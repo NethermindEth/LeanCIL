@@ -16,6 +16,35 @@ theorem disabled_intrinsic :
 
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl
 
+-- New value-only instructions must reject invalid operands in the checked dispatcher.
+private def scalarBody : CIL.Method := { code := [], locals := [], returnsValue := true }
+private def scalarFrame : Frame := { activation := 0, locals := [], owned := [] }
+
+theorem nop_preserves_stack (stack : List Value) (memory : Memory) :
+    step scalarBody .nop 7 [] scalarFrame stack memory =
+      .ok (.next 8 stack scalarFrame memory) := rfl
+
+theorem neg_underflow :
+    (step scalarBody .neg 0 [] scalarFrame [] Examples.empty).isOk = false := rfl
+
+theorem neg_reference_rejected :
+    (step scalarBody .neg 0 [] scalarFrame [Examples.reference] Examples.caller).isOk = false := rfl
+
+theorem gt_mixed_width_rejected :
+    (step scalarBody .gt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Examples.empty).isOk = false := rfl
+
+theorem branches_reject_underflow :
+    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+      !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0)] Examples.empty).isOk) = true := rfl
+
+theorem branches_reject_references :
+    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+      !(step scalarBody op 0 [] scalarFrame [Examples.reference, Examples.reference] Examples.caller).isOk) = true := rfl
+
+theorem branches_reject_mixed_widths :
+    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+      !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Examples.empty).isOk) = true := rfl
+
 theorem uninitialized_rejected :
     read { Examples.caller with cells := fun _ _ => ⟨0, false⟩ } ⟨0, 0⟩ 8 1 = .error .uninitialized := rfl
 

@@ -254,6 +254,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 - `Add`: universal modular arithmetic correctness.
 - `Choose`: symbolic conditional execution.
 - `Calls`: a managed-call chain with an address-taken mutable local.
+- `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the modular additive inverse for every input, including the signed minimum.
 - `Alias`: two arguments naming the same caller storage.
 - `Struct` and `StructCopy`: reference and by-value use of a **12-byte explicit-layout struct**, with an 8-byte field and a 4-byte field, initialization and a byref helper call.
 - `LargeStruct`: a **40-byte** explicit layout with a field at offset 32.
@@ -278,7 +279,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | `call`, `ret` | Partial | Acyclic static managed methods and explicitly modelled runtime calls |
 | `ldind.i8`, `stind.i8`, fields, aggregate operations, `ldsflda` | Partial | Checked references, validated layouts and restricted static data |
 | `newobj` | Partial | Only an explicitly modelled byte-span constructor; no general allocation |
-| All other opcodes | Unsupported | Includes `nop`, `div`, `switch`, `callvirt`, arrays and instruction prefixes |
+| All other opcodes | Unsupported | Includes `div`, `switch`, `callvirt`, arrays and instruction prefixes |
 
 The initial extraction target is Release, IL-only **.NET 10**, 64-bit little-endian execution. Supported scalar operations include 32/64-bit wrapping arithmetic, bitwise operations, shifts, selected conversions/comparisons, conditional/unconditional branches, local and argument loads/stores, 64-bit indirect access, and acyclic static managed calls. Explicit-layout reference-free aggregates use validated sizes and byte offsets; fields currently admit byte/Boolean, 32-bit integer and 64-bit integer storage. SIMD models cover selected Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, as enumerated in `CIL/SIMD` and `Extractor/RuntimeModels.cs`.
 

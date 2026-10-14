@@ -17,6 +17,9 @@ def checkedValue (m : Memory) : Value → ExecutionResult Value
 /-- Only the value-only instruction whitelist may use the original pure
     arithmetic semantics. No memory/reference operation can enter this path. -/
 def pureArity : CIL.Op → Option Nat
+  | .nop => some 0
+  | .neg => some 1
+  | .gt | .bgt _ | .ble _ | .bleu _ => some 2
   | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .bnot => some 1
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
     | .lt | .ltu | .gtu | .eq => some 2

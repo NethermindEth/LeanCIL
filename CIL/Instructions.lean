@@ -13,6 +13,10 @@ inductive LocalKind where
   deriving DecidableEq, Repr
 
 inductive Op where
+  | nop | neg | gt
+  | bgt (target : Nat)
+  | ble (target : Nat)
+  | bleu (target : Nat)
   | loadAggregate (size : Nat)
   | storeAggregate (size : Nat)
   | initAggregate (size : Nat)
