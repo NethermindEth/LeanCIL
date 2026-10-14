@@ -18,25 +18,57 @@ internal static class MetadataValidation
         _ => throw new InvalidDataException($"Unsupported field type: {type.FullName}")
     };
 
-    // Explicit, reference-free layouts avoid guessing runtime packing or GC layout.
-    internal static int Layout(TypeReference reference, ModuleDefinition module)
+    internal sealed record AggregateInfo(int Size, IReadOnlyDictionary<string, int> Offsets);
+
+    internal static int Layout(TypeReference reference, ModuleDefinition module) => AggregateLayout(reference, module).Size;
+
+    internal static int FieldOffset(FieldDefinition field, ModuleDefinition module) =>
+        AggregateLayout(field.DeclaringType, module).Offsets[field.FullName];
+
+    // Managed layout for primitive, reference-free fields on the admitted 64-bit
+    // CoreCLR targets. This is not interop marshalling layout (notably for bool).
+    internal static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module)
     {
-        TypeDefinition type = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate");
+        var type = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate");
         if (reference.Scope != module || type.Module != module || !reference.IsValueType ||
-            !type.IsValueType || !RuntimeModels.HasRuntimeValueTypeBase(type) || !type.IsExplicitLayout ||
-            type.ClassSize <= 0 || type.ClassSize > 65536 || type.HasGenericParameters ||
+            !type.IsValueType || !RuntimeModels.HasRuntimeValueTypeBase(type) ||
+            !(type.IsExplicitLayout || type.IsSequentialLayout) || type.HasGenericParameters ||
+            type.ClassSize is < -1 or > 65536 || (type.IsExplicitLayout && type.ClassSize <= 0) ||
+            type.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.InlineArrayAttribute") ||
             type.Methods.Any(m => m.IsConstructor && m.IsStatic) ||
             module.GetTypes().Count(t => t.FullName == type.FullName) != 1)
             throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName}");
-        foreach (FieldDefinition field in type.Fields.Where(f => !f.IsStatic))
+
+        var packing = type.PackingSize;
+        if (packing is not (-1 or 0 or 1 or 2 or 4 or 8 or 16 or 32 or 64 or 128))
+            throw new InvalidDataException($"Invalid aggregate packing: {reference.FullName}");
+        var pack = packing <= 0 ? 8 : packing;
+        var offsets = new Dictionary<string, int>();
+        var end = 0;
+        var alignment = 1;
+        foreach (var field in type.Fields.Where(f => !f.IsStatic))
         {
+            if (field.FieldType is TypeSpecification || field.FieldType.Scope == module)
+                throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
+            var width = PrimitiveWidth(field.FieldType);
             RuntimeModels.ValidateTypeIdentity(field.FieldType, module);
-            int width = PrimitiveWidth(field.FieldType);
-            if (field.Offset < 0 || (long)field.Offset + width > type.ClassSize ||
-                type.Fields.Count(f => f.Name == field.Name) != 1)
+            var fieldAlignment = Math.Min(pack, width);
+            alignment = Math.Max(alignment, fieldAlignment);
+            var offset = type.IsExplicitLayout ? field.Offset : (end + fieldAlignment - 1) / fieldAlignment * fieldAlignment;
+            if (offset < 0 || offset > 65536 - width ||
+                (type.IsExplicitLayout && offset + width > type.ClassSize) ||
+                (type.IsSequentialLayout && field.Offset >= 0) || type.Fields.Count(f => f.Name == field.Name) != 1)
                 throw new InvalidDataException($"Invalid field layout: {field.FullName}");
+            offsets.Add(field.FullName, offset);
+            end = Math.Max(end, offset + width);
         }
-        return type.ClassSize;
+
+        // An explicit metadata size suppresses final alignment rounding in CoreCLR.
+        // A smaller declared size cannot truncate fields; empty value types occupy one byte.
+        var size = type.ClassSize > 0 ? Math.Max(end, type.ClassSize) : (end + alignment - 1) / alignment * alignment;
+        size = Math.Max(1, size);
+        if (size > 65536) throw new InvalidDataException($"Unsupported aggregate size: {reference.FullName}");
+        return new(size, offsets);
     }
 
     internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false)

@@ -103,3 +103,10 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 - Frame well-formedness, allocation ownership, caller-memory preservation, reference validity, static-world preservation and setup progress include parameter homes.
 - `FrameSetupFits` now includes parameter type compatibility. `enterFrame_succeeds` additionally requires valid argument values; invocation already checks this. The specialized numeric/word/unknown frame setup lemmas require `body.parameterHomes = []`.
 - Regenerate artifacts to obtain parameter-home metadata and its simplification theorem. Proofs unfolding frame setup may need `makeParameterHomes` in their simplification list.
+
+## Sequential layouts
+
+- `MetadataValidation.AggregateLayout` computes a validated size and field offsets for explicit or sequential primitive-field structs. `Layout` retains its size-returning API; `FieldOffset` is the shared offset lookup used by emission and instruction translation.
+- Sequential fields normally have no metadata `FieldOffset`; consumers must use validated computed offsets instead of reading `FieldDefinition.Offset` directly.
+- Aggregate bytes, memory instructions and Lean layout bounds theorems are unchanged. Regenerate artifacts for the expanded metadata subset.
+- Inline arrays, auto layout, nested structs, reference fields and floating-point fields remain unsupported. Interop marshalling layouts are not used to infer managed offsets.
