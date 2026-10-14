@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 147 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 148 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -55,6 +55,7 @@ Ranges below include every numbered form between the endpoints. `.s` denotes the
 | `stind.i1`, `stind.i2`, `stind.i4` | Partial | Store the low one, two or four bytes of an `i32` through a checked reference. Allocation bounds, write permissions and lifetime apply; adjacent bytes remain unchanged. |
 | `ldfld`, `ldflda`, `stfld` | Partial | Fields in same-assembly, validated explicit- or sequential-layout, reference-free value types. Supported field storage is `sbyte`, byte/Boolean, `short`, `ushort`/`char`, 32-bit integer, 64-bit integer or native integer. Narrow stores truncate; narrow loads sign- or zero-extend to `i32` according to field metadata. `ldfld` accepts an aggregate byte snapshot or reference; field addresses and stores require a reference. No general managed objects, auto layouts or static fields through these opcodes. |
 | `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1–65,536 bytes, or exactly `Vector128<ulong>` / `Vector256<ulong>`. No general objects, reference-bearing storage, floating-point tokens. Native-integer tokens use eight-byte storage. |
+| `cpobj` | Partial | Copy validated integer, aggregate or Vector128/256 ulong storage through checked references. Requires initialized readable source and writable destination; self-copy is supported, partial overlap is rejected. No reference-bearing or floating-point tokens. |
 | `initobj` | Partial | Zero the validated width of an admitted integer type or same-assembly explicit- or sequential-layout aggregate. This initializes previously unknown bytes without touching neighboring storage. No general vector or managed-object initialization. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data with an explicit packed blob layout and no static constructor. Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static managed methods in the same assembly, or exact runtime/intrinsic signatures in the allowlist. No arbitrary external calls, generic managed dependencies, instance methods or virtual dispatch. |
@@ -69,7 +70,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | --- | --- |
 | Debugger and prefixes | `break`, `volatile.`, `unaligned.`, `readonly.`, `tail.`, `constrained.` |
 | Other conversions | Floating-point conversions |
-| Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*`, `cpobj`, `cpblk`, `initblk`, `localloc` |
+| Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*`, `cpblk`, `initblk`, `localloc` |
 | Objects, arrays and metadata | `ldnull`, `ldstr`, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` |
 | Static field values | `ldsfld`, `stsfld` |
 | Dispatch and exceptions | `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw`, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |

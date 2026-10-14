@@ -110,3 +110,7 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 - Sequential fields normally have no metadata `FieldOffset`; consumers must use validated computed offsets instead of reading `FieldDefinition.Offset` directly.
 - Aggregate bytes, memory instructions and Lean layout bounds theorems are unchanged. Regenerate artifacts for the expanded metadata subset.
 - Inline arrays, auto layout, nested structs, reference fields and floating-point fields remain unsupported. Interop marshalling layouts are not used to infer managed offsets.
+
+### Typed object copies
+
+`CIL.Op.copyObject size` is a new instruction constructor. Downstream exhaustive matches must handle it; checked execution uses existing allocation-aware reads and writes. `CIL.Safety.copyObject_writes_snapshot` provides a generic byte-copy postcondition. Extraction computes the width from validated type metadata; no application-specific copy summaries are required.

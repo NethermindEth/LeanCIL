@@ -54,7 +54,7 @@ internal static class InstructionTranslation
                 $".{(op == "field" ? "fieldAt" : "setFieldAt")} {offset} {width}" +
                 (op == "field" && resolved.FieldType.FullName is "System.SByte" or "System.Int16" ? " true" : "");
         }
-        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof && i.Operand is TypeReference operandType)
+        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj && i.Operand is TypeReference operandType)
             RuntimeModels.ValidateTypeIdentity(operandType, m.Module);
         if (i.OpCode.Code is Code.Call or Code.Newobj)
         {
@@ -94,6 +94,7 @@ internal static class InstructionTranslation
             Code.Rem => ".divide true true", Code.Rem_Un => ".divide false true",
             Code.Switch => ".switch [" + string.Join(", ", ((Instruction[])i.Operand).Select(m.Body.Instructions.IndexOf)) + "]",
             Code.Sizeof => $".const32 {TypeWidth((TypeReference)i.Operand, m.Module)}",
+            Code.Cpobj => $".copyObject {CopyWidth((TypeReference)i.Operand, m.Module)}",
             Code.Ldind_I1 => ".loadScalar 1 true", Code.Ldind_U1 => ".loadScalar 1",
             Code.Ldind_I2 => ".loadScalar 2 true", Code.Ldind_U2 => ".loadScalar 2",
             Code.Ldind_I4 or Code.Ldind_U4 => ".loadScalar 4",
@@ -155,4 +156,11 @@ internal static class InstructionTranslation
     static int TypeWidth(TypeReference type, ModuleDefinition module) => MetadataValidation.IsAggregate(type, module)
         ? MetadataValidation.Layout(type, module)
         : MetadataValidation.PrimitiveWidth(type);
+
+    static int CopyWidth(TypeReference type, ModuleDefinition module) => type.FullName switch
+    {
+        "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
+        "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
+        _ => TypeWidth(type, module)
+    };
 }

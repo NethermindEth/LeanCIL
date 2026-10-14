@@ -110,6 +110,15 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memor
 def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
   match op, stack with
+  | .copyObject size, .reference source :: .reference destination :: rest =>
+    let src ← referenceAt source
+    let dst ← referenceAt destination
+    if src.allocation = dst.allocation && src.offset != dst.offset &&
+        src.offset < dst.offset + size && dst.offset < src.offset + size then
+      .error (.unsupported "Partially overlapping typed copy")
+    else
+      let bytes ← checkedAt source size (read m src size ordinaryAccessAlignment)
+      return (← checkedAt destination size (write m dst bytes ordinaryAccessAlignment), rest)
   | .loadScalar width signed, .reference r :: rest =>
     if width = 1 || width = 2 || width = 4 || width = 8 then
       return (m, .scalar (← loadValue m r width signed) :: rest)

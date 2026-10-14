@@ -281,7 +281,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
 | Supported branches | Partial | Forward-only reachable control flow; integer conditions/comparisons |
 | `call`, `ret` | Partial | Acyclic static managed methods and explicitly modelled runtime calls |
-| Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
+| Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
 | `switch`, `sizeof` | Partial | Forward jump tables and validated integer/explicit aggregate sizes |
 | `newobj` | Partial | Only an explicitly modelled byte-span constructor; no general allocation |
 | Argument storage | Partial | Parameter assignment and addressing, shared aliases, narrow/native storage and frame lifetime checks |
