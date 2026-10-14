@@ -9,6 +9,7 @@ internal static class Reachability
     {
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
+        MemoryPrefixes.Validate(method);
         var instructions = method.Body.Instructions;
         foreach (Instruction instruction in instructions)
         {

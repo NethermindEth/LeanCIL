@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 148 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 151 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -63,6 +63,18 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, or exact runtime/intrinsic signatures in the allowlist. No arbitrary external calls, generic managed dependencies, class instance methods or virtual dispatch. |
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also the explicitly modelled `ReadOnlySpan<byte>(void*, int)` runtime constructor. Class construction, generic constructors and cyclic dependencies are rejected. |
 | `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. |
+| `initblk`, `cpblk` | Partial | Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
+| `unaligned.` | Partial | Values 1, 2 and 4 before supported ordinary or block memory accesses; malformed prefix sequences and interior branch targets are rejected. |
+
+## Block memory and alignment prefixes
+
+`initblk` and `cpblk` are partially supported for checked managed references and unsigned 32-bit byte counts. Initialization uses the low eight bits of its integer value. Copying requires initialized, readable source bytes; both operations require writable destination bytes, valid lifetimes, bounds and reference-free storage. Every nonempty overlapping copy, including an exact alias, is rejected because CLI overlap behaviour is unspecified. Zero counts access no memory and permit null references.
+
+Unprefixed block operations require eight-byte alignment on the admitted 64-bit target. An immediately preceding `unaligned. 1`, `2` or `4` selects that alignment requirement. Prefix operands, permitted followers and branch targets are validated: a branch cannot enter between a prefix and its instruction. Prefix combinations with unsupported modifiers remain rejected.
+
+`unaligned.` is also accepted before supported integer `ldind.*`/`stind.*`, `ldobj`/`stobj` and `ldfld`/`stfld` instructions. These retain the existing target-specific ordinary byte-aligned memory semantics; a prefix does not bypass any safety check. The prefix occupies its original instruction position and lowers to a no-op, with block alignment encoded in the following operation.
+
+The exact managed-reference overloads of `Unsafe.InitBlock`, `InitBlockUnaligned`, `CopyBlock` and `CopyBlockUnaligned` use these same operations. Pointer overloads and arbitrary integer addresses remain unsupported.
 
 ## Unsupported opcodes
 
@@ -70,9 +82,9 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 
 | Area | Examples rejected by extraction |
 | --- | --- |
-| Debugger and prefixes | `break`, `volatile.`, `unaligned.`, `readonly.`, `tail.`, `constrained.` |
+| Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`, `constrained.` |
 | Other conversions | Floating-point conversions |
-| Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*`, `cpblk`, `initblk`, `localloc` |
+| Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*`, `localloc` |
 | Objects, arrays and metadata | `ldnull`, `ldstr`, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` |
 | Static field values | `ldsfld`, `stsfld` |
 | Dispatch and exceptions | `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw`, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |

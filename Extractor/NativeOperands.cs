@@ -7,9 +7,9 @@ namespace Nethermind.LeanCIL;
 // share 64-bit storage, but only metadata-proven native/int32 mixtures may widen.
 internal static class NativeOperands
 {
-    enum Kind { Other, Word32, Word64, Native }
+    enum Kind { Other, Word32, Word64, Native, Reference }
 
-    static Kind Type(TypeReference type) => EnumTypes.Storage(type).MetadataType switch
+    static Kind Type(TypeReference type) => type is ByReferenceType ? Kind.Reference : EnumTypes.Storage(type).MetadataType switch
     {
         MetadataType.IntPtr or MetadataType.UIntPtr => Kind.Native,
         MetadataType.Int64 or MetadataType.UInt64 => Kind.Word64,
@@ -43,7 +43,16 @@ internal static class NativeOperands
             }
 
             var code = instruction.OpCode.Code;
-            if (Binary(code))
+            if (code is Code.Cpblk or Code.Initblk)
+            {
+                var count = Pop();
+                var source = Pop();
+                var destination = Pop();
+                if (count != Kind.Word32 || destination != Kind.Reference ||
+                    source != (code == Code.Cpblk ? Kind.Reference : Kind.Word32))
+                    throw new InvalidDataException($"Unsupported block memory operand types: {instruction}");
+            }
+            else if (Binary(code))
             {
                 var right = Pop();
                 var left = Pop();
@@ -107,7 +116,7 @@ internal static class NativeOperands
                         Code.Ldfld or Code.Ldsfld => Type(((FieldReference)instruction.Operand).FieldType),
                         Code.Ldobj => Type((TypeReference)instruction.Operand),
                         Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S or
-                            Code.Ldflda or Code.Ldsflda => Kind.Other,
+                            Code.Ldflda or Code.Ldsflda => Kind.Reference,
                         Code.Ldind_I or Code.Conv_I or Code.Conv_U or Code.Conv_Ovf_I or Code.Conv_Ovf_I_Un or
                             Code.Conv_Ovf_U or Code.Conv_Ovf_U_Un => Kind.Native,
                         Code.Ldc_I8 or Code.Ldind_I8 or Code.Conv_I8 or Code.Conv_U8 or Code.Conv_Ovf_I8 or

@@ -84,6 +84,7 @@ def unsafeAdd (sizeBytes : Nat) (offset : Int) : Address → Option Address
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
+  | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | store128 | store256 | init256
   | asRef | add (sizeBytes : Nat) (signed : Bool)
   | bitcast256 | bitcastByteBool | skipInit

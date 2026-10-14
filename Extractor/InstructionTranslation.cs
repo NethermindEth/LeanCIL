@@ -76,6 +76,11 @@ internal static class InstructionTranslation
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
+            // Ordinary accesses already use the documented byte-aligned runtime model.
+            // For block instructions the validated prefix selects the required alignment.
+            Code.Unaligned => ".nop",
+            Code.Cpblk => $".memory (.copyBlock {MemoryPrefixes.BlockAlignment(i)})",
+            Code.Initblk => $".memory (.initBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Starg or Code.Starg_S => Parameter("setLocal"),
             Code.Ldarga or Code.Ldarga_S => Parameter("localAddr"),
             Code.Conv_I => ".convI8",
