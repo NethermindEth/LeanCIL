@@ -55,7 +55,7 @@ internal static class LeanEmitter
         {
             int size = MetadataValidation.Layout(types[i], methods[0].Module);
             string fields = string.Join(", ", types[i].Resolve().Fields.Where(f => !f.IsStatic)
-                .Select(f => $"⟨{f.Offset}, {MetadataValidation.PrimitiveWidth(f.FieldType)}⟩"));
+                .Select(f => $"⟨{MetadataValidation.FieldOffset(f, methods[0].Module)}, {MetadataValidation.PrimitiveWidth(f.FieldType)}⟩"));
             lean.AppendLine($"def layout{i} : AggregateLayout := ⟨{size}, [{fields}]⟩");
             lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := by decide");
         }

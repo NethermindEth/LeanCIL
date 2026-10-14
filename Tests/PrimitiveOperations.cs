@@ -225,7 +225,8 @@ foreach (var operand in new[] { "pointer", "byref", "object", "string", "array",
 
     var output = Path.Combine(root, name, "extraction");
     var rejected = Execute(Extract("extract", dll, "Examples", FixtureSelector(dll), output));
-    var marker = layout && operand != "reference-field" ? "Unsupported aggregate layout" : "Unsupported field type";
+    var marker = operand == "sequential" ? "Invalid field layout" :
+        layout && operand != "reference-field" ? "Unsupported aggregate layout" : "Unsupported field type";
     if (rejected.Code == 0 || !rejected.Output.Contains(marker) || File.Exists(Path.Combine(output, "Extracted.lean")))
         throw new InvalidOperationException($"Wrong sizeof rejection ({operand}): {rejected.Output}");
     Console.WriteLine("PASS sizeof rejection: " + operand);

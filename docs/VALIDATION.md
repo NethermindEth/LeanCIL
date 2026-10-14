@@ -7,11 +7,11 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-The regression runner covers **42 check groups** across ten C# partitions. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
+The regression runner covers **43 check groups** across eleven C# partitions. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
-The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` `--suite division` `--suite checked` `--suite conversions` `--suite native` and `--suite arguments` after `--`. These partitions cover the same 42 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
+The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` `--suite division` `--suite checked` `--suite conversions` `--suite native` `--suite arguments` and `--suite layout` after `--`. These partitions cover the same 43 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |
 | --- | --- |
@@ -31,7 +31,7 @@ The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite na
 | Primitive `ldobj`, `stobj`, `initobj`, indirect loads/stores, C# aliasing, `switch` and `sizeof`, including native integer storage | 534 cases passed, including memory faults, initialization and preservation of neighboring bytes |
 | Empty/duplicate switch tables, out-of-range unsigned indices and switch-only managed dependencies | Passed |
 | Backedge, corrupted switch target, unsupported arm, four forged type tokens and floating-point size | Eight intended extraction rejections |
-| `sizeof` on pointers, managed references, objects, strings, arrays, double, sequential/auto layouts, reference-containing structs and generic layouts | Eleven intended extraction rejections; no Lean extraction produced |
+| `sizeof` on pointers, managed references, objects, strings, arrays, double, auto layouts and malformed sequential field offsets, reference-containing structs and generic layouts | Eleven intended extraction rejections; no Lean extraction produced |
 | Constant-zero write substituted for the input, with the unchanged universal store/load contract | Rejected by proof checking; no successful report retained |
 | Scalar access operand/width checks, bounds and lifetime; arbitrary-memory 32-bit store/load roundtrip | Semantic tests and universal roundtrip theorem passed |
 | Short and full assembly selectors retain the same complete manifest identity | Passed |
@@ -62,6 +62,9 @@ The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite na
 | Overwriting an argument with a replacement value | Universal proof passed for arbitrary inputs; assignment to the wrong parameter rejected |
 | Returning an address into a parameter home | Lifetime fault proved for every input; successful execution ruled out for every fuel budget |
 | Parameter setup with missing inputs or incompatible scalar/reference values, and narrow initialization | Semantic checks passed; taking the address of a byref parameter rejected during extraction |
+| Ordinary and packed sequential structs, all admitted packing values, small/odd explicit sizes and empty structs | 187 runtime layout/execution cases passed; emitted sizes and field offsets agree with managed runtime probes |
+| Sequential struct field store/load | Universal preservation proof passed for every 32-bit input |
+| Invalid packing, oversized layout, auto layout, reference/float fields, inline arrays, generics, explicit offsets on sequential fields, nested and recursive fields | Ten intended metadata rejections |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, cyclic control flow, static initializer and forged runtime scope | Eight intended metadata rejections |
 | Identity-bound static RVA data | Passed |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |

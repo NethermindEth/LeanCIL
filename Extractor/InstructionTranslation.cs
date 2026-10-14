@@ -49,8 +49,9 @@ internal static class InstructionTranslation
             if (resolved.IsStatic || resolved.Module != m.Module || resolved.FullName != f.FullName)
                 throw new InvalidDataException($"Unsupported field {f.FullName}");
             int width = MetadataValidation.PrimitiveWidth(resolved.FieldType);
-            return op == "fieldAddr" ? $".fieldAddress {resolved.Offset}" :
-                $".{(op == "field" ? "fieldAt" : "setFieldAt")} {resolved.Offset} {width}" +
+            var offset = MetadataValidation.FieldOffset(resolved, m.Module);
+            return op == "fieldAddr" ? $".fieldAddress {offset}" :
+                $".{(op == "field" ? "fieldAt" : "setFieldAt")} {offset} {width}" +
                 (op == "field" && resolved.FieldType.FullName is "System.SByte" or "System.Int16" ? " true" : "");
         }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof && i.Operand is TypeReference operandType)
