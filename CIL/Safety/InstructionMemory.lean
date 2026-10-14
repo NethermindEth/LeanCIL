@@ -109,6 +109,18 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memor
 def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
   match op, stack with
+  | .loadScalar width signed, .reference r :: rest =>
+    if width = 1 || width = 2 || width = 4 || width = 8 then
+      return (m, .scalar (← loadValue m r width signed) :: rest)
+    else .error (.unsupported "Scalar memory width")
+  | .storeScalar width, .scalar value :: .reference r :: rest =>
+    let number ← match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
+      | 8, .i64 bits => .ok bits.toNat
+      | _, _ => .error .invalidState
+    let address ← referenceAt r
+    return (← checkedAt r width
+      (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
   | .loadAggregate size, .reference r :: rest =>
     let bytes ← checkedAt r size (dereference m r size ordinaryAccessAlignment)
     return (m, .scalar (.aggregate bytes) :: rest)

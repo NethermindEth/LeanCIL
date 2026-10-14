@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "cli" or "integer" or "narrow"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow]")
+    ["--suite", "all" or "core" or "cli" or "integer" or "narrow" or "primitive"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow|primitive]")
 };
 
 using var verification = new Program();
@@ -18,7 +18,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
 {
     ["cli"] = ("Tests/CliVerification.cs", "CLI proof verification and incorrect implementation rejection"),
     ["integer"] = ("Tests/IntegerOpcodes.cs", "integer opcode encodings, boundary cases and universal negation proofs"),
-    ["narrow"] = ("Tests/NarrowIntegers.cs", "narrow integer conversions, storage, method boundaries and rejection proofs")
+    ["narrow"] = ("Tests/NarrowIntegers.cs", "narrow integer conversions, storage, method boundaries and rejection proofs"),
+    ["primitive"] = ("Tests/PrimitiveOperations.cs", "primitive memory, switch, sizeof and rejection proofs")
 };
 
 void Passed(string name)

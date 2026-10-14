@@ -7,11 +7,11 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-The complete C# regression runner passed **36 check groups**. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode and narrow-storage matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
+All five C# regression partitions passed, covering **37 check groups**. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
-The runner also accepts `--suite core`, `--suite cli`, `--suite integer` and `--suite narrow` after `--`. These partitions cover the same 36 check groups and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments still checks everything and writes `artifacts/test-results.json`.
+The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` and `--suite primitive` after `--`. These partitions cover the same 37 check groups as the full command and can run concurrently in separate checkouts; that is how this revision was validated. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |
 | --- | --- |
@@ -27,6 +27,13 @@ The runner also accepts `--suite core`, `--suite cli`, `--suite integer` and `--
 | Two-byte field overrun and forged narrow runtime type identity | Both rejected during extraction |
 | Signed conversion substituted for unsigned conversion, with the unchanged universal contract | Rejected by proof checking; no successful report retained |
 | Narrow access bounds, permissions and lifetime; generic typed store/load normalization | Semantic tests and universal roundtrip theorem passed |
+| Compiled C# `ref int` store/load: every 32-bit input returned unchanged | Universal proof passed |
+| Primitive `ldobj`, `stobj`, `initobj`, indirect loads/stores, C# aliasing, `switch` and `sizeof` | 459 cases passed, including memory faults, initialization and preservation of neighboring bytes |
+| Empty/duplicate switch tables, out-of-range unsigned indices and switch-only managed dependencies | Passed |
+| Backedge, corrupted switch target, unsupported arm, four forged type tokens and floating-point size | Eight intended extraction rejections |
+| `sizeof` on native integers, pointers, managed references, objects, strings, arrays, double, sequential/auto layouts, reference-containing structs and generic layouts | Thirteen intended extraction rejections; no Lean extraction produced |
+| Constant-zero write substituted for the input, with the unchanged universal store/load contract | Rejected by proof checking; no successful report retained |
+| Scalar access operand/width checks, bounds and lifetime; arbitrary-memory 32-bit store/load roundtrip | Semantic tests and universal roundtrip theorem passed |
 | Short and full assembly selectors retain the same complete manifest identity | Passed |
 | Explicit version, culture and public-key-token mismatches | Three intended identity rejections |
 | Method selectors: aliases, optional returns, short declaring types, overloads, canonical artifact identity, malformed inputs and candidate diagnostics | 23 checks passed |

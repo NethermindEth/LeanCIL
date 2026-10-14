@@ -65,3 +65,10 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 - `load_numeric_local`, `store_load_numeric_local` and `step_load_numeric_local` return `localResult kind value`, which includes truncation and extension for narrow homes. It reduces to the original value for existing non-narrow kinds. Consumers proving identity readback for narrow storage must establish that the value is already in the representable range.
 - Argument-equivalence premises now quantify over the narrow annotation as well as the argument index.
 - Unary arithmetic uses `CIL.unary`, alongside `CIL.binary`; proofs that explicitly unfold instruction internals may need to unfold this helper. Regenerate extraction artifacts and rerun proofs when adopting this version.
+
+## Primitive memory and switch additions
+
+- `Op.loadScalar width signed` and `Op.storeScalar width` add checked integer-reference access for widths 1, 2, 4 and 8. The earlier `.load64` / `.store64` constructors remain unchanged. The pure interpreter rejects the new memory operations; use `CIL.Safety.invoke` for their execution proofs.
+- Primitive integer `ldobj` / `stobj` now emit these scalar operations. Primitive `initobj` reuses the checked zero-fill operation `initAggregate` with the validated integer width; its semantics do not require an aggregate operand.
+- `Op.switch targets` adds unsigned `i32` jump-table dispatch to both execution models. Consumers matching exhaustively on `Op` must handle the new constructors.
+- `sizeof` emits `const32` using validated type metadata. No runtime type inference or new layout oracle is introduced. Regenerate artifacts and recheck consuming proofs after upgrading.

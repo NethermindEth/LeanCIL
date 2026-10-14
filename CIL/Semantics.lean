@@ -115,6 +115,8 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
   match op, stack with
   | .nop, _ => return .next (pc + 1) stack memory
+  | .switch targets, .i32 index :: rest =>
+    return .next (targets[index.toNat]?.getD (pc + 1)) rest memory
   | .bgt target, .i32 b :: .i32 a :: rest => return .next (if a.toInt > b.toInt then target else pc + 1) rest memory
   | .bgt target, .i64 b :: .i64 a :: rest => return .next (if a.toInt > b.toInt then target else pc + 1) rest memory
   | .ble target, .i32 b :: .i32 a :: rest => return .next (if a.toInt ≤ b.toInt then target else pc + 1) rest memory
