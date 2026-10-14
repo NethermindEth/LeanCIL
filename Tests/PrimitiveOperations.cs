@@ -187,6 +187,50 @@ var sizeDll = Fixture("Sizes", (module, method) =>
 Prove(sizeDll, FixtureSelector(sizeDll), "Sizes", types.Select(t => t.Width).Append(12).Append(0)
     .Select((width, index) => Returns($".scalar (.i32 {index})", width)));
 
+// Native widths and unsupported layouts must fail, never become guessed constants.
+foreach (var operand in new[] { "nint", "nuint", "pointer", "byref", "object", "string", "array", "double",
+    "sequential", "auto", "reference-field", "generic", "generic-instance" })
+{
+    var name = "Reject-sizeof-" + operand;
+    var layout = operand is "sequential" or "auto" or "reference-field" or "generic" or "generic-instance";
+    var dll = Fixture(name, (module, method) =>
+    {
+        var packet = module.GetType("Examples.Packet");
+        if (operand is "sequential" or "auto")
+            packet.Attributes = (packet.Attributes & ~TypeAttributes.LayoutMask) |
+                (operand == "sequential" ? TypeAttributes.SequentialLayout : TypeAttributes.AutoLayout);
+        if (operand == "reference-field")
+            packet.Fields.First(f => !f.IsStatic).FieldType = module.TypeSystem.Object;
+        if (operand is "generic" or "generic-instance")
+            packet.GenericParameters.Add(new GenericParameter("T", packet));
+
+        TypeReference type = operand switch
+        {
+            "nint" => module.TypeSystem.IntPtr,
+            "nuint" => module.TypeSystem.UIntPtr,
+            "pointer" => new PointerType(module.TypeSystem.Int32),
+            "byref" => new ByReferenceType(module.TypeSystem.Int32),
+            "object" => module.TypeSystem.Object,
+            "string" => module.TypeSystem.String,
+            "array" => new ArrayType(module.TypeSystem.Int32),
+            "double" => module.TypeSystem.Double,
+            "generic-instance" => new GenericInstanceType(packet),
+            _ => packet
+        };
+        if (type is GenericInstanceType generic)
+            generic.GenericArguments.Add(module.TypeSystem.Int32);
+        method.Body.Instructions.Add(Instruction.Create(OpCodes.Sizeof, type));
+        method.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+    });
+
+    var output = Path.Combine(root, name, "extraction");
+    var rejected = Execute(Extract("extract", dll, "Examples", FixtureSelector(dll), output));
+    var marker = layout && operand != "reference-field" ? "Unsupported aggregate layout" : "Unsupported field type";
+    if (rejected.Code == 0 || !rejected.Output.Contains(marker) || File.Exists(Path.Combine(output, "Extracted.lean")))
+        throw new InvalidOperationException($"Wrong sizeof rejection ({operand}): {rejected.Output}");
+    Console.WriteLine("PASS sizeof rejection: " + operand);
+}
+
 // Empty/duplicate tables and dependencies reachable only from a switch target.
 foreach (var empty in new[] { false, true })
 {

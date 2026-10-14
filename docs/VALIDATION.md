@@ -31,6 +31,7 @@ The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite na
 | Primitive `ldobj`, `stobj`, `initobj`, indirect loads/stores, C# aliasing, `switch` and `sizeof` | 459 cases passed, including memory faults, initialization and preservation of neighboring bytes |
 | Empty/duplicate switch tables, out-of-range unsigned indices and switch-only managed dependencies | Passed |
 | Backedge, corrupted switch target, unsupported arm, four forged type tokens and floating-point size | Eight intended extraction rejections |
+| `sizeof` on native integers, pointers, managed references, objects, strings, arrays, double, sequential/auto layouts, reference-containing structs and generic layouts | Thirteen intended extraction rejections; no Lean extraction produced |
 | Constant-zero write substituted for the input, with the unchanged universal store/load contract | Rejected by proof checking; no successful report retained |
 | Scalar access operand/width checks, bounds and lifetime; arbitrary-memory 32-bit store/load roundtrip | Semantic tests and universal roundtrip theorem passed |
 | Short and full assembly selectors retain the same complete manifest identity | Passed |
