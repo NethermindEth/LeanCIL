@@ -38,6 +38,8 @@ def truth : Value → Option Bool
 
 def binary (op : Op) (a b : Value) : Option Value :=
   match op, a, b with
+  | .gt, .i32 x, .i32 y => some (.i32 (if x.toInt > y.toInt then 1 else 0))
+  | .gt, .i64 x, .i64 y => some (.i32 (if x.toInt > y.toInt then 1 else 0))
   | .add, .i64 x, .i64 y => some (.i64 (x + y))
   | .add, .i32 x, .i32 y => some (.i32 (x + y))
   | .sub, .i64 x, .i64 y => some (.i64 (x - y))
@@ -76,6 +78,15 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
   match op, stack with
+  | .nop, _ => return .next (pc + 1) stack memory
+  | .neg, .i32 w :: rest => return .next (pc + 1) (.i32 (-w) :: rest) memory
+  | .neg, .i64 w :: rest => return .next (pc + 1) (.i64 (-w) :: rest) memory
+  | .bgt target, .i32 b :: .i32 a :: rest => return .next (if a.toInt > b.toInt then target else pc + 1) rest memory
+  | .bgt target, .i64 b :: .i64 a :: rest => return .next (if a.toInt > b.toInt then target else pc + 1) rest memory
+  | .ble target, .i32 b :: .i32 a :: rest => return .next (if a.toInt ≤ b.toInt then target else pc + 1) rest memory
+  | .ble target, .i64 b :: .i64 a :: rest => return .next (if a.toInt ≤ b.toInt then target else pc + 1) rest memory
+  | .bleu target, .i32 b :: .i32 a :: rest => return .next (if a ≤ b then target else pc + 1) rest memory
+  | .bleu target, .i64 b :: .i64 a :: rest => return .next (if a ≤ b then target else pc + 1) rest memory
   | .arg i, _ =>
     let value ← args[i]?
     if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
@@ -121,7 +132,7 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
   | .band, b :: a :: rest | .bor, b :: a :: rest
   | .mul, b :: a :: rest | .bxor, b :: a :: rest
   | .shl, b :: a :: rest | .shr, b :: a :: rest | .shrUn, b :: a :: rest
-  | .lt, b :: a :: rest | .ltu, b :: a :: rest | .gtu, b :: a :: rest | .eq, b :: a :: rest =>
+  | .lt, b :: a :: rest | .ltu, b :: a :: rest | .gt, b :: a :: rest | .gtu, b :: a :: rest | .eq, b :: a :: rest =>
     return .next (pc + 1) ((← binary op a b) :: rest) memory
   | .load64, .ref a :: rest =>
     match ← read64 memory a with

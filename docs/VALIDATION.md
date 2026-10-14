@@ -7,7 +7,7 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-The complete C# regression runner passed **34 check groups**. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, and the invalid-memory-access theorem. The CLI group also passed separately against an isolated installation of the packaged .NET tool.
+The complete C# regression runner passed **35 check groups**. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode matrix. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
@@ -15,6 +15,10 @@ The runner builds the independent assemblies and the CIL library, then creates a
 | --- | --- |
 | Library, scalar/SIMD semantics, allocation, permissions, initialization, lifetime and symbolic automation | Passed |
 | Ten extracted arithmetic, branching, call, aliasing, aggregate and semantic-negative proofs, each with artifact checks | Passed |
+| Compiled C# negation: universal modular additive-inverse contracts for 32- and 64-bit inputs | Both proofs passed |
+| Exact `nop`, `neg`, `cgt`, `bgt`, `bgt.s`, `ble`, `ble.s`, `ble.un`, `ble.un.s` encodings in independent Cecil fixtures | 370 checked-execution boundary cases passed across 32- and 64-bit operands |
+| Identity substituted for negation, with the unchanged universal contract | Both widths rejected by proof checking; no successful report retained |
+| New scalar operations: stack underflow, mixed widths and reference operands; `nop` preserves arbitrary stacks | Semantic tests passed |
 | Short and full assembly selectors retain the same complete manifest identity | Passed |
 | Explicit version, culture and public-key-token mismatches | Three intended identity rejections |
 | Method selectors: aliases, optional returns, short declaring types, overloads, canonical artifact identity, malformed inputs and candidate diagnostics | 23 checks passed |

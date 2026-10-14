@@ -47,6 +47,12 @@ internal static class InstructionTranslation
         }
         return i.OpCode.Code switch
         {
+            Code.Nop => ".nop",
+            Code.Neg => ".neg",
+            Code.Cgt => ".gt",
+            Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
+            Code.Ble or Code.Ble_S => $".ble {Target()}",
+            Code.Ble_Un or Code.Ble_Un_S => $".bleu {Target()}",
             Code.Ldsflda => $".memory (.staticAddress {StaticData.LeanBytes(StaticData.Validate((FieldReference)i.Operand, m.Module))})",
             Code.Ldobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".loadAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",
             Code.Initobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".initAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",

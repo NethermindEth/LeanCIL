@@ -39,7 +39,7 @@ var signatures = new Dictionary<string, string>
 };
 
 // Build the tools, example assemblies and semantic tests.
-foreach (var project in new[] { "Extractor", "Examples/Assembly", "Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/CliVerification.cs", "scripts/Verify.cs", "scripts/Test.cs" })
+foreach (var project in new[] { "Extractor", "Examples/Assembly", "Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/CliVerification.cs", "Tests/IntegerOpcodes.cs", "scripts/Verify.cs", "scripts/Test.cs" })
 {
     var command = new List<string>
     {
@@ -202,6 +202,9 @@ Passed("different feature profile rejected");
 // Exercise the public CLI through proof selection, reuse and semantic rejection.
 Console.Write(Run(["dotnet", "run", "--file", "Tests/CliVerification.cs"]));
 Passed("CLI proof verification and incorrect implementation rejection");
+
+Console.Write(Run(["dotnet", "run", "--file", "Tests/IntegerOpcodes.cs"]));
+Passed("integer opcode encodings, boundary cases and universal negation proofs");
 
 // Write the summary only after every check succeeds.
 File.WriteAllText(At("artifacts/test-results.json"), JsonSerializer.Serialize(new { passed = results, count = results.Count }, Json) + "\n");
