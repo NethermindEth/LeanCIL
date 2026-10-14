@@ -1,4 +1,5 @@
 import CIL.Types
+import CIL.IntegerArithmetic
 import CIL.Features
 import CIL.SIMD.Availability
 import CIL.VectorMemory
@@ -40,6 +41,7 @@ inductive LocalKind where
 
 inductive Op where
   | divide (signed remainder : Bool)
+  | checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool)
   | nop | neg | gt
   | bgt (target : Nat)
   | ble (target : Nat)

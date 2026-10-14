@@ -2,6 +2,8 @@
 
 ## What is defined and proved
 
+Checked integer addition, subtraction and multiplication compute their result over `Int` before checking the signed or unsigned destination range. Overflow cannot silently wrap into a successful result. The universal extracted addition examples prove natural-number addition whenever the sum fits, and the runtime comparison matrix checks both successes and faults for all six encodings at both widths.
+
 Integer division and remainder use an explicit `ArithmeticFault` result, separate from malformed-state and memory faults. Zero divisors and the signed minimum / -1 pair terminate checked execution with located faults. Signed quotient uses truncation toward zero, not Lean's Euclidean division. Signed remainder uses the corresponding truncating remainder. These faults do not implement managed exception objects, handlers or unwinding.
 
 For signed minimum remainder -1, the model selects the overflowing runtime behaviour documented for Intel platforms in [the opcode reference](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.rem). The regression suite compares the emitted CIL with the executing .NET runtime, including this case. This is an explicit runtime correspondence assumption, not a proof of architecture-independent CLI behaviour; proofs requiring successful execution of that input are not supported.

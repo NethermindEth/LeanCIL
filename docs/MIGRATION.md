@@ -78,3 +78,8 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 - `Op.divide signed remainder` represents four CIL encodings. `CIL.IntegerArithmetic` provides the checked bit-vector and scalar operations; the original pure interpreter exposes their successes through `Option`.
 - `ExecutionFault.arithmetic` carries `ArithmeticFault.divideByZero`, `.overflow` or `.invalidOperands`. Consumers matching faults or instructions exhaustively must handle the new constructors. Successful scalar results still pass the existing value checks and safety invariants.
 - Regenerate artifacts: reachable division is now supported, with arithmetic failures distinguished from unsupported instructions. The generic unsupported-instruction fixture now uses array allocation.
+
+## Checked arithmetic
+
+- `Op.checkedArithmetic kind signed` models checked addition, subtraction and multiplication. `CheckedBinaryKind` selects the operation; `checkedBits` and `checkedValues` compute an integer result before applying signed or unsigned bounds.
+- Overflow uses the same located `.arithmetic .overflow` fault as division. Regenerate artifacts and update exhaustive instruction matches; no exception-handler support is implied.
