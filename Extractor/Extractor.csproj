@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Nethermind.LeanCIL</AssemblyName>
+    <RootNamespace>Nethermind.LeanCIL</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>leancil</ToolCommandName>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);LEANCIL_TOOL</DefineConstants>
+    <StartupObject>Nethermind.LeanCIL.Program</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mono.Cecil" />
+    <None Include="../README.md" Pack="true" PackagePath="/" />
+    <None Include="../LICENSE" Pack="true" PackagePath="/" />
+    <Compile Include="../scripts/Verification.cs" Link="Verification.cs" />
+    <Content Include="../CIL/**/*.lean;../Examples/**/*.lean;../Tests/**/*.lean;../CIL.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
+      <Link>verification/%(Identity)</Link>
+      <TargetPath>verification/$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/..', '%(FullPath)'))</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Pack>false</Pack>
+    </Content>
+  </ItemGroup>
+
+  <!-- Keep the managed assembly identity while giving the CLI a short executable name. -->
+  <Target Name="NameCliExecutable" AfterTargets="_ComputeNETCoreBuildOutputFiles">
+    <ItemGroup>
+      <None Update="$(AppHostIntermediatePath)" Condition="'$(AppHostIntermediatePath)' != ''">
+        <Link>leancil$(_NativeExecutableExtension)</Link>
+        <TargetPath>leancil$(_NativeExecutableExtension)</TargetPath>
+      </None>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="SetCliRunCommand" BeforeTargets="ComputeRunArguments" Condition="'$(UseAppHost)' == 'true'">
+    <PropertyGroup>
+      <RunCommand>$(TargetDir)leancil$(_NativeExecutableExtension)</RunCommand>
+    </PropertyGroup>
+  </Target>
+
+</Project>

@@ -1,0 +1,5 @@
+.lake/
+.work/
+**/bin/
+**/obj/
+artifacts/

@@ -1,0 +1,63 @@
+name: Verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+
+      - name: Install Lean toolchain
+        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          # scripts/Test.cs handles building and testing.
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+
+      - name: Run verification suite
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          dotnet run --file scripts/Test.cs 2>&1 | tee artifacts/verification.log
+
+      - name: Upload verification results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verification-results
+          path: |
+            artifacts/verification.log
+            artifacts/test-results.json
+            artifacts/*/verified.json
+            artifacts/*/identity.json
+            artifacts/*/Extracted.lean
+          if-no-files-found: ignore
+          retention-days: 14

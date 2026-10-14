@@ -1,0 +1,15 @@
+name = "leancil"
+version = "0.1.0"
+defaultTargets = ["CIL"]
+
+[[lean_lib]]
+name = "CIL"
+
+[[lean_lib]]
+name = "Examples.Support"
+
+[[lean_lib]]
+name = "Tests.Semantics"
+
+[[lean_lib]]
+name = "Tests.Automation"

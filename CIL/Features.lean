@@ -1,0 +1,104 @@
+import Std
+
+/- .NET runtime capability references (model scope .NET 10):
+https://learn.microsoft.com/dotnet/standard/simd
+https://github.com/dotnet/runtime/blob/v10.0.0/docs/design/features/hw-intrinsics.md
+https://github.com/dotnet/runtime/blob/v10.0.0/docs/design/coreclr/botr/vectors-and-intrinsics.md
+IsSupported is a runtime capability, including OS support and runtime disabling;
+it is not just a CPUID bit. Operation prerequisites are retained explicitly.
+The inherited x86 chain in this model is SSE2 <- SSSE3 <- SSE4.1 <- SSE4.2 <- AVX
+<- AVX2 <- AVX512F. AVX512F.VL additionally requires AVX512F; the reverse
+implication is not valid. BMI1 is independent of this chain.
+SSE4.1, AVX512DQ and ARM prerequisites follow the .NET 10 source declarations:
+https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Sse41.cs
+https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Avx512DQ.cs
+https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/Arm/AdvSimd.cs
+Vector256.IsHardwareAccelerated is an independent fixed JIT/runtime capability in
+this declared domain, including its portable fallback when AVX2 is unavailable:
+https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/Vector256.cs
+https://learn.microsoft.com/dotnet/api/system.runtime.intrinsics.x86.avx512f?view=net-10.0
+https://devblogs.microsoft.com/dotnet/hardware-intrinsics-in-net-core/ -/
+
+namespace CIL
+
+inductive Feature where
+  | advSimd | sse2 | ssse3 | sse42 | avx | avx2 | avx512F | avx512FVL | bmi1
+  | sse41 | avx512DQ | avx512DQVL | bmi2 | armBase64 | vector256Accelerated
+  deriving DecidableEq, Repr
+
+inductive Architecture where
+  | scalar | arm64 | x64
+  deriving DecidableEq, Repr
+
+/-- Runtime-visible flags are fixed throughout an execution. Runtime disabling is
+represented by false flags; BMI1 is independent of the AVX selection. -/
+structure FeatureProfile where
+  architecture : Architecture := .scalar
+  nativeWidth : Nat := 64
+  littleEndian : Bool := true
+  advSimd : Bool := false
+  sse2 : Bool := false
+  ssse3 : Bool := false
+  sse42 : Bool := false
+  avx : Bool := false
+  avx2 : Bool := false
+  avx512F : Bool := false
+  avx512FVL : Bool := false
+  bmi1 : Bool := false
+  sse41 : Bool := false
+  avx512DQ : Bool := false
+  avx512DQVL : Bool := false
+  bmi2 : Bool := false
+  armBase64 : Bool := false
+  vector256Accelerated : Bool := false
+  deriving DecidableEq, Repr
+
+def FeatureProfile.scalar : FeatureProfile := {}
+
+def FeatureProfile.evaluate (p : FeatureProfile) : Feature → Bool
+  | .advSimd => p.advSimd
+  | .sse2 => p.sse2
+  | .ssse3 => p.ssse3
+  | .sse42 => p.sse42
+  | .avx => p.avx
+  | .avx2 => p.avx2
+  | .avx512F => p.avx512F
+  | .avx512FVL => p.avx512FVL
+  | .bmi1 => p.bmi1
+  | .sse41 => p.sse41
+  | .avx512DQ => p.avx512DQ
+  | .avx512DQVL => p.avx512DQVL
+  | .bmi2 => p.bmi2
+  | .armBase64 => p.armBase64
+  | .vector256Accelerated => p.vector256Accelerated
+
+/-- Declared capability domain: 64-bit little-endian execution, architecture
+separation, and prerequisites used by the reachable SSE/AVX operations. This is
+an explicit domain, rather than a claim to enumerate every possible CLR host. -/
+def FeatureProfile.Valid (p : FeatureProfile) : Prop :=
+  p.nativeWidth = 64 ∧ p.littleEndian = true ∧
+  (p.advSimd = true → p.architecture = .arm64) ∧
+  ((p.sse2 || p.ssse3 || p.sse42 || p.avx || p.avx2 || p.avx512F || p.avx512FVL || p.bmi1 || p.sse41 || p.avx512DQ || p.avx512DQVL || p.bmi2) = true →
+    p.architecture = .x64) ∧
+  (p.ssse3 = true → p.sse2 = true) ∧
+  (p.sse42 = true → p.sse2 = true ∧ p.ssse3 = true) ∧
+  (p.avx2 = true → p.avx = true) ∧
+  (p.avx512FVL = true → p.avx512F = true) ∧
+  (p.avx = true → p.sse42 = true) ∧
+  (p.avx512F = true → p.avx2 = true) ∧
+  (p.sse41 = true → p.ssse3 = true) ∧
+  (p.sse42 = true → p.sse41 = true) ∧
+  (p.avx512DQ = true → p.avx512F = true) ∧
+  (p.avx512DQVL = true → p.avx512DQ = true ∧ p.avx512FVL = true) ∧
+  (p.armBase64 = true → p.architecture = .arm64) ∧
+  (p.advSimd = true → p.armBase64 = true)
+
+instance (p : FeatureProfile) : Decidable p.Valid := inferInstanceAs (Decidable (_ ∧ _))
+
+@[simp] theorem FeatureProfile.scalar_evaluate (f : Feature) : scalar.evaluate f = false := by
+  cases f <;> rfl
+
+theorem FeatureProfile.scalar_valid : scalar.Valid := by decide
+
+
+end CIL

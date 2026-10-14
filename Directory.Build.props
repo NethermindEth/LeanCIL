@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup Label="ProductInfo">
+    <Product>Nethermind.LeanCIL</Product>
+    <Authors>Nethermind</Authors>
+    <Company>Nethermind</Company>
+    <Copyright>Copyright (c) 2026 Demerzel Solutions Limited</Copyright>
+    <Description>Formal verification of .NET CIL using Lean 4.</Description>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <RepositoryUrl>https://github.com/NethermindEth/LeanCIL</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/NethermindEth/LeanCIL</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(FileBasedProgram)' != 'true'">
+    <OutputPath>bin/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+</Project>
