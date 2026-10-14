@@ -3,7 +3,7 @@ import CIL.Safety.LiveValues
 namespace CIL.Safety
 
 theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
-    (value : CIL.Value) (h : loadValue m r width = .ok value) : (Value.scalar value).Valid m := by
+    {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) : (Value.scalar value).Valid m := by
   unfold loadValue at h
   repeat' first
     | rfl

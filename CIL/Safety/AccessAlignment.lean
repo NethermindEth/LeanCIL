@@ -21,8 +21,8 @@ theorem access_alignment_at_placement {m : Memory} {r : Reference}
 /-- Successful value loading cannot bypass the full checked read, regardless
     of the width's later scalar/vector interpretation. -/
 theorem loadValue_checked_read {m : Memory} {reference : ManagedReference}
-    {width : Nat} {value : CIL.Value}
-    (loaded : loadValue m reference width = .ok value) :
+    {width : Nat} {value : CIL.Value} {signed : Bool}
+    (loaded : loadValue m reference width signed = .ok value) :
     ∃ r bytes, reference = .address r ∧ read m r width 1 = .ok bytes := by
   cases reference with
   | null => simp [loadValue, dereference, checkedAt, Except.mapError,
@@ -38,8 +38,8 @@ theorem loadValue_checked_read {m : Memory} {reference : ManagedReference}
     still come from the actual checked access. This is a model theorem, not a
     theorem about CLR lowering; see ALIGNMENT.md for that correspondence audit. -/
 theorem loadValue_access_requirements {m : Memory} {reference : ManagedReference}
-    {width : Nat} {value : CIL.Value}
-    (loaded : loadValue m reference width = .ok value) :
+    {width : Nat} {value : CIL.Value} {signed : Bool}
+    (loaded : loadValue m reference width signed = .ok value) :
     ∃ r allocation, reference = .address r ∧
       AccessRequirements m r width 1 false allocation := by
   obtain ⟨r, bytes, href, hread⟩ := loadValue_checked_read loaded

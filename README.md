@@ -17,6 +17,8 @@ The scripts are [.NET file-based apps](https://learn.microsoft.com/en-us/dotnet/
 
 The test command builds independent example assemblies, runs Lean semantic tests, extracts actual CIL, proves positive examples, checks semantic counterexamples, rejects malformed/unsupported inputs, and tests artifact identity. Results go to `artifacts/test-results.json`; generated CIL, proof caches and verification reports are ignored by Git.
 
+To run one part of the suite, use `dotnet run --file scripts/Test.cs -- --suite core` (or `cli`, `integer`, `narrow`). Each selection builds its prerequisites and writes `artifacts/test-results-<suite>.json`. Use separate checkouts when running suites concurrently because tests build and mutate artifacts.
+
 ## Command-line tool
 
 Build and install the .NET tool from this checkout:
@@ -255,6 +257,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 - `Choose`: symbolic conditional execution.
 - `Calls`: a managed-call chain with an address-taken mutable local.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the modular additive inverse for every input, including the signed minimum.
+- `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct containing narrow fields. `UnsignedShort.lean` proves reduction modulo 65,536 for every 32-bit input.
 - `Alias`: two arguments naming the same caller storage.
 - `Struct` and `StructCopy`: reference and by-value use of a **12-byte explicit-layout struct**, with an 8-byte field and a 4-byte field, initialization and a byref helper call.
 - `LargeStruct`: a **40-byte** explicit layout with a field at offset 32.

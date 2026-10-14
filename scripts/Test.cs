@@ -4,14 +4,47 @@
 
 using System.Text.Json;
 
+var suite = args switch
+{
+    [] => "all",
+    ["--suite", "all" or "core" or "cli" or "integer" or "narrow"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow]")
+};
+
 using var verification = new Program();
 var results = new List<string>();
+
+var independentSuites = new Dictionary<string, (string Script, string Description)>
+{
+    ["cli"] = ("Tests/CliVerification.cs", "CLI proof verification and incorrect implementation rejection"),
+    ["integer"] = ("Tests/IntegerOpcodes.cs", "integer opcode encodings, boundary cases and universal negation proofs"),
+    ["narrow"] = ("Tests/NarrowIntegers.cs", "narrow integer conversions, storage, method boundaries and rejection proofs")
+};
 
 void Passed(string name)
 {
     results.Add(name);
     Console.WriteLine("PASS " + name);
 }
+
+void RunSuite(string name)
+{
+    var (script, description) = independentSuites[name];
+    Console.Write(Run(["dotnet", "run", "--file", script]));
+    Passed(description);
+}
+
+void SaveResults()
+{
+    Directory.CreateDirectory(At("artifacts"));
+    File.WriteAllText(ResultsPath(), JsonSerializer.Serialize(new { suite, passed = results, count = results.Count }, Json) + "\n");
+    Console.WriteLine($"All {results.Count} checks passed ({suite}).");
+}
+
+string ResultsPath() => At(suite == "all" ? "artifacts/test-results.json" : $"artifacts/test-results-{suite}.json");
+
+// A failed run must never leave an earlier successful summary behind.
+File.Delete(ResultsPath());
 
 void Rejected(string[] command, string marker)
 {
@@ -38,8 +71,15 @@ var signatures = new Dictionary<string, string>
     ["Escape"] = "System.UInt64& Examples.Arithmetic::Escape()"
 };
 
-// Build the tools, example assemblies and semantic tests.
-foreach (var project in new[] { "Extractor", "Examples/Assembly", "Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/CliVerification.cs", "Tests/IntegerOpcodes.cs", "scripts/Verify.cs", "scripts/Test.cs" })
+// Each suite can run in its own checkout, with only the projects it needs.
+var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
+if (suite is "all" or "core")
+    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "scripts/Verify.cs"]);
+foreach (var (name, entry) in independentSuites)
+    if (suite == "all" || suite == name)
+        projects.Add(entry.Script);
+
+foreach (var project in projects)
 {
     var command = new List<string>
     {
@@ -54,6 +94,13 @@ foreach (var project in new[] { "Extractor", "Examples/Assembly", "Examples/Hard
 
     if (log.Contains("IDE0005"))
         throw new InvalidOperationException("Unused imports: " + log);
+}
+
+if (suite is not ("all" or "core"))
+{
+    RunSuite(suite);
+    SaveResults();
+    return;
 }
 
 // Check method selection before starting the longer Lean verification run.
@@ -199,13 +246,10 @@ Passed("changed proof identity rejected");
 Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-avx2"), "Stale or mismatched");
 Passed("different feature profile rejected");
 
-// Exercise the public CLI through proof selection, reuse and semantic rejection.
-Console.Write(Run(["dotnet", "run", "--file", "Tests/CliVerification.cs"]));
-Passed("CLI proof verification and incorrect implementation rejection");
-
-Console.Write(Run(["dotnet", "run", "--file", "Tests/IntegerOpcodes.cs"]));
-Passed("integer opcode encodings, boundary cases and universal negation proofs");
+// The default command still runs every suite locally.
+if (suite == "all")
+    foreach (var name in independentSuites.Keys)
+        RunSuite(name);
 
 // Write the summary only after every check succeeds.
-File.WriteAllText(At("artifacts/test-results.json"), JsonSerializer.Serialize(new { passed = results, count = results.Count }, Json) + "\n");
-Console.WriteLine($"All {results.Count} checks passed.");
+SaveResults();

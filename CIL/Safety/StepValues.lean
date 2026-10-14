@@ -37,6 +37,7 @@ theorem step_values_valid (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
   all_goals
     repeat' first
       | exact retained
+      | solve | simp [FrameAction.LiveValues, ValuesValid, Value.Valid, numericValue]
       | exact retained.tail
       | solve | exact retained.drop _
       | solve | apply checkedValues_preserved _ _ _ _ hm ext; assumption
@@ -49,6 +50,7 @@ theorem step_values_valid (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
       | solve |
           apply ValuesValid.cons
           · first
+            | rfl
             | solve | exact (checkedValue_valid _ _ _ (by assumption)).2
             | solve | apply loadLocal_result_valid; assumption
             | solve | apply localAddress_result_valid; assumption

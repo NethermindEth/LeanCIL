@@ -56,3 +56,12 @@ General value constructors, address-taking of by-value aggregate arguments, nest
 | Excluded | Domain mathematical contracts, limb arithmetic, storage representation, method proofs, specialized summaries, manifests and coverage policies | Belong to the consuming application |
 
 The new aggregate instructions are supported by the allocation-aware interpreter. Existing proofs targeting the earlier interpreter require an explicit migration; no automatic equivalence claim is made. Fixed aggregate helper names have become vector helper names as listed above. Generic memory lemmas now live in `CIL`; consumers must update qualified references and recheck their proofs. Application integration has not been performed or validated.
+
+## Narrow integer API changes
+
+- `NarrowKind` records signed/unsigned eight- and sixteen-bit storage. Newly extracted narrow locals use `LocalKind.narrow`; the older restricted `LocalKind.byte` remains available for existing handwritten models.
+- `Op.arg`, `Op.local`, `Op.setLocal` and `Op.ret` have optional narrow annotations, defaulting to `none`. Existing constructor expressions retain their previous meanings; pattern matches must account for the additional argument. Extracted annotations are derived from validated signatures and local metadata.
+- `Op.fieldAt` and `Safety.loadValue` have an additional signedness argument, defaulting to `false`. Two-byte fields are now admitted. Checked-read and access-requirement lemmas cover either signedness.
+- `load_numeric_local`, `store_load_numeric_local` and `step_load_numeric_local` return `localResult kind value`, which includes truncation and extension for narrow homes. It reduces to the original value for existing non-narrow kinds. Consumers proving identity readback for narrow storage must establish that the value is already in the representable range.
+- Argument-equivalence premises now quantify over the narrow annotation as well as the argument index.
+- Unary arithmetic uses `CIL.unary`, alongside `CIL.binary`; proofs that explicitly unfold instruction internals may need to unfold this helper. Regenerate extraction artifacts and rerun proofs when adopting this version.

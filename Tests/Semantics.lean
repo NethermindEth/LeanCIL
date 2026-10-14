@@ -45,6 +45,32 @@ theorem branches_reject_mixed_widths :
     ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Examples.empty).isOk) = true := rfl
 
+theorem narrow_conversions_reject_references :
+    ([CIL.Op.convI1, .convI2, .convU2].all fun op =>
+      !(step scalarBody op 0 [] scalarFrame [Examples.reference] Examples.caller).isOk) = true := rfl
+
+theorem narrow_read_bounds :
+    loadValue Examples.caller (.address ⟨0, 7⟩) 2 true =
+      .error (.memory .outsideAllocation (.address ⟨0, 7⟩) 2) := rfl
+
+theorem narrow_read_lifetime :
+    loadValue (expire Examples.caller 0) (.address ⟨0, 0⟩) 2 true =
+      .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 2) := rfl
+
+theorem narrow_write_permission :
+    instruction (.setFieldAt 0 2) [.scalar (.i32 65535), Examples.reference]
+      { Examples.caller with views := [⟨0, 0, 8, true, false⟩] } =
+        .error (.memory .unwritable (.address ⟨0, 0⟩) 2) := rfl
+
+theorem narrow_local_roundtrip {memory : Memory} {reference : Reference}
+    (kind : CIL.NarrowKind) (bits : CIL.W32)
+    (ready : access memory reference kind.width 1 true = .ok ()) :
+    ∃ result,
+      storeLocal memory (.bytes (.narrow kind) reference) (.scalar (.i32 bits)) =
+        .ok (.bytes (.narrow kind) reference, result) ∧
+      loadLocal result (.bytes (.narrow kind) reference) = .ok (.scalar (.i32 (kind.extend bits))) := by
+  exact store_load_numeric_local (.narrow kind) (.i32 bits) bits.toNat rfl ready
+
 theorem uninitialized_rejected :
     read { Examples.caller with cells := fun _ _ => ⟨0, false⟩ } ⟨0, 0⟩ 8 1 = .error .uninitialized := rfl
 
