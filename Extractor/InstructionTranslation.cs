@@ -31,12 +31,12 @@ internal static class InstructionTranslation
         string Arg(int index)
         {
             var home = Array.IndexOf(parameterHomes, index);
-            return home < 0 ? $".arg {index}" + Narrow(m.Parameters[index].ParameterType) :
+            return home < 0 ? $".arg {index}" + Narrow(MethodArguments.Type(m, index)) :
                 $".local {m.Body.Variables.Count + home}";
         }
         string Parameter(string op)
         {
-            var home = Array.IndexOf(parameterHomes, ((ParameterDefinition)i.Operand).Index);
+            var home = Array.IndexOf(parameterHomes, MethodArguments.Index(m, (ParameterDefinition)i.Operand));
             if (home < 0) throw new InvalidDataException("Missing parameter storage");
             return $".{op} {m.Body.Variables.Count + home}";
         }
@@ -121,7 +121,7 @@ internal static class InstructionTranslation
             Code.Stobj => $".storeScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}",
             Code.Initobj => $".initAggregate {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}",
             Code.Ldarg_0 => Arg(0), Code.Ldarg_1 => Arg(1), Code.Ldarg_2 => Arg(2), Code.Ldarg_3 => Arg(3),
-            Code.Ldarg or Code.Ldarg_S => Arg(((ParameterDefinition)i.Operand).Index + (m.HasThis ? 1 : 0)),
+            Code.Ldarg or Code.Ldarg_S => Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
             Code.Ldloc or Code.Ldloc_S => LocalOp("local", Local()),
             Code.Ldloca or Code.Ldloca_S => LocalOp("localAddr", Local()),

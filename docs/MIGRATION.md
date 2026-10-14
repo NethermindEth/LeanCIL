@@ -123,6 +123,12 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 
 `CIL.Op.copyObject size` is a new instruction constructor. Downstream exhaustive matches must handle it; checked execution uses existing allocation-aware reads and writes. `CIL.Safety.copyObject_writes_snapshot` provides a generic byte-copy postcondition. Extraction computes the width from validated type metadata; no application-specific copy summaries are required.
 
+### Struct instance calls
+
+`MethodArguments` centralizes CIL argument indexing: struct instance methods receive a managed-reference `this` at index zero, followed by declared parameters. Assigned/addressed parameter homes and native operand analysis use the same indexing for every encoding. Existing Lean argument and call semantics remain unchanged.
+
+Direct `call` instructions may target admitted same-assembly struct instance methods and constructors. Constructor calls require a void result and valid struct storage supplied by the caller. This does not yet admit arbitrary `newobj`; it is separate from calls to constructors on existing storage. Class instances, virtual dispatch and generic instance methods remain unsupported.
+
 ### Portable scalar helpers
 
 `Intrinsic.scalar` adds a portable runtime family; downstream exhaustive matches over `Intrinsic` must handle it. Its semantics live in `CIL.ScalarIntrinsics`. Availability and required-feature checks classify this family as profile-independent. The extractor accepts selected exact .NET 10 `System.Runtime` and `System.Memory` signatures; it does not admit arbitrary external calls.

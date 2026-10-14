@@ -7,11 +7,11 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-The regression runner covers **47 check groups** across fifteen C# partitions. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
+The regression runner covers **48 check groups** across sixteen C# partitions. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
-The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` `--suite division` `--suite checked` `--suite conversions` `--suite native` `--suite arguments` `--suite layout` `--suite copy`, `--suite bits` , `--suite enums` and `--suite nested` after `--`. These partitions cover the same 47 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
+The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` `--suite division` `--suite checked` `--suite conversions` `--suite native` `--suite arguments` `--suite layout` `--suite copy`, `--suite bits` , `--suite enums` , `--suite nested` and `--suite instance` after `--`. These partitions cover the same 48 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |
 | --- | --- |
