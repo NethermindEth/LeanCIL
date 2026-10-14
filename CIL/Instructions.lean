@@ -58,6 +58,8 @@ inductive Op where
   | fieldAt (offset width : Nat) (signed : Bool := false)
   | fieldAddress (offset : Nat)
   | setFieldAt (offset width : Nat)
+  | aggregateFieldAt (offset size : Nat)
+  | setAggregateFieldAt (offset size : Nat)
   | arg (index : Nat) (narrow : Option NarrowKind := none)
   | vectorArg (index : Nat)
   | vectorArgAddr (index : Nat)

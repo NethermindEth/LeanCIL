@@ -18,9 +18,12 @@ internal static class MetadataValidation
         _ => throw new InvalidDataException($"Unsupported field type: {type.FullName}")
     };
 
-    internal sealed record AggregateInfo(int Size, IReadOnlyDictionary<string, int> Offsets);
+    internal sealed record AggregateInfo(int Size, int Alignment, IReadOnlyDictionary<string, int> Offsets);
 
     internal static int Layout(TypeReference reference, ModuleDefinition module) => AggregateLayout(reference, module).Size;
+
+    internal static int FieldSize(TypeReference type, ModuleDefinition module) =>
+        IsAggregate(type, module) ? Layout(type, module) : PrimitiveWidth(type);
 
     internal static int FieldOffset(FieldDefinition field, ModuleDefinition module) =>
         AggregateLayout(field.DeclaringType, module).Offsets[field.FullName];
@@ -28,6 +31,10 @@ internal static class MetadataValidation
     // Managed layout for primitive, reference-free fields on the admitted 64-bit
     // CoreCLR targets. This is not interop marshalling layout (notably for bool).
     internal static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module)
+        => AggregateLayout(reference, module, [], new Dictionary<string, AggregateInfo>());
+
+    static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module,
+        HashSet<string> active, Dictionary<string, AggregateInfo> layouts)
     {
         var type = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate");
         if (reference.Scope != module || type.Module != module || !reference.IsValueType ||
@@ -39,6 +46,10 @@ internal static class MetadataValidation
             module.GetTypes().Count(t => t.FullName == type.FullName) != 1)
             throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName}");
 
+        if (layouts.TryGetValue(type.FullName, out var cached)) return cached;
+        if (active.Count >= 128 || !active.Add(type.FullName))
+            throw new InvalidDataException($"Recursive or excessively nested aggregate layout: {reference.FullName}");
+
         var packing = type.PackingSize;
         if (packing is not (-1 or 0 or 1 or 2 or 4 or 8 or 16 or 32 or 64 or 128))
             throw new InvalidDataException($"Invalid aggregate packing: {reference.FullName}");
@@ -48,11 +59,13 @@ internal static class MetadataValidation
         var alignment = 1;
         foreach (var field in type.Fields.Where(f => !f.IsStatic))
         {
-            if (field.FieldType is TypeSpecification || (field.FieldType.Scope == module && !EnumTypes.IsEnum(field.FieldType)))
+            if (field.FieldType is TypeSpecification)
                 throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
-            var width = PrimitiveWidth(field.FieldType);
-            RuntimeModels.ValidateTypeIdentity(field.FieldType, module);
-            var fieldAlignment = Math.Min(pack, width);
+            var nested = IsAggregate(field.FieldType, module)
+                ? AggregateLayout(field.FieldType, module, active, layouts) : null;
+            var width = nested?.Size ?? PrimitiveWidth(field.FieldType);
+            if (nested is null) RuntimeModels.ValidateTypeIdentity(field.FieldType, module);
+            var fieldAlignment = Math.Min(pack, nested?.Alignment ?? width);
             alignment = Math.Max(alignment, fieldAlignment);
             var offset = type.IsExplicitLayout ? field.Offset : (end + fieldAlignment - 1) / fieldAlignment * fieldAlignment;
             if (offset < 0 || offset > 65536 - width ||
@@ -68,7 +81,10 @@ internal static class MetadataValidation
         var size = type.ClassSize > 0 ? Math.Max(end, type.ClassSize) : (end + alignment - 1) / alignment * alignment;
         size = Math.Max(1, size);
         if (size > 65536) throw new InvalidDataException($"Unsupported aggregate size: {reference.FullName}");
-        return new(size, offsets);
+        active.Remove(type.FullName);
+        var result = new AggregateInfo(size, alignment, offsets);
+        layouts.Add(type.FullName, result);
+        return result;
     }
 
     internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false)

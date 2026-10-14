@@ -48,8 +48,11 @@ internal static class InstructionTranslation
             RuntimeModels.ValidateTypeIdentity(f.FieldType, m.Module);
             if (resolved.IsStatic || resolved.Module != m.Module || resolved.FullName != f.FullName)
                 throw new InvalidDataException($"Unsupported field {f.FullName}");
-            int width = MetadataValidation.PrimitiveWidth(resolved.FieldType);
+            var aggregate = MetadataValidation.IsAggregate(resolved.FieldType, m.Module);
+            int width = MetadataValidation.FieldSize(resolved.FieldType, m.Module);
             var offset = MetadataValidation.FieldOffset(resolved, m.Module);
+            if (aggregate && op != "fieldAddr")
+                return $".{(op == "field" ? "aggregateFieldAt" : "setAggregateFieldAt")} {offset} {width}";
             return op == "fieldAddr" ? $".fieldAddress {offset}" :
                 $".{(op == "field" ? "fieldAt" : "setFieldAt")} {offset} {width}" +
                 (op == "field" && EnumTypes.Storage(resolved.FieldType).FullName is "System.SByte" or "System.Int16" ? " true" : "");

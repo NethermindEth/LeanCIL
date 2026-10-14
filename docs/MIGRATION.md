@@ -109,7 +109,15 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 - `MetadataValidation.AggregateLayout` computes a validated size and field offsets for explicit or sequential primitive-field structs. `Layout` retains its size-returning API; `FieldOffset` is the shared offset lookup used by emission and instruction translation.
 - Sequential fields normally have no metadata `FieldOffset`; consumers must use validated computed offsets instead of reading `FieldDefinition.Offset` directly.
 - Aggregate bytes, memory instructions and Lean layout bounds theorems are unchanged. Regenerate artifacts for the expanded metadata subset.
-- Inline arrays, auto layout, nested structs, reference fields and floating-point fields remain unsupported. Interop marshalling layouts are not used to infer managed offsets.
+- Inline arrays, auto layout, reference fields and floating-point fields remain unsupported. Interop marshalling layouts are not used to infer managed offsets.
+
+### Nested layouts
+
+`AggregateInfo` now retains alignment as well as size and offsets. Recursive layout validation admits nested reference-free structs, rejects cycles and caps nesting depth at 128. `FieldSize` handles primitive, enum and aggregate fields.
+
+`FieldLayout` adds an `aggregate` flag: scalar fields retain the width restriction to 1/2/4/8 bytes, while aggregate fields require a positive width. Every field remains bounded by its containing layout. Update positional field constructors to include this flag, or use named structure fields. Emission includes bounds theorems for reachable nested layouts.
+
+`Op.aggregateFieldAt` and `Op.setAggregateFieldAt` perform checked nested snapshots and stores. Downstream exhaustive opcode matches must handle them. The scalar field instructions retain their previous meaning. Regenerate extraction artifacts before verifying consumers.
 
 ### Typed object copies
 

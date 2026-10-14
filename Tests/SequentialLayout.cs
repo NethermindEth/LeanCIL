@@ -121,7 +121,7 @@ foreach (var (pack, size, empty) in variants)
     var runtimeType = runtime.GetType("Examples.LayoutFixture")!;
     var actualSize = RuntimeSize(runtimeType);
     var runtimeFields = runtimeType.GetFields().OrderBy(f => f.MetadataToken).ToArray();
-    var actualFields = runtimeFields.Select(f => $"⟨{RuntimeOffset(runtimeType, f)}, {RuntimeSize(f.FieldType)}⟩");
+    var actualFields = runtimeFields.Select(f => $"⟨{RuntimeOffset(runtimeType, f)}, {RuntimeSize(f.FieldType)}, false⟩");
     var claims = new List<string>
     {
         $"Extracted.layout0.size = {actualSize}",
@@ -154,7 +154,10 @@ foreach (var mutation in new[] { "pack", "size", "auto", "reference", "float", "
             case "float": type.Fields[0].FieldType = module.TypeSystem.Double; break;
             case "generic": type.GenericParameters.Add(new GenericParameter("T", type)); break;
             case "offset": type.Fields[0].Offset = 0; break;
-            case "nested": type.Fields[0].FieldType = module.GetType("Examples.Packet"); break;
+            case "nested":
+                type.Fields[0].FieldType = module.GetType("Examples.Packet");
+                module.GetType("Examples.Packet").Fields[0].FieldType = module.TypeSystem.Object;
+                break;
             case "recursive": type.Fields[0].FieldType = type; break;
             case "inline":
                 var attributeType = new TypeReference("System.Runtime.CompilerServices", "InlineArrayAttribute", module, module.TypeSystem.CoreLibrary);
@@ -171,7 +174,8 @@ foreach (var mutation in new[] { "pack", "size", "auto", "reference", "float", "
     var marker = mutation switch
     {
         "pack" => "Invalid aggregate packing", "offset" => "Invalid field layout",
-        "reference" or "float" or "nested" or "recursive" => "Unsupported field type",
+        "reference" or "float" or "nested" => "Unsupported field type",
+        "recursive" => "Recursive or excessively nested aggregate layout",
         _ => "Unsupported aggregate layout"
     };
     if (rejected.Code == 0 || !rejected.Output.Contains(marker) || File.Exists(Path.Combine(output, "Extracted.lean")))
