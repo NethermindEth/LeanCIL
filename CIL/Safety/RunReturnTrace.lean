@@ -54,7 +54,7 @@ theorem run_success_return_trace (program : CIL.Program) (fuel method pc : Nat)
                     ih method (pc + 1) args frame (result ++ rest) memory' final values h
                   exact ⟨lp, lf, ls, before, returned, raw,
                     .callContinue actual hc he hr visit, fetched, ended, checked⟩
-          | construct callee arguments rest frame' temporary memory =>
+          | construct callee arguments rest frame' temporary kind memory =>
             cases hc : program[callee]? with
             | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
@@ -71,12 +71,12 @@ theorem run_success_return_trace (program : CIL.Program) (fuel method pc : Nat)
                   | cons value rest' => simp at h
                   | nil =>
                     simp only [List.isEmpty_nil, Bool.not_true, Bool.false_eq_true, ite_false] at h
-                    cases hl : loadValue memory' (.address temporary) (localWidth .vector256) <;>
+                    cases hl : loadLocal memory' (.bytes kind temporary) <;>
                       simp only [hl] at h
                     · cases h
                     · rename_i value
                       obtain ⟨lp, lf, ls, before, returned, raw, visit, fetched, ended, checked⟩ :=
-                        ih method (pc + 1) args frame' (.scalar value :: rest) memory' final values h
+                        ih method (pc + 1) args frame' (value :: rest) memory' final values h
                       exact ⟨lp, lf, ls, before, returned, raw,
                         .constructContinue actual hc he hr hl visit, fetched, ended, checked⟩
 

@@ -276,6 +276,25 @@ theorem nested_expired :
       allocations := fun _ => some ⟨.callerStack, ⟨8, 1, []⟩, false, []⟩ }).map Prod.snd =
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
 
+theorem constructor_zero_size :
+    step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 0 0)
+      0 [] ⟨0, [], [], []⟩ [] Examples.empty = .error .invalidState := rfl
+
+theorem constructor_stack_underflow :
+    step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 1 3)
+      0 [] ⟨0, [], [], []⟩ [] Examples.empty = .error .invalidState := rfl
+
+def constructorCaller : CIL.Method := {
+  returnsValue := true, locals := [], code := [.newAggregate 1 0 3, .ret] }
+
+theorem constructor_zero_initialization :
+    (invoke [constructorCaller, { returnsValue := false, locals := [], code := [.ret] }]
+      8 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.aggregate [0, 0, 0])] := rfl
+
+theorem constructor_must_return_void :
+    (invoke [constructorCaller, { returnsValue := true, locals := [], code := [.const32 7, .ret] }]
+      8 0 [] Examples.empty).map Prod.snd = .error ⟨0, 0, .invalidState⟩ := rfl
+
 end Tests
 
 namespace Tests

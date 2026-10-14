@@ -90,6 +90,7 @@ inductive Op where
   | bne (target : Nat)
   | call (method : Nat) (argc : Nat)
   | newVector256 (constructor : Nat) (argc : Nat)
+  | newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64))
   | skipInit | asRef
   | feature (id : Feature)
   | intrinsic (operation : Intrinsic) (argc : Nat)

@@ -28,7 +28,7 @@ The checked interpreter represents general reference-free aggregates as byte lis
 
 The extractor admits explicit layouts with a positive declared size and sequential layouts computed from validated primitive, enum or nested aggregate fields, packing and declared size. Both are reference-free and limited to 65,536 bytes per aggregate; sequential padding follows the runtime rules below. Overlapping explicit fields remain possible and follow the byte-memory semantics. Generated `AggregateLayout.Valid` theorems check the emitted layout bounds in Lean. Metadata-to-Lean correspondence remains part of the extractor trust boundary.
 
-Fixed 256-bit snapshot-home operations use **vector** names to distinguish them from general aggregates. Lane operations are explicitly vector-lane operations. They do not stand for arbitrary struct layouts. The pure interpreter intentionally returns failure for the new general aggregate operations; use the checked interpreter for those operations. Arbitrary value constructors and nested/reference-bearing field layouts are not yet exposed by extraction.
+Fixed 256-bit snapshot-home operations use **vector** names to distinguish them from general aggregates. Lane operations are explicitly vector-lane operations. They do not stand for arbitrary struct layouts. The pure interpreter intentionally returns failure for the new general aggregate operations; use the checked interpreter for those operations. Validated reference-free nested layouts and same-assembly value constructors are exposed by extraction; reference-bearing field layouts remain unsupported.
 
 ## Runtime assumptions
 
@@ -96,7 +96,7 @@ References carry allocation identity and offset, not nominal CLR type tags. Rela
 
 The extractor admits direct calls to methods on validated reference-free structs. The implicit `this` argument is a managed reference, not an aggregate snapshot; field accesses use existing allocation, permission, initialization and lifetime checks. By-value struct parameters still copy values into their own frame storage. Parameter assignment/addressing accounts for the shifted argument indices.
 
-Direct calls to a void instance constructor are allowed on existing struct storage. Such calls do not allocate an object or bypass initialization checks. The general `newobj` path remains outside this extension. Class instance methods, indirect/virtual dispatch and generic managed methods remain unsupported.
+Direct calls to a void instance constructor are allowed on existing struct storage. Such calls do not allocate an object or bypass initialization checks. `newobj` for admitted structs allocates zero-initialized caller-owned temporary storage, passes a managed-reference `this` to the constructor, requires a void return and reads back a checked aggregate snapshot. Constructor calls propagate arithmetic and memory faults. The temporary remains owned by the caller until frame cleanup; resource exhaustion is not modelled. Zero-initialized fields follow the CIL construction contract; correspondence of padding bytes and physical runtime layout remains a runtime assumption. Class instance methods, indirect/virtual dispatch and generic managed methods remain unsupported.
 
 ## Integer enums
 

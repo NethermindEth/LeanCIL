@@ -12,7 +12,7 @@ def FrameAction.StateValid (program : CIL.Program) (args : List Value) (current 
   | .next _ values frame memory => LiveState program args frame values memory
   | .call _ childArgs rest memory =>
     LiveState program args current rest memory ∧ ValuesValid memory childArgs
-  | .construct _ childArgs rest frame _ memory =>
+  | .construct _ childArgs rest frame _ _ memory =>
     LiveState program args frame rest memory ∧ ValuesValid memory childArgs
   | .returned values memory => LiveState program args current values memory
 
@@ -35,7 +35,7 @@ theorem step_live_state (program : CIL.Program) (method : Nat) (body : CIL.Metho
   | returned result updated => exact ⟨memory, arguments, values, references, owned, statics⟩
   | call callee childArgs rest updated =>
     exact ⟨⟨memory, arguments, values.2, references, owned, statics⟩, values.1⟩
-  | construct callee childArgs rest frame' temporary updated =>
+  | construct callee childArgs rest frame' temporary kind updated =>
     exact ⟨⟨memory, arguments, values.2, references, owned, statics⟩, values.1⟩
 
 theorem programStep_live_state {program : CIL.Program} {method pc : Nat}

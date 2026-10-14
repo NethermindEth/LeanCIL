@@ -55,7 +55,7 @@ theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Meth
         | returned values memory => rfl
         | call callee arguments rest memory =>
           simp only [Except.mapError, Bind.bind, Except.bind, ih]
-        | construct callee arguments rest frame temporary memory =>
+        | construct callee arguments rest frame temporary kind memory =>
           simp only [Except.mapError, Bind.bind, Except.bind, ih]
 
 theorem invoke_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)

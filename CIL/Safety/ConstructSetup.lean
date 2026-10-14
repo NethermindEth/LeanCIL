@@ -12,7 +12,7 @@ theorem step_newVector256 {body : CIL.Method} {pc callee : Nat}
     ∃ temporary updated,
       step body (.newVector256 callee arguments.length) pc args frame (arguments.reverse ++ rest) memory =
         .ok (.construct callee (.reference (.address temporary) :: arguments) rest
-          { frame with owned := temporary.allocation :: frame.owned } temporary updated) ∧
+          { frame with owned := temporary.allocation :: frame.owned } temporary .vector256 updated) ∧
       read updated temporary 32 1 = .ok (numberBytes 0 32) ∧
       access updated temporary 32 1 true = .ok () ∧
       MemoryBelow memory.nextIdentity memory updated ∧

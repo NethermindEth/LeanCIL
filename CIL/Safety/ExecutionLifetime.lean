@@ -85,7 +85,7 @@ theorem run_preserves_caller_allocations (program : CIL.Program) (fuel method pc
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                   exact prior.trans (ih method (pc + 1) args frame (result ++ rest) memory' final values
                     (Nat.le_trans bound prior.next) owned h)
-          | construct callee arguments rest frame' temporary memory =>
+          | construct callee arguments rest frame' temporary kind memory =>
             cases hc : program[callee]? with
             | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
@@ -107,11 +107,11 @@ theorem run_preserves_caller_allocations (program : CIL.Program) (fuel method pc
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                   split at h
                   · cases h
-                  · cases hl : loadValue memory' (.address temporary) (localWidth .vector256) <;>
+                  · cases hl : loadLocal memory' (.bytes kind temporary) <;>
                       simp only [hl] at h
                     · cases h
                     · rename_i value
-                      exact prior.trans (ih method (pc + 1) args frame' (.scalar value :: rest) memory'
+                      exact prior.trans (ih method (pc + 1) args frame' (value :: rest) memory'
                         final values (Nat.le_trans bound prior.next) afterOwned h)
 
 /-- A child may mutate caller bytes, but cannot expire or replace caller storage. -/

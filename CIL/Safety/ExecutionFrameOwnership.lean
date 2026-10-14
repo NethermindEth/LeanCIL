@@ -7,7 +7,7 @@ namespace CIL.Safety
     ordinary steps and constructor allocation supply their updated frame. -/
 def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
   match action with
-  | .next _ _ frame _ | .construct _ _ _ frame _ _ => frame
+  | .next _ _ frame _ | .construct _ _ _ frame _ _ _ => frame
   | .call _ _ _ _ | .returned _ _ => current
 
 theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
@@ -32,7 +32,10 @@ theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op
           change FrameAllocations _ frame.activation (_ :: frame.owned)
           have allocated := allocateHome_owned _ _ _ _ _ (by assumption)
           have fresh := allocateHome_fresh _ _ _ _ _ (by assumption)
-          have new := allocated.preserve (storeValue_extends_allocations _ _ _ _ (by assumption))
+          have new := allocated.preserve (by
+            first
+            | exact storeValue_extends_allocations _ _ _ _ (by assumption)
+            | exact storeLocal_extends_allocations _ _ _ _ _ (by assumption))
             (by
               intro id member
               simp only [List.mem_singleton] at member

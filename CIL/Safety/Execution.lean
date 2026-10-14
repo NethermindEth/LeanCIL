@@ -41,7 +41,7 @@ inductive FrameAction where
   | next (pc : Nat) (stack : List Value) (frame : Frame) (memory : Memory)
   | call (callee : Nat) (args rest : List Value) (memory : Memory)
   | construct (callee : Nat) (args rest : List Value) (frame : Frame)
-      (temporary : Reference) (memory : Memory)
+      (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
@@ -93,7 +93,16 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
       let memory ← storeValue memory (.address temporary) (.v256 0)
       let frame := { frame with owned := temporary.allocation :: frame.owned }
       return .construct callee (.reference (.address temporary) :: arguments)
-        (stack.drop argc) frame temporary memory
+        (stack.drop argc) frame temporary .vector256 memory
+  | .newAggregate callee argc size, _ =>
+    if size = 0 || stack.length < argc then .error .invalidState else
+      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+      let (temporary, memory) ← allocateHome m frame.activation size
+      let (_, memory) ← storeLocal memory (.bytes (.aggregate size) temporary)
+        (.scalar (.aggregate (List.replicate size 0)))
+      let frame := { frame with owned := temporary.allocation :: frame.owned }
+      return .construct callee (.reference (.address temporary) :: arguments)
+        (stack.drop argc) frame temporary (.aggregate size) memory
   | .memory operation, _ =>
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory
@@ -137,14 +146,14 @@ def run (program : CIL.Program) : Nat → Nat → Nat → List Value → Frame �
       let (childFrame, memory) ← (enterFrame child arguments memory).mapError fun fault => ⟨method, pc, fault⟩
       let (memory, result) ← run program fuel callee 0 arguments childFrame [] memory
       run program fuel method (pc + 1) args frame (result ++ rest) memory
-    | .construct callee arguments rest frame temporary memory =>
+    | .construct callee arguments rest frame temporary kind memory =>
       let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
       let (childFrame, memory) ← (enterFrame child arguments memory).mapError fun fault => ⟨method, pc, fault⟩
       let (memory, result) ← run program fuel callee 0 arguments childFrame [] memory
       if !result.isEmpty then .error ⟨method, pc, .invalidState⟩ else
-        let value ← (loadValue memory (.address temporary) (localWidth .vector256)).mapError
+        let value ← (loadLocal memory (.bytes kind temporary)).mapError
           fun fault => ⟨method, pc, fault⟩
-        run program fuel method (pc + 1) args frame (.scalar value :: rest) memory
+        run program fuel method (pc + 1) args frame (value :: rest) memory
     | .returned result memory =>
       let memory := leaveFrame frame memory
       let result ← (result.mapM (checkedValue memory)).mapError fun fault => ⟨method, pc, fault⟩
