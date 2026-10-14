@@ -127,7 +127,7 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 
 `MethodArguments` centralizes CIL argument indexing: struct instance methods receive a managed-reference `this` at index zero, followed by declared parameters. Assigned/addressed parameter homes and native operand analysis use the same indexing for every encoding. Existing Lean argument and call semantics remain unchanged.
 
-Direct `call` instructions may target admitted same-assembly struct instance methods and constructors. Constructor calls require a void result and valid struct storage supplied by the caller. The separate `newobj` path below constructs a new value rather than invoking a constructor on existing storage. Class instances, virtual dispatch and generic instance methods remain unsupported.
+Direct `call` instructions may target admitted same-assembly struct instance methods and constructors. Constructor calls require a void result and valid struct storage supplied by the caller. The separate `newobj` path below constructs a new value rather than invoking a constructor on existing storage. Class instances, virtual dispatch and generic declaring types remain unsupported.
 
 ### Portable scalar helpers
 
@@ -138,3 +138,6 @@ Direct `call` instructions may target admitted same-assembly struct instance met
 `Op.newAggregate constructor argc size` constructs an admitted struct through the checked interpreter. Extraction follows the constructor dependency and derives the size from validated layout metadata. Consumers with exhaustive instruction matches must handle the new constructor.
 
 `FrameAction.construct` now carries a `LocalKind` between the temporary reference and memory. Constructor continuation proofs use `loadLocal` and return a `CIL.Safety.Value`; update uses of `ConstructComposition` accordingly. Existing vector construction supplies `.vector256`, while generic struct construction supplies `.aggregate size`. The generic lifetime, allocation, frame-ownership and static-world invariants cover both paths.
+## Generic method specialization
+
+Reachable generic methods on admitted non-generic declaring types now produce closed CIL bodies. Artifact manifests record the original definition, metadata token and concrete type arguments; regenerate artifacts with the updated extractor. CIL execution APIs and theorem namespaces are unchanged. Select a non-generic entry whose compiled calls provide the required instantiations.

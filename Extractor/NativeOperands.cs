@@ -79,7 +79,10 @@ internal static class NativeOperands
             }
             else if (code == Code.Ret)
             {
-                if (method.ReturnType.MetadataType != MetadataType.Void) Pop();
+                var actual = method.ReturnType.MetadataType != MetadataType.Void ? Pop() : Kind.Other;
+                if (MethodSpecialization.Source(method) is not null &&
+                    (stack.Count != 0 || (method.ReturnType.MetadataType != MetadataType.Void && actual != Type(method.ReturnType))))
+                    throw new InvalidDataException($"Unsupported generic return stack type: {method.FullName}");
             }
             else
             {

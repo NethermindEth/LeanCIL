@@ -87,6 +87,11 @@ internal static class LeanEmitter
                     return $"({s.pc}, {{ identity := {Array.IndexOf(data, f)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)} }})";
                 }));
             lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
+            if (MethodSpecialization.Source(m) is { } origin)
+            {
+                lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
+                lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
+            }
             lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], parameterHomes := [{parameters}], staticSites := [{sites}], code := [");
             List<string> ops = [];
             foreach (Instruction i in m.Body.Instructions)
