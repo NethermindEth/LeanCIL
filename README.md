@@ -6,7 +6,7 @@ Verification operates on the assembly's actual compiled instructions using CIL s
 
 ## Build and test
 
-Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.402**. The only NuGet dependency is Mono.Cecil, pinned in `Directory.Packages.props`; Lean uses Std and Lean, without Mathlib.
+Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.402**. The extractor uses Mono.Cecil; the F# examples also use FSharp.Core. Both packages are pinned in `Directory.Packages.props`. Lean uses Std and Lean, without Mathlib.
 
 ```sh
 lake build
@@ -269,6 +269,30 @@ To prove another method, supply a unique method selector, write a Lean file impo
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. The library additionally proves generic allocation, frame, reference, aliasing and storage properties.
+
+## F# examples
+
+The [F# examples](Examples/FSharp/Examples.fs) demonstrate arithmetic, branching, real method calls, `byref` mutation and mutable structs with constructors. They use the same CIL semantics, extractor and Lean proof pipeline as the C# examples.
+
+```fsharp
+let Add (x: uint64) (y: uint64) = x + y
+```
+
+Verify the compiled F# addition with the existing language-independent [addition contract](Examples/Proofs/Add.lean):
+
+```sh
+dotnet build Examples/FSharp -c Release
+leancil extract Examples/FSharp/bin/Examples.FSharp.dll "Arithmetic::Add(ulong,ulong)" artifacts/FSharpAdd
+leancil verify artifacts/FSharpAdd --proof Examples/Proofs/Add.lean
+```
+
+The theorem proves `(x + y) mod 2^64` for every pair of 64-bit inputs. The suite also checks universal store/load and constructor contracts, compares compiled F# results with checked CIL execution, and rejects subtraction under the unchanged addition contract:
+
+```sh
+dotnet run --file scripts/Test.cs -- --suite fsharp
+```
+
+These examples cover F# programs that compile into the supported CIL subset. F# lists, closures, discriminated unions and arbitrary FSharp.Core calls are not generally supported; the suite includes an explicitly rejected list example.
 
 ## Supported subset and limits
 

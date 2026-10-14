@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors]")
+    ["--suite", "all" or "core" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp]")
 };
 
 using var verification = new Program();
@@ -16,6 +16,7 @@ var results = new List<string>();
 
 var independentSuites = new Dictionary<string, (string Script, string Description)>
 {
+    ["fsharp"] = ("Tests/FSharp.cs", "F# arithmetic, branches, calls, references and struct construction"),
     ["constructors"] = ("Tests/Constructors.cs", "struct construction, initialized temporaries and constructor faults"),
     ["instance"] = ("Tests/StructMethods.cs", "struct instance calls, managed this and constructor calls"),
     ["nested"] = ("Tests/NestedStructs.cs", "nested struct layout, snapshots, copies and metadata validation"),
@@ -88,6 +89,7 @@ var signatures = new Dictionary<string, string>
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
 if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "scripts/Verify.cs"]);
+if (suite is "all" or "fsharp") projects.Add("Examples/FSharp");
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);
