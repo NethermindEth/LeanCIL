@@ -93,17 +93,35 @@ internal static class RuntimeModels
         if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default) return null;
         var signature = reference.FullName;
-        foreach (var (type, width) in new[] { ("System.UInt32", 32), ("System.UInt64", 64) })
+        foreach (var (type, width) in new[] { ("System.UInt32", 32), ("System.UInt64", 64), ("System.UIntPtr", 64) })
         {
             if (reference.DeclaringType.Scope.Name != "System.Runtime") continue;
             foreach (var (name, operation) in new[] { ("RotateLeft", "rotateLeft"), ("RotateRight", "rotateRight") })
                 if (signature == $"{type} System.Numerics.BitOperations::{name}({type},System.Int32)")
                     return $".intrinsic (.scalar (.{operation} {width})) 2";
-            foreach (var (name, operation) in new[] { ("PopCount", "popCount"), ("LeadingZeroCount", "leadingZeroCount"), ("TrailingZeroCount", "trailingZeroCount") })
+            foreach (var (name, operation) in new[] { ("PopCount", "popCount"), ("LeadingZeroCount", "leadingZeroCount"), ("TrailingZeroCount", "trailingZeroCount"), ("Log2", "log2") })
                 if (signature == $"System.Int32 System.Numerics.BitOperations::{name}({type})")
                     return $".intrinsic (.scalar (.{operation} {width})) 1";
+            if (signature == $"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})")
+                return $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1";
         }
+        if (reference.DeclaringType.Scope.Name == "System.Runtime")
+            foreach (var (type, width, signed) in new[]
+            {
+                ("System.Int32", 32, true), ("System.UInt32", 32, false),
+                ("System.Int64", 64, true), ("System.UInt64", 64, false),
+                ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
+            })
+                if (signature == $"System.Boolean System.Numerics.BitOperations::IsPow2({type})")
+                    return $".intrinsic (.scalar (.isPow2 {width} {signed.ToString().ToLowerInvariant()})) 1";
         if (reference.DeclaringType.Scope.Name != "System.Memory") return null;
+        foreach (var (type, width, signed) in new[]
+        {
+            ("System.SByte", 8, true), ("System.Byte", 8, false),
+            ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
+        })
+            if (signature == $"{type} System.Buffers.Binary.BinaryPrimitives::ReverseEndianness({type})")
+                return $".intrinsic (.scalar (.reverseEndianness {width} {signed.ToString().ToLowerInvariant()})) 1";
         foreach (var width in new[] { 16, 32, 64 })
         foreach (var signed in new[] { false, true })
         {
