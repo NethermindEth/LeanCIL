@@ -24,7 +24,7 @@ def pureArity : CIL.Op → Option Nat
   | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .bnot => some 1
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
     | .lt | .ltu | .gtu | .eq => some 2
-  | .brzero _ | .brnonzero _ => some 1
+  | .brzero _ | .brnonzero _ | .switch _ => some 1
   | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => some 2
   | .branch _ | .feature _ => some 0
   | .intrinsic _ argc => some argc

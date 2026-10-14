@@ -28,6 +28,10 @@ Small integers use `i32` on the evaluation stack. `sbyte` and `short` loads sign
 
 Ordinary reference-free accesses use alignment 1, for the modeled CoreCLR x64/ARM64 normal-memory convention. This is not a proof of the portable CLI natural-alignment rule. Aligned APIs, volatile/atomic instructions, device memory, concurrency, GC relocation internals and arbitrary object headers are outside the extracted subset. The memory model's relocation results concern allocation-relative references, not a verified garbage collector.
 
+Primitive indirect loads/stores and integer `ldobj`/`stobj` use those same access checks and one-, two-, four- or eight-byte storage. They accept managed references, not numeric addresses or aggregate snapshots. Narrow stores truncate; loads extend according to the opcode or validated type token. Integer `initobj` zeroes and initializes exactly that storage width. `sizeof` emits a constant from validated integer widths or explicit aggregate layout metadata, under the same layout correspondence assumption as aggregate memory operations; it is not a model of arbitrary runtime type layout.
+
+`switch` uses unsigned `i32` indexing, with out-of-range indices falling through. Reachability includes every target and the fallthrough, conservatively even for a constant index. Reachable backedges are rejected, and switch-only dependencies and unsupported arms receive the normal validation. These rules follow the [CLI switch operation](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.switch); they do not add loops or exception-region transfers.
+
 Static data is immutable, extraction-bound RVA storage with field identities retained separately from contents. Static initializers that could execute unmodelled code are rejected. Unsafe reference arithmetic wraps at the modeled native width and retains allocation provenance; every resulting reference must pass formation checks. A valid end sentinel grants no access permission.
 
 ## Trusted computing base

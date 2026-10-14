@@ -15,6 +15,9 @@ internal static class Reachability
             if (instruction.Operand is Instruction target &&
                 !instructions.Contains(target))
                 throw new InvalidDataException("Malformed or cyclic control flow");
+            if (instruction.OpCode.Code == Code.Switch &&
+                (instruction.Operand is not Instruction[] targets || targets.Any(t => !instructions.Contains(t))))
+                throw new InvalidDataException("Malformed switch targets");
         }
         // Address-taken locals may be changed indirectly by calls or stores.
         // Never use them as constant facts, even before their address escapes.
@@ -51,6 +54,8 @@ internal static class Reachability
                 continue;
             }
             if (i.Operand is Instruction target) Successor(target);
+            if (i.OpCode.Code == Code.Switch)
+                foreach (var destination in (Instruction[])i.Operand) Successor(destination);
             if (i.OpCode.FlowControl is not (FlowControl.Return or FlowControl.Branch or FlowControl.Throw))
                 Successor(i.Next ?? throw new InvalidDataException("Control falls off method"));
         }

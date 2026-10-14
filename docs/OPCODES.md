@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 99 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 110 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -35,14 +35,18 @@ Ranges below include every numbered form between the endpoints. `.s` denotes the
 | `conv.u` | Partial | Model native unsigned integers as 64-bit: zero-extend `i32`, or preserve `i64`. Does not convert a managed reference to an integer address. |
 | `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. No reference/null equality or floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted forward target. Reachable backward edges and cycles are rejected. |
+| `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. All reachable targets must be forward instruction boundaries; each arm and the fallthrough participate in dependency and stack analysis. |
+| `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char) or same-assembly explicit-layout, reference-free aggregates. No reference types, native integers, floating-point, generic layouts or vector types. |
 | `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. No managed-reference/null truth tests. Only admitted forward successors. |
 | `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching forward. |
 | `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64`, branching forward. |
 | `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching forward. No reference or floating-point comparison. |
 | `ldind.i8`, `stind.i8` | Partial | Eight-byte integer load/store through a checked reference. Allocation bounds, permissions, initialization and lifetime rules apply; arbitrary numeric addresses are not accepted. |
+| `ldind.i1`, `ldind.u1`, `ldind.i2`, `ldind.u2`, `ldind.i4`, `ldind.u4` | Partial | One-, two- or four-byte integer loads through a checked reference. Signed narrow loads sign-extend and unsigned loads zero-extend to `i32`; both four-byte forms return the same `i32` bits. Aggregate snapshots and numeric addresses are rejected. |
+| `stind.i1`, `stind.i2`, `stind.i4` | Partial | Store the low one, two or four bytes of an `i32` through a checked reference. Allocation bounds, write permissions and lifetime apply; adjacent bytes remain unchanged. |
 | `ldfld`, `ldflda`, `stfld` | Partial | Fields in same-assembly, validated explicit-layout, reference-free value types. Supported field storage is `sbyte`, byte/Boolean, `short`, `ushort`/`char`, 32-bit integer or 64-bit integer. Narrow stores truncate; narrow loads sign- or zero-extend to `i32` according to field metadata. `ldfld` accepts an aggregate byte snapshot or reference; field addresses and stores require a reference. No general managed objects, implicit layouts or static fields through these opcodes. |
-| `ldobj`, `stobj` | Partial | Copy validated aggregates of 1–65,536 bytes, or exactly `Vector128<ulong>` / `Vector256<ulong>`, through references. These are not general typed loads/stores; primitive scalar `ldobj`/`stobj` cases are not translated. |
-| `initobj` | Partial | Zero a validated same-assembly explicit-layout aggregate. No general primitive, vector or managed-object initialization through this opcode. |
+| `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1–65,536 bytes, or exactly `Vector128<ulong>` / `Vector256<ulong>`. No general objects, reference-bearing storage, floating-point or native-integer tokens. |
+| `initobj` | Partial | Zero the validated width of an admitted integer type or same-assembly explicit-layout aggregate. This initializes previously unknown bytes without touching neighboring storage. No general vector or managed-object initialization. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data with an explicit packed blob layout and no static constructor. Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static managed methods in the same assembly, or exact runtime/intrinsic signatures in the allowlist. No arbitrary external calls, generic managed dependencies, instance methods or virtual dispatch. |
 | `newobj` | Partial | Only the explicitly modelled `ReadOnlySpan<byte>(void*, int)` constructor via the runtime allowlist. This models span formation, not general object allocation. General value-type constructors and class construction are rejected. |
@@ -57,15 +61,14 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | Debugger and prefixes | `break`, `volatile.`, `unaligned.`, `readonly.`, `tail.`, `constrained.` |
 | Argument mutation/addressing | `starg`, `starg.s`, `ldarga`, `ldarga.s` |
 | Arithmetic | `div`, `div.un`, `rem`, `rem.un`, `add.ovf`, `sub.ovf`, `mul.ovf` and their `.un` forms |
-| Other control flow | `switch` |
 | Other conversions | `conv.i`, floating-point conversions and all `conv.ovf.*` forms |
-| Other indirect/block memory | `ldind.i1`, `ldind.u1`, `ldind.i2`, `ldind.u2`, `ldind.i4`, `ldind.u4`, `ldind.i`, `ldind.ref`, other `stind.*` forms, `cpobj`, `cpblk`, `initblk`, `localloc` |
-| Objects, arrays and metadata | `ldnull`, `ldstr`, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken`, `sizeof` |
+| Other indirect/block memory | `ldind.i`, `ldind.ref`, floating-point `ldind.*`, `stind.i`, `stind.ref`, floating-point `stind.*`, `cpobj`, `cpblk`, `initblk`, `localloc` |
+| Objects, arrays and metadata | `ldnull`, `ldstr`, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` |
 | Static field values | `ldsfld`, `stsfld` |
 | Dispatch and exceptions | `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw`, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
 
-In particular, Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. A Release assembly containing a reachable `switch` is still rejected.
+Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable division or exception handling is still rejected.
 
 ## Runtime calls and SIMD
 

@@ -53,6 +53,56 @@ theorem narrow_read_bounds :
     loadValue Examples.caller (.address ⟨0, 7⟩) 2 true =
       .error (.memory .outsideAllocation (.address ⟨0, 7⟩) 2) := rfl
 
+theorem scalar_load_rejects_snapshot :
+    (instruction (.loadScalar 2) [.scalar (.aggregate [1, 2])] Examples.caller).isOk = false := rfl
+
+theorem scalar_width_rejected :
+    instruction (.loadScalar 16) [Examples.reference] Examples.caller =
+      .error (.unsupported "Scalar memory width") := rfl
+
+theorem scalar_load_null :
+    instruction (.loadScalar 4) [.reference .null] Examples.caller =
+      .error (.memory .nullDereference .null 4) := rfl
+
+theorem scalar_store_null :
+    instruction (.storeScalar 4) [.scalar (.i32 7), .reference .null] Examples.caller =
+      .error (.memory .nullDereference .null 0) := rfl
+
+theorem scalar_store_wrong_width :
+    instruction (.storeScalar 2) [.scalar (.i64 7), Examples.reference] Examples.caller =
+      .error .invalidState := rfl
+
+theorem scalar_store_bounds :
+    instruction (.storeScalar 4) [.scalar (.i32 7), .reference (.address ⟨0, 6⟩)] Examples.caller =
+      .error (.memory .outsideAllocation (.address ⟨0, 6⟩) 4) := rfl
+
+theorem scalar_store_lifetime :
+    instruction (.storeScalar 2) [.scalar (.i32 7), Examples.reference] (expire Examples.caller 0) =
+      .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 2) := rfl
+
+theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.W32)
+    (ready : access memory reference 4 1 true = .ok ()) :
+    ∃ result,
+      instruction (.storeScalar 4) [.scalar (.i32 bits), .reference (.address reference)] memory =
+        .ok (result, []) ∧
+      instruction (.loadScalar 4) [.reference (.address reference)] result =
+        .ok (result, [.scalar (.i32 bits)]) := by
+  obtain ⟨result, stored, loaded⟩ := store_load_numeric_local .word32 (.i32 bits) bits.toNat rfl ready
+  refine ⟨result, ?_, ?_⟩
+  · cases hw : checkedAt (.address reference) 4 (write memory reference (numberBytes bits.toNat 4) 1) <;>
+      simp_all [instruction, storeLocal, localNumber, referenceAt, localWidth, ordinaryAccessAlignment,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]
+  · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
+      simp_all [instruction, loadLocal, loadValue, localWidth, localResult, dereference, ordinaryAccessAlignment,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+theorem switch_unsigned_default :
+    step scalarBody (.switch [10, 20]) 3 [] scalarFrame [.scalar (.i32 4294967295)] Examples.empty =
+      .ok (.next 4 [] scalarFrame Examples.empty) := rfl
+
+theorem switch_rejects_non_i32 :
+    (step scalarBody (.switch [10]) 0 [] scalarFrame [.scalar (.i64 0)] Examples.empty).isOk = false := rfl
+
 theorem narrow_read_lifetime :
     loadValue (expire Examples.caller 0) (.address ⟨0, 0⟩) 2 true =
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 2) := rfl

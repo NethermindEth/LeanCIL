@@ -32,7 +32,7 @@ internal static class InstructionTranslation
                 $".{(op == "field" ? "fieldAt" : "setFieldAt")} {resolved.Offset} {width}" +
                 (op == "field" && resolved.FieldType.FullName is "System.SByte" or "System.Int16" ? " true" : "");
         }
-        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj && i.Operand is TypeReference operandType)
+        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof && i.Operand is TypeReference operandType)
             RuntimeModels.ValidateTypeIdentity(operandType, m.Module);
         if (i.OpCode.Code is Code.Call or Code.Newobj)
         {
@@ -51,6 +51,12 @@ internal static class InstructionTranslation
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
+            Code.Switch => ".switch [" + string.Join(", ", ((Instruction[])i.Operand).Select(m.Body.Instructions.IndexOf)) + "]",
+            Code.Sizeof => $".const32 {TypeWidth((TypeReference)i.Operand, m.Module)}",
+            Code.Ldind_I1 => ".loadScalar 1 true", Code.Ldind_U1 => ".loadScalar 1",
+            Code.Ldind_I2 => ".loadScalar 2 true", Code.Ldind_U2 => ".loadScalar 2",
+            Code.Ldind_I4 or Code.Ldind_U4 => ".loadScalar 4",
+            Code.Stind_I1 => ".storeScalar 1", Code.Stind_I2 => ".storeScalar 2", Code.Stind_I4 => ".storeScalar 4",
             Code.Conv_I1 => ".convI1", Code.Conv_I2 => ".convI2", Code.Conv_U2 => ".convU2",
             Code.Neg => ".neg",
             Code.Cgt => ".gt",
@@ -65,6 +71,10 @@ internal static class InstructionTranslation
             Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .load256",
             Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .store128",
             Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .store256",
+            Code.Ldobj => $".loadScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}" +
+                (((TypeReference)i.Operand).FullName is "System.SByte" or "System.Int16" ? " true" : ""),
+            Code.Stobj => $".storeScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}",
+            Code.Initobj => $".initAggregate {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}",
             Code.Ldarg_0 => Arg(0), Code.Ldarg_1 => Arg(1), Code.Ldarg_2 => Arg(2), Code.Ldarg_3 => Arg(3),
             Code.Ldarg or Code.Ldarg_S => Arg(((ParameterDefinition)i.Operand).Index + (m.HasThis ? 1 : 0)),
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
@@ -100,4 +110,8 @@ internal static class InstructionTranslation
             _ => throw new InvalidDataException($"Unsupported instruction: {i}")
         };
     }
+
+    static int TypeWidth(TypeReference type, ModuleDefinition module) => MetadataValidation.IsAggregate(type, module)
+        ? MetadataValidation.Layout(type, module)
+        : MetadataValidation.PrimitiveWidth(type);
 }

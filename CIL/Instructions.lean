@@ -46,6 +46,8 @@ inductive Op where
   | loadAggregate (size : Nat)
   | storeAggregate (size : Nat)
   | initAggregate (size : Nat)
+  | loadScalar (width : Nat) (signed : Bool := false)
+  | storeScalar (width : Nat)
   | fieldAt (offset width : Nat) (signed : Bool := false)
   | fieldAddress (offset : Nat)
   | setFieldAt (offset width : Nat)
@@ -67,6 +69,7 @@ inductive Op where
   | convI8 | convI4 | convU1 | convU4 | convU8 | convU | bnot | add | sub | mul | band | bor | bxor
   | shl | shr | shrUn | lt | ltu | gtu | eq | load64 | store64 | dup | pop
   | branch (target : Nat)
+  | switch (targets : List Nat)
   | brzero (target : Nat)
   | brnonzero (target : Nat)
   | bltu (target : Nat)
