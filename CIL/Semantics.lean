@@ -68,27 +68,62 @@ def binary (op : Op) (a b : Value) : Option Value :=
   | .eq, .i32 x, .i32 y => some (.i32 (if x = y then 1 else 0))
   | _ , _, _ => none
 
+def unary (op : Op) (value : Value) : Option Value :=
+  match op, value with
+  | .neg, .i32 w => some (.i32 (-w))
+  | .neg, .i64 w => some (.i64 (-w))
+  | .bnot, .i64 w => some (.i64 (~~~w))
+  | .bnot, .i32 w => some (.i32 (~~~w))
+  | .convU4, .i64 w => some (.i32 (w.setWidth 32))
+  | .convU4, .i32 w => some (.i32 w)
+  | .convU8, .i32 w => some (.i64 (w.zeroExtend 64))
+  | .convU8, .i64 w => some (.i64 w)
+  | .convI8, .i32 w => some (.i64 (w.signExtend 64))
+  | .convI8, .i64 w => some (.i64 w)
+  | .convI1, .i32 w => some (.i32 (NarrowKind.signed8.extend w))
+  | .convI1, .i64 w => some (.i32 (NarrowKind.signed8.extend (w.setWidth 32)))
+  | .convI2, .i32 w => some (.i32 (NarrowKind.signed16.extend w))
+  | .convI2, .i64 w => some (.i32 (NarrowKind.signed16.extend (w.setWidth 32)))
+  | .convU2, .i32 w => some (.i32 (NarrowKind.unsigned16.extend w))
+  | .convU2, .i64 w => some (.i32 (NarrowKind.unsigned16.extend (w.setWidth 32)))
+  | .convI4, .i64 w => some (.i32 (w.setWidth 32))
+  | .convI4, .i32 w => some (.i32 w)
+  | .convU1, .i32 w => some (.i32 ((w.setWidth 8).zeroExtend 32))
+  | .convU1, .i64 w => some (.i32 ((w.setWidth 8).zeroExtend 32))
+  | .convU, .i32 w => some (.i64 (w.zeroExtend 64))
+  | .convU, .i64 w => some (.i64 w)
+  | _, _ => none
+
 inductive Action where
   | next (pc : Nat) (stack : List Value) (memory : Memory)
   | call (callee : Nat) (args rest : List Value) (memory : Memory)
   | construct (callee : Nat) (args rest : List Value) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
+def returnFromStack (narrow : Option NarrowKind) (returns : Bool)
+    (stack : List Value) (memory : Memory) : Option Action := do
+  if returns then
+    match stack with
+    | [v] =>
+      let v ← narrowValue narrow v
+      if v.initialized then return .returned [v] memory else none
+    | _ => none
+  else if narrow.isNone && stack.isEmpty then return .returned [] memory else none
+
 def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
   match op, stack with
   | .nop, _ => return .next (pc + 1) stack memory
-  | .neg, .i32 w :: rest => return .next (pc + 1) (.i32 (-w) :: rest) memory
-  | .neg, .i64 w :: rest => return .next (pc + 1) (.i64 (-w) :: rest) memory
   | .bgt target, .i32 b :: .i32 a :: rest => return .next (if a.toInt > b.toInt then target else pc + 1) rest memory
   | .bgt target, .i64 b :: .i64 a :: rest => return .next (if a.toInt > b.toInt then target else pc + 1) rest memory
   | .ble target, .i32 b :: .i32 a :: rest => return .next (if a.toInt ≤ b.toInt then target else pc + 1) rest memory
   | .ble target, .i64 b :: .i64 a :: rest => return .next (if a.toInt ≤ b.toInt then target else pc + 1) rest memory
   | .bleu target, .i32 b :: .i32 a :: rest => return .next (if a ≤ b then target else pc + 1) rest memory
   | .bleu target, .i64 b :: .i64 a :: rest => return .next (if a ≤ b then target else pc + 1) rest memory
-  | .arg i, _ =>
+  | .arg i narrow, _ =>
     let value ← args[i]?
+    let value ← narrowValue narrow value
     if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
   | .vectorArg i, _ => return .next (pc + 1) ((← readVectorHome memory frame 1 i) :: stack) memory
   | .vectorArgAddr i, _ => return .next (pc + 1) (.ref (.home frame 1 i 0) :: stack) memory
@@ -96,11 +131,12 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
   | .vectorLocalAddr i, _ => return .next (pc + 1) (.ref (.home frame 0 i 0) :: stack) memory
   | .setVectorLocal i, .v256 bits :: rest =>
     return .next (pc + 1) rest (writeVectorHome memory frame 0 i bits)
-  | .local i, _ =>
+  | .local i narrow, _ =>
     let value ← memory (.local frame i)
+    let value ← narrowValue narrow value
     if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
   | .localAddr i, _ => return .next (pc + 1) (.ref (.local frame i) :: stack) memory
-  | .setLocal i, v :: rest => return .next (pc + 1) rest (write memory (.local frame i) v)
+  | .setLocal i narrow, v :: rest => return .next (pc + 1) rest (write memory (.local frame i) (← narrowValue narrow v))
   | .lane i, .object id :: rest => return .next (pc + 1) ((← read64 memory (.byte (id + 8 * i.val))) :: rest) memory
   | .laneAddress i, .object id :: rest => return .next (pc + 1) (.ref (.byte (id + 8 * i.val)) :: rest) memory
   | .lane i, .ref address :: rest =>
@@ -114,20 +150,12 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
   | .setLane i, .i64 word :: .ref address :: rest =>
     return .next (pc + 1) rest (← write64 memory (← unsafeAdd 8 i.val address) word)
   | .const64 w, _ => return .next (pc + 1) (.i64 w :: stack) memory
-  | .bnot, .i64 w :: rest => return .next (pc + 1) (.i64 (~~~w) :: rest) memory
-  | .bnot, .i32 w :: rest => return .next (pc + 1) (.i32 (~~~w) :: rest) memory
-  | .convU4, .i64 w :: rest => return .next (pc + 1) (.i32 (w.setWidth 32) :: rest) memory
-  | .convU4, .i32 w :: rest => return .next (pc + 1) (.i32 w :: rest) memory
-  | .convU8, .i32 w :: rest => return .next (pc + 1) (.i64 (w.zeroExtend 64) :: rest) memory
-  | .convU8, .i64 w :: rest => return .next (pc + 1) (.i64 w :: rest) memory
+  | .neg, v :: rest | .bnot, v :: rest
+  | .convI1, v :: rest | .convI2, v :: rest | .convU2, v :: rest
+  | .convI4, v :: rest | .convI8, v :: rest | .convU1, v :: rest
+  | .convU4, v :: rest | .convU8, v :: rest | .convU, v :: rest =>
+    return .next (pc + 1) ((← unary op v) :: rest) memory
   | .const32 w, _ => return .next (pc + 1) (.i32 w :: stack) memory
-  | .convI8, .i32 w :: rest => return .next (pc + 1) (.i64 (w.signExtend 64) :: rest) memory
-  | .convI4, .i64 w :: rest => return .next (pc + 1) (.i32 (w.setWidth 32) :: rest) memory
-  | .convI4, .i32 w :: rest => return .next (pc + 1) (.i32 w :: rest) memory
-  | .convU1, .i32 w :: rest => return .next (pc + 1) (.i32 ((w.setWidth 8).zeroExtend 32) :: rest) memory
-  | .convU1, .i64 w :: rest => return .next (pc + 1) (.i32 ((w.setWidth 8).zeroExtend 32) :: rest) memory
-  | .convU, .i32 w :: rest => return .next (pc + 1) (.i64 (w.zeroExtend 64) :: rest) memory
-  | .convU, .i64 w :: rest => return .next (pc + 1) (.i64 w :: rest) memory
   | .add, b :: a :: rest | .sub, b :: a :: rest
   | .band, b :: a :: rest | .bor, b :: a :: rest
   | .mul, b :: a :: rest | .bxor, b :: a :: rest
@@ -178,12 +206,7 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
   | .skipInit, .object _ :: rest => return .next (pc + 1) rest memory
   | .skipInit, .ref _ :: rest => return .next (pc + 1) rest memory
   | .asRef, .ref a :: rest => return .next (pc + 1) (.ref a :: rest) memory
-  | .ret, _ =>
-    if returns then
-      match stack with
-      | [v] => if v.initialized then return .returned [v] memory else none
-      | _ => none
-    else if stack.isEmpty then return .returned [] memory else none
+  | .ret narrow, _ => returnFromStack narrow returns stack memory
   | _, _ => none
 
 -- Fuel is a bound on nested instruction execution. Exhaustion is failure.

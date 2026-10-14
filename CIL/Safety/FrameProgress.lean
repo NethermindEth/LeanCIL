@@ -10,6 +10,7 @@ def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
   | .aggregate size, .aggregate bytes => bytes.length = size.val
   | .reference, .nullRef => True
   | .byte, .i32 bits => bits.toNat < 256
+  | .narrow _, .i32 _ => True
   | .word32, .i32 _ | .word64, .i64 _ | .vector128, .v128 _ | .vector256, .v256 _ => True
   | _, _ => False
 
@@ -19,7 +20,7 @@ theorem initializer_numeric_number {kind : CIL.LocalKind} {initial : CIL.Value}
   cases kind <;> cases initial <;> simp_all [InitializerFits, localNumber]
 
 theorem localWidth_bounded (kind : CIL.LocalKind) : localWidth kind < nativeLimit := by
-  cases kind <;> simp [localWidth, nativeLimit]
+  cases kind <;> simp only [localWidth, nativeLimit] <;> first | exact CIL.NarrowKind.width_lt _ | simp
 
 
 theorem makeLocal_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind)

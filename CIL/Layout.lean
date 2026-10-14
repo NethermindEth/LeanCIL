@@ -16,7 +16,7 @@ structure AggregateLayout where
 
 def AggregateLayout.Valid (layout : AggregateLayout) : Prop :=
   0 < layout.size ∧ layout.size < 2^64 ∧
-  ∀ field ∈ layout.fields, field.width ∈ [1, 4, 8] ∧ field.offset + field.width ≤ layout.size
+  ∀ field ∈ layout.fields, field.width ∈ [1, 2, 4, 8] ∧ field.offset + field.width ≤ layout.size
 
 instance aggregateLayoutDecidable (layout : AggregateLayout) : Decidable layout.Valid :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))

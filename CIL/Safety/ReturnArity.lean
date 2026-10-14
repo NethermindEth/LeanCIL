@@ -9,6 +9,7 @@ theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     values.length = if body.returnsValue then 1 else 0 := by
   unfold step at executed
   repeat' first
+    | solve | simp_all
     | solve |
       have same : values = stack := (checkedValues_valid _ _ _ (by assumption)).1
       rw [same]

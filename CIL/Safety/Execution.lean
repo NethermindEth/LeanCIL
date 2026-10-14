@@ -17,6 +17,7 @@ def checkedValue (m : Memory) : Value → ExecutionResult Value
 /-- Only the value-only instruction whitelist may use the original pure
     arithmetic semantics. No memory/reference operation can enter this path. -/
 def pureArity : CIL.Op → Option Nat
+  | .convI1 | .convI2 | .convU2 => some 1
   | .nop => some 0
   | .neg => some 1
   | .gt | .bgt _ | .ble _ | .bleu _ => some 2
@@ -45,22 +46,25 @@ inductive FrameAction where
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   match op, stack with
-  | .arg i, _ =>
+  | .arg i none, _ =>
     let some value := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m value) :: stack) frame m
+  | .arg i (some kind), _ =>
+    let some (.scalar (.i32 bits)) := args[i]? | .error .invalidState
+    return .next (pc + 1) ((← checkedValue m (.scalar (.i32 (kind.extend bits)))) :: stack) frame m
   | .vectorArg i, _ =>
     let home ← argumentHome frame i
     return .next (pc + 1) ((← loadLocal m home) :: stack) frame m
   | .vectorArgAddr i, _ =>
     let home ← argumentHome frame i
     return .next (pc + 1) ((← localAddress m home) :: stack) frame m
-  | .local i, _ | .vectorLocal i, _ =>
+  | .local i _, _ | .vectorLocal i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← loadLocal m slot) :: stack) frame m
   | .localAddr i, _ | .vectorLocalAddr i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← localAddress m slot) :: stack) frame m
-  | .setLocal i, value :: rest | .setVectorLocal i, value :: rest =>
+  | .setLocal i _, value :: rest | .setVectorLocal i, value :: rest =>
     let some slot := frame.locals[i]? | .error .invalidState
     let (slot, memory) ← storeLocal m slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set i slot } memory
@@ -79,7 +83,11 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .memory operation, _ =>
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory
-  | .ret, _ =>
+  | .ret (some kind), [.scalar (.i32 bits)] =>
+    if body.returnsValue then
+      return .returned (← [.scalar (.i32 (kind.extend bits))].mapM (checkedValue m)) m
+    else .error .invalidState
+  | .ret none, _ =>
     if stack.length = (if body.returnsValue then 1 else 0) then
       return .returned (← stack.mapM (checkedValue m)) m
     else .error .invalidState

@@ -18,7 +18,8 @@ theorem make_numeric_local (memory : Memory) (activation : Nat)
     cases kind <;> cases value <;> simp_all [localNumber]
   have modeled : value ≠ .unmodeled := by
     cases kind <;> cases value <;> simp_all [localNumber]
-  have bounded : localWidth kind < nativeLimit := by cases kind <;> simp [localWidth, nativeLimit]
+  have bounded : localWidth kind < nativeLimit := by
+    cases kind <;> simp only [localWidth, nativeLimit] <;> first | exact CIL.NarrowKind.width_lt _ | simp
   obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds memory activation (localWidth kind) wellFormed bounded
   have ready := allocateHome_write_access _ _ _ _ _ home
   obtain ⟨result, written, stored, readback⟩ := store_numeric_local kind value number fits ready.access
@@ -35,7 +36,7 @@ theorem step_load_numeric_local {body : CIL.Method} {pc index : Nat} {args stack
     (slot : frame.locals[index]? = some (.bytes kind reference))
     (loaded : read memory reference (localWidth kind) 1 = .ok (numberBytes number (localWidth kind))) :
     step body (.local index) pc args frame stack memory =
-      .ok (.next (pc + 1) (.scalar value :: stack) frame memory) := by
+      .ok (.next (pc + 1) (.scalar (localResult kind value) :: stack) frame memory) := by
   simp only [step, slot, load_numeric_local kind value number fits loaded,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 

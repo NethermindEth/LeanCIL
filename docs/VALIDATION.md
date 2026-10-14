@@ -7,7 +7,7 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-The complete C# regression runner passed **35 check groups**. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode matrix. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
+The complete C# regression runner passed **36 check groups**. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode and narrow-storage matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
@@ -19,6 +19,12 @@ The runner builds the independent assemblies and the CIL library, then creates a
 | Exact `nop`, `neg`, `cgt`, `bgt`, `bgt.s`, `ble`, `ble.s`, `ble.un`, `ble.un.s` encodings in independent Cecil fixtures | 370 checked-execution boundary cases passed across 32- and 64-bit operands |
 | Identity substituted for negation, with the unchanged universal contract | Both widths rejected by proof checking; no successful report retained |
 | New scalar operations: stack underflow, mixed widths and reference operands; `nop` preserves arbitrary stacks | Semantic tests passed |
+| Compiled C# unsigned-short conversion: universal result `x % 65536` for every 32-bit input | Proof passed |
+| Narrow conversions, locals, arguments, returns, calls and fields, including aggregate snapshots | 744 checked-execution boundary cases passed, including 144 deliberate faults |
+| Uninitialized narrow locals and 64-bit stores into narrow homes | Rejected with the expected located faults |
+| Two-byte field overrun and forged narrow runtime type identity | Both rejected during extraction |
+| Signed conversion substituted for unsigned conversion, with the unchanged universal contract | Rejected by proof checking; no successful report retained |
+| Narrow access bounds, permissions and lifetime; generic typed store/load normalization | Semantic tests and universal roundtrip theorem passed |
 | Short and full assembly selectors retain the same complete manifest identity | Passed |
 | Explicit version, culture and public-key-token mismatches | Three intended identity rejections |
 | Method selectors: aliases, optional returns, short declaring types, overloads, canonical artifact identity, malformed inputs and candidate diagnostics | 23 checks passed |
@@ -36,7 +42,7 @@ The runner builds the independent assemblies and the CIL library, then creates a
 | Identity-bound static RVA data | Passed |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |
 
-The addition theorem proves modular arithmetic correctness for arbitrary 64-bit inputs in the checked execution model. The invalid-access and expired-reference theorems classify faults and rule out successful execution for every fuel budget. The subtraction theorem independently refutes the intended addition result. Other example claims have the quantifiers and inputs displayed in their theorem statements; concrete examples do not establish universal method correctness.
+The addition theorem proves modular arithmetic correctness for arbitrary 64-bit inputs in the checked execution model. The unsigned-short theorem proves reduction modulo 65,536 for arbitrary 32-bit inputs. The invalid-access and expired-reference theorems classify faults and rule out successful execution for every fuel budget. The subtraction theorem independently refutes the intended addition result. Other example claims have the quantifiers and inputs displayed in their theorem statements; concrete examples do not establish universal method correctness.
 
 All audited example theorems use only the permitted standard Lean axioms, if any. No new axioms, `sorry`, `admit`, native proof evaluation or unproved summaries were added. See [the trusted base](SOUNDNESS.md) for runtime and extraction assumptions.
 

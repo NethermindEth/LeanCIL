@@ -15,8 +15,10 @@ internal static class InstructionTranslation
     {
         int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);
         int Local() => ((VariableDefinition)i.Operand).Index;
-        string LocalOp(string op, int index) => $".{op} {index}";
-        string Arg(int index) => $".arg {index}";
+        string Narrow(TypeReference type) => LeanEmitter.Narrow(type) is { } kind ? $" (some .{kind})" : "";
+        string LocalOp(string op, int index) => $".{op} {index}" +
+            (op is "local" or "setLocal" ? Narrow(m.Body.Variables[index].VariableType) : "");
+        string Arg(int index) => $".arg {index}" + Narrow(m.Parameters[index].ParameterType);
         string Field(string op)
         {
             var f = (FieldReference)i.Operand;
@@ -27,7 +29,8 @@ internal static class InstructionTranslation
                 throw new InvalidDataException($"Unsupported field {f.FullName}");
             int width = MetadataValidation.PrimitiveWidth(resolved.FieldType);
             return op == "fieldAddr" ? $".fieldAddress {resolved.Offset}" :
-                $".{(op == "field" ? "fieldAt" : "setFieldAt")} {resolved.Offset} {width}";
+                $".{(op == "field" ? "fieldAt" : "setFieldAt")} {resolved.Offset} {width}" +
+                (op == "field" && resolved.FieldType.FullName is "System.SByte" or "System.Int16" ? " true" : "");
         }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj && i.Operand is TypeReference operandType)
             RuntimeModels.ValidateTypeIdentity(operandType, m.Module);
@@ -48,6 +51,7 @@ internal static class InstructionTranslation
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
+            Code.Conv_I1 => ".convI1", Code.Conv_I2 => ".convI2", Code.Conv_U2 => ".convU2",
             Code.Neg => ".neg",
             Code.Cgt => ".gt",
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
@@ -92,7 +96,7 @@ internal static class InstructionTranslation
             Code.Blt or Code.Blt_S => $".blt {Target()}",
             Code.Beq or Code.Beq_S => $".beq {Target()}",
             Code.Bne_Un or Code.Bne_Un_S => $".bne {Target()}",
-            Code.Ret => ".ret",
+            Code.Ret => ".ret" + Narrow(m.ReturnType),
             _ => throw new InvalidDataException($"Unsupported instruction: {i}")
         };
     }

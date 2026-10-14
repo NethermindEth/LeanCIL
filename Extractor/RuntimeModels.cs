@@ -46,6 +46,7 @@ internal static class RuntimeModels
             return;
         }
         bool expectedValueType = type.FullName is "System.UInt64" or "System.Int64" or
+            "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char" or
             "System.UInt32" or "System.Int32" or "System.Byte" or "System.Boolean" or "System.Double" or "System.Single" or
             "System.IntPtr" or "System.UIntPtr" or "System.ReadOnlySpan`1" or
             "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1";

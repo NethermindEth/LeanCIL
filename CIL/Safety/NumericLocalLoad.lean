@@ -3,15 +3,15 @@ import CIL.Safety.ByteRoundTrip
 
 namespace CIL.Safety
 
-/-- Decode a complete initialized typed home back to its original numeric value. -/
+/-- Decode a complete initialized typed home, including narrow integer normalization. -/
 theorem load_numeric_local {memory : Memory} {reference : Reference}
     (kind : CIL.LocalKind) (value : CIL.Value) (number : Nat)
     (fits : localNumber kind value = .ok number)
     (loaded : read memory reference (localWidth kind) 1 =
       .ok (numberBytes number (localWidth kind))) :
-    loadLocal memory (.bytes kind reference) = .ok (.scalar value) := by
+    loadLocal memory (.bytes kind reference) = .ok (.scalar (localResult kind value)) := by
   cases kind <;> cases value <;>
-    simp_all [localNumber, localWidth, loadLocal, byteNumber_numberBytes,
+    simp_all [localNumber, localWidth, loadLocal, localResult, byteNumber_numberBytes,
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
   case aggregate.aggregate size bytes =>
@@ -22,6 +22,13 @@ theorem load_numeric_local {memory : Memory} {reference : Reference}
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_ofNat]
     omega
+  case narrow.i32 kind bits =>
+    cases kind <;> simp_all [CIL.NarrowKind.width, CIL.NarrowKind.extend]
+    all_goals
+      rw [← fits]
+      congr 1
+      apply BitVec.eq_of_toNat_eq
+      simp
   all_goals
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_ofNat]
@@ -35,7 +42,7 @@ theorem store_load_numeric_local {memory : Memory} {reference : Reference}
     (ready : access memory reference (localWidth kind) 1 true = .ok ()) :
     ∃ result,
       storeLocal memory (.bytes kind reference) (.scalar value) = .ok (.bytes kind reference, result) ∧
-      loadLocal result (.bytes kind reference) = .ok (.scalar value) := by
+      loadLocal result (.bytes kind reference) = .ok (.scalar (localResult kind value)) := by
   obtain ⟨result, _, stored, loaded⟩ := store_numeric_local kind value number fits ready
   exact ⟨result, stored, load_numeric_local kind value number fits loaded⟩
 

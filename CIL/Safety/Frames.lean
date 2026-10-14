@@ -3,6 +3,7 @@ import CIL.Safety.InstructionMemory
 namespace CIL.Safety
 
 def localWidth : CIL.LocalKind → Nat
+  | .narrow kind => kind.width
   | .aggregate size => size
   | .byte => 1
   | .word32 => 4
@@ -37,6 +38,7 @@ def allocateHome (m : Memory) (activation width : Nat) :
 
 def localNumber (kind : CIL.LocalKind) (value : CIL.Value) : ExecutionResult Nat :=
   match kind, value with
+  | .narrow _, .i32 bits => .ok bits.toNat
   | .aggregate size, .aggregate bytes =>
     if bytes.length = size then .ok (byteNumber bytes) else .error .invalidState
   | .byte, .i32 bits => if bits.toNat < 256 then .ok bits.toNat else .error .invalidState
@@ -45,6 +47,12 @@ def localNumber (kind : CIL.LocalKind) (value : CIL.Value) : ExecutionResult Nat
   | .vector128, .v128 bits => .ok bits.toNat
   | .vector256, .v256 bits => .ok bits.toNat
   | _, _ => .error .invalidState
+
+/-- Readback after a typed store includes the CLI's narrowing and extension. -/
+def localResult (kind : CIL.LocalKind) (value : CIL.Value) : CIL.Value :=
+  match kind, value with
+  | .narrow kind, .i32 bits => .i32 (kind.extend bits)
+  | _, value => value
 
 def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     ExecutionResult (LocalSlot × Memory) := do
@@ -68,6 +76,7 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
       (read m reference (localWidth kind) 1)
     let number := byteNumber bytes
     match kind with
+    | .narrow kind => return .scalar (.i32 (kind.extend (BitVec.ofNat 32 number)))
     | .aggregate _ => return .scalar (.aggregate bytes)
     | .byte | .word32 => return .scalar (.i32 (BitVec.ofNat 32 number))
     | .word64 => return .scalar (.i64 (BitVec.ofNat 64 number))

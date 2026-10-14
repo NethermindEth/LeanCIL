@@ -39,11 +39,13 @@ def numberBytes (value width : Nat) : List (BitVec 8) :=
     volatile/atomic operations and device memory are not admitted by this rule. -/
 abbrev ordinaryAccessAlignment : Nat := 1
 
-def loadValue (m : Memory) (reference : ManagedReference) (width : Nat) : ExecutionResult CIL.Value := do
+def loadValue (m : Memory) (reference : ManagedReference) (width : Nat)
+    (signed : Bool := false) : ExecutionResult CIL.Value := do
   let bytes ← checkedAt reference width (dereference m reference width ordinaryAccessAlignment)
   let number := byteNumber bytes
   match width with
-  | 1 => return .i32 (BitVec.ofNat 32 number)
+  | 1 => return .i32 (if signed then (BitVec.ofNat 8 number).signExtend 32 else BitVec.ofNat 32 number)
+  | 2 => return .i32 (if signed then (BitVec.ofNat 16 number).signExtend 32 else BitVec.ofNat 32 number)
   | 4 => return .i32 (BitVec.ofNat 32 number)
   | 8 => return .i64 (BitVec.ofNat 64 number)
   | 16 => return .v128 (BitVec.ofNat 128 number)
@@ -120,20 +122,23 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .fieldAddress offset, .reference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (m, .reference (.address address) :: rest)
-  | .fieldAt offset width, .scalar (.aggregate bytes) :: rest =>
+  | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else
       let number := byteNumber ((bytes.drop offset).take width)
       let value ← match width with
-        | 1 | 4 => .ok (.i32 (BitVec.ofNat 32 number))
+        | 1 => .ok (.i32 (if signed then (BitVec.ofNat 8 number).signExtend 32 else BitVec.ofNat 32 number))
+        | 2 => .ok (.i32 (if signed then (BitVec.ofNat 16 number).signExtend 32 else BitVec.ofNat 32 number))
+        | 4 => .ok (.i32 (BitVec.ofNat 32 number))
         | 8 => .ok (.i64 (BitVec.ofNat 64 number))
         | _ => .error (.unsupported "Aggregate field width")
       return (m, .scalar value :: rest)
-  | .fieldAt offset width, .reference (.address r) :: rest =>
+  | .fieldAt offset width signed, .reference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
-    return (m, .scalar (← loadValue m (.address address) width) :: rest)
+    return (m, .scalar (← loadValue m (.address address) width signed) :: rest)
   | .setFieldAt offset width, .scalar value :: .reference (.address r) :: rest =>
     let number ← match width, value with
       | 1, .i32 bits => .ok bits.toNat
+      | 2, .i32 bits => .ok bits.toNat
       | 4, .i32 bits => .ok bits.toNat
       | 8, .i64 bits => .ok bits.toNat
       | _, _ => .error .invalidState
@@ -191,14 +196,14 @@ def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
     (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) := do
   match ops with
   | [] => .error .invalidState
-  | .arg index :: rest =>
+  | .arg index none :: rest =>
     let some value := args[index]? | .error .invalidState
     let value ← match value with
       | .reference reference => formValue m reference
       | .scalar value => if value.initialized then .ok (.scalar value) else .error .invalidState
       | .span reference length => .ok (.span reference length)
     block returns args rest (value :: stack) m
-  | .ret :: _ =>
+  | .ret none :: _ =>
     if stack.length = (if returns then 1 else 0) then return (m, stack)
     else .error .invalidState
   | op :: rest =>

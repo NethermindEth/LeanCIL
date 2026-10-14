@@ -5,9 +5,35 @@ import CIL.VectorMemory
 
 namespace CIL
 
+/-- Small integer storage types; all extend to the 32-bit evaluation-stack type. -/
+inductive NarrowKind where
+  | signed8 | unsigned8 | signed16 | unsigned16
+  deriving DecidableEq, Repr
+
+def NarrowKind.width : NarrowKind → Nat
+  | .signed8 | .unsigned8 => 1
+  | .signed16 | .unsigned16 => 2
+
+@[simp] theorem NarrowKind.width_lt (kind : NarrowKind) : kind.width < 2^64 := by
+  cases kind <;> decide
+
+def NarrowKind.extend (kind : NarrowKind) (bits : W32) : W32 :=
+  match kind with
+  | .signed8 => (bits.setWidth 8).signExtend 32
+  | .unsigned8 => (bits.setWidth 8).zeroExtend 32
+  | .signed16 => (bits.setWidth 16).signExtend 32
+  | .unsigned16 => (bits.setWidth 16).zeroExtend 32
+
+def narrowValue (kind : Option NarrowKind) (value : Value) : Option Value :=
+  match kind, value with
+  | none, value => some value
+  | some kind, .i32 bits => some (.i32 (kind.extend bits))
+  | _, _ => none
+
 /-- Physical local storage, retained even when InitLocals is false. Reference
     slots retain managed-reference values rather than numerical addresses. -/
 inductive LocalKind where
+  | narrow (kind : NarrowKind)
   | aggregate (size : Fin (2^64))
   | byte | word32 | word64 | vector128 | vector256 | reference
   deriving DecidableEq, Repr
@@ -20,23 +46,24 @@ inductive Op where
   | loadAggregate (size : Nat)
   | storeAggregate (size : Nat)
   | initAggregate (size : Nat)
-  | fieldAt (offset width : Nat)
+  | fieldAt (offset width : Nat) (signed : Bool := false)
   | fieldAddress (offset : Nat)
   | setFieldAt (offset width : Nat)
-  | arg (index : Nat)
+  | arg (index : Nat) (narrow : Option NarrowKind := none)
   | vectorArg (index : Nat)
   | vectorArgAddr (index : Nat)
-  | local (index : Nat)
+  | local (index : Nat) (narrow : Option NarrowKind := none)
   | vectorLocal (index : Nat)
   | vectorLocalAddr (index : Nat)
   | setVectorLocal (index : Nat)
   | localAddr (index : Nat)
-  | setLocal (index : Nat)
+  | setLocal (index : Nat) (narrow : Option NarrowKind := none)
   | lane (index : Fin 4)
   | laneAddress (index : Fin 4)
   | setLane (index : Fin 4)
   | const32 (word : W32)
   | const64 (word : W64)
+  | convI1 | convI2 | convU2
   | convI8 | convI4 | convU1 | convU4 | convU8 | convU | bnot | add | sub | mul | band | bor | bxor
   | shl | shr | shrUn | lt | ltu | gtu | eq | load64 | store64 | dup | pop
   | branch (target : Nat)
@@ -55,7 +82,7 @@ inductive Op where
   | feature (id : Feature)
   | intrinsic (operation : Intrinsic) (argc : Nat)
   | memory (operation : MemoryOp)
-  | ret
+  | ret (narrow : Option NarrowKind := none)
   | unsupported (description : String)
   deriving Repr
 

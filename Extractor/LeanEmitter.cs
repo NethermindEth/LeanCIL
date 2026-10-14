@@ -7,13 +7,22 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
+    internal static string? Narrow(TypeReference type) => type.FullName switch
+    {
+        "System.SByte" => "signed8",
+        "System.Byte" or "System.Boolean" => "unsigned8",
+        "System.Int16" => "signed16",
+        "System.UInt16" or "System.Char" => "unsigned16",
+        _ => null
+    };
+
     internal static string Kind(TypeReference type, ModuleDefinition module)
     {
         if (type is ByReferenceType) return ".reference";
         if (MetadataValidation.IsAggregate(type, module)) return $".aggregate {MetadataValidation.Layout(type, module)}";
+        if (Narrow(type) is { } narrow) return $".narrow .{narrow}";
         return type.FullName switch
         {
-            "System.Byte" or "System.Boolean" => ".byte",
             "System.Int32" or "System.UInt32" => ".word32",
             "System.Int64" or "System.UInt64" => ".word64",
             string s when s.StartsWith("System.Runtime.Intrinsics.Vector128`1<", StringComparison.Ordinal) => ".vector128",
@@ -23,7 +32,8 @@ internal static class LeanEmitter
     }
     internal static string Initial(TypeReference type, ModuleDefinition module) => Kind(type, module) switch
     {
-        ".reference" => ".nullRef", ".byte" or ".word32" => ".i32 0", ".word64" => ".i64 0",
+        ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
+        string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
         ".vector128" => ".v128 0", ".vector256" => ".v256 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module)} 0)"
     };
