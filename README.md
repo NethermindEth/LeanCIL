@@ -329,6 +329,8 @@ The memory model checks allocation identity, liveness, bounds, byte permissions,
 
 Integer `Math.Min`, `Max`, `Clamp`, `Abs` and `Sign` are also supported, including narrow and native integers. Verification checks `Abs` overflow and invalid `Clamp` bounds explicitly.
 
+`Unsafe.SizeOf<T>` and managed-reference `Unsafe.Add<T>` use validated managed layouts for supported primitives, enums, reference-free structs and vectors. Reference arithmetic retains allocation identity and checks lifetime and bounds; it does not grant access to memory outside the caller's permissions.
+
 The `Examples.Bits` methods exercise these APIs, including universal proofs of the integer logarithm and of a rotation round trip. Incorrect implementations fail the same contracts. `Log2(0)` returns zero; rounding up returns zero for zero input or overflow; signed power-of-two checks reject negative values.
 
 ### Vector and hardware intrinsics

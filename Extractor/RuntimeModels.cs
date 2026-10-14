@@ -78,7 +78,7 @@ internal static class RuntimeModels
             throw new InvalidDataException($"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
         string? op = scope switch
         {
-            "System.Runtime" => Scalar(reference) ?? Runtime(reference.FullName),
+            "System.Runtime" => Scalar(reference) ?? UnsafeModels.Translate(reference) ?? Runtime(reference.FullName),
             "System.Memory" => Scalar(reference),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
@@ -156,11 +156,8 @@ internal static class RuntimeModels
     private static string? Runtime(string signature) => signature switch
     {
         "!!0& System.Runtime.CompilerServices.Unsafe::AsRef<System.UInt64>(!!0&)" => ".asRef",
-        "!!0& System.Runtime.CompilerServices.Unsafe::Add<System.UInt64>(!!0&,System.Int32)" => ".memory (.add 8 true)",
         "!!1& System.Runtime.CompilerServices.Unsafe::As<System.Byte,System.Runtime.Intrinsics.Vector256`1<System.UInt64>>(!!0&)" => ".memory .asRef",
         "!!1& System.Runtime.CompilerServices.Unsafe::As<System.UInt64,System.Runtime.Intrinsics.Vector256`1<System.UInt64>>(!!0&)" => ".memory .asRef",
-        "!!0& System.Runtime.CompilerServices.Unsafe::Add<System.Runtime.Intrinsics.Vector128`1<System.UInt64>>(!!0&,System.Int32)" => ".memory (.add 16 true)",
-        "!!0& System.Runtime.CompilerServices.Unsafe::Add<System.Runtime.Intrinsics.Vector256`1<System.UInt64>>(!!0&,System.UIntPtr)" => ".memory (.add 32 false)",
         "!!1 System.Runtime.CompilerServices.Unsafe::BitCast<System.Byte,System.Boolean>(!!0)" => ".memory .bitcastByteBool",
         "!!0& System.Runtime.InteropServices.MemoryMarshal::GetReference<System.Byte>(System.ReadOnlySpan`1<!!0>)" => ".memory .spanReference",
         "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" => ".memory .spanCreate",

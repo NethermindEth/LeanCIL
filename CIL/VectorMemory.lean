@@ -91,11 +91,11 @@ inductive MemoryOp where
   | staticAddress (bytes : List (BitVec 8)) | spanCreate
   deriving Repr
 
-/-- The observed overloads are signed Int32 and unsigned native UIntPtr on
-    the declared 64-bit runtime. Other overloads need their own typed model. -/
+/-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
 def offsetValue (signed : Bool) (value : Value) : Option Int :=
   match signed, value with
   | true, .i32 bits => some bits.toInt
+  | true, .i64 bits => some bits.toInt
   | false, .i64 bits => some (bits.toNat : Int)
   | _, _ => none
 
