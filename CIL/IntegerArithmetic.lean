@@ -4,7 +4,7 @@ namespace CIL
 
 /-- Arithmetic failures terminate execution; exception handlers are not modelled. -/
 inductive ArithmeticFault where
-  | invalidOperands | divideByZero | overflow
+  | invalidOperands | divideByZero | overflow | invalidBounds
   deriving DecidableEq, Repr
 
 inductive CheckedBinaryKind where

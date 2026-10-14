@@ -116,4 +116,6 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 | `System.Numerics.BitOperations` | `RoundUpToPowerOf2` on `uint`, `ulong` or `nuint` | Least power of two at least the input; zero for zero input or overflow |
 | `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Reverse bytes within the value; preserve signed return conventions; byte/sbyte are identity operations |
 
+`System.Math.Min`, `Max` and `Clamp` support signed and unsigned 8-, 16-, 32-, 64-bit and native integers. `Abs` and `Sign` support the signed types; `Sign` returns an `int`. `Abs` of the signed minimum produces an arithmetic overflow fault. `Clamp` with a lower bound greater than its upper bound produces an invalid-bounds fault. These failures terminate checked execution; exception handlers are not modelled.
+
 Native-width overloads use the validated 64-bit target. The 128-bit, span, generic-math and other helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.

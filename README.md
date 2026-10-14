@@ -327,6 +327,8 @@ The memory model checks allocation identity, liveness, bounds, byte permissions,
 
 `BitOperations.RotateLeft`, `RotateRight`, `PopCount`, `LeadingZeroCount`, `TrailingZeroCount`, `Log2` and `RoundUpToPowerOf2` support `uint`, `ulong` and `nuint`. `IsPow2` also supports their signed counterparts. `BinaryPrimitives.ReverseEndianness` supports signed and unsigned 8-, 16-, 32-, 64-bit and native integers. These calls work with every hardware profile. Other overloads remain unsupported; see the [exact coverage](docs/OPCODES.md#portable-scalar-runtime-helpers).
 
+Integer `Math.Min`, `Max`, `Clamp`, `Abs` and `Sign` are also supported, including narrow and native integers. Verification checks `Abs` overflow and invalid `Clamp` bounds explicitly.
+
 The `Examples.Bits` methods exercise these APIs, including universal proofs of the integer logarithm and of a rotation round trip. Incorrect implementations fail the same contracts. `Log2(0)` returns zero; rounding up returns zero for zero input or overflow; signed power-of-two checks reject negative values.
 
 ### Vector and hardware intrinsics
