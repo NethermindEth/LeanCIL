@@ -158,6 +158,24 @@ theorem aggregate_roundtrip {memory : Memory} {reference : Reference}
   · exact ready
 
 #print axioms aggregate_roundtrip
+theorem missing_parameter_rejected :
+    CIL.Safety.makeParameterHomes 0 [(0, .word32)] [] Examples.empty = .error .invalidState := rfl
+
+theorem reference_parameter_rejects_integer :
+    CIL.Safety.makeParameterHomes 0 [(0, .reference)] [.scalar (.i32 0)] Examples.empty =
+      .error .invalidState := rfl
+
+theorem scalar_parameter_rejects_reference :
+    (CIL.Safety.makeParameterHomes 0 [(0, .word32)] [.reference .null] Examples.empty).isOk = false := rfl
+
+theorem parameter_initialization_narrows :
+    (do
+      let (homes, _, memory) ← CIL.Safety.makeParameterHomes 0 [(0, .narrow .signed8)]
+        [.scalar (.i32 255)] Examples.empty
+      let some (_, slot) := homes[0]? | .error .invalidState
+      CIL.Safety.loadLocal memory slot : CIL.Safety.ExecutionResult CIL.Safety.Value) =
+      .ok (.scalar (.i32 4294967295)) := rfl
+
 end Tests
 
 namespace Tests

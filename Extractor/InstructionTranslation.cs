@@ -12,14 +12,15 @@ internal static class InstructionTranslation
         return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);
     }
     internal static string Translate(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
-        FeatureProfile? profile = null, HashSet<Instruction>? nativeOperands = null)
+        FeatureProfile? profile = null, HashSet<Instruction>? nativeOperands = null, int[]? parameterHomes = null)
     {
         profile ??= FeatureProfile.Scalar;
-        var translated = TranslateCore(i, m, methods, methodIndex, profile);
+        var translated = TranslateCore(i, m, methods, methodIndex, profile, parameterHomes ?? ParameterStorage.Analyze(m, profile));
         return (nativeOperands ?? NativeOperands.Analyze(m, profile)).Contains(i) ? $".nativeBinary ({translated})" : translated;
     }
 
-    static string TranslateCore(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex, FeatureProfile profile)
+    static string TranslateCore(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
+        FeatureProfile profile, int[] parameterHomes)
     {
         profile ??= FeatureProfile.Scalar;
         int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);
@@ -27,7 +28,18 @@ internal static class InstructionTranslation
         string Narrow(TypeReference type) => LeanEmitter.Narrow(type) is { } kind ? $" (some .{kind})" : "";
         string LocalOp(string op, int index) => $".{op} {index}" +
             (op is "local" or "setLocal" ? Narrow(m.Body.Variables[index].VariableType) : "");
-        string Arg(int index) => $".arg {index}" + Narrow(m.Parameters[index].ParameterType);
+        string Arg(int index)
+        {
+            var home = Array.IndexOf(parameterHomes, index);
+            return home < 0 ? $".arg {index}" + Narrow(m.Parameters[index].ParameterType) :
+                $".local {m.Body.Variables.Count + home}";
+        }
+        string Parameter(string op)
+        {
+            var home = Array.IndexOf(parameterHomes, ((ParameterDefinition)i.Operand).Index);
+            if (home < 0) throw new InvalidDataException("Missing parameter storage");
+            return $".{op} {m.Body.Variables.Count + home}";
+        }
         string Field(string op)
         {
             var f = (FieldReference)i.Operand;
@@ -60,6 +72,8 @@ internal static class InstructionTranslation
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
+            Code.Starg or Code.Starg_S => Parameter("setLocal"),
+            Code.Ldarga or Code.Ldarga_S => Parameter("localAddr"),
             Code.Conv_I => ".convI8",
             Code.Ldind_I => ".load64", Code.Stind_I => ".store64",
             Code.Conv_Ovf_I1 => ".checkedConvert 8 true false", Code.Conv_Ovf_I1_Un => ".checkedConvert 8 true true",

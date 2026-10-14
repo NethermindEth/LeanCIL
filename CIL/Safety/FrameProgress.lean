@@ -85,25 +85,80 @@ theorem makeArgumentHomes_succeeds (m : Memory) (activation : Nat) (indices : Li
       simp [makeArgumentHomes, argument, home, store, rest,
         Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
 
+def ParameterFits (kind : CIL.LocalKind) : Value → Prop
+  | .scalar value => kind ≠ .reference ∧ ∃ number, localNumber kind value = .ok number
+  | .reference _ => kind = .reference
+  | .span _ _ => False
+
+def ParameterArgumentsFit (parameters : List (Nat × CIL.LocalKind)) (args : List Value) : Prop :=
+  ∀ parameter ∈ parameters, ∃ value, args[parameter.1]? = some value ∧ ParameterFits parameter.2 value
+
+theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind)
+    (value : Value) (hm : m.WellFormed) (valid : value.Valid m) (fits : ParameterFits kind value) :
+    ∃ slot owned home final result,
+      makeLocal activation kind .unmodeled m = .ok (slot, owned, home) ∧
+      storeLocal home slot value = .ok (final, result) := by
+  cases value with
+  | span r length => cases fits
+  | reference r =>
+    change kind = .reference at fits
+    subst kind
+    have formed := checkedValue_of_valid m (.reference r) valid
+    exact ⟨.root none, [], m, .root (some r), m, rfl, by
+      simp only [checkedValue] at formed
+      simp [storeLocal, formed, Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
+  | scalar value =>
+    obtain ⟨numeric, number, numbered⟩ := fits
+    obtain ⟨r, home, allocated⟩ := allocateHome_succeeds m activation (localWidth kind) hm (localWidth_bounded kind)
+    obtain ⟨final, result, stored⟩ := fresh_home_storeLocal_succeeds _ _ _ _ _ _ _ allocated numbered
+    refine ⟨.bytes kind r, [r.allocation], home, final, result, ?_, stored⟩
+    cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+theorem makeParameterHomes_succeeds (m : Memory) (activation : Nat)
+    (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
+    (hm : m.WellFormed) (valid : ValuesValid m args) (fits : ParameterArgumentsFit parameters args) :
+    ∃ homes owned result, makeParameterHomes activation parameters args m = .ok (homes, owned, result) := by
+  induction parameters generalizing m with
+  | nil => exact ⟨[], [], m, rfl⟩
+  | cons parameter parameters ih =>
+    obtain ⟨index, kind⟩ := parameter
+    obtain ⟨value, argument, compatible⟩ := fits (index, kind) (by simp)
+    obtain ⟨slot, ids, home, final, stored, made, store⟩ :=
+      initializeParameter_succeeds m activation kind value hm (valid value (List.mem_of_getElem? argument)) compatible
+    have homeWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ hm made
+    have storedWF := storeLocal_preserves_wellFormed _ _ _ _ _ homeWF store
+    have ext := (makeLocal_fresh _ _ _ _ _ _ _ made).1.trans (storeLocal_extends_allocations _ _ _ _ _ store)
+    obtain ⟨homes, other, result, rest⟩ := ih stored storedWF (valid.preserve hm ext)
+      (fun p member => fits p (by simp [member]))
+    exact ⟨(index, final) :: homes, ids ++ other, result, by
+      simp [makeParameterHomes, argument, made, store, rest,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
+
 def FrameSetupFits (body : CIL.Method) (args : List Value) : Prop :=
-  InitializersFit body.localKinds body.locals ∧ AggregateArgumentsFit body.vectorArgs args
+  InitializersFit body.localKinds body.locals ∧ AggregateArgumentsFit body.vectorArgs args ∧
+    ParameterArgumentsFit body.parameterHomes args
 
 theorem enterFrame_succeeds (body : CIL.Method) (args : List Value) (m : Memory)
-    (wellFormed : m.WellFormed) (fits : FrameSetupFits body args) :
+    (wellFormed : m.WellFormed) (validArgs : ValuesValid m args) (fits : FrameSetupFits body args) :
     ∃ frame memory, enterFrame body args m = .ok (frame, memory) := by
   obtain ⟨locals, owned, memory, prepared⟩ :=
     makeLocals_succeeds m m.nextIdentity body.localKinds body.locals wellFormed fits.1
   have valid := makeLocals_preserves_wellFormed _ _ _ _ _ _ _ wellFormed prepared
   obtain ⟨arguments, ids, result, homes⟩ :=
-    makeArgumentHomes_succeeds memory m.nextIdentity body.vectorArgs args valid fits.2
-  exact ⟨⟨m.nextIdentity, locals, owned ++ ids, arguments⟩, result, by
-    simp [enterFrame, prepared, homes, Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
+    makeArgumentHomes_succeeds memory m.nextIdentity body.vectorArgs args valid fits.2.1
+  have resultWF := makeArgumentHomes_preserves_wellFormed _ _ _ _ _ _ _ valid homes
+  have ext := (makeLocals_fresh _ _ _ _ _ _ _ prepared).1.trans
+    (makeArgumentHomes_fresh _ _ _ _ _ _ _ homes).1
+  obtain ⟨parameters, other, final, parametersMade⟩ := makeParameterHomes_succeeds result m.nextIdentity
+    body.parameterHomes args resultWF (validArgs.preserve wellFormed ext) fits.2.2
+  exact ⟨⟨m.nextIdentity, locals ++ parameters.map Prod.snd, (owned ++ ids) ++ other, arguments⟩, final, by
+    simp [enterFrame, prepared, homes, parametersMade, Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
 
 theorem enterFrame_live_succeeds (program : CIL.Program) (body : CIL.Method)
     (args : List Value) (m : Memory) (wellFormed : m.WellFormed) (valid : ValuesValid m args)
     (world : StaticWorldValid (programStaticDescriptors program) m) (fits : FrameSetupFits body args) :
     ∃ frame memory, enterFrame body args m = .ok (frame, memory) ∧ LiveState program args frame [] memory := by
-  obtain ⟨frame, memory, setup⟩ := enterFrame_succeeds body args m wellFormed fits
+  obtain ⟨frame, memory, setup⟩ := enterFrame_succeeds body args m wellFormed valid fits
   exact ⟨frame, memory, setup, enterFrame_live_state _ _ _ _ _ _ wellFormed valid world setup⟩
 
 #print axioms makeLocal_succeeds
