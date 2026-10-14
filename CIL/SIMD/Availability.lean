@@ -6,6 +6,7 @@ namespace CIL
 -- Portable Vector128/Vector256 operations have executable software semantics.
 -- ISA-specific operations additionally require their runtime-visible capability.
 def Intrinsic.available (profile : FeatureProfile) : Intrinsic → Bool
+  | .scalar _ => true
   | .vector _ => true
   | .advSimd _ => profile.advSimd
   | .sse .shiftLeftBytes => profile.sse2

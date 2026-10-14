@@ -1,4 +1,5 @@
 import CIL.SIMD.Vector
+import CIL.ScalarIntrinsics
 import CIL.SIMD.AdvSimd
 import CIL.SIMD.SSE
 import CIL.SIMD.AVX2
@@ -52,6 +53,7 @@ inductive AVX512DQIntrinsic where
 
 /-- ISA families are explicit; the common family contains portable bit-pattern operations. -/
 inductive Intrinsic where
+  | scalar (op : ScalarIntrinsic)
   | vector (op : VectorIntrinsic)
   | advSimd (op : AdvSimdIntrinsic)
   | sse (op : SSEIntrinsic)
@@ -85,6 +87,7 @@ private def immediate (v : Value) : Option (BitVec 8) :=
 /-- Type, arity and immediate failures are explicit. ISA availability is checked during extraction. -/
 def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   match op, args with
+  | .scalar operation, xs => evalScalarIntrinsic operation xs
   | .vector (.add64 w), xs => binaryLanes w (· + ·) xs
   | .vector (.sub64 w), xs => binaryLanes w (· - ·) xs
   | .vector (.mul64 w), xs => binaryLanes w (· * ·) xs

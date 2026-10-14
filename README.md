@@ -299,6 +299,12 @@ Profiles default to scalar. Pass a supported profile name or `@profile.json` as 
 
 The memory model checks allocation identity, liveness, bounds, byte permissions, initialization, alignment and GC-sensitive intervals. It supports overlap and distinct private frames. It does not prove JIT/compiler correctness, concurrency, GC implementation correctness, OS memory behaviour or arbitrary .NET runtime equivalence. See [soundness and trusted base](docs/SOUNDNESS.md) for the precise boundary.
 
+### Portable bit and endian helpers
+
+`BitOperations.RotateLeft`, `RotateRight`, `PopCount`, `LeadingZeroCount` and `TrailingZeroCount` support `uint` and `ulong`. `BinaryPrimitives.ReverseEndianness` supports signed and unsigned 16-, 32- and 64-bit integers. These calls work with every hardware profile. Other overloads remain unsupported; see the [exact coverage](docs/OPCODES.md#portable-scalar-runtime-helpers).
+
+The `Examples.Bits` methods exercise these APIs, including a universal proof that rotating a 64-bit value left by 13 and then right by 13 restores every input. Changing the inverse rotation count makes that contract fail.
+
 ### Vector and hardware intrinsics
 
 Each family has partial coverage. The [intrinsic support tables](docs/SIMD.md) give the exact accepted overloads, element types, immediate bounds and profile requirements.

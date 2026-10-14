@@ -100,3 +100,15 @@ This inventory was checked against:
 - [Execution.lean](../CIL/Safety/Execution.lean), [Frames.lean](../CIL/Safety/Frames.lean), [InstructionMemory.lean](../CIL/Safety/InstructionMemory.lean) and [StaticMemory.lean](../CIL/Safety/StaticMemory.lean): checked execution, local storage and memory behaviour.
 
 When extending translation or operand support, update this table together with the implementation and relevant semantic/extractor regressions. See [validation results](VALIDATION.md) for the tests actually run and [soundness](SOUNDNESS.md) for the runtime assumptions and trusted base.
+
+## Portable scalar runtime helpers
+
+These are exact `call` signatures, not additional CIL opcodes. They work with every admitted hardware profile.
+
+| Runtime type | Supported methods and overloads | Semantics |
+| --- | --- | --- |
+| `System.Numerics.BitOperations` | `RotateLeft` / `RotateRight` on `uint` or `ulong`, with `int` count | Circular rotation, count modulo 32/64, including negative counts |
+| `System.Numerics.BitOperations` | `PopCount`, `LeadingZeroCount`, `TrailingZeroCount` on `uint` or `ulong` | `int` result; zero has 32/64 leading/trailing zeros |
+| `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `short`, `ushort`, `int`, `uint`, `long`, `ulong` | Reverse bytes within the value; preserve signed return conventions |
+
+Native-width, 128-bit, span, byte/sbyte, generic-math and other helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.
