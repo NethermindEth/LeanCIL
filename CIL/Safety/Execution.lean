@@ -46,6 +46,9 @@ inductive FrameAction where
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   match op, stack with
+  | .divide signed remainder, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues signed remainder x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
   | .arg i none, _ =>
     let some value := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m value) :: stack) frame m

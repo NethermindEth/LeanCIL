@@ -7,11 +7,11 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-All five C# regression partitions passed, covering **37 check groups**. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
+The first five C# regression partitions passed, covering **37 check groups**, before the division extension. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
-The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` and `--suite primitive` after `--`. These partitions cover the same 37 check groups as the full command and can run concurrently in separate checkouts; that is how this revision was validated. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
+The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` and `--suite division` after `--`. These partitions cover the same 38 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |
 | --- | --- |
@@ -46,7 +46,10 @@ The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite na
 | Method discovery includes canonical selectors and unsupported candidates without claiming support | Passed |
 | Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Passed |
 | Subtraction rejected by the unchanged universal addition contract | Passed; no successful report retained |
-| Unsupported division | Explicit extraction rejection |
+| Unsupported array allocation | Explicit extraction rejection |
+| Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against actual .NET execution and corresponding Lean proofs passed, including divide-by-zero and signed overflow |
+| Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs passed for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
+| Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests passed |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, cyclic control flow, static initializer and forged runtime scope | Eight intended metadata rejections |
 | Identity-bound static RVA data | Passed |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |

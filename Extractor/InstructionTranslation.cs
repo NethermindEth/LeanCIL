@@ -51,6 +51,8 @@ internal static class InstructionTranslation
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
+            Code.Div => ".divide true false", Code.Div_Un => ".divide false false",
+            Code.Rem => ".divide true true", Code.Rem_Un => ".divide false true",
             Code.Switch => ".switch [" + string.Join(", ", ((Instruction[])i.Operand).Select(m.Body.Instructions.IndexOf)) + "]",
             Code.Sizeof => $".const32 {TypeWidth((TypeReference)i.Operand, m.Module)}",
             Code.Ldind_I1 => ".loadScalar 1 true", Code.Ldind_U1 => ".loadScalar 1",

@@ -1,6 +1,7 @@
 import CIL.Memory
 import CIL.Instructions
 import CIL.AggregateMemory
+import CIL.IntegerArithmetic
 
 namespace CIL
 
@@ -38,6 +39,7 @@ def truth : Value → Option Bool
 
 def binary (op : Op) (a b : Value) : Option Value :=
   match op, a, b with
+  | .divide signed remainder, x, y => (divideValues signed remainder x y).toOption
   | .gt, .i32 x, .i32 y => some (.i32 (if x.toInt > y.toInt then 1 else 0))
   | .gt, .i64 x, .i64 y => some (.i32 (if x.toInt > y.toInt then 1 else 0))
   | .add, .i64 x, .i64 y => some (.i64 (x + y))
@@ -159,6 +161,7 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
     return .next (pc + 1) ((← unary op v) :: rest) memory
   | .const32 w, _ => return .next (pc + 1) (.i32 w :: stack) memory
   | .add, b :: a :: rest | .sub, b :: a :: rest
+  | .divide _ _, b :: a :: rest
   | .band, b :: a :: rest | .bor, b :: a :: rest
   | .mul, b :: a :: rest | .bxor, b :: a :: rest
   | .shl, b :: a :: rest | .shr, b :: a :: rest | .shrUn, b :: a :: rest

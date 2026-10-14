@@ -159,3 +159,26 @@ theorem aggregate_roundtrip {memory : Memory} {reference : Reference}
 
 #print axioms aggregate_roundtrip
 end Tests
+
+namespace Tests
+
+theorem division_mixed_widths_rejected :
+    CIL.divideValues false false (.i32 6) (.i64 2) = .error .invalidOperands := rfl
+
+theorem division_reference_rejected :
+    CIL.divideValues true false .nullRef (.i32 2) = .error .invalidOperands := rfl
+
+theorem division_zero (signed remainder : Bool) (x : CIL.W64) :
+    CIL.divideBits signed remainder x 0 = .error .divideByZero := by
+  simp [CIL.divideBits]
+
+theorem division_underflow :
+    (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
+      (.divide false false) 0 [] ⟨0, [], [], []⟩ [] Examples.empty).isOk = false := rfl
+
+theorem division_managed_reference_rejected :
+    (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
+      (.divide false false) 0 [] ⟨0, [], [], []⟩
+      [.scalar (.i32 2), .reference .null] Examples.empty).isOk = false := rfl
+
+end Tests

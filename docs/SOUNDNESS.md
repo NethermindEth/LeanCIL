@@ -2,6 +2,10 @@
 
 ## What is defined and proved
 
+Integer division and remainder use an explicit `ArithmeticFault` result, separate from malformed-state and memory faults. Zero divisors and the signed minimum / -1 pair terminate checked execution with located faults. Signed quotient uses truncation toward zero, not Lean's Euclidean division. Signed remainder uses the corresponding truncating remainder. These faults do not implement managed exception objects, handlers or unwinding.
+
+For signed minimum remainder -1, the model selects the overflowing runtime behaviour documented for Intel platforms in [the opcode reference](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.rem). The regression suite compares the emitted CIL with the executing .NET runtime, including this case. This is an explicit runtime correspondence assumption, not a proof of architecture-independent CLI behaviour; proofs requiring successful execution of that input are not supported.
+
 `CIL.Semantics` defines a functional byte-memory execution model, with wrapping bit-vector arithmetic, instruction-level failure, calls and explicit finite fuel. Its memory addresses do not themselves certify physical allocations. Its successful execution theorem is not a memory-safety certificate.
 
 `CIL.Safety.Memory` adds allocation identities, storage kinds, layouts, live/dead state, initialized bytes, read/write views, end sentinels and managed references. Allocation identities increase and are never recycled. `CIL.Safety.Execution` checks every memory/reference instruction and frame transition. It uses the arithmetic interpreter only through the existing value-only whitelist. Unknown operations cannot fall through to unchecked memory operations.
