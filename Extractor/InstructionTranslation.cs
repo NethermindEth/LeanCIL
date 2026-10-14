@@ -52,7 +52,7 @@ internal static class InstructionTranslation
             var offset = MetadataValidation.FieldOffset(resolved, m.Module);
             return op == "fieldAddr" ? $".fieldAddress {offset}" :
                 $".{(op == "field" ? "fieldAt" : "setFieldAt")} {offset} {width}" +
-                (op == "field" && resolved.FieldType.FullName is "System.SByte" or "System.Int16" ? " true" : "");
+                (op == "field" && EnumTypes.Storage(resolved.FieldType).FullName is "System.SByte" or "System.Int16" ? " true" : "");
         }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj && i.Operand is TypeReference operandType)
             RuntimeModels.ValidateTypeIdentity(operandType, m.Module);
@@ -114,7 +114,7 @@ internal static class InstructionTranslation
             Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .store128",
             Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .store256",
             Code.Ldobj => $".loadScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}" +
-                (((TypeReference)i.Operand).FullName is "System.SByte" or "System.Int16" ? " true" : ""),
+                (EnumTypes.Storage((TypeReference)i.Operand).FullName is "System.SByte" or "System.Int16" ? " true" : ""),
             Code.Stobj => $".storeScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}",
             Code.Initobj => $".initAggregate {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}",
             Code.Ldarg_0 => Arg(0), Code.Ldarg_1 => Arg(1), Code.Ldarg_2 => Arg(2), Code.Ldarg_3 => Arg(3),

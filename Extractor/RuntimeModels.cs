@@ -28,7 +28,8 @@ internal static class RuntimeModels
     {
         if (type.Scope == module && type.IsValueType && type is not TypeSpecification)
         {
-            MetadataValidation.Layout(type, module);
+            if (EnumTypes.IsEnum(type)) EnumTypes.Storage(type);
+            else MetadataValidation.Layout(type, module);
             return;
         }
         if (type is GenericParameter) return;

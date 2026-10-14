@@ -7,7 +7,7 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
-    internal static string? Narrow(TypeReference type) => type.FullName switch
+    internal static string? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
         "System.SByte" => "signed8",
         "System.Byte" or "System.Boolean" => "unsigned8",
@@ -21,7 +21,7 @@ internal static class LeanEmitter
         if (type is ByReferenceType) return ".reference";
         if (MetadataValidation.IsAggregate(type, module)) return $".aggregate {MetadataValidation.Layout(type, module)}";
         if (Narrow(type) is { } narrow) return $".narrow .{narrow}";
-        return type.FullName switch
+        return EnumTypes.Storage(type).FullName switch
         {
             "System.Int32" or "System.UInt32" => ".word32",
             "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" => ".word64",
