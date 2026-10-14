@@ -75,6 +75,22 @@ def formValue (m : Memory) (reference : ManagedReference) : ExecutionResult Valu
 def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
   match operation, stack with
+  | .copyBlock alignment, .scalar (.i32 count) :: .reference source :: .reference destination :: rest =>
+    let width := count.toNat
+    if width = 0 then return (m, rest) else
+      let src ← referenceAt source
+      let dst ← referenceAt destination
+      if src.allocation = dst.allocation && src.offset < dst.offset + width && dst.offset < src.offset + width then
+        .error (.unsupported "Overlapping block copy")
+      else
+        let bytes ← checkedAt source width (read m src width alignment)
+        return (← checkedAt destination width (write m dst bytes alignment), rest)
+  | .initBlock alignment, .scalar (.i32 count) :: .scalar (.i32 value) :: .reference destination :: rest =>
+    let width := count.toNat
+    if width = 0 then return (m, rest) else
+      let dst ← referenceAt destination
+      let _ ← checkedAt destination width (access m dst width alignment true)
+      return (← checkedAt destination width (write m dst (List.replicate width (value.setWidth 8)) alignment), rest)
   | .load128, .reference r :: rest => return (m, .scalar (← loadValue m r 16) :: rest)
   | .load256, .reference r :: rest => return (m, .scalar (← loadValue m r 32) :: rest)
   | .store128, .scalar (.v128 bits) :: .reference r :: rest =>

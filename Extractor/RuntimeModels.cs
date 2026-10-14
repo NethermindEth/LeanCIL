@@ -155,6 +155,10 @@ internal static class RuntimeModels
 
     private static string? Runtime(string signature) => signature switch
     {
+        "System.Void System.Runtime.CompilerServices.Unsafe::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" => ".memory (.copyBlock 8)",
+        "System.Void System.Runtime.CompilerServices.Unsafe::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" => ".memory (.copyBlock 1)",
+        "System.Void System.Runtime.CompilerServices.Unsafe::InitBlock(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 8)",
+        "System.Void System.Runtime.CompilerServices.Unsafe::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
         "!!0& System.Runtime.CompilerServices.Unsafe::AsRef<System.UInt64>(!!0&)" => ".asRef",
         "!!1& System.Runtime.CompilerServices.Unsafe::As<System.Byte,System.Runtime.Intrinsics.Vector256`1<System.UInt64>>(!!0&)" => ".memory .asRef",
         "!!1& System.Runtime.CompilerServices.Unsafe::As<System.UInt64,System.Runtime.Intrinsics.Vector256`1<System.UInt64>>(!!0&)" => ".memory .asRef",

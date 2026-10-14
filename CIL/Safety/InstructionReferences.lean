@@ -41,6 +41,7 @@ theorem memoryInstruction_values_valid (operation : CIL.MemoryOp) (stack values 
       | exact retained.head
       | exact retained.tail
       | exact retained.tail.tail
+      | exact retained.tail.tail.tail
       | solve |
           apply ValuesValid.cons
           · first
