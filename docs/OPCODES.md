@@ -109,8 +109,11 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 
 | Runtime type | Supported methods and overloads | Semantics |
 | --- | --- | --- |
-| `System.Numerics.BitOperations` | `RotateLeft` / `RotateRight` on `uint` or `ulong`, with `int` count | Circular rotation, count modulo 32/64, including negative counts |
-| `System.Numerics.BitOperations` | `PopCount`, `LeadingZeroCount`, `TrailingZeroCount` on `uint` or `ulong` | `int` result; zero has 32/64 leading/trailing zeros |
-| `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `short`, `ushort`, `int`, `uint`, `long`, `ulong` | Reverse bytes within the value; preserve signed return conventions |
+| `System.Numerics.BitOperations` | `RotateLeft` / `RotateRight` on `uint`, `ulong` or `nuint`, with `int` count | Circular rotation, count modulo 32/64, including negative counts |
+| `System.Numerics.BitOperations` | `PopCount`, `LeadingZeroCount`, `TrailingZeroCount` on `uint`, `ulong` or `nuint` | `int` result; zero has 32/64 leading/trailing zeros |
+| `System.Numerics.BitOperations` | `IsPow2` on `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | True for positive powers of two; false for zero and signed negative values |
+| `System.Numerics.BitOperations` | `Log2` on `uint`, `ulong` or `nuint` | Floor base-two logarithm as `int`; zero input returns zero |
+| `System.Numerics.BitOperations` | `RoundUpToPowerOf2` on `uint`, `ulong` or `nuint` | Least power of two at least the input; zero for zero input or overflow |
+| `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Reverse bytes within the value; preserve signed return conventions; byte/sbyte are identity operations |
 
-Native-width, 128-bit, span, byte/sbyte, generic-math and other helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.
+Native-width overloads use the validated 64-bit target. The 128-bit, span, generic-math and other helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.
