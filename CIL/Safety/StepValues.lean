@@ -20,10 +20,18 @@ theorem allocated_store_reference_valid (m home result : Memory) (activation wid
     (allocateHome_preserves_wellFormed _ _ _ _ _ hm allocation) r r
     (allocateHome_reference_valid _ _ _ _ _ allocation)
 
+theorem allocated_storeLocal_reference_valid (m home result : Memory) (activation width : Nat)
+    (r : Reference) (slot finalSlot : LocalSlot) (value : Value) (hm : m.WellFormed)
+    (allocation : allocateHome m activation width = .ok (r, home))
+    (store : storeLocal home slot value = .ok (finalSlot, result)) : form result r = .ok r :=
+  (storeLocal_extends_allocations _ _ _ _ _ store).preserves_reference
+    (allocateHome_preserves_wellFormed _ _ _ _ _ hm allocation) r r
+    (allocateHome_reference_valid _ _ _ _ _ allocation)
+
 def FrameAction.LiveValues (action : FrameAction) : Prop :=
   match action with
   | .next _ values _ memory | .returned values memory => ValuesValid memory values
-  | .call _ args rest memory | .construct _ args rest _ _ memory =>
+  | .call _ args rest memory | .construct _ args rest _ _ _ memory =>
     ValuesValid memory args ∧ ValuesValid memory rest
 
 theorem step_values_valid (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
@@ -59,6 +67,7 @@ theorem step_values_valid (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
             | solve | apply loadLocal_result_valid; assumption
             | solve | apply localAddress_result_valid; assumption
             | solve | apply allocated_store_reference_valid; exact hm; assumption; assumption
+            | solve | apply allocated_storeLocal_reference_valid; exact hm; assumption; assumption
           · first
             | exact retained
             | exact retained.tail.tail

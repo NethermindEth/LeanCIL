@@ -4,7 +4,7 @@ import CIL.Safety.StaticMemoryLemmas
 namespace CIL.Safety
 
 def FrameAction.memory : FrameAction → Memory
-  | .next _ _ _ m | .call _ _ _ m | .construct _ _ _ _ _ m | .returned _ m => m
+  | .next _ _ _ m | .call _ _ _ m | .construct _ _ _ _ _ _ m | .returned _ m => m
 
 theorem step_preserves_wellFormed (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
@@ -20,6 +20,10 @@ theorem step_preserves_wellFormed (body : CIL.Method) (operation : CIL.Op) (pc :
       | solve | apply instruction_preserves_wellFormed _ _ _ _ _ hm; assumption
       | solve |
           apply storeValue_preserves_wellFormed
+          · apply allocateHome_preserves_wellFormed _ _ _ _ _ hm; assumption
+          · assumption
+      | solve |
+          apply storeLocal_preserves_wellFormed
           · apply allocateHome_preserves_wellFormed _ _ _ _ _ hm; assumption
           · assumption
       | cases h
@@ -72,7 +76,7 @@ theorem run_preserves_wellFormed (program : CIL.Program) (fuel method pc : Nat)
                   have returnedWF := ih callee 0 arguments childFrame [] childMemory memory' result childWF hr
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                   exact ih method (pc + 1) args frame (result ++ rest) memory' final values returnedWF h
-          | construct callee arguments rest frame' temporary memory =>
+          | construct callee arguments rest frame' temporary kind memory =>
             cases hc : program[callee]? with
             | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
@@ -89,11 +93,11 @@ theorem run_preserves_wellFormed (program : CIL.Program) (fuel method pc : Nat)
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                   split at h
                   · cases h
-                  · cases hl : loadValue memory' (.address temporary) (localWidth .vector256) <;>
+                  · cases hl : loadLocal memory' (.bytes kind temporary) <;>
                       simp only [hl] at h
                     · cases h
                     · rename_i value
-                      exact ih method (pc + 1) args frame' (.scalar value :: rest) memory' final values returnedWF h
+                      exact ih method (pc + 1) args frame' (value :: rest) memory' final values returnedWF h
 
 #print axioms run_preserves_wellFormed
 

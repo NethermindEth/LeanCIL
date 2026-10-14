@@ -68,7 +68,7 @@ internal static class InstructionTranslation
             if (index > methodIndex)
             {
                 if (i.OpCode.Code == Code.Newobj)
-                    throw new InvalidDataException("Value constructors are not yet supported for arbitrary layouts");
+                    return $".newAggregate {index} {resolved.Parameters.Count} {MetadataValidation.Layout(resolved.DeclaringType, m.Module)}";
                 return $".call {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
             }
             throw new InvalidDataException($"Unsupported or unresolved call: {r.FullName} [{r.DeclaringType.Scope.Name}]");

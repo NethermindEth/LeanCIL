@@ -17,7 +17,7 @@ theorem programStep_preserves_wellFormed (program : CIL.Program) (method pc : Na
 /-- A nested call or constructor invokes exactly these captured arguments. -/
 def FrameAction.child (action : FrameAction) (callee : Nat) (arguments : List Value) : Prop :=
   (∃ rest, action = .call callee arguments rest action.memory) ∨
-  ∃ rest frame temporary, action = .construct callee arguments rest frame temporary action.memory
+  ∃ rest frame temporary kind, action = .construct callee arguments rest frame temporary kind action.memory
 
 /-- Memory observations at CIL boundaries, including prefixes of executions
     which later fault. Continuation requires an actual successful child run. -/
@@ -51,15 +51,15 @@ inductive RunVisits (program : CIL.Program) : Nat → Nat → Nat → List Value
       (finish : run program fuel callee 0 arguments childFrame [] childMemory = .ok (returned, result))
       (later : RunVisits program fuel method (pc + 1) args frame (result ++ rest) returned observed) :
       RunVisits program (fuel + 1) method pc args frame stack m observed
-  | constructContinue {fuel method pc args frame stack m callee arguments rest nextFrame temporary
+  | constructContinue {fuel method pc args frame stack m callee arguments rest nextFrame temporary kind
         updated child childFrame childMemory returned value observed}
       (step : ProgramStep program method pc args frame stack m
-        (.construct callee arguments rest nextFrame temporary updated))
+        (.construct callee arguments rest nextFrame temporary kind updated))
       (lookup : program[callee]? = some child)
       (enter : enterFrame child arguments updated = .ok (childFrame, childMemory))
       (finish : run program fuel callee 0 arguments childFrame [] childMemory = .ok (returned, []))
-      (load : loadValue returned (.address temporary) (localWidth .vector256) = .ok value)
-      (later : RunVisits program fuel method (pc + 1) args nextFrame (.scalar value :: rest) returned observed) :
+      (load : loadLocal returned (.bytes kind temporary) = .ok value)
+      (later : RunVisits program fuel method (pc + 1) args nextFrame (value :: rest) returned observed) :
       RunVisits program (fuel + 1) method pc args frame stack m observed
   | expired {fuel method pc args frame stack m result updated}
       (step : ProgramStep program method pc args frame stack m (.returned result updated)) :
@@ -137,7 +137,7 @@ theorem run_success_visits (program : CIL.Program) (fuel method pc : Nat)
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                   exact .callContinue actual hc he hr
                     (ih method (pc + 1) args frame (result ++ rest) memory' final values h)
-          | construct callee arguments rest frame' temporary memory =>
+          | construct callee arguments rest frame' temporary kind memory =>
             cases hc : program[callee]? with
             | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
@@ -154,12 +154,12 @@ theorem run_success_visits (program : CIL.Program) (fuel method pc : Nat)
                   | cons value rest' => simp at h
                   | nil =>
                     simp only [List.isEmpty_nil, Bool.not_true, Bool.false_eq_true, ite_false] at h
-                    cases hl : loadValue memory' (.address temporary) (localWidth .vector256) <;>
+                    cases hl : loadLocal memory' (.bytes kind temporary) <;>
                       simp only [hl] at h
                     · cases h
                     · rename_i value
                       exact .constructContinue actual hc he hr hl
-                        (ih method (pc + 1) args frame' (.scalar value :: rest) memory' final values h)
+                        (ih method (pc + 1) args frame' (value :: rest) memory' final values h)
 
 #print axioms run_success_visits
 end CIL.Safety

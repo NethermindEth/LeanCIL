@@ -50,7 +50,7 @@ theorem run_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
               simp only [Except.mapError, Bind.bind, Except.bind, child, Option.map_some,
                 enterFrame_profile]
               simp only [ih]
-          | construct callee arguments rest frame temporary memory =>
+          | construct callee arguments rest frame temporary kind memory =>
             cases child : program[callee]? with
             | none => simp [Except.mapError, Bind.bind, Except.bind, child]
             | some childBody =>

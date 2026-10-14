@@ -6,7 +6,7 @@ theorem FrameAction.child_arguments_valid {program : CIL.Program} {args : List V
     {frame : Frame} {action : FrameAction} {callee : Nat} {arguments : List Value}
     (valid : action.StateValid program args frame) (call : action.child callee arguments) :
     ValuesValid action.memory arguments := by
-  rcases call with ⟨rest, equal⟩ | ⟨rest, nextFrame, temporary, equal⟩
+  rcases call with ⟨rest, equal⟩ | ⟨rest, nextFrame, temporary, kind, equal⟩
   · cases action <;> cases equal
     exact valid.2
   · cases action <;> cases equal
@@ -26,14 +26,14 @@ theorem enter_child_live_state {program : CIL.Program} {method pc : Nat}
 
 theorem constructor_resume_live_state (program : CIL.Program) (fuel method : Nat)
     (body : CIL.Method) (childArgs args rest : List Value) (child parent : Frame)
-    (temporary : Reference) (value : CIL.Value) (m entered final : Memory)
+    (temporary : Reference) (kind : CIL.LocalKind) (value : Value) (m entered final : Memory)
     (state : LiveState program args parent rest m)
     (setup : enterFrame body childArgs m = .ok (child, entered))
     (finish : run program fuel method 0 childArgs child [] entered = .ok (final, []))
-    (load : loadValue final (.address temporary) (localWidth .vector256) = .ok value) :
-    LiveState program args parent (.scalar value :: rest) final := by
+    (load : loadLocal final (.bytes kind temporary) = .ok value) :
+    LiveState program args parent (value :: rest) final := by
   have preserved := child_preserves_parent_state _ _ _ _ _ _ _ _ _ _ _ _ _ state setup finish
-  exact { preserved with stack := ValuesValid.cons (loadValue_scalar_valid _ _ _ _ load) preserved.stack }
+  exact { preserved with stack := ValuesValid.cons (loadLocal_result_valid _ _ _ load) preserved.stack }
 
 /-- Actual running and suspended frame boundaries. Returned frames are absent:
     their private storage has expired and their result is checked separately. -/
@@ -48,9 +48,9 @@ inductive RunningVisits (program : CIL.Program) : Nat → Nat → Nat → List V
   | suspendedCall {fuel method pc args frame stack m callee arguments rest updated}
       (step : ProgramStep program method pc args frame stack m (.call callee arguments rest updated)) :
       RunningVisits program (fuel + 1) method pc args frame stack m args frame rest updated
-  | suspendedConstruct {fuel method pc args frame stack m callee arguments rest nextFrame temporary updated}
+  | suspendedConstruct {fuel method pc args frame stack m callee arguments rest nextFrame temporary kind updated}
       (step : ProgramStep program method pc args frame stack m
-        (.construct callee arguments rest nextFrame temporary updated)) :
+        (.construct callee arguments rest nextFrame temporary kind updated)) :
       RunningVisits program (fuel + 1) method pc args frame stack m args nextFrame rest updated
   | child {fuel method pc args frame stack m action callee arguments child childFrame childMemory oa of os om}
       (step : ProgramStep program method pc args frame stack m action)
@@ -66,15 +66,15 @@ inductive RunningVisits (program : CIL.Program) : Nat → Nat → Nat → List V
       (finish : run program fuel callee 0 arguments childFrame [] childMemory = .ok (returned, result))
       (later : RunningVisits program fuel method (pc + 1) args frame (result ++ rest) returned oa of os om) :
       RunningVisits program (fuel + 1) method pc args frame stack m oa of os om
-  | constructContinue {fuel method pc args frame stack m callee arguments rest nextFrame temporary
+  | constructContinue {fuel method pc args frame stack m callee arguments rest nextFrame temporary kind
         updated child childFrame childMemory returned value oa of os om}
       (step : ProgramStep program method pc args frame stack m
-        (.construct callee arguments rest nextFrame temporary updated))
+        (.construct callee arguments rest nextFrame temporary kind updated))
       (lookup : program[callee]? = some child)
       (enter : enterFrame child arguments updated = .ok (childFrame, childMemory))
       (finish : run program fuel callee 0 arguments childFrame [] childMemory = .ok (returned, []))
-      (load : loadValue returned (.address temporary) (localWidth .vector256) = .ok value)
-      (later : RunningVisits program fuel method (pc + 1) args nextFrame (.scalar value :: rest) returned oa of os om) :
+      (load : loadLocal returned (.bytes kind temporary) = .ok value)
+      (later : RunningVisits program fuel method (pc + 1) args nextFrame (value :: rest) returned oa of os om) :
       RunningVisits program (fuel + 1) method pc args frame stack m oa of os om
 
 theorem runningVisits_live_state {program : CIL.Program} {fuel method pc : Nat}
@@ -94,7 +94,7 @@ theorem runningVisits_live_state {program : CIL.Program} {fuel method pc : Nat}
     exact ih (child_resume_live_state _ _ _ _ _ _ _ _ _ _ _ _ _
       (programStep_live_state step state).1 enter finish)
   | constructContinue step lookup enter finish load later ih =>
-    exact ih (constructor_resume_live_state _ _ _ _ _ _ _ _ _ _ _ _ _ _
+    exact ih (constructor_resume_live_state _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
       (programStep_live_state step state).1 enter finish load)
 
 theorem runningVisits_memory_observation {program : CIL.Program} {fuel method pc : Nat}

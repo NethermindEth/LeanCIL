@@ -146,7 +146,7 @@ internal static class MetadataValidation
             state[method] = 1;
             foreach (Instruction instruction in Reachability.Analyze(method, profile))
             {
-                if (instruction.OpCode.Code != Code.Call || instruction.Operand is not MethodReference reference ||
+                if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
                     InstructionTranslation.RuntimeModel(reference, profile) is not null) continue;
                 if (reference is GenericInstanceMethod || reference.ExplicitThis ||
                     reference.CallingConvention != MethodCallingConvention.Default)
@@ -154,6 +154,9 @@ internal static class MetadataValidation
                 MethodDefinition callee = reference.Resolve() ?? throw new InvalidDataException("Unresolved call");
                 if (callee.Module != module || reference.FullName != callee.FullName || reference.HasThis != callee.HasThis)
                     throw new InvalidDataException("External or mismatched managed dependency");
+                if (instruction.OpCode.Code == Code.Newobj &&
+                    (!callee.IsConstructor || !callee.HasThis || !IsAggregate(callee.DeclaringType, module)))
+                    throw new InvalidDataException("Unsupported newobj constructor");
                 Visit(callee);
             }
             state[method] = 2;

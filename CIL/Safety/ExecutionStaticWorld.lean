@@ -34,6 +34,10 @@ theorem step_preserves_static_world (descriptors : List CIL.StaticDescriptor)
           apply storeValue_preserves_static_world
           · apply allocateHome_preserves_static_world _ _ _ _ _ _ hm world; assumption
           · assumption
+      | solve |
+          apply storeLocal_preserves_static_world
+          · apply allocateHome_preserves_static_world _ _ _ _ _ _ hm world; assumption
+          · assumption
       | cases h
       | split at h
 
@@ -93,7 +97,7 @@ theorem run_preserves_static_world (program : CIL.Program) (fuel method pc : Nat
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                   exact ih method (pc + 1) args frame (result ++ rest) memory' final values
                     returnedWF parentOwn returnedWorld h
-          | construct callee arguments rest frame' temporary memory =>
+          | construct callee arguments rest frame' temporary kind memory =>
             cases hc : program[callee]? with
             | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
@@ -115,11 +119,11 @@ theorem run_preserves_static_world (program : CIL.Program) (fuel method pc : Nat
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                   split at h
                   · cases h
-                  · cases hl : loadValue memory' (.address temporary) (localWidth .vector256) <;>
+                  · cases hl : loadLocal memory' (.bytes kind temporary) <;>
                       simp only [hl] at h
                     · cases h
                     · rename_i value
-                      exact ih method (pc + 1) args frame' (.scalar value :: rest) memory' final values
+                      exact ih method (pc + 1) args frame' (value :: rest) memory' final values
                         returnedWF parentOwn returnedWorld h
 
 theorem invoke_preserves_static_world (program : CIL.Program) (fuel method : Nat)

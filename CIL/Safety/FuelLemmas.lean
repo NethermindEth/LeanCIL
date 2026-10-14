@@ -55,7 +55,7 @@ theorem run_mono (program : CIL.Program) (fuel extra method pc : Nat)
                   simp [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind, Except.mapError] at h
                   have parent := ih method (pc + 1) args frame (values ++ rest) final outcome ready h
                   simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more, Bind.bind, Except.bind, Except.mapError] using parent
-          | construct callee arguments rest parentFrame temporary updated =>
+          | construct callee arguments rest parentFrame temporary kind updated =>
             cases hc : program[callee]? with
             | none => simpa [Nat.succ_add, run, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] using h
             | some child =>
@@ -77,12 +77,12 @@ theorem run_mono (program : CIL.Program) (fuel extra method pc : Nat)
                   | cons value tail =>
                     simpa [Nat.succ_add, run, hb, ho, hs, hc, he, hr, more, Bind.bind, Except.bind, Except.mapError] using h
                   | nil =>
-                    cases hv : loadValue final (.address temporary) (localWidth .vector256) with
+                    cases hv : loadLocal final (.bytes kind temporary) with
                     | error fault =>
                       simpa [Nat.succ_add, run, hb, ho, hs, hc, he, hr, more, hv, Bind.bind, Except.bind, Except.mapError] using h
                     | ok value =>
                       simp [run, hb, ho, hs, hc, he, hr, hv, Bind.bind, Except.bind, Except.mapError] at h
-                      have parent := ih method (pc + 1) args parentFrame (.scalar value :: rest) final outcome ready h
+                      have parent := ih method (pc + 1) args parentFrame (value :: rest) final outcome ready h
                       simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more, hv, Bind.bind, Except.bind, Except.mapError] using parent
 #print axioms run_mono
 

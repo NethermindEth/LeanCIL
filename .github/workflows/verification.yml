@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        suite: [core, cli, integer, narrow, primitive, division, checked, conversions, native, arguments, layout, copy, bits, enums, nested, instance]
+        suite: [core, cli, integer, narrow, primitive, division, checked, conversions, native, arguments, layout, copy, bits, enums, nested, instance, constructors]
 
     env:
       DOTNET_NOLOGO: true

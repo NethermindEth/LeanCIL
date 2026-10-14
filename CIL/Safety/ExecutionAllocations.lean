@@ -106,6 +106,10 @@ theorem step_extends_allocations (body : CIL.Method) (operation : CIL.Op) (pc : 
           apply AllocationExtension.trans
           · exact (allocateHome_fresh _ _ _ _ _ (by assumption)).1
           · apply storeValue_extends_allocations; assumption
+      | solve |
+          apply AllocationExtension.trans
+          · exact (allocateHome_fresh _ _ _ _ _ (by assumption)).1
+          · apply storeLocal_extends_allocations; assumption
       | cases h
       | split at h
 
@@ -121,7 +125,7 @@ def Frame.OwnedAbove (frame : Frame) (watermark : Nat) : Prop :=
 
 def FrameAction.OwnedAbove (action : FrameAction) (watermark : Nat) : Prop :=
   match action with
-  | .next _ _ frame _ | .construct _ _ _ frame _ _ => frame.OwnedAbove watermark
+  | .next _ _ frame _ | .construct _ _ _ frame _ _ _ => frame.OwnedAbove watermark
   | .call _ _ _ _ | .returned _ _ => True
 
 theorem step_ownedAbove (body : CIL.Method) (operation : CIL.Op) (pc : Nat)

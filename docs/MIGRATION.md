@@ -40,7 +40,7 @@ Fixed-vector helpers remain separate: `vectorArg`, `vectorLocal`, their address/
 
 ## Extension points
 
-General value constructors, address-taking of by-value aggregate arguments, nested/reference-bearing layouts, exception handling, managed object construction and concurrency need additional semantics and proofs before extraction can accept them. Unsupported features currently fail explicitly.
+Reference-bearing layouts, exception handling, managed object construction and concurrency need additional semantics and proofs before extraction can accept them. Unsupported features currently fail explicitly.
 
 ## Extraction inventory
 
@@ -127,8 +127,14 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 
 `MethodArguments` centralizes CIL argument indexing: struct instance methods receive a managed-reference `this` at index zero, followed by declared parameters. Assigned/addressed parameter homes and native operand analysis use the same indexing for every encoding. Existing Lean argument and call semantics remain unchanged.
 
-Direct `call` instructions may target admitted same-assembly struct instance methods and constructors. Constructor calls require a void result and valid struct storage supplied by the caller. This does not yet admit arbitrary `newobj`; it is separate from calls to constructors on existing storage. Class instances, virtual dispatch and generic instance methods remain unsupported.
+Direct `call` instructions may target admitted same-assembly struct instance methods and constructors. Constructor calls require a void result and valid struct storage supplied by the caller. The separate `newobj` path below constructs a new value rather than invoking a constructor on existing storage. Class instances, virtual dispatch and generic instance methods remain unsupported.
 
 ### Portable scalar helpers
 
 `Intrinsic.scalar` adds a portable runtime family; downstream exhaustive matches over `Intrinsic` must handle it. Its semantics live in `CIL.ScalarIntrinsics`. Availability and required-feature checks classify this family as profile-independent. The extractor accepts selected exact .NET 10 `System.Runtime` and `System.Memory` signatures; it does not admit arbitrary external calls.
+
+### Struct construction
+
+`Op.newAggregate constructor argc size` constructs an admitted struct through the checked interpreter. Extraction follows the constructor dependency and derives the size from validated layout metadata. Consumers with exhaustive instruction matches must handle the new constructor.
+
+`FrameAction.construct` now carries a `LocalKind` between the temporary reference and memory. Constructor continuation proofs use `loadLocal` and return a `CIL.Safety.Value`; update uses of `ConstructComposition` accordingly. Existing vector construction supplies `.vector256`, while generic struct construction supplies `.aggregate size`. The generic lifetime, allocation, frame-ownership and static-world invariants cover both paths.
