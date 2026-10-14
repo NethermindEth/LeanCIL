@@ -126,6 +126,71 @@ theorem makeArgumentHomes_preserves_caller_memory (m result : Memory) (activatio
               ((ih stored final rest other hr).weaken ext.next)
     · cases h
 
+theorem initialize_parameter_preserves_caller_memory (m home result : Memory) (activation : Nat)
+    (kind : CIL.LocalKind) (slot final : LocalSlot) (owned : List AllocationId) (value : Value)
+    (made : makeLocal activation kind .unmodeled m = .ok (slot, owned, home))
+    (stored : storeLocal home slot value = .ok (final, result)) :
+    MemoryBelow m.nextIdentity m result := by
+  unfold makeLocal at made
+  split at made
+  · cases made
+    cases value with
+    | scalar value => cases stored
+    | span r length => cases stored
+    | reference r =>
+      simp only [storeLocal] at stored
+      cases hf : formValue m r <;>
+        simp only [hf, Bind.bind, Except.bind, Pure.pure, Except.pure] at stored
+      · cases stored
+      · cases stored; exact .refl _ _
+  all_goals
+    cases ha : allocateHome m activation (localWidth kind) <;>
+      simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at made
+    · cases made
+    · rename_i allocation
+      obtain ⟨reference, memory⟩ := allocation
+      cases made
+      cases value with
+      | reference r => cases stored
+      | span r length => cases stored
+      | scalar value =>
+        exact (allocateHome_preserves_caller_memory _ _ _ _ _ ha).trans
+          (store_numeric_local_preserves_memory_below _ _ _ _ _ _ _
+            (Nat.le_of_eq (allocateHome_fresh _ _ _ _ _ ha).2.1.symm) stored)
+
+theorem makeParameterHomes_preserves_caller_memory (m result : Memory) (activation : Nat)
+    (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
+    (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
+    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
+    MemoryBelow m.nextIdentity m result := by
+  induction parameters generalizing m homes owned result with
+  | nil => cases h; exact .refl _ _
+  | cons parameter parameters ih =>
+    obtain ⟨index, kind⟩ := parameter
+    simp only [makeParameterHomes] at h
+    split at h
+    · rename_i value argument
+      cases hl : makeLocal activation kind .unmodeled m <;>
+        simp only [hl, Bind.bind, Except.bind] at h
+      · cases h
+      · rename_i made
+        obtain ⟨slot, ids, memory⟩ := made
+        cases hs : storeLocal memory slot value <;> simp only [hs] at h
+        · cases h
+        · rename_i stored
+          obtain ⟨slot', memory'⟩ := stored
+          have first := initialize_parameter_preserves_caller_memory _ _ _ _ _ _ _ _ _ hl hs
+          have ext := (makeLocal_fresh _ _ _ _ _ _ _ hl).1.trans
+            (storeLocal_extends_allocations _ _ _ _ _ hs)
+          cases hr : makeParameterHomes activation parameters args memory' <;>
+            simp only [hr, Pure.pure, Except.pure] at h
+          · cases h
+          · rename_i remaining
+            obtain ⟨rest, other, final⟩ := remaining
+            cases h
+            exact first.trans ((ih memory' final rest other hr).weaken ext.next)
+    · cases h
+
 theorem enterFrame_preserves_caller_memory (body : CIL.Method) (args : List Value)
     (m result : Memory) (frame : Frame)
     (h : enterFrame body args m = .ok (frame, result)) : MemoryBelow m.nextIdentity m result := by
@@ -140,10 +205,18 @@ theorem enterFrame_preserves_caller_memory (body : CIL.Method) (args : List Valu
     · cases h
     · rename_i homes
       obtain ⟨arguments, ids, final⟩ := homes
-      cases h
-      exact (makeLocals_preserves_caller_memory _ _ _ _ _ _ _ hl).trans
+      have first := (makeLocals_preserves_caller_memory _ _ _ _ _ _ _ hl).trans
         ((makeArgumentHomes_preserves_caller_memory _ _ _ _ _ _ _ ha).weaken
           (makeLocals_fresh _ _ _ _ _ _ _ hl).1.next)
+      have ext := (makeLocals_fresh _ _ _ _ _ _ _ hl).1.trans
+        (makeArgumentHomes_fresh _ _ _ _ _ _ _ ha).1
+      cases hp : makeParameterHomes m.nextIdentity body.parameterHomes args final <;>
+        simp only [hp] at h
+      · cases h
+      · rename_i parameters
+        obtain ⟨parameters, ids, final'⟩ := parameters
+        cases h
+        exact first.trans ((makeParameterHomes_preserves_caller_memory _ _ _ _ _ _ _ hp).weaken ext.next)
 
 #print axioms allocateHome_preserves_caller_memory
 #print axioms makeLocal_preserves_caller_memory

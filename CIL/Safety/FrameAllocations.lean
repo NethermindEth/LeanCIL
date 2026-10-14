@@ -147,6 +147,43 @@ theorem makeArgumentHomes_owned (m result : Memory) (activation : Nat) (indices 
             exact (first.preserve next.1 older).append (ih memory' final rest other hr)
     · cases h
 
+theorem makeParameterHomes_owned (m result : Memory) (activation : Nat)
+    (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
+    (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
+    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
+    FrameAllocations result activation owned := by
+  induction parameters generalizing m homes owned result with
+  | nil => cases h; intro id member; cases member
+  | cons parameter parameters ih =>
+    obtain ⟨index, kind⟩ := parameter
+    simp only [makeParameterHomes] at h
+    split at h
+    · rename_i value argument
+      cases hl : makeLocal activation kind .unmodeled m <;>
+        simp only [hl, Bind.bind, Except.bind] at h
+      · cases h
+      · rename_i made
+        obtain ⟨slot, ids, memory⟩ := made
+        have fresh := makeLocal_fresh _ _ _ _ _ _ _ hl
+        have owns := makeLocal_owned _ _ _ _ _ _ _ hl
+        cases hs : storeLocal memory slot value <;> simp only [hs] at h
+        · cases h
+        · rename_i stored
+          obtain ⟨slot', memory'⟩ := stored
+          have ext := storeLocal_extends_allocations _ _ _ _ _ hs
+          have first := owns.preserve ext (fun id member => (fresh.2 id member).2)
+          cases hr : makeParameterHomes activation parameters args memory' <;>
+            simp only [hr, Pure.pure, Except.pure] at h
+          · cases h
+          · rename_i remaining
+            obtain ⟨rest, other, final⟩ := remaining
+            cases h
+            have next := makeParameterHomes_fresh _ _ _ _ _ _ _ hr
+            exact (first.preserve next.1 (fun id member =>
+              Nat.lt_of_lt_of_le (fresh.2 id member).2 ext.next)).append
+                (ih memory' final rest other hr)
+    · cases h
+
 theorem enterFrame_owned (body : CIL.Method) (args : List Value) (m result : Memory) (frame : Frame)
     (h : enterFrame body args m = .ok (frame, result)) :
     FrameAllocations result frame.activation frame.owned := by
@@ -163,10 +200,19 @@ theorem enterFrame_owned (body : CIL.Method) (args : List Value) (m result : Mem
     · cases h
     · rename_i homes
       obtain ⟨arguments, other, final⟩ := homes
-      cases h
       have next := makeArgumentHomes_fresh _ _ _ _ _ _ _ ha
-      exact (owns.preserve next.1 (fun id member => (fresh.2 id member).2)).append
+      have first := (owns.preserve next.1 (fun id member => (fresh.2 id member).2)).append
         (makeArgumentHomes_owned _ _ _ _ _ _ _ ha)
+      have bounds := fresh.trans next
+      cases hp : makeParameterHomes m.nextIdentity body.parameterHomes args final <;>
+        simp only [hp] at h
+      · cases h
+      · rename_i parameters
+        obtain ⟨parameters, ids, final'⟩ := parameters
+        cases h
+        exact (first.preserve (makeParameterHomes_fresh _ _ _ _ _ _ _ hp).1
+          (fun id member => (bounds.2 id member).2)).append
+            (makeParameterHomes_owned _ _ _ _ _ _ _ hp)
 
 #print axioms enterFrame_owned
 end CIL.Safety

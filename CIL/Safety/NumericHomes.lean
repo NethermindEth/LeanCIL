@@ -127,7 +127,7 @@ def numericSpecs (body : CIL.Method) : List NumericLocalSpec :=
 theorem numeric_frame_setup (body : CIL.Method) (specs : List NumericLocalSpec)
     (kinds : body.localKinds = specs.map NumericLocalSpec.kind)
     (initializers : body.locals = specs.map NumericLocalSpec.value)
-    (arguments : body.vectorArgs = []) (memory : Memory) (args : List Value)
+    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
     ∃ frame result,
       enterFrame body args memory = .ok (frame, result) ∧
@@ -137,7 +137,7 @@ theorem numeric_frame_setup (body : CIL.Method) (specs : List NumericLocalSpec)
   simp only [numericKinds, numericInitializers] at made
   let frame : Frame := ⟨memory.nextIdentity, slots, owned, []⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
-    simp only [enterFrame, kinds, initializers, made, arguments, makeArgumentHomes,
+    simp only [enterFrame, kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes, List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl
   exact ⟨frame, result, setup, homes, enterFrame_preserves_caller_memory _ _ _ _ _ setup,

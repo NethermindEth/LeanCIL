@@ -95,3 +95,11 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 - `conv.i`, `ldind.i` and `stind.i` reuse signed widening and checked eight-byte memory operations. No integer-address dereference or pointer storage is introduced.
 - `Op.nativeBinary operation` marks mixed native/int32 arithmetic and comparisons found by forward stack-type analysis. `CIL.NativeEvaluation` widens the int32 operand and preserves the original operation's faults or branch target. Consumers matching instructions exhaustively must handle this constructor; use the checked interpreter for these operations.
 - Stack joins with incompatible tracked types and native/int64 operand mixtures are rejected explicitly. Regenerate extraction artifacts to include native operand annotations.
+
+## Parameter storage
+
+- `Method.parameterHomes` records the parameter index and storage kind for each assigned or addressed parameter. Extraction maps these parameters to additional private slots after the declared locals. Instruction offsets remain unchanged; `ldarg`, `starg` and `ldarga` share the same home.
+- `makeParameterHomes` allocates and initializes these slots on entry. Their allocation IDs join the frame's owned storage and expire on return. Byref parameters use reference roots; taking their address remains unsupported.
+- Frame well-formedness, allocation ownership, caller-memory preservation, reference validity, static-world preservation and setup progress include parameter homes.
+- `FrameSetupFits` now includes parameter type compatibility. `enterFrame_succeeds` additionally requires valid argument values; invocation already checks this. The specialized numeric/word/unknown frame setup lemmas require `body.parameterHomes = []`.
+- Regenerate artifacts to obtain parameter-home metadata and its simplification theorem. Proofs unfolding frame setup may need `makeParameterHomes` in their simplification list.

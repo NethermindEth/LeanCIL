@@ -94,6 +94,38 @@ theorem makeArgumentHomes_preserves_wellFormed (m result : Memory) (activation :
             exact ih memory' final rest other hws hr
     · cases h
 
+theorem makeParameterHomes_preserves_wellFormed (m result : Memory) (activation : Nat)
+    (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
+    (homes : List (Nat × LocalSlot)) (owned : List AllocationId) (hm : m.WellFormed)
+    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
+    result.WellFormed := by
+  induction parameters generalizing m homes owned result with
+  | nil => cases h; exact hm
+  | cons parameter parameters ih =>
+    obtain ⟨index, kind⟩ := parameter
+    simp only [makeParameterHomes] at h
+    split at h
+    · rename_i value argument
+      cases hl : makeLocal activation kind .unmodeled m <;>
+        simp only [hl, Bind.bind, Except.bind] at h
+      · cases h
+      · rename_i made
+        obtain ⟨slot, ids, memory⟩ := made
+        have hw := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ hm hl
+        cases hs : storeLocal memory slot value <;> simp only [hs] at h
+        · cases h
+        · rename_i stored
+          obtain ⟨slot', memory'⟩ := stored
+          have hws := storeLocal_preserves_wellFormed _ _ _ _ _ hw hs
+          cases hr : makeParameterHomes activation parameters args memory' <;>
+            simp only [hr, Pure.pure, Except.pure] at h
+          · cases h
+          · rename_i remaining
+            obtain ⟨rest, other, final⟩ := remaining
+            cases h
+            exact ih memory' final rest other hws hr
+    · cases h
+
 theorem enterFrame_preserves_wellFormed (body : CIL.Method) (args : List Value)
     (m result : Memory) (frame : Frame) (hm : m.WellFormed)
     (h : enterFrame body args m = .ok (frame, result)) : result.WellFormed := by
@@ -109,8 +141,14 @@ theorem enterFrame_preserves_wellFormed (body : CIL.Method) (args : List Value)
     · cases h
     · rename_i homes
       obtain ⟨arguments, other, final⟩ := homes
-      cases h
-      exact makeArgumentHomes_preserves_wellFormed _ _ _ _ _ _ _ hw ha
+      have hv := makeArgumentHomes_preserves_wellFormed _ _ _ _ _ _ _ hw ha
+      cases hp : makeParameterHomes m.nextIdentity body.parameterHomes args final <;>
+        simp only [hp] at h
+      · cases h
+      · rename_i parameters
+        obtain ⟨parameters, ids, final'⟩ := parameters
+        cases h
+        exact makeParameterHomes_preserves_wellFormed _ _ _ _ _ _ _ hv hp
 
 #print axioms makeArgumentHomes_preserves_wellFormed
 #print axioms enterFrame_preserves_wellFormed

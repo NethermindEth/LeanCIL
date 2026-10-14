@@ -15,7 +15,7 @@ theorem correctness (x y : W64) (nonzero : y ≠ 0) :
     rfl
   simp [Extracted.program, Extracted.method0, CIL.Safety.invoke, CIL.Safety.run,
     CIL.Safety.step, checkedValue, numericValue, enterFrame, makeLocals,
-    makeArgumentHomes, leaveFrame, calculation, List.mapM, List.mapM.loop,
+    makeArgumentHomes, makeParameterHomes, leaveFrame, calculation, List.mapM, List.mapM.loop,
     Bind.bind, Except.bind, Except.mapError, Except.map, Pure.pure, Except.pure]
 
 #print axioms correctness

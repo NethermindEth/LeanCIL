@@ -109,6 +109,7 @@ structure Method where
   staticSites : List (Nat × StaticDescriptor) := []
   vectorLocals : List Nat := []
   vectorArgs : List Nat := []
+  parameterHomes : List (Nat × LocalKind) := []
   returnsValue : Bool
   deriving Repr
 

@@ -136,11 +136,26 @@ def argumentHome (frame : Frame) (index : Nat) : ExecutionResult LocalSlot := do
   let some (_, slot) := frame.arguments.find? (fun home => home.1 == index) | .error .invalidState
   return slot
 
+/-- Materialize only parameters that are assigned or addressed. By-value homes
+    are private to the activation; byref parameters retain their reference value. -/
+def makeParameterHomes (activation : Nat) (parameters : List (Nat × CIL.LocalKind))
+    (args : List Value) (m : Memory) :
+    ExecutionResult (List (Nat × LocalSlot) × List AllocationId × Memory) := do
+  match parameters with
+  | [] => return ([], [], m)
+  | (index, kind) :: rest =>
+    let some value := args[index]? | .error .invalidState
+    let (slot, owned, memory) ← makeLocal activation kind .unmodeled m
+    let (slot, memory) ← storeLocal memory slot value
+    let (homes, other, memory) ← makeParameterHomes activation rest args memory
+    return ((index, slot) :: homes, owned ++ other, memory)
+
 def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) : ExecutionResult (Frame × Memory) := do
   let activation := m.nextIdentity
   let (locals, owned, memory) ← makeLocals activation body.localKinds body.locals m
   let (arguments, argumentIds, memory) ← makeArgumentHomes activation body.vectorArgs args memory
-  return ({ activation, locals, owned := owned ++ argumentIds, arguments }, memory)
+  let (parameters, parameterIds, memory) ← makeParameterHomes activation body.parameterHomes args memory
+  return (⟨activation, locals ++ parameters.map Prod.snd, (owned ++ argumentIds) ++ parameterIds, arguments⟩, memory)
 
 def leaveFrame (frame : Frame) (m : Memory) : Memory :=
   frame.owned.foldl expire m

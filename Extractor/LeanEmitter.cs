@@ -64,6 +64,8 @@ internal static class LeanEmitter
             MethodDefinition m = methods[n];
             HashSet<Instruction> reachable = Reachability.Analyze(m, profile);
             var nativeOperands = NativeOperands.Analyze(m, profile);
+            var parameterIndices = ParameterStorage.Analyze(m, profile);
+            var parameters = string.Join(", ", parameterIndices.Select(index => $"({index}, {Kind(m.Parameters[index].ParameterType, m.Module)})"));
             string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module) : ".unmodeled"));
             string kinds = string.Join(", ", m.Body.Variables.Select(v => Kind(v.VariableType, m.Module)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
@@ -73,11 +75,12 @@ internal static class LeanEmitter
                     return $"({s.pc}, {{ identity := {Array.IndexOf(data, f)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)} }})";
                 }));
             lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], staticSites := [{sites}], code := [");
+            lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], parameterHomes := [{parameters}], staticSites := [{sites}], code := [");
             List<string> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands) : ".unsupported \"Unreachable under selected profile\"");
+                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices) : ".unsupported \"Unreachable under selected profile\"");
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
+            lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : method{n}.parameterHomes = [{parameters}] := rfl");
             for (int pc = 0; pc < ops.Count; pc++)
                 lean.AppendLine($"@[cil_code ↓] theorem method{n}_instruction{pc} : method{n}.code[{pc}]? = some ({ops[pc]} : Op) := rfl");
             foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites", "vectorLocals", "vectorArgs" })

@@ -112,8 +112,9 @@ internal static class MetadataValidation
         for (int i = 0; i < ordered.Count; i++)
         {
             var nativeOperands = NativeOperands.Analyze(ordered[i], profile);
+            var parameterHomes = ParameterStorage.Analyze(ordered[i], profile);
             foreach (Instruction instruction in Reachability.Analyze(ordered[i], profile))
-                InstructionTranslation.Translate(instruction, ordered[i], ordered.ToArray(), i, profile, nativeOperands);
+                InstructionTranslation.Translate(instruction, ordered[i], ordered.ToArray(), i, profile, nativeOperands, parameterHomes);
         }
         return ordered.ToArray();
     }

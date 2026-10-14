@@ -71,3 +71,9 @@ The repository script's `--check` checks the report's selected theorem, proof/fr
 ## Negative evidence
 
 The wrong-addition fixture has a finite execution witness plus a uniqueness theorem refuting the requested output at every successful fuel. Out-of-bounds and dangling-reference examples have classified semantic faults plus `invoke_fault_refutes_success`, ruling out success for every fuel. These proofs explain rejection independently of the tactic diagnostic produced when a positive contract fails.
+
+## Argument storage
+
+Assigned or addressed parameters receive private frame-owned storage with the declared physical type. Argument loads, assignment and address-taking share that storage; ordinary by-value calls copy values into the callee's home. A byref parameter is a private reference slot: assigning it changes that slot, while writing through it affects the referenced allocation. Addresses of byref slots are explicitly rejected because nested managed-reference storage is outside the model.
+
+Narrow stores truncate and typed loads extend, following the [starg rules](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.starg). The [ldarga operation](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.ldarga) uses the existing allocation-relative reference and access checks. All owned parameter homes expire at return, and returned references are checked after expiration. The original argument list remains available for untouched parameters; extraction redirects every load of a materialized parameter to its home. This mapping and the validated storage metadata are part of the extractor trust boundary.

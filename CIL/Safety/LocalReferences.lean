@@ -181,6 +181,45 @@ theorem makeArgumentHomes_references_valid (m result : Memory) (activation : Nat
             · exact tail _ member
     · cases h
 
+theorem makeParameterHomes_references_valid (m result : Memory) (activation : Nat)
+    (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
+    (homes : List (Nat × LocalSlot)) (owned : List AllocationId) (hm : m.WellFormed)
+    (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
+    ∀ home ∈ homes, home.2.ReferencesValid result := by
+  induction parameters generalizing m homes owned result with
+  | nil => cases h; simp
+  | cons parameter parameters ih =>
+    obtain ⟨index, kind⟩ := parameter
+    simp only [makeParameterHomes] at h
+    split at h
+    · rename_i value argument
+      cases hl : makeLocal activation kind .unmodeled m <;>
+        simp only [hl, Bind.bind, Except.bind] at h
+      · cases h
+      · rename_i made
+        obtain ⟨slot, ids, memory⟩ := made
+        have hw := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ hm hl
+        have initial := makeLocal_reference_valid _ _ _ _ _ _ _ hm hl
+        cases hs : storeLocal memory slot value <;> simp only [hs] at h
+        · cases h
+        · rename_i stored
+          obtain ⟨slot', memory'⟩ := stored
+          have hws := storeLocal_preserves_wellFormed _ _ _ _ _ hw hs
+          have updated := storeLocal_preserves_reference_validity _ _ _ _ _ hw initial hs
+          cases hr : makeParameterHomes activation parameters args memory' <;>
+            simp only [hr, Pure.pure, Except.pure] at h
+          · cases h
+          · rename_i remaining
+            obtain ⟨rest, other, final⟩ := remaining
+            have retained := updated.preserve hws (makeParameterHomes_fresh _ _ _ _ _ _ _ hr).1
+            have tail := ih memory' final rest other hws hr
+            cases h
+            intro home member
+            rcases List.mem_cons.mp member with rfl | member
+            · exact retained
+            · exact tail _ member
+    · cases h
+
 def Frame.ReferencesValid (m : Memory) (frame : Frame) : Prop :=
   SlotsReferencesValid m frame.locals ∧ ∀ home ∈ frame.arguments, home.2.ReferencesValid m
 
@@ -202,8 +241,21 @@ theorem enterFrame_references_valid (body : CIL.Method) (args : List Value)
       obtain ⟨arguments, other, final⟩ := homes
       have argumentsValid := makeArgumentHomes_references_valid _ _ _ _ _ _ _ hw ha
       have ext := (makeArgumentHomes_fresh _ _ _ _ _ _ _ ha).1
-      cases h
-      exact ⟨fun slot member => (localsValid slot member).preserve hw ext, argumentsValid⟩
+      have hv := makeArgumentHomes_preserves_wellFormed _ _ _ _ _ _ _ hw ha
+      cases hp : makeParameterHomes m.nextIdentity body.parameterHomes args final <;>
+        simp only [hp] at h
+      · cases h
+      · rename_i parameters
+        obtain ⟨parameters, ids, final'⟩ := parameters
+        have parametersValid := makeParameterHomes_references_valid _ _ _ _ _ _ _ hv hp
+        have next := (makeParameterHomes_fresh _ _ _ _ _ _ _ hp).1
+        cases h
+        refine ⟨?_, fun home member => (argumentsValid home member).preserve hv next⟩
+        intro slot member
+        rcases List.mem_append.mp member with old | added
+        · exact ((localsValid slot old).preserve hw ext).preserve hv next
+        · obtain ⟨home, present, rfl⟩ := List.mem_map.mp added
+          exact parametersValid home present
 
 theorem Frame.ReferencesValid.preserve {m result : Memory} {frame : Frame}
     (valid : frame.ReferencesValid m) (hm : m.WellFormed) (ext : AllocationExtension m result) :

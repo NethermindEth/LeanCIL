@@ -284,13 +284,14 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
 | `switch`, `sizeof` | Partial | Forward jump tables and validated integer/explicit aggregate sizes |
 | `newobj` | Partial | Only an explicitly modelled byte-span constructor; no general allocation |
+| Argument storage | Partial | Parameter assignment and addressing, shared aliases, narrow/native storage and frame lifetime checks |
 | Native integers | Partial | `nint`/`nuint` signatures, locals, fields, memory, casts, arithmetic and `sizeof` on validated 64-bit targets |
 | Checked integer conversions | Partial | Integer inputs; signed/unsigned bounds, narrow extension and native-width destinations |
 | Checked integer arithmetic | Partial | Signed/unsigned 32-/64-bit add, subtract and multiply; explicit overflow faults |
 | Integer division and remainder | Partial | Signed/unsigned 32-/64-bit operands; explicit zero-divisor and overflow faults |
 | All other opcodes | Unsupported | Includes `callvirt`, arrays and instruction prefixes |
 
-The initial extraction target is Release, IL-only **.NET 10**, 64-bit little-endian execution. Supported scalar operations include 32/64-bit wrapping arithmetic, bitwise operations, shifts, selected conversions/comparisons, conditional/unconditional branches, local and argument loads/stores, 64-bit indirect access, and acyclic static managed calls. Explicit-layout reference-free aggregates use validated sizes and byte offsets; fields currently admit byte/Boolean, 32-bit integer and 64-bit integer storage. SIMD models cover selected Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, as enumerated in `CIL/SIMD` and `Extractor/RuntimeModels.cs`.
+The initial extraction target is Release, IL-only **.NET 10**, 64-bit little-endian execution. Supported scalar operations include 32/64-bit wrapping arithmetic, bitwise operations, shifts, selected conversions/comparisons, conditional/unconditional branches, local and argument loads/stores, 64-bit indirect access, and acyclic static managed calls. Explicit-layout reference-free aggregates use validated sizes and byte offsets; fields currently admit narrow, 32-bit, 64-bit and native integer storage. SIMD models cover selected Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, as enumerated in `CIL/SIMD` and `Extractor/RuntimeModels.cs`.
 
 The extractor rejects unmodelled instructions, recursive/cyclic reachable control flow, exception handling, instance/virtual dispatch, value constructors for arbitrary layouts, managed object construction, reference-bearing aggregates, general arrays, implicit packing, floating-point arithmetic, arbitrary external calls, static constructors, and unsupported signatures. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
 
