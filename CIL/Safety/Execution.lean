@@ -44,9 +44,22 @@ inductive FrameAction where
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
+def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : ExecutionResult CIL.Value :=
+  match operation with
+  | .scalar (.math kind width signed) =>
+    (CIL.evalIntegerMath kind width signed operands).mapError ExecutionFault.arithmetic
+  | _ => match CIL.evalIntrinsic operation operands with
+    | some value => .ok value
+    | none => .error .invalidState
+
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   match op, stack with
+  | .intrinsic operation argc, _ =>
+    if stack.length < argc then .error .invalidState else
+      let operands ← scalars (stack.take argc).reverse
+      let value ← checkedIntrinsic operation operands
+      return .next (pc + 1) ((← checkedValue m (.scalar value)) :: stack.drop argc) frame m
   | .nativeBinary operation, .scalar y :: .scalar x :: rest =>
     let (target, values) ← (CIL.nativeBinaryValues operation pc x y).mapError ExecutionFault.arithmetic
     let values ← (values.map Value.scalar).mapM (checkedValue m)

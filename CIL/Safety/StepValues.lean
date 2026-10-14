@@ -70,6 +70,7 @@ theorem step_values_valid (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
             | solve | apply allocated_storeLocal_reference_valid; exact hm; assumption; assumption
           · first
             | exact retained
+            | exact retained.drop _
             | exact retained.tail.tail
             | exact retained.tail
             | solve | apply checkedValues_preserved _ _ _ _ hm ext; assumption

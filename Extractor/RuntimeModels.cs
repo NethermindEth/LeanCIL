@@ -93,6 +93,27 @@ internal static class RuntimeModels
         if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default) return null;
         var signature = reference.FullName;
+        if (reference.DeclaringType.Scope.Name == "System.Runtime")
+        foreach (var (type, width, signed) in new[]
+        {
+            ("System.SByte", 8, true), ("System.Byte", 8, false),
+            ("System.Int16", 16, true), ("System.UInt16", 16, false),
+            ("System.Int32", 32, true), ("System.UInt32", 32, false),
+            ("System.Int64", 64, true), ("System.UInt64", 64, false),
+            ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
+        })
+        foreach (var (name, operation, arity) in new[]
+        {
+            ("Min", "min", 2), ("Max", "max", 2), ("Clamp", "clamp", 3),
+            ("Abs", "abs", 1), ("Sign", "sign", 1)
+        })
+        {
+            if (!signed && arity == 1) continue;
+            var result = name == "Sign" ? "System.Int32" : type;
+            var parameters = string.Join(",", Enumerable.Repeat(type, arity));
+            if (signature == $"{result} System.Math::{name}({parameters})")
+                return $".intrinsic (.scalar (.math .{operation} {width} {signed.ToString().ToLowerInvariant()})) {arity}";
+        }
         foreach (var (type, width) in new[] { ("System.UInt32", 32), ("System.UInt64", 64), ("System.UIntPtr", 64) })
         {
             if (reference.DeclaringType.Scope.Name != "System.Runtime") continue;

@@ -1,9 +1,41 @@
 import CIL.Types
+import CIL.IntegerArithmetic
 
 namespace CIL
 
+inductive IntegerMath where
+  | min | max | clamp | abs | sign
+  deriving DecidableEq, Repr
+
+/-- Runtime integer helpers use mathematical comparisons, with explicit exceptional outcomes. -/
+def evalIntegerMath (operation : IntegerMath) (width : Nat) (signed : Bool)
+    (args : List Value) : Except ArithmeticFault Value := do
+  if width != 8 && width != 16 && width != 32 && width != 64 then
+    .error .invalidOperands
+  else
+    let numbers ← args.mapM fun value => match value with
+      | .i32 bits => if width ≤ 32 then
+          .ok (if signed then (bits.setWidth width).toInt else (bits.setWidth width).toNat)
+        else .error .invalidOperands
+      | .i64 bits => if width = 64 then .ok (if signed then bits.toInt else bits.toNat)
+        else .error .invalidOperands
+      | _ => .error .invalidOperands
+    let result ← match operation, numbers with
+      | .min, [a, b] => .ok (min a b)
+      | .max, [a, b] => .ok (max a b)
+      | .clamp, [x, lower, upper] =>
+        if lower > upper then .error .invalidBounds else .ok (min (max x lower) upper)
+      | .abs, [x] => if !signed then .error .invalidOperands else
+        if x = -(2 ^ (width - 1) : Int) then .error .overflow else .ok (Int.ofNat x.natAbs)
+      | .sign, [x] => if !signed then .error .invalidOperands else
+        .ok (if x < 0 then -1 else if x = 0 then 0 else 1)
+      | _, _ => .error .invalidOperands
+    return if operation == .sign || width ≤ 32 then .i32 (BitVec.ofInt 32 result)
+      else .i64 (BitVec.ofInt 64 result)
+
 /-- Portable runtime helpers, independent of hardware feature availability. -/
 inductive ScalarIntrinsic where
+  | math (operation : IntegerMath) (width : Nat) (signed : Bool)
   | rotateLeft (width : Nat) | rotateRight (width : Nat)
   | popCount (width : Nat) | leadingZeroCount (width : Nat) | trailingZeroCount (width : Nat)
   | reverseEndianness (width : Nat) (signed : Bool)
@@ -32,6 +64,7 @@ def reverseBytes (x : BitVec w) : BitVec w :=
     (result <<< 8) ||| ((x >>> (8 * i)) &&& 255)) 0
 
 def evalScalarIntrinsic : ScalarIntrinsic → List Value → Option Value
+  | .math operation width signed, args => (evalIntegerMath operation width signed args).toOption
   | .isPow2 32 signed, [.i32 x] => some (.i32 (if isPowerOfTwo x signed then 1 else 0))
   | .isPow2 64 signed, [.i64 x] => some (.i32 (if isPowerOfTwo x signed then 1 else 0))
   | .log2 32, [.i32 x] => some (.i32 (BitVec.ofNat 32 x.toNat.log2))
