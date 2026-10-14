@@ -26,7 +26,7 @@ internal static class MemoryPrefixes
                 Instruction[] branches => branches,
                 _ => []
             };
-            if (targets.Any(target => target.Previous?.OpCode.Code == Code.Unaligned))
+            if (targets.Any(target => target?.Previous?.OpCode.Code == Code.Unaligned))
                 throw new InvalidDataException("Branch enters the middle of an unaligned instruction");
         }
     }
