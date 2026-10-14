@@ -2,6 +2,7 @@ name: Verification
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -13,10 +14,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Build and verify
+  suites:
+    name: Verify (${{ matrix.suite }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        suite: [core, cli, integer, narrow]
 
     env:
       DOTNET_NOLOGO: true
@@ -46,18 +52,30 @@ jobs:
         run: |
           mkdir -p artifacts
           set -o pipefail
-          dotnet run --file scripts/Test.cs 2>&1 | tee artifacts/verification.log
+          dotnet run --file scripts/Test.cs -- --suite ${{ matrix.suite }} 2>&1 | tee artifacts/verification.log
 
       - name: Upload verification results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: verification-results
+          name: verification-results-${{ matrix.suite }}
           path: |
             artifacts/verification.log
-            artifacts/test-results.json
-            artifacts/*/verified.json
-            artifacts/*/identity.json
-            artifacts/*/Extracted.lean
+            artifacts/test-results-*.json
+            artifacts/**/verified.json
+            artifacts/**/identity.json
+            artifacts/**/Extracted.lean
           if-no-files-found: ignore
           retention-days: 14
+
+  verify:
+    name: Build and verify
+    needs: suites
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every verification suite to pass
+        env:
+          SUITES_RESULT: ${{ needs.suites.result }}
+        run: test "$SUITES_RESULT" = success

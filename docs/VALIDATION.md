@@ -11,6 +11,8 @@ The complete C# regression runner passed **36 check groups**. This includes init
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
+The runner also accepts `--suite core`, `--suite cli`, `--suite integer` and `--suite narrow` after `--`. These partitions cover the same 36 check groups and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments still checks everything and writes `artifacts/test-results.json`.
+
 | Coverage | Result |
 | --- | --- |
 | Library, scalar/SIMD semantics, allocation, permissions, initialization, lifetime and symbolic automation | Passed |
