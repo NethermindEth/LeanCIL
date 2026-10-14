@@ -11,6 +11,7 @@ inductive Value where
   deriving DecidableEq, Repr
 
 inductive ExecutionFault where
+  | arithmetic (fault : CIL.ArithmeticFault)
   | memory (rule : Fault) (reference : ManagedReference) (width : Nat)
   | invalidState
   | unsupported (description : String)

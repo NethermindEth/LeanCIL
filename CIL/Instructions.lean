@@ -39,6 +39,7 @@ inductive LocalKind where
   deriving DecidableEq, Repr
 
 inductive Op where
+  | divide (signed remainder : Bool)
   | nop | neg | gt
   | bgt (target : Nat)
   | ble (target : Nat)

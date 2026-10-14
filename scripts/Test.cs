@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "cli" or "integer" or "narrow" or "primitive"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow|primitive]")
+    ["--suite", "all" or "core" or "cli" or "integer" or "narrow" or "primitive" or "division"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow|primitive|division]")
 };
 
 using var verification = new Program();
@@ -19,7 +19,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["cli"] = ("Tests/CliVerification.cs", "CLI proof verification and incorrect implementation rejection"),
     ["integer"] = ("Tests/IntegerOpcodes.cs", "integer opcode encodings, boundary cases and universal negation proofs"),
     ["narrow"] = ("Tests/NarrowIntegers.cs", "narrow integer conversions, storage, method boundaries and rejection proofs"),
-    ["primitive"] = ("Tests/PrimitiveOperations.cs", "primitive memory, switch, sizeof and rejection proofs")
+    ["primitive"] = ("Tests/PrimitiveOperations.cs", "primitive memory, switch, sizeof and rejection proofs"),
+    ["division"] = ("Tests/Division.cs", "integer division and remainder runtime comparisons and proofs")
 };
 
 void Passed(string name)
@@ -169,7 +170,7 @@ Passed("incorrect addition rejected against unchanged universal contract");
 
 // Unsupported instructions and malformed metadata must fail during extraction.
 Rejected(Extract("extract", assembly, identity, "System.Int32 Examples.Arithmetic::Unsupported(System.Int32)", At("artifacts/Unsupported")), "Unsupported instruction");
-Passed("unsupported division rejected");
+Passed("unsupported array allocation rejected");
 
 Directory.CreateDirectory(At("artifacts/mutations"));
 

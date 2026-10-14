@@ -67,5 +67,5 @@ internal static class Arithmetic
         ulong local = 1;
         return ref Unsafe.AsRef(in local);
     }
-    public static int Unsupported(int x) => x / 2;
+    public static int Unsupported(int x) => new int[x].Length;
 }

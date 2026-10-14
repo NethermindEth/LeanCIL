@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 110 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 114 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -24,6 +24,7 @@ Ranges below include every numbered form between the endpoints. `.s` denotes the
 | `ldloca`, `ldloca.s` | Partial | Form a checked reference to byte-backed local storage. Taking the address of a managed-reference local is explicitly unsupported. |
 | `neg` | Partial | Wrapping negation of an `i32` or `i64`; the signed minimum maps to itself. No floating-point or reference operands. |
 | `add`, `sub`, `mul` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values. No floating-point, mixed-width or reference/pointer arithmetic through these opcodes. |
+| `div`, `div.un`, `rem`, `rem.un` | Partial | Same-width `i32`/`i64` quotient or remainder. Signed quotient truncates toward zero; signed remainder follows the dividend sign. Zero divisors fault. Signed minimum with divisor -1 faults for both signed operations under the admitted runtime assumption. No floating-point, mixed-width operands or exception handlers. |
 | `and`, `or`, `xor`, `not` | Partial | Bitwise operations on `i32`/`i64`; binary operands must have the same width. |
 | `shl`, `shr`, `shr.un` | Partial | Shift an `i32` or `i64` by an `i32` count, masked modulo 32 or 64. `shr` is arithmetic; `shr.un` is logical. An `i64` count is not implemented. |
 | `conv.i4`, `conv.u4` | Partial | `i64` to low 32 bits; `i32` identity. No floating-point or reference conversions. |
@@ -60,7 +61,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | --- | --- |
 | Debugger and prefixes | `break`, `volatile.`, `unaligned.`, `readonly.`, `tail.`, `constrained.` |
 | Argument mutation/addressing | `starg`, `starg.s`, `ldarga`, `ldarga.s` |
-| Arithmetic | `div`, `div.un`, `rem`, `rem.un`, `add.ovf`, `sub.ovf`, `mul.ovf` and their `.un` forms |
+| Arithmetic | `add.ovf`, `sub.ovf`, `mul.ovf` and their `.un` forms |
 | Other conversions | `conv.i`, floating-point conversions and all `conv.ovf.*` forms |
 | Other indirect/block memory | `ldind.i`, `ldind.ref`, floating-point `ldind.*`, `stind.i`, `stind.ref`, floating-point `stind.*`, `cpobj`, `cpblk`, `initblk`, `localloc` |
 | Objects, arrays and metadata | `ldnull`, `ldstr`, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` |
@@ -68,7 +69,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | Dispatch and exceptions | `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw`, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
 
-Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable division or exception handling is still rejected.
+Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable array allocation or exception handling is still rejected.
 
 ## Runtime calls and SIMD
 
