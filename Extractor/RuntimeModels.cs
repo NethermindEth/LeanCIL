@@ -9,7 +9,7 @@ internal static class RuntimeModels
     internal static bool ExactScope(IMetadataScope scope, string name) => scope is AssemblyNameReference assembly &&
         assembly.Name == name && assembly.Version == new Version(10, 0, 0, 0) &&
         string.IsNullOrEmpty(assembly.Culture) && Convert.ToHexString(assembly.PublicKeyToken).ToLowerInvariant() ==
-            (name == "System.Runtime.Intrinsics" ? "cc7b13ffcd2ddd51" : "b03f5f7f11d50a3a");
+            (name is "System.Runtime.Intrinsics" or "System.Memory" ? "cc7b13ffcd2ddd51" : "b03f5f7f11d50a3a");
 
     internal static bool SupportedType(TypeReference type)
     {
@@ -50,8 +50,9 @@ internal static class RuntimeModels
             "System.UInt32" or "System.Int32" or "System.Byte" or "System.Boolean" or "System.Double" or "System.Single" or
             "System.IntPtr" or "System.UIntPtr" or "System.ReadOnlySpan`1" or
             "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1";
-        bool valid = type.IsValueType == expectedValueType && (ExactScope(type.Scope, type.FullName.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal)
-                ? "System.Runtime.Intrinsics" : "System.Runtime")) &&
+        var expectedScope = type.FullName == "System.Buffers.Binary.BinaryPrimitives" ? "System.Memory" :
+            type.FullName.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal) ? "System.Runtime.Intrinsics" : "System.Runtime";
+        bool valid = type.IsValueType == expectedValueType && ExactScope(type.Scope, expectedScope) &&
             (type.FullName != "System.Void" || type.MetadataType == MetadataType.Void);
         if (!valid) throw new InvalidDataException($"Unsupported type identity: {type.FullName} [{type.Scope}]");
     }
@@ -72,16 +73,44 @@ internal static class RuntimeModels
             (reference.HasThis && reference.Name != ".ctor") ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
-        if (scope is "System.Runtime" or "System.Runtime.Intrinsics" && !ExactScope(reference.DeclaringType.Scope, scope))
+        if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" && !ExactScope(reference.DeclaringType.Scope, scope))
             throw new InvalidDataException($"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
         string? op = scope switch
         {
-            "System.Runtime" => Runtime(reference.FullName),
+            "System.Runtime" => Scalar(reference) ?? Runtime(reference.FullName),
+            "System.Memory" => Scalar(reference),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
         if (op is not null) ValidateSignature(reference);
         return op;
+    }
+
+    // Match exact non-generic static signatures, including the defining assembly.
+    private static string? Scalar(MethodReference reference)
+    {
+        if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
+            reference.CallingConvention != MethodCallingConvention.Default) return null;
+        var signature = reference.FullName;
+        foreach (var (type, width) in new[] { ("System.UInt32", 32), ("System.UInt64", 64) })
+        {
+            if (reference.DeclaringType.Scope.Name != "System.Runtime") continue;
+            foreach (var (name, operation) in new[] { ("RotateLeft", "rotateLeft"), ("RotateRight", "rotateRight") })
+                if (signature == $"{type} System.Numerics.BitOperations::{name}({type},System.Int32)")
+                    return $".intrinsic (.scalar (.{operation} {width})) 2";
+            foreach (var (name, operation) in new[] { ("PopCount", "popCount"), ("LeadingZeroCount", "leadingZeroCount"), ("TrailingZeroCount", "trailingZeroCount") })
+                if (signature == $"System.Int32 System.Numerics.BitOperations::{name}({type})")
+                    return $".intrinsic (.scalar (.{operation} {width})) 1";
+        }
+        if (reference.DeclaringType.Scope.Name != "System.Memory") return null;
+        foreach (var width in new[] { 16, 32, 64 })
+        foreach (var signed in new[] { false, true })
+        {
+            var type = $"System.{(signed ? "Int" : "UInt")}{width}";
+            if (signature == $"{type} System.Buffers.Binary.BinaryPrimitives::ReverseEndianness({type})")
+                return $".intrinsic (.scalar (.reverseEndianness {width} {signed.ToString().ToLowerInvariant()})) 1";
+        }
+        return null;
     }
 
     private static string? Runtime(string signature) => signature switch

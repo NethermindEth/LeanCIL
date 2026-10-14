@@ -91,3 +91,9 @@ This models managed storage, not interop marshalling. In particular Boolean and 
 Runtime comparisons exercise exact `cpobj` instructions emitted with Cecil, including primitive values, explicit/sequential structs and the admitted vectors. C# assignment commonly emits `ldobj`/`stobj`; the fixtures deliberately test `cpobj` itself. Runtime agreement for the supported type/layout profile, including padding, remains an assumption beyond the Lean operational semantics; these tests are evidence, not a proof of the JIT.
 
 References carry allocation identity and offset, not nominal CLR type tags. Relating a `cpobj` proof to runtime execution assumes that both references designate storage compatible with its validated type token, as required by the [opcode contract](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.cpobj?view=net-10.0). Byte-level access safety alone does not establish that nominal type compatibility.
+
+## Portable bit helpers
+
+`CIL.ScalarIntrinsics` defines rotations using Lean bit-vector rotations, population and zero counts by enumerating the value's bits, and endian reversal by reversing bytes. `Intrinsic.scalar` reuses the existing intrinsic dispatch without hardware requirements; profile-equivalence proofs cover this new family. The finite 32-bit count representation gives the .NET rotation count modulo 32/64, including negative `int` values.
+
+The trust boundary includes correspondence between these definitions and the selected .NET 10 `BitOperations` and `BinaryPrimitives` overloads. Exact signature/scope validation and boundary/runtime comparison tests support that correspondence; they do not verify CoreCLR or a JIT. See the [BitOperations API](https://learn.microsoft.com/en-us/dotnet/api/system.numerics.bitoperations?view=net-10.0) and [ReverseEndianness API](https://learn.microsoft.com/en-us/dotnet/api/system.buffers.binary.binaryprimitives.reverseendianness?view=net-10.0).

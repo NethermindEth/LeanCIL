@@ -229,6 +229,22 @@ theorem copy_partial_overlap :
     (instruction (.copyObject 8) [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 4⟩)] copyMemory).map Prod.snd =
       .error (.unsupported "Partially overlapping typed copy") := rfl
 
+theorem scalar_helper_wrong_width :
+    CIL.evalScalarIntrinsic (.rotateLeft 64) [.i32 1, .i32 2] = none := rfl
+
+theorem scalar_helper_wrong_arity :
+    CIL.evalScalarIntrinsic (.popCount 64) [.i64 1, .i64 2] = none := rfl
+
+theorem scalar_helper_wrong_type :
+    CIL.evalScalarIntrinsic (.reverseEndianness 32 false) [.nullRef] = none := rfl
+
+theorem scalar_helper_unsupported_width :
+    CIL.evalScalarIntrinsic (.reverseEndianness 24 false) [.i32 1] = none := rfl
+
+theorem scalar_helper_zero_counts :
+    CIL.evalScalarIntrinsic (.leadingZeroCount 64) [.i64 0] = some (.i32 64) ∧
+    CIL.evalScalarIntrinsic (.trailingZeroCount 32) [.i32 0] = some (.i32 32) := ⟨rfl, rfl⟩
+
 end Tests
 
 namespace Tests

@@ -19,6 +19,7 @@ def Program.ProfileAgreement (program : Program) (p q : FeatureProfile) : Prop :
 /-- A syntactic check for operations whose execution does not observe a profile. -/
 def Op.profileIndependentCheck : Op → Bool
   | .feature _ => false
+  | .intrinsic (.scalar _) _ => true
   | .intrinsic (.vector _) _ => true
   | .intrinsic _ _ => false
   | _ => true
@@ -149,6 +150,7 @@ theorem invoke_uniform_reprofile_eq (program : Program) (p q : FeatureProfile)
   exact he
 
 def Intrinsic.requiredFeatures : Intrinsic → List Feature
+  | .scalar _ => []
   | .vector _ => []
   | .advSimd _ => [.advSimd]
   | .sse .shiftLeftBytes => [.sse2]

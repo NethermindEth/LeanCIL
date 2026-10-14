@@ -114,3 +114,7 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 ### Typed object copies
 
 `CIL.Op.copyObject size` is a new instruction constructor. Downstream exhaustive matches must handle it; checked execution uses existing allocation-aware reads and writes. `CIL.Safety.copyObject_writes_snapshot` provides a generic byte-copy postcondition. Extraction computes the width from validated type metadata; no application-specific copy summaries are required.
+
+### Portable scalar helpers
+
+`Intrinsic.scalar` adds a portable runtime family; downstream exhaustive matches over `Intrinsic` must handle it. Its semantics live in `CIL.ScalarIntrinsics`. Availability and required-feature checks classify this family as profile-independent. The extractor accepts selected exact .NET 10 `System.Runtime` and `System.Memory` signatures; it does not admit arbitrary external calls.
