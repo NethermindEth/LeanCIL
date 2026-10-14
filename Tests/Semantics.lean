@@ -165,6 +165,19 @@ namespace Tests
 theorem division_mixed_widths_rejected :
     CIL.divideValues false false (.i32 6) (.i64 2) = .error .invalidOperands := rfl
 
+theorem checked_mixed_widths_rejected :
+    CIL.checkedValues .add false (.i32 6) (.i64 2) = .error .invalidOperands := rfl
+
+theorem checked_reference_rejected :
+    CIL.checkedValues .mul true .nullRef (.i32 2) = .error .invalidOperands := rfl
+
+theorem checked_unsigned_subtraction_underflow :
+    CIL.checkedValues .sub false (.i32 0) (.i32 1) = .error .overflow := rfl
+
+theorem checked_signed_multiplication_overflow :
+    CIL.checkedValues .mul true (.i64 9223372036854775808) (.i64 18446744073709551615) =
+      .error .overflow := rfl
+
 theorem division_reference_rejected :
     CIL.divideValues true false .nullRef (.i32 2) = .error .invalidOperands := rfl
 

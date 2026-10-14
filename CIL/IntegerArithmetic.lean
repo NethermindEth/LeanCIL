@@ -7,6 +7,27 @@ inductive ArithmeticFault where
   | invalidOperands | divideByZero | overflow
   deriving DecidableEq, Repr
 
+inductive CheckedBinaryKind where
+  | add | sub | mul
+  deriving DecidableEq, Repr
+
+def checkedBits (kind : CheckedBinaryKind) (signed : Bool) (x y : BitVec width) :
+    Except ArithmeticFault (BitVec width) :=
+  let a : Int := if signed then x.toInt else x.toNat
+  let b : Int := if signed then y.toInt else y.toNat
+  let result := match kind with | .add => a + b | .sub => a - b | .mul => a * b
+  let bound : Int := if signed then 2 ^ (width - 1) else 2 ^ width
+  let lower := if signed then -bound else 0
+  if lower ≤ result ∧ result < bound then .ok (BitVec.ofInt width result)
+  else .error .overflow
+
+def checkedValues (kind : CheckedBinaryKind) (signed : Bool) (x y : Value) :
+    Except ArithmeticFault Value :=
+  match x, y with
+  | .i32 x, .i32 y => (checkedBits kind signed x y).map Value.i32
+  | .i64 x, .i64 y => (checkedBits kind signed x y).map Value.i64
+  | _, _ => .error .invalidOperands
+
 /-- Integer division truncates toward zero. The signed minimum / -1 pair is
     rejected for quotient and remainder, matching the admitted .NET runtime. -/
 def divideBits (signed remainder : Bool) (x y : BitVec width) :
