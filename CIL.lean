@@ -104,6 +104,7 @@ import CIL.Safety.WordRoots
 import CIL.Safety.WordSnapshotPreservation
 import CIL.Safety.WordSnapshots
 import CIL.Safety.WriteEffects
+import CIL.Safety.TypedCopy
 import CIL.Semantics
 import CIL.SymbolicExecution
 import CIL.Types

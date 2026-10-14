@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout]")
+    ["--suite", "all" or "core" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy]")
 };
 
 using var verification = new Program();
@@ -24,6 +24,7 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["checked"] = ("Tests/CheckedArithmetic.cs", "checked integer arithmetic runtime comparisons and proofs"),
     ["conversions"] = ("Tests/CheckedConversions.cs", "checked integer conversions runtime comparisons and proofs"),
     ["layout"] = ("Tests/SequentialLayout.cs", "sequential struct layout, runtime offsets and metadata validation"),
+    ["copy"] = ("Tests/TypedCopy.cs", "typed copies, aliases, byte snapshots and rejection proofs"),
     ["arguments"] = ("Tests/Arguments.cs", "argument assignment, addressing, aliases and lifetime proofs"),
     ["native"] = ("Tests/NativeIntegers.cs", "native integer storage, arithmetic and runtime comparisons")
 };

@@ -50,6 +50,7 @@ inductive Op where
   | ble (target : Nat)
   | bleu (target : Nat)
   | loadAggregate (size : Nat)
+  | copyObject (size : Nat)
   | storeAggregate (size : Nat)
   | initAggregate (size : Nat)
   | loadScalar (width : Nat) (signed : Bool := false)
