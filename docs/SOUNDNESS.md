@@ -26,7 +26,7 @@ Successful checked execution excludes the model's faults on the executed path. L
 
 The checked interpreter represents general reference-free aggregates as byte lists. A local's physical size is a bounded `LocalKind.aggregate` size; initialization allocates that exact size. `localNumber` rejects snapshots of the wrong length. Generic load/store/init operations carry their byte size, and generic field instructions carry validated byte offsets and scalar widths. They use the same access and lifetime machinery as scalar/vector memory.
 
-The extractor admits explicit layouts with a positive declared size and sequential layouts computed from validated primitive fields, packing and declared size. Both are reference-free and limited to 65,536 bytes per aggregate; sequential padding follows the runtime rules below. Overlapping explicit fields remain possible and follow the byte-memory semantics. Generated `AggregateLayout.Valid` theorems check the emitted layout bounds in Lean. Metadata-to-Lean correspondence remains part of the extractor trust boundary.
+The extractor admits explicit layouts with a positive declared size and sequential layouts computed from validated primitive or enum fields, packing and declared size. Both are reference-free and limited to 65,536 bytes per aggregate; sequential padding follows the runtime rules below. Overlapping explicit fields remain possible and follow the byte-memory semantics. Generated `AggregateLayout.Valid` theorems check the emitted layout bounds in Lean. Metadata-to-Lean correspondence remains part of the extractor trust boundary.
 
 Fixed 256-bit snapshot-home operations use **vector** names to distinguish them from general aggregates. Lane operations are explicitly vector-lane operations. They do not stand for arbitrary struct layouts. The pure interpreter intentionally returns failure for the new general aggregate operations; use the checked interpreter for those operations. Arbitrary value constructors and nested/reference-bearing field layouts are not yet exposed by extraction.
 
@@ -80,7 +80,7 @@ Narrow stores truncate and typed loads extend, following the [starg rules](https
 
 ## Sequential struct layout
 
-Sequential layouts are computed for same-assembly, non-generic value types containing admitted primitive integer fields. Field order, packing, declared size and the validated 64-bit native width determine offsets and size. Default packing is eight; explicit packing is restricted to the supported powers of two. Inferred sizes include trailing alignment padding, explicit sizes cannot truncate fields, and empty structs occupy at least one byte. Inline arrays, auto layout, nested value-type fields, reference fields and floating-point fields are rejected.
+Sequential layouts are computed for same-assembly, non-generic value types containing admitted primitive integer or integer-backed enum fields. Field order, packing, declared size and the validated 64-bit native width determine offsets and size. Default packing is eight; explicit packing is restricted to the supported powers of two. Inferred sizes include trailing alignment padding, explicit sizes cannot truncate fields, and empty structs occupy at least one byte. Inline arrays, auto layout, nested value-type fields, reference fields and floating-point fields are rejected.
 
 This models managed storage, not interop marshalling. In particular Boolean and Char retain their managed widths. Runtime correspondence follows the admitted [.NET 10 sequential layout implementation](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/classlayoutinfo.cpp), with independent runtime size/offset probes and execution comparisons. Extracted layouts still carry kernel-checked bounds theorems; those theorems validate the emitted layout, not the CLR implementation itself.
 
@@ -91,6 +91,12 @@ This models managed storage, not interop marshalling. In particular Boolean and 
 Runtime comparisons exercise exact `cpobj` instructions emitted with Cecil, including primitive values, explicit/sequential structs and the admitted vectors. C# assignment commonly emits `ldobj`/`stobj`; the fixtures deliberately test `cpobj` itself. Runtime agreement for the supported type/layout profile, including padding, remains an assumption beyond the Lean operational semantics; these tests are evidence, not a proof of the JIT.
 
 References carry allocation identity and offset, not nominal CLR type tags. Relating a `cpobj` proof to runtime execution assumes that both references designate storage compatible with its validated type token, as required by the [opcode contract](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.cpobj?view=net-10.0). Byte-level access safety alone does not establish that nominal type compatibility.
+
+## Integer enums
+
+Same-assembly, non-generic enums use the storage of their validated underlying integer type: `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long` or `ulong`. The extractor validates the `System.Enum` base identity and the single `value__` instance field before normalizing types for execution. Method signatures retain enum names for artifact identity. Narrow enum loads and returns use the same truncation and sign/zero extension as their underlying integers; enum fields use that integer's size and alignment.
+
+All underlying bit patterns are admitted, including values without a named constant and combinations of flags. This follows the unboxed enum execution model in [ECMA-335, partitions I.8.5.2 and I.12.1](https://ecma-international.org/wp-content/uploads/ECMA-335_6th_edition_june_2012.pdf). This does not add boxing, `System.Enum` instance methods, reflection or external enum dependencies. Metadata validation and its translation to existing Lean integer operations remain part of the extractor trust boundary.
 
 ## Portable bit helpers
 

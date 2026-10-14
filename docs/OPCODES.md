@@ -14,6 +14,8 @@ Ranges below include every numbered form between the endpoints. `.s` denotes the
 
 `i32` and `i64` refer to the model's 32- and 64-bit integer stack values; managed references are separate values, not integer addresses.
 
+Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long` or `ulong` use their validated underlying integer representation throughout these operations, including fields, argument homes and typed memory instructions. Narrow enum loads sign- or zero-extend exactly like the underlying type. Unnamed values are supported; boxing, `System.Enum` methods and external enum dependencies are not.
+
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
 | `ldc.i4`, `ldc.i4.s`, `ldc.i4.m1`, `ldc.i4.0`–`ldc.i4.8` | Complete within the admitted model | Push the encoded 32-bit integer constant. |

@@ -6,9 +6,9 @@ namespace Nethermind.LeanCIL;
 internal static class MetadataValidation
 {
     internal static bool IsAggregate(TypeReference type, ModuleDefinition module) =>
-        type is not TypeSpecification && type.Scope == module && type.IsValueType;
+        type is not TypeSpecification && type.Scope == module && type.IsValueType && !EnumTypes.IsEnum(type);
 
-    internal static int PrimitiveWidth(TypeReference type) => type.FullName switch
+    internal static int PrimitiveWidth(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
         "System.Byte" or "System.SByte" or "System.Boolean" => 1,
         "System.Int16" or "System.UInt16" or "System.Char" => 2,
@@ -48,7 +48,7 @@ internal static class MetadataValidation
         var alignment = 1;
         foreach (var field in type.Fields.Where(f => !f.IsStatic))
         {
-            if (field.FieldType is TypeSpecification || field.FieldType.Scope == module)
+            if (field.FieldType is TypeSpecification || (field.FieldType.Scope == module && !EnumTypes.IsEnum(field.FieldType)))
                 throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
             var width = PrimitiveWidth(field.FieldType);
             RuntimeModels.ValidateTypeIdentity(field.FieldType, module);
@@ -80,6 +80,7 @@ internal static class MetadataValidation
             Type(byRef.ElementType, module);
             return;
         }
+        type = EnumTypes.Storage(type);
         if (IsAggregate(type, module)) { Layout(type, module); return; }
         if (!(returns && type.FullName == "System.Void") && type.FullName is not
             ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or

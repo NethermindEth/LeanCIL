@@ -9,7 +9,7 @@ internal static class NativeOperands
 {
     enum Kind { Other, Word32, Word64, Native }
 
-    static Kind Type(TypeReference type) => type.MetadataType switch
+    static Kind Type(TypeReference type) => EnumTypes.Storage(type).MetadataType switch
     {
         MetadataType.IntPtr or MetadataType.UIntPtr => Kind.Native,
         MetadataType.Int64 or MetadataType.UInt64 => Kind.Word64,
