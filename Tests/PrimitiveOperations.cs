@@ -85,6 +85,7 @@ TypeReference Primitive(ModuleDefinition module, string name) => name switch
     "Char" => module.TypeSystem.Char, "Boolean" => module.TypeSystem.Boolean,
     "Int32" => module.TypeSystem.Int32, "UInt32" => module.TypeSystem.UInt32,
     "Int64" => module.TypeSystem.Int64, "UInt64" => module.TypeSystem.UInt64,
+    "IntPtr" => module.TypeSystem.IntPtr, "UIntPtr" => module.TypeSystem.UIntPtr,
     _ => throw new ArgumentException("Unknown primitive: " + name)
 };
 
@@ -92,7 +93,8 @@ var types = new (string Name, int Width, bool Signed)[]
 {
     ("SByte", 1, true), ("Byte", 1, false), ("Int16", 2, true),
     ("UInt16", 2, false), ("Char", 2, false), ("Boolean", 1, false),
-    ("Int32", 4, false), ("UInt32", 4, false), ("Int64", 8, false), ("UInt64", 8, false)
+    ("Int32", 4, false), ("UInt32", 4, false), ("Int64", 8, false), ("UInt64", 8, false),
+    ("IntPtr", 8, true), ("UIntPtr", 8, false)
 };
 
 // Typed stores/loads and zero initialization cover all admitted integer tokens.
@@ -136,7 +138,7 @@ foreach (var (load, store, width, signed) in new[]
     (OpCodes.Ldind_I1, OpCodes.Stind_I1, 1, true), (OpCodes.Ldind_U1, OpCodes.Stind_I1, 1, false),
     (OpCodes.Ldind_I2, OpCodes.Stind_I2, 2, true), (OpCodes.Ldind_U2, OpCodes.Stind_I2, 2, false),
     (OpCodes.Ldind_I4, OpCodes.Stind_I4, 4, false), (OpCodes.Ldind_U4, OpCodes.Stind_I4, 4, false),
-    (OpCodes.Ldind_I8, OpCodes.Stind_I8, 8, false)
+    (OpCodes.Ldind_I8, OpCodes.Stind_I8, 8, false), (OpCodes.Ldind_I, OpCodes.Stind_I, 8, false)
 })
 {
     var name = load.Name.Replace('.', '_');
@@ -187,8 +189,8 @@ var sizeDll = Fixture("Sizes", (module, method) =>
 Prove(sizeDll, FixtureSelector(sizeDll), "Sizes", types.Select(t => t.Width).Append(12).Append(0)
     .Select((width, index) => Returns($".scalar (.i32 {index})", width)));
 
-// Native widths and unsupported layouts must fail, never become guessed constants.
-foreach (var operand in new[] { "nint", "nuint", "pointer", "byref", "object", "string", "array", "double",
+// Unsupported type tokens and layouts must fail, never become guessed constants.
+foreach (var operand in new[] { "pointer", "byref", "object", "string", "array", "double",
     "sequential", "auto", "reference-field", "generic", "generic-instance" })
 {
     var name = "Reject-sizeof-" + operand;
@@ -206,8 +208,6 @@ foreach (var operand in new[] { "nint", "nuint", "pointer", "byref", "object", "
 
         TypeReference type = operand switch
         {
-            "nint" => module.TypeSystem.IntPtr,
-            "nuint" => module.TypeSystem.UIntPtr,
             "pointer" => new PointerType(module.TypeSystem.Int32),
             "byref" => new ByReferenceType(module.TypeSystem.Int32),
             "object" => module.TypeSystem.Object,

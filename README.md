@@ -284,6 +284,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
 | `switch`, `sizeof` | Partial | Forward jump tables and validated integer/explicit aggregate sizes |
 | `newobj` | Partial | Only an explicitly modelled byte-span constructor; no general allocation |
+| Native integers | Partial | `nint`/`nuint` signatures, locals, fields, memory, casts, arithmetic and `sizeof` on validated 64-bit targets |
 | Checked integer conversions | Partial | Integer inputs; signed/unsigned bounds, narrow extension and native-width destinations |
 | Checked integer arithmetic | Partial | Signed/unsigned 32-/64-bit add, subtract and multiply; explicit overflow faults |
 | Integer division and remainder | Partial | Signed/unsigned 32-/64-bit operands; explicit zero-divisor and overflow faults |

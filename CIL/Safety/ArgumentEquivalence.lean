@@ -9,6 +9,9 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Op) (pc : Nat)
     step body op pc args frame stack memory = step body op pc other frame stack memory := by
   cases op <;> try rfl
   case arg index narrow => cases narrow <;> simp only [step, agreement index _ rfl]
+  case nativeBinary operation =>
+    simp only [step]
+    repeat' first | rfl | contradiction | split
   case divide signed remainder =>
     simp only [step]
     repeat' first | rfl | contradiction | split

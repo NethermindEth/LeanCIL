@@ -40,6 +40,8 @@ inductive LocalKind where
   deriving DecidableEq, Repr
 
 inductive Op where
+  /-- Widen the int32 operand of a metadata-validated mixed native operation. -/
+  | nativeBinary (operation : Op)
   | divide (signed remainder : Bool)
   | checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool)
   | checkedConvert (width : Nat) (signed unsignedInput : Bool)

@@ -13,7 +13,8 @@ internal static class MetadataValidation
         "System.Byte" or "System.SByte" or "System.Boolean" => 1,
         "System.Int16" or "System.UInt16" or "System.Char" => 2,
         "System.Int32" or "System.UInt32" => 4,
-        "System.Int64" or "System.UInt64" => 8,
+        // Every admitted profile is validated as 64-bit before type/layout validation.
+        "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" => 8,
         _ => throw new InvalidDataException($"Unsupported field type: {type.FullName}")
     };
 
@@ -49,7 +50,7 @@ internal static class MetadataValidation
         }
         if (IsAggregate(type, module)) { Layout(type, module); return; }
         if (!(returns && type.FullName == "System.Void") && type.FullName is not
-            ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.Byte" or "System.Boolean" or
+            ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char") &&
             !(type is GenericInstanceType && type.FullName.StartsWith("System.Runtime.Intrinsics.Vector", StringComparison.Ordinal) && RuntimeModels.SupportedType(type)))
             throw new InvalidDataException($"Unsupported type: {type.FullName}");
@@ -109,8 +110,11 @@ internal static class MetadataValidation
         ordered.Reverse();
         // Validate translation before producing any artifact.
         for (int i = 0; i < ordered.Count; i++)
+        {
+            var nativeOperands = NativeOperands.Analyze(ordered[i], profile);
             foreach (Instruction instruction in Reachability.Analyze(ordered[i], profile))
-                InstructionTranslation.Translate(instruction, ordered[i], ordered.ToArray(), i, profile);
+                InstructionTranslation.Translate(instruction, ordered[i], ordered.ToArray(), i, profile, nativeOperands);
+        }
         return ordered.ToArray();
     }
 }

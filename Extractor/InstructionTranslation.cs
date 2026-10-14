@@ -11,7 +11,15 @@ internal static class InstructionTranslation
             return ".feature " + FeatureProfile.LeanFeature(feature);
         return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);
     }
-    internal static string Translate(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex, FeatureProfile? profile = null)
+    internal static string Translate(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
+        FeatureProfile? profile = null, HashSet<Instruction>? nativeOperands = null)
+    {
+        profile ??= FeatureProfile.Scalar;
+        var translated = TranslateCore(i, m, methods, methodIndex, profile);
+        return (nativeOperands ?? NativeOperands.Analyze(m, profile)).Contains(i) ? $".nativeBinary ({translated})" : translated;
+    }
+
+    static string TranslateCore(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex, FeatureProfile profile)
     {
         profile ??= FeatureProfile.Scalar;
         int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);
@@ -52,6 +60,8 @@ internal static class InstructionTranslation
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
+            Code.Conv_I => ".convI8",
+            Code.Ldind_I => ".load64", Code.Stind_I => ".store64",
             Code.Conv_Ovf_I1 => ".checkedConvert 8 true false", Code.Conv_Ovf_I1_Un => ".checkedConvert 8 true true",
             Code.Conv_Ovf_U1 => ".checkedConvert 8 false false", Code.Conv_Ovf_U1_Un => ".checkedConvert 8 false true",
             Code.Conv_Ovf_I2 => ".checkedConvert 16 true false", Code.Conv_Ovf_I2_Un => ".checkedConvert 16 true true",

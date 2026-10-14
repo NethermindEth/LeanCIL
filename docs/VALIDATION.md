@@ -7,11 +7,11 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-All six C# regression partitions passed for the division revision, covering **38 check groups**, before the checked-arithmetic extension. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
+The regression runner covers **41 check groups** across nine C# partitions. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
-The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` `--suite division` `--suite checked` and `--suite conversions` after `--`. These partitions cover the same 40 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
+The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` `--suite division` `--suite checked` `--suite conversions` and `--suite native` after `--`. These partitions cover the same 41 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |
 | --- | --- |
@@ -28,10 +28,10 @@ The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite na
 | Signed conversion substituted for unsigned conversion, with the unchanged universal contract | Rejected by proof checking; no successful report retained |
 | Narrow access bounds, permissions and lifetime; generic typed store/load normalization | Semantic tests and universal roundtrip theorem passed |
 | Compiled C# `ref int` store/load: every 32-bit input returned unchanged | Universal proof passed |
-| Primitive `ldobj`, `stobj`, `initobj`, indirect loads/stores, C# aliasing, `switch` and `sizeof` | 459 cases passed, including memory faults, initialization and preservation of neighboring bytes |
+| Primitive `ldobj`, `stobj`, `initobj`, indirect loads/stores, C# aliasing, `switch` and `sizeof`, including native integer storage | 534 cases passed, including memory faults, initialization and preservation of neighboring bytes |
 | Empty/duplicate switch tables, out-of-range unsigned indices and switch-only managed dependencies | Passed |
 | Backedge, corrupted switch target, unsupported arm, four forged type tokens and floating-point size | Eight intended extraction rejections |
-| `sizeof` on native integers, pointers, managed references, objects, strings, arrays, double, sequential/auto layouts, reference-containing structs and generic layouts | Thirteen intended extraction rejections; no Lean extraction produced |
+| `sizeof` on pointers, managed references, objects, strings, arrays, double, sequential/auto layouts, reference-containing structs and generic layouts | Eleven intended extraction rejections; no Lean extraction produced |
 | Constant-zero write substituted for the input, with the unchanged universal store/load contract | Rejected by proof checking; no successful report retained |
 | Scalar access operand/width checks, bounds and lifetime; arbitrary-memory 32-bit store/load roundtrip | Semantic tests and universal roundtrip theorem passed |
 | Short and full assembly selectors retain the same complete manifest identity | Passed |
@@ -54,6 +54,10 @@ The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite na
 | Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs passed; subtraction substituted for addition rejected |
 | All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against actual .NET execution and corresponding Lean proofs passed, including native destinations and overflow |
 | Checked 64-to-32-bit unsigned narrowing with a representable input | Universal preservation proof passed; an eight-bit truncating implementation rejected |
+| Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,261 comparisons against actual .NET results or arithmetic exceptions and corresponding Lean proofs passed |
+| Extracted native addition on the admitted 64-bit target | Universal modular-addition proof passed |
+| Required-32-bit assembly, forged native type identity, native field overrun, native/int64 operands and 32-bit execution profile | Five intended extraction rejections |
+| Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests passed; unsigned branch/comparison widening differences checked explicitly |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, cyclic control flow, static initializer and forged runtime scope | Eight intended metadata rejections |
 | Identity-bound static RVA data | Passed |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |
