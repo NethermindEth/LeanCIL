@@ -47,6 +47,7 @@ internal static class LeanEmitter
             .Where(i => i.OpCode.Code == Code.Ldsflda)
             .Select(i => StaticData.Validate((FieldReference)i.Operand, methods[0].Module)).Distinct().ToArray();
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
+            .Concat(m.HasThis ? [m.DeclaringType] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
             .Concat(m.Body.Instructions.Where(i => i.Operand is FieldReference).Select(i => ((FieldReference)i.Operand).DeclaringType)))
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
@@ -76,7 +77,7 @@ internal static class LeanEmitter
             HashSet<Instruction> reachable = Reachability.Analyze(m, profile);
             var nativeOperands = NativeOperands.Analyze(m, profile);
             var parameterIndices = ParameterStorage.Analyze(m, profile);
-            var parameters = string.Join(", ", parameterIndices.Select(index => $"({index}, {Kind(m.Parameters[index].ParameterType, m.Module)})"));
+            var parameters = string.Join(", ", parameterIndices.Select(index => $"({index}, {Kind(MethodArguments.Type(m, index), m.Module)})"));
             string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module) : ".unmodeled"));
             string kinds = string.Join(", ", m.Body.Variables.Select(v => Kind(v.VariableType, m.Module)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))

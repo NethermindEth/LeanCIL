@@ -96,11 +96,12 @@ internal static class NativeOperands
                         throw new InvalidDataException($"Unsupported native stack effect: {instruction}");
                     var result = code switch
                     {
-                        Code.Ldarg_0 => Type(method.Parameters[0].ParameterType),
-                        Code.Ldarg_1 => Type(method.Parameters[1].ParameterType),
-                        Code.Ldarg_2 => Type(method.Parameters[2].ParameterType),
-                        Code.Ldarg_3 => Type(method.Parameters[3].ParameterType),
-                        Code.Ldarg or Code.Ldarg_S => Type(((ParameterDefinition)instruction.Operand).ParameterType),
+                        Code.Ldarg_0 => Type(MethodArguments.Type(method, 0)),
+                        Code.Ldarg_1 => Type(MethodArguments.Type(method, 1)),
+                        Code.Ldarg_2 => Type(MethodArguments.Type(method, 2)),
+                        Code.Ldarg_3 => Type(MethodArguments.Type(method, 3)),
+                        Code.Ldarg or Code.Ldarg_S => Type(MethodArguments.Type(method,
+                            MethodArguments.Index(method, (ParameterDefinition)instruction.Operand))),
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
                             Type(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType),
                         Code.Ldfld or Code.Ldsfld => Type(((FieldReference)instruction.Operand).FieldType),

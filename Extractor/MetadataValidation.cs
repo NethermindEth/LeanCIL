@@ -127,7 +127,8 @@ internal static class MetadataValidation
                 if (visited == 1) throw new InvalidDataException("Recursive managed dependency");
                 return;
             }
-            if (method.Module != module || !method.IsStatic || method.ExplicitThis ||
+            if (method.Module != module || method.IsStatic == method.HasThis || method.ExplicitThis ||
+                (!method.IsStatic && !IsAggregate(method.DeclaringType, module)) ||
                 method.CallingConvention != MethodCallingConvention.Default || !method.HasBody ||
                 method.IsPInvokeImpl ||
                 (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
@@ -136,6 +137,9 @@ internal static class MetadataValidation
                 method.Body.Instructions.Count == 0 || method.Body.ExceptionHandlers.Count != 0 ||
                 method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic))
                 throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
+            if (method.HasThis) Layout(method.DeclaringType, module);
+            if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
+                throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
             Type(method.ReturnType, module, returns: true);
             foreach (ParameterDefinition parameter in method.Parameters) Type(parameter.ParameterType, module);
             foreach (VariableDefinition local in method.Body.Variables) Type(local.VariableType, module);
@@ -144,11 +148,11 @@ internal static class MetadataValidation
             {
                 if (instruction.OpCode.Code != Code.Call || instruction.Operand is not MethodReference reference ||
                     InstructionTranslation.RuntimeModel(reference, profile) is not null) continue;
-                if (reference is GenericInstanceMethod || reference.HasThis || reference.ExplicitThis ||
+                if (reference is GenericInstanceMethod || reference.ExplicitThis ||
                     reference.CallingConvention != MethodCallingConvention.Default)
                     throw new InvalidDataException("Unsupported call signature");
                 MethodDefinition callee = reference.Resolve() ?? throw new InvalidDataException("Unresolved call");
-                if (callee.Module != module || reference.FullName != callee.FullName)
+                if (callee.Module != module || reference.FullName != callee.FullName || reference.HasThis != callee.HasThis)
                     throw new InvalidDataException("External or mismatched managed dependency");
                 Visit(callee);
             }

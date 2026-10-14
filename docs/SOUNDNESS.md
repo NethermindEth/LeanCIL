@@ -92,6 +92,12 @@ Runtime comparisons exercise exact `cpobj` instructions emitted with Cecil, incl
 
 References carry allocation identity and offset, not nominal CLR type tags. Relating a `cpobj` proof to runtime execution assumes that both references designate storage compatible with its validated type token, as required by the [opcode contract](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.cpobj?view=net-10.0). Byte-level access safety alone does not establish that nominal type compatibility.
 
+## Struct instance calls
+
+The extractor admits direct calls to methods on validated reference-free structs. The implicit `this` argument is a managed reference, not an aggregate snapshot; field accesses use existing allocation, permission, initialization and lifetime checks. By-value struct parameters still copy values into their own frame storage. Parameter assignment/addressing accounts for the shifted argument indices.
+
+Direct calls to a void instance constructor are allowed on existing struct storage. Such calls do not allocate an object or bypass initialization checks. The general `newobj` path remains outside this extension. Class instance methods, indirect/virtual dispatch and generic managed methods remain unsupported.
+
 ## Integer enums
 
 Same-assembly, non-generic enums use the storage of their validated underlying integer type: `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long` or `ulong`. The extractor validates the `System.Enum` base identity and the single `value__` instance field before normalizing types for execution. Method signatures retain enum names for artifact identity. Narrow enum loads and returns use the same truncation and sign/zero extension as their underlying integers; enum fields use that integer's size and alignment.
