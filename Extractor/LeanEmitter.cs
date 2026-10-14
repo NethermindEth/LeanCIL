@@ -24,7 +24,7 @@ internal static class LeanEmitter
         return type.FullName switch
         {
             "System.Int32" or "System.UInt32" => ".word32",
-            "System.Int64" or "System.UInt64" => ".word64",
+            "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" => ".word64",
             string s when s.StartsWith("System.Runtime.Intrinsics.Vector128`1<", StringComparison.Ordinal) => ".vector128",
             string s when s.StartsWith("System.Runtime.Intrinsics.Vector256`1<", StringComparison.Ordinal) => ".vector256",
             _ => throw new InvalidDataException($"Unsupported local: {type.FullName}")
@@ -63,6 +63,7 @@ internal static class LeanEmitter
         {
             MethodDefinition m = methods[n];
             HashSet<Instruction> reachable = Reachability.Analyze(m, profile);
+            var nativeOperands = NativeOperands.Analyze(m, profile);
             string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module) : ".unmodeled"));
             string kinds = string.Join(", ", m.Body.Variables.Select(v => Kind(v.VariableType, m.Module)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
@@ -75,7 +76,7 @@ internal static class LeanEmitter
             lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], staticSites := [{sites}], code := [");
             List<string> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile) : ".unsupported \"Unreachable under selected profile\"");
+                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands) : ".unsupported \"Unreachable under selected profile\"");
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
             for (int pc = 0; pc < ops.Count; pc++)
                 lean.AppendLine($"@[cil_code ↓] theorem method{n}_instruction{pc} : method{n}.code[{pc}]? = some ({ops[pc]} : Op) := rfl");

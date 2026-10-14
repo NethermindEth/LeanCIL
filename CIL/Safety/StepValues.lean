@@ -48,6 +48,10 @@ theorem step_values_valid (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
           · apply checkedValues_preserved _ _ _ _ hm ext; assumption
           · exact retained.drop _
       | solve |
+          apply ValuesValid.append
+          · apply checkedValues_preserved _ _ _ _ hm ext; assumption
+          · exact retained.tail.tail
+      | solve |
           apply ValuesValid.cons
           · first
             | rfl

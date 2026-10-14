@@ -1,5 +1,6 @@
 import CIL.Safety.Frames
 import CIL.Safety.StaticMemory
+import CIL.NativeEvaluation
 
 namespace CIL.Safety
 
@@ -46,6 +47,10 @@ inductive FrameAction where
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   match op, stack with
+  | .nativeBinary operation, .scalar y :: .scalar x :: rest =>
+    let (target, values) ← (CIL.nativeBinaryValues operation pc x y).mapError ExecutionFault.arithmetic
+    let values ← (values.map Value.scalar).mapM (checkedValue m)
+    return .next target (values ++ rest) frame m
   | .checkedConvert width signed unsignedInput, .scalar x :: rest =>
     let value ← (CIL.convertInteger width signed unsignedInput x).mapError ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m

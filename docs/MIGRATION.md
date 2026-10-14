@@ -88,3 +88,10 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 
 - `Op.checkedConvert width signed unsignedInput` represents the 20 integer checked-conversion encodings. `convertInteger` rejects unsupported widths and operands, checks mathematical bounds, and returns an extended `i32` for 8-/16-bit destinations.
 - Native destination encodings use the validated profile width (currently 64). Floating-point input and pointer/reference conversions remain unsupported. Regenerate artifacts and handle the new instruction constructor in exhaustive matches.
+
+## Native integers
+
+- Validated `System.IntPtr` / `System.UIntPtr` signatures, locals and fields use the existing 64-bit scalar and checked storage representation. Primitive type widths, typed memory instructions and `sizeof` admit these tokens under the existing 64-bit profile restriction.
+- `conv.i`, `ldind.i` and `stind.i` reuse signed widening and checked eight-byte memory operations. No integer-address dereference or pointer storage is introduced.
+- `Op.nativeBinary operation` marks mixed native/int32 arithmetic and comparisons found by forward stack-type analysis. `CIL.NativeEvaluation` widens the int32 operand and preserves the original operation's faults or branch target. Consumers matching instructions exhaustively must handle this constructor; use the checked interpreter for these operations.
+- Stack joins with incompatible tracked types and native/int64 operand mixtures are rejected explicitly. Regenerate extraction artifacts to include native operand annotations.

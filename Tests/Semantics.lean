@@ -171,6 +171,30 @@ theorem checked_mixed_widths_rejected :
 theorem checked_conversion_bad_width :
     CIL.convertInteger 7 false true (.i32 1) = .error .invalidOperands := rfl
 
+theorem native_memory_dispatch_rejected :
+    CIL.nativeBinaryValues .load64 0 (.i64 0) (.i32 0) = .error .invalidOperands := rfl
+
+theorem native_nested_dispatch_rejected :
+    CIL.nativeBinaryValues (.nativeBinary .add) 0 (.i64 0) (.i32 0) = .error .invalidOperands := rfl
+
+theorem native_reference_operand_rejected :
+    CIL.nativeBinaryValues .add 0 .nullRef (.i32 0) = .error .invalidOperands := rfl
+
+theorem native_mixed_signed_extension :
+    CIL.nativeBinaryValues .add 0 (.i64 1) (.i32 4294967295) = .ok (1, [.i64 0]) := rfl
+
+theorem native_checked_unsigned_extension :
+    CIL.nativeBinaryValues (.checkedArithmetic .add false) 0 (.i64 1) (.i32 4294967295) =
+      .ok (1, [.i64 4294967296]) := rfl
+
+theorem native_unsigned_branch_extension :
+    CIL.nativeBinaryValues (.bne 9) 0 (.i64 18446744073709551615) (.i32 4294967295) =
+      .ok (9, []) := rfl
+
+theorem native_unsigned_compare_extension :
+    CIL.nativeBinaryValues .gtu 0 (.i64 18446744073709551615) (.i32 4294967295) =
+      .ok (1, [.i32 0]) := rfl
+
 theorem checked_conversion_reference_rejected :
     CIL.convertInteger 32 false true .nullRef = .error .invalidOperands := rfl
 
