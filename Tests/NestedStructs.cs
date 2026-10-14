@@ -88,8 +88,12 @@ foreach (var outerPack in new[] { 1, 2, 4, 8 })
     var dll = Path.Combine(output, "Examples.dll");
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
-        module.GetType("Examples.PackedLeaf").PackingSize = (short)innerPack;
-        module.GetType("Examples.PackedNestedRecord").PackingSize = (short)outerPack;
+        var inner = module.GetType("Examples.PackedLeaf");
+        var outer = module.GetType("Examples.PackedNestedRecord");
+        inner.PackingSize = (short)innerPack;
+        inner.ClassSize = Math.Max(0, inner.ClassSize);
+        outer.PackingSize = (short)outerPack;
+        outer.ClassSize = Math.Max(0, outer.ClassSize);
         module.Write(dll);
     }
     var actual = Assembly.Load(File.ReadAllBytes(dll));
