@@ -2,6 +2,8 @@
 
 ## What is defined and proved
 
+Checked integer conversions interpret the input according to the opcode's `.un` flag, then check the mathematical value against the destination bounds. Signed narrow results are sign-extended in their 32-bit stack slot. Native destination widths come from the validated target profile, not the machine performing extraction. Floating-point conversion behaviour is outside this model.
+
 Checked integer addition, subtraction and multiplication compute their result over `Int` before checking the signed or unsigned destination range. Overflow cannot silently wrap into a successful result. The universal extracted addition examples prove natural-number addition whenever the sum fits, and the runtime comparison matrix checks both successes and faults for all six encodings at both widths.
 
 Integer division and remainder use an explicit `ArithmeticFault` result, separate from malformed-state and memory faults. Zero divisors and the signed minimum / -1 pair terminate checked execution with located faults. Signed quotient uses truncation toward zero, not Lean's Euclidean division. Signed remainder uses the corresponding truncating remainder. These faults do not implement managed exception objects, handlers or unwinding.

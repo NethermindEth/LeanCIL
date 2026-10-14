@@ -168,6 +168,18 @@ theorem division_mixed_widths_rejected :
 theorem checked_mixed_widths_rejected :
     CIL.checkedValues .add false (.i32 6) (.i64 2) = .error .invalidOperands := rfl
 
+theorem checked_conversion_bad_width :
+    CIL.convertInteger 7 false true (.i32 1) = .error .invalidOperands := rfl
+
+theorem checked_conversion_reference_rejected :
+    CIL.convertInteger 32 false true .nullRef = .error .invalidOperands := rfl
+
+theorem checked_conversion_sign_extension :
+    CIL.convertInteger 8 true false (.i64 18446744073709551615) = .ok (.i32 4294967295) := rfl
+
+theorem checked_conversion_unsigned_input_overflow :
+    CIL.convertInteger 8 true true (.i32 4294967295) = .error .overflow := rfl
+
 theorem checked_reference_rejected :
     CIL.checkedValues .mul true .nullRef (.i32 2) = .error .invalidOperands := rfl
 

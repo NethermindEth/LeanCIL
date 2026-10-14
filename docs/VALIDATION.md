@@ -11,7 +11,7 @@ All six C# regression partitions passed for the division revision, covering **38
 
 The runner builds the independent assemblies and the CIL library, then creates a fresh source-only Lean build for verification. File-based C# apps provide the test runner, verifier and metadata fixture generator. Their only external package is the same pinned Mono.Cecil version used by the extractor.
 
-The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` `--suite division` and `--suite checked` after `--`. These partitions cover the same 39 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
+The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite narrow` `--suite primitive` `--suite division` `--suite checked` and `--suite conversions` after `--`. These partitions cover the same 40 check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |
 | --- | --- |
@@ -52,6 +52,8 @@ The runner accepts `--suite core`, `--suite cli`, `--suite integer`, `--suite na
 | Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests passed |
 | Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against actual .NET results or overflow exceptions and corresponding Lean proofs passed |
 | Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs passed; subtraction substituted for addition rejected |
+| All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against actual .NET execution and corresponding Lean proofs passed, including native destinations and overflow |
+| Checked 64-to-32-bit unsigned narrowing with a representable input | Universal preservation proof passed; an eight-bit truncating implementation rejected |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, cyclic control flow, static initializer and forged runtime scope | Eight intended metadata rejections |
 | Identity-bound static RVA data | Passed |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |

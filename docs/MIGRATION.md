@@ -83,3 +83,8 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 
 - `Op.checkedArithmetic kind signed` models checked addition, subtraction and multiplication. `CheckedBinaryKind` selects the operation; `checkedBits` and `checkedValues` compute an integer result before applying signed or unsigned bounds.
 - Overflow uses the same located `.arithmetic .overflow` fault as division. Regenerate artifacts and update exhaustive instruction matches; no exception-handler support is implied.
+
+## Checked integer conversions
+
+- `Op.checkedConvert width signed unsignedInput` represents the 20 integer checked-conversion encodings. `convertInteger` rejects unsupported widths and operands, checks mathematical bounds, and returns an extended `i32` for 8-/16-bit destinations.
+- Native destination encodings use the validated profile width (currently 64). Floating-point input and pointer/reference conversions remain unsupported. Regenerate artifacts and handle the new instruction constructor in exhaustive matches.

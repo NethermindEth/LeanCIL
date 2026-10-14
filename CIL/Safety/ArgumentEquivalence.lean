@@ -15,6 +15,9 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Op) (pc : Nat)
   case checkedArithmetic kind signed =>
     simp only [step]
     repeat' first | rfl | contradiction | split
+  case checkedConvert width signed unsignedInput =>
+    simp only [step]
+    repeat' first | rfl | contradiction | split
   case ret narrow =>
     cases narrow <;> simp only [step]
     all_goals repeat' first | rfl | contradiction | split
