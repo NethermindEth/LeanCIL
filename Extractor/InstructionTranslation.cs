@@ -13,6 +13,7 @@ internal static class InstructionTranslation
     }
     internal static string Translate(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex, FeatureProfile? profile = null)
     {
+        profile ??= FeatureProfile.Scalar;
         int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);
         int Local() => ((VariableDefinition)i.Operand).Index;
         string Narrow(TypeReference type) => LeanEmitter.Narrow(type) is { } kind ? $" (some .{kind})" : "";
@@ -51,6 +52,16 @@ internal static class InstructionTranslation
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
+            Code.Conv_Ovf_I1 => ".checkedConvert 8 true false", Code.Conv_Ovf_I1_Un => ".checkedConvert 8 true true",
+            Code.Conv_Ovf_U1 => ".checkedConvert 8 false false", Code.Conv_Ovf_U1_Un => ".checkedConvert 8 false true",
+            Code.Conv_Ovf_I2 => ".checkedConvert 16 true false", Code.Conv_Ovf_I2_Un => ".checkedConvert 16 true true",
+            Code.Conv_Ovf_U2 => ".checkedConvert 16 false false", Code.Conv_Ovf_U2_Un => ".checkedConvert 16 false true",
+            Code.Conv_Ovf_I4 => ".checkedConvert 32 true false", Code.Conv_Ovf_I4_Un => ".checkedConvert 32 true true",
+            Code.Conv_Ovf_U4 => ".checkedConvert 32 false false", Code.Conv_Ovf_U4_Un => ".checkedConvert 32 false true",
+            Code.Conv_Ovf_I8 => ".checkedConvert 64 true false", Code.Conv_Ovf_I8_Un => ".checkedConvert 64 true true",
+            Code.Conv_Ovf_U8 => ".checkedConvert 64 false false", Code.Conv_Ovf_U8_Un => ".checkedConvert 64 false true",
+            Code.Conv_Ovf_I => $".checkedConvert {profile.NativeWidth} true false", Code.Conv_Ovf_I_Un => $".checkedConvert {profile.NativeWidth} true true",
+            Code.Conv_Ovf_U => $".checkedConvert {profile.NativeWidth} false false", Code.Conv_Ovf_U_Un => $".checkedConvert {profile.NativeWidth} false true",
             Code.Add_Ovf => ".checkedArithmetic .add true", Code.Add_Ovf_Un => ".checkedArithmetic .add false",
             Code.Sub_Ovf => ".checkedArithmetic .sub true", Code.Sub_Ovf_Un => ".checkedArithmetic .sub false",
             Code.Mul_Ovf => ".checkedArithmetic .mul true", Code.Mul_Ovf_Un => ".checkedArithmetic .mul false",

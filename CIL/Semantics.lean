@@ -73,6 +73,8 @@ def binary (op : Op) (a b : Value) : Option Value :=
 
 def unary (op : Op) (value : Value) : Option Value :=
   match op, value with
+  | .checkedConvert width signed unsignedInput, value =>
+    (convertInteger width signed unsignedInput value).toOption
   | .neg, .i32 w => some (.i32 (-w))
   | .neg, .i64 w => some (.i64 (-w))
   | .bnot, .i64 w => some (.i64 (~~~w))
@@ -156,6 +158,7 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
     return .next (pc + 1) rest (← write64 memory (← unsafeAdd 8 i.val address) word)
   | .const64 w, _ => return .next (pc + 1) (.i64 w :: stack) memory
   | .neg, v :: rest | .bnot, v :: rest
+  | .checkedConvert _ _ _, v :: rest
   | .convI1, v :: rest | .convI2, v :: rest | .convU2, v :: rest
   | .convI4, v :: rest | .convI8, v :: rest | .convU1, v :: rest
   | .convU4, v :: rest | .convU8, v :: rest | .convU, v :: rest =>

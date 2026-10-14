@@ -46,6 +46,9 @@ inductive FrameAction where
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   match op, stack with
+  | .checkedConvert width signed unsignedInput, .scalar x :: rest =>
+    let value ← (CIL.convertInteger width signed unsignedInput x).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
   | .checkedArithmetic kind signed, .scalar y :: .scalar x :: rest =>
     let value ← (CIL.checkedValues kind signed x y).mapError ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m

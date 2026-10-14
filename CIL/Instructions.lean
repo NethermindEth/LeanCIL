@@ -42,6 +42,7 @@ inductive LocalKind where
 inductive Op where
   | divide (signed remainder : Bool)
   | checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool)
+  | checkedConvert (width : Nat) (signed unsignedInput : Bool)
   | nop | neg | gt
   | bgt (target : Nat)
   | ble (target : Nat)

@@ -28,6 +28,23 @@ def checkedValues (kind : CheckedBinaryKind) (signed : Bool) (x y : Value) :
   | .i64 x, .i64 y => (checkedBits kind signed x y).map Value.i64
   | _, _ => .error .invalidOperands
 
+/-- Checked integer conversion preserves the mathematical input value. Narrow
+    destinations are returned in a 32-bit evaluation-stack slot. -/
+def convertNumber (width : Nat) (signed : Bool) (number : Int) : Except ArithmeticFault Value :=
+  let bound : Int := if signed then 2 ^ (width - 1) else 2 ^ width
+  let lower := if signed then -bound else 0
+  if lower ≤ number ∧ number < bound then
+    .ok (if width ≤ 32 then .i32 (BitVec.ofInt 32 number) else .i64 (BitVec.ofInt 64 number))
+  else .error .overflow
+
+def convertInteger (width : Nat) (signed unsignedInput : Bool) (value : Value) :
+    Except ArithmeticFault Value :=
+  if width != 8 && width != 16 && width != 32 && width != 64 then .error .invalidOperands else
+  match value with
+  | .i32 bits => convertNumber width signed (if unsignedInput then bits.toNat else bits.toInt)
+  | .i64 bits => convertNumber width signed (if unsignedInput then bits.toNat else bits.toInt)
+  | _ => .error .invalidOperands
+
 /-- Integer division truncates toward zero. The signed minimum / -1 pair is
     rejected for quotient and remainder, matching the admitted .NET runtime. -/
 def divideBits (signed remainder : Bool) (x y : BitVec width) :
