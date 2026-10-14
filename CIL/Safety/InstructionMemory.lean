@@ -154,6 +154,19 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
         | 8 => .ok (.i64 (BitVec.ofNat 64 number))
         | _ => .error (.unsupported "Aggregate field width")
       return (m, .scalar value :: rest)
+  | .aggregateFieldAt offset size, .scalar (.aggregate bytes) :: rest =>
+    if offset + size > bytes.length then .error .invalidState else
+      return (m, .scalar (.aggregate ((bytes.drop offset).take size)) :: rest)
+  | .aggregateFieldAt offset size, .reference reference :: rest =>
+    let r ← referenceAt reference
+    let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+    let bytes ← checkedAt (.address address) size (read m address size ordinaryAccessAlignment)
+    return (m, .scalar (.aggregate bytes) :: rest)
+  | .setAggregateFieldAt offset size, .scalar (.aggregate bytes) :: .reference reference :: rest =>
+    if bytes.length != size then .error .invalidState else
+      let r ← referenceAt reference
+      let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+      return (← checkedAt (.address address) size (write m address bytes ordinaryAccessAlignment), rest)
   | .fieldAt offset width signed, .reference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (m, .scalar (← loadValue m (.address address) width signed) :: rest)

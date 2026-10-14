@@ -245,6 +245,37 @@ theorem scalar_helper_zero_counts :
     CIL.evalScalarIntrinsic (.leadingZeroCount 64) [.i64 0] = some (.i32 64) ∧
     CIL.evalScalarIntrinsic (.trailingZeroCount 32) [.i32 0] = some (.i32 32) := ⟨rfl, rfl⟩
 
+theorem nested_snapshot_bounds :
+    (instruction (.aggregateFieldAt 3 2) [.scalar (.aggregate [1, 2, 3, 4])] Examples.empty).map Prod.snd =
+      .error .invalidState := rfl
+
+theorem nested_store_size :
+    (instruction (.setAggregateFieldAt 0 8) [.scalar (.aggregate [1]), Examples.reference] Examples.caller).map Prod.snd =
+      .error .invalidState := rfl
+
+theorem nested_null :
+    (instruction (.aggregateFieldAt 0 8) [.reference .null] Examples.empty).map Prod.snd =
+      .error (.memory .nullDereference .null 0) := rfl
+
+theorem nested_uninitialized :
+    (instruction (.aggregateFieldAt 0 8) [Examples.reference]
+      { Examples.caller with cells := fun _ _ => ⟨0, false⟩ }).map Prod.snd =
+      .error (.memory .uninitialized (.address ⟨0, 0⟩) 8) := rfl
+
+theorem nested_bounds :
+    (instruction (.aggregateFieldAt 4 8) [Examples.reference] Examples.caller).map Prod.snd =
+      .error (.memory .outsideAllocation (.address ⟨0, 4⟩) 8) := rfl
+
+theorem nested_unwritable :
+    (instruction (.setAggregateFieldAt 0 8) [.scalar (.aggregate (List.replicate 8 0)), Examples.reference]
+      { Examples.caller with views := [⟨0, 0, 8, true, false⟩] }).map Prod.snd =
+      .error (.memory .unwritable (.address ⟨0, 0⟩) 8) := rfl
+
+theorem nested_expired :
+    (instruction (.aggregateFieldAt 0 8) [Examples.reference] { Examples.caller with
+      allocations := fun _ => some ⟨.callerStack, ⟨8, 1, []⟩, false, []⟩ }).map Prod.snd =
+      .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
+
 end Tests
 
 namespace Tests
