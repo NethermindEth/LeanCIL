@@ -118,6 +118,7 @@ internal static class MetadataValidation
             (module.Attributes & ModuleAttributes.Required32Bit) != 0)
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
         MethodDefinition entry = MethodSelector.Resolve(module, entrySignature);
+        var specializations = new MethodSpecialization(module);
         Dictionary<MethodDefinition, int> state = [];
         List<MethodDefinition> ordered = [];
         void Visit(MethodDefinition method)
@@ -148,7 +149,16 @@ internal static class MetadataValidation
             {
                 if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
                     InstructionTranslation.RuntimeModel(reference, profile) is not null) continue;
-                if (reference is GenericInstanceMethod || reference.ExplicitThis ||
+                if (reference is GenericInstanceMethod generic)
+                {
+                    if (instruction.OpCode.Code != Code.Call)
+                        throw new InvalidDataException("Unsupported generic constructor call");
+                    var specialized = specializations.Instantiate(generic);
+                    instruction.Operand = specialized;
+                    Visit(specialized);
+                    continue;
+                }
+                if (reference.ExplicitThis ||
                     reference.CallingConvention != MethodCallingConvention.Default)
                     throw new InvalidDataException("Unsupported call signature");
                 MethodDefinition callee = reference.Resolve() ?? throw new InvalidDataException("Unresolved call");

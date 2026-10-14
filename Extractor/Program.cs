@@ -113,6 +113,7 @@ internal static class Program
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
+                    specialization = MethodSpecialization.Source(m),
                     locals = m.Body.Variables.Select(v => v.VariableType.FullName),
                     instructions = m.Body.Instructions.Select(i => i.ToString()) }),
                 layouts = module.GetTypes().Where(t => t.IsValueType && t.IsExplicitLayout && t.Fields.Any(f => !f.IsStatic))

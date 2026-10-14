@@ -36,3 +36,14 @@ module Arithmetic =
 
     // Lists require runtime allocation outside the admitted subset.
     let UnsupportedList (value: uint64) = [value]
+
+module GenericMethods =
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let Identity<'T> (value: 'T) = value
+
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let Choose<'T> (first: bool) (left: 'T) (right: 'T) =
+        if first then left else right
+
+    let Identity64 (value: uint64) = Identity value
+    let Select (first: bool) (left: uint64) (right: uint64) = Choose first left right

@@ -294,6 +294,14 @@ dotnet run --file scripts/Test.cs -- --suite fsharp
 
 These examples cover F# programs that compile into the supported CIL subset. F# lists, closures, discriminated unions and arbitrary FSharp.Core calls are not generally supported; the suite includes an explicitly rejected list example.
 
+The `GenericMethods` module also demonstrates generic identity and selection functions. LeanCIL specializes their compiled CIL for the concrete value types used by reachable calls. The F# and C# identity examples share the same [universal Lean contract](Examples/Proofs/GenericIdentity.lean):
+
+```sh
+leancil extract Examples/FSharp/bin/Examples.FSharp.dll "GenericMethods::Identity64(ulong)" artifacts/FSharpIdentity
+leancil verify artifacts/FSharpIdentity --proof Examples/Proofs/GenericIdentity.lean
+dotnet run --file scripts/Test.cs -- --suite generics
+```
+
 ## Supported subset and limits
 
 The [opcode support table](docs/OPCODES.md) lists every opcode currently translated by the extractor, including short forms, operand restrictions and execution limits. **Complete** means complete within the admitted value/memory model; **partial** means additional cases are excluded. Neither label claims complete CLR coverage or proves a particular method correct.
@@ -304,9 +312,10 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | Argument/local loads and stores, `ldloca` | Partial | Admitted types; no address of a managed-reference local |
 | `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
 | Supported branches | Partial | Forward-only reachable control flow; integer conditions/comparisons |
-| `call`, `ret` | Partial | Acyclic static managed methods and explicitly modelled runtime calls |
+| `call`, `ret` | Partial | Acyclic static/struct instance methods, concrete generic-method specializations and explicitly modelled runtime calls |
 | Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
-| `switch`, `sizeof` | Partial | Forward jump tables and validated integer/explicit aggregate sizes |
+| `initblk`, `cpblk`, `unaligned.` | Partial | Checked managed references, 32-bit byte counts and validated alignment prefixes; overlapping block copies rejected |
+| `switch`, `sizeof` | Partial | Forward jump tables and validated integer and reference-free aggregate sizes |
 | `newobj` | Partial | Validated reference-free struct constructors and the modelled byte-span constructor; no class allocation |
 | Argument storage | Partial | Parameter assignment and addressing, shared aliases, narrow/native storage and frame lifetime checks |
 | Native integers | Partial | `nint`/`nuint` signatures, locals, fields, memory, casts, arithmetic and `sizeof` on validated 64-bit targets |
