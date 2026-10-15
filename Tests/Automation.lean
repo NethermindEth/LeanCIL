@@ -31,9 +31,9 @@ theorem checked_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) 
       .ok (memory, [.scalar (.i32 value)]) := by
   by_cases zero : condition = 0
   · have truth : CIL.truth (.i32 condition) = some false := by simp [CIL.truth, zero]
-    cil_checked_steps truth
+    cil_checked_steps [truth]
   · have truth : CIL.truth (.i32 condition) = some true := by simp [CIL.truth]; exact zero
-    cil_checked_steps truth
+    cil_checked_steps [truth]
 
 #print axioms checked_branch
 end Tests.Automation

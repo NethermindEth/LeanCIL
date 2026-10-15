@@ -38,9 +38,12 @@ object[] Values(Type type) => type == typeof(bool) ? [false, true] :
     throw new InvalidOperationException("Unexpected parameter type");
 
 // Universal contracts cover direct, repeated, nested and instance generic calls.
-foreach (var method in new[] { "Identity64", "Repeated", "Nested", "Instance" })
+foreach (var method in new[] { "Identity64", "Repeated", "Nested" })
     verification.Verify(assembly, "Examples", $"GenericMethods::{method}(ulong)",
         At("Examples/Proofs/GenericIdentity.lean"), Path.Combine(root, method));
+// The instance wrapper allocates a receiver; retain its separate fixed-memory check.
+verification.Verify(assembly, "Examples", "GenericMethods::Instance(ulong)",
+    At("Examples/Proofs/GenericInstance.lean"), Path.Combine(root, "Instance"));
 verification.Verify(assembly, "Examples", "GenericMethods::Identity32(int)",
     At("Examples/Proofs/GenericIdentity32.lean"), Path.Combine(root, "Identity32"));
 verification.Verify(fsharp, "Examples.FSharp", "GenericMethods::Identity64(ulong)",
