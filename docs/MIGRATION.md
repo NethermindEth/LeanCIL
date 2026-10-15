@@ -40,6 +40,8 @@ Fixed-vector helpers remain separate: `vectorArg`, `vectorLocal`, their address/
 
 ## Extension points
 
+Loops are now extractable: reachable branch and switch backedges use fixed-point feature reachability and stack-join validation. Recursive calls remain unsupported. Regenerate artifacts when upgrading. `CIL.Safety.Loops` provides `LoopState`, `LoopSegment`, `LoopTerminates` and `loop_terminates`; `CIL.Verification.ensures_of_loop` connects successful loop execution and frame setup to total correctness. Proofs supply their own invariant and decreasing measure. The existing instruction-count `executionBound` remains only a candidate budget and is generally insufficient for input-dependent loops.
+
 Reference-bearing layouts, exception handling, managed object construction and concurrency need additional semantics and proofs before extraction can accept them. Unsupported features currently fail explicitly.
 
 ## Extraction inventory
@@ -93,7 +95,7 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 
 - Validated `System.IntPtr` / `System.UIntPtr` signatures, locals and fields use the existing 64-bit scalar and checked storage representation. Primitive type widths, typed memory instructions and `sizeof` admit these tokens under the existing 64-bit profile restriction.
 - `conv.i`, `ldind.i` and `stind.i` reuse signed widening and checked eight-byte memory operations. No integer-address dereference or pointer storage is introduced.
-- `Op.nativeBinary operation` marks mixed native/int32 arithmetic and comparisons found by forward stack-type analysis. `CIL.NativeEvaluation` widens the int32 operand and preserves the original operation's faults or branch target. Consumers matching instructions exhaustively must handle this constructor; use the checked interpreter for these operations.
+- `Op.nativeBinary operation` marks mixed native/int32 arithmetic and comparisons found by control-flow stack-type analysis. `CIL.NativeEvaluation` widens the int32 operand and preserves the original operation's faults or branch target. Consumers matching instructions exhaustively must handle this constructor; use the checked interpreter for these operations.
 - Stack joins with incompatible tracked types and native/int64 operand mixtures are rejected explicitly. Regenerate extraction artifacts to include native operand annotations.
 
 ## Parameter storage

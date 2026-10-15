@@ -3,7 +3,7 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// A small forward analysis for fixed feature expressions. Unknown means any
+// A finite-height dataflow analysis for fixed feature expressions. Unknown means any
 // value, never false. This only selects reachability; emitted CIL is unchanged
 // and the kernel still checks every executed instruction and feature query.
 internal sealed class FeatureConstants
@@ -27,14 +27,24 @@ internal sealed class FeatureConstants
 
     internal FeatureConstants Copy() => new([.. _stack], (int?[])_locals.Clone());
 
-    internal void Merge(FeatureConstants other)
+    internal bool Merge(FeatureConstants other)
     {
+        bool changed = false;
         if (_stack.Count != other._stack.Count)
             throw new InvalidDataException("Inconsistent evaluation stack at control-flow merge");
         for (int i = 0; i < _stack.Count; i++)
-            if (_stack[i] != other._stack[i]) _stack[i] = null;
+            if (_stack[i] is not null && _stack[i] != other._stack[i])
+            {
+                _stack[i] = null;
+                changed = true;
+            }
         for (int i = 0; i < _locals.Length; i++)
-            if (_locals[i] != other._locals[i]) _locals[i] = null;
+            if (_locals[i] is not null && _locals[i] != other._locals[i])
+            {
+                _locals[i] = null;
+                changed = true;
+            }
+        return changed;
     }
 
     internal int? Top => _stack.Count == 0 ? null : _stack[^1];

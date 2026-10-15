@@ -54,11 +54,6 @@ switch (args[2])
         add.Body.Variables.Add(new VariableDefinition(module.TypeSystem.String));
         break;
 
-    case "cycle":
-        add.Body.Instructions[0].OpCode = OpCodes.Br;
-        add.Body.Instructions[0].Operand = add.Body.Instructions[0];
-        break;
-
     case "initializer":
         var cctor = new MethodDefinition(".cctor", MethodAttributes.Static | MethodAttributes.Private |
             MethodAttributes.SpecialName | MethodAttributes.RTSpecialName, module.TypeSystem.Void);
