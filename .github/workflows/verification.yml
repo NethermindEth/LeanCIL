@@ -26,17 +26,20 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
       - name: Test suite selection
         run: |
-          python3 scripts/test-select-verification.py
-          python3 scripts/test-summarize-verification.py
+          dotnet run --file scripts/TestSelectVerification.cs
+          dotnet run --file scripts/TestSummarizeVerification.cs
       - name: Select affected suites
         id: select
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-        run: python3 scripts/select-verification.py --event "$EVENT" --base "$BASE" --head "$HEAD" --output "$GITHUB_OUTPUT"
+        run: dotnet run --file scripts/SelectVerification.cs -- --event "$EVENT" --base "$BASE" --head "$HEAD" --output "$GITHUB_OUTPUT"
 
   prepare:
     name: Prepare fresh certified Lean library
@@ -83,7 +86,7 @@ jobs:
           retention-days: 14
       - name: Summarize preparation timings
         if: always()
-        run: python3 scripts/summarize-verification.py --root artifacts/verification-traces --output artifacts/stage-timings.json --markdown artifacts/stage-timings.md --github-summary
+        run: dotnet run --file scripts/SummarizeVerification.cs -- --root artifacts/verification-traces --output artifacts/stage-timings.json --markdown artifacts/stage-timings.md --github-summary
       - name: Upload preparation transcripts and timings
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -155,7 +158,7 @@ jobs:
 
       - name: Summarize verification timings
         if: always()
-        run: python3 scripts/summarize-verification.py --root artifacts/verification-traces --output artifacts/stage-timings.json --markdown artifacts/stage-timings.md --github-summary
+        run: dotnet run --file scripts/SummarizeVerification.cs -- --root artifacts/verification-traces --output artifacts/stage-timings.json --markdown artifacts/stage-timings.md --github-summary
 
       - name: Upload verification results
         if: always()
@@ -184,6 +187,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
       - name: Download this run's verification transcripts and timings
         if: needs.select.outputs.has-suites == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -192,7 +198,7 @@ jobs:
           path: artifacts/collected
       - name: Summarize all verification stages
         if: needs.select.outputs.has-suites == 'true'
-        run: python3 scripts/summarize-verification.py --root artifacts/collected --output artifacts/all-stage-timings.json --markdown artifacts/all-stage-timings.md --github-summary
+        run: dotnet run --file scripts/SummarizeVerification.cs -- --root artifacts/collected --output artifacts/all-stage-timings.json --markdown artifacts/all-stage-timings.md --github-summary
       - name: Upload combined stage timings
         if: always() && needs.select.outputs.has-suites == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
