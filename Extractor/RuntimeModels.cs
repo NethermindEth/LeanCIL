@@ -93,6 +93,9 @@ internal static class RuntimeModels
         if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default) return null;
         var signature = reference.FullName;
+        if (reference.DeclaringType.Scope.Name == "System.Runtime" &&
+            signature == "System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)")
+            return ".memory .bigMul64";
         if (reference.DeclaringType.Scope.Name == "System.Runtime")
         foreach (var (type, width, signed) in new[]
         {

@@ -75,6 +75,8 @@ def formValue (m : Memory) (reference : ManagedReference) : ExecutionResult Valu
 def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
   match operation, stack with
+  | .bigMul64, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
+    return (← storeValue m low (.i64 (left * right)), .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest)
   | .copyBlock alignment, .scalar (.i32 count) :: .reference source :: .reference destination :: rest =>
     let width := count.toNat
     if width = 0 then return (m, rest) else

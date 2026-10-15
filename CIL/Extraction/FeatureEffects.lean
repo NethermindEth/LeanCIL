@@ -3,6 +3,7 @@ import CIL.Instructions
 namespace CIL.Extraction
 
 private def memoryFeatureEffect : MemoryOp → Nat × Nat
+  | .bigMul64 => (3, 1)
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 => (2, 0)
   | .init256 | .skipInit => (1, 0)

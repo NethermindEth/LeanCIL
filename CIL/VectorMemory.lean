@@ -1,4 +1,5 @@
 import CIL.Memory
+import CIL.WideMultiply
 
 /- Exact overload references (.NET 10):
    https://learn.microsoft.com/dotnet/api/system.runtime.compilerservices.unsafe.add?view=net-10.0
@@ -84,6 +85,7 @@ def unsafeAdd (sizeBytes : Nat) (offset : Int) : Address → Option Address
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
+  | bigMul64
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | store128 | store256 | init256
   | asRef | add (sizeBytes : Nat) (signed : Bool)
@@ -103,6 +105,8 @@ def offsetValue (signed : Bool) (value : Value) : Option Int :=
 def evalMemory (op : MemoryOp) (stack : List Value) (m : Memory) :
     Option (Memory × List Value) := do
   match op, stack with
+  | .bigMul64, .ref low :: .i64 right :: .i64 left :: rest =>
+    return (← write64 m low (left * right), .i64 (WideMultiply.high64 left right) :: rest)
   | .load128, .ref address :: rest => return (m, (← read128 m address) :: rest)
   | .load256, .ref address :: rest => return (m, (← read256 m address) :: rest)
   | .load256, .object base :: rest => return (m, (← read256 m (.byte base)) :: rest)

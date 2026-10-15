@@ -50,7 +50,7 @@ theorem memoryInstruction_values_valid (operation : CIL.MemoryOp) (stack values 
             | solve | apply loadValue_scalar_valid; assumption
             | solve | apply formValue_result_valid; assumption
             | solve | apply checked_add_result_valid; assumption
-          · first | exact retained | exact retained.tail | exact retained.tail.tail
+          · first | exact retained | exact retained.tail | exact retained.tail.tail | exact retained.tail.tail.tail
       | cases h
       | split at h
 
