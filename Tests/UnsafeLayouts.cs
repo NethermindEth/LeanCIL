@@ -117,3 +117,4 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
 
 Console.WriteLine($"PASS {cases} layout-based Unsafe checks");
 Run(["dotnet", "run", "--file", "Tests/SkipInitialization.cs"], streamOutput: true, progress: "SkipInit checks");
+Run(["dotnet", "run", "--file", "Tests/UnsafeReferences.cs"], streamOutput: true, progress: "Unsafe byref reinterpretation checks");

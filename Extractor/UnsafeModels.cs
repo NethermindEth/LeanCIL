@@ -7,6 +7,7 @@ internal static class UnsafeModels
 {
     internal static string? Translate(MethodReference reference)
     {
+        if (ReinterpretReference(reference) is { } cast) return cast;
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
@@ -46,5 +47,33 @@ internal static class UnsafeModels
         if (sizeOf) return $".const32 {width}";
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
         return $".memory (.add {width} {signed.ToString().ToLowerInvariant()})";
+    }
+
+    // A byref reinterpretation changes only its static type, never the allocation,
+    // offset, initialized bytes or access bounds used by checked memory operations.
+    private static string? ReinterpretReference(MethodReference reference)
+    {
+        if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
+            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
+            (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
+            return null;
+        var definition = generic.ElementMethod;
+        var arity = reference.Name switch { "As" => 2, "AsRef" => 1, _ => 0 };
+        if (arity == 0 || generic.GenericArguments.Count != arity || definition.GenericParameters.Count != arity ||
+            definition.Parameters.Count != 1) return null;
+        bool Reference(TypeReference type, int position) => type is ByReferenceType byRef &&
+            byRef.ElementType is GenericParameter parameter && parameter.Type == GenericParameterType.Method &&
+            parameter.Position == position && parameter.Owner == definition;
+        if (!Reference(definition.Parameters[0].ParameterType, 0) || !Reference(definition.ReturnType, arity - 1))
+            return null;
+        foreach (var type in generic.GenericArguments)
+        {
+            if (type is ByReferenceType or PointerType or GenericParameter)
+                throw new InvalidDataException($"Unsupported Unsafe reference element: {type.FullName}");
+            MetadataValidation.Type(type, reference.Module);
+        }
+        RuntimeModels.ValidateSignature(reference);
+        return ".memory .asRef";
     }
 }
