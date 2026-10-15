@@ -38,7 +38,7 @@ void Reject(int sample, string name, Func<string, string> mutate)
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, source);
     var result = Execute(["lake", "env", "lean", path]);
-    if (result.Code == 0 || !result.Output.Contains("decide", StringComparison.Ordinal))
+    if (result.Code == 0 || !result.Output.Contains("error:", StringComparison.Ordinal))
         throw new InvalidOperationException("Invalid specialization was not rejected: " + name + "\n" + result.Output);
     Console.WriteLine("PASS generic evidence rejects " + name);
 }

@@ -9,7 +9,7 @@ Directory.CreateDirectory(output);
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples", "Arithmetic::Add(ulong,ulong)", output));
 var baseline = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-var declaration = new Regex(@"theorem translation_valid\s*:[\s\S]*?:= by decide");
+var declaration = new Regex(@"theorem translation_valid\s*:[\s\S]*?(?=@\[cil_code\] theorem lookup0)");
 if (declaration.Matches(baseline).Count != 1)
     throw new InvalidOperationException("Expected exactly one complete extraction certificate");
 
