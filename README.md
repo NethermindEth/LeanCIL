@@ -272,14 +272,15 @@ To prove another method, supply a unique method selector, write a Lean file impo
 
 - `Add`: universal modular arithmetic correctness in the specified empty initial memory.
 - `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over arbitrary caller memory, with exact memory preservation. The checked automation follows generated instruction lookups; the same contract is tested after inserting NOPs and rejected for subtraction.
-- `Choose`: concrete conditional-execution checks.
+- `Choose`: universal checked selection for both Boolean inputs and every pair of 64-bit values, preserving arbitrary caller memory exactly.
+- `GenericIdentity`: universal identity through direct, repeated and nested generic calls in C#, and a compiled F# identity wrapper, preserving arbitrary caller memory exactly.
 - `Loops.Countdown`: universal termination and a zero result for every `uint`, including zero and `UInt32.MaxValue`, using a decreasing natural-number measure over checked local storage.
 - `Calls`: a managed-call chain with an address-taken mutable local.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the modular additive inverse for every input, including the signed minimum.
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct containing narrow fields. `UnsignedShort.lean` proves reduction modulo 65,536 for every 32-bit input.
 - `PrimitiveOperations`: reads/writes through integer references, aliasing, switch tables and aggregate `sizeof`. `PrimitiveReadWrite.lean` proves that a store followed by a load returns every 32-bit input unchanged.
 - `Alias`: two arguments naming the same caller storage.
-- `Struct` and `StructCopy`: reference and by-value use of a **12-byte explicit-layout struct**, with an 8-byte field and a 4-byte field, initialization and a byref helper call.
+- `Struct`: universal return of the input through a **12-byte explicit-layout struct**, initialization, two field stores and a byref helper call. For every well-formed caller memory, all earlier allocation metadata, bytes and access permissions are preserved; temporary frame allocations are expired on return. `StructCopy` separately checks by-value use of the same layout.
 - `LargeStruct`: a **40-byte** explicit layout with a field at offset 32.
 - `PastEnd`: a permitted end sentinel whose dereference is rejected as outside the allocation, for every fuel budget.
 - `Escape`: a reference to an expired local is rejected on return, for every fuel budget.
@@ -287,7 +288,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 - A separate `Examples.Hardware` assembly, built from the file-based library `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
 
-Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. Argument quantification does not imply arbitrary caller memory: most examples require `Examples.empty` or `Examples.caller`. `CheckedAdd64.lean` explicitly quantifies caller memory and proves it unchanged. The library additionally proves generic allocation, frame, reference, aliasing and storage properties.
+Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify caller memory and prove it unchanged. `Struct` quantifies well-formed caller memory and proves `MemoryBelow` preservation of the caller's storage. Other examples may require `Examples.empty` or `Examples.caller`; argument quantification alone does not imply arbitrary caller memory. The allocating generic instance wrapper retains a separate fixed-memory check in `GenericInstance.lean`.
 
 ## Loop verification
 
