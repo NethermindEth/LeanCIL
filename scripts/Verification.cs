@@ -24,8 +24,79 @@ partial class Program : IDisposable
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
-    static (int Code, string Output, string Stdout, string Stderr) Execute(IEnumerable<string> command, string? cwd = null, string? leanPath = null)
+    sealed class ProgressSummary(string label)
     {
+        readonly object gate = new();
+        string latest = "";
+        int pending;
+
+        public void Add(string line, TextWriter writer)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return;
+            lock (gate)
+            {
+                if (line.StartsWith("PASS ", StringComparison.Ordinal) || line.StartsWith("All ", StringComparison.Ordinal))
+                    writer.WriteLine(line);
+                else
+                {
+                    // Lake prints axiom details after its completed-target line.
+                    // Keep the target count or proof phase as the summary instead.
+                    if (latest.Length == 0 || (!line.StartsWith("info: ", StringComparison.Ordinal) &&
+                        !line.Contains("depends on axioms:", StringComparison.Ordinal)))
+                        latest = line.Length > 200 ? line[..200] + "…" : line;
+                    pending++;
+                }
+            }
+        }
+
+        public void Report()
+        {
+            lock (gate)
+            {
+                if (pending == 0) return;
+                Console.WriteLine($"PROGRESS {label}: {latest} ({pending} output lines since last update)");
+                pending = 0;
+            }
+        }
+    }
+
+    static async Task<string> CaptureOutput(StreamReader reader, TextWriter writer, ProgressSummary? summary = null)
+    {
+        var captured = new StringBuilder();
+        var line = new StringBuilder();
+        var buffer = new char[4096];
+        int count;
+        while ((count = await reader.ReadAsync(buffer)) != 0)
+        {
+            captured.Append(buffer, 0, count);
+            if (summary is null)
+            {
+                await writer.WriteAsync(buffer.AsMemory(0, count));
+                await writer.FlushAsync();
+            }
+            else
+                for (var i = 0; i < count; i++)
+                    if (buffer[i] == '\n')
+                    {
+                        summary.Add(line.ToString().TrimEnd('\r'), writer);
+                        line.Clear();
+                    }
+                    else line.Append(buffer[i]);
+        }
+        if (summary is not null && line.Length > 0) summary.Add(line.ToString(), writer);
+        return captured.ToString();
+    }
+
+    static (int Code, string Output, string Stdout, string Stderr) Execute(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
+        bool streamOutput = false, string? progress = null)
+    {
+#if LEANCIL_TOOL
+        // CLI output is a stable interface; progress belongs to the repository runner.
+        progress = null;
+#endif
+        // Aggregate at the suite boundary; nested build/proof phases feed this summary.
+        var summary = streamOutput && progress is not null ? new ProgressSummary(progress) : null;
+        streamOutput |= progress is not null;
         var args = command.ToArray();
         var start = new ProcessStartInfo(args[0])
         {
@@ -44,6 +115,8 @@ partial class Program : IDisposable
         if (leanPath is not null)
             start.Environment["LEAN_PATH"] = leanPath;
 
+        if (progress is not null) Console.WriteLine("START " + progress);
+        var elapsed = Stopwatch.StartNew();
         using var process = new Process { StartInfo = start };
         try
         {
@@ -54,19 +127,24 @@ partial class Program : IDisposable
         {
             throw new InvalidOperationException("Required command not found: " + args[0], exception);
         }
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
+        var stdout = streamOutput ? CaptureOutput(process.StandardOutput, Console.Out, summary) : process.StandardOutput.ReadToEndAsync();
+        var stderr = streamOutput ? CaptureOutput(process.StandardError, Console.Error, summary) : process.StandardError.ReadToEndAsync();
+        if (summary is null) process.WaitForExit();
+        else
+            while (!process.WaitForExit(10_000)) summary.Report();
 
         var output = stdout.GetAwaiter().GetResult();
         var error = stderr.GetAwaiter().GetResult();
+        if (progress is not null)
+            Console.WriteLine($"END {progress} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
         return (process.ExitCode, output + error, output, error);
     }
 
-    static string Run(IEnumerable<string> command, string? cwd = null, string? leanPath = null)
+    static string Run(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
+        bool streamOutput = false, string? progress = null)
     {
         var args = command.ToArray();
-        var result = Execute(args, cwd, leanPath);
+        var result = Execute(args, cwd, leanPath, streamOutput, progress);
 
         if (result.Code != 0)
             throw new InvalidOperationException($"Command failed ({result.Code}): {string.Join(' ', args)}\n{result.Output}");
@@ -130,7 +208,7 @@ partial class Program : IDisposable
                 File.Copy(At(name), destination);
             }
 
-        Run(["lake", "build", "CIL"], library);
+        Run(["lake", "build", "CIL"], library, progress: "Building fresh Lean verification library");
         libraryInputs = common;
 
         return library;
@@ -193,7 +271,7 @@ partial class Program : IDisposable
             .Select(m => m.Groups[1].Value).Where(n => n != "Extracted" && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
         if (support.Length > 0)
-            Run(["lake", "build", .. support], session);
+            Run(["lake", "build", .. support], session, progress: "Building proof dependencies: " + entry);
 
         if (!existingArtifacts)
             Run(Extract("extract", assembly, identity, entry, output, profile));
@@ -214,7 +292,8 @@ partial class Program : IDisposable
 
             stage?.Invoke("proof checking");
             foreach (var name in new[] { "Extracted", "Proof" })
-                Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")], leanPath: leanPath);
+                Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
+                    leanPath: leanPath, progress: $"Checking {name}: {entry}");
 
             stage?.Invoke("theorem audit");
             audit = Run(["lean", "--root=" + fresh, Path.Combine(fresh, "Audit.lean")], leanPath: leanPath);
