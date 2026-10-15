@@ -3,6 +3,11 @@ import CIL.Safety.Frames
 
 namespace CIL.Safety
 
+theorem Memory.Equivalent.loadSnapshot {m n : Memory} (same : m.Equivalent n)
+    (r : ManagedReference) (shape : CIL.SnapshotShape) :
+    loadSnapshot m r shape = loadSnapshot n r shape := by
+  simp only [CIL.Safety.loadSnapshot, same.readSnapshot]
+
 theorem Memory.Equivalent.formValue {m n : Memory} (same : m.Equivalent n) (r : ManagedReference) :
     CIL.Safety.formValue m r = CIL.Safety.formValue n r := by
   cases r <;> simp only [CIL.Safety.formValue, same.form]
@@ -11,7 +16,7 @@ theorem Memory.Equivalent.loadLocal {m n : Memory} (same : m.Equivalent n) (slot
     CIL.Safety.loadLocal m slot = CIL.Safety.loadLocal n slot := by
   cases slot with
   | root value => cases value <;> simp only [CIL.Safety.loadLocal, same.formValue]
-  | bytes kind reference => simp only [CIL.Safety.loadLocal, same.read]
+  | bytes kind reference => simp only [CIL.Safety.loadLocal, same.read, same.loadSnapshot]
 
 theorem Memory.Equivalent.localAddress {m n : Memory} (same : m.Equivalent n) (slot : LocalSlot) :
     CIL.Safety.localAddress m slot = CIL.Safety.localAddress n slot := by
@@ -45,12 +50,18 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
   | bytes kind reference =>
     cases value with
     | scalar value =>
-      simp only [CIL.Safety.storeLocal]
-      apply ResultEquivalent.bind_same
-      intro number
-      apply ResultEquivalent.bind (same.write reference (numberBytes number (localWidth kind)) 1 |>.mapError _)
-      intro left right related
-      exact .ok ⟨rfl, related⟩
+      cases value <;> simp only [CIL.Safety.storeLocal]
+      all_goals first
+        | (split
+           · exact .error _
+           · apply ResultEquivalent.bind (same.writeSnapshot _ _ _ |>.mapError _)
+             intro left right related
+             exact .ok ⟨rfl, related⟩)
+        | (apply ResultEquivalent.bind_same
+           intro number
+           apply ResultEquivalent.bind (same.write reference (numberBytes number (localWidth kind)) 1 |>.mapError _)
+           intro left right related
+           exact .ok ⟨rfl, related⟩)
     | reference reference => exact .error _
     | span reference length => exact .error _
 

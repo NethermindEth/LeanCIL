@@ -73,6 +73,29 @@ theorem write_preserves_immutable (m result : Memory) (r : Reference)
       rw [writeViews_permitted]
       simp [permitted, viewContains, different]
 
+theorem writeSnapshot_preserves_immutable (m result : Memory) (r : Reference)
+    (bytes : List (BitVec 8 × Bool)) (alignment : Nat)
+    (h : writeSnapshot m r bytes alignment = .ok result) : PreservesImmutable m result := by
+  simp only [writeSnapshot, write, List.length_map] at h
+  cases ha : access m r bytes.length alignment true <;>
+    simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  · cases h
+  · cases h
+    intro id a present kind
+    have different : r.allocation ≠ id := by
+      intro equal
+      cases live : a.live <;> cases position : validPosition a r.offset <;>
+        simp [access, form, liveAllocation, equal, present, kind, live, position,
+          Bind.bind, Except.bind, Pure.pure, Except.pure] at ha
+      repeat' first | cases ha | split at ha
+    refine ⟨present, ?_, ?_⟩
+    · intro offset
+      simp [Ne.symm different]
+    · intro offset
+      change permitted { m with views := writeViews m r bytes.length } false ⟨id, offset⟩ = _
+      rw [writeViews_permitted]
+      simp [permitted, viewContains, different]
+
 theorem allocate_preserves_immutable (m result : Memory) (a : Allocation) (id : AllocationId)
     (hm : m.WellFormed) (h : allocate m a = .ok (id, result)) : PreservesImmutable m result := by
   simp only [allocate] at h

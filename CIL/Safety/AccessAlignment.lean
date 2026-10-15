@@ -18,21 +18,24 @@ theorem access_alignment_at_placement {m : Memory} {r : Reference}
   exact ⟨ready.aligned.1, Nat.mod_eq_zero_of_dvd
     (Nat.dvd_add divides (Nat.dvd_of_mod_eq_zero ready.aligned.2.2))⟩
 
-/-- Successful value loading cannot bypass the full checked read, regardless
-    of the width's later scalar/vector interpretation. -/
+/-- Copying a vector may retain unknown bytes, but never bypasses the checked
+    read authority, lifetime, bounds or alignment requirements. -/
 theorem loadValue_checked_read {m : Memory} {reference : ManagedReference}
     {width : Nat} {value : CIL.Value} {signed : Bool}
     (loaded : loadValue m reference width signed = .ok value) :
-    ∃ r bytes, reference = .address r ∧ read m r width 1 = .ok bytes := by
+    ∃ r, reference = .address r ∧ access m r width 1 false = .ok () := by
   cases reference with
-  | null => simp [loadValue, dereference, checkedAt, Except.mapError,
+  | null =>
+    simp [loadValue, dereference, checkedAt, Except.mapError,
       Bind.bind, Except.bind] at loaded
   | address r =>
-    cases hread : read m r width 1 with
-    | error fault => simp [loadValue, dereference, hread, checkedAt,
-        Except.mapError, Bind.bind, Except.bind] at loaded
-    | ok bytes => exact ⟨r, bytes, rfl, hread⟩
-
+    cases ha : access m r width 1 false with
+    | error fault =>
+      by_cases h16 : width = 16 <;> by_cases h32 : width = 32 <;>
+        simp_all [loadValue, dereference, read, checkedAt, loadSnapshot, referenceAt,
+          ordinaryAccessAlignment, CIL.SnapshotShape.width, readSnapshot, Except.mapError, Bind.bind, Except.bind]
+      all_goals repeat' first | cases loaded | split at loaded
+    | ok result => cases result; exact ⟨r, rfl, ha⟩
 /-- Byte alignment at the supported ordinary value-load boundary imposes no
     hidden natural/vector alignment on a caller offset. Other read obligations
     still come from the actual checked access. This is a model theorem, not a
@@ -42,12 +45,7 @@ theorem loadValue_access_requirements {m : Memory} {reference : ManagedReference
     (loaded : loadValue m reference width signed = .ok value) :
     ∃ r allocation, reference = .address r ∧
       AccessRequirements m r width 1 false allocation := by
-  obtain ⟨r, bytes, href, hread⟩ := loadValue_checked_read loaded
-  have checked : access m r width 1 false = .ok () := by
-    unfold read at hread
-    cases haccess : access m r width 1 false with
-    | error fault => simp [haccess, Bind.bind, Except.bind] at hread
-    | ok result => cases result; rfl
+  obtain ⟨r, href, checked⟩ := loadValue_checked_read loaded
   obtain ⟨allocation, ready⟩ := access_requirements checked
   exact ⟨r, allocation, href, ready⟩
 
@@ -56,28 +54,39 @@ private theorem checkedAt_success {reference : ManagedReference} {width : Nat}
     result = .ok value := by
   cases result <;> simp_all [checkedAt, Except.mapError]
 
-/-- Every supported scalar/vector store uses an actual checked byte write. -/
+/-- Stores copy either initialized bytes or exact byte/mask snapshots. -/
 theorem storeValue_checked_write {m final : Memory} {reference : ManagedReference}
     {value : CIL.Value} (stored : storeValue m reference value = .ok final) :
-    ∃ r bytes, reference = .address r ∧ write m r bytes 1 = .ok final := by
+    ∃ r, reference = .address r ∧
+      ((∃ bytes, write m r bytes 1 = .ok final) ∨
+       (∃ bytes, writeSnapshot m r bytes 1 = .ok final)) := by
   cases value <;> cases reference <;>
     simp only [storeValue, referenceAt, Bind.bind, Except.bind] at stored <;>
     try cases stored
-  all_goals exact ⟨_, _, rfl, checkedAt_success stored⟩
+  all_goals repeat' first
+    | solve | exact ⟨_, rfl, Or.inl ⟨_, checkedAt_success stored⟩⟩
+    | solve | exact ⟨_, rfl, Or.inr ⟨_, checkedAt_success stored⟩⟩
+    | cases stored
+    | split at stored
 
 theorem storeValue_access_requirements {m final : Memory} {reference : ManagedReference}
     {value : CIL.Value} (stored : storeValue m reference value = .ok final) :
-    ∃ r bytes allocation, reference = .address r ∧ write m r bytes 1 = .ok final ∧
-      AccessRequirements m r bytes.length 1 true allocation := by
-  obtain ⟨r, bytes, href, hwritten⟩ := storeValue_checked_write stored
-  have checked : access m r bytes.length 1 true = .ok () := by
-    unfold write at hwritten
-    cases haccess : access m r bytes.length 1 true with
-    | error fault => simp [haccess, Bind.bind, Except.bind] at hwritten
-    | ok result => cases result; rfl
-  obtain ⟨allocation, ready⟩ := access_requirements checked
-  exact ⟨r, bytes, allocation, href, hwritten, ready⟩
-
+    ∃ r width allocation, reference = .address r ∧
+      AccessRequirements m r width 1 true allocation := by
+  obtain ⟨r, href, ordinary | snapshot⟩ := storeValue_checked_write stored
+  · obtain ⟨bytes, hwritten⟩ := ordinary
+    have checked : access m r bytes.length 1 true = .ok () := by
+      unfold write at hwritten
+      cases ha : access m r bytes.length 1 true <;> simp_all [Bind.bind, Except.bind]
+    obtain ⟨allocation, ready⟩ := access_requirements checked
+    exact ⟨r, bytes.length, allocation, href, ready⟩
+  · obtain ⟨bytes, hwritten⟩ := snapshot
+    have checked : access m r bytes.length 1 true = .ok () := by
+      unfold writeSnapshot write at hwritten
+      simp only [List.length_map] at hwritten
+      cases ha : access m r bytes.length 1 true <;> simp_all [Bind.bind, Except.bind]
+    obtain ⟨allocation, ready⟩ := access_requirements checked
+    exact ⟨r, bytes.length, allocation, href, ready⟩
 #print axioms access_alignment_at_placement
 #print axioms loadValue_checked_read
 #print axioms loadValue_access_requirements

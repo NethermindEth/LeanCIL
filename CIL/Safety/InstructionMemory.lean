@@ -1,4 +1,4 @@
-import CIL.Safety.MemoryLemmas
+import CIL.Safety.SnapshotMemory
 import CIL.Semantics
 
 namespace CIL.Safety
@@ -23,6 +23,10 @@ abbrev ExecutionResult := Except ExecutionFault
 def checkedAt (reference : ManagedReference) (width : Nat) (result : Checked α) : ExecutionResult α :=
   result.mapError fun rule => .memory rule reference width
 
+theorem checkedAt_ok {reference : ManagedReference} {width : Nat} {result : Checked α} {value : α}
+    (h : checkedAt reference width result = .ok value) : result = .ok value := by
+  cases result <;> simp_all [checkedAt, Except.mapError]
+
 def referenceAt : ManagedReference → ExecutionResult Reference
   | .null => .error (.memory .nullDereference .null 0)
   | .address r => .ok r
@@ -34,6 +38,52 @@ def byteNumber (bytes : List (BitVec 8)) : Nat :=
 def numberBytes (value width : Nat) : List (BitVec 8) :=
   (List.range width).map fun i => BitVec.ofNat 8 (value / 256^i)
 
+def snapshotValue (shape : CIL.SnapshotShape) (bytes : List (BitVec 8 × Bool)) : CIL.Value :=
+  if bytes.all Prod.snd then
+    let data := bytes.map Prod.fst
+    match shape with
+    | .aggregate _ => .aggregate data
+    | .vector128 => .v128 (BitVec.ofNat 128 (byteNumber data))
+    | .vector256 => .v256 (BitVec.ofNat 256 (byteNumber data))
+  else .snapshot shape bytes
+
+def valueSnapshot (shape : CIL.SnapshotShape) : CIL.Value → Option (List (BitVec 8 × Bool))
+  | .snapshot actual bytes =>
+    if actual = shape ∧ bytes.length = shape.width then some bytes else none
+  | .aggregate bytes => match shape with
+    | .aggregate width => if bytes.length = width then some (bytes.map fun b => (b, true)) else none
+    | _ => none
+  | .v128 bits => if shape = .vector128 then some ((numberBytes bits.toNat 16).map fun b => (b, true)) else none
+  | .v256 bits => if shape = .vector256 then some ((numberBytes bits.toNat 32).map fun b => (b, true)) else none
+  | _ => none
+
+def bitcastValue (source target : CIL.SnapshotShape) (value : CIL.Value) : ExecutionResult CIL.Value := do
+  if source.width != target.width then .error .invalidState else
+    let some bytes := valueSnapshot source value | .error .invalidState
+    return snapshotValue target bytes
+
+theorem valueSnapshot_length {shape : CIL.SnapshotShape} {value : CIL.Value}
+    {bytes : List (BitVec 8 × Bool)} (h : valueSnapshot shape value = some bytes) :
+    bytes.length = shape.width := by
+  cases value with
+  | snapshot actual data =>
+    simp only [valueSnapshot] at h
+    split at h
+    · rename_i condition
+      have same := Option.some.inj h
+      rw [← same]
+      exact condition.2
+    · cases h
+  | _ =>
+    cases shape <;> simp_all [valueSnapshot, numberBytes, CIL.SnapshotShape.width]
+    all_goals first
+      | (rcases h with ⟨length, rfl⟩; simp [length])
+      | (rw [← h]; simp)
+def loadSnapshot (m : Memory) (r : ManagedReference) (shape : CIL.SnapshotShape) : ExecutionResult CIL.Value := do
+  let address ← referenceAt r
+  let bytes ← checkedAt r shape.width (readSnapshot m address shape.width 1)
+  return snapshotValue shape bytes
+
 /-- Ordinary reference-free accesses in the target CoreCLR x64/ARM64 normal-memory
     convention permit byte offsets. This is not the portable CLI natural-alignment
     rule. ALIGNMENT.md records the runtime correspondence boundary; aligned APIs,
@@ -42,6 +92,9 @@ abbrev ordinaryAccessAlignment : Nat := 1
 
 def loadValue (m : Memory) (reference : ManagedReference) (width : Nat)
     (signed : Bool := false) : ExecutionResult CIL.Value := do
+  if width = 16 || width = 32 then
+    if let .error .uninitialized := dereference m reference width ordinaryAccessAlignment then
+      return ← loadSnapshot m reference (if width = 16 then .vector128 else .vector256)
   let bytes ← checkedAt reference width (dereference m reference width ordinaryAccessAlignment)
   let number := byteNumber bytes
   match width with
@@ -54,6 +107,11 @@ def loadValue (m : Memory) (reference : ManagedReference) (width : Nat)
   | _ => .error (.unsupported "Memory value width")
 
 def storeValue (m : Memory) (reference : ManagedReference) (value : CIL.Value) : ExecutionResult Memory := do
+  if let .snapshot shape bytes := value then
+    if (shape = .vector128 || shape = .vector256) && bytes.length == shape.width then
+      let address ← referenceAt reference
+      return ← checkedAt reference shape.width (writeSnapshot m address bytes ordinaryAccessAlignment)
+    else .error .invalidState
   let (width, number) ← match value with
     | .i64 bits => .ok (8, bits.toNat)
     | .v128 bits => .ok (16, bits.toNat)
@@ -99,6 +157,10 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memor
     return (← storeValue m r (.v128 bits), rest)
   | .store256, .scalar (.v256 bits) :: .reference r :: rest =>
     return (← storeValue m r (.v256 bits), rest)
+  | .store128, .scalar (.snapshot .vector128 bytes) :: .reference r :: rest =>
+    return (← storeValue m r (.snapshot .vector128 bytes), rest)
+  | .store256, .scalar (.snapshot .vector256 bytes) :: .reference r :: rest =>
+    return (← storeValue m r (.snapshot .vector256 bytes), rest)
   | .init256, .reference r :: rest => return (← storeValue m r (.v256 0), rest)
   | .asRef, .reference r :: rest => return (m, (← formValue m r) :: rest)
   | .add size signed, .scalar offset :: .reference r :: rest =>
@@ -107,6 +169,8 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memor
     let result ← checkedAt r 0 (add m address size (BitVec.ofInt 64 offset))
     return (m, .reference (.address result) :: rest)
   | .bitcast256, .scalar (.v256 bits) :: rest => return (m, .scalar (.v256 bits) :: rest)
+  | .bitcastValue source target, .scalar value :: rest =>
+    return (m, .scalar (← bitcastValue source target value) :: rest)
   | .bitcastByteBool, .scalar (.i32 bits) :: rest =>
     if bits.toNat ≤ 1 then return (m, .scalar (.i32 bits) :: rest)
     else .error (.unsupported "Noncanonical Boolean representation")
@@ -150,12 +214,18 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     return (← checkedAt r width
       (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
   | .loadAggregate size, .reference r :: rest =>
+    if let .error .uninitialized := dereference m r size ordinaryAccessAlignment then
+      return (m, .scalar (← loadSnapshot m r (.aggregate size)) :: rest)
     let bytes ← checkedAt r size (dereference m r size ordinaryAccessAlignment)
     return (m, .scalar (.aggregate bytes) :: rest)
   | .storeAggregate size, .scalar (.aggregate bytes) :: .reference r :: rest =>
     if bytes.length != size then .error .invalidState else
       let address ← referenceAt r
       return (← checkedAt r size (write m address bytes ordinaryAccessAlignment), rest)
+  | .storeAggregate size, .scalar (.snapshot (.aggregate width) bytes) :: .reference r :: rest =>
+    if bytes.length != size || width != size then .error .invalidState else
+      let address ← referenceAt r
+      return (← checkedAt r size (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
   | .initAggregate size, .reference r :: rest =>
     let address ← referenceAt r
     return (← checkedAt r size (write m address (List.replicate size 0) ordinaryAccessAlignment), rest)

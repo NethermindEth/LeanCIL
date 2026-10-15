@@ -32,7 +32,7 @@ Prove("Null", "UnsafeReferences::Word(Examples.FourLimbs&)",
 Prove("Expired", "UnsafeReferences::Word(Examples.FourLimbs&)",
     "CIL.Safety.invoke Extracted.program 4 0 [Examples.reference] (CIL.Safety.expire memory 0) = .error ⟨0, 0, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩");
 Prove("VectorUninitialized", "UnsafeReferences::ReadHalf(Examples.FourLimbs&)",
-    "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .error ⟨0, 2, .memory .uninitialized (.address ⟨0, 0⟩) 16⟩");
+    "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .ok (memory, [.scalar (.snapshot .vector128 (List.replicate 16 (37, false)))])");
 Prove("VectorBounds", "UnsafeReferences::ReadHalf(Examples.FourLimbs&)", """
     CIL.Safety.invoke Extracted.program 8 0 [Examples.reference]
       { memory with

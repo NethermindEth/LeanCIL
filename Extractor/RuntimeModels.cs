@@ -78,7 +78,7 @@ internal static class RuntimeModels
             throw new InvalidDataException($"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
         string? op = scope switch
         {
-            "System.Runtime" => Scalar(reference) ?? UnsafeModels.Translate(reference) ?? Runtime(reference.FullName),
+            "System.Runtime" => Scalar(reference) ?? ValueBitCasts.Translate(reference) ?? UnsafeModels.Translate(reference) ?? Runtime(reference.FullName),
             "System.Memory" => Scalar(reference),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null

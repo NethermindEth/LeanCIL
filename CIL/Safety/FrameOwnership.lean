@@ -21,33 +21,14 @@ theorem allocateHome_fresh {alignment : Nat} (m result : Memory) (activation wid
 theorem storeLocal_extends_allocations (m result : Memory) (slot final : LocalSlot)
     (value : Value) (h : storeLocal m slot value = .ok (final, result)) :
     AllocationExtension m result := by
-  cases slot with
-  | root root =>
-    cases value with
-    | scalar value => cases h
-    | span reference length => cases h
-    | reference reference =>
-      simp only [storeLocal] at h
-      cases hf : formValue m reference <;>
-        simp only [hf, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-      · cases h
-      · cases h
-        exact .refl m
-  | bytes kind reference =>
-    cases value with
-    | reference value => cases h
-    | span value length => cases h
-    | scalar value =>
-      simp only [storeLocal] at h
-      cases hn : localNumber kind value <;> simp only [hn, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i number
-        cases hw : write m reference (numberBytes number (localWidth kind)) 1 <;>
-          simp only [hw, checkedAt, Except.mapError, Pure.pure, Except.pure] at h
-        · cases h
-        · cases h
-          exact write_extends_allocations _ _ _ _ _ hw
-
+  unfold storeLocal at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals repeat' first
+    | exact .refl m
+    | solve | exact write_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
 def FreshOwned (before after : Memory) (owned : List AllocationId) : Prop :=
   AllocationExtension before after ∧
     ∀ id ∈ owned, before.nextIdentity ≤ id ∧ id < after.nextIdentity

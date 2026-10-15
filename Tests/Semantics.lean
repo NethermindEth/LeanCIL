@@ -1,4 +1,5 @@
 import Tests.AggregateSetup
+import Tests.ValueBitCasts
 import Tests.ViewReuse
 import Examples.Support
 import CIL.Safety.ExecutionInvariants
@@ -112,12 +113,15 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
       instruction (.loadScalar 4) [.reference (.address reference)] result =
         .ok (result, [.scalar (.i32 bits)]) := by
   obtain ⟨result, stored, loaded⟩ := store_load_numeric_local .word32 (.i32 bits) bits.toNat rfl ready
+  change (do
+    let bytes ← checkedAt (.address reference) 4 (read result reference 4 1)
+    pure (Value.scalar (.i32 (BitVec.ofNat 32 (byteNumber bytes)))) : ExecutionResult Value) = _ at loaded
   refine ⟨result, ?_, ?_⟩
   · cases hw : checkedAt (.address reference) 4 (write memory reference (numberBytes bits.toNat 4) 1) <;>
       simp_all [instruction, storeLocal, localNumber, referenceAt, localWidth, ordinaryAccessAlignment,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
   · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
-      simp_all [instruction, loadLocal, loadValue, localWidth, localResult, dereference, ordinaryAccessAlignment,
+      simp_all [instruction, loadValue, localResult, dereference, ordinaryAccessAlignment,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem switch_unsigned_default :

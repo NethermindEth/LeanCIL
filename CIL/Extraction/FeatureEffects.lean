@@ -9,7 +9,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .init256 | .skipInit => (1, 0)
   | .dataToken _ | .staticAddress _ => (0, 1)
   | .add .. | .spanCreate => (2, 1)
-  | .load128 | .load256 | .asRef | .bitcast256 | .bitcastByteBool
+  | .load128 | .load256 | .asRef | .bitcast256 | .bitcastByteBool | .bitcastValue ..
   | .createSpan | .spanReference => (1, 1)
 
 /-- Successful stack effects for instructions that cannot create a local alias or

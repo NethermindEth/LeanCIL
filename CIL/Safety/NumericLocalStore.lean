@@ -19,7 +19,9 @@ theorem store_numeric_local {memory : Memory} {reference : Reference}
   have loaded := write_readback _ _ _ _ _ written
   rw [length] at loaded
   refine ⟨result, written, ?_, loaded⟩
-  simp [storeLocal, fits, written, checkedAt, Except.mapError,
+  cases value <;> try cases fits
+  all_goals try solve | cases kind <;> simp [localNumber] at fits
+  all_goals simp [storeLocal, fits, written, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms store_numeric_local

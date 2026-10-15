@@ -46,16 +46,15 @@ theorem storeValue_preserves_wellFormed (m result : Memory) (reference : Managed
     (value : CIL.Value) (hm : m.WellFormed)
     (h : storeValue m reference value = .ok result) : result.WellFormed := by
   unfold storeValue at h
-  split at h <;> try cases h
-  all_goals
-    cases reference with
-    | null => cases h
-    | address address =>
-      simp only [referenceAt, Bind.bind, Except.bind] at h
-      exact checked_write_preserves_wellFormed _ _ _ _ _ _ _ hm h
-
+  repeat' first
+    | solve | exact write_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
+    | simp only [Bind.bind, Except.bind] at h
 #print axioms storeValue_preserves_wellFormed
 
+set_option maxHeartbeats 800000 in
 theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (hm : m.WellFormed)
     (h : memoryInstruction operation stack m = .ok (result, values)) : result.WellFormed := by
@@ -64,6 +63,7 @@ theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp) (stack
   all_goals
     repeat' first
       | exact hm
+      | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
       | solve | apply checked_write_preserves_wellFormed _ _ _ _ _ _ _ hm; assumption
       | solve | apply storeValue_preserves_wellFormed _ _ _ _ hm; assumption
       | cases h
@@ -71,6 +71,7 @@ theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp) (stack
 
 #print axioms memoryInstruction_preserves_wellFormed
 
+set_option maxHeartbeats 800000 in
 theorem instruction_preserves_wellFormed (operation : CIL.Op) (stack values : List Value)
     (m result : Memory) (hm : m.WellFormed)
     (h : instruction operation stack m = .ok (result, values)) : result.WellFormed := by
@@ -79,6 +80,7 @@ theorem instruction_preserves_wellFormed (operation : CIL.Op) (stack values : Li
   all_goals
     repeat' first
       | exact hm
+      | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
       | solve | apply checked_write_preserves_wellFormed _ _ _ _ _ _ _ hm; assumption
       | solve | apply memoryInstruction_preserves_wellFormed _ _ _ _ _ hm; assumption
       | solve | apply storeValue_preserves_wellFormed _ _ _ _ hm; assumption

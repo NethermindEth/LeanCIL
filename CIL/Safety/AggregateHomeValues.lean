@@ -8,8 +8,7 @@ theorem load_local_aggregate_of_read {memory : Memory} {reference : Reference}
     {size : Fin (2^64)} {bytes : List (BitVec 8)}
     (loaded : read memory reference size 1 = .ok bytes) :
     loadLocal memory (.bytes (.aggregate size) reference) = .ok (.scalar (.aggregate bytes)) := by
-  simp [loadLocal, localWidth, loaded, checkedAt, Except.mapError,
-    Bind.bind, Except.bind, Pure.pure, Except.pure]
+  exact loadLocal_of_read loaded
 
 /-- Full-width checked aggregate stores need write access, not initialized bytes.
     The explicit write equation also exposes the exact footprint to callers. -/

@@ -52,34 +52,14 @@ theorem leaveFrame_preserves_wellFormed (frame : Frame) (m : Memory)
 theorem storeLocal_preserves_wellFormed (m result : Memory) (slot final : LocalSlot)
     (value : Value) (hm : m.WellFormed)
     (h : storeLocal m slot value = .ok (final, result)) : result.WellFormed := by
-  cases slot with
-  | root root =>
-    cases value with
-    | scalar value => cases h
-    | span reference length => cases h
-    | reference reference =>
-      simp only [storeLocal] at h
-      cases hf : formValue m reference <;>
-        simp only [hf, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-      · cases h
-      · cases h
-        exact hm
-  | bytes kind reference =>
-    cases value with
-    | reference value => cases h
-    | span value length => cases h
-    | scalar value =>
-      simp only [storeLocal] at h
-      cases hn : localNumber kind value <;> simp only [hn, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i number
-        cases hw : write m reference (numberBytes number (localWidth kind)) 1 <;>
-          simp only [hw, checkedAt, Except.mapError,
-            Pure.pure, Except.pure] at h
-        · cases h
-        · cases h
-          exact write_preserves_wellFormed _ _ _ _ _ hm hw
-
+  unfold storeLocal at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals repeat' first
+    | exact hm
+    | solve | exact write_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
 #print axioms storeLocal_preserves_wellFormed
 
 end CIL.Safety

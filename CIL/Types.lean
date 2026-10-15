@@ -5,6 +5,17 @@ namespace CIL
 abbrev W64 := BitVec 64
 abbrev W32 := BitVec 32
 
+/-- Storage shapes admitted by value reinterpretation; lane type does not change bytes. -/
+inductive SnapshotShape where
+  | aggregate (width : Nat)
+  | vector128 | vector256
+  deriving DecidableEq, Repr
+
+def SnapshotShape.width : SnapshotShape → Nat
+  | .aggregate width => width
+  | .vector128 => 16
+  | .vector256 => 32
+
 inductive Address where
   | byte (address : Nat)
   | local (frame index : Nat)
@@ -13,6 +24,8 @@ inductive Address where
   deriving DecidableEq, Repr
 
 inductive Value where
+  /-- Partial value snapshots retain every byte and its initialization bit. -/
+  | snapshot (shape : SnapshotShape) (bytes : List (BitVec 8 × Bool))
   | aggregate (bytes : List (BitVec 8))
   | i8 (word : BitVec 8)
   | i64 (word : W64)
