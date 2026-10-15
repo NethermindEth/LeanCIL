@@ -336,7 +336,7 @@ partial class Program : IDisposable
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
 
     sealed record Report(int schema, string assemblySha256, string identitySha256, string theorem, string[] axioms,
-        string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null);
+        string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null, string[]? initializedTypes = null);
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
@@ -452,7 +452,10 @@ partial class Program : IDisposable
         if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
             throw new InvalidOperationException("Inputs changed during verification");
 
-        var report = new Report(2, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild);
+        var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+        var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
+            ? assumptions.Deserialize<string[]>() : [];
+        var report = new Report(2, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, initializedTypes);
         File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
         return report;

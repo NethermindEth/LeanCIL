@@ -132,6 +132,23 @@ A regular `dotnet build Extractor -c Release` produces `Extractor/bin/leancil.ex
 
 ## Architecture
 
+Methods on types with static constructors are rejected by default. If the caller
+guarantees successful initialization before invocation, extraction can record
+that precondition explicitly:
+
+```sh
+leancil extract assembly.dll 'Type::Method(ulong)' artifacts/Method --assume-initialized Namespace.Type
+```
+
+Repeat `--assume-initialized` for each required type, using its exact metadata
+name. Assumptions apply only to named types in this assembly and do not propagate
+to helper types. They do not execute or prove initialization, admit calls to
+static constructors, or enable unsupported static field accesses. The generated
+Lean source and identity manifest retain the assumptions; `check` reuses them and
+rejects conflicting explicit assumptions. Verification binds the manifest hash
+and prints the initialization preconditions with the theorem. Re-extract older
+artifacts to include the new manifest field.
+
 | Layer | Public modules | Purpose |
 | --- | --- | --- |
 | Values and instructions | `CIL.Types`, `CIL.Instructions`, `CIL.Layout` | Bit vectors, references, byte snapshots, validated aggregate layouts |

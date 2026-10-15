@@ -42,7 +42,6 @@ internal static class MetadataValidation
             !(type.IsExplicitLayout || type.IsSequentialLayout) || type.HasGenericParameters ||
             type.ClassSize is < -1 or > 65536 || (type.IsExplicitLayout && type.ClassSize <= 0) ||
             type.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.InlineArrayAttribute") ||
-            type.Methods.Any(m => m.IsConstructor && m.IsStatic) ||
             module.GetTypes().Count(t => t.FullName == type.FullName) != 1)
             throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName}");
 
@@ -106,9 +105,14 @@ internal static class MetadataValidation
         RuntimeModels.ValidateTypeIdentity(type, module);
     }
 
-    internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile)
+    internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
+        IReadOnlyCollection<string>? initializedTypes = null)
     {
         profile.Validate();
+        initializedTypes ??= [];
+        foreach (var name in initializedTypes)
+            if (!module.GetTypes().Any(t => t.FullName == name && t.Methods.Any(m => m.IsConstructor && m.IsStatic)))
+                throw new InvalidDataException($"Initialization assumption must name a type with a static constructor in this assembly: {name}");
         string? Attribute(string name) => module.Assembly.CustomAttributes
             .SingleOrDefault(a => a.AttributeType.FullName == name)?.ConstructorArguments.Single().Value as string;
         if ((module.Assembly.Name.FullName != assemblyIdentity && module.Assembly.Name.Name != assemblyIdentity) ||
@@ -136,7 +140,9 @@ internal static class MetadataValidation
                     MethodImplAttributes.Synchronized | MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0 ||
                 method.HasGenericParameters || method.DeclaringType.HasGenericParameters ||
                 method.Body.Instructions.Count == 0 || method.Body.ExceptionHandlers.Count != 0 ||
-                method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic))
+                (method.IsConstructor && method.IsStatic) ||
+                (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
+                    !initializedTypes.Contains(method.DeclaringType.FullName, StringComparer.Ordinal)))
                 throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
             if (method.HasThis) Layout(method.DeclaringType, module);
             if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))

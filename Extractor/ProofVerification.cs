@@ -91,6 +91,9 @@ partial class Program
             Console.WriteLine($"Verified: {report.theorem}");
             Console.WriteLine($"  Assembly: {identity}");
             Console.WriteLine($"  Entry: {entry}");
+            if (manifest.TryGetProperty("initializedTypes", out var initializedTypes))
+                foreach (var name in initializedTypes.EnumerateArray())
+                    Console.WriteLine($"  Caller assumption: {name.GetString()} initialization completed successfully before invocation.");
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
             Console.WriteLine($"  Settings: {CliPaths.Display(settingsPath)}");
