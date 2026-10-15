@@ -7,14 +7,34 @@ using System.Text.Json;
 var cli = new[] { "dotnet", args.Length == 0 ? ExtractorPath : Path.GetFullPath(args[0]) };
 var root = Path.GetFullPath(At("artifacts/ConsumerPackage"));
 var output = At("artifacts/ConsumerExtraction");
+// Tamper only this test's private receipts. A valid base certificate may be
+// copied from the caller's cache; the verifier still authenticates it normally.
+var existingCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
+    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
+var isolatedCache = At("artifacts/ConsumerCache-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(isolatedCache);
+if (Directory.Exists(existingCache))
+{
+    foreach (var candidate in Directory.EnumerateDirectories(existingCache))
+        if (File.Exists(Path.Combine(candidate, "cache-manifest.json")) &&
+            File.Exists(Path.Combine(candidate, "lakefile.toml")) && Sha(Path.Combine(candidate, "lakefile.toml")) == Sha(At("lakefile.toml")))
+            CopyTree(candidate, Path.Combine(isolatedCache, Path.GetFileName(candidate)));
+}
+Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", isolatedCache);
+var testTrace = At("artifacts/ConsumerTrace-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(testTrace);
+Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", testTrace);
 Directory.CreateDirectory(Path.Combine(root, "Client"));
 var revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(root, "lakefile.toml"),
     $"name = \"consumer\"\n[[require]]\nname = \"leancil\"\ngit = {JsonSerializer.Serialize(Root.Replace('\\', '/'))}\nrev = \"{revision}\"\n[[lean_lib]]\nname = \"Client\"\n");
 File.Copy(At("lean-toolchain"), Path.Combine(root, "lean-toolchain"), true);
+var independent = Path.Combine(root, "Client", "Independent.lean");
+File.WriteAllText(independent, "namespace Client\ntheorem independent (x : Nat) : x = x := rfl\nend Client\n");
 const string shared = """
 import Extracted
 import CIL.Semantics
+import Client.Independent
 namespace Client
 theorem execution (x y : CIL.W64) (memory : CIL.Memory) :
     CIL.invoke Extracted.program 4 0 [.i64 x, .i64 y] memory =
@@ -64,6 +84,60 @@ if (!inputs.TryGetProperty("consumer:" + sharedPath, out _) ||
     inputs.GetProperty("revision:leancil").GetString() != revision)
     throw new InvalidOperationException("Missing consumer source or dependency identity.");
 Console.WriteLine("PASS external consumer package and transitive dependency importing Extracted");
+
+Verify();
+var cached = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+if (cached.GetProperty("libraryBuild").GetString() != "consumer-proof-cache")
+    throw new InvalidOperationException("Unchanged consumer proof was not reused.");
+Console.WriteLine("PASS unchanged consumer proof reuses an authenticated successful result");
+
+// A distinct extraction identity must recheck the extraction-dependent proof,
+// while the independently certified consumer helper can retain its artifact.
+var trace = testTrace;
+var beforeReuseTrace = Directory.GetFiles(trace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+var previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+    Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "Arithmetic::Add(ulong,ulong)", output]);
+    Verify();
+    var replay = Directory.EnumerateFiles(trace, "*.jsonl").Where(path => !beforeReuseTrace.Contains(path)).SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+        .Select(item => item.GetProperty("command").EnumerateArray().Select(arg => arg.GetString()!).ToArray())
+        .Where(command => command.Any(arg => Path.GetFileNameWithoutExtension(arg) == "leanchecker")).ToArray();
+    if (replay.Length == 0 || replay.Any(command => command.Contains("Client.Independent")) ||
+        !replay.Any(command => command.Contains("Client.Shared") && command.Contains("Extracted")))
+        throw new InvalidOperationException("Consumer support replay did not distinguish extraction-dependent imports.");
+}
+finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+Console.WriteLine("PASS extraction-independent helper reused across gates; dependent module replayed");
+
+// Neither a self-consistent source match nor modified cached bytes can bypass
+// the producer receipt. Invalidate the proof receipt too, so this exercises the
+// support artifact fallback rather than the unchanged-result fast path.
+foreach (var receipt in Directory.EnumerateFiles(SuccessCacheRoot, "report.json", SearchOption.AllDirectories))
+{
+    var saved = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(receipt));
+    if (saved.GetProperty("inputs").TryGetProperty("consumer:" + proof, out _)) File.AppendAllText(receipt, "\n ");
+}
+var independentArtifacts = Directory.EnumerateFiles(SuccessCacheRoot, "Independent.olean", SearchOption.AllDirectories).ToArray();
+if (independentArtifacts.Length == 0) throw new InvalidOperationException("No certified consumer support artifact was published.");
+foreach (var artifact in independentArtifacts) File.AppendAllText(artifact, "tampered artifact");
+var tamperTrace = testTrace;
+var beforeTamperTrace = Directory.GetFiles(tamperTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", tamperTrace);
+    Verify();
+    var commands = Directory.EnumerateFiles(tamperTrace, "*.jsonl").Where(path => !beforeTamperTrace.Contains(path)).SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+        .Select(item => item.GetProperty("command").EnumerateArray().Select(arg => arg.GetString()!).ToArray());
+    if (!commands.Any(command => command.Any(arg => Path.GetFileNameWithoutExtension(arg) == "leanchecker") &&
+        command.Contains("Client.Independent")))
+        throw new InvalidOperationException("Tampered consumer artifacts were not rebuilt and replayed.");
+}
+finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+Console.WriteLine("PASS tampered consumer support and proof receipts fall back to fresh verification");
 
 // A changed imported proof must fail, regardless of any existing consumer caches.
 File.WriteAllText(sharedPath, shared.Replace("x + y", "x - y"));

@@ -109,6 +109,107 @@ partial class Program
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
     }
 
+    // A deliberately conservative key: include all package sources (not only the
+    // selected proof's syntactic imports), pinned revisions, and effective config.
+    // Only artifacts whose compiled import closure excludes Extracted are shared.
+    string ConsumerCacheKey(string kind, SortedDictionary<string, string> inputs, string extra) =>
+        ContentKey("consumer-" + kind + "-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" +
+            Sha(Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean")) + "\n" +
+            Sha(Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" +
+            // lakefile.lean may consult environment variables when choosing
+            // options/plugins. Bind them conservatively; never log their values.
+            JsonSerializer.Serialize(new SortedDictionary<string, string>(Environment.GetEnvironmentVariables()
+                .Cast<System.Collections.DictionaryEntry>().ToDictionary(entry => (string)entry.Key, entry => (string)entry.Value!), StringComparer.Ordinal)) + "\n" +
+            JsonSerializer.Serialize(inputs) + "\n" + extra);
+
+    Dictionary<string, string[]> ConsumerModuleImports(string session, Dictionary<string, string> modules)
+    {
+        // Read Lean's compiled import headers, not a regex over source text. This
+        // also handles public/private imports and transitive package dependencies.
+        var probe = Path.Combine(session, "LeanCILImports" + Guid.NewGuid().ToString("N") + ".lean");
+        var input = probe + ".json";
+        try
+        {
+            File.WriteAllText(probe, """
+import Lean
+unsafe def main (args : List String) : IO Unit := do
+  let [input] := args | throw (IO.userError "Expected module manifest")
+  let paths : Array String ← IO.ofExcept <| (Lean.Json.parse (← IO.FS.readFile input)).bind Lean.fromJson?
+  for path in paths do
+    let (data, region) ← Lean.readModuleData path
+    IO.println (Lean.Json.arr (data.imports.map fun i => Lean.Json.str i.module.toString)).compress
+    region.free
+""");
+            var paths = modules.Values.ToArray();
+            File.WriteAllText(input, JsonSerializer.Serialize(paths));
+            var result = Run(["lean", "--run", probe, input], session);
+            var lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length != paths.Length) throw new InvalidDataException("Incomplete consumer compiled import graph.");
+            return modules.Keys.Zip(lines).ToDictionary(pair => pair.First,
+                pair => JsonSerializer.Deserialize<string[]>(pair.Second) ?? throw new InvalidDataException("Invalid import graph."));
+        }
+        finally { File.Delete(probe); File.Delete(input); }
+    }
+
+    void PublishConsumerSupport(string session, string key, string[] directories, string proofModule)
+    {
+        if (!UseSuccessCache) return;
+        var modules = directories.Where(Directory.Exists)
+            .SelectMany(directory => Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
+                .Select(path => (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
+            .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
+        var graph = ConsumerModuleImports(session, modules);
+        var dependent = new HashSet<string>(["Extracted", "ExtractionAudit", proofModule], StringComparer.Ordinal);
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var (name, imports) in graph)
+                if (imports.Any(dependent.Contains)) changed |= dependent.Add(name);
+        } while (changed);
+        var publication = Path.Combine(Path.GetTempPath(), "leancil-consumer-support-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(publication);
+        try
+        {
+            var generatedArtifacts = Directory.EnumerateFiles(session, "*", SearchOption.AllDirectories)
+                .Select(path => (Path: path, Relative: Path.GetRelativePath(session, path).Replace('\\', '/')))
+                .Where(file => !file.Relative.Split('/').Contains(".git") &&
+                    new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }.Any(suffix => file.Relative.EndsWith(suffix, StringComparison.Ordinal)))
+                .ToArray();
+            foreach (var (name, path) in modules.Where(pair => !dependent.Contains(pair.Key) &&
+                pair.Key != "CIL" && !pair.Key.StartsWith("CIL.", StringComparison.Ordinal)))
+            {
+                var stem = Path.GetFileNameWithoutExtension(path);
+                foreach (var artifact in Directory.EnumerateFiles(Path.GetDirectoryName(path)!, stem + ".*"))
+                {
+                    // A sibling module Foo.Bar must not be mistaken for Foo's artifact.
+                    var suffix = Path.GetFileName(artifact)[stem.Length..];
+                    if (suffix is not (".olean" or ".olean.hash" or ".olean.private" or ".olean.private.hash" or
+                        ".olean.server" or ".olean.server.hash" or ".ilean" or ".ilean.hash" or ".trace" or ".ir" or ".ir.hash")) continue;
+                    var target = Within(publication, Path.GetRelativePath(session, artifact));
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(artifact, target);
+                }
+                // Lake's olean trace also records generated C/IR outputs. Without
+                // those outputs it recompiles an otherwise valid cached module.
+                // Search by full module suffix to respect custom build/IR dirs.
+                var modulePath = name.Replace('.', '/');
+                foreach (var artifact in generatedArtifacts)
+                {
+                    if (!new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }
+                        .Any(suffix => artifact.Relative.EndsWith("/" + modulePath + suffix, StringComparison.Ordinal))) continue;
+                    var target = Within(publication, artifact.Relative);
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(artifact.Path, target, true);
+                }
+            }
+            // Append immutable certified generations: later gates may discover
+            // additional independent helpers that were absent from the first gate.
+            PublishSuccess(key + "-" + ContentKey(JsonSerializer.Serialize(CacheFiles(publication))), publication);
+        }
+        finally { Directory.Delete(publication, true); }
+    }
+
     Report VerifyConsumer(string assembly, string proof, string output, string theorem, string root,
         string? settings, Action<string>? stage)
     {
@@ -127,10 +228,23 @@ partial class Program
         var certifiedBase = ModuleArtifacts(certifiedLibrary).Where(pair =>
             ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
         var identityHash = Sha(Path.Combine(output, "identity.json"));
+        var proofKey = ConsumerCacheKey("proof", before, identityHash + "\n" + theorem + "\n" + Sha(assembly));
         var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(session);
         try
         {
+            var receipt = Path.Combine(session, "certified-result");
+            if (RestoreSuccess(proofKey, receipt))
+            {
+                var cached = JsonSerializer.Deserialize<Report>(File.ReadAllText(Path.Combine(receipt, "report.json")))!;
+                Run(["dotnet", ExtractorPath, "check", output]);
+                if (!Same(before, ConsumerInputs(root, proof, settings, output)) || identityHash != Sha(Path.Combine(output, "identity.json")))
+                    throw new InvalidOperationException("Inputs changed during consumer verification");
+                var reused = cached with { libraryBuild = "consumer-proof-cache" };
+                File.WriteAllText(reportPath, JsonSerializer.Serialize(reused, Json) + "\n");
+                CacheProgress("certified consumer proof: " + theorem);
+                return reused;
+            }
             var dependencies = ConsumerDependencies(root);
             foreach (var dependency in dependencies)
             {
@@ -176,7 +290,9 @@ partial class Program
             if (File.Exists(extractionAuditPath)) throw new InvalidDataException("ExtractionAudit is reserved for the certificate audit.");
             File.WriteAllText(extractionAuditPath, ExtractionAuditSource);
             AddConsumerLibrary(frameworkCopy, "ExtractionAudit");
-            var proofModule = "LeanCILProof" + Guid.NewGuid().ToString("N");
+            const string proofModule = "LeanCILProof";
+            if (File.Exists(Path.Combine(session, proofModule + ".lean")))
+                throw new InvalidDataException("LeanCILProof is reserved for the selected proof.");
             File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), Path.Combine(session, proofModule + ".lean"));
             AddConsumerLibrary(session, proofModule);
             var copied = before.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal))
@@ -185,6 +301,45 @@ partial class Program
                 .Append(extractionAuditPath)
                 .Append(Path.Combine(session, proofModule + ".lean"))
                 .ToDictionary(path => path, Sha);
+            var initialImportDirectories = ConsumerImportDirectories(session);
+            var supportInputs = new SortedDictionary<string, string>(before.Where(pair =>
+                !pair.Key.StartsWith("proof:", StringComparison.Ordinal) && !pair.Key.StartsWith("settings:", StringComparison.Ordinal))
+                .ToDictionary(), StringComparer.Ordinal);
+            var configuration = copied.Where(pair => Path.GetFileName(pair.Key) is "lakefile.toml" or "lakefile.lean" or "lake-manifest.json")
+                .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => Path.GetRelativePath(session, pair.Key) + ":" + pair.Value);
+            var supportKey = ConsumerCacheKey("support", supportInputs,
+                string.Join("\n", initialImportDirectories.Select(path => Path.GetRelativePath(session, path))) + "\n" + string.Join("\n", configuration));
+            var restoredArtifacts = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            var restoredDirectory = Path.Combine(Path.GetTempPath(), "leancil-consumer-restored-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(restoredDirectory);
+            try
+            {
+                var restored = false;
+                foreach (var generation in UseSuccessCache && Directory.Exists(SuccessCacheRoot)
+                    ? Directory.EnumerateDirectories(SuccessCacheRoot, supportKey + "-*").OrderByDescending(Directory.GetLastWriteTimeUtc)
+                    : Enumerable.Empty<string>())
+                {
+                    // RestoreSuccess verifies the local producer signature and all
+                    // artifact hashes. Staging directories never have a valid receipt.
+                    if (RestoreSuccess(Path.GetFileName(generation), restoredDirectory))
+                    {
+                        restored = true;
+                        break;
+                    }
+                    // An interrupted copy may leave partial files; they have no
+                    // reusable certificate and must never enter the package.
+                    Directory.Delete(restoredDirectory, true);
+                    Directory.CreateDirectory(restoredDirectory);
+                }
+                if (restored) restoredArtifacts = CacheFiles(restoredDirectory);
+                if (restoredArtifacts.Count > 0)
+                {
+                    CopyTree(restoredDirectory, session);
+                    CacheProgress("certified consumer support library");
+                }
+            }
+            finally { Directory.Delete(restoredDirectory, true); }
             // Snapshot before invoking Lake: configuration elaboration and imported
             // metaprograms must not redefine the source bytes accepted by this run.
             stage?.Invoke("extraction certificate audit");
@@ -199,6 +354,11 @@ partial class Program
             stage?.Invoke("kernel replay");
             var checker = Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
             var importDirectories = ConsumerImportDirectories(session);
+            if (!initialImportDirectories.SequenceEqual(importDirectories))
+                throw new InvalidDataException("Consumer import paths changed during verification.");
+            var supportUnchanged = restoredArtifacts.Count > 0 && restoredArtifacts.Where(pair =>
+                Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal)).All(pair =>
+                File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             var frameworkModules = Path.GetFullPath(Path.Combine(frameworkCopy, ".lake/build/lib/lean"));
             var currentBase = ModuleArtifacts(frameworkCopy).Where(pair =>
@@ -224,7 +384,12 @@ partial class Program
                         module.All(pair => certifiedBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
                     if (!unchanged && (module.Key == "CIL" || module.Key.StartsWith("CIL.", StringComparison.Ordinal)))
                         baseUnchanged = false;
-                    discovered.Add((module.Key, unchanged));
+                    var certifiedSupport = supportUnchanged && module.All(pair =>
+                    {
+                        var relative = Path.GetRelativePath(session, Path.Combine(directory, pair.Key));
+                        return restoredArtifacts.TryGetValue(relative.Replace('\\', '/'), out var hash) && hash == pair.Value;
+                    });
+                    discovered.Add((module.Key, unchanged || certifiedSupport));
                 }
             }
             if (!names.Contains(proofModule) || !names.Contains("Extracted") || !names.Contains("ExtractionAudit"))
@@ -251,6 +416,12 @@ partial class Program
                 ? assumptions.Deserialize<string[]>() : [];
             var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before,
                 libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes);
+            // Publish only after the complete declaration replay, exact theorem
+            // audit, extraction recheck and source-stability checks succeeded.
+            PublishConsumerSupport(session, supportKey, importDirectories, proofModule);
+            Directory.CreateDirectory(receipt);
+            File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));
+            PublishSuccess(proofKey, receipt);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
             return report;
         }
