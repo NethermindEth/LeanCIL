@@ -1,3 +1,4 @@
+import Tests.ViewReuse
 import Examples.Support
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.NumericLocalLoad

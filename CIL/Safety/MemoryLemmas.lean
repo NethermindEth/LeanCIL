@@ -1,4 +1,4 @@
-import CIL.Safety.Memory
+import CIL.Safety.ViewReuse
 
 namespace CIL.Safety
 
@@ -151,6 +151,8 @@ theorem write_preserves_write_permission (m result : Memory) (r q : Reference)
     simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   · cases h
   · cases h
+    change permitted { m with views := writeViews m r bytes.length } true q = _
+    rw [writeViews_permitted]
     simp [permitted]
 
 theorem write_read_permission (m result : Memory) (r q : Reference)
@@ -164,6 +166,8 @@ theorem write_read_permission (m result : Memory) (r q : Reference)
     simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   · cases h
   · cases h
+    change permitted { m with views := writeViews m r bytes.length } false q = _
+    rw [writeViews_permitted]
     simp [permitted, viewContains, eq_comm]
 
 theorem write_preserves_wellFormed (m result : Memory) (r : Reference)
@@ -176,8 +180,14 @@ theorem write_preserves_wellFormed (m result : Memory) (r : Reference)
   · cases h
     refine ⟨hm.1, ?_⟩
     intro view hv
-    simp only [List.mem_cons] at hv
-    rcases hv with rfl | hv
+    have included : view ∈ ⟨r.allocation, r.offset, bytes.length, true, false⟩ :: m.views := by
+      change view ∈ writeViews m r bytes.length at hv
+      unfold writeViews at hv
+      split at hv
+      · exact List.mem_cons_of_mem _ hv
+      · exact hv
+    simp only [List.mem_cons] at included
+    rcases included with rfl | hv
     · obtain ⟨a, allocation, _, bounds⟩ := access_within_allocation _ _ _ _ _ ha
       exact ⟨a, allocation, bounds⟩
     · exact hm.2 view hv

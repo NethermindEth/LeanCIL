@@ -25,3 +25,6 @@ name = "Tests.FeatureEvidence"
 
 [[lean_lib]]
 name = "Tests.LayoutCoverage"
+
+[[lean_lib]]
+name = "Tests.ViewReuse"
