@@ -11,13 +11,15 @@ internal static class Reachability
         profile.Validate();
         MemoryPrefixes.Validate(method);
         var instructions = method.Body.Instructions;
+        var boundaries = instructions.ToHashSet();
         foreach (Instruction instruction in instructions)
         {
-            if (instruction.Operand is Instruction target &&
-                !instructions.Contains(target))
-                throw new InvalidDataException("Malformed or cyclic control flow");
+            if (instruction.OpCode.Code != Code.Switch &&
+                instruction.OpCode.FlowControl is FlowControl.Branch or FlowControl.Cond_Branch &&
+                (instruction.Operand is not Instruction target || !boundaries.Contains(target)))
+                throw new InvalidDataException("Malformed control-flow target");
             if (instruction.OpCode.Code == Code.Switch &&
-                (instruction.Operand is not Instruction[] targets || targets.Any(t => !instructions.Contains(t))))
+                (instruction.Operand is not Instruction[] targets || targets.Any(t => !boundaries.Contains(t))))
                 throw new InvalidDataException("Malformed switch targets");
         }
         // Address-taken locals may be changed indirectly by calls or stores.
@@ -29,11 +31,15 @@ internal static class Reachability
         {
             [instructions[0]] = new(method.Body.Variables.Count)
         };
-        // The admitted graph is forward-only, so every predecessor has been
-        // merged before an instruction is visited. Conflicting facts become unknown.
-        foreach (Instruction i in instructions)
+        // Revisit successors when a backedge or join weakens a constant fact.
+        // Facts only move from a constant to unknown, so this reaches a fixed point.
+        Queue<Instruction> pending = new();
+        HashSet<Instruction> queued = [instructions[0]];
+        pending.Enqueue(instructions[0]);
+        while (pending.TryDequeue(out Instruction? i))
         {
-            if (!incoming.TryGetValue(i, out FeatureConstants? state)) continue;
+            queued.Remove(i);
+            FeatureConstants state = incoming[i];
             reachable.Add(i);
             int? condition = state.Top;
             state = state.Copy();
@@ -41,10 +47,14 @@ internal static class Reachability
 
             void Successor(Instruction target)
             {
-                if (!instructions.Contains(target) || target.Offset <= i.Offset)
-                    throw new InvalidDataException("Malformed or cyclic control flow");
-                if (incoming.TryGetValue(target, out FeatureConstants? previous)) previous.Merge(state);
+                if (!boundaries.Contains(target))
+                    throw new InvalidDataException("Malformed control-flow target");
+                if (incoming.TryGetValue(target, out FeatureConstants? previous))
+                {
+                    if (!previous.Merge(state)) return;
+                }
                 else incoming[target] = state.Copy();
+                if (queued.Add(target)) pending.Enqueue(target);
             }
 
             if (condition is int known && i.OpCode.Code is Code.Brfalse or Code.Brfalse_S or Code.Brtrue or Code.Brtrue_S)

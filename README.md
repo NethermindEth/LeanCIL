@@ -255,6 +255,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 
 - `Add`: universal modular arithmetic correctness.
 - `Choose`: symbolic conditional execution.
+- `Loops.Countdown`: universal termination and a zero result for every `uint`, including zero and `UInt32.MaxValue`, using a decreasing natural-number measure over checked local storage.
 - `Calls`: a managed-call chain with an address-taken mutable local.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the modular additive inverse for every input, including the signed minimum.
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct containing narrow fields. `UnsignedShort.lean` proves reduction modulo 65,536 for every 32-bit input.
@@ -269,6 +270,20 @@ To prove another method, supply a unique method selector, write a Lean file impo
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. The library additionally proves generic allocation, frame, reference, aliasing and storage properties.
+
+## Loop verification
+
+Reachable backward branches and switch targets are admitted when control-flow targets and stack joins validate. Feature reachability uses a fixed point: a backedge that invalidates a constant fact causes affected instructions to be revisited. Recursive managed calls remain unsupported.
+
+Extraction does not establish termination. [The countdown proof](Examples/Proofs/Countdown.lean) uses `CIL.Safety.loop_terminates` with an invariant describing readable, writable counter storage and the measure `remaining.toNat`. Every nonzero iteration proves six actual checked instruction steps and a strictly smaller measure; the zero case proves a successful return. `ensures_of_loop` lifts this to `CIL.Safety.Ensures`, so the theorem supplies successful finite execution for every input, including the maximum 32-bit unsigned value, without unrolling billions of iterations. Subtraction cannot underflow because it occurs only when the counter is positive.
+
+```sh
+leancil extract Examples/Assembly/bin/Examples.dll "Loops::Countdown(uint)" artifacts/Countdown
+leancil verify artifacts/Countdown --proof Examples/Proofs/Countdown.lean
+dotnet run --file scripts/Test.cs -- --suite loops
+```
+
+Loop invariants and decreasing measures are supplied by the proof author. The suite rejects an incorrect loop under the unchanged contract, checks malformed stack joins and changing loop facts, and proves that an admitted infinite loop exhausts every fuel budget. Fuel exhaustion is never successful verification of total correctness.
 
 ## F# examples
 
@@ -326,7 +341,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 
 The initial extraction target is Release, IL-only **.NET 10**, 64-bit little-endian execution. Supported scalar operations include 32/64-bit wrapping arithmetic, bitwise operations, shifts, selected conversions/comparisons, conditional/unconditional branches, local and argument loads/stores, 64-bit indirect access, and acyclic managed calls to static methods and reference-free struct instance methods. Struct methods receive a checked managed-reference `this`; direct constructor calls on existing storage and `newobj` construction of validated structs are supported. Explicit- and sequential-layout reference-free aggregates use validated sizes and byte offsets; fields admit narrow, 32-bit, 64-bit and native integer storage, including same-assembly enums backed by the eight C# enum integer types and nested reference-free structs. Nested fields support references, snapshots and whole-value assignment, with validated packing and padding. Enum parameters, returns, locals, references and flags use the underlying integer semantics, including unnamed values. Boxing and `System.Enum` methods remain unsupported. SIMD models cover selected Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, as enumerated in `CIL/SIMD` and `Extractor/RuntimeModels.cs`.
 
-The extractor rejects unmodelled instructions, recursive/cyclic reachable control flow, exception handling, class instance/virtual dispatch, managed object construction, reference-bearing aggregates, general arrays, unsupported packing, floating-point arithmetic, arbitrary external calls, static constructors, and unsupported signatures. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
+The extractor rejects unmodelled instructions, recursive managed calls, exception handling, class instance/virtual dispatch, managed object construction, reference-bearing aggregates, general arrays, unsupported packing, floating-point arithmetic, arbitrary external calls, static constructors, and unsupported signatures. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
 
 Profiles default to scalar. Pass a supported profile name or `@profile.json` as the final positional argument to `leancil extract`. Both `check` and `verify` recover the profile from the manifest. Capability prerequisites are validated. Instructions unreachable under that exact fixed profile are emitted as explicit unsupported placeholders; changing profiles invalidates artifacts.
 

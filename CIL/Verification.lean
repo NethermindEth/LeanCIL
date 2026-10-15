@@ -1,4 +1,5 @@
 import CIL.Safety.Certificate
+import CIL.Safety.Loops
 
 namespace CIL.Safety
 
@@ -29,4 +30,22 @@ theorem ensures_of_vc (program : CIL.Program) (method : Nat)
   exact ⟨bound args initial, final, values, executed, result⟩
 
 #print axioms ensures_of_vc
+
+/-- Lift a loop termination proof through checked invocation setup to total correctness. -/
+theorem ensures_of_loop (program : CIL.Program) (method : Nat)
+    (pre : List Value → Memory → Prop)
+    (post : List Value → Memory → Memory → List Value → Prop)
+    (verified : ∀ args initial, pre args initial →
+      ∃ body frame entered,
+        program[method]? = some body ∧
+        args.mapM (checkedValue initial) = .ok args ∧
+        enterFrame body args initial = .ok (frame, entered) ∧
+        LoopTerminates program method args (post args initial) ⟨0, frame, [], entered⟩) :
+    Ensures program method pre post := by
+  intro args initial permitted
+  obtain ⟨body, frame, entered, found, checked, setup, fuel, final, values, executed, satisfied⟩ :=
+    verified args initial permitted
+  exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩
+
+#print axioms ensures_of_loop
 end CIL.Safety

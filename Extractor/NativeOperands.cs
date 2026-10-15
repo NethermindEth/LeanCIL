@@ -3,7 +3,7 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Track evaluation-stack widths across the admitted forward graph. Native values
+// Track evaluation-stack widths across the admitted control-flow graph. Native values
 // share 64-bit storage, but only metadata-proven native/int32 mixtures may widen.
 internal static class NativeOperands
 {
@@ -30,7 +30,9 @@ internal static class NativeOperands
         var reachable = Reachability.Analyze(method, profile);
         var incoming = new Dictionary<Instruction, Kind[]> { [method.Body.Instructions[0]] = [] };
         var mixed = new HashSet<Instruction>();
-        foreach (var instruction in method.Body.Instructions)
+        var pending = new Queue<Instruction>();
+        pending.Enqueue(method.Body.Instructions[0]);
+        while (pending.TryDequeue(out var instruction))
         {
             if (!reachable.Contains(instruction) || !incoming.TryGetValue(instruction, out var before)) continue;
             var stack = before.ToList();
@@ -142,7 +144,11 @@ internal static class NativeOperands
                     if (!previous.SequenceEqual(stack))
                         throw new InvalidDataException($"Incompatible native stack types at {target}");
                 }
-                else incoming[target] = [.. stack];
+                else
+                {
+                    incoming[target] = [.. stack];
+                    pending.Enqueue(target);
+                }
             }
 
             if (instruction.Operand is Instruction target) Successor(target);

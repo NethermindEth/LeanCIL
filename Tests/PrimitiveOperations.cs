@@ -257,7 +257,7 @@ foreach (var empty in new[] { false, true })
 }
 
 // Unsupported targets and forged type tokens cannot hide behind a switch arm.
-foreach (var mutation in new[] { "backedge", "bad-target", "unsupported-arm", "scope-load", "scope-store", "scope-init", "scope-size", "float-size" })
+foreach (var mutation in new[] { "bad-target", "unsupported-arm", "scope-load", "scope-store", "scope-init", "scope-size", "float-size" })
 {
     var name = "Reject-" + mutation;
     var dll = Fixture(name, (module, method) =>
@@ -284,7 +284,7 @@ foreach (var mutation in new[] { "backedge", "bad-target", "unsupported-arm", "s
             var start = Instruction.Create(OpCodes.Ldarg_0);
             var target = Instruction.Create(OpCodes.Ldc_I4_1);
             code.Add(start);
-            code.Add(Instruction.Create(OpCodes.Switch, new[] { mutation == "backedge" ? start : target }));
+            code.Add(Instruction.Create(OpCodes.Switch, new[] { target }));
             code.Add(Instruction.Create(OpCodes.Ldc_I4_0));
             code.Add(Instruction.Create(OpCodes.Ret));
             code.Add(target);
@@ -315,7 +315,7 @@ foreach (var mutation in new[] { "backedge", "bad-target", "unsupported-arm", "s
     var rejected = Execute(Extract("extract", dll, "Examples", FixtureSelector(dll), Path.Combine(root, name)));
     var marker = mutation switch
     {
-        "backedge" => "cyclic control flow", "bad-target" => "Malformed switch targets",
+        "bad-target" => "Malformed switch targets",
         "unsupported-arm" => "Unsupported instruction", "float-size" => "Unsupported field type",
         _ => "Unsupported type identity"
     };
