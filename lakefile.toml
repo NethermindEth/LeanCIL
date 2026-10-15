@@ -37,3 +37,6 @@ name = "Tests.WrapperProofs"
 
 [[lean_lib]]
 name = "Tests.UnsafeWrappers"
+
+[[lean_lib]]
+name = "Tests.AggregateSetup"
