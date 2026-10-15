@@ -104,6 +104,12 @@ SIMD and hardware features enter compiled CIL mostly through `call`, rather than
 
 `Unsafe.SizeOf<T>()` and the managed-reference `Unsafe.Add<T>` overloads with `int`, `nint` or `nuint` offsets use validated layouts for supported integer primitives, enums, reference-free structs and supported Vector128/256 types. Sizes include managed packing and padding; reference offsets scale by that size and wrap at the validated native width. Forming the resulting reference checks allocation identity, lifetime and bounds, including explicitly admitted one-past positions. It does not grant permission to read or write. Classes, pointer/byref type arguments and unsupported layouts fail extraction.
 
+`Unsafe.SkipInit<T>(out T)` admits the same supported storage types. Its checked
+operation validates the managed reference and leaves memory unchanged, including
+initialization flags and access permissions. It does not initialize the output;
+reads still require initialized bytes. Extraction evidence checks the exact
+runtime call identity and its translation to `skipInit`.
+
 The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and byte-span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references remains unsupported.
 
 Reachability is evaluated under the chosen, validated feature profile. Instructions excluded by that analysis are emitted as explicit unsupported placeholders, not silently assigned successful semantics. If execution reaches such a placeholder it fails. Changing the profile invalidates extraction artifacts.

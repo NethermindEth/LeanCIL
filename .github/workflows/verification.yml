@@ -14,15 +14,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  select:
+    name: Select verification suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      has-suites: ${{ steps.select.outputs.has-suites }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Test suite selection
+        run: python3 scripts/test-select-verification.py
+      - name: Select affected suites
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/select-verification.py --event "$EVENT" --base "$BASE" --head "$HEAD" --output "$GITHUB_OUTPUT"
+
   suites:
     name: Verify (${{ matrix.suite }})
+    needs: select
+    if: needs.select.outputs.has-suites == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 4
-      matrix:
-        suite: [core, contracts, cli, integer, narrow, primitive, division, checked, conversions, native, arguments, layout, copy, bits, enums, nested, instance, constructors, fsharp, math, unsafe, blocks, generics, loops, evidence]
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
 
     env:
       DOTNET_NOLOGO: true
@@ -73,12 +96,21 @@ jobs:
 
   verify:
     name: Build and verify
-    needs: suites
+    needs: [select, suites]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require every verification suite to pass
+      - name: Require successful selection and every selected suite to pass
         env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          HAS_SUITES: ${{ needs.select.outputs.has-suites }}
           SUITES_RESULT: ${{ needs.suites.result }}
-        run: test "$SUITES_RESULT" = success
+        run: |
+          test "$SELECT_RESULT" = success
+          if [ "$HAS_SUITES" = true ]; then
+            test "$SUITES_RESULT" = success
+          else
+            test "$HAS_SUITES" = false
+            test "$SUITES_RESULT" = skipped
+          fi

@@ -421,6 +421,12 @@ Integer `Math.Min`, `Max`, `Clamp`, `Abs` and `Sign` are also supported, includi
 
 `Unsafe.SizeOf<T>` and managed-reference `Unsafe.Add<T>` use validated managed layouts for supported primitives, enums, reference-free structs and vectors. Reference arithmetic retains allocation identity and checks lifetime and bounds; it does not grant access to memory outside the caller's permissions.
 
+`Unsafe.SkipInit<T>` supports the same admitted storage types. It consumes a valid
+managed reference and preserves memory, including byte initialization flags.
+Reading an uninitialized byte after the call still fails checked execution;
+subsequent stores must satisfy the normal write permissions. Extraction evidence
+independently binds the runtime call to the `skipInit` instruction.
+
 The `Examples.Bits` methods exercise these APIs, including universal proofs of the integer logarithm and of a rotation round trip. Incorrect implementations fail the same contracts. `Log2(0)` returns zero; rounding up returns zero for zero input or overflow; signed power-of-two checks reject negative values.
 
 ### Vector and hardware intrinsics
@@ -442,6 +448,21 @@ An enabled CPU feature does not imply support for all of its APIs. Float/double 
 ## Using LeanCIL in another project
 
 Pin LeanCIL as a Lake dependency and import the required `CIL.*` modules. Keep application specifications, method proofs and coverage policies in the consuming project. See [integration guidance](docs/MIGRATION.md) and [validation results](docs/VALIDATION.md).
+
+## Verification CI
+
+Pushes to `main` and manual runs execute every verification suite. Pull requests
+select suites from changed test entry points, referenced proofs, and their
+transitive source imports. Markdown and license-only changes skip the expensive
+suites. Shared framework, extractor, fixture projects, build configuration,
+workflow changes, and unrecognized paths conservatively run the full matrix.
+
+The required `Build and verify` check always runs. It succeeds only when selection
+succeeds and every selected suite passes, or when selection explicitly reports
+that no suites are needed. Failed or cancelled selection/tests cannot pass it.
+Keep this aggregate check required rather than individual matrix jobs, which may
+be absent on a PR. Run `python3 scripts/test-select-verification.py` to test the
+selection rules and final gate locally.
 
 ## License
 
