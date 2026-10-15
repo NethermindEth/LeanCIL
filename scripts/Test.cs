@@ -127,6 +127,8 @@ if (suite is not ("all" or "core"))
 Run(["dotnet", "run", "--file", "Tests/LibraryCache.cs"], streamOutput: true, progress: "Library cache checks");
 Passed("library cache integrity and source keys");
 
+Run(["dotnet", "run", "--file", "Tests/InitializedTypes.cs"], streamOutput: true, progress: "Initialization assumptions");
+Passed("explicit type initialization assumptions and identity");
 Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 

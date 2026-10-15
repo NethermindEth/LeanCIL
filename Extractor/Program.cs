@@ -7,7 +7,7 @@ namespace Nethermind.LeanCIL;
 
 internal static class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh]";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]...\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh]";
 
     static int Main(string[] args)
     {
@@ -45,9 +45,17 @@ internal static class Program
             var positional = new List<string>();
             string? expectedAssembly = null;
             string? assemblyOverride = null;
+            var initializedTypes = new SortedSet<string>(StringComparer.Ordinal);
             for (var index = 1; index < args.Length; index++)
             {
-                if (args[index] == "--assembly")
+                if (args[index] == "--assume-initialized")
+                {
+                    if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
+                        throw new ArgumentException("--assume-initialized requires a fully qualified type name.");
+                    if (!initializedTypes.Add(args[index]))
+                        throw new ArgumentException("Duplicate initialization assumption: " + args[index]);
+                }
+                else if (args[index] == "--assembly")
                 {
                     if (expectedAssembly is not null)
                         throw new ArgumentException("Duplicate --assembly option.");
@@ -77,6 +85,13 @@ internal static class Program
             stage = "extraction integrity";
             JsonElement? recorded = args[0] == "check"
                 ? JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(identityPath)) : null;
+            if (recorded is { } assumptions && assumptions.TryGetProperty("initializedTypes", out var recordedTypes))
+            {
+                var names = recordedTypes.Deserialize<string[]>() ?? throw new InvalidDataException("Missing initialization assumptions.");
+                if (initializedTypes.Count > 0 && !initializedTypes.SetEquals(names))
+                    throw new InvalidDataException("Initialization assumptions differ from the recorded extraction.");
+                initializedTypes.UnionWith(names);
+            }
             if (recorded is { } existing && existing.GetProperty("schema").GetInt32() != 2)
                 throw new InvalidDataException("Unsupported extraction manifest schema; run leancil extract again.");
             var assemblyPath = recordedCheck
@@ -91,7 +106,7 @@ internal static class Program
             using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "metadata and CIL validation";
-            MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile);
+            MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes);
             string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             if (recorded is { } prior)
             {
@@ -103,13 +118,16 @@ internal static class Program
             }
             stage = "metadata and CIL validation";
             string source = LeanEmitter.Emit(methods, profile, Hash(assembly));
+            if (initializedTypes.Count > 0)
+                source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
+                    "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
             string manifest = JsonSerializer.Serialize(new
             {
                 schema = 2,
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
-                assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile,
+                assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile, initializedTypes,
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
@@ -145,6 +163,8 @@ internal static class Program
                 File.WriteAllText(identityPath, manifest, new UTF8Encoding(false));
                 Console.WriteLine($"Extracted {methods.Length} reachable method{(methods.Length == 1 ? "" : "s")} into {CliPaths.Display(leanPath)}");
             }
+            foreach (var name in initializedTypes)
+                Console.WriteLine($"  Caller assumption: {name} initialization completed successfully before invocation.");
         }
         catch (Exception exception)
         {
