@@ -84,6 +84,32 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     Decidable (TranslationValid rawLayouts layouts evidence program) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
+/-- Compose independently checked methods without reducing their validators again. -/
+inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
+    (all : List MethodEvidence) : List MethodEvidence → Program → Prop where
+  | nil : MethodsChecked rawLayouts layouts all [] []
+  | cons {item rest method program} : MethodEvidenceValid rawLayouts layouts all item method →
+      MethodsChecked rawLayouts layouts all rest program →
+      MethodsChecked rawLayouts layouts all (item :: rest) (method :: program)
+
+theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
+    {evidence : List MethodEvidence} {program : Program}
+    (layout : LayoutsValid rawLayouts layouts)
+    (methods : MethodsChecked rawLayouts layouts evidence evidence program) :
+    TranslationValid rawLayouts layouts evidence program := by
+  have compose {items code} (checked : MethodsChecked rawLayouts layouts evidence items code) :
+      items.length = code.length ∧ ∀ index : Fin items.length,
+        MethodAtValid rawLayouts layouts evidence items[index] code[index.val]? := by
+    induction checked with
+    | nil => exact ⟨rfl, fun index => Fin.elim0 index⟩
+    | @cons item rest method code valid tail ih =>
+      refine ⟨congrArg Nat.succ ih.1, ?_⟩
+      intro ⟨index, bound⟩
+      cases index with
+      | zero => exact valid
+      | succ index => exact ih.2 ⟨index, Nat.lt_of_succ_lt_succ bound⟩
+  exact ⟨layout, compose methods⟩
+
 theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {evidence : List MethodEvidence} {program : Program}
     (valid : TranslationValid rawLayouts layouts evidence program)
@@ -93,4 +119,5 @@ theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Arra
   simpa [MethodAtValid, found] using checked
 
 #print axioms translation_method_checked
+#print axioms translation_of_methods
 end CIL.Extraction

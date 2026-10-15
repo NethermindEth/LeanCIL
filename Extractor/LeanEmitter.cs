@@ -118,7 +118,19 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods method{n}Closed method{n}Reachable method{n} := by decide");
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, layoutUses := method{n}LayoutUses }}")) + "]");
-        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence program := by decide");
+        for (int n = 0; n < methods.Length; n++)
+        {
+            lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := by decide");
+            lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := by decide");
+            lean.AppendLine($"theorem method{n}_skipInit_validated : Extraction.SkipInitValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := by decide");
+            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence methodEvidence[{n}] method{n} :=");
+            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_skipInit_validated⟩");
+        }
+        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence program := by");
+        lean.AppendLine("  apply Extraction.translation_of_methods layouts_validated");
+        for (int n = 0; n < methods.Length; n++)
+            lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
+        lean.AppendLine("  exact Extraction.MethodsChecked.nil");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
         lean.AppendLine("end Extracted");
