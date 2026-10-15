@@ -22,6 +22,10 @@ void Verified(params string[] options)
         throw new InvalidOperationException("CLI proof failed: " + result.Output);
 
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+    if (report.GetProperty("schema").GetInt32() != 3 ||
+        !report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid"))
+        throw new InvalidOperationException("Missing mandatory extraction certificate audit in report.");
+
     if (report.GetProperty("theorem").GetString() != "ExampleProof.correctness")
         throw new InvalidOperationException("Wrong theorem in CLI verification report.");
 

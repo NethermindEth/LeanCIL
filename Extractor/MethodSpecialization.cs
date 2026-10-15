@@ -9,9 +9,13 @@ internal sealed class MethodSpecialization(ModuleDefinition module)
 {
     internal sealed record Origin(string Definition, string[] TypeArguments);
     static readonly ConditionalWeakTable<MethodDefinition, Origin> origins = new();
+    static readonly ConditionalWeakTable<MethodDefinition, TypeReference[]> typeArguments = new();
     readonly Dictionary<string, MethodDefinition> instances = new(StringComparer.Ordinal);
 
     internal static Origin? Source(MethodDefinition method) => origins.TryGetValue(method, out var origin) ? origin : null;
+
+    internal static IReadOnlyList<TypeReference> Arguments(MethodDefinition method) =>
+        typeArguments.TryGetValue(method, out var arguments) ? arguments : [];
 
     internal MethodDefinition Instantiate(GenericInstanceMethod reference)
     {
@@ -126,6 +130,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module)
 
         instances.Add(key, clone);
         origins.Add(clone, new(definition.FullName, reference.GenericArguments.Select(t => t.FullName).ToArray()));
+        typeArguments.Add(clone, reference.GenericArguments.ToArray());
         return clone;
     }
 }

@@ -223,6 +223,8 @@ The parameter list remains required. Matching is case-sensitive; an explicit ret
 
 The generated `Extracted.lean` contains `arg 0`, `arg 1`, `add`, `ret`, the exact method signature, assembly hash, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees are emitted in dependency order.
 
+Extraction also emits raw metadata and a `translation_valid` certificate. Independent Lean validators recompute layouts, check all layout-dependent sites and parameter-home mappings, validate structural generic substitution and managed-call bindings, and check feature-analysis states and control-flow coverage. Verification requires this certificate to have the exact validator type for the complete emitted program and kernel-replays it separately from the user proof. Raw metadata serialization and transformations outside those checks remain trusted.
+
 `Examples/Proofs/Add.lean` states the mathematical property independently: the returned word's natural value equals `(x.toNat + y.toNat) % 2^64`. Its universal proof derives execution from the generated program. Changing the implementation to subtraction causes the unchanged addition proof to fail. `WrongAdd.lean` independently proves a counterexample for every successful fuel budget.
 
 ### Try breaking the implementation

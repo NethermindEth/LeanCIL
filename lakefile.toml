@@ -13,3 +13,15 @@ name = "Tests.Semantics"
 
 [[lean_lib]]
 name = "Tests.Automation"
+
+[[lean_lib]]
+name = "Tests.ExtractionLayout"
+
+[[lean_lib]]
+name = "Tests.ExtractionParameters"
+
+[[lean_lib]]
+name = "Tests.FeatureEvidence"
+
+[[lean_lib]]
+name = "Tests.LayoutCoverage"

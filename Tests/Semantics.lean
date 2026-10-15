@@ -346,9 +346,16 @@ theorem native_checked_unsigned_extension :
     CIL.nativeBinaryValues (.checkedArithmetic .add false) 0 (.i64 1) (.i32 4294967295) =
       .ok (1, [.i64 4294967296]) := rfl
 
-theorem native_unsigned_branch_extension :
+theorem native_unsigned_branch_rejected :
     CIL.nativeBinaryValues (.bne 9) 0 (.i64 18446744073709551615) (.i32 4294967295) =
-      .ok (9, []) := rfl
+      .error .invalidOperands := rfl
+
+theorem native_unsigned_branch_family_rejected :
+    CIL.nativeBinaryValues (.bltu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.bgtu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.bleu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.bgeu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands :=
+  ⟨rfl, rfl, rfl, rfl⟩
 
 theorem native_unsigned_compare_extension :
     CIL.nativeBinaryValues .gtu 0 (.i64 18446744073709551615) (.i32 4294967295) =

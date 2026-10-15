@@ -114,3 +114,4 @@ import CIL.VectorMemory
 import CIL.VectorMemoryLemmas
 import CIL.Verification
 import CIL.WideMultiply
+import CIL.Extraction.Translation

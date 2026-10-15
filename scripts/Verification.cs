@@ -335,8 +335,37 @@ partial class Program : IDisposable
         ["dotnet", ExtractorPath, mode, assembly, entry, output, profile,
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
 
+    // This module imports only the extracted program, never the user proof. The
+    // certificate must prove the complete validator application for that program;
+    // a declaration with the right name but type True is insufficient.
+    const string ExtractionAuditSource = """
+        import Extracted
+        run_cmd do
+          match (← Lean.getEnv).find? `Extracted.translation_valid with
+          | some (.thmInfo _) => pure ()
+          | _ => throwError "Expected extraction certificate theorem"
+        theorem ExtractionAudit.valid :
+            CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
+              Extracted.methodEvidence Extracted.program := Extracted.translation_valid
+        #print axioms ExtractionAudit.valid
+        """;
+
+    static string[] AuditedAxioms(string audit, string theorem)
+    {
+        var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
+        if (matches.Count > 1)
+            throw new InvalidOperationException("Ambiguous theorem axiom audit");
+        if (matches.Count == 0 && !audit.Contains($"'{theorem}' does not depend on any axioms"))
+            throw new InvalidOperationException("Missing transitive theorem axiom audit");
+        var axioms = matches.Count == 0 ? [] : matches[0].Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (axioms.Any(a => a is not ("propext" or "Quot.sound" or "Classical.choice")))
+            throw new InvalidOperationException("Unapproved proof axioms: " + string.Join(", ", axioms));
+        return axioms;
+    }
+
     sealed record Report(int schema, string assemblySha256, string identitySha256, string theorem, string[] axioms,
-        string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null, string[]? initializedTypes = null);
+        string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
+        string? extractionAudit = null, string[]? initializedTypes = null);
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
@@ -358,7 +387,7 @@ partial class Program : IDisposable
             var old = JsonSerializer.Deserialize<Report>(File.ReadAllText(reportPath)) ?? throw new InvalidOperationException("Missing report");
             Run(Extract("check", assembly, identity, entry, output, profile));
 
-            if (old.schema != 2 || !Same(old.inputs, Inputs(proof, settings)) || old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
+            if (old.schema != 3 || string.IsNullOrWhiteSpace(old.extractionAudit) || !Same(old.inputs, Inputs(proof, settings)) || old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
                 old.theorem != theorem || old.assemblySha256 != Sha(assembly))
                 throw new InvalidOperationException("Stale verification report or changed proof inputs");
 
@@ -391,6 +420,7 @@ partial class Program : IDisposable
         var fresh = Path.Combine(output, "proof-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fresh);
         string audit;
+        string extractionAudit = "";
         string[] axioms;
 
         try
@@ -398,12 +428,20 @@ partial class Program : IDisposable
             File.Copy(Path.Combine(output, "Extracted.lean"), Path.Combine(fresh, "Extracted.lean"));
             File.Copy(proof, Path.Combine(fresh, "Proof.lean"));
             File.WriteAllText(Path.Combine(fresh, "Audit.lean"), $"import Proof\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
+            File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
 
-            stage?.Invoke("proof checking");
-            foreach (var name in new[] { "Extracted", "Proof" })
-                Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
+            foreach (var name in new[] { "Extracted", "ExtractionAudit", "Proof" })
+            {
+                stage?.Invoke(name == "ExtractionAudit" ? "extraction certificate audit" : "proof checking");
+                var checkedOutput = Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
                     leanPath: leanPath, progress: $"Checking {name}: {entry}");
+                if (name == "ExtractionAudit")
+                {
+                    extractionAudit = checkedOutput;
+                    AuditedAxioms(extractionAudit, "ExtractionAudit.valid");
+                }
+            }
 
             // The base audit covers modules built by CIL.lean, not the entire CIL
             // namespace. Replay newly built or changed CIL modules too, alongside every source
@@ -422,23 +460,12 @@ partial class Program : IDisposable
                 .Where(name => !certifiedCil.TryGetValue(name, out var certified) ||
                     !currentCil.TryGetValue(name, out var current) || certified != current)
                 .Select(name => name.Split(".olean", 2)[0].Replace('/', '.')).Distinct();
-            Run([checker, .. replay, .. changedCil, "Extracted", "Proof"], leanPath: leanPath,
+            Run([checker, .. replay, .. changedCil, "Extracted", "ExtractionAudit", "Proof"], leanPath: leanPath,
                 progress: "Kernel replay: " + entry);
 
             stage?.Invoke("theorem audit");
             audit = Run(["lean", "--root=" + fresh, Path.Combine(fresh, "Audit.lean")], leanPath: leanPath);
-            var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
-
-            if (matches.Count > 1)
-                throw new InvalidOperationException("Ambiguous theorem axiom audit");
-
-            if (matches.Count == 0 && !audit.Contains($"'{theorem}' does not depend on any axioms"))
-                throw new InvalidOperationException("Missing transitive theorem axiom audit");
-
-            axioms = matches.Count == 0 ? [] : matches[0].Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            if (axioms.Any(a => a is not ("propext" or "Quot.sound" or "Classical.choice")))
-                throw new InvalidOperationException("Unapproved proof axioms: " + string.Join(", ", axioms));
+            axioms = AuditedAxioms(audit, theorem);
         }
         finally
         {
@@ -455,7 +482,7 @@ partial class Program : IDisposable
         var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
         var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
             ? assumptions.Deserialize<string[]>() : [];
-        var report = new Report(2, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, initializedTypes);
+        var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes);
         File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
         return report;

@@ -37,9 +37,9 @@ internal static class LeanEmitter
         ".vector128" => ".v128 0", ".vector256" => ".v256 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module)} 0)"
     };
-    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, string assemblyHash)
+    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, string assemblyHash, ModuleDefinition originalModule)
     {
-        StringBuilder lean = new("import CIL.Layout\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\n");
+        StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
         lean.AppendLine($"def assemblySha256 : String := {JsonSerializer.Serialize(assemblyHash)}");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := by decide");
@@ -49,6 +49,9 @@ internal static class LeanEmitter
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
             .Concat(m.HasThis ? [m.DeclaringType] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
+            .Concat(MethodSpecialization.Arguments(m))
+            .Concat(m.Body.Instructions.Where(i => i.Operand is TypeReference).Select(i => (TypeReference)i.Operand))
+            .Concat(m.Body.Instructions.Where(i => i.Operand is GenericInstanceMethod).SelectMany(i => ((GenericInstanceMethod)i.Operand).GenericArguments))
             .Concat(m.Body.Instructions.Where(i => i.Operand is FieldReference).Select(i => ((FieldReference)i.Operand).DeclaringType)))
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
             .Where(t => MetadataValidation.IsAggregate(t, methods[0].Module)).DistinctBy(t => t.FullName).ToArray();
@@ -71,6 +74,9 @@ internal static class LeanEmitter
             lean.AppendLine($"def layout{i} : AggregateLayout := ⟨{size}, [{fields}]⟩");
             lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := by decide");
         }
+        var layoutEvidence = new LayoutEvidence(types);
+        layoutEvidence.EmitLayouts(lean);
+        var genericEvidence = new GenericEvidence(originalModule, layoutEvidence);
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
@@ -97,13 +103,22 @@ internal static class LeanEmitter
             foreach (Instruction i in m.Body.Instructions)
                 ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices) : ".unsupported \"Unreachable under selected profile\"");
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
+            layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
+            ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
+            genericEvidence.EmitMethod(lean, m, n);
+            FeatureEvidence.Emit(lean, m, n, profile);
             lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : method{n}.parameterHomes = [{parameters}] := rfl");
             for (int pc = 0; pc < ops.Count; pc++)
                 lean.AppendLine($"@[cil_code ↓] theorem method{n}_instruction{pc} : method{n}.code[{pc}]? = some ({ops[pc]} : Op) := rfl");
             foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites", "vectorLocals", "vectorArgs" })
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (m.ReturnType.FullName == "System.Void" ? "false" : "true") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
         }
+        lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
+        for (int n = 0; n < methods.Length; n++)
+            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods method{n}Closed method{n}Reachable method{n} := by decide");
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
+        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, layoutUses := method{n}LayoutUses }}")) + "]");
+        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence program := by decide");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
         lean.AppendLine("end Extracted");

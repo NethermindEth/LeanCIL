@@ -61,7 +61,16 @@ internal static class NativeOperands
                 var native = left == Kind.Native || right == Kind.Native;
                 if (native && (left is not (Kind.Native or Kind.Word32) || right is not (Kind.Native or Kind.Word32)))
                     throw new InvalidDataException($"Unsupported native operand mixture: {instruction}");
-                if (native && left != right) mixed.Add(instruction);
+                if (native && left != right)
+                {
+                    // CoreCLR widens an int32 constant differently from an argument
+                    // here; inlining can change that provenance. Require explicit
+                    // conversion instead of encoding a JIT-context-dependent rule.
+                    if (code is Code.Bne_Un or Code.Bne_Un_S or Code.Bgt_Un or Code.Bgt_Un_S or
+                        Code.Bge_Un or Code.Bge_Un_S or Code.Blt_Un or Code.Blt_Un_S or Code.Ble_Un or Code.Ble_Un_S)
+                        throw new InvalidDataException($"Unsupported mixed native/int32 unsigned branch; insert explicit conv.i or conv.u: {instruction}");
+                    mixed.Add(instruction);
+                }
                 if (instruction.OpCode.FlowControl != FlowControl.Cond_Branch)
                     stack.Add(code is Code.Ceq or Code.Clt or Code.Clt_Un or Code.Cgt or Code.Cgt_Un ? Kind.Word32 :
                         native ? Kind.Native : left == right ? left : Kind.Other);

@@ -101,13 +101,18 @@ var mixedOperations = new[]
     OpCodes.Add, OpCodes.Sub, OpCodes.Mul, OpCodes.Div, OpCodes.Div_Un, OpCodes.Rem, OpCodes.Rem_Un,
     OpCodes.Add_Ovf, OpCodes.Add_Ovf_Un, OpCodes.Sub_Ovf, OpCodes.Sub_Ovf_Un, OpCodes.Mul_Ovf, OpCodes.Mul_Ovf_Un,
     OpCodes.And, OpCodes.Or, OpCodes.Xor, OpCodes.Ceq, OpCodes.Clt, OpCodes.Clt_Un, OpCodes.Cgt, OpCodes.Cgt_Un,
-    OpCodes.Beq, OpCodes.Bne_Un, OpCodes.Blt, OpCodes.Blt_Un, OpCodes.Bgt, OpCodes.Bgt_Un,
-    OpCodes.Ble, OpCodes.Ble_Un, OpCodes.Bge, OpCodes.Bge_Un
+    OpCodes.Beq, OpCodes.Blt, OpCodes.Bgt, OpCodes.Ble, OpCodes.Bge
 };
+var unsignedBranches = new[] { OpCodes.Bne_Un, OpCodes.Blt_Un, OpCodes.Bgt_Un, OpCodes.Ble_Un, OpCodes.Bge_Un };
+foreach (var (candidates, scenario, conversion) in new[] {
+    (mixedOperations, "Mixed", (OpCode?)null),
+    (unsignedBranches, "ExplicitSigned", (OpCode?)OpCodes.Conv_I),
+    (unsignedBranches, "ExplicitUnsigned", (OpCode?)OpCodes.Conv_U)
+})
 foreach (var reverse in new[] { false, true })
-foreach (var (operations, group) in mixedOperations.Chunk(6).Select((ops, index) => (ops, index)))
+foreach (var (operations, group) in candidates.Chunk(6).Select((ops, index) => (ops, index)))
 {
-    var name = $"Mixed-{reverse}-{group}";
+    var name = $"{scenario}-{reverse}-{group}";
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
@@ -130,7 +135,9 @@ foreach (var (operations, group) in mixedOperations.Chunk(6).Select((ops, index)
         foreach (var (operation, index) in operations.Select((op, index) => (op, index)))
         {
             code.Add(targets[index]);
+            if (reverse && conversion.HasValue) code.Add(Instruction.Create(conversion.Value));
             code.Add(Instruction.Create(reverse ? OpCodes.Ldarg_1 : OpCodes.Ldarg_2));
+            if (!reverse && conversion.HasValue) code.Add(Instruction.Create(conversion.Value));
             faultSites.Add(code.Count);
             if (operation.FlowControl == FlowControl.Cond_Branch)
             {
@@ -174,6 +181,50 @@ foreach (var (operations, group) in mixedOperations.Chunk(6).Select((ops, index)
     }
     Prove(dll, selector, name, claims);
 }
+
+// No argument-only exception: inlining/constant propagation can change whether
+// the JIT sees ldc.i4, even when this method itself loads an argument or local.
+// Cover every short/long encoding, both orders, and negative constant provenance.
+var branchRejections = 0;
+foreach (var branch in unsignedBranches.Concat(new[] {
+    OpCodes.Bne_Un_S, OpCodes.Blt_Un_S, OpCodes.Bgt_Un_S, OpCodes.Ble_Un_S, OpCodes.Bge_Un_S }))
+foreach (var reverse in new[] { false, true })
+foreach (var operandSource in new[] { "argument", "constant", "local" })
+{
+    var output = Path.Combine(root, $"Reject-{branch.Name}-{reverse}-{operandSource}");
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using var module = ModuleDefinition.ReadModule(assembly);
+    var method = new MethodDefinition("AmbiguousBranch", Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static,
+        module.TypeSystem.Int32);
+    method.Parameters.Add(new ParameterDefinition(module.TypeSystem.IntPtr));
+    method.Parameters.Add(new ParameterDefinition(module.TypeSystem.Int32));
+    module.GetType("Examples.NativeIntegers").Methods.Add(method);
+    var code = method.Body.Instructions;
+    if (operandSource == "local")
+    {
+        method.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+        code.Add(Instruction.Create(OpCodes.Ldc_I4_M1));
+        code.Add(Instruction.Create(OpCodes.Stloc_0));
+    }
+    var narrow = operandSource switch {
+        "constant" => OpCodes.Ldc_I4_M1, "local" => OpCodes.Ldloc_0, _ => OpCodes.Ldarg_1
+    };
+    code.Add(Instruction.Create(reverse ? narrow : OpCodes.Ldarg_0));
+    code.Add(Instruction.Create(reverse ? OpCodes.Ldarg_0 : narrow));
+    var taken = Instruction.Create(OpCodes.Ldc_I4_1);
+    code.Add(Instruction.Create(branch, taken));
+    code.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+    code.Add(Instruction.Create(OpCodes.Ret));
+    code.Add(taken);
+    code.Add(Instruction.Create(OpCodes.Ret));
+    module.Write(dll);
+    var rejection = Execute(Extract("extract", dll, "Examples", method.FullName, output));
+    if (rejection.Code == 0 || !rejection.Output.Contains("Unsupported mixed native/int32 unsigned branch; insert explicit conv.i or conv.u"))
+        throw new InvalidOperationException("Ambiguous unsigned branch accepted: " + rejection.Output);
+    branchRejections++;
+}
+Console.WriteLine($"PASS {branchRejections} mixed unsigned branch rejections; explicit conv.i/conv.u cases proved above");
 
 // Native metadata must not weaken target, layout or runtime identity checks.
 foreach (var mutation in new[] { "required32", "scope", "field", "mixed64" })

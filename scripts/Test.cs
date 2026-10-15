@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "contracts" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops]")
+    ["--suite", "all" or "core" or "contracts" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence]")
 };
 
 using var verification = new Program();
@@ -17,6 +17,7 @@ var results = new List<string>();
 var independentSuites = new Dictionary<string, (string Script, string Description)>
 {
     ["contracts"] = ("Tests/UniversalContracts.cs", "universal checked contracts, caller memory preservation and incorrect implementations"),
+    ["evidence"] = ("Tests/ExtractionEvidence.cs", "independent extraction certificates and malformed evidence rejection"),
     ["loops"] = ("Tests/Loops.cs", "cyclic control-flow validation, universal termination and negative contracts"),
     ["generics"] = ("Tests/GenericMethods.cs", "C# and F# generic method specialization, provenance and rejection proofs"),
     ["blocks"] = ("Tests/Blocks.cs", "block memory, alignment prefixes, runtime comparisons and safety faults"),
@@ -95,6 +96,8 @@ var signatures = new Dictionary<string, string>
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
 if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "scripts/Verify.cs"]);
+if (suite is "all" or "evidence")
+    projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
@@ -272,7 +275,7 @@ var reportPath = Path.Combine(addOutput, "verified.json");
 var savedReport = File.ReadAllText(reportPath);
 try
 {
-    var legacy = JsonSerializer.Deserialize<Report>(savedReport)! with { schema = 1 };
+    var legacy = JsonSerializer.Deserialize<Report>(savedReport)! with { schema = 2 };
     File.WriteAllText(reportPath, JsonSerializer.Serialize(legacy, Json));
     failed = false;
     try
@@ -284,13 +287,13 @@ try
         failed = true;
     }
     if (!failed)
-        throw new InvalidOperationException("Legacy report without kernel replay accepted");
+        throw new InvalidOperationException("Legacy report without extraction certificate audit accepted");
 }
 finally
 {
     File.WriteAllText(reportPath, savedReport);
 }
-Passed("legacy report without kernel replay rejected");
+Passed("legacy report without extraction certificate audit rejected");
 
 Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-avx2"), "Stale or mismatched");
 Passed("different feature profile rejected");

@@ -1,0 +1,23 @@
+{
+  "release": "10.0.0",
+  "releaseDate": "2025-11-11",
+  "metadataUrl": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json",
+  "sourceTag": "v10.0.0",
+  "sourceCommit": "60629d14374c56f1cb51819049ad1fa529307f8d",
+  "importerSha256": "8A80AFCD5FBC6DFD7F2322036FE34148A45710C556EE27199251768BF3C739DE",
+  "compilerHeaderSha256": "26361468EACC844E26742549F3074447F1F16A11A49191A20D9F0F2B6F8C1CE0",
+  "archives": [
+    {
+      "name": "dotnet-runtime-osx-arm64.tar.gz",
+      "rid": "osx-arm64",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.0/dotnet-runtime-10.0.0-osx-arm64.tar.gz",
+      "hash": "af8e200e31db511aebe50ca02d1fc634d7b7d8769940fd04f5fbf9999416f48a9ffee5858e91847515522984c67815ce6189a1fd11f5540b13f2bd6c7fe6c37b"
+    },
+    {
+      "name": "dotnet-runtime-win-x64.zip",
+      "rid": "win-x64",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.0/dotnet-runtime-10.0.0-win-x64.zip",
+      "hash": "4f785ed52d49545e328d7526fd6fe80e2d0c84bc90c5f905df631ef87b9d3efd211d10670aa87d5e7b87cd2f54d3dedb6e5be78027d5533153670e1186230825"
+    }
+  ]
+}
