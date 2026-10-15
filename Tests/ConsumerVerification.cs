@@ -53,6 +53,10 @@ void Reject(string marker, params string[] options)
 Verify("--proof", proof, "--proof-root", root);
 var first = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 var inputs = first.GetProperty("inputs");
+if (first.GetProperty("schema").GetInt32() != 3 ||
+    !first.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid", StringComparison.Ordinal) ||
+    !first.GetProperty("libraryBuild").GetString()!.StartsWith("consumer-", StringComparison.Ordinal))
+    throw new InvalidOperationException("Consumer verification omitted certified base or exact extraction certificate audit.");
 if (first.GetProperty("initializedTypes")[0].GetString() != "Examples.InitializedTypes")
     throw new InvalidOperationException("Consumer report dropped initialization preconditions.");
 if (!inputs.TryGetProperty("consumer:" + sharedPath, out _) ||
@@ -89,6 +93,42 @@ run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
 Reject("while replaying declaration");
 File.WriteAllText(sharedPath, shared);
 Console.WriteLine("PASS kernel replay rejects unchecked declarations in consumer imports");
+
+// A custom Lake output directory must not hide unused declarations from replay.
+var lakefile = Path.Combine(root, "lakefile.toml");
+var lakeConfiguration = File.ReadAllText(lakefile);
+var poison = Path.Combine(root, "Client", "Poison.lean");
+Directory.CreateDirectory(Path.GetDirectoryName(poison)!);
+try
+{
+    File.WriteAllText(lakefile, lakeConfiguration
+        .Replace("name = \"consumer\"\n", "name = \"consumer\"\nbuildDir = \".lake/custom-build\"\n"));
+    File.WriteAllText(poison, "namespace Client.Poison\ntheorem valid : True := True.intro\nend Client.Poison\n");
+    File.WriteAllText(sharedPath, "import Client.Poison\n" + shared);
+    Verify();
+    Console.WriteLine("PASS custom Lake build directory with additional consumer module verified");
+    File.WriteAllText(poison, """
+        import Lean
+        set_option debug.skipKernelTC true
+        run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+          name := `Client.Poison.forged
+          levelParams := []
+          type := Lean.mkConst ``False
+          value := Lean.mkConst ``True.intro
+        })
+        """);
+    File.WriteAllText(sharedPath, "import Client.Poison\n" + shared);
+    // The selected theorem does not use the forged declaration, so axiom audit
+    // alone cannot detect it. Require the kernel replay diagnostic specifically.
+    Reject("while replaying declaration");
+}
+finally
+{
+    File.WriteAllText(lakefile, lakeConfiguration);
+    File.WriteAllText(sharedPath, shared);
+    File.Delete(poison);
+}
+Console.WriteLine("PASS unused forged consumer helper in custom Lake build directory rejected by kernel replay");
 
 File.WriteAllText(Path.Combine(root, "Extracted.lean"), "-- stale extraction");
 Reject("reserved");

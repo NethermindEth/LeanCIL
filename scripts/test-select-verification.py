@@ -1,4 +1,7 @@
 import importlib.util
+import heapq
+import itertools
+import json
 import os
 from pathlib import Path
 import re
@@ -13,6 +16,24 @@ spec.loader.exec_module(selection)
 
 
 class SelectionTests(unittest.TestCase):
+    def test_longest_first_preserves_selection(self):
+        selected = selection.select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"])
+        self.assertEqual(selection.schedule(selected), ["unsafe", "math", "loops"])
+        self.assertEqual(set(selection.schedule(selection.suite_inputs())), set(selection.suite_inputs()))
+        self.assertEqual(selection.schedule(["loops", "newlongsuite"]), ["newlongsuite", "loops"])
+        self.assertEqual(selection.schedule([]), [])
+
+    def test_measured_schedule_reduces_estimated_tail_without_skipping_jobs(self):
+        durations = json.loads((selection.ROOT / "scripts/verification-durations.json").read_text())["seconds"]
+        def makespan(order, workers):
+            available = [0] * workers
+            for name in order:
+                heapq.heapreplace(available, available[0] + durations[name])
+            return max(available)
+        old = makespan(sorted(selection.suite_inputs()), 4)
+        new = makespan(selection.schedule(selection.suite_inputs()), 8)
+        self.assertLess(new, old)
+
     def test_docs_only(self):
         self.assertEqual(selection.select(["README.md", "docs/design.md"]), [])
 
@@ -23,6 +44,9 @@ class SelectionTests(unittest.TestCase):
     def test_test_entry_point(self):
         self.assertEqual(selection.select(["Tests/Loops.cs"]), ["loops"])
         self.assertEqual(selection.select(["Tests/SkipInitialization.cs"]), ["unsafe"])
+        self.assertEqual(selection.select(["Tests/BatchVerification.cs"]), ["core"])
+        self.assertEqual(selection.select(["Tests/VerificationCache.cs"]), ["core"])
+        self.assertEqual(selection.select(["Tests/VerificationReuse.cs"]), ["core"])
 
     def test_proof_and_transitive_import(self):
         self.assertEqual(selection.select(["Examples/Proofs/Countdown.lean"]), ["contracts", "fsharp", "loops"])
@@ -58,17 +82,26 @@ class SelectionTests(unittest.TestCase):
             self.skipTest("bash is required to test the workflow gate")
         workflow = (selection.ROOT / ".github/workflows/verification.yml").read_text(encoding="utf-8")
         gate = textwrap.dedent(workflow.rsplit("        run: |\n", 1)[1])
-        for planned, selected, result in (
-            ("success", "true", "success"), ("success", "false", "skipped"),
-            ("success", "true", "failure"), ("success", "true", "cancelled"),
-            ("success", "true", "skipped"), ("success", "false", "failure"),
-            ("failure", "false", "skipped"), ("cancelled", "false", "skipped"),
-            ("skipped", "false", "skipped"), ("success", "", "skipped"),
-        ):
-            env = dict(os.environ, SELECT_RESULT=planned, HAS_SUITES=selected, SUITES_RESULT=result)
+        statuses = ("success", "failure", "cancelled", "skipped")
+        for planned, selected, prepared, result in itertools.product(statuses, ("true", "false", ""), statuses, statuses):
+            env = dict(os.environ, SELECT_RESULT=planned, HAS_SUITES=selected, PREPARE_RESULT=prepared, SUITES_RESULT=result)
             result_code = subprocess.run([bash, "-e", "-c", gate], env=env).returncode
-            expected = planned == "success" and ((selected, result) in {("true", "success"), ("false", "skipped")})
-            self.assertEqual(result_code == 0, expected, (planned, selected, result))
+            expected = planned == "success" and ((selected, prepared, result) in {
+                ("true", "success", "success"), ("false", "skipped", "skipped")})
+            self.assertEqual(result_code == 0, expected, (planned, selected, prepared, result))
+
+    def test_same_run_certified_library_binding_and_observability(self):
+        workflow = (selection.ROOT / ".github/workflows/verification.yml").read_text(encoding="utf-8")
+        self.assertIn("needs: [select, prepare]", workflow)
+        self.assertIn("needs: [select, prepare, suites]", workflow)
+        self.assertEqual(workflow.count("name: certified-library-${{ github.run_id }}-${{ github.run_attempt }}"), 1)
+        self.assertIn("LEANCIL_CERTIFIED_LIBRARY_SHA256: ${{ needs.prepare.outputs.manifest-sha256 }}", workflow)
+        self.assertIn("artifact-ids: ${{ needs.prepare.outputs.artifact-id }}", workflow)
+        self.assertIn("artifact-id: ${{ steps.library-artifact.outputs.artifact-id }}", workflow)
+        self.assertIn("name: verification-results-${{ matrix.suite }}-${{ github.run_attempt }}", workflow)
+        self.assertIn("include-hidden-files: true", workflow)
+        self.assertIn("max-parallel: 8", workflow)
+        self.assertIn("artifacts/verification-traces/", workflow)
 
 
 if __name__ == "__main__":

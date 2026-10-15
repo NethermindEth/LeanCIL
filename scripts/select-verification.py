@@ -3,11 +3,25 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def schedule(suites, root=ROOT):
+    """Start the measured longest jobs first; never remove or duplicate a suite."""
+    data = json.loads((root / "scripts/verification-durations.json").read_text(encoding="utf-8"))
+    durations = data["seconds"]
+    if not durations or any(not isinstance(value, (int, float)) or isinstance(value, bool)
+                            or not math.isfinite(value) or value <= 0
+                            for value in durations.values()):
+        raise ValueError("Suite durations must be positive numbers")
+    # New suites have no measured duration. Run them first instead of silently
+    # putting an unknown potentially long job at the tail of the queue.
+    return sorted(suites, key=lambda name: (-durations.get(name, max(durations.values()) + 1), name))
 
 
 def suite_inputs(root=ROOT):
@@ -20,7 +34,8 @@ def suite_inputs(root=ROOT):
         "Examples/Verify.cs", "Examples/Hardware/Hardware.cs", "scripts/Verify.cs",
         "Tests/LibraryCache.cs", "Tests/InitializedTypes.cs", "Tests/ConsumerVerification.cs",
         "Tests/MethodSelectors.cs", "Tests/MetadataMutator.cs", "Tests/Semantics.lean",
-        "Tests/Automation.lean",
+        "Tests/Automation.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
+        "Tests/VerificationReuse.cs",
     }
     inputs["core"].update(f"Examples/Proofs/{name}.lean" for name in (
         "Add", "Choose", "Calls", "Alias", "Struct", "StructCopy", "LargeStruct",
@@ -94,7 +109,7 @@ def main():
         changed = subprocess.check_output(
             ["git", "diff", "--name-only", "--no-renames", "-z", f"{args.base}...{args.head}"], cwd=ROOT)
         paths = [path for path in changed.decode("utf-8").split("\0") if path]
-    suites = select(paths, args.event)
+    suites = schedule(select(paths, args.event))
     print(json.dumps({"changed": paths, "suites": suites}, indent=2))
     with open(args.output, "a", encoding="utf-8") as output:
         # GitHub validates the matrix even when its job is skipped.

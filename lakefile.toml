@@ -31,3 +31,9 @@ name = "Tests.ViewReuse"
 
 [[lean_lib]]
 name = "Tests.SkipInitEvidence"
+
+[[lean_lib]]
+name = "Tests.WrapperProofs"
+
+[[lean_lib]]
+name = "Tests.UnsafeWrappers"

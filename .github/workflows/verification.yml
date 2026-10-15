@@ -27,7 +27,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Test suite selection
-        run: python3 scripts/test-select-verification.py
+        run: |
+          python3 scripts/test-select-verification.py
+          python3 scripts/test-summarize-verification.py
       - name: Select affected suites
         id: select
         env:
@@ -36,20 +38,84 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: python3 scripts/select-verification.py --event "$EVENT" --base "$BASE" --head "$HEAD" --output "$GITHUB_OUTPUT"
 
+  prepare:
+    name: Prepare fresh certified Lean library
+    needs: select
+    if: needs.select.outputs.has-suites == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      manifest-sha256: ${{ steps.certify.outputs.manifest-sha256 }}
+      artifact-id: ${{ steps.library-artifact.outputs.artifact-id }}
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      LEANCIL_TRACE_DIRECTORY: ${{ github.workspace }}/artifacts/verification-traces
+      LEANCIL_SUITE: prepare
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Build and kernel-replay the source-bound library
+        id: certify
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library 2>&1 | tee artifacts/verification.log
+      - name: Upload certified library for this workflow attempt
+        id: library-artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: certified-library-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/certified-library
+          # The certificate covers the hidden .lake tree as well as sources.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Summarize preparation timings
+        if: always()
+        run: python3 scripts/summarize-verification.py --root artifacts/verification-traces --output artifacts/stage-timings.json --markdown artifacts/stage-timings.md --github-summary
+      - name: Upload preparation transcripts and timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-results-prepare-${{ github.run_attempt }}
+          path: |
+            artifacts/verification.log
+            artifacts/verification-traces/
+            artifacts/stage-timings.*
+          if-no-files-found: ignore
+          retention-days: 14
+
   suites:
     name: Verify (${{ matrix.suite }})
-    needs: select
+    needs: [select, prepare]
     if: needs.select.outputs.has-suites == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      max-parallel: 4
+      # Longest measured suites start first; eight runners bound concurrent load.
+      max-parallel: 8
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
 
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
+      LEANCIL_CERTIFIED_LIBRARY: ${{ github.workspace }}/artifacts/certified-library
+      # The trusted digest is a successful producer-job output, never artifact text.
+      LEANCIL_CERTIFIED_LIBRARY_SHA256: ${{ needs.prepare.outputs.manifest-sha256 }}
+      LEANCIL_TRACE_DIRECTORY: ${{ github.workspace }}/artifacts/verification-traces
+      LEANCIL_SUITE: ${{ matrix.suite }}
 
     steps:
       - name: Check out sources
@@ -73,6 +139,13 @@ jobs:
           use-github-cache: false
           use-mathlib-cache: false
 
+      - name: Download the successful producer job's certified library
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          # Failed-job reruns retain the successful producer's immutable artifact ID.
+          artifact-ids: ${{ needs.prepare.outputs.artifact-id }}
+          path: artifacts/certified-library
+
       - name: Run verification suite
         shell: bash
         run: |
@@ -80,37 +153,68 @@ jobs:
           set -o pipefail
           dotnet run --file scripts/Test.cs -- --suite ${{ matrix.suite }} 2>&1 | tee artifacts/verification.log
 
+      - name: Summarize verification timings
+        if: always()
+        run: python3 scripts/summarize-verification.py --root artifacts/verification-traces --output artifacts/stage-timings.json --markdown artifacts/stage-timings.md --github-summary
+
       - name: Upload verification results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: verification-results-${{ matrix.suite }}
+          name: verification-results-${{ matrix.suite }}-${{ github.run_attempt }}
           path: |
             artifacts/verification.log
+            artifacts/verification-traces/
+            artifacts/stage-timings.*
             artifacts/test-results-*.json
             artifacts/**/verified.json
             artifacts/**/identity.json
             artifacts/**/Extracted.lean
+            artifacts/**/Batch.lean
           if-no-files-found: ignore
           retention-days: 14
 
   verify:
     name: Build and verify
-    needs: [select, suites]
+    needs: [select, prepare, suites]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download this run's verification transcripts and timings
+        if: needs.select.outputs.has-suites == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: verification-results-*
+          path: artifacts/collected
+      - name: Summarize all verification stages
+        if: needs.select.outputs.has-suites == 'true'
+        run: python3 scripts/summarize-verification.py --root artifacts/collected --output artifacts/all-stage-timings.json --markdown artifacts/all-stage-timings.md --github-summary
+      - name: Upload combined stage timings
+        if: always() && needs.select.outputs.has-suites == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-stage-timings-${{ github.run_attempt }}
+          path: artifacts/all-stage-timings.*
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Require successful selection and every selected suite to pass
+        if: always()
         env:
           SELECT_RESULT: ${{ needs.select.result }}
           HAS_SUITES: ${{ needs.select.outputs.has-suites }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
           SUITES_RESULT: ${{ needs.suites.result }}
         run: |
           test "$SELECT_RESULT" = success
           if [ "$HAS_SUITES" = true ]; then
+            test "$PREPARE_RESULT" = success
             test "$SUITES_RESULT" = success
           else
             test "$HAS_SUITES" = false
+            test "$PREPARE_RESULT" = skipped
             test "$SUITES_RESULT" = skipped
           fi

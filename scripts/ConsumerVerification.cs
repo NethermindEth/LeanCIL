@@ -85,6 +85,30 @@ partial class Program
             File.AppendAllText(Path.Combine(directory, "lakefile.lean"), $"\nlean_lib {name}\n");
     }
 
+    string[] ConsumerImportDirectories(string session)
+    {
+        // Ask the same Lake environment used by the checker. Package buildDir and
+        // leanLibDir need not be the default .lake/build/lib/lean directories.
+        var probe = Path.Combine(session, "LeanCILPaths" + Guid.NewGuid().ToString("N") + ".lean");
+        string output;
+        try
+        {
+            File.WriteAllText(probe, "def main : IO Unit := do\n  IO.println (\"LEANCIL_LEAN_PATH=\" ++ (← IO.getEnv \"LEAN_PATH\").getD \"\")\n");
+            output = Run(["lake", "env", "lean", "--run", probe], session);
+        }
+        finally { File.Delete(probe); }
+        var lines = output.Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => line.StartsWith("LEANCIL_LEAN_PATH=", StringComparison.Ordinal)).ToArray();
+        if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean import paths.");
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var trusted = Path.GetFullPath(Path.Combine(Toolchain, "lib/lean"));
+        return lines[0]["LEANCIL_LEAN_PATH=".Length..].Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, session)))
+            .Where(path => !path.Equals(trusted, comparison))
+            .Select(path => Within(session, Path.GetRelativePath(session, path)))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
+    }
+
     Report VerifyConsumer(string assembly, string proof, string output, string theorem, string root,
         string? settings, Action<string>? stage)
     {
@@ -98,6 +122,10 @@ partial class Program
         var before = ConsumerInputs(root, proof, settings, output);
         if (!before.ContainsKey("consumer:" + proof))
             throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
+        stage?.Invoke("Lean library build");
+        var certifiedLibrary = Library(Inputs(proof, settings));
+        var certifiedBase = ModuleArtifacts(certifiedLibrary).Where(pair =>
+            ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
         var identityHash = Sha(Path.Combine(output, "identity.json"));
         var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(session);
@@ -121,6 +149,21 @@ partial class Program
             }
             var framework = dependencies.Single(d => d.Name == "leancil");
             var frameworkCopy = Within(session, Path.GetRelativePath(root, framework.Source));
+            // ConsumerInputs already checked normalized source equality. Use the
+            // certified bytes (including line endings) so Lake can reuse its traces.
+            foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories).Append(At("CIL.lean")))
+                File.Copy(path, Path.Combine(frameworkCopy, Path.GetRelativePath(Root, path)), true);
+            var baseBuild = Path.Combine(certifiedLibrary, ".lake/build");
+            var frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
+            foreach (var path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
+                if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
+                    .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
+                var destination = Path.Combine(frameworkBuild, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(path, destination, true);
+            }
             // Give Lake a real generated-module target before building consumer imports.
             if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
                 throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");
@@ -129,28 +172,64 @@ partial class Program
             if (Sha(Path.Combine(frameworkCopy, "Extracted.lean")) != extraction.GetProperty("generatedSha256").GetString())
                 throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
             AddConsumerLibrary(frameworkCopy, "Extracted");
+            var extractionAuditPath = Path.Combine(frameworkCopy, "ExtractionAudit.lean");
+            if (File.Exists(extractionAuditPath)) throw new InvalidDataException("ExtractionAudit is reserved for the certificate audit.");
+            File.WriteAllText(extractionAuditPath, ExtractionAuditSource);
+            AddConsumerLibrary(frameworkCopy, "ExtractionAudit");
             var proofModule = "LeanCILProof" + Guid.NewGuid().ToString("N");
             File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), Path.Combine(session, proofModule + ".lean"));
             AddConsumerLibrary(session, proofModule);
             var copied = before.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal))
                 .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
                 .Append(Path.Combine(frameworkCopy, "Extracted.lean"))
+                .Append(extractionAuditPath)
                 .Append(Path.Combine(session, proofModule + ".lean"))
                 .ToDictionary(path => path, Sha);
+            // Snapshot before invoking Lake: configuration elaboration and imported
+            // metaprograms must not redefine the source bytes accepted by this run.
+            stage?.Invoke("extraction certificate audit");
+            var extractionAudit = Run(["lake", "build", "+ExtractionAudit:olean"], frameworkCopy,
+                progress: "Checking consumer extraction certificate");
+            AuditedAxioms(extractionAudit, "ExtractionAudit.valid");
             stage?.Invoke("proof checking");
             Run(["lake", "build", "+" + proofModule + ":olean"], session, progress: "Building fresh consumer proof and dependencies");
-            // Elaborators can insert unchecked declarations. Replay every built
-            // consumer/dependency module, not just the selected theorem's module.
+            // Replay every consumer/external module, including unused declarations.
+            // Only identical artifacts in the validated framework package can reuse
+            // the base certificate; a same-named consumer module cannot inherit it.
             stage?.Invoke("kernel replay");
-            var toolchain = Run(["lean", "--print-prefix"]).Trim();
-            var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
-            var buildDirectories = new[] { session }.Concat(dependencies.Select(d =>
-                Within(session, Path.GetRelativePath(root, d.Source))))
-                .Select(path => Path.Combine(path, ".lake/build/lib/lean")).Where(Directory.Exists);
-            var modules = buildDirectories.SelectMany(directory =>
-                Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
-                    .Select(path => Path.GetRelativePath(directory, path).Split(Path.DirectorySeparatorChar)[0])
-                    .Select(name => Path.GetFileNameWithoutExtension(name)!)).Distinct().Order(StringComparer.Ordinal);
+            var checker = Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
+            var importDirectories = ConsumerImportDirectories(session);
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var frameworkModules = Path.GetFullPath(Path.Combine(frameworkCopy, ".lake/build/lib/lean"));
+            var currentBase = ModuleArtifacts(frameworkCopy).Where(pair =>
+                ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
+            var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison)) &&
+                certifiedBase.Count == currentBase.Count &&
+                certifiedBase.All(pair => currentBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            var discovered = new List<(string Name, bool Certified)>();
+            foreach (var directory in importDirectories)
+            {
+                if (!Directory.Exists(directory)) continue;
+                var artifacts = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+                    .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
+                    .Select(path => new KeyValuePair<string, string>(Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha(path)));
+                foreach (var module in artifacts.GroupBy(pair => ModuleName(pair.Key)))
+                {
+                    if (!names.Add(module.Key)) throw new InvalidDataException("Ambiguous consumer module: " + module.Key);
+                    if (File.Exists(Path.Combine(Toolchain, "lib/lean", module.Key.Replace('.', '/') + ".olean")))
+                        throw new InvalidDataException("Consumer module shadows the trusted Lean toolchain: " + module.Key);
+                    var unchanged = directory.Equals(frameworkModules, comparison) &&
+                        module.Count() == certifiedBase.Count(pair => ModuleName(pair.Key) == module.Key) &&
+                        module.All(pair => certifiedBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
+                    if (!unchanged && (module.Key == "CIL" || module.Key.StartsWith("CIL.", StringComparison.Ordinal)))
+                        baseUnchanged = false;
+                    discovered.Add((module.Key, unchanged));
+                }
+            }
+            if (!names.Contains(proofModule) || !names.Contains("Extracted") || !names.Contains("ExtractionAudit"))
+                throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
+            var modules = discovered.Where(module => !baseUnchanged || !module.Certified).Select(module => module.Name);
             Run(["lake", "env", checker, .. modules], session, progress: "Kernel replay of consumer proof and dependencies");
             var auditPath = Path.Combine(session, "LeanCILAudit.lean");
             File.WriteAllText(auditPath, $"import {proofModule}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
@@ -170,8 +249,8 @@ partial class Program
                 throw new InvalidOperationException("Sources changed in the fresh consumer build");
             var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
-            var report = new Report(2, Sha(assembly), identityHash, theorem, axioms, audit, before,
-                libraryBuild: "fresh-consumer", initializedTypes: initializedTypes);
+            var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before,
+                libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
             return report;
         }
