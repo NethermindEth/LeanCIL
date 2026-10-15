@@ -107,6 +107,7 @@ import CIL.Safety.WriteEffects
 import CIL.Safety.TypedCopy
 import CIL.Semantics
 import CIL.SymbolicExecution
+import CIL.Safety.SymbolicExecution
 import CIL.Types
 import CIL.VectorMemory
 import CIL.VectorMemoryLemmas

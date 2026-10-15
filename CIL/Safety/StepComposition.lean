@@ -23,6 +23,21 @@ theorem run_next {program : CIL.Program} {fuel method pc target : Nat}
   simp only [run, methodFound, instructionFound, stepped, Except.mapError, Bind.bind, Except.bind]
 #print axioms run_next
 
+/-- Return through frame expiration and the checked result validation. -/
+theorem run_return {program : CIL.Program} {fuel method pc : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {frame : Frame} {memory updated : Memory}
+    (methodFound : program[method]? = some body)
+    (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.returned values updated))
+    (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values) :
+    run program (fuel + 1) method pc args frame stack memory =
+      .ok (leaveFrame frame updated, values) := by
+  simp only [run, methodFound, instructionFound, stepped, checked,
+    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms run_return
+
 /-- Compose one checked fetched step with a terminating continuation without
     fixing the continuation's fuel in the caller proof. -/
 theorem run_next_exists {program : CIL.Program} {method pc target : Nat}

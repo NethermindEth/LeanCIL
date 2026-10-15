@@ -3,12 +3,12 @@ import CIL.Safety.FrameSetupLemmas
 
 namespace CIL.Safety
 
-theorem allocateHome_preserves_static_world (descriptors : List CIL.StaticDescriptor)
+theorem allocateHome_preserves_static_world {alignment : Nat} (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (activation width : Nat) (r : Reference) (hm : m.WellFormed)
     (world : StaticWorldValid descriptors m)
-    (h : allocateHome m activation width = .ok (r, result)) : StaticWorldValid descriptors result := by
+    (h : allocateHome m activation width alignment = .ok (r, result)) : StaticWorldValid descriptors result := by
   unfold allocateHome at h
-  cases ha : allocate m ⟨.frame activation, ⟨width, 1, []⟩, true, [width]⟩ <;>
+  cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
     simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure] at h
   · cases h
@@ -63,7 +63,7 @@ theorem makeLocal_preserves_static_world (descriptors : List CIL.StaticDescripto
     · cases h; exact world
     · cases h
   all_goals
-    cases ha : allocateHome m activation (localWidth kind) <;>
+    cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>
       simp only [ha, Bind.bind, Except.bind] at h
     · cases h
     · rename_i home

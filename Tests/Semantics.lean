@@ -20,6 +20,28 @@ theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0
 private def scalarBody : CIL.Method := { code := [], locals := [], returnsValue := true }
 private def scalarFrame : Frame := { activation := 0, locals := [], owned := [] }
 
+theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsic)
+    (disabled : operation.available body.profile = false) (argc pc : Nat)
+    (args stack : List Value) (frame : Frame) (memory : Memory) :
+    step body (.intrinsic operation argc) pc args frame stack memory =
+      .error (.unsupported "Intrinsic unavailable in target profile") := by
+  simp [step, disabled]
+
+theorem checked_avx2_enabled :
+    step { scalarBody with profile := { avx2 := true } } (.intrinsic (.avx2 .add64) 2)
+      0 [] scalarFrame [.scalar (.v256 1), .scalar (.v256 2)] Examples.empty =
+      .ok (.next 1 [.scalar (.v256 3)] scalarFrame Examples.empty) := rfl
+
+theorem checked_avx512_disabled :
+    step scalarBody (.intrinsic (.avx512 .ltu64) 2) 0 [] scalarFrame
+      [.scalar (.v256 1), .scalar (.v256 2)] Examples.empty =
+      .error (.unsupported "Intrinsic unavailable in target profile") := rfl
+
+theorem checked_avx512_invocation_disabled (memory : Memory) :
+    invoke [{ code := [.arg 0, .arg 1, .intrinsic (.avx512 .ltu64) 2, .ret], locals := [], returnsValue := true }] 4 0
+      [.scalar (.v256 1), .scalar (.v256 2)] memory =
+      .error ⟨0, 2, .unsupported "Intrinsic unavailable in target profile"⟩ := rfl
+
 theorem nop_preserves_stack (stack : List Value) (memory : Memory) :
     step scalarBody .nop 7 [] scalarFrame stack memory =
       .ok (.next 8 stack scalarFrame memory) := rfl

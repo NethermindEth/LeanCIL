@@ -13,12 +13,12 @@ theorem make_local_word64 (memory : Memory) (activation : Nat) (word : BitVec 64
       read result reference 8 1 = .ok (numberBytes word.toNat 8) ∧
       access result reference 8 1 true = .ok () ∧
       MemoryBelow memory.nextIdentity memory result := by
-  obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds memory activation 8 wellFormed (by decide)
+  obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds (alignment := 8) memory activation 8 wellFormed (by decide) (by decide)
   have ready := allocateHome_write_access _ _ _ _ _ home
   obtain ⟨result, written, stored, readback, _⟩ := store_local_word64 word ready.access
   have created : makeLocal activation .word64 (.i64 word) memory =
       .ok (.bytes .word64 reference, [reference.allocation], result) := by
-    simp [makeLocal, localWidth, home, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    simp [makeLocal, localWidth, localAlignment, home, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
   exact ⟨reference, result, created, readback, (ready.after_write written).access,
     makeLocal_preserves_caller_memory _ _ _ _ _ _ _ created⟩
 

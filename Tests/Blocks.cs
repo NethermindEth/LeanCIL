@@ -35,6 +35,46 @@ void Prove(string dll, string selector, string name, List<string> claims)
     Console.WriteLine($"PASS {name}: {claims.Count} checks");
 }
 
+// Model-owned scalar homes retain natural alignment, including addressed parameters.
+var runtimeBlocks = Assembly.LoadFile(assembly).GetType("Examples.Blocks")!;
+foreach (var name in new[] { "FillLocal", "FillParameter", "CopyLocal", "CopyParameter" })
+{
+    var method = runtimeBlocks.GetMethod(name)!;
+    var claims = new List<string>();
+    foreach (var count in new uint[] { 0, 1, 8 })
+    foreach (var bits in new ulong[] { 0, 0x8070605040302010, ulong.MaxValue })
+    {
+        object[] arguments = name switch
+        {
+            "FillLocal" => [(byte)bits, count],
+            "FillParameter" => [bits, (byte)165, count],
+            "CopyLocal" => [bits, count],
+            _ => [ulong.MaxValue, bits, count]
+        };
+        var expected = (ulong)method.Invoke(null, arguments)!;
+        var values = arguments.Select(value => value is ulong word
+            ? $".scalar (.i64 {word})" : $".scalar (.i32 {value})");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", values)}] memory).map Prod.snd = .ok [.scalar (.i64 {expected})]");
+    }
+    var prefix = name switch
+    {
+        "FillLocal" => ".scalar (.i32 165)",
+        "FillParameter" => ".scalar (.i64 0), .scalar (.i32 165)",
+        "CopyLocal" => ".scalar (.i64 0)",
+        _ => ".scalar (.i64 0), .scalar (.i64 0)"
+    };
+    // Never execute out-of-bounds writes in the CLR; require the model to reject them.
+    claims.Add($"((CIL.Safety.invoke Extracted.program 64 0 [{prefix}, .scalar (.i32 9)] memory).map (fun _ => false)).mapError (fun f => match f.fault with | .memory .outsideAllocation _ _ => true | _ => false) = .error true");
+    var parameters = name switch
+    {
+        "FillLocal" => "byte,uint",
+        "FillParameter" => "ulong,byte,uint",
+        "CopyLocal" => "ulong,uint",
+        _ => "ulong,ulong,uint"
+    };
+    Prove(assembly, $"Blocks::{name}({parameters})", name, claims);
+}
+
 // Exercise compiler-generated runtime calls and actual block opcodes with each prefix.
 foreach (var copy in new[] { false, true })
 foreach (var alignment in new[] { 0, 1, 2, 4, 8 })

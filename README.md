@@ -86,7 +86,7 @@ Verify a Lean proof against the extracted method:
 leancil verify artifacts/Add --proof Examples/Proofs/Add.lean
 ```
 
-`verify` first checks the extraction artifacts, builds the bundled Lean sources in a fresh directory, checks the selected theorem with Lean, and audits its transitive axioms. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed; the tool includes the framework sources.
+`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to rebuild the library; CI does this automatically. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed; the tool includes the framework sources.
 
 Expected output:
 
@@ -141,7 +141,7 @@ A regular `dotnet build Extractor -c Release` produces `Extractor/bin/leancil.ex
 | Automation | `CIL.SymbolicExecution` | Kernel-checked instruction equations, symbolic stepping, transactional proved summaries |
 | Runtime features | `CIL.Features`, `CIL.SIMD.*`, `CIL.ProfileEquivalence` | Fixed capability profiles, supported SIMD semantics, justified profile equivalence |
 | Extraction | `Extractor/` | Metadata validation, managed-call reachability, CIL translation and Lean generation |
-| Verification | `leancil verify` | Fresh source builds, named theorem audit and assembly/source identity binding |
+| Verification | `leancil verify` | Source-keyed library cache, explicit fresh builds, kernel replay, theorem audit and assembly/source identity binding |
 
 **Use `CIL.Safety.invoke` for memory-safety claims.** Successful `CIL.invoke` alone does not establish allocation bounds or lifetime. The checked interpreter supports arbitrary admitted aggregate widths; the earlier interpreter retains explicitly named fixed vector-home operations and rejects the new general aggregate instructions. These are two defined models, not an unproved correspondence theorem between them.
 
@@ -163,7 +163,7 @@ leancil extract Examples/Assembly/bin/Examples.dll "Arithmetic::Add(ulong,ulong)
 leancil verify artifacts/Add --proof Examples/Proofs/Add.lean
 ```
 
-Verification first checks the extraction, builds the bundled Lean sources in a fresh directory, checks the selected theorem and audits its axioms. It writes `artifacts/Add/verified.json` only after the proof and final identity checks succeed.
+Verification first checks the extraction, prepares the source-keyed library cache in a private session, checks and kernel-replays the selected proof, and audits its axioms. `--fresh` bypasses the cache. It writes `artifacts/Add/verified.json` only after the proof and final identity checks succeed.
 
 Output begins with the following summary, followed by the full theorem statement shown in the command-line section:
 
@@ -249,12 +249,13 @@ This prints `Verified: ExampleProof.correctness` and the theorem statement: for 
 
 A verification report identifies the **specific named theorem and its printed type**, not all methods or all inputs automatically. `leancil check` validates extraction artifacts only; `leancil verify` runs the proof. A failed proof returns `1`, prints `Invalid:` and the diagnostic to standard error, and removes the previous verification report.
 
-To prove another method, supply a unique method selector, write a Lean file importing `Extracted`, state a specification and prove it from `Extracted.program`. By default the driver checks `ExampleProof.correctness`; use `--theorem` for another name. `CIL.Safety.Ensures` expresses total correctness with successful finite execution. `VC` and `ensures_of_vc` expose a chosen finite execution condition. Simple concrete tests can use kernel reduction (`rfl`); symbolic proofs use ordinary Lean reasoning or `cil_steps`. Exhaustion and unsupported states are failures.
+To prove another method, supply a unique method selector, write a Lean file importing `Extracted`, state a specification and prove it from `Extracted.program`. By default the driver checks `ExampleProof.correctness`; use `--theorem` for another name. `CIL.Safety.Ensures` expresses total correctness with successful finite execution. `VC` and `ensures_of_vc` expose a chosen finite execution condition. Simple concrete tests can use kernel reduction (`rfl`); symbolic checked-model proofs use ordinary Lean reasoning or `cil_checked_steps` from `CIL.Safety.SymbolicExecution`. The older `cil_steps` tactic targets the pure interpreter. Exhaustion and unsupported states are failures.
 
 ## Independent examples
 
-- `Add`: universal modular arithmetic correctness.
-- `Choose`: symbolic conditional execution.
+- `Add`: universal modular arithmetic correctness in the specified empty initial memory.
+- `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over arbitrary caller memory, with exact memory preservation. The checked automation follows generated instruction lookups; the same contract is tested after inserting NOPs and rejected for subtraction.
+- `Choose`: concrete conditional-execution checks.
 - `Loops.Countdown`: universal termination and a zero result for every `uint`, including zero and `UInt32.MaxValue`, using a decreasing natural-number measure over checked local storage.
 - `Calls`: a managed-call chain with an address-taken mutable local.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the modular additive inverse for every input, including the signed minimum.
@@ -269,7 +270,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 - A separate `Examples.Hardware` assembly, built from the file-based library `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
 
-Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. The library additionally proves generic allocation, frame, reference, aliasing and storage properties.
+Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. Argument quantification does not imply arbitrary caller memory: most examples require `Examples.empty` or `Examples.caller`. `CheckedAdd64.lean` explicitly quantifies caller memory and proves it unchanged. The library additionally proves generic allocation, frame, reference, aliasing and storage properties.
 
 ## Loop verification
 
@@ -326,7 +327,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | `ldc.i4` and its short forms, `ldc.i8`, `dup`, `pop` | Complete within the admitted model | Integer constants and supported stack values |
 | Argument/local loads and stores, `ldloca` | Partial | Admitted types; no address of a managed-reference local |
 | `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
-| Supported branches | Partial | Forward-only reachable control flow; integer conditions/comparisons |
+| Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons; termination requires a separate proof |
 | `call`, `ret` | Partial | Acyclic static/struct instance methods, concrete generic-method specializations and explicitly modelled runtime calls |
 | Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
 | `initblk`, `cpblk`, `unaligned.` | Partial | Checked managed references, 32-bit byte counts and validated alignment prefixes; overlapping block copies rejected |

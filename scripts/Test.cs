@@ -93,7 +93,7 @@ var signatures = new Dictionary<string, string>
 // Each suite can run in its own checkout, with only the projects it needs.
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
 if (suite is "all" or "core")
-    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "scripts/Verify.cs"]);
+    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
@@ -124,6 +124,9 @@ if (suite is not ("all" or "core"))
 }
 
 // Check method selection before starting the longer Lean verification run.
+Run(["dotnet", "run", "--file", "Tests/LibraryCache.cs"], streamOutput: true, progress: "Library cache checks");
+Passed("library cache integrity and source keys");
+
 Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
@@ -261,6 +264,30 @@ if (!failed)
     throw new InvalidOperationException("Changed proof accepted");
 
 Passed("changed proof identity rejected");
+
+var reportPath = Path.Combine(addOutput, "verified.json");
+var savedReport = File.ReadAllText(reportPath);
+try
+{
+    var legacy = JsonSerializer.Deserialize<Report>(savedReport)! with { schema = 1 };
+    File.WriteAllText(reportPath, JsonSerializer.Serialize(legacy, Json));
+    failed = false;
+    try
+    {
+        verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
+    }
+    catch (InvalidOperationException error) when (error.Message.Contains("Stale verification report"))
+    {
+        failed = true;
+    }
+    if (!failed)
+        throw new InvalidOperationException("Legacy report without kernel replay accepted");
+}
+finally
+{
+    File.WriteAllText(reportPath, savedReport);
+}
+Passed("legacy report without kernel replay rejected");
 
 Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-avx2"), "Stale or mismatched");
 Passed("different feature profile rejected");

@@ -11,15 +11,21 @@ partial class Program
     internal static void VerifyArtifacts(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
-            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name]");
+            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh]");
 
         var output = Path.GetFullPath(args[0]);
         string? proof = null;
         string? theorem = null;
+        var fresh = false;
 
         for (var index = 1; index < args.Length; index++)
         {
             var option = args[index];
+            if (option == "--fresh" && !fresh)
+            {
+                fresh = true;
+                continue;
+            }
             if (++index == args.Length || args[index].StartsWith("--", StringComparison.Ordinal))
                 throw new ArgumentException($"Missing value for {option}.");
 
@@ -78,7 +84,7 @@ partial class Program
             var identity = manifest.GetProperty("assemblyIdentity").GetString()!;
             var entry = manifest.GetProperty("entry").GetString()!;
 
-            using var verification = new Program();
+            using var verification = new Program { freshLibrary = fresh };
             var report = verification.Verify(assembly, identity, entry, proof, output,
                 theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: value => stage = value);
 

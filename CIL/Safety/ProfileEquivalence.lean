@@ -14,6 +14,8 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Op) (p q : CIL.FeatureProf
       step { body with profile := q } op pc args frame stack memory := by
   unfold step
   split <;> try rfl
+  all_goals simp only [CIL.Op.ProfileAgreement] at agreement
+  all_goals try simp only [agreement]
   all_goals simp only [CIL.step_profile_eq op p q agreement]
 
 theorem run_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)

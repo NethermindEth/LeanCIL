@@ -16,7 +16,7 @@ theorem allocate_initialized256 (memory : Memory) (activation : Nat) (bits : Bit
       access result reference 32 1 true = .ok () ∧
       MemoryBelow memory.nextIdentity memory result := by
   obtain ⟨reference, allocated, home⟩ :=
-    allocateHome_succeeds memory activation 32 wellFormed (by decide)
+    allocateHome_succeeds (alignment := 1) memory activation 32 wellFormed (by decide) (by decide)
   have ready := allocateHome_write_access _ _ _ _ _ home
   have length : (numberBytes bits.toNat 32).length = 32 := by simp [numberBytes]
   obtain ⟨result, written⟩ := write_succeeds (bytes := numberBytes bits.toNat 32)
@@ -29,7 +29,7 @@ theorem allocate_initialized256 (memory : Memory) (activation : Nat) (bits : Bit
       Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   have created : makeLocal activation .vector256 (.v256 bits) memory =
       .ok (.bytes .vector256 reference, [reference.allocation], result) := by
-    simp [makeLocal, localWidth, home, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    simp [makeLocal, localWidth, localAlignment, home, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
   refine ⟨reference, allocated, result, home, ?_, stored, readback, ?_,
     makeLocal_preserves_caller_memory _ _ _ _ _ _ _ created⟩
   · simp [storeValue, referenceAt, written, checkedAt,

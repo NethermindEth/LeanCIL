@@ -3,10 +3,10 @@ import CIL.Safety.FrameOwnership
 
 namespace CIL.Safety
 
-theorem allocateHome_preserves_caller_memory (m result : Memory) (activation width : Nat) (r : Reference)
-    (h : allocateHome m activation width = .ok (r, result)) : MemoryBelow m.nextIdentity m result := by
+theorem allocateHome_preserves_caller_memory {alignment : Nat} (m result : Memory) (activation width : Nat) (r : Reference)
+    (h : allocateHome m activation width alignment = .ok (r, result)) : MemoryBelow m.nextIdentity m result := by
   unfold allocateHome at h
-  cases ha : allocate m ⟨.frame activation, ⟨width, 1, []⟩, true, [width]⟩ <;>
+  cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
     simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure] at h
   · cases h
@@ -45,7 +45,7 @@ theorem makeLocal_preserves_caller_memory (m result : Memory) (activation : Nat)
     · cases h; exact .refl _ _
     · cases h
   all_goals
-    cases ha : allocateHome m activation (localWidth kind) <;>
+    cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>
       simp only [ha, Bind.bind, Except.bind] at h
     · cases h
     · rename_i home
@@ -144,7 +144,7 @@ theorem initialize_parameter_preserves_caller_memory (m home result : Memory) (a
       · cases stored
       · cases stored; exact .refl _ _
   all_goals
-    cases ha : allocateHome m activation (localWidth kind) <;>
+    cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>
       simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at made
     · cases made
     · rename_i allocation

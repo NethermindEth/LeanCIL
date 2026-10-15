@@ -12,7 +12,7 @@ theorem makeLocal_preserves_wellFormed (m result : Memory) (activation : Nat)
     · cases h; exact hm
     · cases h
   all_goals
-    cases ha : allocateHome m activation (localWidth kind) <;>
+    cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>
       simp only [ha, Bind.bind, Except.bind] at h
     · cases h
     · rename_i home
