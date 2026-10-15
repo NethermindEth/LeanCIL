@@ -130,7 +130,7 @@ Every invocation checks the proof afresh. A failed proof removes the previous ve
 
 A regular `dotnet build Extractor -c Release` produces `Extractor/bin/leancil.exe` on Windows (`leancil` on other platforms). The managed assembly and package are named `Nethermind.LeanCIL`.
 
-## Architecture
+### Initialization assumptions
 
 Methods on types with static constructors are rejected by default. If the caller
 guarantees successful initialization before invocation, extraction can record
@@ -148,6 +148,45 @@ Lean source and identity manifest retain the assumptions; `check` reuses them an
 rejects conflicting explicit assumptions. Verification binds the manifest hash
 and prints the initialization preconditions with the theorem. Re-extract older
 artifacts to include the new manifest field.
+
+### Consumer proof packages
+
+For proofs split across a consumer's own Lean modules, pass the Lake package root:
+
+```sh
+leancil verify artifacts/Add --proof proofs/Add.lean --proof-root . --theorem MyProof.correctness
+```
+
+The package must depend on `leancil`, use the bundled Lean toolchain, and have a
+resolved `lake-manifest.json` (`lake update`). Both `lakefile.toml` and
+`lakefile.lean` are supported. Dependencies must be resolved git packages pinned
+to full revisions, using the standard `.lake/packages` directory. The consumer's
+CIL sources must match the verifier's bundled framework, allowing LF/CRLF
+differences. Mismatches fail explicitly.
+
+Verification copies the consumer's Lean sources, Lake configuration and resolved
+dependency sources into a temporary package, without copying compiled caches.
+It supplies the selected `Extracted` module before Lake builds the proof and its
+imports, so shared consumer modules can themselves import `Extracted`. There is
+no need to flatten the proof or put consumer files in LeanCIL's examples.
+
+The report binds all copied `.lean`, `.toml`, `.json` and `lean-toolchain` files
+and dependency revisions. Sources are checked again before writing the report;
+all built consumer and dependency modules undergo kernel replay, and
+the selected theorem's transitive axioms are audited with the same policy as
+single-file verification. `verification.json` remembers the package root.
+Consumer packages always build fresh, including when `--fresh` is supplied.
+
+This mode supports Lean source packages; local path dependencies, custom Lake
+cache directories, symlinked sources and native/precompiled dependencies are not
+supported. Build/artifact directories (`.lake`, `.git`, `artifacts`, `generated`,
+`bin`, `obj`, `.work`) and the selected extraction output directory are excluded.
+Place handwritten proofs outside them.
+`Extracted.lean` is reserved for the selected artifact; do not keep another copy
+among consumer sources. Lake configuration and Lean elaborators are executable
+code, so use this mode with packages you trust.
+
+## Architecture
 
 | Layer | Public modules | Purpose |
 | --- | --- | --- |

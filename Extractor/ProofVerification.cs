@@ -6,17 +6,18 @@ using Nethermind.LeanCIL;
 // Share the same fresh-build and theorem-audit implementation as the test scripts.
 partial class Program
 {
-    sealed record VerificationSettings(int schema, string proof, string theorem);
+    sealed record VerificationSettings(int schema, string proof, string theorem, string? proofRoot = null);
 
     internal static void VerifyArtifacts(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
-            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh]");
+            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory]");
 
         var output = Path.GetFullPath(args[0]);
         string? proof = null;
         string? theorem = null;
         var fresh = false;
+        string? proofRoot = null;
 
         for (var index = 1; index < args.Length; index++)
         {
@@ -31,6 +32,9 @@ partial class Program
 
             switch (option)
             {
+                case "--proof-root" when proofRoot is null:
+                    proofRoot = Path.GetFullPath(args[index]);
+                    break;
                 case "--proof" when proof is null:
                     proof = Path.GetFullPath(args[index]);
                     break;
@@ -56,6 +60,7 @@ partial class Program
                     throw new InvalidDataException("Invalid verification.json: expected schema 1, proof and theorem.");
                 proof ??= Path.GetFullPath(saved.proof, output);
                 theorem ??= saved.theorem;
+                if (saved.proofRoot is not null) proofRoot ??= Path.GetFullPath(saved.proofRoot, output);
             }
             else if (proof is null && File.Exists(reportPath))
             {
@@ -76,7 +81,8 @@ partial class Program
 
             // Settings are reusable inputs and survive both successful and failed proofs.
             Directory.CreateDirectory(output);
-            var settings = new VerificationSettings(1, Path.GetRelativePath(output, proof).Replace('\\', '/'), theorem);
+            var settings = new VerificationSettings(1, Path.GetRelativePath(output, proof).Replace('\\', '/'), theorem,
+                proofRoot is null ? null : Path.GetRelativePath(output, proofRoot).Replace('\\', '/'));
             File.WriteAllText(settingsPath, JsonSerializer.Serialize(settings, Json) + "\n");
             stage = "extraction integrity";
             var manifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
@@ -85,8 +91,10 @@ partial class Program
             var entry = manifest.GetProperty("entry").GetString()!;
 
             using var verification = new Program { freshLibrary = fresh };
-            var report = verification.Verify(assembly, identity, entry, proof, output,
-                theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: value => stage = value);
+            var report = proofRoot is null
+                ? verification.Verify(assembly, identity, entry, proof, output,
+                    theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: value => stage = value)
+                : verification.VerifyConsumer(assembly, proof, output, theorem, proofRoot, settingsPath, value => stage = value);
 
             Console.WriteLine($"Verified: {report.theorem}");
             Console.WriteLine($"  Assembly: {identity}");
