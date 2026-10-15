@@ -9,7 +9,11 @@ Recorded on 2026-10-15. The probe executes the exact CIL recorded in each manife
 
 Each architecture's `results.csv` records opcode, operand order, int32 provenance, explicit conversion, admission status, both operand bit patterns, expected result, and actual result/fault. `manifest.json` records runtime build/version/architecture, runtime binary hashes, probe and generated fixture hashes, exact method signatures and CIL instructions, and the results hash. Both machines executed the same probe binary and generated the same deterministic fixture bytes. The CSV bytes differ only in platform newline encoding.
 
+The local `.gitattributes` preserves those runtime-produced CSV bytes, including Windows CRLF, so checkout and commit do not invalidate the recorded SHA256 values.
+
 The corpus contains 31 arithmetic/comparison/branch opcodes, both operand orders, five native boundaries and five int32 boundaries, loaded from arguments and embedded as `ldc.i4` constants. It also exercises all five affected unsigned branches with explicit `conv.i` and `conv.u` on both operand sources. Zero divisors, signed division/remainder overflow, unsigned boundaries, and negative int32 values are included. Results are compared with a separate `BigInteger` oracle; this is finite runtime evidence, not a proof of CoreCLR.
+
+Both architectures were also run with `DOTNET_TieredCompilation=0`, forcing fully optimized JIT compilation rather than default tiering. All 4,100 rows were identical to the original runs, including the 38 historical divergences. [optimized-runs.json](optimized-runs.json) records the exact commands, environment setting, runtime and binary identities, and result hashes. It references the existing CSVs and CIL listings because their hashes match exactly; unchanged rows and instructions are not duplicated. The probe binaries are identified independently for each run, including rebuilds between runs.
 
 ## Discovered discrepancy and enforced boundary
 
@@ -44,3 +48,5 @@ Download the appropriate archive from `provenance.json`, verify its SHA512, and 
 ```
 
 The project pins runtime 10.0.0 and disables roll-forward. To run on a second machine without installing an SDK, copy `NativeProbe.dll`, `NativeProbe.deps.json`, `NativeProbe.runtimeconfig.json`, and `Mono.Cecil.dll` from the build directory. The generated fixture uses a deterministic MVID and timestamp. An admitted mismatch returns exit code 1; historical mismatches in the explicitly rejected category remain recorded separately. The full extraction/proof regression suite is `dotnet run --file Tests/NativeIntegers.cs` after normal repository build prerequisites.
+
+To repeat the optimized-mode run, set `DOTNET_TieredCompilation=0` for that process. In PowerShell, set `$env:DOTNET_TieredCompilation = '0'` before invoking the isolated runtime. On macOS, prefix the command with `DOTNET_TieredCompilation=0`. Use a separate output directory to retain both runs.

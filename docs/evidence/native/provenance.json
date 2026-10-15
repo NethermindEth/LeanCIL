@@ -19,5 +19,6 @@
       "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.0/dotnet-runtime-10.0.0-win-x64.zip",
       "hash": "4f785ed52d49545e328d7526fd6fe80e2d0c84bc90c5f905df631ef87b9d3efd211d10670aa87d5e7b87cd2f54d3dedb6e5be78027d5533153670e1186230825"
     }
-  ]
+  ],
+  "optimizedRuns": "optimized-runs.json"
 }
