@@ -77,6 +77,19 @@ Reject("Unapproved proof axioms");
 File.WriteAllText(sharedPath, shared);
 Console.WriteLine("PASS axiom hidden in imported consumer module rejected");
 
+File.WriteAllText(sharedPath, "import Lean\n" + shared + "\n" + """
+set_option debug.skipKernelTC true
+run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+  name := `Client.forged
+  levelParams := []
+  type := Lean.mkConst ``False
+  value := Lean.mkConst ``True.intro
+})
+""");
+Reject("while replaying declaration");
+File.WriteAllText(sharedPath, shared);
+Console.WriteLine("PASS kernel replay rejects unchecked declarations in consumer imports");
+
 File.WriteAllText(Path.Combine(root, "Extracted.lean"), "-- stale extraction");
 Reject("reserved");
 File.Delete(Path.Combine(root, "Extracted.lean"));

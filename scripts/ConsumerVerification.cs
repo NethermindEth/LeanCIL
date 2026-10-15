@@ -139,6 +139,19 @@ partial class Program
                 .ToDictionary(path => path, Sha);
             stage?.Invoke("proof checking");
             Run(["lake", "build", "+" + proofModule + ":olean"], session, progress: "Building fresh consumer proof and dependencies");
+            // Elaborators can insert unchecked declarations. Replay every built
+            // consumer/dependency module, not just the selected theorem's module.
+            stage?.Invoke("kernel replay");
+            var toolchain = Run(["lean", "--print-prefix"]).Trim();
+            var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
+            var buildDirectories = new[] { session }.Concat(dependencies.Select(d =>
+                Within(session, Path.GetRelativePath(root, d.Source))))
+                .Select(path => Path.Combine(path, ".lake/build/lib/lean")).Where(Directory.Exists);
+            var modules = buildDirectories.SelectMany(directory =>
+                Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
+                    .Select(path => Path.ChangeExtension(Path.GetRelativePath(directory, path), null)
+                        .Replace(Path.DirectorySeparatorChar, '.'))).Distinct().Order(StringComparer.Ordinal);
+            Run(["lake", "env", checker, .. modules], session, progress: "Kernel replay of consumer proof and dependencies");
             var auditPath = Path.Combine(session, "LeanCILAudit.lean");
             File.WriteAllText(auditPath, $"import {proofModule}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
             stage?.Invoke("theorem audit");
@@ -157,7 +170,8 @@ partial class Program
                 throw new InvalidOperationException("Sources changed in the fresh consumer build");
             var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
-            var report = new Report(1, Sha(assembly), identityHash, theorem, axioms, audit, before, initializedTypes);
+            var report = new Report(2, Sha(assembly), identityHash, theorem, axioms, audit, before,
+                libraryBuild: "fresh-consumer", initializedTypes: initializedTypes);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
             return report;
         }

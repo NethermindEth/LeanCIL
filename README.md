@@ -172,8 +172,10 @@ no need to flatten the proof or put consumer files in LeanCIL's examples.
 
 The report binds all copied `.lean`, `.toml`, `.json` and `lean-toolchain` files
 and dependency revisions. Sources are checked again before writing the report;
+all built consumer and dependency modules undergo kernel replay, and
 the selected theorem's transitive axioms are audited with the same policy as
 single-file verification. `verification.json` remembers the package root.
+Consumer packages always build fresh, including when `--fresh` is supplied.
 
 This mode supports Lean source packages; local path dependencies, custom Lake
 cache directories, symlinked sources and native/precompiled dependencies are not
