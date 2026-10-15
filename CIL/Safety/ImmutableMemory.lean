@@ -69,6 +69,8 @@ theorem write_preserves_immutable (m result : Memory) (r : Reference)
     · intro offset
       simp [Ne.symm different]
     · intro offset
+      change permitted { m with views := writeViews m r bytes.length } false ⟨id, offset⟩ = _
+      rw [writeViews_permitted]
       simp [permitted, viewContains, different]
 
 theorem allocate_preserves_immutable (m result : Memory) (a : Allocation) (id : AllocationId)

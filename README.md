@@ -370,6 +370,10 @@ Profiles default to scalar. Pass a supported profile name or `@profile.json` as 
 
 The memory model checks allocation identity, liveness, bounds, byte permissions, initialization, alignment and GC-sensitive intervals. It supports overlap and distinct private frames. It does not prove JIT/compiler correctness, concurrency, GC implementation correctness, OS memory behaviour or arbitrary .NET runtime equivalence. See [soundness and trusted base](docs/SOUNDNESS.md) for the precise boundary.
 
+Stores reuse existing read permissions when they already cover the written range, including coverage spread across multiple views. The `write_run_equivalent` theorem proves that replacing the previous always-prepending write preserves any subsequent checked execution: returned values, exact faults, allocation state, bytes and permissions. `Memory.Equivalent.run` and `.invoke` cover branches, calls, constructors and frame cleanup.
+
+Run `pwsh scripts/BenchmarkViews.ps1 -Stores 128 -Repetitions 3` to compare kernel reduction against the previous write implementation. In a local Windows run with Lean 4.35.0, 128 alternating stores retained 1 view instead of 129; median elapsed time was 5.6 seconds versus 17.7 seconds. These timings include process startup and shared-machine activity; view counts are checked by kernel reduction.
+
 ### Portable bit and endian helpers
 
 `BitOperations.RotateLeft`, `RotateRight`, `PopCount`, `LeadingZeroCount`, `TrailingZeroCount`, `Log2` and `RoundUpToPowerOf2` support `uint`, `ulong` and `nuint`. `IsPow2` also supports their signed counterparts. `BinaryPrimitives.ReverseEndianness` supports signed and unsigned 8-, 16-, 32-, 64-bit and native integers. These calls work with every hardware profile. Other overloads remain unsupported; see the [exact coverage](docs/OPCODES.md#portable-scalar-runtime-helpers).

@@ -77,6 +77,8 @@ theorem write_preserves_memory_below (m result : Memory) (r : Reference) (bytes 
       simp [different]
     · intro id old offset writing
       have different : id ≠ r.allocation := Nat.ne_of_lt (Nat.lt_of_lt_of_le old fresh)
+      change permitted { m with views := writeViews m r bytes.length } writing ⟨id, offset⟩ = _
+      rw [writeViews_permitted]
       simp [permitted, viewContains, Ne.symm different]
 
 #print axioms MemoryBelow.read

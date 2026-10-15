@@ -139,12 +139,38 @@ def dereference (m : Memory) (reference : ManagedReference) (width alignment : N
   | .null => .error .nullDereference
   | .address r => read m r width alignment
 
-def write (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Nat) : Checked Memory := do
+/-- A covering readable view is the common fast path; fragmented authority may
+    also cover every byte. Empty writes need no additional authority. -/
+def readableRange (m : Memory) (r : Reference) (width : Nat) : Bool :=
+  width == 0 ||
+    m.views.any (fun view => view.readable && decide
+      (view.allocation = r.allocation ∧ view.start ≤ r.offset ∧ r.offset + width ≤ view.start + view.length)) ||
+    (List.range width).all (fun i => permitted m false { r with offset := r.offset + i })
+
+def writeViews (m : Memory) (r : Reference) (width : Nat) : List View :=
+  if readableRange m r width then m.views
+  else ⟨r.allocation, r.offset, width, true, false⟩ :: m.views
+
+/-- Reference implementation retained to state and prove optimization equivalence. -/
+def writeAlwaysPrepend (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Nat) : Checked Memory := do
   access m r bytes.length alignment true
   -- A method may read its own initialized output. This grants no write authority
   -- and exposes exactly the interval whose original write authority was checked.
   return { m with
     views := ⟨r.allocation, r.offset, bytes.length, true, false⟩ :: m.views
+    cells := (fun id offset =>
+    if id = r.allocation ∧ r.offset ≤ offset then
+      (match bytes[offset - r.offset]? with
+      | some bits => { bits, initialized := true }
+      | none => m.cells id offset)
+    else m.cells id offset) }
+
+def write (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Nat) : Checked Memory := do
+  access m r bytes.length alignment true
+  -- A method may read its own initialized output. This grants no write authority
+  -- and exposes exactly the interval whose original write authority was checked.
+  return { m with
+    views := writeViews m r bytes.length
     cells := (fun id offset =>
     if id = r.allocation ∧ r.offset ≤ offset then
       (match bytes[offset - r.offset]? with

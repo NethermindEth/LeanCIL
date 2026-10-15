@@ -1,0 +1,62 @@
+import CIL.Safety.FrameEquivalence
+
+namespace CIL.Safety
+
+theorem Memory.Equivalent.loadValue {m n : Memory} (same : m.Equivalent n)
+    (reference : ManagedReference) (width : Nat) (signed : Bool) :
+    loadValue m reference width signed = loadValue n reference width signed := by
+  simp only [CIL.Safety.loadValue, same.dereference]
+
+theorem Memory.Equivalent.storeValue {m n : Memory} (same : m.Equivalent n)
+    (reference : ManagedReference) (value : CIL.Value) :
+    ResultEquivalent Memory.Equivalent (storeValue m reference value) (storeValue n reference value) := by
+  cases value <;> simp only [CIL.Safety.storeValue, Bind.bind, Except.bind]
+  all_goals first
+    | exact .error _
+    | (apply ResultEquivalent.bind_same
+       intro address
+       exact (same.write address _ ordinaryAccessAlignment).mapError _)
+
+theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (memoryInstruction operation stack m)
+      (memoryInstruction operation stack n) := by
+  unfold CIL.Safety.memoryInstruction
+  split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeValue _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+
+theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.Op) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (instruction operation stack m)
+      (instruction operation stack n) := by
+  unfold CIL.Safety.instruction
+  split <;> try simp only [same.read, same.dereference, same.loadValue, same.formValue, same.add]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeValue _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+
+#print axioms Memory.Equivalent.instruction
+#print axioms Memory.Equivalent.memoryInstruction
+#print axioms Memory.Equivalent.loadValue
+#print axioms Memory.Equivalent.storeValue
+
+end CIL.Safety
