@@ -95,7 +95,7 @@ var signatures = new Dictionary<string, string>
 // Each suite can run in its own checkout, with only the projects it needs.
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
 if (suite is "all" or "core")
-    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "scripts/Verify.cs"]);
+    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/BatchVerification.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
@@ -121,6 +121,14 @@ foreach (var project in projects)
         throw new InvalidOperationException("Unused imports: " + log);
 }
 
+if (suite is "all" or "core" or "unsafe" or "evidence")
+{
+    // Direct semantic/evidence checks use the checkout's Lake build directory.
+    // Seed it from the same validated private library instead of rebuilding CIL.
+    var certified = verification.Library(Inputs(At("CIL.lean")));
+    CopyTree(Path.Combine(certified, ".lake/build"), At(".lake/build"));
+}
+
 if (suite is not ("all" or "core"))
 {
     RunSuite(suite);
@@ -131,6 +139,15 @@ if (suite is not ("all" or "core"))
 // Check method selection before starting the longer Lean verification run.
 Run(["dotnet", "run", "--file", "Tests/LibraryCache.cs"], streamOutput: true, progress: "Library cache checks");
 Passed("library cache integrity and source keys");
+
+Run(["dotnet", "run", "--file", "Tests/VerificationCache.cs"], streamOutput: true, progress: "Certified verification cache checks");
+Passed("certified artifact receipts and cache tampering rejection");
+
+Run(["dotnet", "run", "--file", "Tests/VerificationReuse.cs"], streamOutput: true, progress: "Certified verification reuse checks");
+Passed("cold and warm verification, proof-edit invalidation and unchecked helper rejection");
+
+Run(["dotnet", "run", "--file", "Tests/BatchVerification.cs"], streamOutput: true, progress: "Generated verification batch checks");
+Passed("batched extraction and proof checking, independent identities and negative regressions");
 
 Run(["dotnet", "run", "--file", "Tests/InitializedTypes.cs"], streamOutput: true, progress: "Initialization assumptions");
 Passed("explicit type initialization assumptions and identity");

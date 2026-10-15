@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -14,25 +15,37 @@ var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Unsaf
 using var source = ModuleDefinition.ReadModule(assembly);
 var owner = source.GetType("Examples.UnsafeLayouts");
 var cases = 0;
+var pending = new List<(GeneratedVerification Request, string Name, int Count)>();
 
-void Prove(MethodDefinition method, List<string> claims, string definitions = "")
+void Flush()
+{
+    if (pending.Count == 0) return;
+    verification.VerifyGeneratedBatch(assembly, "Examples", pending.Select(p => p.Request).ToArray());
+    foreach (var item in pending)
+    {
+        cases += item.Count;
+        Console.WriteLine($"PASS {item.Name}: {item.Count} checks");
+    }
+    pending.Clear();
+}
+
+void Prove(MethodDefinition method, List<string> claims, string definitions = "", string? term = null)
 {
     var output = Path.Combine(root, method.Name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + definitions +
+    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nimport Tests.UnsafeWrappers\nnamespace ExampleProof\n" + definitions +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
-        (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", method.FullName, proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {method.Name}: {claims.Count} checks");
+        (term ?? (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩")) + "\nend ExampleProof\n");
+    pending.Add((new GeneratedVerification(method.FullName, proof, output), method.Name, claims.Count));
+    if (pending.Count == 8) Flush();
 }
 
 // Sizes come from .NET's managed layout, including packed/nested structs and vectors.
 foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", StringComparison.Ordinal)))
 {
     var size = (int)runtime.GetMethod(method.Name)!.Invoke(null, null)!;
-    Prove(method, [$"(CIL.Safety.invoke Extracted.program 8 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.i32 {size})]"]);
+    Prove(method, [$"(CIL.Safety.invoke Extracted.program 8 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.i32 {size})]"], term: "Tests.UnsafeWrappers.size_ok _ _ _");
 }
 
 // Runtime byte offsets and Lean references must agree for each element type and offset overload.
@@ -63,8 +76,12 @@ foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Add", StringC
     // Forming an address beyond the allocation fails before any dereference.
     claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [Examples.reference, .scalar (.i{stackWidth} 5)] memory).map Prod.snd = .error ⟨0, 2, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩");
     claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [.reference .null, .scalar (.i{stackWidth} 0)] memory).map Prod.snd = .error ⟨0, 2, .memory .nullDereference .null 0⟩");
-    Prove(method, claims, memory);
+    var success = "Tests.UnsafeWrappers.add_ok _ _ _ _ _ _ _ rfl rfl rfl rfl";
+    var failure = "Tests.UnsafeWrappers.add_error _ _ _ _ _ _ _ rfl rfl rfl";
+    Prove(method, claims, memory, "⟨" + string.Join(", ", Enumerable.Repeat(success, 5).Concat([failure, failure])) + "⟩");
 }
+
+Flush();
 
 // Reject malformed generic signatures and element types before emitting any Lean.
 foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "arity", "offset", "return", "scope", "version" })

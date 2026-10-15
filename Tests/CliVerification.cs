@@ -145,12 +145,16 @@ if (args.Length == 0)
     Run([.. importedCli, "extract", assembly, "Arithmetic::Add(ulong,ulong)", importedOutput]);
     var importedProof = Path.Combine(importedRoot, "Proof.lean");
     File.WriteAllText(importedProof, "import Extracted\nimport CIL.AuditGood\ntheorem ExampleProof.correctness : True := AuditGood.helper\n");
-    var validImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof]);
+    // This corpus deliberately differs from CI's shared certified library. Build
+    // and replay it independently rather than accepting that library's certificate.
+    var validImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof, "--fresh"],
+        progress: "Checking valid imported helper against modified library");
     if (validImported.Code != 0 || validImported.Stderr.Length != 0 ||
         !validImported.Stdout.StartsWith("Verified: ExampleProof.correctness"))
         throw new InvalidOperationException("Valid imported CIL helper rejected: " + validImported.Output);
     File.WriteAllText(importedProof, "import Extracted\nimport CIL.AuditBad\ntheorem ExampleProof.correctness : False := AuditBad.helper\n");
-    var invalidImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof]);
+    var invalidImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof, "--fresh"],
+        progress: "Rejecting forged imported helper against modified library");
     if (invalidImported.Code != 1 || invalidImported.Stdout.Length != 0 ||
         !invalidImported.Stderr.Contains("Stage: kernel replay") ||
         !invalidImported.Stderr.Contains("AuditBad.helper") ||

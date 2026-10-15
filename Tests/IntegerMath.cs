@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -12,6 +13,18 @@ var root = At("artifacts/IntegerMath");
 Directory.CreateDirectory(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.IntegerMath")!;
 var cases = 0;
+var pending = new List<(GeneratedVerification Request, string Name, int Count)>();
+void Flush()
+{
+    if (pending.Count == 0) return;
+    verification.VerifyGeneratedBatch(assembly, "Examples", pending.Select(item => item.Request).ToArray());
+    foreach (var item in pending)
+    {
+        cases += item.Count;
+        Console.WriteLine($"PASS {item.Name}: {item.Count} runtime comparisons");
+    }
+    pending.Clear();
+}
 object Value(Type type, ulong bits)
 {
     if (type == typeof(sbyte)) return unchecked((sbyte)bits);
@@ -43,6 +56,25 @@ string LeanValue(object value) => value switch
     _ => throw new InvalidOperationException("Unexpected value: " + value)
 };
 
+string Bits(object value) => LeanValue(value).Split(' ')[^1].TrimEnd(')');
+string Narrow(Type type, string value) => type == typeof(sbyte) ? $"(CIL.NarrowKind.signed8.extend {value})" :
+    type == typeof(byte) ? $"(CIL.NarrowKind.unsigned8.extend {value})" :
+    type == typeof(short) ? $"(CIL.NarrowKind.signed16.extend {value})" :
+    type == typeof(ushort) ? $"(CIL.NarrowKind.unsigned16.extend {value})" : value;
+int Width(Type type) => type == typeof(long) || type == typeof(ulong) || type == typeof(nint) || type == typeof(nuint) ? 64 : 32;
+string Balanced(IReadOnlyList<string> entries, bool proof)
+{
+    string Build(int start, int count)
+    {
+        if (count == 1) return entries[start];
+        var half = count / 2;
+        var left = Build(start, half);
+        var right = Build(start + half, count - half);
+        return proof ? $"⟨{left}, {right}⟩" : $"({left} ∧ {right})";
+    }
+    return Build(0, entries.Count);
+}
+
 // Compare all overloads against the runtime, including exceptional outcomes.
 foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Static).Where(m => !m.Name.StartsWith("Wrong", StringComparison.Ordinal)))
 {
@@ -53,33 +85,73 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var values = new ulong[] { 0, 1, 2, 127, 128, 255, 32767, 32768, 65535, int.MaxValue, 1UL << 31, uint.MaxValue, long.MaxValue, 1UL << 63, ulong.MaxValue }
         .Select(x => Value(type, x)).Distinct().ToArray();
     var claims = new List<string>();
+    var instances = new List<string>();
     foreach (var x in values)
     foreach (var y in parameters.Length > 1 ? values : values.Take(1))
     foreach (var z in parameters.Length > 2 ? values : values.Take(1))
     {
         object[] inputs = parameters.Length switch { 1 => [x], 2 => [x, y], _ => [x, y, z] };
         string expected;
+        string instance;
         try
         {
-            expected = $".ok [{LeanValue(method.Invoke(null, inputs)!)}]";
+            var result = method.Invoke(null, inputs)!;
+            expected = $".ok [{LeanValue(result)}]";
+            instance = $"wrapper_success {string.Join(" ", inputs.Select(Bits))} {Bits(result)} (by rfl)";
         }
         catch (TargetInvocationException error) when (error.InnerException is OverflowException or ArgumentException)
         {
             var fault = error.InnerException is OverflowException ? "overflow" : "invalidBounds";
             expected = $".error ⟨0, {parameters.Length}, .arithmetic .{fault}⟩";
+            instance = $"wrapper_fault {string.Join(" ", inputs.Select(Bits))} .{fault} (by rfl)";
         }
         claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = {expected}");
+        instances.Add($"theorem case{instances.Count} : {claims[^1]} :=\n  (congrArg (fun result => result.map Prod.snd) ({instance})).trans (by rfl)\n");
     }
 
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 32768\nset_option maxHeartbeats 4000000\n" +
-        "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
+    // Prove the extracted instruction prefix and return once, with the scalar
+    // evaluator result as a hypothesis. Every runtime vector below still proves
+    // the original checked invocation, including narrowing and located faults.
+    var argc = parameters.Length;
+    var stackWidth = Width(type);
+    var resultWidth = Width(method.ReturnType);
+    var variables = Enumerable.Range(0, argc).Select(i => "x" + i).ToArray();
+    var inputsLean = string.Join(", ", variables.Select(x => $".scalar (.i{stackWidth} {x})"));
+    var loaded = variables.Select(x => $".i{stackWidth} {Narrow(type, x)}").ToArray();
+    var stack = string.Join(", ", loaded.Reverse().Select(x => $".scalar ({x})"));
+    var operation = method.Name.StartsWith("Clamp", StringComparison.Ordinal) ? "clamp" :
+        method.Name.StartsWith("Min", StringComparison.Ordinal) ? "min" :
+        method.Name.StartsWith("Max", StringComparison.Ordinal) ? "max" :
+        method.Name.StartsWith("Abs", StringComparison.Ordinal) ? "abs" : "sign";
+    var width = type == typeof(sbyte) || type == typeof(byte) ? 8 : type == typeof(short) || type == typeof(ushort) ? 16 : stackWidth;
+    var signed = type == typeof(byte) || type == typeof(ushort) || type == typeof(uint) || type == typeof(ulong) || type == typeof(nuint) ? "false" : "true";
+    var binders = $"({string.Join(" ", variables)} : CIL.W{stackWidth})";
+    var evaluation = $"CIL.evalIntegerMath .{operation} {width} {signed} [{string.Join(", ", loaded)}]";
+    var invocation = $"CIL.Safety.invoke Extracted.program 8 0 [{inputsLean}] Examples.empty";
+    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], []⟩ [{stack}] Examples.empty = _\n";
+    var instruction = $"(body := Extracted.method0) (op := .intrinsic (.scalar (.math .{operation} {width} {signed})) {argc})";
+    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nimport Tests.WrapperProofs\nset_option maxRecDepth 4096\n" +
+        "namespace ExampleProof\n" +
+        $"theorem wrapper_success {binders} (r : CIL.W{resultWidth})\n" +
+        $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
+        $"    {invocation} = .ok (Examples.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + prefix +
+        $"  refine (CIL.Safety.run_next {instruction} (by rfl) (by rfl)\n" +
+        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], []⟩ Examples.empty) from ?_)).trans (by rfl)\n" +
+        "  math_wrapper_step evaluated\n" +
+        $"theorem wrapper_fault {binders} (fault : CIL.ArithmeticFault)\n" +
+        $"    (evaluated : {evaluation} = .error fault) :\n" +
+        $"    {invocation} = .error ⟨0, {argc}, .arithmetic fault⟩ := by\n" + prefix +
+        $"  apply Tests.WrapperProofs.run_fault {instruction} (by rfl) (by rfl)\n" +
+        "  math_wrapper_step evaluated\n" + string.Join("\n", instances) +
+        // A balanced tree retains every claim without a linear-depth proof term.
+        "\ntheorem correctness :\n" + Balanced(claims, false) + " :=\n" +
+        Balanced(Enumerable.Range(0, claims.Count).Select(i => "case" + i).ToArray(), true) + "\nend ExampleProof\n");
     var selector = $"IntegerMath::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
-    verification.Verify(assembly, "Examples", selector, proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {method.Name}: {claims.Count} runtime comparisons");
+    pending.Add((new GeneratedVerification(selector, proof, output), method.Name, claims.Count));
+    if (pending.Count == 4) Flush();
 }
+Flush();
 
 // A runtime helper model must never accept a forged identity or signature.
 foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported" })

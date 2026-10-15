@@ -461,7 +461,7 @@ The required `Build and verify` check always runs. It succeeds only when selecti
 succeeds and every selected suite passes, or when selection explicitly reports
 that no suites are needed. Failed or cancelled selection/tests cannot pass it.
 Keep this aggregate check required rather than individual matrix jobs, which may
-be absent on a PR. Run `python3 scripts/test-select-verification.py` to test the
+be absent on a PR. Run `dotnet run --file scripts/TestSelectVerification.cs` to test the
 selection rules and final gate locally.
 
 ## License
