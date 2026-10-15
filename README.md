@@ -165,17 +165,26 @@ CIL sources must match the verifier's bundled framework, allowing LF/CRLF
 differences. Mismatches fail explicitly.
 
 Verification copies the consumer's Lean sources, Lake configuration and resolved
-dependency sources into a temporary package, without copying compiled caches.
+dependency sources into a temporary package, without trusting the package's compiled caches.
 It supplies the selected `Extracted` module before Lake builds the proof and its
 imports, so shared consumer modules can themselves import `Extracted`. There is
 no need to flatten the proof or put consumer files in LeanCIL's examples.
 
 The report binds all copied `.lean`, `.toml`, `.json` and `lean-toolchain` files
 and dependency revisions. Sources are checked again before writing the report;
-all built consumer and dependency modules undergo kernel replay, and
+new or changed consumer and dependency modules undergo kernel replay, and
 the selected theorem's transitive axioms are audited with the same policy as
 single-file verification. `verification.json` remembers the package root.
-Consumer packages always build fresh, including when `--fresh` is supplied.
+Successful runs locally certify extraction-independent support artifacts for reuse
+across method gates. The certificate binds the full consumer source snapshot,
+effective Lake configuration, ordered resolved import paths, dependency revisions,
+compiler/kernel/verifier identity and artifact hashes. Lean's compiled import graph
+excludes modules that transitively depend on `Extracted` from this shared cache.
+An unchanged proof may reuse its authenticated successful result only for the same
+extraction identity, theorem and inputs; extraction integrity is checked again.
+Modified or unsigned cache files fall back to rebuilding and kernel replay.
+`--fresh` disables both consumer caches. These receipts are local to the machine;
+the existing certified CIL producer artifact can still supply the base library.
 
 This mode supports Lean source packages; local path dependencies, custom Lake
 cache directories, symlinked sources and native/precompiled dependencies are not
