@@ -3,6 +3,139 @@ using System.Text.RegularExpressions;
 
 partial class Program
 {
+    sealed record ConsumerSupportManifest(int Schema, string Policy, string Library, string Toolchain,
+        SortedDictionary<string, string> Sources, SortedDictionary<string, SortedDictionary<string, string>> Modules,
+        SortedDictionary<string, string[]> Imports);
+
+    static SortedDictionary<string, string> PortableConsumerSources(string root, SortedDictionary<string, string> inputs) =>
+        new(inputs.Where(pair => !pair.Key.StartsWith("proof:", StringComparison.Ordinal) &&
+                !pair.Key.StartsWith("settings:", StringComparison.Ordinal))
+            .ToDictionary(pair => pair.Key.StartsWith("consumer:", StringComparison.Ordinal)
+                ? "consumer:" + Path.GetRelativePath(root, pair.Key[9..]).Replace('\\', '/') : pair.Key, pair => pair.Value), StringComparer.Ordinal);
+
+    string ConsumerToolchainIdentity()
+    {
+        var directory = Path.Combine(Toolchain, "lib", "lean");
+        var files = new SortedDictionary<string, string>(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
+            .ToDictionary(path => Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha), StringComparer.Ordinal);
+        return ContentKey(JsonSerializer.Serialize(files));
+    }
+
+    static SortedDictionary<string, string> ConsumerModuleParts(string path)
+    {
+        var parts = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var suffix in new[] { "", ".server", ".private" })
+            if (File.Exists(path + suffix)) parts[".olean" + suffix] = Sha(path + suffix);
+        return parts;
+    }
+
+    void ExportConsumerSupport(string root, SortedDictionary<string, string> inputs,
+        Dictionary<string, string> independent, Dictionary<string, string[]> graph)
+    {
+        var destination = Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT");
+        if (string.IsNullOrWhiteSpace(destination)) return;
+        var modules = new SortedDictionary<string, SortedDictionary<string, string>>(
+            independent.ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)), StringComparer.Ordinal);
+        var manifest = new ConsumerSupportManifest(1, VerificationPolicy, libraryKey!, ConsumerToolchainIdentity(),
+            PortableConsumerSources(root, inputs), modules,
+            new(independent.Keys.ToDictionary(name => name, name => graph[name]), StringComparer.Ordinal));
+        var json = JsonSerializer.Serialize(manifest, Json) + "\n";
+        var digest = ContentKey(json);
+        Directory.CreateDirectory(destination);
+        var path = Path.GetFullPath(Path.Combine(destination, digest + ".json"));
+        // The trusted digest must travel separately from the downloadable manifest.
+        var temporary = path + "." + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllText(temporary, json);
+            try { File.Move(temporary, path); }
+            catch (IOException) when (File.Exists(path) && Sha(path) == digest) { }
+        }
+        finally { File.Delete(temporary); }
+        Console.WriteLine("Certified consumer support manifest: " + path);
+        Console.WriteLine("Certified consumer support SHA256: " + digest);
+        var githubOutput = Environment.GetEnvironmentVariable("GITHUB_OUTPUT");
+        if (!string.IsNullOrWhiteSpace(githubOutput))
+            File.AppendAllText(githubOutput, "consumer-support-sha256=" + digest + "\n");
+    }
+
+    HashSet<string> ImportedConsumerSupport(string root, SortedDictionary<string, string> inputs,
+        Dictionary<string, string> modules)
+    {
+        if (freshLibrary) return [];
+        var path = Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT");
+        var digest = Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256");
+        if (string.IsNullOrWhiteSpace(path) && string.IsNullOrWhiteSpace(digest)) return [];
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(digest))
+            throw new InvalidDataException("Consumer support manifest digest mismatch or missing trusted digest.");
+        var bytes = File.ReadAllBytes(path);
+        if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != digest)
+            throw new InvalidDataException("Consumer support manifest digest mismatch or missing trusted digest.");
+        var manifest = JsonSerializer.Deserialize<ConsumerSupportManifest>(bytes)
+            ?? throw new InvalidDataException("Invalid consumer support manifest.");
+        if (manifest.Sources is null || manifest.Modules is null || manifest.Imports is null ||
+            manifest.Modules.Any(pair => pair.Value is null || !manifest.Imports.TryGetValue(pair.Key, out var imports) || imports is null))
+            throw new InvalidDataException("Invalid consumer support manifest.");
+        if (manifest.Schema != 1 || manifest.Policy != VerificationPolicy || manifest.Library != libraryKey ||
+            !Same(manifest.Sources, PortableConsumerSources(root, inputs)) || manifest.Toolchain != ConsumerToolchainIdentity()) return [];
+        // Invalidate the entire dependent closure of changed or missing modules.
+        // Unused producer modules need not be built by a different method gate.
+        var invalid = manifest.Modules.Where(pair => !modules.TryGetValue(pair.Key, out var artifact) ||
+            !Same(pair.Value, ConsumerModuleParts(artifact))).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var name in manifest.Modules.Keys)
+                if (manifest.Imports[name].Any(import => invalid.Contains(import) ||
+                    (!manifest.Modules.ContainsKey(import) &&
+                     !File.Exists(Path.Combine(Toolchain, "lib/lean", import.Replace('.', '/') + ".olean")))))
+                    changed |= invalid.Add(name);
+        } while (changed);
+        return manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal) &&
+            name is not ("Extracted" or "ExtractionAudit" or "LeanCILProof")).ToHashSet(StringComparer.Ordinal);
+    }
+
+    static void ReplayConsumerModules(string session, IEnumerable<string> modules)
+    {
+        var targets = modules.ToArray();
+        var profile = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") == "true";
+        var runner = Path.Combine(Path.GetTempPath(), "leancil-replay-" + Guid.NewGuid().ToString("N") + ".lean");
+        try
+        {
+            // Use the pinned toolchain's checker, not a consumer implementation
+            // of kernel replay. Explicit targets avoid repeated search-path scans.
+            File.WriteAllText(runner, """
+import LeanChecker
+unsafe def replayConsumerModule (name : String) : IO Nat := do
+  let started ← IO.monoMsNow
+  replayFromImports name.toName
+  return (← IO.monoMsNow) - started
+def reportConsumerModule (name : String) (elapsed : Nat) : IO Unit :=
+  IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("milliseconds", Lean.toJson elapsed)]).compress
+unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  if profile then
+    for name in args do
+      reportConsumerModule name (← replayConsumerModule name)
+  else
+    let tasks ← args.toArray.mapM fun name => do
+      return (name, ← IO.asTask (replayConsumerModule name))
+    for (name, task) in tasks do
+      match task.get with
+      | .ok elapsed => reportConsumerModule name elapsed
+      | .error error => throw error
+""" + "\n#eval do\n  let json := String.fromUTF8! (ByteArray.mk #[" +
+                string.Join(",", System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(targets))) +
+                "])\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayConsumerModules args " +
+                profile.ToString().ToLowerInvariant() + "\n");
+            Run(["lake", "env", "lean", runner], session, progress: profile
+                ? "Profiled kernel replay of consumer modules" : "Kernel replay of consumer proof and dependencies");
+        }
+        finally { File.Delete(runner); }
+    }
+
     sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
 
     static string Within(string root, string relative)
@@ -151,9 +284,10 @@ unsafe def main (args : List String) : IO Unit := do
         finally { File.Delete(probe); File.Delete(input); }
     }
 
-    void PublishConsumerSupport(string session, string key, string[] directories, string proofModule)
+    void PublishConsumerSupport(string session, string key, string[] directories, string proofModule,
+        string root, SortedDictionary<string, string> inputs)
     {
-        if (!UseSuccessCache) return;
+        if (!UseSuccessCache && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"))) return;
         var modules = directories.Where(Directory.Exists)
             .SelectMany(directory => Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
                 .Select(path => (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
@@ -167,6 +301,8 @@ unsafe def main (args : List String) : IO Unit := do
             foreach (var (name, imports) in graph)
                 if (imports.Any(dependent.Contains)) changed |= dependent.Add(name);
         } while (changed);
+        ExportConsumerSupport(root, inputs, modules.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph);
+        if (!UseSuccessCache) return;
         var publication = Path.Combine(Path.GetTempPath(), "leancil-consumer-support-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(publication);
         try
@@ -352,7 +488,6 @@ unsafe def main (args : List String) : IO Unit := do
             // Only identical artifacts in the validated framework package can reuse
             // the base certificate; a same-named consumer module cannot inherit it.
             stage?.Invoke("kernel replay");
-            var checker = Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
             var importDirectories = ConsumerImportDirectories(session);
             if (!initialImportDirectories.SequenceEqual(importDirectories))
                 throw new InvalidDataException("Consumer import paths changed during verification.");
@@ -394,8 +529,16 @@ unsafe def main (args : List String) : IO Unit := do
             }
             if (!names.Contains(proofModule) || !names.Contains("Extracted") || !names.Contains("ExtractionAudit"))
                 throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
-            var modules = discovered.Where(module => !baseUnchanged || !module.Certified).Select(module => module.Name);
-            Run(["lake", "env", checker, .. modules], session, progress: "Kernel replay of consumer proof and dependencies");
+            var currentArtifacts = importDirectories.Where(Directory.Exists).SelectMany(directory =>
+                Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
+                    (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
+                .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
+            var portableSupport = ImportedConsumerSupport(root, before, currentArtifacts);
+            var checkedArtifacts = JsonSerializer.Serialize(currentArtifacts.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)));
+            var modules = discovered.Where(module => !baseUnchanged || (!module.Certified && !portableSupport.Contains(module.Name)))
+                .Select(module => module.Name);
+            ReplayConsumerModules(session, modules);
             var auditPath = Path.Combine(session, "LeanCILAudit.lean");
             File.WriteAllText(auditPath, $"import {proofModule}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
             stage?.Invoke("theorem audit");
@@ -412,13 +555,22 @@ unsafe def main (args : List String) : IO Unit := do
                 throw new InvalidOperationException("Inputs changed during consumer verification");
             if (copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
                 throw new InvalidOperationException("Sources changed in the fresh consumer build");
+            var finalArtifacts = importDirectories.Where(Directory.Exists).SelectMany(directory =>
+                Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
+                    (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
+                .OrderBy(pair => pair.Name, StringComparer.Ordinal)
+                .ToDictionary(pair => pair.Name, pair => ConsumerModuleParts(pair.Path));
+            if (checkedArtifacts != JsonSerializer.Serialize(finalArtifacts))
+                throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
             var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
             var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before,
-                libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes);
+                libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
+                consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
+                    ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null);
             // Publish only after the complete declaration replay, exact theorem
             // audit, extraction recheck and source-stability checks succeeded.
-            PublishConsumerSupport(session, supportKey, importDirectories, proofModule);
+            PublishConsumerSupport(session, supportKey, importDirectories, proofModule, root, before);
             Directory.CreateDirectory(receipt);
             File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));
             PublishSuccess(proofKey, receipt);
