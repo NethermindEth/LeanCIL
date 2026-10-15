@@ -205,6 +205,7 @@ partial class Program : IDisposable
 #if LEANCIL_TOOL
         // CLI output is a stable interface; progress belongs to the repository runner.
         progress = null;
+        streamOutput = false;
 #endif
         // Aggregate at the suite boundary; nested build/proof phases feed this summary.
         var summary = streamOutput && progress is not null ? new ProgressSummary(progress) : null;
