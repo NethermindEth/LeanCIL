@@ -99,6 +99,7 @@ if (suite is "all" or "core")
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
+if (suite is "all" or "unsafe") projects.Add("Tests/SkipInitialization.cs");
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);

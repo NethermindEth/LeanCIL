@@ -28,3 +28,6 @@ name = "Tests.LayoutCoverage"
 
 [[lean_lib]]
 name = "Tests.ViewReuse"
+
+[[lean_lib]]
+name = "Tests.SkipInitEvidence"

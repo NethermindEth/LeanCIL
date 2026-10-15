@@ -25,12 +25,15 @@ internal static class UnsafeModels
         var add = reference.Name == "Add" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr";
-        if (!sizeOf && !add) return null;
+        var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
+            Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Void;
+        if (!sizeOf && !add && !skipInit) return null;
 
         if (element is ByReferenceType || element is PointerType || element is GenericParameter)
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
         MetadataValidation.Type(element, reference.Module);
         RuntimeModels.ValidateSignature(reference);
+        if (skipInit) return ".skipInit";
         var width = element is GenericInstanceType vector && RuntimeModels.SupportedType(vector)
             ? vector.ElementType.FullName switch
             {

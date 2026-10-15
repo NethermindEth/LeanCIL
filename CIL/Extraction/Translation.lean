@@ -1,5 +1,6 @@
 import CIL.Extraction.Features
 import CIL.Extraction.LayoutCoverage
+import CIL.Extraction.SkipInit
 
 namespace CIL.Extraction
 
@@ -54,12 +55,13 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   FeatureFlowValid item.closed method.profile item.featureStates item.reachable method.code ∧
   ManagedCallsValid (specializationTable all) item.closed item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
-  MethodShapeValid rawLayouts item.closed method
+  MethodShapeValid rawLayouts item.closed method ∧
+  SkipInitValid rawLayouts item.closed item.reachable method.code
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (item : MethodEvidence) (method : Option Method) : Prop :=
