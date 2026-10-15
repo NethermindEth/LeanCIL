@@ -294,7 +294,9 @@ Concrete example proofs establish their displayed inputs. Only explicitly univer
 
 Reachable backward branches and switch targets are admitted when control-flow targets and stack joins validate. Feature reachability uses a fixed point: a backedge that invalidates a constant fact causes affected instructions to be revisited. Recursive managed calls remain unsupported.
 
-Extraction does not establish termination. [The countdown proof](Examples/Proofs/Countdown.lean) uses `CIL.Safety.loop_terminates` with an invariant describing readable, writable counter storage and the measure `remaining.toNat`. Every nonzero iteration proves six actual checked instruction steps and a strictly smaller measure; the zero case proves a successful return. `ensures_of_loop` lifts this to `CIL.Safety.Ensures`, so the theorem supplies successful finite execution for every input, including the maximum 32-bit unsigned value, without unrolling billions of iterations. Subtraction cannot underflow because it occurs only when the counter is positive.
+Extraction does not establish termination. [The countdown proof](Examples/Proofs/Countdown.lean) uses `CIL.Safety.loop_terminates` with an invariant describing readable, writable counter storage and the measure `remaining.toNat`. The invariant location is found from the compiled branch instruction. `cil_loop_steps` checks the path between invariant locations and infers its execution cost; each iteration proves a strictly smaller measure; the zero case proves a successful return. `ensures_of_loop` lifts this to `CIL.Safety.Ensures`, so the theorem supplies successful finite execution for every input, including the maximum 32-bit unsigned value, without unrolling billions of iterations. Subtraction cannot underflow because it occurs only when the counter is positive.
+
+The loop suite checks the unchanged universal proof after inserting NOPs and rearranging basic blocks. It also requires that proof to reject both an incorrect result and a loop whose counter never decreases.
 
 ```sh
 leancil extract Examples/Assembly/bin/Examples.dll "Loops::Countdown(uint)" artifacts/Countdown

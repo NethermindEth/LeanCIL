@@ -19,6 +19,70 @@ verification.Verify(assembly, "Examples", "Loops::Countdown(uint)", contract, co
 verification.Verify(assembly, "Examples", "Loops::Countdown(uint)", contract, correct, check: true);
 Console.WriteLine("PASS universal countdown termination and zero result, including 0 and UInt32.MaxValue");
 
+// Recompile equivalent control flow without changing a character of the universal proof.
+foreach (var variant in new[] { "Nops", "Reordered", "Stuttering" })
+{
+    var output = Path.Combine(root, variant);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var method = module.GetType("Examples.Loops").Methods.Single(method => method.Name == "Countdown");
+        var il = method.Body.GetILProcessor();
+        var original = method.Body.Instructions.ToArray();
+        if (variant == "Nops")
+        {
+            foreach (var instruction in original) il.InsertBefore(instruction, Instruction.Create(OpCodes.Nop));
+        }
+        else if (variant == "Reordered")
+        {
+            var entryJump = original.First(instruction => instruction.OpCode.FlowControl == FlowControl.Branch);
+            var condition = original.Single(instruction => instruction.OpCode.FlowControl == FlowControl.Cond_Branch);
+            var header = (Instruction)entryJump.Operand;
+            var body = (Instruction)condition.Operand;
+            var exit = original[Array.IndexOf(original, condition) + 1];
+            var entryInstructions = original.Take(Array.IndexOf(original, entryJump) + 1).ToArray();
+            var bodyInstructions = original[Array.IndexOf(original, body)..Array.IndexOf(original, header)];
+            var conditionInstructions = original[Array.IndexOf(original, header)..(Array.IndexOf(original, condition) + 1)];
+            var exitInstructions = original[Array.IndexOf(original, exit)..];
+            method.Body.Instructions.Clear();
+            foreach (var instruction in entryInstructions.Concat(exitInstructions).Concat(conditionInstructions))
+                il.Append(instruction);
+            il.Append(Instruction.Create(OpCodes.Br, exit));
+            foreach (var instruction in bodyInstructions) il.Append(instruction);
+            il.Append(Instruction.Create(OpCodes.Br, header));
+        }
+        else
+        {
+            // Still valid cyclic CIL, but a nonzero counter never decreases.
+            original.Single(instruction => instruction.OpCode == OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_0;
+        }
+        module.Write(dll);
+    }
+    Run(Extract("extract", dll, "Examples", "Loops::Countdown(uint)", output));
+    if (variant == "Stuttering")
+    {
+        var refused = false;
+        try { verification.Verify(dll, "Examples", "Loops::Countdown(uint)", contract, output, existingArtifacts: true); }
+        catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
+        {
+            refused = true;
+        }
+        if (!refused || File.Exists(Path.Combine(output, "verified.json")))
+            throw new InvalidOperationException("Nondecreasing loop satisfied the termination contract");
+        Console.WriteLine("PASS unchanged universal contract rejects nondecreasing loop");
+    }
+    else
+    {
+        var actual = Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Loops")!.GetMethod("Countdown")!;
+        foreach (var input in new uint[] { 0, 1, 7 })
+            if ((uint)actual.Invoke(null, [input])! != 0)
+                throw new InvalidOperationException("Equivalent-loop fixture changed the result: " + variant);
+        verification.Verify(dll, "Examples", "Loops::Countdown(uint)", contract, output, existingArtifacts: true);
+        Console.WriteLine($"PASS unchanged universal contract after {variant}");
+    }
+}
+
 void Prove(string dll, string selector, string name, string source)
 {
     var output = Path.Combine(root, name);
