@@ -1,0 +1,71 @@
+{
+  "recordedDate": "2026-10-15",
+  "mode": "Tiered compilation disabled: fully optimized JIT",
+  "comparison": "All 4100 rows match default-tiering results; per-architecture CSV hashes match exactly.",
+  "runs": [
+    {
+      "architecture": "x64",
+      "environment": {
+        "DOTNET_TieredCompilation": "0"
+      },
+      "command": "$env:DOTNET_TieredCompilation='0'; artifacts/NativeProbe/runtime/dotnet.exe Tests/NativeProbe/bin/NativeProbe.dll artifacts/NativeProbe/x64-optimized",
+      "results": "x64/results.csv",
+      "fixtureInstructions": "x64/manifest.json#/methods",
+      "manifest": {
+        "framework": ".NET 10.0.0",
+        "architecture": "X64",
+        "os": "Microsoft Windows 10.0.26220",
+        "runtimeVersion": "10.0.0",
+        "coreLibraryVersion": "10.0.0-rtm.25523.111+b0f34d51fccc69fd334253924abd8d6853fad7aa",
+        "runtimeBuild": [
+          "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+          "10.0.0"
+        ],
+        "runtimeBinarySha256": {
+          "clrjit.dll": "DFF97430ADCCEA107E809CDEDE057B05D85D2D09706B7CD840F8E72D6D105210",
+          "coreclr.dll": "5201734DB1EF225D23D8EFCA6198B47CC70EDDD5A12601E16D76A7DA68C5907D",
+          "System.Private.CoreLib.dll": "98F6D0B7D327A97B68DA4C10FB5A21675ED2DEE2F2B8EBBA244B0902F3F9C8CE"
+        },
+        "fixtureSha256": "46B4A0D1CFB7F01A1DC0722E431AD4C6835F5A30D9A917C1CB8E98F71D6FE8E0",
+        "probeSha256": "2599D02395BE369D5777D785F689C246479D718C87889F3895B481AA2FC63E7D",
+        "resultsSha256": "8EE3C7D8E55310443F6104474D8AC1A1D06E0323EA6E1371E5F48ADDAA3CA855",
+        "count": 4100,
+        "failed": 0,
+        "rejected": 500,
+        "historicalDivergences": 38
+      }
+    },
+    {
+      "architecture": "arm64",
+      "environment": {
+        "DOTNET_TieredCompilation": "0"
+      },
+      "command": "DOTNET_TieredCompilation=0 /Users/benadams/leancil-native-probe/runtime/dotnet /Users/benadams/leancil-native-probe/NativeProbe.dll /Users/benadams/leancil-native-probe/arm64-optimized",
+      "results": "arm64/results.csv",
+      "fixtureInstructions": "arm64/manifest.json#/methods",
+      "manifest": {
+        "framework": ".NET 10.0.0",
+        "architecture": "Arm64",
+        "os": "macOS 27.0.0",
+        "runtimeVersion": "10.0.0",
+        "coreLibraryVersion": "10.0.0-rtm.25523.111+b0f34d51fccc69fd334253924abd8d6853fad7aa",
+        "runtimeBuild": [
+          "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+          "10.0.0"
+        ],
+        "runtimeBinarySha256": {
+          "libcoreclr.dylib": "7FB56FF5A2386F63331C66F5EE246C422468CD2283E1F53A86C0E920DD9F615F",
+          "System.Private.CoreLib.dll": "A99B94BCEAF3108BE8DCF97BA85D778910E6F8FF71266B891897B09139927865",
+          "libclrjit.dylib": "879F10D029A051C51F1CF89F7C6363ED688BB2BFE88C5D9DC3C10DB0AD508088"
+        },
+        "fixtureSha256": "46B4A0D1CFB7F01A1DC0722E431AD4C6835F5A30D9A917C1CB8E98F71D6FE8E0",
+        "probeSha256": "2599D02395BE369D5777D785F689C246479D718C87889F3895B481AA2FC63E7D",
+        "resultsSha256": "912737DE17D5ABD635CE9A5C54CD2939791F47163B0AAE47E411346BD6D2FD2E",
+        "count": 4100,
+        "failed": 0,
+        "rejected": 500,
+        "historicalDivergences": 38
+      }
+    }
+  ]
+}

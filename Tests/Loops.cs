@@ -205,8 +205,9 @@ theorem correctness :
 Console.WriteLine("PASS backward switch dispatch and fuel exhaustion");
 
 // Entry jumps over the body to the condition. The backedge must visit and type
-// the earlier body, including mixed native/int32 arithmetic and comparisons.
-var native = Fixture("NativeLoop", (_, method) =>
+// the earlier body, including mixed native/int32 arithmetic. Unsigned comparisons
+// require an explicit native-width bound, independent of JIT constant provenance.
+string NativeLoop(string name, bool convertBound) => Fixture(name, (_, method) =>
 {
     var code = method.Body.Instructions;
     var body = Instruction.Create(OpCodes.Ldc_I4_1);
@@ -218,15 +219,29 @@ var native = Fixture("NativeLoop", (_, method) =>
     code.Add(Instruction.Create(OpCodes.Add));
     code.Add(condition);
     code.Add(Instruction.Create(OpCodes.Ldc_I4_3));
+    if (convertBound) code.Add(Instruction.Create(OpCodes.Conv_U));
     code.Add(Instruction.Create(OpCodes.Blt_Un, body));
     code.Add(Instruction.Create(OpCodes.Conv_U4));
     code.Add(Instruction.Create(OpCodes.Ret));
 });
+var native = NativeLoop("NativeLoop", convertBound: true);
+var nativeRuntime = Assembly.Load(File.ReadAllBytes(native)).GetType("Examples.Loops")!.GetMethod("Countdown")!;
+if ((uint)nativeRuntime.Invoke(null, [0u])! != 3u)
+    throw new InvalidOperationException("Explicitly widened native loop changed its runtime result");
 Prove(native, "Loops::Countdown(uint)", "NativeLoopProof", """
 theorem correctness : (CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 0)] Examples.empty).map Prod.snd =
     .ok [.scalar (.i32 3)] := rfl
 """);
 Console.WriteLine("PASS native stack typing through backward-reachable body");
+
+var ambiguousNative = NativeLoop("NativeLoopAmbiguous", convertBound: false);
+var ambiguousOutput = Path.Combine(root, "NativeLoopAmbiguous", "Extracted");
+var ambiguousResult = Execute(Extract("extract", ambiguousNative, "Examples", "Loops::Countdown(uint)", ambiguousOutput));
+if (ambiguousResult.Code == 0 ||
+    !ambiguousResult.Output.Contains("Unsupported mixed native/int32 unsigned branch; insert explicit conv.i or conv.u") ||
+    File.Exists(Path.Combine(ambiguousOutput, "Extracted.lean")))
+    throw new InvalidOperationException("Unconverted native loop was not rejected: " + ambiguousResult.Output);
+Console.WriteLine("PASS unconverted mixed unsigned loop comparison rejected");
 
 foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "stack-fact", "recursive-call", "fallthrough", "bad-target", "middle-target" })
 {

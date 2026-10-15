@@ -25,6 +25,9 @@ internal sealed class FeatureConstants
         _locals = locals;
     }
 
+    internal IReadOnlyList<int?> Stack => _stack;
+    internal IReadOnlyList<int?> Locals => _locals;
+
     internal FeatureConstants Copy() => new([.. _stack], (int?[])_locals.Clone());
 
     internal bool Merge(FeatureConstants other)

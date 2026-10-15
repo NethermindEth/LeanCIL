@@ -117,7 +117,8 @@ internal static class Program
                     throw new InvalidDataException("Stale or mismatched verification artifact: extractor has changed since extraction.");
             }
             stage = "metadata and CIL validation";
-            string source = LeanEmitter.Emit(methods, profile, Hash(assembly));
+            using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+            string source = LeanEmitter.Emit(methods, profile, Hash(assembly), originalModule);
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";

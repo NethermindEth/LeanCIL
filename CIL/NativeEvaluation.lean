@@ -6,16 +6,16 @@ namespace CIL
     It cannot dispatch memory, calls, features or another native wrapper. -/
 def nativePureBinary : Op → Bool
   | .add | .sub | .mul | .band | .bor | .bxor | .lt | .ltu | .gt | .gtu | .eq
-    | .bgt _ | .ble _ | .bleu _ | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _
-    | .beq _ | .bne _ => true
+    | .bgt _ | .ble _ | .bge _ | .blt _ | .beq _ => true
   | _ => false
 
-/-- The admitted .NET runtime zero-extends for unsigned checked arithmetic and
-    unsigned conditional branches. Other admitted mixed operations sign-extend,
-    including the scalar comparison instructions clt.un and cgt.un. -/
+/-- The admitted .NET runtime zero-extends for unsigned checked arithmetic.
+    Other admitted mixed operations sign-extend, including scalar clt.un/cgt.un.
+    Mixed unsigned branches are rejected: CoreCLR's widening depends on whether
+    its importer sees a constant, which can change through inlining. -/
 def widenNativeOperand (op : Op) (bits : W32) : W64 :=
   match op with
-  | .checkedArithmetic _ false | .bltu _ | .bgeu _ | .bgtu _ | .bleu _ | .bne _ => bits.zeroExtend 64
+  | .checkedArithmetic _ false => bits.zeroExtend 64
   | _ => bits.signExtend 64
 
 def nativeBinaryValues (op : Op) (pc : Nat) (x y : Value) :

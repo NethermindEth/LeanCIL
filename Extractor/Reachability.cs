@@ -6,6 +6,9 @@ namespace Nethermind.LeanCIL;
 internal static class Reachability
 {
     internal static HashSet<Instruction> Analyze(MethodDefinition method, FeatureProfile? selectedProfile = null)
+        => Certify(method, selectedProfile).Keys.ToHashSet();
+
+    internal static Dictionary<Instruction, FeatureConstants> Certify(MethodDefinition method, FeatureProfile? selectedProfile = null)
     {
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
@@ -26,7 +29,6 @@ internal static class Reachability
         // Never use them as constant facts, even before their address escapes.
         HashSet<int> addressed = instructions.Where(i => i.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
             .Select(FeatureConstants.Local).ToHashSet();
-        HashSet<Instruction> reachable = [];
         Dictionary<Instruction, FeatureConstants> incoming = new()
         {
             [instructions[0]] = new(method.Body.Variables.Count)
@@ -40,7 +42,6 @@ internal static class Reachability
         {
             queued.Remove(i);
             FeatureConstants state = incoming[i];
-            reachable.Add(i);
             int? condition = state.Top;
             state = state.Copy();
             state.Step(i, method, profile, addressed);
@@ -70,6 +71,6 @@ internal static class Reachability
             if (i.OpCode.FlowControl is not (FlowControl.Return or FlowControl.Branch or FlowControl.Throw))
                 Successor(i.Next ?? throw new InvalidDataException("Control falls off method"));
         }
-        return reachable;
+        return incoming;
     }
 }

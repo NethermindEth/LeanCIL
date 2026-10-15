@@ -1,0 +1,2 @@
+# Preserve the exact runtime-produced bytes identified by manifest SHA256 values.
+**/results.csv -text whitespace=cr-at-eol
