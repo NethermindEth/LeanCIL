@@ -149,8 +149,8 @@ partial class Program
                 .Select(path => Path.Combine(path, ".lake/build/lib/lean")).Where(Directory.Exists);
             var modules = buildDirectories.SelectMany(directory =>
                 Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
-                    .Select(path => Path.ChangeExtension(Path.GetRelativePath(directory, path), null)
-                        .Replace(Path.DirectorySeparatorChar, '.'))).Distinct().Order(StringComparer.Ordinal);
+                    .Select(path => Path.GetRelativePath(directory, path).Split(Path.DirectorySeparatorChar)[0])
+                    .Select(name => Path.GetFileNameWithoutExtension(name)!)).Distinct().Order(StringComparer.Ordinal);
             Run(["lake", "env", checker, .. modules], session, progress: "Kernel replay of consumer proof and dependencies");
             var auditPath = Path.Combine(session, "LeanCILAudit.lean");
             File.WriteAllText(auditPath, $"import {proofModule}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
