@@ -20,7 +20,7 @@ theorem make_numeric_local (memory : Memory) (activation : Nat)
     cases kind <;> cases value <;> simp_all [localNumber]
   have bounded : localWidth kind < nativeLimit := by
     cases kind <;> simp only [localWidth, nativeLimit] <;> first | exact CIL.NarrowKind.width_lt _ | simp
-  obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds memory activation (localWidth kind) wellFormed bounded
+  obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds memory activation (localWidth kind) wellFormed bounded (localAlignment_pos kind)
   have ready := allocateHome_write_access _ _ _ _ _ home
   obtain ⟨result, written, stored, readback⟩ := store_numeric_local kind value number fits ready.access
   have created : makeLocal activation kind value memory =

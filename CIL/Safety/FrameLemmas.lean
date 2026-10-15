@@ -17,11 +17,11 @@ theorem leaveFrame_expires_owned (frame : Frame) (m : Memory) (id : AllocationId
   simp [liveAllocation, leaveFrame, expireAll_allocations, owned, present]
 #print axioms expireAll_allocations
 #print axioms leaveFrame_expires_owned
-theorem allocateHome_preserves_wellFormed (m result : Memory) (activation width : Nat)
+theorem allocateHome_preserves_wellFormed {alignment : Nat} (m result : Memory) (activation width : Nat)
     (reference : Reference) (hm : m.WellFormed)
-    (h : allocateHome m activation width = .ok (reference, result)) : result.WellFormed := by
+    (h : allocateHome m activation width alignment = .ok (reference, result)) : result.WellFormed := by
   unfold allocateHome at h
-  cases ha : allocate m ⟨.frame activation, ⟨width, 1, []⟩, true, [width]⟩ with
+  cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ with
   | error fault => simp [ha, checkedAt, Except.mapError, Bind.bind, Except.bind] at h
   | ok value =>
     obtain ⟨id, memory⟩ := value

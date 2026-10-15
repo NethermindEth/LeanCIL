@@ -2,12 +2,12 @@ import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.AllocationExtension
 namespace CIL.Safety
 
-theorem allocateHome_fresh (m result : Memory) (activation width : Nat) (r : Reference)
-    (h : allocateHome m activation width = .ok (r, result)) :
+theorem allocateHome_fresh {alignment : Nat} (m result : Memory) (activation width : Nat) (r : Reference)
+    (h : allocateHome m activation width alignment = .ok (r, result)) :
     AllocationExtension m result ∧ r.allocation = m.nextIdentity ∧
       r.allocation < result.nextIdentity := by
   unfold allocateHome at h
-  cases ha : allocate m ⟨.frame activation, ⟨width, 1, []⟩, true, [width]⟩ <;>
+  cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
     simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure] at h
   · cases h
@@ -63,7 +63,7 @@ theorem makeLocal_fresh (m result : Memory) (activation : Nat) (kind : CIL.Local
     · cases h; exact ⟨.refl m, by simp⟩
     · cases h
   all_goals
-    cases ha : allocateHome m activation (localWidth kind) <;>
+    cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>
       simp only [ha, Bind.bind, Except.bind] at h
     · cases h
     · rename_i home

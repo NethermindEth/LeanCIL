@@ -27,7 +27,7 @@ theorem make_unknown_local (memory : Memory) (activation : Nat) (kind : CIL.Loca
         .ok (.bytes kind reference, [reference.allocation], result) ∧
       access result reference (localWidth kind) 1 true = .ok () := by
   obtain ⟨reference, result, home⟩ :=
-    allocateHome_succeeds memory activation (localWidth kind) wellFormed (localWidth_bounded kind)
+    allocateHome_succeeds memory activation (localWidth kind) wellFormed (localWidth_bounded kind) (localAlignment_pos kind)
   refine ⟨reference, result, ?_, (allocateHome_write_access _ _ _ _ _ home).access⟩
   cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
 

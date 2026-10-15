@@ -56,6 +56,7 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   match op, stack with
   | .intrinsic operation argc, _ =>
+    if !operation.available body.profile then .error (.unsupported "Intrinsic unavailable in target profile") else
     if stack.length < argc then .error .invalidState else
       let operands ← scalars (stack.take argc).reverse
       let value ← checkedIntrinsic operation operands

@@ -26,11 +26,22 @@ structure Frame where
   arguments : List (Nat × LocalSlot) := []
   deriving Repr
 
-def allocateHome (m : Memory) (activation width : Nat) :
+/-- Natural alignment for 32/64-bit scalar homes on the supported 64-bit targets
+    (ECMA-335 I.12.6.2).
+    Aggregate metadata retains only size; packed aggregates stay byte aligned. -/
+def localAlignment : CIL.LocalKind → Nat
+  | .word32 => 4
+  | .word64 => 8
+  | _ => 1
+
+@[simp] theorem localAlignment_pos (kind : CIL.LocalKind) : 0 < localAlignment kind := by
+  cases kind <;> simp [localAlignment]
+
+def allocateHome (m : Memory) (activation width : Nat) (alignment : Nat := 1) :
     ExecutionResult (Reference × Memory) := do
   let (id, memory) ← checkedAt .null width (allocate m {
     kind := .frame activation
-    layout := ⟨width, 1, []⟩
+    layout := ⟨width, alignment, []⟩
     sentinels := [width] })
   let reference : Reference := ⟨id, 0⟩
   return (reference, { memory with
@@ -98,7 +109,7 @@ def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m
     | .unmodeled => .ok (.root none, [], m)
     | _ => .error .invalidState
   | _ => do
-    let (reference, memory) ← allocateHome m activation (localWidth kind)
+    let (reference, memory) ← allocateHome m activation (localWidth kind) (localAlignment kind)
     let slot := LocalSlot.bytes kind reference
     if initial = .unmodeled then return (slot, [reference.allocation], memory)
     else

@@ -19,6 +19,22 @@ foreach (var width in new[] { 32, 64 })
     verification.Verify(assembly, "Examples", width == 32 ? "CheckedArithmetic::Add(uint,uint)" : "CheckedArithmetic::Add64(ulong,ulong)",
         At($"Examples/Proofs/CheckedAdd{width}.lean"), Path.Combine(root, $"CheckedAdd{width}"));
 
+// The checked automation follows extracted instruction lookups, not fixed PCs.
+var shiftedOutput = Path.Combine(root, "ShiftedCheckedAdd64");
+Directory.CreateDirectory(shiftedOutput);
+var shiftedDll = Path.Combine(shiftedOutput, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.CheckedArithmetic").Methods.Single(m => m.Name == "Add64");
+    var il = method.Body.GetILProcessor();
+    foreach (var instruction in method.Body.Instructions.ToArray())
+        il.InsertBefore(instruction, Instruction.Create(OpCodes.Nop));
+    module.Write(shiftedDll);
+}
+verification.Verify(shiftedDll, "Examples", "CheckedArithmetic::Add64(ulong,ulong)",
+    At("Examples/Proofs/CheckedAdd64.lean"), shiftedOutput);
+Console.WriteLine("PASS checked automation: unchanged arbitrary-memory contract after instruction shifts");
+
 // Execute the exact same emitted CIL in .NET and in the checked Lean semantics.
 foreach (var width in new[] { 32, 64 })
 foreach (var operation in new[] { OpCodes.Add_Ovf, OpCodes.Add_Ovf_Un, OpCodes.Sub_Ovf, OpCodes.Sub_Ovf_Un, OpCodes.Mul_Ovf, OpCodes.Mul_Ovf_Un })
@@ -110,3 +126,26 @@ if (!rejected || File.Exists(Path.Combine(wrongOutput, "verified.json")))
     throw new InvalidOperationException("Incorrect sum accepted");
 
 Console.WriteLine($"CheckedArithmetic passed: {cases} cases; universal contracts passed and incorrect sum rejected.");
+
+var wrong64Output = Path.Combine(root, "WrongCheckedAdd64");
+Directory.CreateDirectory(wrong64Output);
+var wrong64Dll = Path.Combine(wrong64Output, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.CheckedArithmetic").Methods.Single(m => m.Name == "Add64");
+    method.Body.Instructions.Single(i => i.OpCode == OpCodes.Add_Ovf_Un).OpCode = OpCodes.Sub;
+    module.Write(wrong64Dll);
+}
+rejected = false;
+try
+{
+    verification.Verify(wrong64Dll, "Examples", "CheckedArithmetic::Add64(ulong,ulong)",
+        At("Examples/Proofs/CheckedAdd64.lean"), wrong64Output);
+}
+catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
+{
+    rejected = true;
+}
+if (!rejected || File.Exists(Path.Combine(wrong64Output, "verified.json")))
+    throw new InvalidOperationException("Checked automation accepted incorrect addition");
+Console.WriteLine("PASS checked automation rejects subtraction under the unchanged universal contract");

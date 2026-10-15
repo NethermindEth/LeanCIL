@@ -160,6 +160,7 @@ internal static class RuntimeModels
         "System.Void System.Runtime.CompilerServices.Unsafe::InitBlock(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 8)",
         "System.Void System.Runtime.CompilerServices.Unsafe::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
         "!!0& System.Runtime.CompilerServices.Unsafe::AsRef<System.UInt64>(!!0&)" => ".asRef",
+        "!!1& System.Runtime.CompilerServices.Unsafe::As<System.UInt64,System.Byte>(!!0&)" => ".memory .asRef",
         "!!1& System.Runtime.CompilerServices.Unsafe::As<System.Byte,System.Runtime.Intrinsics.Vector256`1<System.UInt64>>(!!0&)" => ".memory .asRef",
         "!!1& System.Runtime.CompilerServices.Unsafe::As<System.UInt64,System.Runtime.Intrinsics.Vector256`1<System.UInt64>>(!!0&)" => ".memory .asRef",
         "!!1 System.Runtime.CompilerServices.Unsafe::BitCast<System.Byte,System.Boolean>(!!0)" => ".memory .bitcastByteBool",

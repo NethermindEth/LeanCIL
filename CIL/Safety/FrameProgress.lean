@@ -30,7 +30,7 @@ theorem makeLocal_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind
   · subst kind
     cases initial <;> simp_all [InitializerFits, makeLocal]
   · obtain ⟨reference, memory, home⟩ :=
-      allocateHome_succeeds m activation (localWidth kind) wellFormed (localWidth_bounded kind)
+      allocateHome_succeeds m activation (localWidth kind) wellFormed (localWidth_bounded kind) (localAlignment_pos kind)
     by_cases unknown : initial = .unmodeled
     · refine ⟨.bytes kind reference, [reference.allocation], memory, ?_⟩
       cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -76,7 +76,7 @@ theorem makeArgumentHomes_succeeds (m : Memory) (activation : Nat) (indices : Li
   | cons index indices ih =>
     obtain ⟨bits, argument⟩ := fits index (by simp)
     obtain ⟨reference, memory, home⟩ :=
-      allocateHome_succeeds m activation (localWidth .vector256) wellFormed (localWidth_bounded _)
+      allocateHome_succeeds (alignment := 1) m activation (localWidth .vector256) wellFormed (localWidth_bounded _) (by decide)
     obtain ⟨slot, stored, store⟩ := fresh_home_storeLocal_succeeds m memory activation .vector256 reference (.v256 bits) bits.toNat home rfl
     have valid := storeLocal_preserves_wellFormed _ _ _ _ _
       (allocateHome_preserves_wellFormed _ _ _ _ _ wellFormed home) store
@@ -109,7 +109,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
       simp [storeLocal, formed, Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
   | scalar value =>
     obtain ⟨numeric, number, numbered⟩ := fits
-    obtain ⟨r, home, allocated⟩ := allocateHome_succeeds m activation (localWidth kind) hm (localWidth_bounded kind)
+    obtain ⟨r, home, allocated⟩ := allocateHome_succeeds m activation (localWidth kind) hm (localWidth_bounded kind) (localAlignment_pos kind)
     obtain ⟨final, result, stored⟩ := fresh_home_storeLocal_succeeds _ _ _ _ _ _ _ allocated numbered
     refine ⟨.bytes kind r, [r.allocation], home, final, result, ?_, stored⟩
     cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]

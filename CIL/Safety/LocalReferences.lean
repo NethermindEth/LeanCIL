@@ -26,10 +26,10 @@ theorem LocalSlot.ReferencesValid.preserve {m result : Memory} {slot : LocalSlot
       | null => exact True.intro
       | address r => exact ext.preserves_reference hm r r valid
 
-theorem allocateHome_reference_valid (m result : Memory) (activation width : Nat) (r : Reference)
-    (h : allocateHome m activation width = .ok (r, result)) : form result r = .ok r := by
+theorem allocateHome_reference_valid {alignment : Nat} (m result : Memory) (activation width : Nat) (r : Reference)
+    (h : allocateHome m activation width alignment = .ok (r, result)) : form result r = .ok r := by
   unfold allocateHome at h
-  cases ha : allocate m ⟨.frame activation, ⟨width, 1, []⟩, true, [width]⟩ <;>
+  cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
     simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure] at h
   · cases h
@@ -88,7 +88,7 @@ theorem makeLocal_reference_valid (m result : Memory) (activation : Nat) (kind :
     · cases h; exact True.intro
     · cases h
   all_goals
-    cases ha : allocateHome m activation (localWidth kind) <;>
+    cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>
       simp only [ha, Bind.bind, Except.bind] at h
     · cases h
     · rename_i home

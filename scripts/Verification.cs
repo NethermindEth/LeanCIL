@@ -185,32 +185,142 @@ partial class Program : IDisposable
     static bool Same(SortedDictionary<string, string> left, SortedDictionary<string, string> right) =>
         left.Count == right.Count && left.All(p => right.TryGetValue(p.Key, out var value) && value == p.Value);
 
+    bool freshLibrary { get; init; }
+    string? libraryKey;
+    string? libraryBuild;
+    SortedDictionary<string, string>? certifiedCil;
+
+    static SortedDictionary<string, string> LibrarySources(SortedDictionary<string, string> snapshot) =>
+        new(snapshot.Where(p => p.Key.StartsWith("CIL/", StringComparison.Ordinal) ||
+            p.Key is "CIL.lean" or "lakefile.toml" or "lake-manifest.json" or "lean-toolchain").ToDictionary(), StringComparer.Ordinal);
+
+    static SortedDictionary<string, string> CacheFiles(string directory) =>
+        new(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path) != "cache-manifest.json")
+            .ToDictionary(path => Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha), StringComparer.Ordinal);
+
+    // Track every olean part, including server/private declaration data.
+    static SortedDictionary<string, string> CilArtifacts(string session)
+    {
+        var compiled = Path.Combine(session, ".lake/build/lib/lean");
+        return new(Directory.EnumerateFiles(compiled, "*", SearchOption.AllDirectories)
+            .Select(path => (Path: path, Relative: Path.GetRelativePath(compiled, path).Replace('\\', '/')))
+            .Where(file => (file.Relative.StartsWith("CIL/", StringComparison.Ordinal) ||
+                file.Relative.StartsWith("CIL.olean", StringComparison.Ordinal)) &&
+                Path.GetFileName(file.Relative).Contains(".olean", StringComparison.Ordinal))
+            .ToDictionary(file => file.Relative, file => Sha(file.Path)), StringComparer.Ordinal);
+    }
+
+    static bool ValidCache(string directory)
+    {
+        try
+        {
+            var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(
+                File.ReadAllText(Path.Combine(directory, "cache-manifest.json")));
+            return manifest is not null && manifest.ContainsKey(".lake/build/lib/lean/CIL.olean") && Same(manifest, CacheFiles(directory));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+    }
+
+    static void CopyTree(string source, string destination)
+    {
+        foreach (var path in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(destination, Path.GetRelativePath(source, path));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(path, target, true);
+        }
+    }
+
     string Library(SortedDictionary<string, string> snapshot)
     {
-        var common = new SortedDictionary<string, string>(snapshot.Where(p => !p.Key.StartsWith("proof:")).ToDictionary(), StringComparer.Ordinal);
-
+        var common = new SortedDictionary<string, string>(snapshot.Where(p =>
+            !p.Key.StartsWith("proof:", StringComparison.Ordinal) && !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal);
         if (library is not null)
         {
             if (!Same(common, libraryInputs!))
                 throw new InvalidOperationException("Proof session source inputs changed");
-
             return library;
         }
 
+        var sources = LibrarySources(common);
+        // Include the resolved toolchain, platform and cache format, not the selected proof.
+        var toolchain = Run(["lean", "--print-prefix"]).Trim();
+        var compiler = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
+        libraryKey = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+            "leancil-library-v2-kernel-replayed\n" + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
+            toolchain + "\n" + Sha(compiler) + "\n" + JsonSerializer.Serialize(sources))));
         library = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(library);
-
-        foreach (var name in common.Keys)
-            if (name.EndsWith(".lean") || name is "lakefile.toml" or "lake-manifest.json" or "lean-toolchain")
+        var fresh = freshLibrary ||
+            string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
+        var cacheRoot = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
+        var cached = Path.Combine(cacheRoot, libraryKey);
+        FileStream? cacheLock = null;
+        try
+        {
+            if (!fresh)
             {
-                var destination = Path.Combine(library, name);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(At(name), destination);
+                Directory.CreateDirectory(cacheRoot);
+                // Serialize same-key builders. A lock is released even after a crashed process.
+                var deadline = Stopwatch.StartNew();
+                while (cacheLock is null)
+                {
+                    try { cacheLock = new FileStream(cached + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+                    catch (IOException) when (deadline.Elapsed < TimeSpan.FromMinutes(10)) { Thread.Sleep(100); }
+                }
             }
-
-        Run(["lake", "build", "CIL"], library, progress: "Building fresh Lean verification library");
+            if (!fresh && ValidCache(cached) && Same(sources, LibrarySources(CacheFiles(cached))))
+            {
+                CopyTree(cached, library);
+                if (!ValidCache(library))
+                    throw new InvalidOperationException("Library cache changed while copying");
+                libraryBuild = "cache";
+            }
+            else
+            {
+                foreach (var (name, hash) in sources)
+                {
+                    var destination = Path.Combine(library, name);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(At(name), destination);
+                    if (Sha(destination) != hash)
+                        throw new InvalidOperationException("Library source changed while copying: " + name);
+                }
+                Run(["lake", "build", "CIL"], library, progress: "Building fresh Lean verification library");
+                var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
+                Run([checker, "CIL"], library, Path.Combine(library, ".lake/build/lib/lean"),
+                    progress: "Kernel replay of fresh Lean verification library");
+                libraryBuild = "fresh";
+                if (!fresh)
+                {
+                    File.WriteAllText(Path.Combine(library, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(library), Json));
+                    var staging = cached + "." + Guid.NewGuid().ToString("N");
+                    try
+                    {
+                        CopyTree(library, staging);
+                        if (Directory.Exists(cached)) Directory.Delete(cached, true);
+                        Directory.Move(staging, cached);
+                    }
+                    finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+                }
+            }
+        }
+        finally { cacheLock?.Dispose(); }
+        // Support builds mutate only this private session, never the shared base cache.
+        foreach (var name in common.Keys.Where(name => name.EndsWith(".lean", StringComparison.Ordinal) && !sources.ContainsKey(name)))
+        {
+            var destination = Path.Combine(library, name);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(At(name), destination, true);
+        }
+        certifiedCil = CilArtifacts(library);
         libraryInputs = common;
-
         return library;
     }
 
@@ -226,7 +336,7 @@ partial class Program : IDisposable
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
 
     sealed record Report(int schema, string assemblySha256, string identitySha256, string theorem, string[] axioms,
-        string theoremAudit, SortedDictionary<string, string> inputs);
+        string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null);
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
@@ -248,7 +358,7 @@ partial class Program : IDisposable
             var old = JsonSerializer.Deserialize<Report>(File.ReadAllText(reportPath)) ?? throw new InvalidOperationException("Missing report");
             Run(Extract("check", assembly, identity, entry, output, profile));
 
-            if (old.schema != 1 || !Same(old.inputs, Inputs(proof, settings)) || old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
+            if (old.schema != 2 || !Same(old.inputs, Inputs(proof, settings)) || old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
                 old.theorem != theorem || old.assemblySha256 != Sha(assembly))
                 throw new InvalidOperationException("Stale verification report or changed proof inputs");
 
@@ -263,7 +373,7 @@ partial class Program : IDisposable
         else
             Run(["dotnet", "build", "Extractor", "-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
 
-        // Rebuild handwritten Lean sources without trusting existing compiled artifacts.
+        // Use a source-bound build; CI and --fresh bypass the local library cache.
         stage?.Invoke("Lean library build");
         var before = Inputs(proof, settings);
         var session = Library(before);
@@ -295,6 +405,26 @@ partial class Program : IDisposable
                 Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
                     leanPath: leanPath, progress: $"Checking {name}: {entry}");
 
+            // The base audit covers modules built by CIL.lean, not the entire CIL
+            // namespace. Replay newly built or changed CIL modules too, alongside every source
+            // support root as well as the generated module and proof: checking only
+            // Proof would trust unchecked declarations smuggled through an import.
+            // Installed Lean toolchain modules remain part of the trusted toolchain.
+            stage?.Invoke("kernel replay");
+            var toolchain = Run(["lean", "--print-prefix"]).Trim();
+            var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
+            var libraryPath = Path.Combine(session, ".lake/build/lib/lean");
+            var replay = Directory.EnumerateFiles(libraryPath, "*.olean", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(libraryPath, path).Split(Path.DirectorySeparatorChar)[0])
+                .Select(name => Path.GetFileNameWithoutExtension(name)).Where(n => n != "CIL").Distinct();
+            var currentCil = CilArtifacts(session);
+            var changedCil = certifiedCil!.Keys.Union(currentCil.Keys)
+                .Where(name => !certifiedCil.TryGetValue(name, out var certified) ||
+                    !currentCil.TryGetValue(name, out var current) || certified != current)
+                .Select(name => name.Split(".olean", 2)[0].Replace('/', '.')).Distinct();
+            Run([checker, .. replay, .. changedCil, "Extracted", "Proof"], leanPath: leanPath,
+                progress: "Kernel replay: " + entry);
+
             stage?.Invoke("theorem audit");
             audit = Run(["lean", "--root=" + fresh, Path.Combine(fresh, "Audit.lean")], leanPath: leanPath);
             var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
@@ -322,7 +452,7 @@ partial class Program : IDisposable
         if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
             throw new InvalidOperationException("Inputs changed during verification");
 
-        var report = new Report(1, Sha(assembly), identityHash, theorem, axioms, audit, before);
+        var report = new Report(2, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild);
         File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
         return report;
