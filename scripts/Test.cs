@@ -129,6 +129,8 @@ Passed("library cache integrity and source keys");
 
 Run(["dotnet", "run", "--file", "Tests/InitializedTypes.cs"], streamOutput: true, progress: "Initialization assumptions");
 Passed("explicit type initialization assumptions and identity");
+Run(["dotnet", "run", "--file", "Tests/ConsumerVerification.cs"], streamOutput: true, progress: "Consumer proof packages");
+Passed("external consumer proof package and transitive source identity");
 Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 

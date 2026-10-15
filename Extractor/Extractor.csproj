@@ -19,6 +19,7 @@
     <None Include="../README.md" Pack="true" PackagePath="/" />
     <None Include="../LICENSE" Pack="true" PackagePath="/" />
     <Compile Include="../scripts/Verification.cs" Link="Verification.cs" />
+    <Compile Include="../scripts/ConsumerVerification.cs" Link="ConsumerVerification.cs" />
     <Content Include="../CIL/**/*.lean;../Examples/**/*.lean;../Tests/**/*.lean;../CIL.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
       <Link>verification/%(Identity)</Link>
       <TargetPath>verification/$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/..', '%(FullPath)'))</TargetPath>
