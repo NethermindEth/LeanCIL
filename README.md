@@ -217,6 +217,9 @@ Normal consumer replay uses the same routine in parallel and records timings too
 the serial option isolates each module's cost. Both modes use the exact resolved
 module list instead of repeatedly scanning the complete search path for prefixes,
 and retain the final theorem/axiom audit and source/artifact stability checks.
+Replay explicitly passes `LEAN_NUM_THREADS` to the Lean frontend (default two)
+to bound concurrent imported environments; the frontend otherwise uses hardware
+concurrency even when that environment variable is set.
 
 This mode supports Lean source packages; local path dependencies, custom Lake
 cache directories, symlinked sources and native/precompiled dependencies are not

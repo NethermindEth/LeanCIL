@@ -195,6 +195,10 @@ run_cmd do
     if (profileRecords.Length != 1 || !File.ReadAllText(Path.Combine(testTrace,
         profileRecords[0].GetProperty("transcript").GetString()!)).Contains("\"module\":\"Client.Shared\""))
         throw new InvalidOperationException("Missing per-module kernel replay timing.");
+    var replayThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
+    if (!profileRecords[0].GetProperty("command").EnumerateArray().Any(argument =>
+        argument.GetString() == "-j" + (string.IsNullOrWhiteSpace(replayThreads) ? "2" : replayThreads)))
+        throw new InvalidOperationException("Replay did not forward the thread limit to the Lean frontend.");
     Console.WriteLine("PASS per-module profiling uses the toolchain checker and produces module timings");
 }
 finally

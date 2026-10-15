@@ -101,6 +101,10 @@ partial class Program
     {
         var targets = modules.ToArray();
         var profile = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") == "true";
+        var configuredThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
+        var threads = string.IsNullOrWhiteSpace(configuredThreads) ? "2" : configuredThreads;
+        if (!uint.TryParse(threads, out var count) || count == 0)
+            throw new InvalidDataException("LEAN_NUM_THREADS must be a positive integer.");
         var runner = Path.Combine(Path.GetTempPath(), "leancil-replay-" + Guid.NewGuid().ToString("N") + ".lean");
         try
         {
@@ -130,7 +134,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 string.Join(",", System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(targets))) +
                 "])\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayConsumerModules args " +
                 profile.ToString().ToLowerInvariant() + "\n");
-            Run(["lake", "env", "lean", runner], session, progress: profile
+            // Unlike leanchecker, the lean frontend defaults to hardware
+            // concurrency rather than honoring LEAN_NUM_THREADS itself.
+            Run(["lake", "env", "lean", "-j" + threads, runner], session, progress: profile
                 ? "Profiled kernel replay of consumer modules" : "Kernel replay of consumer proof and dependencies");
         }
         finally { File.Delete(runner); }
