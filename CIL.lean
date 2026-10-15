@@ -29,6 +29,8 @@ import CIL.Safety.AccessSlices
 import CIL.Safety.AllocationExtension
 import CIL.Safety.ArgumentEquivalence
 import CIL.Safety.ArgumentHomeValues
+import CIL.Safety.AggregateHomeValues
+import CIL.Safety.AggregateLocals
 import CIL.Safety.ByteEncoding
 import CIL.Safety.ByteRoundTrip
 import CIL.Safety.CallComposition

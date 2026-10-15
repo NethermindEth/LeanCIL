@@ -1,3 +1,4 @@
+import Tests.AggregateSetup
 import Tests.ViewReuse
 import Examples.Support
 import CIL.Safety.ExecutionInvariants
