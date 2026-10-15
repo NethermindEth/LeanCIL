@@ -6,6 +6,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Optimize>true</Optimize>
     <Nullable>enable</Nullable>
+    <!-- Verification fixtures do not require public API documentation. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 </Project>

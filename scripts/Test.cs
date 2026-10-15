@@ -110,7 +110,7 @@ foreach (var project in projects)
     if (project == "Examples/Hardware/Hardware.cs")
         command.AddRange(["--output", "Examples/Hardware/bin"]);
 
-    var log = Run(command, progress: "Building " + project);
+    var log = Run(command, streamOutput: true, progress: "Building " + project);
 
     if (log.Contains("IDE0005"))
         throw new InvalidOperationException("Unused imports: " + log);
@@ -127,7 +127,7 @@ if (suite is not ("all" or "core"))
 Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
-Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation"], progress: "Building Lean library, semantics and automation tests");
+Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
 Passed("library and semantic tests");
 
 // Verify each extracted method and immediately check its artifact identity.

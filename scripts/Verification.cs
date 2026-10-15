@@ -24,17 +24,66 @@ partial class Program : IDisposable
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
-    static async Task<string> CaptureOutput(StreamReader reader, TextWriter writer)
+    sealed class ProgressSummary(string label)
+    {
+        readonly object gate = new();
+        string latest = "";
+        int pending;
+
+        public void Add(string line, TextWriter writer)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return;
+            lock (gate)
+            {
+                if (line.StartsWith("PASS ", StringComparison.Ordinal) || line.StartsWith("All ", StringComparison.Ordinal))
+                    writer.WriteLine(line);
+                else
+                {
+                    // Lake prints axiom details after its completed-target line.
+                    // Keep the target count or proof phase as the summary instead.
+                    if (latest.Length == 0 || (!line.StartsWith("info: ", StringComparison.Ordinal) &&
+                        !line.Contains("depends on axioms:", StringComparison.Ordinal)))
+                        latest = line.Length > 200 ? line[..200] + "…" : line;
+                    pending++;
+                }
+            }
+        }
+
+        public void Report()
+        {
+            lock (gate)
+            {
+                if (pending == 0) return;
+                Console.WriteLine($"PROGRESS {label}: {latest} ({pending} output lines since last update)");
+                pending = 0;
+            }
+        }
+    }
+
+    static async Task<string> CaptureOutput(StreamReader reader, TextWriter writer, ProgressSummary? summary = null)
     {
         var captured = new StringBuilder();
+        var line = new StringBuilder();
         var buffer = new char[4096];
         int count;
         while ((count = await reader.ReadAsync(buffer)) != 0)
         {
             captured.Append(buffer, 0, count);
-            await writer.WriteAsync(buffer.AsMemory(0, count));
-            await writer.FlushAsync();
+            if (summary is null)
+            {
+                await writer.WriteAsync(buffer.AsMemory(0, count));
+                await writer.FlushAsync();
+            }
+            else
+                for (var i = 0; i < count; i++)
+                    if (buffer[i] == '\n')
+                    {
+                        summary.Add(line.ToString().TrimEnd('\r'), writer);
+                        line.Clear();
+                    }
+                    else line.Append(buffer[i]);
         }
+        if (summary is not null && line.Length > 0) summary.Add(line.ToString(), writer);
         return captured.ToString();
     }
 
@@ -45,6 +94,8 @@ partial class Program : IDisposable
         // CLI output is a stable interface; progress belongs to the repository runner.
         progress = null;
 #endif
+        // Aggregate at the suite boundary; nested build/proof phases feed this summary.
+        var summary = streamOutput && progress is not null ? new ProgressSummary(progress) : null;
         streamOutput |= progress is not null;
         var args = command.ToArray();
         var start = new ProcessStartInfo(args[0])
@@ -76,9 +127,11 @@ partial class Program : IDisposable
         {
             throw new InvalidOperationException("Required command not found: " + args[0], exception);
         }
-        var stdout = streamOutput ? CaptureOutput(process.StandardOutput, Console.Out) : process.StandardOutput.ReadToEndAsync();
-        var stderr = streamOutput ? CaptureOutput(process.StandardError, Console.Error) : process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
+        var stdout = streamOutput ? CaptureOutput(process.StandardOutput, Console.Out, summary) : process.StandardOutput.ReadToEndAsync();
+        var stderr = streamOutput ? CaptureOutput(process.StandardError, Console.Error, summary) : process.StandardError.ReadToEndAsync();
+        if (summary is null) process.WaitForExit();
+        else
+            while (!process.WaitForExit(10_000)) summary.Report();
 
         var output = stdout.GetAwaiter().GetResult();
         var error = stderr.GetAwaiter().GetResult();
