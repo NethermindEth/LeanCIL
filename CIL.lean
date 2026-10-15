@@ -116,6 +116,7 @@ import CIL.VectorMemory
 import CIL.VectorMemoryLemmas
 import CIL.Verification
 import CIL.WideMultiply
+import CIL.Safety.WideMultiply
 import CIL.Extraction.Translation
 import CIL.Safety.MemoryEquivalence
 import CIL.Safety.FrameEquivalence

@@ -200,3 +200,4 @@ if (!rejected || File.Exists(Path.Combine(wrongOutput, "verified.json")))
     throw new InvalidOperationException("Maximum implementation accepted as minimum");
 
 Console.WriteLine($"PASS {cases} integer Math runtime comparisons, universal minimum and incorrect implementation rejection");
+Run(["dotnet", "run", "--file", "Tests/WideProduct.cs"], streamOutput: true, progress: "BigMul checked output tests");
