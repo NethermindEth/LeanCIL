@@ -46,6 +46,7 @@ theorem storeLocal_preserves_static_world (descriptors : List CIL.StaticDescript
   all_goals
     repeat' first
       | exact world
+      | solve | exact writeSnapshot_preserves_static_world _ _ _ _ _ _ world (checkedAt_ok (by assumption))
       | solve | apply checked_write_preserves_static_world _ _ _ _ _ _ _ _ world; assumption
       | cases h
       | split at h

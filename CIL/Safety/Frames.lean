@@ -65,12 +65,22 @@ def localResult (kind : CIL.LocalKind) (value : CIL.Value) : CIL.Value :=
   | .narrow kind, .i32 bits => .i32 (kind.extend bits)
   | _, value => value
 
+def localSnapshotShape : CIL.LocalKind → Option CIL.SnapshotShape
+  | .aggregate size => some (.aggregate size)
+  | .vector128 => some .vector128
+  | .vector256 => some .vector256
+  | _ => none
+
 def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     ExecutionResult (LocalSlot × Memory) := do
   match slot, value with
   | .root _, .reference reference =>
     let _ ← formValue m reference
     return (.root (some reference), m)
+  | .bytes kind reference, .scalar (.snapshot shape bytes) =>
+    if localSnapshotShape kind != some shape || bytes.length != localWidth kind then .error .invalidState else
+      let memory ← checkedAt (.address reference) (localWidth kind) (writeSnapshot m reference bytes 1)
+      return (slot, memory)
   | .bytes kind reference, .scalar value =>
     let number ← localNumber kind value
     let memory ← checkedAt (.address reference) (localWidth kind)
@@ -83,6 +93,9 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
   | .root none => .error .invalidState
   | .root (some reference) => formValue m reference
   | .bytes kind reference =>
+    if let some shape := localSnapshotShape kind then
+      if let .error .uninitialized := read m reference (localWidth kind) 1 then
+        return .scalar (← loadSnapshot m (.address reference) shape)
     let bytes ← checkedAt (.address reference) (localWidth kind)
       (read m reference (localWidth kind) 1)
     let number := byteNumber bytes
@@ -99,6 +112,23 @@ def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
   match slot with
   | .bytes _ reference => formValue m (.address reference)
   | .root _ => .error (.unsupported "Address of managed-reference local")
+
+/-- Initialized reads retain the original typed decoding, independently of the
+    fallback used for partial aggregate/vector copies. -/
+theorem loadLocal_of_read {m : Memory} {reference : Reference} {kind : CIL.LocalKind}
+    {bytes : List (BitVec 8)} (loaded : read m reference (localWidth kind) 1 = .ok bytes) :
+    loadLocal m (.bytes kind reference) =
+      (match kind with
+      | .narrow k => .ok (.scalar (.i32 (k.extend (BitVec.ofNat 32 (byteNumber bytes)))))
+      | .aggregate _ => .ok (.scalar (.aggregate bytes))
+      | .byte | .word32 => .ok (.scalar (.i32 (BitVec.ofNat 32 (byteNumber bytes))))
+      | .word64 => .ok (.scalar (.i64 (BitVec.ofNat 64 (byteNumber bytes))))
+      | .vector128 => .ok (.scalar (.v128 (BitVec.ofNat 128 (byteNumber bytes))))
+      | .vector256 => .ok (.scalar (.v256 (BitVec.ofNat 256 (byteNumber bytes))))
+      | .reference => .error .invalidState) := by
+  simp only [loadLocal, loaded, checkedAt, Except.mapError, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases kind <;> rfl
 
 /-- Create one typed local without treating unknown bytes as initialized. -/
 def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m : Memory) :

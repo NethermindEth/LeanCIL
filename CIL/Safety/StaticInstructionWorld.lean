@@ -2,6 +2,8 @@ import CIL.Safety.StaticInitialization
 
 namespace CIL.Safety
 
+set_option maxHeartbeats 800000
+
 theorem write_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Nat)
     (world : StaticWorldValid descriptors m) (h : write m r bytes alignment = .ok result) :
@@ -13,6 +15,17 @@ theorem write_preserves_static_world (descriptors : List CIL.StaticDescriptor)
   · cases h
   · cases h
     rfl
+
+theorem writeSnapshot_preserves_static_world (descriptors : List CIL.StaticDescriptor)
+    (m result : Memory) (r : Reference) (bytes : List (BitVec 8 × Bool)) (alignment : Nat)
+    (world : StaticWorldValid descriptors m) (h : writeSnapshot m r bytes alignment = .ok result) :
+    StaticWorldValid descriptors result := by
+  apply (writeSnapshot_preserves_immutable _ _ _ _ _ h).world descriptors world
+  simp only [writeSnapshot, write] at h
+  cases ha : access m r (bytes.map Prod.fst).length alignment true <;>
+    simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  · cases h
+  · cases h; rfl
 
 theorem checked_write_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Nat)
@@ -29,14 +42,12 @@ theorem storeValue_preserves_static_world (descriptors : List CIL.StaticDescript
     (world : StaticWorldValid descriptors m) (h : storeValue m reference value = .ok result) :
     StaticWorldValid descriptors result := by
   unfold storeValue at h
-  split at h <;> try cases h
-  all_goals
-    cases reference with
-    | null => cases h
-    | address address =>
-      simp only [referenceAt, Bind.bind, Except.bind] at h
-      exact checked_write_preserves_static_world _ _ _ _ _ _ _ _ world h
-
+  repeat' first
+    | solve | exact write_preserves_static_world _ _ _ _ _ _ world (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_preserves_static_world _ _ _ _ _ _ world (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
+    | simp only [Bind.bind, Except.bind] at h
 theorem memoryInstruction_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (operation : CIL.MemoryOp) (stack values : List Value) (m result : Memory)
     (world : StaticWorldValid descriptors m)
@@ -47,6 +58,7 @@ theorem memoryInstruction_preserves_static_world (descriptors : List CIL.StaticD
   all_goals
     repeat' first
       | exact world
+      | solve | exact writeSnapshot_preserves_static_world _ _ _ _ _ _ world (checkedAt_ok (by assumption))
       | solve | apply checked_write_preserves_static_world _ _ _ _ _ _ _ _ world; assumption
       | solve | apply storeValue_preserves_static_world _ _ _ _ _ world; assumption
       | cases h
@@ -62,6 +74,7 @@ theorem instruction_preserves_static_world (descriptors : List CIL.StaticDescrip
   all_goals
     repeat' first
       | exact world
+      | solve | exact writeSnapshot_preserves_static_world _ _ _ _ _ _ world (checkedAt_ok (by assumption))
       | solve | apply checked_write_preserves_static_world _ _ _ _ _ _ _ _ world; assumption
       | solve | apply memoryInstruction_preserves_static_world _ _ _ _ _ _ world; assumption
       | solve | apply storeValue_preserves_static_world _ _ _ _ _ world; assumption
@@ -89,6 +102,7 @@ theorem staticInstruction_preserves_static_world (descriptors : List CIL.StaticD
   all_goals
     repeat' first
       | exact world
+      | solve | exact writeSnapshot_preserves_static_world _ _ _ _ _ _ world (checkedAt_ok (by assumption))
       | solve | apply checked_write_preserves_static_world _ _ _ _ _ _ _ _ world; assumption
       | solve | apply memoryInstruction_preserves_static_world _ _ _ _ _ _ world; assumption
       | solve |

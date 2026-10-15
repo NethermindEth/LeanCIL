@@ -31,6 +31,7 @@ import CIL.Safety.ArgumentEquivalence
 import CIL.Safety.ArgumentHomeValues
 import CIL.Safety.AggregateHomeValues
 import CIL.Safety.AggregateLocals
+import CIL.Safety.ValueBitCasts
 import CIL.Safety.ByteEncoding
 import CIL.Safety.ByteRoundTrip
 import CIL.Safety.CallComposition

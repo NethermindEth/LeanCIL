@@ -5,8 +5,43 @@ import CIL.NativeEvaluation
 namespace CIL.Safety
 
 def numericValue : CIL.Value → Bool
+  | .snapshot shape bytes => bytes.length == shape.width
   | .aggregate _ | .i8 _ | .i32 _ | .i64 _ | .v128 _ | .v256 _ => true
   | _ => false
+
+theorem numericValue_snapshotValue (shape : CIL.SnapshotShape) (bytes : List (BitVec 8 × Bool))
+    (length : bytes.length = shape.width) : numericValue (snapshotValue shape bytes) = true := by
+  unfold snapshotValue
+  split
+  · cases shape <;> rfl
+  · simp [numericValue, length]
+
+theorem loadSnapshot_numeric {m : Memory} {r : ManagedReference} {shape : CIL.SnapshotShape}
+    {value : CIL.Value} (h : loadSnapshot m r shape = .ok value) : numericValue value = true := by
+  unfold loadSnapshot at h
+  cases hr : referenceAt r <;> simp only [hr, Bind.bind, Except.bind] at h
+  · cases h
+  · rename_i address
+    cases hb : checkedAt r shape.width (readSnapshot m address shape.width 1) <;>
+      simp only [hb, Pure.pure, Except.pure] at h
+    · cases h
+    · cases h
+      exact numericValue_snapshotValue _ _ (readSnapshot_length (checkedAt_ok hb))
+
+theorem bitcastValue_numeric {source target : CIL.SnapshotShape} {input value : CIL.Value}
+    (h : bitcastValue source target input = .ok value) : numericValue value = true := by
+  unfold bitcastValue at h
+  split at h
+  · cases h
+  · rename_i sizes
+    split at h
+    · rename_i bytes found
+      cases h
+      apply numericValue_snapshotValue
+      have length := valueSnapshot_length found
+      simp only [bne_iff_ne, ne_eq, Decidable.not_not] at sizes
+      exact length.trans sizes
+    · cases h
 
 def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .reference r => formValue m r

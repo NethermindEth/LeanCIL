@@ -2,11 +2,14 @@ import CIL.Safety.LiveValues
 
 namespace CIL.Safety
 
+set_option maxHeartbeats 800000
+
 theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
     {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) : (Value.scalar value).Valid m := by
   unfold loadValue at h
   repeat' first
     | rfl
+    | solve | exact loadSnapshot_numeric (by assumption)
     | cases h
     | split at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
@@ -46,6 +49,8 @@ theorem memoryInstruction_values_valid (operation : CIL.MemoryOp) (stack values 
           apply ValuesValid.cons
           · first
             | rfl
+            | solve | exact bitcastValue_numeric (by assumption)
+            | solve | exact loadSnapshot_numeric (by assumption)
             | exact retained.head
             | solve | apply loadValue_scalar_valid; assumption
             | solve | apply formValue_result_valid; assumption
@@ -70,6 +75,8 @@ theorem instruction_values_valid (operation : CIL.Op) (stack values : List Value
           apply ValuesValid.cons
           · first
             | rfl
+            | solve | exact bitcastValue_numeric (by assumption)
+            | solve | exact loadSnapshot_numeric (by assumption)
             | exact retained.head
             | solve | apply loadValue_scalar_valid; assumption
             | solve | apply formValue_result_valid; assumption

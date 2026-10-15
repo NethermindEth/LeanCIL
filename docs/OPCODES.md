@@ -112,6 +112,10 @@ runtime call identity and its translation to `skipInit`.
 
 The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and byte-span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references remains unsupported.
 
+The checked model supports `Unsafe.BitCast<TFrom,TTo>` between equal-size validated unmanaged aggregates and `Vector128`/`Vector256` values with `uint` or `ulong` elements, in both directions and under the scalar profile. Byte snapshots retain initialization flags through the cast, local and parameter homes, and value loads/stores. Partially initialized results remain snapshots; numeric reads and vector arithmetic cannot consume their unknown bytes. The pure model does not implement this value-cast operation.
+
+`CIL.Safety.ValueBitCasts` supplies byte/vector round-trip lemmas and `bitcastValue_preserves_snapshot`; `CIL.Safety.SnapshotMemory` supplies checked snapshot write/readback facts. Access witnesses in `AccessAlignment` distinguish initialized reads/writes from snapshot copies, which preserve flags instead of asserting initialization.
+
 Reachability is evaluated under the chosen, validated feature profile. Instructions excluded by that analysis are emitted as explicit unsupported placeholders, not silently assigned successful semantics. If execution reaches such a placeholder it fails. Changing the profile invalidates extraction artifacts.
 
 ## Lean-only operations and source of truth

@@ -90,6 +90,7 @@ inductive MemoryOp where
   | load128 | load256 | store128 | store256 | init256
   | asRef | add (sizeBytes : Nat) (signed : Bool)
   | bitcast256 | bitcastByteBool | skipInit
+  | bitcastValue (source target : SnapshotShape)
   | dataToken (bytes : List (BitVec 8)) | createSpan | spanReference
   | staticAddress (bytes : List (BitVec 8)) | spanCreate
   deriving Repr

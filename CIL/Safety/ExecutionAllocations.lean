@@ -3,6 +3,8 @@ import CIL.Safety.FrameOwnership
 
 namespace CIL.Safety
 
+set_option maxHeartbeats 800000
+
 theorem checked_write_extends_allocations (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat) (reference : ManagedReference) (width : Nat)
     (h : checkedAt reference width (write m r bytes alignment) = .ok result) :
@@ -16,14 +18,12 @@ theorem storeValue_extends_allocations (m result : Memory) (reference : ManagedR
     (value : CIL.Value) (h : storeValue m reference value = .ok result) :
     AllocationExtension m result := by
   unfold storeValue at h
-  split at h <;> try cases h
-  all_goals
-    cases reference with
-    | null => cases h
-    | address address =>
-      simp only [referenceAt, Bind.bind, Except.bind] at h
-      exact checked_write_extends_allocations _ _ _ _ _ _ _ h
-
+  repeat' first
+    | solve | exact write_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
+    | simp only [Bind.bind, Except.bind] at h
 theorem memoryInstruction_extends_allocations (operation : CIL.MemoryOp)
     (stack values : List Value) (m result : Memory)
     (h : memoryInstruction operation stack m = .ok (result, values)) :
@@ -33,6 +33,7 @@ theorem memoryInstruction_extends_allocations (operation : CIL.MemoryOp)
   all_goals
     repeat' first
       | exact .refl m
+      | solve | exact writeSnapshot_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
       | solve | apply checked_write_extends_allocations; assumption
       | solve | apply storeValue_extends_allocations; assumption
       | cases h
@@ -46,6 +47,7 @@ theorem instruction_extends_allocations (operation : CIL.Op) (stack values : Lis
   all_goals
     repeat' first
       | exact .refl m
+      | solve | exact writeSnapshot_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
       | solve | apply checked_write_extends_allocations; assumption
       | solve | apply memoryInstruction_extends_allocations; assumption
       | solve | apply storeValue_extends_allocations; assumption
@@ -83,6 +85,7 @@ theorem staticInstruction_extends_allocations (body : CIL.Method) (pc : Nat)
   all_goals
     repeat' first
       | exact .refl m
+      | solve | exact writeSnapshot_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
       | solve | apply checked_write_extends_allocations; assumption
       | solve | apply staticReference_extends_allocations; assumption
       | solve | apply memoryInstruction_extends_allocations; assumption
@@ -98,6 +101,7 @@ theorem step_extends_allocations (body : CIL.Method) (operation : CIL.Op) (pc : 
   all_goals
     repeat' first
       | exact .refl m
+      | solve | exact writeSnapshot_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
       | solve | apply checked_write_extends_allocations; assumption
       | solve | apply storeLocal_extends_allocations; assumption
       | solve | apply staticInstruction_extends_allocations; assumption

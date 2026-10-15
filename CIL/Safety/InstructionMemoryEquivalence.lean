@@ -5,17 +5,20 @@ namespace CIL.Safety
 theorem Memory.Equivalent.loadValue {m n : Memory} (same : m.Equivalent n)
     (reference : ManagedReference) (width : Nat) (signed : Bool) :
     loadValue m reference width signed = loadValue n reference width signed := by
-  simp only [CIL.Safety.loadValue, same.dereference]
+  simp only [CIL.Safety.loadValue, same.dereference, same.loadSnapshot]
 
 theorem Memory.Equivalent.storeValue {m n : Memory} (same : m.Equivalent n)
     (reference : ManagedReference) (value : CIL.Value) :
     ResultEquivalent Memory.Equivalent (storeValue m reference value) (storeValue n reference value) := by
   cases value <;> simp only [CIL.Safety.storeValue, Bind.bind, Except.bind]
-  all_goals first
+  all_goals repeat first
     | exact .error _
     | (apply ResultEquivalent.bind_same
        intro address
-       exact (same.write address _ ordinaryAccessAlignment).mapError _)
+       first
+       | exact (same.write address _ ordinaryAccessAlignment).mapError _
+       | exact (same.writeSnapshot address _ ordinaryAccessAlignment).mapError _)
+    | split
 
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -33,6 +36,9 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     | (apply ResultEquivalent.bind (same.storeValue _ _)
        intro left right related
        exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
     | split
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
@@ -40,7 +46,7 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
     ResultEquivalent MemoryFirstEquivalent (instruction operation stack m)
       (instruction operation stack n) := by
   unfold CIL.Safety.instruction
-  split <;> try simp only [same.read, same.dereference, same.loadValue, same.formValue, same.add]
+  split <;> try simp only [same.read, same.dereference, same.loadValue, same.loadSnapshot, same.formValue, same.add]
   all_goals repeat first
     | exact same.memoryInstruction _ _
     | exact .error _
@@ -50,6 +56,9 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
        intro left right related
        exact .ok ⟨related, rfl⟩)
     | (apply ResultEquivalent.bind (same.storeValue _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)
        intro left right related
        exact .ok ⟨related, rfl⟩)
     | split

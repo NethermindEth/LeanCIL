@@ -24,16 +24,13 @@ theorem store_numeric_local_preserves_memory_below (m result : Memory) (kind : C
     (fresh : watermark ≤ r.allocation)
     (h : storeLocal m (.bytes kind r) (.scalar value) = .ok (slot, result)) :
     MemoryBelow watermark m result := by
-  unfold storeLocal at h
-  cases hn : localNumber kind value <;> simp only [hn, Bind.bind, Except.bind] at h
-  · cases h
-  · rename_i number
-    cases hw : write m r (numberBytes number (localWidth kind)) 1 <;>
-      simp only [hw, checkedAt, Except.mapError, Pure.pure, Except.pure] at h
-    · cases h
-    · cases h
-      exact write_preserves_memory_below _ _ _ _ _ _ fresh hw
-
+  cases value <;> simp only [storeLocal] at h
+  all_goals repeat' first
+    | solve | exact write_preserves_memory_below _ _ _ _ _ _ fresh (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_preserves_memory_below _ _ _ _ _ _ fresh (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
 theorem makeLocal_preserves_caller_memory (m result : Memory) (activation : Nat)
     (kind : CIL.LocalKind) (initial : CIL.Value) (slot : LocalSlot) (owned : List AllocationId)
     (h : makeLocal activation kind initial m = .ok (slot, owned, result)) :

@@ -14,13 +14,16 @@ theorem decode_word64 (word : BitVec 64) :
 theorem load_word64_of_read {memory : Memory} {reference : Reference} {word : BitVec 64}
     (loaded : read memory reference 8 1 = .ok (numberBytes word.toNat 8)) :
     loadValue memory (.address reference) 8 = .ok (.i64 word) := by
-  simp only [loadValue, dereference, loaded, checkedAt, Except.mapError,
+  simp [loadValue, dereference, loaded, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure, decode_word64]
 
 theorem load_local_word64_of_read {memory : Memory} {reference : Reference} {word : BitVec 64}
     (loaded : read memory reference 8 1 = .ok (numberBytes word.toNat 8)) :
     loadLocal memory (.bytes .word64 reference) = .ok (.scalar (.i64 word)) := by
-  simp only [loadLocal, localWidth, loaded, checkedAt, Except.mapError,
+  change (do
+    let bytes ← checkedAt (.address reference) 8 (read memory reference 8 1)
+    pure (Value.scalar (.i64 (BitVec.ofNat 64 (byteNumber bytes)))) : ExecutionResult Value) = _
+  simp only [loaded, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure, decode_word64]
 
 /-- Numeric local storage requires write access but no prior initialization. -/

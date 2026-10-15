@@ -67,6 +67,7 @@ theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
   all_goals
     repeat' first
       | rfl
+      | solve | exact loadSnapshot_numeric (by assumption)
       | solve | apply formValue_result_valid; assumption
       | cases h
       | split at h

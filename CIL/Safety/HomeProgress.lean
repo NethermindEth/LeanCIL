@@ -50,9 +50,11 @@ theorem fresh_home_storeLocal_succeeds (m result : Memory) (activation : Nat)
     simp [numberBytes]
   have writable : access result r (numberBytes number (localWidth kind)).length 1 true = .ok () := by
     simpa only [width] using accessOK
-  simp only [storeLocal, fits, write, writable, checkedAt, Except.mapError,
+  cases value
+  case snapshot shape bytes => cases kind <;> simp [localNumber] at fits
+  all_goals simp only [storeLocal, fits, write, writable, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
-  exact ⟨_, _, rfl⟩
+  all_goals exact ⟨_, _, rfl⟩
 
 #print axioms allocateHome_succeeds
 #print axioms allocateHome_write_access
