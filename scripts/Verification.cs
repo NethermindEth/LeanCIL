@@ -666,8 +666,11 @@ partial class Program : IDisposable
                         var changed = (altered ? current : current.Where(pair => !certifiedModules!.ContainsKey(pair.Key)))
                             .Select(pair => ModuleName(pair.Key)).Distinct().ToArray();
                         if (changed.Length > 0)
+                        {
+                            stage?.Invoke("kernel replay");
                             Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), .. changed],
                                 leanPath: Path.Combine(session, ".lake/build/lib/lean"), progress: "Kernel replay of proof dependencies: " + entry);
+                        }
                         certifiedModules = current;
                         CopySupportArtifacts(session, staging, supportSources);
                         PublishSuccess(supportKey, staging);
@@ -704,6 +707,7 @@ partial class Program : IDisposable
                 .Select(ModuleName).Distinct().ToArray();
             if (changedModules.Length > 0)
             {
+                stage?.Invoke("kernel replay");
                 Run([checker, .. changedModules], leanPath: leanPath, progress: "Kernel replay of proof dependencies: " + entry);
                 certifiedModules = currentModules;
             }

@@ -48,6 +48,29 @@ for (var attempt = 0; attempt < 2; attempt++)
     catch (InvalidOperationException error) when (error.Message.Contains("while replaying declaration")) { }
     if (File.Exists(Path.Combine(output, "verified.json"))) throw new Exception("Failed proof retained a successful report");
 }
+// A newly imported module must report dependency-check failures as kernel replay,
+// even when the base library has already been certified in this private session.
+File.WriteAllText(Path.Combine(verifier.library!, "CIL", "ReuseForged.lean"), """
+    import Lean
+    set_option debug.skipKernelTC true
+    run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+      name := `ReuseForged.helper
+      levelParams := []
+      type := Lean.mkConst ``False
+      value := Lean.mkConst ``True.intro
+    })
+    """);
+File.WriteAllText(proof, "import Extracted\nimport CIL.ReuseForged\ntheorem ExampleProof.correctness : False := ReuseForged.helper\n");
+var dependencyStage = "";
+try
+{
+    verifier.Verify(assembly, "Examples", entry, proof, output, stage: value => dependencyStage = value);
+    throw new Exception("Unchecked imported helper was accepted");
+}
+catch (InvalidOperationException error) when (error.Message.Contains("while replaying declaration") &&
+    error.Message.Contains("ReuseForged.helper") && dependencyStage == "kernel replay") { }
+if (File.Exists(Path.Combine(output, "verified.json"))) throw new Exception("Failed dependency retained a successful report");
+Console.WriteLine("PASS imported helper rejection reports kernel replay stage");
 File.WriteAllText(proof, baseline);
 using var second = new Program();
 timer.Restart();
