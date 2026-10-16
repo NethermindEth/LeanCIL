@@ -219,10 +219,9 @@ def featureOpMatches (raw : RawMethod) (i : RawInstruction) (emitted : Op) : Boo
         fallbackFeatureEffect i emitted
 
 private def checkFeatureSite (raw : RawMethod) (profile : FeatureProfile)
-    (certificate : FeatureCertificate) (code : List Op) (pc : Nat) : Bool :=
-  match raw.code[pc]?, certificate[pc]?, code[pc]? with
-  | some _, some none, some (.unsupported _) => true
-  | some i, some (some state), some emitted =>
+    (certificate : FeatureCertificate) : RawInstruction × Nat → Option FeatureState → Op → Bool
+  | _, none, .unsupported _ => true
+  | (i, pc), some state, emitted =>
     wellShaped raw state && featureOpMatches raw i emitted &&
       match featureTransfer raw profile i state, featureSuccessors pc i state with
       | some after, some successors => successors.all fun target =>
@@ -230,7 +229,7 @@ private def checkFeatureSite (raw : RawMethod) (profile : FeatureProfile)
           | some (some incoming) => after.weakens incoming
           | _ => false
       | _, _ => false
-  | _, _, _ => false
+  | _, none, _ => false
 
 /-- No optional sites: entry, every raw PC, the entire parameter-reachability mask,
     every successor, and all unsupported holes are covered. -/
@@ -239,7 +238,7 @@ def FeatureFlowValid (raw : RawMethod) (profile : FeatureProfile)
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := List.replicate raw.locals.length none }) ∧
-  (List.range raw.code.length).all (checkFeatureSite raw profile certificate code) = true
+  all3 (checkFeatureSite raw profile certificate) raw.code.zipIdx certificate code = true
 
 instance (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
     (reachable : List Bool) (code : List Op) : Decidable (FeatureFlowValid raw profile certificate reachable code) :=
@@ -299,19 +298,16 @@ theorem FeatureFlowValid.edge_closed {raw : RawMethod} {profile : FeatureProfile
     {pc target : Nat} (edge : FeatureEdge raw profile certificate pc target) :
     ∃ incoming, certificate[target]? = some (some incoming) := by
   obtain ⟨i, state, after, successors, hi, hs, ht, hn, member⟩ := edge
-  have bound : pc < raw.code.length := List.getElem?_eq_some_iff.mp hi |>.1
-  have checked := (List.all_eq_true.mp valid.2.2.2.2) pc (List.mem_range.mpr bound)
-  simp only [checkFeatureSite, hi, hs] at checked
-  cases hc : code[pc]? with
-  | none => simp [hc] at checked
-  | some emitted =>
-    simp only [hc, ht, hn, Bool.and_eq_true] at checked
-    have successor := List.all_eq_true.mp checked.2 target member
-    cases hnext : certificate[target]? with
+  have bound : pc < code.length := valid.2.1 ▸ (List.getElem?_eq_some_iff.mp hi).1
+  have indexed : raw.code.zipIdx[pc]? = some (i, pc) := by simp [List.getElem?_zipIdx, hi]
+  have checked := all3_at valid.2.2.2.2 indexed hs (List.getElem?_eq_getElem bound)
+  simp only [checkFeatureSite, ht, hn, Bool.and_eq_true] at checked
+  have successor := List.all_eq_true.mp checked.2 target member
+  cases hnext : certificate[target]? with
+  | none => simp [hnext] at successor
+  | some next => cases next with
     | none => simp [hnext] at successor
-    | some next => cases next with
-      | none => simp [hnext] at successor
-      | some incoming => exact ⟨incoming, rfl⟩
+    | some incoming => exact ⟨incoming, rfl⟩
 
 inductive FeaturePath (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) : Nat → Prop where

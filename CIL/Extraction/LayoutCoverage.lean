@@ -44,8 +44,8 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
 def expectedLayoutUses (layouts : List RawLayout) (closed : RawMethod)
     (parameters : RawArguments) (reachable : List Bool) : Option (List LayoutUse) := do
   if closed.code.length != reachable.length then none else
-    let instructions ← (closed.code.zipIdx).mapM fun (instruction, pc) =>
-      if reachable[pc]?.getD false then instructionLayoutUses layouts pc instruction else some []
+    let instructions ← ((closed.code.zip reachable).zipIdx).mapM fun ((instruction, live), pc) =>
+      if live then instructionLayoutUses layouts pc instruction else some []
     let locals := (closed.locals.zipIdx).flatMap fun (type, slot) =>
       (aggregateIndex type).toList.map fun index => LayoutUse.local slot index
     let homes ← ((requiredHomeIndices parameters reachable).zipIdx).mapM fun (argument, slot) => do

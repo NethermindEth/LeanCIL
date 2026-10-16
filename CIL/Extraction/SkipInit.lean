@@ -26,10 +26,10 @@ def skipInitCall (layouts : List RawLayout) (instruction : RawInstruction) : Boo
 def SkipInitValid (layouts : List RawLayout) (closed : RawMethod)
     (reachable : List Bool) (code : List Op) : Prop :=
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
-  ∀ pc : Fin closed.code.length, reachable[pc.val]? = some true →
-    skipInitCall layouts closed.code[pc] = (match code[pc.val]? with
-      | some .skipInit => true
-      | _ => false)
+  all3 (fun instruction live emitted => !live ||
+    skipInitCall layouts instruction == (match emitted with
+      | .skipInit => true
+      | _ => false)) closed.code reachable code = true
 
 instance (layouts : List RawLayout) (closed : RawMethod)
     (reachable : List Bool) (code : List Op) : Decidable (SkipInitValid layouts closed reachable code) :=
