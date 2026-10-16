@@ -47,20 +47,28 @@ if (excluded < 700 || states.Count != reachable.Count || extracted.Contains("set
 Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")]);
 Console.WriteLine($"PASS {excluded} excluded sites validate at the default heartbeat budget");
 
-// Claiming the last pruned site is reachable must still be caught at that site.
-var last = reachable.LastIndexOf("false");
-reachable[last] = "true";
-states[last] = "some { stack := [], locals := [] }";
-var tampered = Path.Combine(directory, "Tampered.lean");
-File.WriteAllText(tampered, string.Join('\n', extracted.Split('\n').Select(line =>
-    line.StartsWith("def method0Reachable ", StringComparison.Ordinal) ? $"def method0Reachable : List Bool := [{string.Join(", ", reachable)}]" :
-    line.StartsWith("def method0FeatureStates ", StringComparison.Ordinal) ? $"def method0FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", states)}]" :
-    line)));
-var rejected = Execute(["lake", "env", "lean", tampered]);
-if (rejected.Code == 0 || !rejected.Output.Contains("FeatureFlowValid", StringComparison.Ordinal) ||
-    !rejected.Output.Contains("ParameterHomesValid", StringComparison.Ordinal))
-    throw new InvalidOperationException("A pruned site claimed reachable was not rejected by both site validators:\n" + rejected.Output);
-Console.WriteLine($"PASS claiming pruned site {last} reachable is rejected by feature and parameter validation");
+// Each validator must still reach and reject a forged claim at the last pruned site it checks.
+void Reject(string name, string validator, Func<int, bool> site, bool forgeState)
+{
+    var live = Entries("method0Reachable");
+    var facts = Entries("method0FeatureStates");
+    var pc = Enumerable.Range(0, live.Count).Last(i => live[i] == "false" && site(i));
+    live[pc] = "true";
+    if (forgeState) facts[pc] = "some { stack := [], locals := [] }";
+    var tampered = Path.Combine(directory, name + ".lean");
+    File.WriteAllText(tampered, string.Join('\n', extracted.Split('\n').Select(line =>
+        line.StartsWith("def method0Reachable ", StringComparison.Ordinal) ? $"def method0Reachable : List Bool := [{string.Join(", ", live)}]" :
+        line.StartsWith("def method0FeatureStates ", StringComparison.Ordinal) ? $"def method0FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", facts)}]" :
+        line)));
+    var rejected = Execute(["lake", "env", "lean", tampered]);
+    if (rejected.Code == 0 || !rejected.Output.Contains($"Extraction.{validator} ", StringComparison.Ordinal))
+        throw new InvalidOperationException($"{validator} accepted pruned site {pc} claimed reachable:\n" + rejected.Output);
+    Console.WriteLine($"PASS {validator} rejects pruned site {pc} claimed reachable");
+}
+var argumentCode = extracted.Split('\n').Single(l => l.StartsWith("def method0RawArguments ", StringComparison.Ordinal));
+var operations = argumentCode[(argumentCode.LastIndexOf("code := [", StringComparison.Ordinal) + 9)..argumentCode.LastIndexOf(']')].Split(", ");
+Reject("ForgedFeatureSite", "FeatureFlowValid", _ => true, forgeState: true);
+Reject("ForgedArgumentSite", "ParameterHomesValid", pc => operations[pc].StartsWith(".load", StringComparison.Ordinal), forgeState: true);
 
 var consumer = Path.Combine(directory, "Consumer");
 Directory.CreateDirectory(consumer);
@@ -73,6 +81,8 @@ File.WriteAllText(proof, """
 import Extracted
 namespace ExampleProof
 def empty : CIL.Safety.Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [], nextIdentity := 0 }
+-- Only this user proof's `rfl` needs depth to reach the scalar path ~800 instructions in; generated evidence keeps the defaults.
+set_option maxRecDepth 4096 in
 theorem correctness :
     (CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 2), .scalar (.i64 3)] empty).map Prod.snd =
       .ok [.scalar (.i64 5)] := by rfl
