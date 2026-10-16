@@ -14,7 +14,7 @@ File.WriteAllText(Path.Combine(source, "Scaling.csproj"), """
 """);
 var methods = Enumerable.Range(0, 6).Select(index =>
     $"public static ulong M{index}(ulong x) {{ " +
-    string.Join(" ", Enumerable.Range(1, 12).Select(value => $"x = (x + {value}UL) ^ {value + index}UL;")) +
+    string.Join(" ", Enumerable.Range(1, 48).Select(value => $"x = (x + {value}UL) ^ {value + index}UL;")) +
     (index == 0 ? " return M1(x) + M2(x) + M3(x) + M4(x) + M5(x); }" : " return x; }"));
 File.WriteAllText(Path.Combine(source, "Scaling.cs"), "public static class Scaling { " + string.Join('\n', methods) + " }");
 Run(["dotnet", "build", Path.Combine(source, "Scaling.csproj"), "-c", "Release"]);
