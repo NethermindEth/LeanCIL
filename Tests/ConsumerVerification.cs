@@ -126,6 +126,9 @@ var originalIndependent = File.ReadAllText(independent);
 var configuration = Path.Combine(root, "Client", "Configuration.lean");
 var producerOnly = Path.Combine(root, "Client", "ProducerOnly.lean");
 var producerProof = Path.Combine(root, "ProducerProof.lean");
+var sourcePath = Path.Combine(root, "Client", "SourcePath.lean");
+var pathDependent = Path.Combine(root, "Client", "PathDependent.lean");
+var multipart = Path.Combine(root, "Client", "Multipart.lean");
 var portableDirectory = At("artifacts/PortableConsumer-" + Guid.NewGuid().ToString("N"));
 var relocated = At("artifacts/RelocatedConsumer-" + Guid.NewGuid().ToString("N"));
 try
@@ -138,7 +141,29 @@ run_cmd do
   let value ← if enabled then `(true) else `(false)
   elabCommand (← `(def environmentFlag : Bool := $value))
 """);
-    File.WriteAllText(independent, "import Client.Configuration\n" + originalIndependent);
+    // Persisted lint diagnostics contain the fresh session's absolute filename.
+    const string linted = "theorem linted (x : Nat) : x = x := by simp only [Nat.add_zero]\n";
+    File.WriteAllText(multipart, """
+module
+public import Lean
+open Lean Elab Command in
+run_cmd do
+  let enabled := (← IO.getEnv "LEANCIL_TEST_CONFIGURATION").isSome
+  let value ← if enabled then `(true) else `(false)
+  elabCommand (← `(private def privateFlag : Bool := $value))
+namespace Multipart
+""" + "\npublic " + linted + "end Multipart\n");
+    File.WriteAllText(independent, "import Client.Configuration\nimport Client.Multipart\n" + originalIndependent + linted);
+    // The same filename in a declaration is semantic and must not be stripped.
+    File.WriteAllText(sourcePath, """
+import Lean
+open Lean Elab Command in
+run_cmd do
+  let value := Syntax.mkStrLit (← getFileName)
+  elabCommand (← `(def sourcePath : String := $value))
+""");
+    File.WriteAllText(pathDependent, "import Client.SourcePath\ntheorem pathRefl : sourcePath = sourcePath := rfl\n");
+    File.WriteAllText(sharedPath, "import Client.PathDependent\n" + shared);
     File.WriteAllText(producerOnly, "theorem producerOnly : True := True.intro\n");
     File.WriteAllText(producerProof, "import Client.ProducerOnly\n" + File.ReadAllText(proof));
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
@@ -160,10 +185,11 @@ run_cmd do
     var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
     Verify("--proof", Path.Combine(relocated, "Proof.lean"), "--proof-root", relocated);
     var commands = NewReplayCommands(previous);
-    if (commands.Length == 0 || commands.Any(command => command.Contains("Client.Independent") || command.Contains("Client.Configuration")) ||
-        !commands.Any(command => command.Contains("Client.Shared") && command.Contains("Extracted")))
+    if (commands.Length == 0 || commands.Any(command => command.Contains("Client.Independent") || command.Contains("Client.Configuration") || command.Contains("Client.Multipart")) ||
+        !commands.Any(command => command.Contains("Client.Shared") && command.Contains("Extracted") &&
+            command.Contains("Client.SourcePath") && command.Contains("Client.PathDependent")))
         throw new InvalidOperationException("Portable support was not reused after relocation and environment change.");
-    Console.WriteLine("PASS portable support across checkout roots and environments without local receipts");
+    Console.WriteLine("PASS relocated lint diagnostics reuse; semantic source paths invalidate dependents; multipart modules reuse");
     var portableReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
     if (portableReport.GetProperty("consumerSupportSha256").GetString() != Sha(manifest))
         throw new InvalidOperationException("Portable support provenance missing from certificate.");
@@ -171,7 +197,8 @@ run_cmd do
     Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", "changed");
     previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
     Verify();
-    if (!NewReplayCommands(previous).Any(command => command.Contains("Client.Independent") && command.Contains("Client.Configuration")))
+    if (!NewReplayCommands(previous).Any(command => command.Contains("Client.Independent") && command.Contains("Client.Configuration") &&
+        command.Contains("Client.Multipart")))
         throw new InvalidOperationException("Changed compiled dependency did not invalidate portable support closure.");
     Console.WriteLine("PASS unchanged sources with environment-dependent compiled dependency invalidate portable reuse");
     Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", null);
@@ -208,6 +235,10 @@ finally
     File.Delete(configuration);
     File.Delete(producerOnly);
     File.Delete(producerProof);
+    File.Delete(sourcePath);
+    File.Delete(pathDependent);
+    File.Delete(multipart);
+    File.WriteAllText(sharedPath, shared);
 }
 Verify("--proof", proof, "--proof-root", root);
 

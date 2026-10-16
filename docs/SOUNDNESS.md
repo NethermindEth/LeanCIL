@@ -88,6 +88,8 @@ The repository script's `--check` checks the report's selected theorem, proof/fr
 
 `leancil list` is metadata discovery only. It includes methods whose types or instructions the verifier does not support. Listing a signature does not bypass extraction validation or establish any correctness property.
 
+Portable consumer support manifests require an independently trusted SHA256 and bind the verifier, framework, toolchain, source snapshot and compiled import closure. Schema 2 fingerprints deserialize every `.olean`, `.olean.server` and `.olean.private` part with the pinned Lean toolchain, remove only the `Lean.Linter.lintLogExt` diagnostic extension, then reserialize with Lean's compactor and hash the result. This extension records linter messages and source locations, not kernel declarations. All constants (including private declarations), import modifiers and other extensions remain covered. Source paths inside definitions are retained. A changed fingerprint invalidates all dependents. The consumer is still built from fresh sources, extraction-dependent modules are replayed, and raw artifact hashes are checked for stability across fingerprinting, replay and theorem audit. Canonical files are temporary fingerprint inputs and are never loaded as proof artifacts.
+
 ## Negative evidence
 
 The wrong-addition fixture has a finite execution witness plus a uniqueness theorem refuting the requested output at every successful fuel. Out-of-bounds and dangling-reference examples have classified semantic faults plus `invoke_fault_refutes_success`, ruling out success for every fuel. These proofs explain rejection independently of the tactic diagnostic produced when a positive contract fails.
