@@ -220,8 +220,7 @@ def validateManagedCall (methods : List SpecializedMethod) (raw : RawInstruction
 def ManagedCallsValid (methods : List SpecializedMethod) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) : Prop :=
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-  ∀ pc : Fin raw.code.length,
-    validateManagedCall methods raw.code[pc] reachable[pc.val]! (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true
+  all3 (validateManagedCall methods) raw.code reachable emitted.code = true
 
 instance (methods : List SpecializedMethod) (raw : RawMethod) (reachable : List Bool)
     (emitted : Method) : Decidable (ManagedCallsValid methods raw reachable emitted) :=
@@ -230,7 +229,12 @@ instance (methods : List SpecializedMethod) (raw : RawMethod) (reachable : List 
 theorem validated_managed_call {methods : List SpecializedMethod} {raw : RawMethod}
     {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods raw reachable emitted) (pc : Fin raw.code.length) :
-    validateManagedCall methods raw.code[pc] reachable[pc.val]! (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := valid.2.2 pc
+    validateManagedCall methods raw.code[pc] reachable[pc.val]! (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
+  have live : pc.val < reachable.length := valid.1 ▸ pc.isLt
+  have present : pc.val < emitted.code.length := valid.2.1 ▸ pc.isLt
+  rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
+  exact all3_at valid.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
+    (List.getElem?_eq_getElem present)
 
 #print axioms validated_specialization
 #print axioms validated_closed_arguments

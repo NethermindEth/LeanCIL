@@ -1,4 +1,5 @@
 import CIL.Extraction.LayoutUses
+import CIL.Extraction.Lockstep
 
 namespace CIL.Extraction
 
@@ -58,31 +59,31 @@ private def argumentNarrow : StorageType → Option NarrowKind
   | .field .unsigned16 | .field .character => some .unsigned16
   | _ => none
 
-private def homeSlot (raw : RawArguments) (reachable : List Bool) (index : Nat) : Option Nat :=
-  let homes := requiredHomeIndices raw reachable
+private def homeSlot (raw : RawArguments) (homes : List Nat) (index : Nat) : Option Nat :=
   if index ∈ homes then some (raw.locals.length + homes.idxOf index) else none
 
-/-- Check every argument instruction and reject hidden accesses to appended home slots. -/
-def validateArgumentOp (raw : RawArguments) (reachable : List Bool)
+/-- Check one argument instruction against a precomputed home set; hidden accesses
+    to appended home slots are rejected. -/
+def validateArgumentOpIn (raw : RawArguments) (homes : List Nat)
     (operation : ArgumentOp) (live : Bool) (emitted : Op) : Bool :=
   if !live then match emitted with | .unsupported _ => true | _ => false
   else match operation with
   | .load index => (do
       let type ← raw.arguments[index]?
-      match homeSlot raw reachable index, emitted with
+      match homeSlot raw homes index, emitted with
       | some slot, .local actual narrow => return actual == slot && narrow.isNone
       | none, .arg actual narrow => return actual == index && narrow == argumentNarrow type
       | _, _ => return false).getD false
   | .store index => (do
       let _ ← raw.arguments[index]?
-      let slot ← homeSlot raw reachable index
+      let slot ← homeSlot raw homes index
       match emitted with
       | .setLocal actual narrow => return actual == slot && narrow.isNone
       | _ => return false).getD false
   | .address index => (do
       let type ← raw.arguments[index]?
       if type == StorageType.reference then return false
-      let slot ← homeSlot raw reachable index
+      let slot ← homeSlot raw homes index
       match emitted with
       | .localAddr actual => return actual == slot
       | _ => return false).getD false
@@ -92,6 +93,9 @@ def validateArgumentOp (raw : RawArguments) (reachable : List Bool)
       | .vectorLocal index | .vectorLocalAddr index | .setVectorLocal index => index < raw.locals.length
       | _ => true
 
+def validateArgumentOp (raw : RawArguments) (reachable : List Bool) : ArgumentOp → Bool → Op → Bool :=
+  validateArgumentOpIn raw (requiredHomeIndices raw reachable)
+
 /-- A complete mapping check, not a list of optional argument-use claims. -/
 def ParameterHomesValid (layouts : Array ComputedLayout) (raw : RawArguments)
     (reachable : List Bool) (method : Method) : Prop :=
@@ -100,12 +104,7 @@ def ParameterHomesValid (layouts : Array ComputedLayout) (raw : RawArguments)
   raw.locals.mapM (storageKind layouts) = some method.localKinds ∧
   method.locals.length = raw.locals.length ∧
   expectedHomes layouts raw reachable = some method.parameterHomes ∧
-  ∀ pc : Fin raw.code.length,
-    (do
-      let operation ← raw.code[pc.val]?
-      let live ← reachable[pc.val]?
-      let emitted ← method.code[pc.val]?
-      return validateArgumentOp raw reachable operation live emitted).getD false = true
+  all3 (validateArgumentOpIn raw (requiredHomeIndices raw reachable)) raw.code reachable method.code = true
 
 instance (layouts : Array ComputedLayout) (raw : RawArguments)
     (reachable : List Bool) (method : Method) : Decidable (ParameterHomesValid layouts raw reachable method) :=
@@ -131,9 +130,7 @@ theorem validated_argument_access {layouts : Array ComputedLayout} {raw : RawArg
     (rawAt : raw.code[pc.val]? = some operation) (reachableAt : reachable[pc.val]? = some live)
     (emittedAt : method.code[pc.val]? = some emitted) :
     validateArgumentOp raw reachable operation live emitted = true := by
-  have checked := valid.2.2.2.2.2 pc
-  rw [rawAt, reachableAt, emittedAt] at checked
-  exact checked
+  exact all3_at valid.2.2.2.2.2 rawAt reachableAt emittedAt
 
 /-- Once a parameter has a home, loading its original argument slot is rejected. -/
 theorem home_load_rejects_original_arg (raw : RawArguments) (reachable : List Bool)
@@ -141,6 +138,6 @@ theorem home_load_rejects_original_arg (raw : RawArguments) (reachable : List Bo
     (home : index ∈ requiredHomeIndices raw reachable) :
     validateArgumentOp raw reachable (.load index) true (.arg actual narrow) = false := by
   cases found : raw.arguments[index]? <;>
-    simp [validateArgumentOp, homeSlot, home, found]
+    simp [validateArgumentOp, validateArgumentOpIn, homeSlot, home, found]
 
 end CIL.Extraction
