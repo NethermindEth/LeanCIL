@@ -186,6 +186,41 @@ Modified or unsigned cache files fall back to rebuilding and kernel replay.
 `--fresh` disables both consumer caches. These receipts are local to the machine;
 the existing certified CIL producer artifact can still supply the base library.
 
+For reuse across machines, set `LEANCIL_EXPORT_CONSUMER_SUPPORT` to an output
+directory on a trusted producer. A successful consumer verification writes a
+content-addressed JSON manifest and prints its SHA256. Give a receiver that file
+through `LEANCIL_CONSUMER_SUPPORT` and the independently trusted digest through
+`LEANCIL_CONSUMER_SUPPORT_SHA256` (for example, a producer job output). Never
+derive the trusted digest from an untrusted download. No local receipt secret
+is exported. In GitHub Actions the producer also writes the
+`consumer-support-sha256` step output; the manifest filename is `<digest>.json`.
+Run the producer with `LEANCIL_DISABLE_SUCCESS_CACHE=true` when a
+new export is required, since an unchanged whole-proof cache hit skips publication.
+
+The receiver still builds fresh sources. It skips kernel replay only when the
+verifier, certified framework, installed Lean artifacts, normalized source
+snapshot, pinned dependencies and **entire compiled support import closure**
+match the producer. Environment differences are allowed only if the rebuilt
+bytes match. A changed dependency invalidates every dependent module, even
+when a referencing theorem's own bytes are unchanged. Extraction-dependent
+modules and the public proof are always checked. Incompatible manifests fall
+back to replay; a missing or incorrect trusted digest fails verification.
+Reports record `consumerSupportSha256` when portable support was used.
+`--fresh` bypasses portable reuse too; `LEANCIL_DISABLE_SUCCESS_CACHE` disables
+local receipts without disabling an explicitly supplied portable manifest.
+
+Set `LEANCIL_PROFILE_CONSUMER_REPLAY=true` with `LEANCIL_TRACE_DIRECTORY` to
+record JSON timings for each replayed module. This invokes the pinned toolchain's
+`LeanChecker.replayFromImports` serially, including each module's import loading.
+It is a diagnostic mode, not a prediction of normal parallel checker throughput.
+Normal consumer replay uses the same routine in parallel and records timings too;
+the serial option isolates each module's cost. Both modes use the exact resolved
+module list instead of repeatedly scanning the complete search path for prefixes,
+and retain the final theorem/axiom audit and source/artifact stability checks.
+Replay explicitly passes `LEAN_NUM_THREADS` to the Lean frontend (default two)
+to bound concurrent imported environments; the frontend otherwise uses hardware
+concurrency even when that environment variable is set.
+
 This mode supports Lean source packages; local path dependencies, custom Lake
 cache directories, symlinked sources and native/precompiled dependencies are not
 supported. Build/artifact directories (`.lake`, `.git`, `artifacts`, `generated`,

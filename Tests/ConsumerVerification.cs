@@ -96,21 +96,120 @@ Console.WriteLine("PASS unchanged consumer proof reuses an authenticated success
 var trace = testTrace;
 var beforeReuseTrace = Directory.GetFiles(trace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
 var previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+string[][] NewReplayCommands(HashSet<string> previous) => Directory.EnumerateFiles(testTrace, "*.jsonl")
+    .Where(path => !previous.Contains(path)).SelectMany(File.ReadLines)
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+    .Where(item => item.GetProperty("stage").GetString() == "Kernel replay of consumer proof and dependencies")
+    .Select(item => File.ReadLines(Path.Combine(testTrace, item.GetProperty("transcript").GetString()!))
+        .Where(line => line.StartsWith('{')).Select(line => JsonSerializer.Deserialize<JsonElement>(line)
+            .GetProperty("module").GetString()!).ToArray()).ToArray();
 try
 {
     Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
     Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "Arithmetic::Add(ulong,ulong)", output]);
     Verify();
-    var replay = Directory.EnumerateFiles(trace, "*.jsonl").Where(path => !beforeReuseTrace.Contains(path)).SelectMany(File.ReadLines)
-        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
-        .Select(item => item.GetProperty("command").EnumerateArray().Select(arg => arg.GetString()!).ToArray())
-        .Where(command => command.Any(arg => Path.GetFileNameWithoutExtension(arg) == "leanchecker")).ToArray();
+    var replay = NewReplayCommands(beforeReuseTrace);
     if (replay.Length == 0 || replay.Any(command => command.Contains("Client.Independent")) ||
         !replay.Any(command => command.Contains("Client.Shared") && command.Contains("Extracted")))
         throw new InvalidOperationException("Consumer support replay did not distinguish extraction-dependent imports.");
 }
 finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
 Console.WriteLine("PASS extraction-independent helper reused across gates; dependent module replayed");
+
+// Portable manifests certify freshly rebuilt bytes, including the complete
+// import closure. Neither a receipt key nor the producer's environment travels.
+var portableVariables = new[] { "LEANCIL_DISABLE_SUCCESS_CACHE", "LEANCIL_EXPORT_CONSUMER_SUPPORT",
+    "LEANCIL_CONSUMER_SUPPORT", "LEANCIL_CONSUMER_SUPPORT_SHA256", "LEANCIL_PROFILE_CONSUMER_REPLAY",
+    "LEANCIL_TEST_CONFIGURATION", "LEANCIL_SUITE" };
+var savedPortableEnvironment = portableVariables.ToDictionary(name => name, Environment.GetEnvironmentVariable);
+var originalIndependent = File.ReadAllText(independent);
+var configuration = Path.Combine(root, "Client", "Configuration.lean");
+var producerOnly = Path.Combine(root, "Client", "ProducerOnly.lean");
+var producerProof = Path.Combine(root, "ProducerProof.lean");
+var portableDirectory = At("artifacts/PortableConsumer-" + Guid.NewGuid().ToString("N"));
+var relocated = At("artifacts/RelocatedConsumer-" + Guid.NewGuid().ToString("N"));
+try
+{
+    File.WriteAllText(configuration, """
+import Lean
+open Lean Elab Command in
+run_cmd do
+  let enabled := (← IO.getEnv "LEANCIL_TEST_CONFIGURATION").isSome
+  let value ← if enabled then `(true) else `(false)
+  elabCommand (← `(def environmentFlag : Bool := $value))
+""");
+    File.WriteAllText(independent, "import Client.Configuration\n" + originalIndependent);
+    File.WriteAllText(producerOnly, "theorem producerOnly : True := True.intro\n");
+    File.WriteAllText(producerProof, "import Client.ProducerOnly\n" + File.ReadAllText(proof));
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
+    Environment.SetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT", portableDirectory);
+    Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", null);
+    Verify("--proof", producerProof, "--proof-root", root);
+    var manifest = Directory.GetFiles(portableDirectory, "*.json").Single();
+    var manifestBytes = File.ReadAllBytes(manifest);
+    Environment.SetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT", null);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", manifest);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", Sha(manifest));
+    Environment.SetEnvironmentVariable("LEANCIL_SUITE", "different-receiver-job");
+    Directory.CreateDirectory(relocated);
+    foreach (var file in Directory.GetFiles(root))
+        File.Copy(file, Path.Combine(relocated, Path.GetFileName(file)));
+    CopyTree(Path.Combine(root, "Client"), Path.Combine(relocated, "Client"));
+    // Resolve fresh git dependencies as a new checkout would.
+    Run(["lake", "update"], relocated);
+    var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify("--proof", Path.Combine(relocated, "Proof.lean"), "--proof-root", relocated);
+    var commands = NewReplayCommands(previous);
+    if (commands.Length == 0 || commands.Any(command => command.Contains("Client.Independent") || command.Contains("Client.Configuration")) ||
+        !commands.Any(command => command.Contains("Client.Shared") && command.Contains("Extracted")))
+        throw new InvalidOperationException("Portable support was not reused after relocation and environment change.");
+    Console.WriteLine("PASS portable support across checkout roots and environments without local receipts");
+    var portableReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+    if (portableReport.GetProperty("consumerSupportSha256").GetString() != Sha(manifest))
+        throw new InvalidOperationException("Portable support provenance missing from certificate.");
+
+    Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", "changed");
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    if (!NewReplayCommands(previous).Any(command => command.Contains("Client.Independent") && command.Contains("Client.Configuration")))
+        throw new InvalidOperationException("Changed compiled dependency did not invalidate portable support closure.");
+    Console.WriteLine("PASS unchanged sources with environment-dependent compiled dependency invalidate portable reuse");
+    Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", null);
+
+    File.AppendAllText(Path.Combine(relocated, "Client", "Shared.lean"), "\n-- changed source snapshot\n");
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    if (!NewReplayCommands(previous).Any(command => command.Contains("Client.Independent")))
+        throw new InvalidOperationException("Changed source snapshot did not invalidate portable support.");
+    File.AppendAllText(manifest, " ");
+    Reject("manifest digest mismatch");
+    File.WriteAllBytes(manifest, manifestBytes);
+    Console.WriteLine("PASS changed source and tampered portable manifest cannot bypass kernel replay");
+
+    Environment.SetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY", "true");
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify("--proof", proof, "--proof-root", root);
+    var profileRecords = Directory.EnumerateFiles(testTrace, "*.jsonl").Where(path => !previous.Contains(path)).SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+        .Where(item => item.GetProperty("stage").GetString() == "Profiled kernel replay of consumer modules").ToArray();
+    if (profileRecords.Length != 1 || !File.ReadAllText(Path.Combine(testTrace,
+        profileRecords[0].GetProperty("transcript").GetString()!)).Contains("\"module\":\"Client.Shared\""))
+        throw new InvalidOperationException("Missing per-module kernel replay timing.");
+    var replayThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
+    if (!profileRecords[0].GetProperty("command").EnumerateArray().Any(argument =>
+        argument.GetString() == "-j" + (string.IsNullOrWhiteSpace(replayThreads) ? "2" : replayThreads)))
+        throw new InvalidOperationException("Replay did not forward the thread limit to the Lean frontend.");
+    Console.WriteLine("PASS per-module profiling uses the toolchain checker and produces module timings");
+}
+finally
+{
+    foreach (var (name, value) in savedPortableEnvironment) Environment.SetEnvironmentVariable(name, value);
+    File.WriteAllText(independent, originalIndependent);
+    File.Delete(configuration);
+    File.Delete(producerOnly);
+    File.Delete(producerProof);
+}
+Verify("--proof", proof, "--proof-root", root);
 
 // Neither a self-consistent source match nor modified cached bytes can bypass
 // the producer receipt. Invalidate the proof receipt too, so this exercises the
@@ -129,11 +228,8 @@ try
 {
     Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", tamperTrace);
     Verify();
-    var commands = Directory.EnumerateFiles(tamperTrace, "*.jsonl").Where(path => !beforeTamperTrace.Contains(path)).SelectMany(File.ReadLines)
-        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
-        .Select(item => item.GetProperty("command").EnumerateArray().Select(arg => arg.GetString()!).ToArray());
-    if (!commands.Any(command => command.Any(arg => Path.GetFileNameWithoutExtension(arg) == "leanchecker") &&
-        command.Contains("Client.Independent")))
+    var commands = NewReplayCommands(beforeTamperTrace);
+    if (!commands.Any(command => command.Contains("Client.Independent")))
         throw new InvalidOperationException("Tampered consumer artifacts were not rebuilt and replayed.");
 }
 finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
