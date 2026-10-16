@@ -30,14 +30,62 @@ partial class Program
         return parts;
     }
 
-    void ExportConsumerSupport(string root, SortedDictionary<string, string> inputs,
+    // Exclude only Lean's persisted linter diagnostics, never strings in
+    // declarations or other environment extensions. Keep every module part.
+    Dictionary<string, SortedDictionary<string, string>> PortableConsumerModuleParts(
+        string session, Dictionary<string, string> modules)
+    {
+        var temporary = Path.Combine(Path.GetTempPath(), "leancil-fingerprints-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporary);
+        try
+        {
+            var probe = Path.Combine(temporary, "Fingerprint.lean");
+            File.WriteAllText(probe, """
+import Lean
+@[noinline] def fingerprintModule (name : String) (sources destinations : Array String) :
+    IO (Array Lean.CompactedRegion) := do
+  let parts ← Lean.readModuleDataParts (sources.map System.FilePath.mk)
+  let filtered := parts.map fun (data, _) =>
+    { data with entries := data.entries.filter (fun entry => entry.1 != `Lean.Linter.lintLogExt) }
+  Lean.saveModuleDataParts name.toName (destinations.map System.FilePath.mk |>.zip filtered)
+  return parts.map Prod.snd
+unsafe def main (args : List String) : IO Unit := do
+  let [input] := args | throw (IO.userError "Expected fingerprint manifest")
+  let modules : Array (String × Array String × Array String) ←
+    IO.ofExcept <| (Lean.Json.parse (← IO.FS.readFile input)).bind Lean.fromJson?
+  for (name, sources, destinations) in modules do
+    -- Drop the reconstructed data before unmapping its referenced objects.
+    let regions ← fingerprintModule name sources destinations
+    for region in regions.reverse do
+      region.free
+""");
+            var paths = modules.Select((pair, index) => (pair.Key, Source: pair.Value,
+                Destination: Path.Combine(temporary, index + ".olean"))).ToArray();
+            var input = Path.Combine(temporary, "modules.json");
+            File.WriteAllText(input, JsonSerializer.Serialize(paths.Select(item => new object[]
+            {
+                item.Key,
+                new object[]
+                {
+                    new[] { "", ".server", ".private" }.Where(suffix => File.Exists(item.Source + suffix)).Select(suffix => item.Source + suffix).ToArray(),
+                    new[] { "", ".server", ".private" }.Where(suffix => File.Exists(item.Source + suffix)).Select(suffix => item.Destination + suffix).ToArray()
+                }
+            })));
+            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean"),
+                "-j2", "--run", probe, input], session, progress: "Fingerprinting portable consumer modules");
+            return paths.ToDictionary(item => item.Key, item => ConsumerModuleParts(item.Destination));
+        }
+        finally { Directory.Delete(temporary, true); }
+    }
+
+    void ExportConsumerSupport(string session, string root, SortedDictionary<string, string> inputs,
         Dictionary<string, string> independent, Dictionary<string, string[]> graph)
     {
         var destination = Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT");
         if (string.IsNullOrWhiteSpace(destination)) return;
         var modules = new SortedDictionary<string, SortedDictionary<string, string>>(
-            independent.ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)), StringComparer.Ordinal);
-        var manifest = new ConsumerSupportManifest(1, VerificationPolicy, libraryKey!, ConsumerToolchainIdentity(),
+            PortableConsumerModuleParts(session, independent), StringComparer.Ordinal);
+        var manifest = new ConsumerSupportManifest(2, VerificationPolicy, libraryKey!, ConsumerToolchainIdentity(),
             PortableConsumerSources(root, inputs), modules,
             new(independent.Keys.ToDictionary(name => name, name => graph[name]), StringComparer.Ordinal));
         var json = JsonSerializer.Serialize(manifest, Json) + "\n";
@@ -60,7 +108,7 @@ partial class Program
             File.AppendAllText(githubOutput, "consumer-support-sha256=" + digest + "\n");
     }
 
-    HashSet<string> ImportedConsumerSupport(string root, SortedDictionary<string, string> inputs,
+    HashSet<string> ImportedConsumerSupport(string session, string root, SortedDictionary<string, string> inputs,
         Dictionary<string, string> modules)
     {
         if (freshLibrary) return [];
@@ -77,12 +125,14 @@ partial class Program
         if (manifest.Sources is null || manifest.Modules is null || manifest.Imports is null ||
             manifest.Modules.Any(pair => pair.Value is null || !manifest.Imports.TryGetValue(pair.Key, out var imports) || imports is null))
             throw new InvalidDataException("Invalid consumer support manifest.");
-        if (manifest.Schema != 1 || manifest.Policy != VerificationPolicy || manifest.Library != libraryKey ||
+        if (manifest.Schema != 2 || manifest.Policy != VerificationPolicy || manifest.Library != libraryKey ||
             !Same(manifest.Sources, PortableConsumerSources(root, inputs)) || manifest.Toolchain != ConsumerToolchainIdentity()) return [];
+        var fingerprints = PortableConsumerModuleParts(session,
+            modules.Where(pair => manifest.Modules.ContainsKey(pair.Key)).ToDictionary());
         // Invalidate the entire dependent closure of changed or missing modules.
         // Unused producer modules need not be built by a different method gate.
-        var invalid = manifest.Modules.Where(pair => !modules.TryGetValue(pair.Key, out var artifact) ||
-            !Same(pair.Value, ConsumerModuleParts(artifact))).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+        var invalid = manifest.Modules.Where(pair => !fingerprints.TryGetValue(pair.Key, out var parts) ||
+            !Same(pair.Value, parts)).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
         bool changed;
         do
         {
@@ -307,7 +357,7 @@ unsafe def main (args : List String) : IO Unit := do
             foreach (var (name, imports) in graph)
                 if (imports.Any(dependent.Contains)) changed |= dependent.Add(name);
         } while (changed);
-        ExportConsumerSupport(root, inputs, modules.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph);
+        ExportConsumerSupport(session, root, inputs, modules.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph);
         if (!UseSuccessCache) return;
         var publication = Path.Combine(Path.GetTempPath(), "leancil-consumer-support-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(publication);
@@ -539,9 +589,9 @@ unsafe def main (args : List String) : IO Unit := do
                 Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
                     (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
                 .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
-            var portableSupport = ImportedConsumerSupport(root, before, currentArtifacts);
             var checkedArtifacts = JsonSerializer.Serialize(currentArtifacts.OrderBy(pair => pair.Key, StringComparer.Ordinal)
                 .ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)));
+            var portableSupport = ImportedConsumerSupport(session, root, before, currentArtifacts);
             var modules = discovered.Where(module => !baseUnchanged || (!module.Certified && !portableSupport.Contains(module.Name)))
                 .Select(module => module.Name);
             ReplayConsumerModules(session, modules);

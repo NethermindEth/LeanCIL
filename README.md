@@ -200,8 +200,13 @@ new export is required, since an unchanged whole-proof cache hit skips publicati
 The receiver still builds fresh sources. It skips kernel replay only when the
 verifier, certified framework, installed Lean artifacts, normalized source
 snapshot, pinned dependencies and **entire compiled support import closure**
-match the producer. Environment differences are allowed only if the rebuilt
-bytes match. A changed dependency invalidates every dependent module, even
+match the producer. Schema 2 fingerprints use the pinned Lean serializer on all
+compiled module parts, excluding only `Lean.Linter.lintLogExt`: persisted linter
+diagnostics include temporary absolute source filenames. All declarations,
+imports and other extensions remain covered, including source paths stored in
+semantic values. The original compiled files are never rewritten, and their raw
+hashes must remain stable throughout verification. Environment differences are
+allowed only if these fingerprints match. A changed dependency invalidates every dependent module, even
 when a referencing theorem's own bytes are unchanged. Extraction-dependent
 modules and the public proof are always checked. Incompatible manifests fall
 back to replay; a missing or incorrect trusted digest fails verification.
