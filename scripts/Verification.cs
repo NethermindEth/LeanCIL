@@ -22,8 +22,6 @@ partial class Program : IDisposable
     int proofCacheHits;
     int supportCacheHits;
     SortedDictionary<string, string>? certifiedModules;
-    // Concurrent Verify calls share one session; its build and certified module set change only under this lock.
-    readonly object sessionGate = new();
 
     byte[]? receiptKey;
     readonly HashSet<string> preparedSupport = new(StringComparer.Ordinal);
@@ -662,66 +660,60 @@ partial class Program : IDisposable
         stage?.Invoke("extraction integrity");
         if (existingArtifacts)
             Run(["dotnet", ExtractorPath, "check", output]);
-        else
-            lock (sessionGate)
-                if (!extractorBuilt)
-                {
-                    Run(["dotnet", "build", "Extractor", "-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
-                    extractorBuilt = true;
-                }
+        else if (!extractorBuilt)
+        {
+            Run(["dotnet", "build", "Extractor", "-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
+            extractorBuilt = true;
+        }
 
         // Use a source-bound build; CI and --fresh bypass the local library cache.
         stage?.Invoke("Lean library build");
         var before = Inputs(proof, settings);
+        var session = Library(before);
         var support = Regex.Matches(File.ReadAllText(proof), @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
             .Select(m => m.Groups[1].Value).Where(n => n != "Extracted" && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
-        string session;
 
-        lock (sessionGate)
+        if (support.Length > 0)
         {
-            session = Library(before);
-            if (support.Length > 0)
+            // Lean's dependency query supplies the import closure. When dependencies
+            // are not built yet, a conservative source snapshot safely widens the key.
+            var supportSources = SupportInputs(session, support, before);
+            var supportKey = ContentKey("support-audit-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" +
+                string.Join("\n", support.Order(StringComparer.Ordinal)) + "\n" + JsonSerializer.Serialize(supportSources));
+            if (!preparedSupport.Contains(supportKey))
             {
-                // Lean's dependency query supplies the import closure. When dependencies
-                // are not built yet, a conservative source snapshot safely widens the key.
-                var supportSources = SupportInputs(session, support, before);
-                var supportKey = ContentKey("support-audit-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" +
-                    string.Join("\n", support.Order(StringComparer.Ordinal)) + "\n" + JsonSerializer.Serialize(supportSources));
-                if (!preparedSupport.Contains(supportKey))
+                var staging = Path.Combine(Path.GetTempPath(), "leancil-support-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(staging);
+                try
                 {
-                    var staging = Path.Combine(Path.GetTempPath(), "leancil-support-" + Guid.NewGuid().ToString("N"));
-                    Directory.CreateDirectory(staging);
-                    try
+                    if (RestoreSuccess(supportKey, staging))
                     {
-                        if (RestoreSuccess(supportKey, staging))
-                        {
-                            var restored = ModuleArtifacts(staging);
-                            CopyTree(staging, session);
-                            foreach (var (name, hash) in restored) certifiedModules![name] = hash;
-                            Interlocked.Increment(ref supportCacheHits);
-                            CacheProgress("certified dependencies: " + entry);
-                        }
-                        else
-                        {
-                            Run(["lake", "build", .. support], session, progress: "Building proof dependencies: " + entry);
-                            var current = ModuleArtifacts(session);
-                            var altered = certifiedModules!.Any(pair => !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
-                            var changed = (altered ? current : current.Where(pair => !certifiedModules!.ContainsKey(pair.Key)))
-                                .Select(pair => ModuleName(pair.Key)).Distinct().ToArray();
-                            if (changed.Length > 0)
-                            {
-                                stage?.Invoke("kernel replay");
-                                Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), .. changed],
-                                    leanPath: Path.Combine(session, ".lake/build/lib/lean"), progress: "Kernel replay of proof dependencies: " + entry);
-                            }
-                            certifiedModules = current;
-                            CopySupportArtifacts(session, staging, supportSources);
-                            PublishSuccess(supportKey, staging);
-                        }
+                        var restored = ModuleArtifacts(staging);
+                        CopyTree(staging, session);
+                        foreach (var (name, hash) in restored) certifiedModules![name] = hash;
+                        supportCacheHits++;
+                        CacheProgress("certified dependencies: " + entry);
                     }
-                    finally { Directory.Delete(staging, true); }
-                    preparedSupport.Add(supportKey);
+                    else
+                    {
+                        Run(["lake", "build", .. support], session, progress: "Building proof dependencies: " + entry);
+                        var current = ModuleArtifacts(session);
+                        var altered = certifiedModules!.Any(pair => !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
+                        var changed = (altered ? current : current.Where(pair => !certifiedModules!.ContainsKey(pair.Key)))
+                            .Select(pair => ModuleName(pair.Key)).Distinct().ToArray();
+                        if (changed.Length > 0)
+                        {
+                            stage?.Invoke("kernel replay");
+                            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), .. changed],
+                                leanPath: Path.Combine(session, ".lake/build/lib/lean"), progress: "Kernel replay of proof dependencies: " + entry);
+                        }
+                        certifiedModules = current;
+                        CopySupportArtifacts(session, staging, supportSources);
+                        PublishSuccess(supportKey, staging);
+                    }
                 }
+                finally { Directory.Delete(staging, true); }
+                preparedSupport.Add(supportKey);
             }
         }
 
@@ -745,19 +737,15 @@ partial class Program : IDisposable
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
 
             var checker = Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
-            SortedDictionary<string, string> currentModules;
-            lock (sessionGate)
+            var currentModules = ModuleArtifacts(session);
+            var alteredExisting = certifiedModules!.Any(pair => !currentModules.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
+            var changedModules = (alteredExisting ? currentModules.Keys : currentModules.Keys.Where(name => !certifiedModules!.ContainsKey(name)))
+                .Select(ModuleName).Distinct().ToArray();
+            if (changedModules.Length > 0)
             {
-                currentModules = ModuleArtifacts(session);
-                var alteredExisting = certifiedModules!.Any(pair => !currentModules.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
-                var changedModules = (alteredExisting ? currentModules.Keys : currentModules.Keys.Where(name => !certifiedModules!.ContainsKey(name)))
-                    .Select(ModuleName).Distinct().ToArray();
-                if (changedModules.Length > 0)
-                {
-                    stage?.Invoke("kernel replay");
-                    Run([checker, .. changedModules], leanPath: leanPath, progress: "Kernel replay of proof dependencies: " + entry);
-                    certifiedModules = currentModules;
-                }
+                stage?.Invoke("kernel replay");
+                Run([checker, .. changedModules], leanPath: leanPath, progress: "Kernel replay of proof dependencies: " + entry);
+                certifiedModules = currentModules;
             }
             // Full artifact identities include transitive support dependencies and every
             // olean part. Cached success is never inferred from an unsigned manifest.
@@ -769,7 +757,7 @@ partial class Program : IDisposable
             {
                 extractionAudit = File.ReadAllText(Path.Combine(fresh, "extraction-audit.txt"));
                 AuditedAxioms(extractionAudit, "ExtractionAudit.valid");
-                Interlocked.Increment(ref extractionCacheHits);
+                extractionCacheHits++;
                 CacheProgress("certified extraction: " + entry);
             }
             else
@@ -804,7 +792,7 @@ partial class Program : IDisposable
                 }
                 audit = File.ReadAllText(Path.Combine(fresh, "theorem-audit.txt"));
                 axioms = AuditedAxioms(audit, theorem);
-                Interlocked.Increment(ref proofCacheHits);
+                proofCacheHits++;
                 CacheProgress("certified proof: " + entry);
             }
             else

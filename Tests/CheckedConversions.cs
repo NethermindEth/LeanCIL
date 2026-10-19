@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Numerics;
 using System.Reflection;
@@ -34,11 +35,10 @@ var operations = new (OpCode Op, int Width, bool Signed, bool UnsignedInput, boo
 
 if (IntPtr.Size != 8) throw new InvalidOperationException("Runtime comparisons require the admitted 64-bit target");
 
-// Cases share the session warmed above and are otherwise independent; checks are dominated by process startup.
-var checks = new[] { 32, 64 }.SelectMany(inputWidth => operations.Select(operation => (inputWidth, operation))).ToArray();
-Parallel.ForEach(checks, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, check =>
+var queue = new GeneratedQueue(verification, assembly);
+foreach (var inputWidth in new[] { 32, 64 })
+foreach (var (operation, width, signed, unsignedInput, native) in operations)
 {
-    var (inputWidth, (operation, width, signed, unsignedInput, native)) = check;
     var output = Path.Combine(root, operation.Name.Replace('.', '_') + "-" + inputWidth);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
@@ -97,10 +97,13 @@ Parallel.ForEach(checks, new ParallelOptions { MaxDegreeOfParallelism = Environm
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    Interlocked.Add(ref cases, claims.Count);
-    Console.WriteLine($"PASS {operation.Name} from {inputWidth}: {claims.Count} runtime comparisons and proofs");
-});
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {operation.Name} from {inputWidth}: {claims.Count} runtime comparisons and proofs");
+    });
+}
+queue.Flush();
 
 // Truncating to eight bits cannot satisfy the original 32-bit narrowing contract.
 var wrongOutput = Path.Combine(root, "WrongNarrow");

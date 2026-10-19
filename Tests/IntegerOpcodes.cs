@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Numerics;
 using Mono.Cecil;
@@ -10,6 +11,7 @@ using Mono.Cecil.Cil;
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/IntegerOpcodes");
+var queue = new GeneratedQueue(verification, assembly);
 Directory.CreateDirectory(root);
 
 // Prove a mathematical contract over actual C# compiler output for every input.
@@ -96,12 +98,14 @@ foreach (var operation in operations)
         string.Join(" ∧\n  ", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     var type = width == 32 ? "int" : "long";
     var parameters = operation == OpCodes.Nop || operation == OpCodes.Neg ? type : $"{type},{type}";
-    verification.Verify(dll, "Examples", $"IntegerOperations::Greater{width}({parameters})", proof, output);
-    Console.WriteLine($"PASS {operation.Name} i{width}: {claims.Count} boundary cases");
+    queue.Add(new($"IntegerOperations::Greater{width}({parameters})", proof, output, Assembly: dll),
+        () => Console.WriteLine($"PASS {operation.Name} i{width}: {claims.Count} boundary cases"));
 
     // Identity cannot satisfy the universal additive-inverse contract.
     if (operation == OpCodes.Nop)
     {
+        // The rejection reuses this fixture's output, so certify the fixture first.
+        queue.Flush();
         var rejected = false;
 
         try
@@ -120,5 +124,7 @@ foreach (var operation in operations)
         Console.WriteLine($"PASS incorrect negation i{width} rejected by proof checking");
     }
 }
+
+queue.Flush();
 
 Console.WriteLine("Integer opcode proofs passed.");

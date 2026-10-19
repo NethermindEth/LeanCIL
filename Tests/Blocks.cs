@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -13,6 +14,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Blocks");
 Directory.CreateDirectory(root);
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 const string memory = """
 def memory : CIL.Safety.Memory := {
   allocations := fun id => if id < 2 then some ⟨.callerStack, ⟨16, 8, []⟩, true, [16]⟩ else none
@@ -30,9 +32,11 @@ void Prove(string dll, string selector, string name, List<string> claims)
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact ⟨" +
         string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {name}: {claims.Count} checks");
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {name}: {claims.Count} checks");
+    });
 }
 
 // Model-owned scalar homes retain natural alignment, including addressed parameters.
@@ -223,6 +227,8 @@ foreach (var mutation in new[] { "zero", "three", "eight", "target", "duplicate"
         throw new InvalidOperationException("Incorrect block metadata rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
+
+queue.Flush();
 
 Console.WriteLine($"PASS {cases} block memory checks and universal overrun rejection");
 

@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Buffers.Binary;
 using System.Numerics;
@@ -14,6 +15,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/PrimitiveOperations");
 Directory.CreateDirectory(root);
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 
 void Prove(string dll, string selector, string name, IEnumerable<string> statements)
 {
@@ -24,9 +26,11 @@ void Prove(string dll, string selector, string name, IEnumerable<string> stateme
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\ntheorem correctness :\n  " + string.Join(" ∧\n  ", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    cases += claims.Length;
-    Console.WriteLine($"PASS {name}: {claims.Length} cases");
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Length;
+        Console.WriteLine($"PASS {name}: {claims.Length} cases");
+    });
 }
 
 string Executes(string arguments, string memory = "Examples.caller") =>
@@ -345,5 +349,7 @@ catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean
 }
 if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
     throw new InvalidOperationException("Incorrect write accepted");
+
+queue.Flush();
 
 Console.WriteLine($"Primitive operation proofs passed: {cases} cases; incorrect write rejected.");
