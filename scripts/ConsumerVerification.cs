@@ -163,8 +163,11 @@ unsafe def main (args : List String) : IO Unit := do
         if (!uint.TryParse(threads, out var count) || count == 0)
             throw new InvalidDataException("LEAN_NUM_THREADS must be a positive integer.");
         var runner = Path.Combine(Path.GetTempPath(), "leancil-replay-" + Guid.NewGuid().ToString("N") + ".lean");
+        var targetsPath = Path.ChangeExtension(runner, ".json");
         try
         {
+            // A literal target list exceeds Lean's recursion limit for large module sets.
+            File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
             // Use the pinned toolchain's checker, not a consumer implementation
             // of kernel replay. Explicit targets avoid repeated search-path scans.
             File.WriteAllText(runner, """
@@ -198,9 +201,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         failed := true
   if failed then
     throw (IO.userError "Kernel replay rejected at least one consumer module")
-""" + "\n#eval do\n  let json := String.fromUTF8! (ByteArray.mk #[" +
-                string.Join(",", System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(targets))) +
-                "])\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayConsumerModules args " +
+""" + "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
+                string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
+                "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayConsumerModules args " +
                 profile.ToString().ToLowerInvariant() + "\n");
             // Unlike leanchecker, the lean frontend defaults to hardware
             // concurrency rather than honoring LEAN_NUM_THREADS itself.
@@ -226,7 +229,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidOperationException($"Command failed ({result.Code}): {string.Join(' ', command)}\n{result.Output}");
             return failures;
         }
-        finally { File.Delete(runner); }
+        finally { File.Delete(runner); File.Delete(targetsPath); }
     }
 
     sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
