@@ -66,19 +66,28 @@ partial class Program : IDisposable
 
     static string ContentKey(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    bool RestoreSuccess(string key, string destination)
+    SortedDictionary<string, string>? AuthenticatedSuccess(string key)
     {
-        if (!UseSuccessCache) return false;
         var cached = Path.Combine(SuccessCacheRoot, key);
         try
         {
             var manifest = File.ReadAllBytes(Path.Combine(cached, "receipt.json"));
             var signature = File.ReadAllBytes(Path.Combine(cached, "receipt.hmac"));
-            if (!CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()), signature)) return false;
+            if (!CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()), signature)) return null;
             var expected = JsonSerializer.Deserialize<SortedDictionary<string, string>>(manifest);
-            var files = Path.Combine(cached, "files");
-            if (expected is null || !Same(expected, CacheFiles(files))) return false;
-            CopyTree(files, destination);
+            return expected is not null && Same(expected, CacheFiles(Path.Combine(cached, "files"))) ? expected : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    bool RestoreSuccess(string key, string destination)
+    {
+        if (!UseSuccessCache) return false;
+        try
+        {
+            var expected = AuthenticatedSuccess(key);
+            if (expected is null) return false;
+            CopyTree(Path.Combine(SuccessCacheRoot, key, "files"), destination);
             foreach (var (name, hash) in expected)
                 if (Sha(Path.Combine(destination, name)) != hash)
                     throw new InvalidOperationException("Certified cache changed while copying");
@@ -87,10 +96,13 @@ partial class Program : IDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return false; }
     }
 
+    // Published entries are immutable: an authenticated entry is never duplicated
+    // or overwritten, and concurrent publishers race only on an atomic rename.
     void PublishSuccess(string key, string source)
     {
         if (!UseSuccessCache) return;
         Directory.CreateDirectory(SuccessCacheRoot);
+        if (AuthenticatedSuccess(key) is not null) return;
         var cached = Path.Combine(SuccessCacheRoot, key);
         var staging = cached + "." + Guid.NewGuid().ToString("N");
         try
@@ -101,8 +113,26 @@ partial class Program : IDisposable
             var manifest = JsonSerializer.SerializeToUtf8Bytes(CacheFiles(files));
             File.WriteAllBytes(Path.Combine(staging, "receipt.json"), manifest);
             File.WriteAllBytes(Path.Combine(staging, "receipt.hmac"), HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()));
-            try { Directory.Move(staging, cached); }
+            try
+            {
+                Directory.Move(staging, cached);
+                return;
+            }
             catch (IOException) when (Directory.Exists(cached)) { }
+            if (AuthenticatedSuccess(key) is not null) return;
+            // Replace a corrupt or unauthenticated entry; readers authenticate every file.
+            var invalid = cached + ".invalid-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                Directory.Move(cached, invalid);
+                Directory.Move(staging, cached);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            finally
+            {
+                try { if (Directory.Exists(invalid)) Directory.Delete(invalid, true); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            }
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
@@ -199,7 +229,7 @@ partial class Program : IDisposable
     }
 
     static (int Code, string Output, string Stdout, string Stderr) Execute(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
-        bool streamOutput = false, string? progress = null)
+        bool streamOutput = false, string? progress = null, IReadOnlyDictionary<string, string>? environment = null)
     {
         var traceStage = progress;
 #if LEANCIL_TOOL
@@ -227,6 +257,8 @@ partial class Program : IDisposable
 
         if (leanPath is not null)
             start.Environment["LEAN_PATH"] = leanPath;
+        foreach (var (name, value) in environment ?? new Dictionary<string, string>())
+            start.Environment[name] = value;
 
         if (progress is not null) Console.WriteLine("START " + progress);
         var startedAtUtc = DateTimeOffset.UtcNow;
@@ -269,10 +301,10 @@ partial class Program : IDisposable
     }
 
     static string Run(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
-        bool streamOutput = false, string? progress = null)
+        bool streamOutput = false, string? progress = null, IReadOnlyDictionary<string, string>? environment = null)
     {
         var args = command.ToArray();
-        var result = Execute(args, cwd, leanPath, streamOutput, progress);
+        var result = Execute(args, cwd, leanPath, streamOutput, progress, environment);
 
         if (result.Code != 0)
             throw new InvalidOperationException($"Command failed ({result.Code}): {string.Join(' ', args)}\n{result.Output}");
