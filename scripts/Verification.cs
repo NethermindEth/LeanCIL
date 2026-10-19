@@ -228,6 +228,8 @@ partial class Program : IDisposable
         return captured.ToString();
     }
 
+    static readonly object TraceGate = new();
+
     static (int Code, string Output, string Stdout, string Stderr) Execute(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
         bool streamOutput = false, string? progress = null, IReadOnlyDictionary<string, string>? environment = null)
     {
@@ -290,7 +292,9 @@ partial class Program : IDisposable
             Console.WriteLine($"END {progress} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
         if (!string.IsNullOrWhiteSpace(traceDirectory))
         {
-            File.AppendAllText(Path.Combine(traceDirectory, $"{Environment.ProcessId}.jsonl"), JsonSerializer.Serialize(new {
+            // Concurrent commands in one process append to the same trace file.
+            lock (TraceGate)
+                File.AppendAllText(Path.Combine(traceDirectory, $"{Environment.ProcessId}.jsonl"), JsonSerializer.Serialize(new {
                 stage = traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, processId = Environment.ProcessId,
                 cwd = start.WorkingDirectory, durationSeconds = elapsed.Elapsed.TotalSeconds,
                 exitCode = process.ExitCode, transcript, command = args,
