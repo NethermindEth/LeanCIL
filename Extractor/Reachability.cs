@@ -35,6 +35,7 @@ internal static class Reachability
         };
         // Revisit successors when a backedge or join weakens a constant fact.
         // Facts only move from a constant to unknown, so this reaches a fixed point.
+        var typeTests = TypeTests.Analyze(method);
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];
         pending.Enqueue(instructions[0]);
@@ -44,7 +45,7 @@ internal static class Reachability
             FeatureConstants state = incoming[i];
             int? condition = state.Top;
             state = state.Copy();
-            state.Step(i, method, profile, addressed);
+            state.Step(i, method, profile, addressed, typeTests.Results.TryGetValue(i, out bool same) ? same : null);
 
             void Successor(Instruction target)
             {
@@ -58,16 +59,24 @@ internal static class Reachability
                 if (queued.Add(target)) pending.Enqueue(target);
             }
 
+            // The emitted operands of a folded type test push nothing, so it must be entered at its start.
+            void Jump(Instruction target)
+            {
+                if (typeTests.Interior.Contains(target))
+                    throw new InvalidDataException($"Branch into a folded type comparison: {i}");
+                Successor(target);
+            }
+
             if (condition is int known && i.OpCode.Code is Code.Brfalse or Code.Brfalse_S or Code.Brtrue or Code.Brtrue_S)
             {
                 bool taken = (known != 0) == (i.OpCode.Code is Code.Brtrue or Code.Brtrue_S);
-                Successor(taken ? (Instruction)i.Operand
-                    : i.Next ?? throw new InvalidDataException("Missing selected feature successor"));
+                if (taken) Jump((Instruction)i.Operand);
+                else Successor(i.Next ?? throw new InvalidDataException("Missing selected feature successor"));
                 continue;
             }
-            if (i.Operand is Instruction target) Successor(target);
+            if (i.Operand is Instruction target) Jump(target);
             if (i.OpCode.Code == Code.Switch)
-                foreach (var destination in (Instruction[])i.Operand) Successor(destination);
+                foreach (var destination in (Instruction[])i.Operand) Jump(destination);
             if (i.OpCode.FlowControl is not (FlowControl.Return or FlowControl.Branch or FlowControl.Throw))
                 Successor(i.Next ?? throw new InvalidDataException("Control falls off method"));
         }

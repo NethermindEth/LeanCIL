@@ -1,5 +1,6 @@
 import CIL.Extraction.Generics
 import CIL.Extraction.FeatureEffects
+import CIL.Extraction.TypeTests
 
 namespace CIL.Extraction
 
@@ -126,6 +127,15 @@ def featureTransfer (raw : RawMethod) (profile : FeatureProfile)
     let (pops, pushes) ← stackEffect i.opcode
     forget state pops pushes
 
+/-- A decided type test replaces the raw comparison result by its exact word. -/
+def featureTransferAt (raw : RawMethod) (profile : FeatureProfile) (role : Option TypeTestRole)
+    (i : RawInstruction) (state : FeatureState) : Option FeatureState :=
+  match role with
+  | some (.result value) => match state.stack with
+    | _ :: _ :: stack => some { state with stack := some (if value then 1 else 0) :: stack }
+    | _ => none
+  | _ => featureTransfer raw profile i state
+
 /-- Every switch destination is retained, even for a constant selector. Only
     true/false branches may prune an edge, and only for a known word. -/
 def featureSuccessors (pc : Nat) (i : RawInstruction) (state : FeatureState) : Option (List Nat) :=
@@ -218,13 +228,27 @@ def featureOpMatches (raw : RawMethod) (i : RawInstruction) (emitted : Op) : Boo
     | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 65025, 42] || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect i emitted
 
+/-- Type-test operands emit nothing and the comparison emits its decided word. Outside
+    a decided test, type handles and `System.Type` calls have no admitted translation. -/
+def featureOpMatchesAt (raw : RawMethod) (role : Option TypeTestRole)
+    (i : RawInstruction) (emitted : Op) : Bool :=
+  match role, emitted with
+  | some .head, .nop | some .interior, .nop => true
+  | some (.result value), .const32 word => word == if value then 1 else 0
+  | some _, _ => false
+  | none, _ => !typeTestInstruction i && featureOpMatches raw i emitted
+
 private def checkFeatureSite (raw : RawMethod) (profile : FeatureProfile)
-    (certificate : FeatureCertificate) : RawInstruction × Nat → Option FeatureState → Op → Bool
+    (certificate : FeatureCertificate) (roles : List (Option TypeTestRole)) :
+    (RawInstruction × Option TypeTestRole) × Nat → Option FeatureState → Op → Bool
   | _, none, .unsupported _ => true
-  | (i, pc), some state, emitted =>
-    wellShaped raw state && featureOpMatches raw i emitted &&
-      match featureTransfer raw profile i state, featureSuccessors pc i state with
-      | some after, some successors => successors.all fun target =>
+  | ((i, role), pc), some state, emitted =>
+    wellShaped raw state && featureOpMatchesAt raw role i emitted &&
+      match featureTransferAt raw profile role i state, featureSuccessors pc i state with
+      | some after, some successors =>
+        -- Roles are contiguous, so only a non-fallthrough edge can enter a test's interior.
+        successors.all (fun target => target == pc + 1 || typeTestEntry roles target) &&
+        successors.all fun target =>
           match certificate[target]? with
           | some (some incoming) => after.weakens incoming
           | _ => false
@@ -238,7 +262,8 @@ def FeatureFlowValid (raw : RawMethod) (profile : FeatureProfile)
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := List.replicate raw.locals.length none }) ∧
-  all3 (checkFeatureSite raw profile certificate) raw.code.zipIdx certificate code = true
+  all3 (checkFeatureSite raw profile certificate (typeTestRoles raw.code))
+    (raw.code.zip (typeTestRoles raw.code)).zipIdx certificate code = true
 
 instance (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
     (reachable : List Bool) (code : List Op) : Decidable (FeatureFlowValid raw profile certificate reachable code) :=
@@ -285,9 +310,10 @@ theorem factsWeaken_preserves {source target : List (Option W32)} {values : List
     facts, rather than copied from the extractor's claimed reachable mask. -/
 def FeatureEdge (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) (pc target : Nat) : Prop :=
-  ∃ i state after successors,
-    raw.code[pc]? = some i ∧ certificate[pc]? = some (some state) ∧
-    featureTransfer raw profile i state = some after ∧
+  ∃ i role state after successors,
+    (raw.code.zip (typeTestRoles raw.code))[pc]? = some (i, role) ∧
+    certificate[pc]? = some (some state) ∧
+    featureTransferAt raw profile role i state = some after ∧
     featureSuccessors pc i state = some successors ∧ target ∈ successors
 
 /-- Validation establishes closure under every independently recomputed edge,
@@ -297,12 +323,15 @@ theorem FeatureFlowValid.edge_closed {raw : RawMethod} {profile : FeatureProfile
     (valid : FeatureFlowValid raw profile certificate reachable code)
     {pc target : Nat} (edge : FeatureEdge raw profile certificate pc target) :
     ∃ incoming, certificate[target]? = some (some incoming) := by
-  obtain ⟨i, state, after, successors, hi, hs, ht, hn, member⟩ := edge
-  have bound : pc < code.length := valid.2.1 ▸ (List.getElem?_eq_some_iff.mp hi).1
-  have indexed : raw.code.zipIdx[pc]? = some (i, pc) := by simp [List.getElem?_zipIdx, hi]
+  obtain ⟨i, role, state, after, successors, hi, hs, ht, hn, member⟩ := edge
+  have zipped := (List.getElem?_eq_some_iff.mp hi).1
+  have bound : pc < code.length := by
+    rw [valid.2.1]; exact Nat.lt_of_lt_of_le zipped (by simp [List.length_zip, Nat.min_le_left])
+  have indexed : (raw.code.zip (typeTestRoles raw.code)).zipIdx[pc]? = some ((i, role), pc) := by
+    simp [List.getElem?_zipIdx, hi]
   have checked := all3_at valid.2.2.2.2 indexed hs (List.getElem?_eq_getElem bound)
   simp only [checkFeatureSite, ht, hn, Bool.and_eq_true] at checked
-  have successor := List.all_eq_true.mp checked.2 target member
+  have successor := List.all_eq_true.mp checked.2.2 target member
   cases hnext : certificate[target]? with
   | none => simp [hnext] at successor
   | some next => cases next with

@@ -23,6 +23,9 @@ internal static class InstructionTranslation
         FeatureProfile profile, int[] parameterHomes)
     {
         profile ??= FeatureProfile.Scalar;
+        var typeTests = TypeTests.Analyze(m);
+        if (typeTests.Results.TryGetValue(i, out bool same)) return same ? ".const32 1" : ".const32 0";
+        if (typeTests.Operands.Contains(i)) return ".nop";
         int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);
         int Local() => ((VariableDefinition)i.Operand).Index;
         string Narrow(TypeReference type) => LeanEmitter.Narrow(type) is { } kind ? $" (some .{kind})" : "";

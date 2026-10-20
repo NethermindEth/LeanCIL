@@ -60,9 +60,17 @@ internal sealed class FeatureConstants
         return value;
     }
 
-    internal void Step(Instruction instruction, MethodDefinition method, FeatureProfile profile, HashSet<int> addressed)
+    internal void Step(Instruction instruction, MethodDefinition method, FeatureProfile profile, HashSet<int> addressed,
+        bool? typeTest = null)
     {
         Code code = instruction.OpCode.Code;
+        if (typeTest is bool same)
+        {
+            Pop();
+            Pop();
+            _stack.Add(same ? 1 : 0);
+            return;
+        }
         switch (code)
         {
             case Code.Ldc_I4_M1: _stack.Add(-1); return;

@@ -2,7 +2,7 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 
-Run(["lake", "build", "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.LayoutCoverage"],
+Run(["lake", "build", "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.LayoutCoverage", "Tests.TypeTestEvidence"],
     streamOutput: true, progress: "Extraction validator regressions");
 foreach (var name in new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TranslationAudit", "TranslationScaling", "ExcludedBranchScaling" })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);

@@ -55,7 +55,7 @@ internal static class VerificationSelection
             "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence",
             "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
-        inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence",
+        inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "TypeTestEvidence",
             "LayoutCoverage" }.Select(name => $"Tests/{name}.lean"));
         inputs["unsafe"].Add("Tests/SkipInitialization.cs");
 
