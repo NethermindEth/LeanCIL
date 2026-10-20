@@ -95,7 +95,7 @@ var signatures = new Dictionary<string, string>
 // Each suite can run in its own checkout, with only the projects it needs.
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
 if (suite is "all" or "core")
-    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/BatchVerification.cs", "scripts/Verify.cs"]);
+    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
@@ -148,6 +148,9 @@ Passed("cold and warm verification, proof-edit invalidation and unchecked helper
 
 Run(["dotnet", "run", "--file", "Tests/BatchVerification.cs"], streamOutput: true, progress: "Generated verification batch checks");
 Passed("batched extraction and proof checking, independent identities and negative regressions");
+
+Run(["dotnet", "run", "--file", "Tests/JointReplay.cs"], streamOutput: true, progress: "Joint kernel replay checks");
+Passed("joint kernel replay, untargeted-import fallback and forged declaration attribution");
 
 Run(["dotnet", "run", "--file", "Tests/InitializedTypes.cs"], streamOutput: true, progress: "Initialization assumptions");
 Passed("explicit type initialization assumptions and identity");
