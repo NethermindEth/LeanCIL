@@ -220,6 +220,12 @@ with the `LEAN_PATH` that `lake env` resolves after the build (and `LEAN_SYSROOT
 set to that toolchain), instead of starting Lake again for each step. The
 resolved import paths are still compared with those resolved before the build.
 
+When proof checking fails, the report leads with `Lean errors (N):`: each
+`error:` diagnostic with its `file:line:col`, the module Lake was building and
+its full message block, omitting axiom reports, traces and warnings. Long
+messages are truncated in this summary only; the unmodified Lake output follows
+under `Details:` (and in the `LEANCIL_TRACE_DIRECTORY` transcripts when set).
+
 ### Batch consumer verification
 
 `leancil verify-batch requests.json` verifies many requests against one consumer
