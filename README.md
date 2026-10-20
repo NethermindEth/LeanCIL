@@ -256,6 +256,51 @@ reported with the program's length. The diagnostic is computed after the
 failure through compiled evaluation and is never proof evidence; it also works
 for `Method = Method` goals. `Tests/MethodBinding.lean` covers both outcomes.
 
+#### Binding bodies modulo dead code
+
+A profile can make the extractor emit dead `.unsupported` blocks that shift
+every later branch target, which breaks a `cil_body` equality even though
+reachable behaviour is unchanged. `cil_embed` (from `CIL.Embedding.Tactic`)
+proves the weaker `MethodEmbeds` relation instead: every live instruction of the
+literal body appears in the extracted method at a mapped pc, with its code
+targets mapped the same way and its fallthrough kept adjacent. Keep the proof
+over the literal body and transport it with the lemmas in
+`CIL.Safety.Embedding.Simulation`:
+
+```lean
+import CIL.Embedding.Tactic
+import CIL.Safety.Embedding.Simulation
+
+theorem bound : CIL.MethodEmbeds Extracted.program 2 (Full.fullBody Extracted.profile 9 5 7) := by cil_embed
+
+-- A run proved over the literal body holds for the extraction with the same fuel.
+example {fuel : Nat} {args : List CIL.Safety.Value} {m : CIL.Safety.Memory} {r : CIL.Safety.Memory × List CIL.Safety.Value}
+    (h : CIL.Safety.invoke (Extracted.program.set 2 (Full.fullBody Extracted.profile 9 5 7)) fuel 2 args m = .ok r) :
+    CIL.Safety.invoke Extracted.program fuel 2 args m = .ok r := bound.invoke h
+```
+
+`bound.certificate` transports an `InvocationCertificate` and
+`bound.descriptors` the program's static descriptor list; `ProgramRefines.set`
+composes several bound methods. The transfer is for successful checked
+execution only. The pc map is computed outside the kernel and then checked by
+it, so a wrong map is rejected, not trusted. A changed reachable instruction or
+an inserted live one is reported by expected and actual pc:
+
+```text
+cil_embed: the expected body does not embed into the extracted method
+method index 0
+expected pc 1 maps to actual pc 1
+  expected: CIL.Op.brzero 4
+  renamed:  CIL.Op.brzero 6
+  actual:   CIL.Op.brzero 4
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Op.const32 0x00000009#32) is not the image of any live expected pc
+```
+
+The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for
+1,414 instructions. See [docs/SOUNDNESS.md](docs/SOUNDNESS.md#method-body-embedding)
+for the exact conditions and limits; `Tests/MethodEmbedding.lean` covers both
+outcomes.
+
 ### Batch consumer verification
 
 `leancil verify-batch requests.json` verifies many requests against one consumer

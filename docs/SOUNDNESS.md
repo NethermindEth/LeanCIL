@@ -42,6 +42,27 @@ The extractor admits explicit layouts with a positive declared size and sequenti
 
 Fixed 256-bit snapshot-home operations use **vector** names to distinguish them from general aggregates. Lane operations are explicitly vector-lane operations. They do not stand for arbitrary struct layouts. The pure interpreter intentionally returns failure for the new general aggregate operations; use the checked interpreter for those operations. Validated reference-free nested layouts and same-assembly value constructors are exposed by extraction; reference-bearing field layouts remain unsupported.
 
+## Method-body embedding
+
+`MethodEmbeds program index expected` (`CIL.Embedding.Basic`) states that method `index` exists and that `Embeds expected actual map` holds for its body `actual` and a pc map `map`; expected pc `p` maps to `map.getD p actual.code.length`, so pcs outside the map go past the end of the actual body. `Embeds` requires equal profile, return shape, locals, local kinds, vector locals and arguments, parameter homes and static descriptor list, that pc 0 maps to pc 0, and, for every live expected pc (any instruction except `.unsupported`):
+
+- the actual instruction at the mapped pc is the expected one with every code target renamed through the map;
+- a static address at the mapped pc resolves the same descriptor;
+- an instruction that can resume at the next pc (anything except `branch`, `ret` and `.unsupported`, and including calls) maps its successor to the next actual pc.
+
+Each condition is a list equality or a Boolean check that the kernel decides by evaluation; no equality instance on `Op` is involved.
+
+`CIL.Safety.run_refines` proves, for programs related by `ProgramRefines` (every method embedded, equal program-wide static descriptors), that a successful `CIL.Safety.run` of the expected program at any pc gives the same result, memory included, for the actual program at the mapped pc with the same fuel. `invoke_refines`, `MethodEmbeds.invoke` and `MethodEmbeds.certificate` transfer successful invocations and `InvocationCertificate`s from `program.set index expected` to `program`; `ProgramRefines.set` composes embeddings of several methods. The step lemma `step_relabel` covers every `Op` constructor. These theorems depend only on `propext`, `Quot.sound` and `Classical.choice`.
+
+Scope and limits:
+
+- The transfer covers success only. Faults carry their pc, so a failing expected run says nothing about the actual one, and the actual body may fault where the expected body is dead.
+- Dead expected pcs are unconstrained: an `.unsupported` instruction faults whenever it executes, so a successful expected run never reaches one. Actual pcs outside the image of live expected pcs are unconstrained as well; the simulation never visits them.
+- Only the checked interpreter is covered. The base `CIL.run` keys vector homes by pc, so renumbering changes its memory and no such theorem holds for it.
+- The relation is syntactic and conservative: an inserted live instruction, even a `nop`, on a reachable path is rejected.
+
+`cil_embed` (`CIL.Embedding.Tactic`) computes the map outside the kernel by aligning live instructions, following fallthroughs and branch targets. The alignment is untrusted: the proof term passes the map to `Embeds.mk` with every field closed by `Eq.refl`, and the kernel checks it against the body reduced from `program[index]?`. A wrong map can only make the kernel reject the proof. Before building the proof, the tactic evaluates the same conditions and reports the first violated one.
+
 ## Runtime assumptions
 
 The supported runtime convention is 64-bit, little-endian .NET 10, with fixed hardware capability flags throughout execution. ISA-specific instructions require their declared features; portable vector operations use the supplied software semantics. A selected profile describes runtime-visible availability, including runtime/OS disabling, not merely physical CPU features.
