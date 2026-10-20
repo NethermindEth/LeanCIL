@@ -5,6 +5,29 @@ namespace Nethermind.LeanCIL;
 
 internal static class MetadataValidation
 {
+    static string ScopeName(IMetadataScope scope) => scope switch
+    {
+        AssemblyNameReference assembly => assembly.Name,
+        ModuleDefinition module => module.Assembly?.Name.Name ?? module.Name,
+        _ => scope.Name
+    };
+
+    static InvalidDataException Call(string reason, MethodReference reference, MethodDefinition caller,
+        Instruction instruction, string? detail = null, Exception? inner = null) =>
+        Rejections.Tag(Rejection.Call, new InvalidDataException(
+            $"{reason}: {reference.FullName}\n  Caller: {caller.FullName} at IL_{instruction.Offset:x4}" +
+            (detail is null ? "" : "\n  " + detail), inner));
+
+    // Names the method whose own metadata or body failed validation.
+    static T InMethod<T>(MethodDefinition method, Func<T> validate)
+    {
+        try { return validate(); }
+        catch (InvalidDataException error) when (Rejections.Of(error) is null)
+        {
+            throw new InvalidDataException($"{error.Message}\n  Method: {method.FullName}", error);
+        }
+    }
+
     internal static bool IsAggregate(TypeReference type, ModuleDefinition module) =>
         type is not TypeSpecification && type.Scope == module && type.IsValueType && !EnumTypes.IsEnum(type);
 
@@ -131,7 +154,7 @@ internal static class MetadataValidation
         {
             if (state.TryGetValue(method, out int visited))
             {
-                if (visited == 1) throw new InvalidDataException("Recursive managed dependency");
+                if (visited == 1) throw new InvalidDataException($"Recursive managed dependency: {method.FullName}");
                 return;
             }
             if (method.Module != module || method.IsStatic == method.HasThis || method.ExplicitThis ||
@@ -146,36 +169,64 @@ internal static class MetadataValidation
                 (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
                     !initializedTypes.Contains(method.DeclaringType.FullName, StringComparer.Ordinal)))
                 throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
-            if (method.HasThis) Layout(method.DeclaringType, module);
-            if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
-                throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
-            Type(method.ReturnType, module, returns: true);
-            foreach (ParameterDefinition parameter in method.Parameters) Type(parameter.ParameterType, module);
-            foreach (VariableDefinition local in method.Body.Variables) Type(local.VariableType, module);
+            var reachable = InMethod(method, () =>
+            {
+                if (method.HasThis) Layout(method.DeclaringType, module);
+                if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
+                    throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
+                Type(method.ReturnType, module, returns: true);
+                foreach (ParameterDefinition parameter in method.Parameters) Type(parameter.ParameterType, module);
+                foreach (VariableDefinition local in method.Body.Variables) Type(local.VariableType, module);
+                return Reachability.Analyze(method, profile);
+            });
             state[method] = 1;
-            foreach (Instruction instruction in Reachability.Analyze(method, profile))
+            void Enter(MethodDefinition callee, MethodReference reference, Instruction instruction)
+            {
+                if (state.GetValueOrDefault(callee) == 1)
+                    throw Call("Recursive managed dependency", reference, method, instruction);
+                Visit(callee);
+            }
+            foreach (Instruction instruction in reachable)
             {
                 if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
                     InstructionTranslation.RuntimeModel(reference, profile) is not null) continue;
                 if (reference is GenericInstanceMethod generic)
                 {
                     if (instruction.OpCode.Code != Code.Call)
-                        throw new InvalidDataException("Unsupported generic constructor call");
-                    var specialized = specializations.Instantiate(generic);
+                        throw Call("Unsupported generic constructor call", reference, method, instruction);
+                    MethodDefinition specialized;
+                    try { specialized = specializations.Instantiate(generic); }
+                    catch (InvalidDataException error) when (Rejections.Of(error) is null)
+                    {
+                        throw Call("Unsupported generic call", reference, method, instruction, error.Message, error);
+                    }
                     instruction.Operand = specialized;
-                    Visit(specialized);
+                    Enter(specialized, reference, instruction);
                     continue;
                 }
-                if (reference.ExplicitThis ||
-                    reference.CallingConvention != MethodCallingConvention.Default)
-                    throw new InvalidDataException("Unsupported call signature");
-                MethodDefinition callee = reference.Resolve() ?? throw new InvalidDataException("Unresolved call");
-                if (callee.Module != module || reference.FullName != callee.FullName || reference.HasThis != callee.HasThis)
-                    throw new InvalidDataException("External or mismatched managed dependency");
+                if (reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default)
+                    throw Call("Unsupported call signature", reference, method, instruction,
+                        reference.ExplicitThis ? "Explicit this is not supported" : $"Calling convention: {reference.CallingConvention}");
+                MethodDefinition callee = reference.Resolve() ??
+                    throw Call("Unresolved call", reference, method, instruction, $"Callee scope: {ScopeName(reference.DeclaringType.Scope)}");
+                if (callee.Module != module)
+                {
+                    var assembly = ScopeName(callee.Module);
+                    var referenced = ScopeName(reference.DeclaringType.Scope);
+                    throw Call("External managed dependency", reference, method, instruction,
+                        $"Callee assembly: {assembly}" + (referenced == assembly ? "" : $" (referenced as {referenced})"));
+                }
+                if (reference.FullName != callee.FullName)
+                    throw Call("Mismatched managed dependency", reference, method, instruction,
+                        $"FullName differs from the resolved definition {callee.FullName}");
+                if (reference.HasThis != callee.HasThis)
+                    throw Call("Mismatched managed dependency", reference, method, instruction,
+                        $"HasThis differs (reference {reference.HasThis}, definition {callee.HasThis})");
                 if (instruction.OpCode.Code == Code.Newobj &&
                     (!callee.IsConstructor || !callee.HasThis || !IsAggregate(callee.DeclaringType, module)))
-                    throw new InvalidDataException("Unsupported newobj constructor");
-                Visit(callee);
+                    throw Call("Unsupported newobj constructor", reference, method, instruction,
+                        "newobj must construct a reference-free struct declared in this assembly");
+                Enter(callee, reference, instruction);
             }
             state[method] = 2;
             ordered.Add(method);
@@ -185,10 +236,15 @@ internal static class MetadataValidation
         // Validate translation before producing any artifact.
         for (int i = 0; i < ordered.Count; i++)
         {
-            var nativeOperands = NativeOperands.Analyze(ordered[i], profile);
-            var parameterHomes = ParameterStorage.Analyze(ordered[i], profile);
-            foreach (Instruction instruction in Reachability.Analyze(ordered[i], profile))
-                InstructionTranslation.Translate(instruction, ordered[i], ordered.ToArray(), i, profile, nativeOperands, parameterHomes);
+            var index = i;
+            InMethod(ordered[index], () =>
+            {
+                var nativeOperands = NativeOperands.Analyze(ordered[index], profile);
+                var parameterHomes = ParameterStorage.Analyze(ordered[index], profile);
+                foreach (Instruction instruction in Reachability.Analyze(ordered[index], profile))
+                    InstructionTranslation.Translate(instruction, ordered[index], ordered.ToArray(), index, profile, nativeOperands, parameterHomes);
+                return 0;
+            });
         }
         return ordered.ToArray();
     }

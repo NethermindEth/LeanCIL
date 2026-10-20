@@ -19,19 +19,19 @@ internal sealed class MethodSpecialization(ModuleDefinition module)
 
     internal MethodDefinition Instantiate(GenericInstanceMethod reference)
     {
-        var definition = reference.Resolve() ?? throw new InvalidDataException("Unresolved generic method");
+        var definition = reference.Resolve() ?? throw new InvalidDataException($"Unresolved generic method: {reference.FullName}");
         if (definition.Module != module || definition.DeclaringType.HasGenericParameters ||
             reference.ElementMethod.FullName != definition.FullName || reference.HasThis != definition.HasThis ||
             reference.ExplicitThis || reference.GenericArguments.Count != definition.GenericParameters.Count ||
             !definition.HasGenericParameters || definition.IsConstructor || !definition.HasBody || definition.Body.ExceptionHandlers.Count != 0 ||
             (reference.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default ||
             (definition.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
-            throw new InvalidDataException("Unsupported generic method signature or body");
+            throw new InvalidDataException($"Unsupported generic method signature or body: {reference.FullName}");
 
         foreach (var argument in reference.GenericArguments)
         {
             if (argument is ByReferenceType or PointerType or GenericParameter)
-                throw new InvalidDataException("Unsupported generic method type argument");
+                throw new InvalidDataException($"Unsupported generic method type argument: {argument.FullName}");
             MetadataValidation.Type(argument, module);
         }
         foreach (var parameter in definition.GenericParameters)
@@ -41,7 +41,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module)
             var allowed = GenericParameterAttributes.NotNullableValueTypeConstraint |
                 GenericParameterAttributes.DefaultConstructorConstraint | (GenericParameterAttributes)0x20;
             if ((parameter.Attributes & ~allowed) != 0)
-                throw new InvalidDataException("Unsupported generic method constraints");
+                throw new InvalidDataException($"Unsupported generic method constraints: {definition.FullName}");
             foreach (var constraint in parameter.Constraints)
             {
                 var type = constraint.ConstraintType;
@@ -50,7 +50,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module)
                     RuntimeModels.ExactScope(modifier.ModifierType.Scope, "System.Runtime"))
                     type = modifier.ElementType;
                 if (type.FullName != "System.ValueType" || !RuntimeModels.ExactScope(type.Scope, "System.Runtime"))
-                    throw new InvalidDataException("Unsupported generic method constraints");
+                    throw new InvalidDataException($"Unsupported generic method constraints: {definition.FullName}");
                 RuntimeModels.ValidateTypeIdentity(type, module);
             }
         }
