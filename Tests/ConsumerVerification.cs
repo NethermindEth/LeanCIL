@@ -104,6 +104,13 @@ string[][] NewReplayCommands(HashSet<string> previous) => Directory.EnumerateFil
     .Select(item => File.ReadLines(Path.Combine(testTrace, item.GetProperty("transcript").GetString()!))
         .Where(line => line.StartsWith('{')).Select(line => JsonSerializer.Deserialize<JsonElement>(line)
             .GetProperty("module").GetString()!).ToArray()).ToArray();
+string NewStageOutput(HashSet<string> previous, string stage) => string.Join('\n', Directory.EnumerateFiles(testTrace, "*.jsonl")
+    .Where(path => !previous.Contains(path)).SelectMany(File.ReadLines)
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+    .Where(item => item.GetProperty("stage").GetString() == stage)
+    .Select(item => File.ReadAllText(Path.Combine(testTrace, item.GetProperty("transcript").GetString()!))));
+static bool BuiltModule(string output, string module) =>
+    System.Text.RegularExpressions.Regex.IsMatch(output, @"\bBuilt " + System.Text.RegularExpressions.Regex.Escape(module) + @"(\s|$)");
 try
 {
     Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
@@ -116,6 +123,34 @@ try
 }
 finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
 Console.WriteLine("PASS extraction-independent helper reused across gates; dependent module replayed");
+
+// Lake traces a module-system file's IR signature; restored support missing it is
+// silently recompiled, so the cache saves no build time for such modules.
+var moduleSupport = Path.Combine(root, "Client", "ModuleSupport.lean");
+var independentBeforeModule = File.ReadAllText(independent);
+try
+{
+    File.WriteAllText(moduleSupport, "module\nnamespace ModuleSupport\npublic theorem refl (x : Nat) : x = x := rfl\nend ModuleSupport\n");
+    File.WriteAllText(independent, "import Client.ModuleSupport\n" + independentBeforeModule);
+    Verify();
+    // Invalidate the proof receipt so the next run restores support instead of the whole result.
+    foreach (var receipt in Directory.EnumerateFiles(SuccessCacheRoot, "report.json", SearchOption.AllDirectories))
+    {
+        var saved = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(receipt));
+        if (saved.GetProperty("inputs").TryGetProperty("consumer:" + proof, out _)) File.AppendAllText(receipt, "\n ");
+    }
+    var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    var build = NewStageOutput(previous, "Building fresh consumer proof and dependencies");
+    if (build.Length == 0 || BuiltModule(build, "Client.ModuleSupport") || BuiltModule(build, "Client.Independent"))
+        throw new InvalidOperationException("Cached module-system support was rebuilt.");
+}
+finally
+{
+    File.WriteAllText(independent, independentBeforeModule);
+    File.Delete(moduleSupport);
+}
+Console.WriteLine("PASS cached module-system support is restored without a rebuild");
 
 // Support reuse is keyed by what Lean and Lake read, not by unrelated process
 // state or by consumer files outside the support modules' sources.
