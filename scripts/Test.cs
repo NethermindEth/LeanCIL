@@ -159,8 +159,8 @@ Passed("external consumer proof package and transitive source identity");
 Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
-Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
-Passed("library, semantic and method-body binding tests");
+Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
+Passed("library, semantic, method-body binding and embedding tests");
 
 // Verify each extracted method and immediately check its artifact identity.
 foreach (var (name, signature) in signatures)

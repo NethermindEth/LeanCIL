@@ -18,6 +18,12 @@ name = "Tests.Automation"
 name = "Tests.MethodBinding"
 
 [[lean_lib]]
+name = "Tests.MulScalarFixture"
+
+[[lean_lib]]
+name = "Tests.MethodEmbedding"
+
+[[lean_lib]]
 name = "Tests.ExtractionLayout"
 
 [[lean_lib]]
