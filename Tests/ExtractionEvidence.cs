@@ -4,6 +4,6 @@
 
 Run(["lake", "build", "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.LayoutCoverage", "Tests.TypeTestEvidence"],
     streamOutput: true, progress: "Extraction validator regressions");
-foreach (var name in new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TranslationAudit", "TranslationScaling", "ExcludedBranchScaling" })
+foreach (var name in new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "TranslationAudit", "TranslationScaling", "ExcludedBranchScaling" })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");
