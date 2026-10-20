@@ -187,9 +187,16 @@ sources are bound per module: each generation records, for every module, the
 hashes of its candidate source files, its compiled imports and its artifacts.
 A later run restores the largest import-closed set of modules whose sources are
 unchanged, so editing one helper or adding unrelated proof files keeps the rest.
-Lean's compiled import graph excludes modules that transitively depend on
-`Extracted` from this shared cache. Lake still decides reuse from its own traces;
-if it rebuilds any restored module, every module is replayed again.
+Modules that transitively depend on `Extracted` (but not on the extraction
+certificate audit or a proof module) are also recorded, bound additionally to the
+generated `Extracted.lean` text. `Extracted.lean` carries no assembly hash, so an
+assembly change outside the extracted program keeps it byte-identical; each
+workspace then restores those modules for its own extraction, which skips their
+rebuild but never their kernel replay against the freshly built `Extracted`.
+The certificate still binds the actual assembly through the extraction integrity
+check and `assemblySha256` in the report. Lake still decides reuse from its own
+traces; if it rebuilds any restored extraction-independent module, every module
+is replayed again.
 Republishing the same module set from a new session is a no-op, and concurrent
 verifiers publish through an atomic rename; a corrupt entry is replaced.
 An unchanged proof may reuse its authenticated successful result only for the same
@@ -369,7 +376,7 @@ Arithmetic::Add(ulong,ulong)
 
 The parameter list remains required. Matching is case-sensitive; an explicit return type must match. Use `ulong&` for a by-reference parameter. Ambiguous selectors fail with a list of full candidate signatures, which can be copied into the command. Artifacts always record the resolved canonical signature, so equivalent selectors can check the same artifact. Selection never relaxes supported-type or instruction validation.
 
-The generated `Extracted.lean` contains `arg 0`, `arg 1`, `add`, `ret`, the exact method signature, assembly hash, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees are emitted in dependency order.
+The generated `Extracted.lean` contains `arg 0`, `arg 1`, `add`, `ret`, the exact method signature, metadata, profile and kernel-checked fetch equations; the assembly hash lives in `identity.json` and the report. The entry is method zero; reachable managed callees are emitted in dependency order.
 
 Extraction also emits raw metadata and a `translation_valid` certificate. Independent Lean validators recompute layouts, check all layout-dependent sites and parameter-home mappings, validate structural generic substitution and managed-call bindings, and check feature-analysis states and control-flow coverage. Per-site validators walk the raw code, reachability mask and emitted code in lockstep, so a long branch excluded by the profile adds linear rather than quadratic checking cost. Verification requires this certificate to have the exact validator type for the complete emitted program and kernel-replays it separately from the user proof. Raw metadata serialization and transformations outside those checks remain trusted.
 

@@ -37,10 +37,9 @@ internal static class LeanEmitter
         ".vector128" => ".v128 0", ".vector256" => ".v256 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module)} 0)"
     };
-    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, string assemblyHash, ModuleDefinition originalModule)
+    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule)
     {
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
-        lean.AppendLine($"def assemblySha256 : String := {JsonSerializer.Serialize(assemblyHash)}");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := by decide");
         FieldDefinition[] data = methods.SelectMany(m => Reachability.Analyze(m, profile))
