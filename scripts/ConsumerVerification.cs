@@ -1082,7 +1082,14 @@ unsafe def main (args : List String) : IO Unit := do
                 if (!built[k])
                 {
                     if (requests[i].ExpectRejection) rejecting.Add(i);
-                    else Fail([i], buildFailure!);
+                    else if (members.Length == 1) Fail([i], buildFailure!);
+                    else
+                    {
+                        // Same message; the summary omits the other requests' own proof modules.
+                        var own = new InvalidOperationException(buildFailure!.Message);
+                        own.Data[LeanDiagnostics.HiddenModulesKey] = names.Where((_, m) => m != k).ToArray();
+                        Fail([i], own);
+                    }
                 }
                 else if (requests[i].ExpectRejection)
                     Fail([i], new InvalidOperationException("Expected proof checking to reject " + requests[i].Theorem + ", but the proof checked."));

@@ -64,11 +64,27 @@ void Verify(params string[] options)
     var text = Run([.. cli, "verify", output, .. options]);
     if (!text.Contains("Verified: ExampleProof.correctness")) throw new InvalidOperationException(text);
 }
-void Reject(string marker, params string[] options)
+string Reject(string marker, params string[] options)
 {
     var result = Execute([.. cli, "verify", output, .. options]);
     if (result.Code != 1 || !result.Output.Contains(marker) || File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("Expected consumer proof rejection: " + result.Output);
+    return result.Output;
+}
+// A proof-checking failure leads with a bounded summary of the Lean errors; the full output follows.
+string LeanSummary(string text, params string[] required)
+{
+    var start = text.IndexOf("Lean errors (", StringComparison.Ordinal);
+    var end = text.IndexOf("Full Lean output follows under Details.", StringComparison.Ordinal);
+    var details = end < 0 ? -1 : text.IndexOf("Details:", end, StringComparison.Ordinal);
+    if (start < 0 || end < start || details < end)
+        throw new InvalidOperationException("Proof-checking failure did not lead with a Lean error summary: " + text);
+    var summary = text[start..end];
+    if (summary.Split('\n').Length > 60 || summary.Contains("depends on axioms", StringComparison.Ordinal) ||
+        summary.Contains("trace:", StringComparison.Ordinal) || required.Any(item => !summary.Contains(item, StringComparison.Ordinal)) ||
+        !text[details..].Contains("Command failed", StringComparison.Ordinal))
+        throw new InvalidOperationException("Unexpected Lean error summary:\n" + summary + "\nFull text:\n" + text);
+    return summary;
 }
 Verify("--proof", proof, "--proof-root", root);
 var first = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
@@ -473,7 +489,9 @@ Console.WriteLine("PASS tampered consumer support and proof receipts fall back t
 
 // A changed imported proof must fail, regardless of any existing consumer caches.
 File.WriteAllText(sharedPath, shared.Replace("x + y", "x - y"));
-Reject("error:");
+var importedFailure = Reject("error:");
+LeanSummary(importedFailure, "Client/Shared.lean:", "(building Client.Shared)", "x - y");
+Console.WriteLine("PASS proof-checking failure leads with the located Lean errors of the failing module");
 File.WriteAllText(sharedPath, shared + "\n-- Imported-source identity changed.\n");
 Verify();
 var restored = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
@@ -604,6 +622,8 @@ try
     if (code != 1 || !statuses.SequenceEqual(expected) || !text.Contains("while replaying declaration") ||
         !text.Contains("Batch: 4 passed, 3 failed of 7 requests."))
         throw new InvalidOperationException("Unexpected batch outcomes: " + string.Join(", ", statuses) + "\n" + text);
+    // WrongAdd breaks the shared helper both batchC proofs import; the FAIL diagnostics lead with that error.
+    LeanSummary(text, "Client/Shared.lean:", "(building Client.Shared)");
     // The last request for each output owns its certificate, as in sequential runs.
     var certificateA = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(batchA, "verified.json")));
     var certificateB = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(batchB, "verified.json")));

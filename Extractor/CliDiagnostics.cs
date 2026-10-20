@@ -63,6 +63,13 @@ internal static class CliDiagnostics
         Console.Error.WriteLine($"  Stage: {stage}");
         Console.Error.WriteLine($"  Next: {next}");
         if (summary != error.Message)
+        {
+            // The bounded Lean summary leads; the full transcript follows unchanged.
+            var cause = error is CliFailure ? error.InnerException ?? error : error;
+            var lean = LeanDiagnostics.Summarize(error.Message, cause.Data[LeanDiagnostics.HiddenModulesKey] as string[]);
+            if (lean is not null)
+                Console.Error.Write(lean + "Full Lean output follows under Details.\n");
             Console.Error.WriteLine("Details:\n" + error.Message);
+        }
     }
 }

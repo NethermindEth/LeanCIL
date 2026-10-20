@@ -29,10 +29,11 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
-      - name: Test suite selection
+      - name: Test verification helpers
         run: |
           dotnet run --file scripts/TestSelectVerification.cs
           dotnet run --file scripts/TestSummarizeVerification.cs
+          dotnet run --file scripts/TestLeanDiagnostics.cs
       - name: Select affected suites
         id: select
         env:

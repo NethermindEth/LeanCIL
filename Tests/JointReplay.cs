@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 #:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
 
 using var verification = new Program();
 var root = At("artifacts/JointReplay");

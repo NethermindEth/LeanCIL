@@ -15,6 +15,9 @@ name = "Tests.Semantics"
 name = "Tests.Automation"
 
 [[lean_lib]]
+name = "Tests.MethodBinding"
+
+[[lean_lib]]
 name = "Tests.ExtractionLayout"
 
 [[lean_lib]]
