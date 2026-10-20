@@ -199,7 +199,9 @@ unsafe def replayConsumerModulesJointly (args : List String) : IO Unit := do
       throw <| IO.userError s!"Replay target constant {name} is already imported"
   discard <| env.toKernelEnv.replay constants
   env.freeRegions
-  IO.println (Lean.Json.mkObj [("joint", Lean.toJson names.length), ("milliseconds", Lean.toJson ((← IO.monoMsNow) - started))]).compress
+  let elapsed := (← IO.monoMsNow) - started
+  for name in args do
+    IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("joint", Lean.toJson true), ("milliseconds", Lean.toJson elapsed)]).compress
 """;
 
     // Every requested module is reported as replayed or rejected; a checker process failure throws.
@@ -225,19 +227,21 @@ unsafe def replayConsumerModulesJointly (args : List String) : IO Unit := do
             var result = Execute([LeanExecutable, runner], session, leanPath,
                 progress: "Joint kernel replay of consumer proof and dependencies", environment: LeanEnvironment);
             if (result.Code != 0) return false;
+            var replayed = new HashSet<string>(StringComparer.Ordinal);
             foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
                 if (!line.StartsWith('{')) continue;
                 try
                 {
                     var record = JsonSerializer.Deserialize<JsonElement>(line);
-                    if (record.ValueKind == JsonValueKind.Object && record.TryGetProperty("joint", out var count) &&
-                        count.ValueKind == JsonValueKind.Number && count.GetInt32() == targets.Length)
-                        return true;
+                    if (record.ValueKind == JsonValueKind.Object && record.TryGetProperty("joint", out var joint) &&
+                        joint.ValueKind == JsonValueKind.True && record.TryGetProperty("module", out var module) &&
+                        module.ValueKind == JsonValueKind.String)
+                        replayed.Add(module.GetString()!);
                 }
                 catch (JsonException) { }
             }
-            return false;
+            return replayed.SetEquals(targets);
         }
         finally { File.Delete(runner); File.Delete(targetsPath); }
     }

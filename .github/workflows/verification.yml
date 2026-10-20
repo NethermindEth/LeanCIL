@@ -62,7 +62,22 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
-      - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+      - name: Install Lean toolchain
+        id: lean
+        # The toolchain download fails transiently; retry once after a pause.
+        continue-on-error: true
+        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Wait before retrying the Lean toolchain install
+        if: steps.lean.outcome == 'failure'
+        shell: bash
+        run: sleep 30
+      - name: Retry Lean toolchain install
+        if: steps.lean.outcome == 'failure'
+        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
         with:
           auto-config: false
           use-github-cache: false
@@ -135,9 +150,23 @@ jobs:
           global-json-file: global.json
 
       - name: Install Lean toolchain
+        id: lean
+        # The toolchain download fails transiently; retry once after a pause.
+        continue-on-error: true
         uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
         with:
           # scripts/Test.cs handles building and testing.
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Wait before retrying the Lean toolchain install
+        if: steps.lean.outcome == 'failure'
+        shell: bash
+        run: sleep 30
+      - name: Retry Lean toolchain install
+        if: steps.lean.outcome == 'failure'
+        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
           auto-config: false
           use-github-cache: false
           use-mathlib-cache: false

@@ -99,7 +99,8 @@ var previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY"
 string[][] NewReplayCommands(HashSet<string> previous) => Directory.EnumerateFiles(testTrace, "*.jsonl")
     .Where(path => !previous.Contains(path)).SelectMany(File.ReadLines)
     .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
-    .Where(item => item.GetProperty("stage").GetString() == "Kernel replay of consumer proof and dependencies")
+    .Where(item => item.GetProperty("stage").GetString() is "Kernel replay of consumer proof and dependencies"
+        or "Joint kernel replay of consumer proof and dependencies")
     .Select(item => File.ReadLines(Path.Combine(testTrace, item.GetProperty("transcript").GetString()!))
         .Where(line => line.StartsWith('{')).Select(line => JsonSerializer.Deserialize<JsonElement>(line)
             .GetProperty("module").GetString()!).ToArray()).ToArray();
