@@ -440,6 +440,13 @@ unsafe def main (args : List String) : IO Unit := do
     bool ExternalConsumerModule(string name) => name == "CIL" || name.StartsWith("CIL.", StringComparison.Ordinal) ||
         File.Exists(Path.Combine(Toolchain, "lib/lean", name.Replace('.', '/') + ".olean"));
 
+    // Binds extraction-dependent support to the generated program text, not to the assembly bytes.
+    // Restored dependents only skip rebuilding: they are always replayed against the fresh Extracted.
+    const string ExtractedSourceKey = "<generated>/Extracted.lean";
+
+    static IReadOnlyDictionary<string, string> WithExtraction(IReadOnlyDictionary<string, string> sources, string extracted) =>
+        sources.Append(new(ExtractedSourceKey, extracted)).ToDictionary(StringComparer.Ordinal);
+
     // Keep only modules whose candidate sources are unchanged and whose imports are
     // kept, certified framework modules or toolchain modules.
     HashSet<string> RestorableConsumerSupport(SortedDictionary<string, ConsumerSupportModule> record, IReadOnlyDictionary<string, string> sources)
@@ -452,7 +459,8 @@ unsafe def main (args : List String) : IO Unit := do
         {
             changed = false;
             foreach (var name in result.ToArray())
-                if (record[name].Imports.Any(import => !result.Contains(import) && !ExternalConsumerModule(import)))
+                if (record[name].Imports.Any(import => !result.Contains(import) && !ExternalConsumerModule(import) &&
+                    !(import == "Extracted" && record[name].Sources.ContainsKey(ExtractedSourceKey))))
                     changed |= result.Remove(name);
         } while (changed);
         return result;
@@ -475,8 +483,12 @@ unsafe def main (args : List String) : IO Unit := do
 
     // Restores the largest unchanged, import-closed module set of one authenticated
     // generation. Lake still decides reuse; a rebuilt restored module forces full replay.
-    SortedDictionary<string, string> RestoreConsumerSupport(string key, IReadOnlyDictionary<string, string> sources, string destination)
+    // dependent selects extraction-dependent modules (true), the others (false) or both (null).
+    SortedDictionary<string, string> RestoreConsumerSupport(string key, IReadOnlyDictionary<string, string> sources, string destination,
+        bool? dependent = null)
     {
+        bool Selected(SortedDictionary<string, ConsumerSupportModule> record, string module) =>
+            dependent is not bool wanted || record[module].Sources.ContainsKey(ExtractedSourceKey) == wanted;
         if (!UseSuccessCache || !Directory.Exists(SuccessCacheRoot)) return new(StringComparer.Ordinal);
         var candidates = new List<(string Name, int Count, DateTime Time)>();
         foreach (var generation in Directory.EnumerateDirectories(SuccessCacheRoot, key + "-*"))
@@ -486,7 +498,7 @@ unsafe def main (args : List String) : IO Unit := do
             if (name.Contains('.')) continue;
             // Unauthenticated preselection only; the chosen generation is authenticated below.
             var record = ReadConsumerSupportRecord(Path.Combine(generation, "files", ConsumerSupportRecordName));
-            var count = record is null ? 0 : RestorableConsumerSupport(record, sources).Count;
+            var count = record is null ? 0 : RestorableConsumerSupport(record, sources).Count(module => Selected(record, module));
             if (count > 0) candidates.Add((name, count, Directory.GetLastWriteTimeUtc(generation)));
         }
         foreach (var (name, _, _) in candidates.OrderByDescending(item => item.Count).ThenByDescending(item => item.Time))
@@ -499,7 +511,8 @@ unsafe def main (args : List String) : IO Unit := do
                 if (!RestoreSuccess(name, staging)) continue;
                 var record = ReadConsumerSupportRecord(Path.Combine(staging, ConsumerSupportRecordName));
                 if (record is null) continue;
-                var files = RestorableConsumerSupport(record, sources).SelectMany(module => record[module].Files)
+                var files = RestorableConsumerSupport(record, sources).Where(module => Selected(record, module))
+                    .SelectMany(module => record[module].Files)
                     .Select(file => (Source: Within(staging, file), Target: Within(destination, file))).ToArray();
                 if (files.Any(file => !File.Exists(file.Source))) continue;
                 foreach (var (source, target) in files)
@@ -515,10 +528,11 @@ unsafe def main (args : List String) : IO Unit := do
         return new(StringComparer.Ordinal);
     }
 
-    // Collects certified, extraction-independent modules with their sources and
-    // imports. Returns null when no module can be bound to its sources.
+    // Collects certified modules except the extraction, its audit, proofs and their importers, with
+    // their sources and imports; extraction-dependent ones also bind the generated program text.
+    // Returns null when no module can be bound to its sources.
     string? CollectConsumerSupport(string session, Dictionary<string, string> modules, Dictionary<string, string[]> graph,
-        HashSet<string> dependent, IReadOnlyDictionary<string, string> sources)
+        HashSet<string> excluded, HashSet<string> extractionDependent, IReadOnlyDictionary<string, string> sources)
     {
         var generatedArtifacts = Directory.EnumerateFiles(session, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(session, path).Replace('\\', '/'))
@@ -526,7 +540,7 @@ unsafe def main (args : List String) : IO Unit := do
                 new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }.Any(suffix => relative.EndsWith(suffix, StringComparison.Ordinal)))
             .ToArray();
         var record = new SortedDictionary<string, ConsumerSupportModule>(StringComparer.Ordinal);
-        foreach (var (name, path) in modules.Where(pair => !dependent.Contains(pair.Key) &&
+        foreach (var (name, path) in modules.Where(pair => !excluded.Contains(pair.Key) &&
             pair.Key != "CIL" && !pair.Key.StartsWith("CIL.", StringComparison.Ordinal)))
         {
             var files = new SortedSet<string>(StringComparer.Ordinal);
@@ -548,9 +562,10 @@ unsafe def main (args : List String) : IO Unit := do
                 if (new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }
                     .Any(suffix => artifact.EndsWith("/" + modulePath + suffix, StringComparison.Ordinal)))
                     files.Add(artifact);
-            var candidates = sources.Where(pair => pair.Key[..^".lean".Length] == modulePath ||
-                pair.Key[..^".lean".Length].EndsWith("/" + modulePath, StringComparison.Ordinal));
-            record[name] = new(new(candidates.ToDictionary(), StringComparer.Ordinal),
+            var candidates = sources.Where(pair => pair.Key != ExtractedSourceKey && (pair.Key[..^".lean".Length] == modulePath ||
+                pair.Key[..^".lean".Length].EndsWith("/" + modulePath, StringComparison.Ordinal))).ToDictionary();
+            if (extractionDependent.Contains(name) && candidates.Count > 0) candidates[ExtractedSourceKey] = sources[ExtractedSourceKey];
+            record[name] = new(new(candidates, StringComparer.Ordinal),
                 graph[name].Order(StringComparer.Ordinal).ToArray(), files.ToArray());
         }
         // A module without known sources cannot be matched later, nor can its importers.
@@ -840,6 +855,7 @@ unsafe def main (args : List String) : IO Unit := do
 
         void VerifyGroup(int[] members, string session, bool first, bool share)
         {
+            var bound = WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean")));
             var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
             var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, outputs[members[0]],
                 members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray());
@@ -860,7 +876,8 @@ unsafe def main (args : List String) : IO Unit := do
                 supportKey = ConsumerCacheKey("support", new(snapshot.Where(pair => pair.Key.StartsWith("revision:", StringComparison.Ordinal))
                         .ToDictionary(), StringComparer.Ordinal),
                     string.Join("\n", relativeImportDirectories) + "\n" + string.Join("\n", configuration));
-                supportArtifacts = RestoreConsumerSupport(supportKey, sources, support);
+                // Workspaces differ in Extracted, so only extraction-independent support is shared.
+                supportArtifacts = RestoreConsumerSupport(supportKey, bound, support, dependent: false);
             }
             var restoredArtifacts = new SortedDictionary<string, string>(supportArtifacts.Where(pair => pair.Key != ConsumerSupportRecordName)
                 .ToDictionary(), StringComparer.Ordinal);
@@ -871,6 +888,24 @@ unsafe def main (args : List String) : IO Unit := do
                 File.Copy(Within(support, file), target, true);
             }
             if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
+            // Not part of restoredArtifacts: these are rebuilt only if stale and always replayed.
+            if (supportKey.Length > 0)
+            {
+                var own = Path.Combine(Path.GetTempPath(), "leancil-consumer-dependent-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(own);
+                try
+                {
+                    var dependentFiles = RestoreConsumerSupport(supportKey, bound, own, dependent: true);
+                    foreach (var file in dependentFiles.Keys)
+                    {
+                        var target = Within(session, file);
+                        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                        File.Copy(Within(own, file), target, true);
+                    }
+                    if (dependentFiles.Count > 0) CacheProgress("certified extraction-dependent consumer modules");
+                }
+                finally { Directory.Delete(own, true); }
+            }
             // Snapshot before invoking Lake: configuration elaboration and imported
             // metaprograms must not redefine the source bytes accepted by this run.
             Stage(members, "extraction certificate audit");
@@ -972,8 +1007,12 @@ unsafe def main (args : List String) : IO Unit := do
             var checkedArtifacts = JsonSerializer.Serialize(currentArtifacts.OrderBy(pair => pair.Key, StringComparer.Ordinal)
                 .ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)));
             var portableSupport = ImportedConsumerSupport(session, root, before[proceeding[0]], currentArtifacts);
-            var graph = members.Length > 1 || share || UseSuccessCache || exporting ? ConsumerModuleImports(session, currentArtifacts) : null;
+            var graph = members.Length > 1 || share || UseSuccessCache || exporting || restoredArtifacts.Count > 0
+                ? ConsumerModuleImports(session, currentArtifacts) : null;
+            // Cached support was checked against another Extracted, so its importers are always replayed.
+            var extractionDependent = graph is null ? new HashSet<string>(StringComparer.Ordinal) : DependentModules(graph, ["Extracted"]);
             var failures = ReplayConsumerModules(session, discovered.Where(module => !baseUnchanged ||
+                extractionDependent.Contains(module.Name) ||
                 (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name), leanPath);
             foreach (var i in proceeding)
             {
@@ -1032,7 +1071,9 @@ unsafe def main (args : List String) : IO Unit := do
                         currentArtifacts.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph);
                 if (UseSuccessCache || share)
                 {
-                    var collected = CollectConsumerSupport(session, currentArtifacts, graph, dependent, sources);
+                    var excluded = DependentModules(graph, ["ExtractionAudit", .. names]);
+                    excluded.Add("Extracted");
+                    var collected = CollectConsumerSupport(session, currentArtifacts, graph, excluded, extractionDependent, bound);
                     if (collected is not null)
                     {
                         try
@@ -1043,6 +1084,11 @@ unsafe def main (args : List String) : IO Unit := do
                             {
                                 Directory.Delete(support, true);
                                 Directory.Move(collected, support);
+                                // Later workspaces restore their own extraction-dependent modules.
+                                var record = ReadConsumerSupportRecord(Path.Combine(support, ConsumerSupportRecordName));
+                                foreach (var file in record?.Values.Where(module => module.Sources.ContainsKey(ExtractedSourceKey))
+                                    .SelectMany(module => module.Files) ?? [])
+                                    File.Delete(Within(support, file));
                                 supportArtifacts = CacheFiles(support);
                             }
                         }

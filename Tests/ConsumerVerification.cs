@@ -152,6 +152,64 @@ finally
 }
 Console.WriteLine("PASS cached module-system support is restored without a rebuild");
 
+// Extracted.lean names no assembly bytes, so an assembly change outside the extracted program
+// restores extraction-dependent modules instead of rebuilding them. They are still replayed
+// against the fresh Extracted, and the certificate binds the new assembly.
+string[] NewBuildTranscripts(HashSet<string> previous) => Directory.EnumerateFiles(testTrace, "*.jsonl")
+    .Where(path => !previous.Contains(path)).SelectMany(File.ReadLines)
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+    .Where(item => item.GetProperty("stage").GetString() == "Building fresh consumer proof and dependencies")
+    .Select(item => File.ReadAllText(Path.Combine(testTrace, item.GetProperty("transcript").GetString()!))).ToArray();
+var examples = At("Examples/Assembly/bin/Examples.dll");
+var patchedDirectory = At("artifacts/ConsumerPatched-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Directory.CreateDirectory(patchedDirectory);
+    var patched = Path.Combine(patchedDirectory, "Examples.dll");
+    var bytes = File.ReadAllBytes(examples);
+    Guid mvid;
+    using (var pe = new System.Reflection.PortableExecutable.PEReader(new MemoryStream(bytes)))
+    {
+        var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+        mvid = metadata.GetGuid(metadata.GetModuleDefinition().Mvid);
+    }
+    var mvidBytes = mvid.ToByteArray();
+    var offsets = Enumerable.Range(0, bytes.Length - mvidBytes.Length + 1)
+        .Where(offset => bytes.AsSpan(offset, mvidBytes.Length).SequenceEqual(mvidBytes)).ToArray();
+    if (offsets.Length != 1) throw new InvalidOperationException("Expected one module version identifier in the example assembly.");
+    bytes[offsets[0]] ^= 0xff;
+    File.WriteAllBytes(patched, bytes);
+    if (Sha(patched) == Sha(examples)) throw new InvalidOperationException("Patched assembly is unchanged.");
+    var generated = Sha(Path.Combine(output, "Extracted.lean"));
+    Run([.. cli, "extract", patched, "Arithmetic::Add(ulong,ulong)", output]);
+    if (Sha(Path.Combine(output, "Extracted.lean")) != generated)
+        throw new InvalidOperationException("Extracted.lean depends on assembly bytes outside the extracted program.");
+    var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    var builds = NewBuildTranscripts(previous);
+    var replay = NewReplayCommands(previous);
+    var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+    if (builds.Length != 1 || builds[0].Contains("Built Client.Shared") ||
+        !replay.Any(command => command.Contains("Client.Shared") && command.Contains("Extracted")) ||
+        report.GetProperty("assemblySha256").GetString() != Sha(patched))
+        throw new InvalidOperationException("Identical extraction from a changed assembly did not reuse and replay its dependent module.");
+    Console.WriteLine("PASS identical extraction restores dependent modules, replays them and certifies the new assembly");
+
+    // A different extracted program must rebuild the modules that import it.
+    Run([.. cli, "extract", examples, "SelectorExamples.Two.Collision::Add(ulong,ulong)", output]);
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    builds = NewBuildTranscripts(previous);
+    if (builds.Length != 1 || !builds[0].Contains("Built Client.Shared"))
+        throw new InvalidOperationException("A changed extraction reused a module built against another program.");
+    Console.WriteLine("PASS changed extraction rebuilds dependent modules");
+}
+finally
+{
+    Run([.. cli, "extract", examples, "Arithmetic::Add(ulong,ulong)", output]);
+    Directory.Delete(patchedDirectory, true);
+}
+
 // Support reuse is keyed by what Lean and Lake read, not by unrelated process
 // state or by consumer files outside the support modules' sources.
 string[] SupportGenerations() => Directory.EnumerateDirectories(SuccessCacheRoot)

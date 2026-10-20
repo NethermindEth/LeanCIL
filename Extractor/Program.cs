@@ -123,7 +123,7 @@ internal static class Program
             }
             stage = "metadata and CIL validation";
             using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly));
-            string source = LeanEmitter.Emit(methods, profile, Hash(assembly), originalModule);
+            string source = LeanEmitter.Emit(methods, profile, originalModule);
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
