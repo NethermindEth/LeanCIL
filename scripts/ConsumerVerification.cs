@@ -660,8 +660,9 @@ unsafe def main (args : List String) : IO Unit := do
     // Verifies requests against one consumer snapshot. Each request gets its own
     // certificate, proof module, theorem audit and failure; requests that share an
     // extraction share one Lake workspace, build and kernel replay.
+    // `finished` reports each request once its outcome is final, possibly from parallel workspaces.
     ConsumerOutcome[] VerifyConsumerRequests(string root, IReadOnlyList<ConsumerRequest> requests,
-        Action<int, string>? stage, bool batch, int parallelism = 1)
+        Action<int, string>? stage, bool batch, int parallelism = 1, Action<int, ConsumerOutcome>? finished = null)
     {
         root = Path.GetFullPath(root);
         var outcomes = requests.Select(_ => new ConsumerOutcome()).ToArray();
@@ -812,6 +813,7 @@ unsafe def main (args : List String) : IO Unit := do
                 outcomes[i].Report = report;
                 CacheProgress("certified consumer proof: " + requests[i].Theorem);
             }
+            foreach (var i in cached.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
         }
 
         var groups = new Dictionary<string, List<int>>(StringComparer.Ordinal);
@@ -1072,6 +1074,7 @@ unsafe def main (args : List String) : IO Unit := do
             try { VerifyGroup(members, session, first, share); }
             catch (Exception error) { Fail(members, error); }
             finally { Directory.Delete(session, true); }
+            foreach (var i in members.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
         }
 
         try
