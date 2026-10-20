@@ -148,102 +148,15 @@ unsafe def main (args : List String) : IO Unit := do
     }
 
 
-    string LeanExecutable => Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
-
-    // Pin the sysroot that `lake env` would supply, so direct Lean runs use the trusted toolchain.
-    IReadOnlyDictionary<string, string> LeanEnvironment => new Dictionary<string, string> { ["LEAN_SYSROOT"] = Toolchain };
-
-    // Per-module replay re-imports each module's dependencies; one shared import of
-    // everything outside the targets makes large sets several times cheaper.
-    // No target constant may preexist, since Replay skips matching theorems unchecked.
-    const string JointReplaySource = """
-import LeanChecker
-unsafe def readConsumerParts (module : Lean.Name) : IO (Lean.ModuleData × Lean.ModuleData) := do
-  let mFile ← Lean.findOLean module
-  unless (← mFile.pathExists) do
-    throw <| IO.userError s!"object file '{mFile}' of module {module} does not exist"
-  let mut fnames := #[mFile]
-  let sFile := Lean.OLeanLevel.server.adjustFileName mFile
-  if (← sFile.pathExists) then
-    fnames := fnames.push sFile
-    let pFile := Lean.OLeanLevel.private.adjustFileName mFile
-    if (← pFile.pathExists) then
-      fnames := fnames.push pFile
-  let parts ← Lean.readModuleDataParts fnames
-  if h : parts.size = 0 then throw <| IO.userError "failed to read module data" else
-  return (parts[0].1, parts[parts.size-1].1)
-unsafe def replayConsumerModulesJointly (args : List String) : IO Unit := do
-  Lean.initSearchPath (← Lean.findSysroot)
-  let started ← IO.monoMsNow
-  let names := args.map String.toName
-  let targets : Lean.NameSet := names.foldl (·.insert ·) {}
-  let mut imports : Std.HashMap Lean.Name Lean.Import := {}
-  let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
-  for module in names do
-    let (exported, complete) ← readConsumerParts module
-    for i in exported.imports do
-      unless targets.contains i.module do
-        imports := imports.insert i.module <| match imports[i.module]? with
-          | some j => { j with importAll := j.importAll || i.importAll, isExported := j.isExported || i.isExported, isMeta := j.isMeta || i.isMeta }
-          | none => i
-    -- The most private part subsumes the others.
-    for name in complete.constNames, ci in complete.constants do
-      if constants.contains name then
-        throw <| IO.userError s!"Constant {name} is declared by more than one replay target"
-      constants := constants.insert name ci
-  let external := imports.toArray.map (·.2) |>.qsort (·.module.toString < ·.module.toString)
-  let (_, s) ← Lean.importModulesCore external |>.run
-  let env ← Lean.finalizeImport s external {} 0 false false (isModule := true)
-  for (name, _) in constants do
-    if env.contains name then
-      throw <| IO.userError s!"Replay target constant {name} is already imported"
-  discard <| env.toKernelEnv.replay constants
-  env.freeRegions
-  let elapsed := (← IO.monoMsNow) - started
-  for name in args do
-    IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("joint", Lean.toJson true), ("milliseconds", Lean.toJson elapsed)]).compress
-""";
-
     // Every requested module is reported as replayed or rejected; a checker process failure throws.
     Dictionary<string, string> ReplayConsumerModules(string session, IEnumerable<string> modules, string leanPath)
     {
         var targets = modules.ToArray();
         var profile = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") == "true";
         // A rejected or ineligible joint replay falls through to per-module replay, which attributes failures.
-        if (!profile && targets.Length > 1 && ReplayConsumerModulesJointly(session, targets, leanPath)) return [];
+        if (!profile && targets.Length > 1 &&
+            ReplayModulesJointly(session, targets, leanPath, "Joint kernel replay of consumer proof and dependencies")) return [];
         return ReplayConsumerModulesSeparately(session, targets, leanPath, profile);
-    }
-
-    bool ReplayConsumerModulesJointly(string session, string[] targets, string leanPath)
-    {
-        var runner = Path.Combine(Path.GetTempPath(), "leancil-joint-replay-" + Guid.NewGuid().ToString("N") + ".lean");
-        var targetsPath = Path.ChangeExtension(runner, ".json");
-        try
-        {
-            File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
-            File.WriteAllText(runner, JointReplaySource + "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
-                string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
-                "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayConsumerModulesJointly args\n");
-            var result = Execute([LeanExecutable, runner], session, leanPath,
-                progress: "Joint kernel replay of consumer proof and dependencies", environment: LeanEnvironment);
-            if (result.Code != 0) return false;
-            var replayed = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (!line.StartsWith('{')) continue;
-                try
-                {
-                    var record = JsonSerializer.Deserialize<JsonElement>(line);
-                    if (record.ValueKind == JsonValueKind.Object && record.TryGetProperty("joint", out var joint) &&
-                        joint.ValueKind == JsonValueKind.True && record.TryGetProperty("module", out var module) &&
-                        module.ValueKind == JsonValueKind.String)
-                        replayed.Add(module.GetString()!);
-                }
-                catch (JsonException) { }
-            }
-            return replayed.SetEquals(targets);
-        }
-        finally { File.Delete(runner); File.Delete(targetsPath); }
     }
 
     Dictionary<string, string> ReplayConsumerModulesSeparately(string session, string[] targets, string leanPath, bool profile)

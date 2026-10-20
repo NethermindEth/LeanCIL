@@ -137,6 +137,104 @@ partial class Program : IDisposable
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
 
+    string LeanExecutable => Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
+
+    // Pin the sysroot that `lake env` would supply, so direct Lean runs use the trusted toolchain.
+    IReadOnlyDictionary<string, string> LeanEnvironment => new Dictionary<string, string> { ["LEAN_SYSROOT"] = Toolchain };
+
+    // Per-module replay re-imports each module's dependencies; one shared import of
+    // everything outside the targets makes large sets several times cheaper.
+    // No target constant may preexist, since Replay skips matching theorems unchecked.
+    const string JointReplaySource = """
+import LeanChecker
+unsafe def readReplayParts (module : Lean.Name) : IO (Lean.ModuleData × Lean.ModuleData) := do
+  let mFile ← Lean.findOLean module
+  unless (← mFile.pathExists) do
+    throw <| IO.userError s!"object file '{mFile}' of module {module} does not exist"
+  let mut fnames := #[mFile]
+  let sFile := Lean.OLeanLevel.server.adjustFileName mFile
+  if (← sFile.pathExists) then
+    fnames := fnames.push sFile
+    let pFile := Lean.OLeanLevel.private.adjustFileName mFile
+    if (← pFile.pathExists) then
+      fnames := fnames.push pFile
+  let parts ← Lean.readModuleDataParts fnames
+  if h : parts.size = 0 then throw <| IO.userError "failed to read module data" else
+  return (parts[0].1, parts[parts.size-1].1)
+-- The duplicate rule of `finalizeImport` and `Replay`: on-demand equation lemmas recur across modules.
+def sameReplayTheorem : Lean.ConstantInfo → Lean.ConstantInfo → Bool
+  | .thmInfo a, .thmInfo b => a.name == b.name && a.type == b.type && a.levelParams == b.levelParams && a.all == b.all
+  | _, _ => false
+unsafe def replayModulesJointly (args : List String) : IO Unit := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  let started ← IO.monoMsNow
+  let names := args.map String.toName
+  let targets : Lean.NameSet := names.foldl (·.insert ·) {}
+  let mut imports : Std.HashMap Lean.Name Lean.Import := {}
+  let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
+  for module in names do
+    let (exported, complete) ← readReplayParts module
+    for i in exported.imports do
+      unless targets.contains i.module do
+        imports := imports.insert i.module <| match imports[i.module]? with
+          | some j => { j with importAll := j.importAll || i.importAll, isExported := j.isExported || i.isExported, isMeta := j.isMeta || i.isMeta }
+          | none => i
+    -- The most private part subsumes the others.
+    for name in complete.constNames, ci in complete.constants do
+      match constants[name]? with
+      | some prior =>
+        unless sameReplayTheorem prior ci do
+          throw <| IO.userError s!"Constant {name} is declared by more than one replay target"
+      | none => constants := constants.insert name ci
+  let external := imports.toArray.map (·.2) |>.qsort (·.module.toString < ·.module.toString)
+  let (_, s) ← Lean.importModulesCore external |>.run
+  let env ← Lean.finalizeImport s external {} 0 false false (isModule := true)
+  let imported := env.allImportedModuleNames
+  for (name, ci) in constants do
+    if let some prior := env.find? name then
+      -- Only an identical theorem from an untargeted module may be skipped, as per-module replay would.
+      let owner := (env.getModuleIdxFor? name).bind (imported[·.toNat]?)
+      unless owner.any (!targets.contains ·) && sameReplayTheorem prior ci do
+        throw <| IO.userError s!"Replay target constant {name} is already imported"
+  discard <| env.toKernelEnv.replay constants
+  env.freeRegions
+  let elapsed := (← IO.monoMsNow) - started
+  for name in args do
+    IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("joint", Lean.toJson true), ("milliseconds", Lean.toJson elapsed)]).compress
+""";
+
+    // False when the set is ineligible or any declaration is rejected; callers then replay per module.
+    bool ReplayModulesJointly(string cwd, string[] targets, string leanPath, string progress)
+    {
+        var runner = Path.Combine(Path.GetTempPath(), "leancil-joint-replay-" + Guid.NewGuid().ToString("N") + ".lean");
+        var targetsPath = Path.ChangeExtension(runner, ".json");
+        try
+        {
+            File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
+            File.WriteAllText(runner, JointReplaySource + "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
+                string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
+                "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayModulesJointly args\n");
+            var result = Execute([LeanExecutable, runner], cwd, leanPath, progress: progress, environment: LeanEnvironment);
+            if (result.Code != 0) return false;
+            var replayed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!line.StartsWith('{')) continue;
+                try
+                {
+                    var record = JsonSerializer.Deserialize<JsonElement>(line);
+                    if (record.ValueKind == JsonValueKind.Object && record.TryGetProperty("joint", out var joint) &&
+                        joint.ValueKind == JsonValueKind.True && record.TryGetProperty("module", out var module) &&
+                        module.ValueKind == JsonValueKind.String)
+                        replayed.Add(module.GetString()!);
+                }
+                catch (JsonException) { }
+            }
+            return replayed.SetEquals(targets);
+        }
+        finally { File.Delete(runner); File.Delete(targetsPath); }
+    }
+
     static SortedDictionary<string, string> ModuleArtifacts(string session) =>
         new(Directory.EnumerateFiles(Path.Combine(session, ".lake/build/lib/lean"), "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
@@ -480,8 +578,11 @@ partial class Program : IDisposable
                 }
                 Run(["lake", "build", "CIL"], library, streamOutput: true, progress: "Building fresh Lean verification library");
                 var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
-                Run([checker, "CIL"], library, Path.Combine(library, ".lake/build/lib/lean"), streamOutput: true,
-                    progress: "Kernel replay of fresh Lean verification library");
+                var compiledLibrary = Path.Combine(library, ".lake/build/lib/lean");
+                if (!ReplayModulesJointly(library, [.. ModuleArtifacts(library).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
+                    compiledLibrary, "Joint kernel replay of fresh Lean verification library"))
+                    Run([checker, "CIL"], library, compiledLibrary, streamOutput: true,
+                        progress: "Kernel replay of fresh Lean verification library");
                 libraryBuild = "fresh";
                 if (!fresh)
                 {

@@ -31,18 +31,36 @@ Compile("JointForged", """
     })
     """);
 
-if (!verification.ReplayConsumerModulesJointly(root, ["JointA", "JointB", "JointC"], root))
+// JointE1 and JointE2 each store their own on-demand JointD.f equation lemmas.
+Compile("JointD", "def JointD.f : Nat -> Nat\n  | 0 => 1\n  | n + 1 => n\n");
+Compile("JointE1", "import JointD\ntheorem JointE1.use (n : Nat) : JointD.f (n + 1) = n := JointD.f.eq_2 n\n");
+Compile("JointE2", "import JointD\ntheorem JointE2.use (n : Nat) : JointD.f (n + 1) = n := JointD.f.eq_2 n\n");
+// Unrelated modules declaring one name with different statements.
+Compile("JointClash1", "theorem JointClash.same : True := trivial\n");
+Compile("JointClash2", "theorem JointClash.same : 1 = 1 := rfl\n");
+
+if (!verification.ReplayModulesJointly(root, ["JointA", "JointB", "JointC"], root, "Joint replay check"))
     throw new InvalidOperationException("Import-closed targets did not replay jointly");
 Console.WriteLine("PASS import-closed targets replay jointly");
 
+if (!verification.ReplayModulesJointly(root, ["JointD", "JointE1", "JointE2"], root, "Joint replay check"))
+    throw new InvalidOperationException("Identical on-demand equation lemmas blocked joint replay");
+Console.WriteLine("PASS identical on-demand equation lemmas in several targets replay jointly");
+
+if (verification.ReplayModulesJointly(root, ["JointClash1", "JointClash2"], root, "Joint replay check"))
+    throw new InvalidOperationException("Joint replay merged one name with different statements");
+if (verification.ReplayConsumerModules(root, ["JointClash1", "JointClash2"], root).Count != 0)
+    throw new InvalidOperationException("Per-module fallback rejected valid modules");
+Console.WriteLine("PASS one name with different statements falls back to per-module replay");
+
 // JointA arrives through the untargeted JointB, so its theorems would be skipped as duplicates.
-if (verification.ReplayConsumerModulesJointly(root, ["JointA", "JointC"], root))
+if (verification.ReplayModulesJointly(root, ["JointA", "JointC"], root, "Joint replay check"))
     throw new InvalidOperationException("Joint replay accepted a target loaded through an untargeted import");
 if (verification.ReplayConsumerModules(root, ["JointA", "JointC"], root).Count != 0)
     throw new InvalidOperationException("Per-module fallback rejected valid modules");
 Console.WriteLine("PASS target loaded through an untargeted import falls back to per-module replay");
 
-if (verification.ReplayConsumerModulesJointly(root, ["JointA", "JointForged"], root))
+if (verification.ReplayModulesJointly(root, ["JointA", "JointForged"], root, "Joint replay check"))
     throw new InvalidOperationException("Joint replay accepted a forged declaration");
 var failures = verification.ReplayConsumerModules(root, ["JointA", "JointForged"], root);
 if (failures.Keys.SingleOrDefault() != "JointForged" || !failures["JointForged"].Contains("while replaying declaration"))
