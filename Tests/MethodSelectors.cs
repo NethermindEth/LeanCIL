@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
 
 using System.Text.Json;
@@ -165,6 +166,37 @@ var unsupported = Execute(Extract("extract", assembly, null, "Arithmetic::Unsupp
 if (unsupported.Code != 1 || !unsupported.Stderr.Contains("Stage: metadata and CIL validation") ||
     !unsupported.Stderr.Contains("Next:") || !unsupported.Stderr.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Missing actionable unsupported-CIL diagnostic: " + unsupported.Output);
+
+// A call-site rejection must name the callee, caller and IL offset, and must not blame the selector.
+string CallOffset(string input, string caller, string callee)
+{
+    using var module = Mono.Cecil.ModuleDefinition.ReadModule(input);
+    var method = module.GetType("Examples.Arithmetic").Methods.Single(m => m.FullName == caller);
+    var call = method.Body.Instructions.First(i => i.OpCode.Code == Mono.Cecil.Cil.Code.Call &&
+        ((Mono.Cecil.MethodReference)i.Operand).FullName == callee);
+    return $"IL_{call.Offset:x4}";
+}
+
+void RejectedCall(string input, string selector, string caller, string callee, string[] markers)
+{
+    File.Delete(Path.Combine(output, "Extracted.lean"));
+    var result = Execute(Extract("extract", input, identity, selector, output));
+    var site = $"{callee}\n  Caller: {caller} at {CallOffset(input, caller, callee)}";
+    if (result.Code != 1 || !result.Stderr.Contains("Stage: metadata and CIL validation") ||
+        !result.Stderr.Contains(site) || markers.Any(marker => !result.Stderr.Contains(marker)) ||
+        result.Stderr.Contains("leancil list") || !result.Stderr.Contains("Next: Reachable calls must") ||
+        File.Exists(Path.Combine(output, "Extracted.lean")))
+        throw new InvalidOperationException("Missing call-site diagnostic: " + result.Output);
+    checks++;
+}
+
+RejectedCall(assembly, "Arithmetic::TypeCheck(ulong)", "System.UInt64 Examples.Arithmetic::TypeCheck(System.UInt64)",
+    "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)",
+    ["External managed dependency: ", "Callee assembly: System.Private.CoreLib"]);
+var instanceCall = At("artifacts/Selectors/instance-call.dll");
+Run(["dotnet", "run", "--file", "Tests/MetadataMutator.cs", "--", assembly, instanceCall, "instance-call"]);
+RejectedCall(instanceCall, "Arithmetic::Add(ulong,ulong)", canonical,
+    "System.UInt64 Examples.Arithmetic::Increment(System.UInt64)", ["Unresolved call: ", "Callee scope: Examples"]);
 
 var missingProof = Execute([inferred[0], inferred[1], "verify", output, "--proof", At("artifacts/missing-proof.lean")]);
 if (missingProof.Code != 1 || missingProof.Stdout.Length != 0 || !missingProof.Stderr.Contains("Stage: proof selection") ||

@@ -39,10 +39,10 @@ internal static class MethodSelector
             {
                 if (!delimiters.TryPop(out var opening) ||
                     (character == '>' ? opening != '<' : opening != '['))
-                    throw new ArgumentException("Malformed method selector: unbalanced parameter type");
+                    throw Rejections.Tag(Rejection.Selector, new ArgumentException("Malformed method selector: unbalanced parameter type"));
             }
             else if (character is '(' or ')')
-                throw new ArgumentException("Malformed method selector: unexpected parenthesis");
+                throw Rejections.Tag(Rejection.Selector, new ArgumentException("Malformed method selector: unexpected parenthesis"));
             else if (character == ',' && delimiters.Count == 0)
             {
                 parts.Add(text[start..i]);
@@ -52,7 +52,7 @@ internal static class MethodSelector
 
         parts.Add(text[start..]);
         if (delimiters.Count != 0 || parts.Any(string.IsNullOrWhiteSpace))
-            throw new ArgumentException("Malformed method selector: invalid parameter list");
+            throw Rejections.Tag(Rejection.Selector, new ArgumentException("Malformed method selector: invalid parameter list"));
 
         return parts.Select(NormalizeType).ToArray();
     }
@@ -62,7 +62,7 @@ internal static class MethodSelector
         var syntax = Regex.Match(selector.Trim(),
             @"\A(?:(?<return>.+)\s+)?(?<type>[^\s:]+)\s*::\s*(?<method>[^\s():]+)\s*\((?<parameters>.*)\)\z");
         if (!syntax.Success)
-            throw new ArgumentException("Malformed method selector. Use [return-type ]Type::Method(parameter-types)");
+            throw Rejections.Tag(Rejection.Selector, new ArgumentException("Malformed method selector. Use [return-type ]Type::Method(parameter-types)"));
 
         var declaringType = syntax.Groups["type"].Value;
         var methodName = syntax.Groups["method"].Value;
@@ -82,9 +82,9 @@ internal static class MethodSelector
         return matches.Length switch
         {
             1 => matches[0],
-            0 => throw new InvalidDataException($"No method matches selector '{selector}'"),
-            _ => throw new InvalidDataException($"Ambiguous method selector '{selector}'. Candidates:\n" +
-                string.Join("\n", matches.Select(method => "  " + method.FullName).Order(StringComparer.Ordinal)))
+            0 => throw Rejections.Tag(Rejection.Selector, new InvalidDataException($"No method matches selector '{selector}'")),
+            _ => throw Rejections.Tag(Rejection.Selector, new InvalidDataException($"Ambiguous method selector '{selector}'. Candidates:\n" +
+                string.Join("\n", matches.Select(method => "  " + method.FullName).Order(StringComparer.Ordinal))))
         };
     }
 }

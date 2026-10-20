@@ -79,6 +79,18 @@ switch (args[2])
         add.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
         break;
 
+    case "instance-call":
+        // Cecil does not resolve an instance reference to a static same-assembly method.
+        var increment = owner.Methods.Single(m => m.Name == "Increment");
+        var instance = new MethodReference(increment.Name, increment.ReturnType, owner) { HasThis = true };
+        instance.Parameters.Add(new ParameterDefinition(module.TypeSystem.UInt64));
+        add.Body.Instructions.Clear();
+        add.Body.Instructions.Add(Instruction.Create(OpCodes.Ldarg_0));
+        add.Body.Instructions.Add(Instruction.Create(OpCodes.Ldarg_1));
+        add.Body.Instructions.Add(Instruction.Create(OpCodes.Call, instance));
+        add.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        break;
+
     default:
         throw new ArgumentException("Unknown mutation");
 }

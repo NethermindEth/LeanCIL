@@ -5,6 +5,22 @@ internal sealed class CliFailure(string stage, Exception cause) : Exception(caus
     internal string Stage { get; } = stage;
 }
 
+internal enum Rejection { Selector, Call }
+
+// Classifies a validation failure so the CLI can suggest a fix that matches its cause.
+internal static class Rejections
+{
+    const string Key = "Nethermind.LeanCIL.Rejection";
+
+    internal static T Tag<T>(Rejection kind, T error) where T : Exception
+    {
+        error.Data[Key] = kind;
+        return error;
+    }
+
+    internal static Rejection? Of(Exception error) => error.Data[Key] as Rejection?;
+}
+
 internal static class CliDiagnostics
 {
     internal static void Write(Exception error, string stage, bool invalid)
@@ -16,7 +32,13 @@ internal static class CliDiagnostics
         {
             "arguments" => "Run leancil --help for command syntax.",
             "assembly loading" => "Check the DLL path and build the assembly before extracting it.",
-            "metadata and CIL validation" => "Use leancil list to find the exact method selector. For unsupported CIL or metadata, use the supported subset described in the README.",
+            "metadata and CIL validation" => Rejections.Of(error is CliFailure { InnerException: { } cause } ? cause : error) switch
+            {
+                Rejection.Selector => "Use leancil list to find the exact method selector.",
+                Rejection.Call => "Reachable calls must target methods in the extracted assembly or runtime calls modelled by LeanCIL. " +
+                    "Remove the call from the extracted path, or see Supported subset and limits in the README for the modelled calls.",
+                _ => "Use the supported CIL and metadata subset described in the README."
+            },
             "extraction integrity" => "Rerun leancil extract with the intended assembly, method and profile, then rerun this command.",
             "proof selection" => "Supply --proof path/to/Proof.lean, or correct the proof path and theorem in verification.json.",
             "Lean library build" => "Ensure Lean and Lake are installed with the bundled lean-toolchain version, then address the build diagnostic below.",

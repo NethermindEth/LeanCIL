@@ -78,6 +78,16 @@ Invalid: Stale or mismatched verification artifact: artifacts/Add/Extracted.lean
   Next: Rerun leancil extract with the intended assembly, method and profile, then rerun this command.
 ```
 
+Method and call validation failures name the rejected item and the method containing it. A rejected call reports the callee, the calling method and the IL offset of the call. For example, `typeof(ulong) == typeof(uint)` compiles to calls into the runtime library that LeanCIL does not model:
+
+```text
+Error: External managed dependency: System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)
+  Caller: System.UInt64 Examples.Arithmetic::TypeCheck(System.UInt64) at IL_0005
+  Callee assembly: System.Private.CoreLib (referenced as System.Runtime)
+  Stage: metadata and CIL validation
+  Next: Reachable calls must target methods in the extracted assembly or runtime calls modelled by LeanCIL. Remove the call from the extracted path, or see Supported subset and limits in the README for the modelled calls.
+```
+
 The check reads the assembly path, method and hardware profile from the manifest, regenerates the extraction in memory, and compares it with the saved files without overwriting them. Assembly paths are stored relative to the artifact directory. If the DLL moves, use `leancil check artifacts/Add --assembly-path path/to/Examples.dll`; its identity and content must still match. Older manifests must be regenerated with `extract`.
 
 Verify a Lean proof against the extracted method:
