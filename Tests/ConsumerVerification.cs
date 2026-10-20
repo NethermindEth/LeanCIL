@@ -260,7 +260,7 @@ finally
 // import closure. Neither a receipt key nor the producer's environment travels.
 var portableVariables = new[] { "LEANCIL_DISABLE_SUCCESS_CACHE", "LEANCIL_EXPORT_CONSUMER_SUPPORT",
     "LEANCIL_CONSUMER_SUPPORT", "LEANCIL_CONSUMER_SUPPORT_SHA256", "LEANCIL_PROFILE_CONSUMER_REPLAY",
-    "LEANCIL_TEST_CONFIGURATION", "LEANCIL_SUITE" };
+    "LEANCIL_TEST_CONFIGURATION", "LEANCIL_SUITE", "LEANCIL_RESTORE_CONSUMER_SUPPORT", "LEANCIL_CACHE_ENVIRONMENT" };
 var savedPortableEnvironment = portableVariables.ToDictionary(name => name, Environment.GetEnvironmentVariable);
 var originalIndependent = File.ReadAllText(independent);
 var configuration = Path.Combine(root, "Client", "Configuration.lean");
@@ -333,6 +333,71 @@ run_cmd do
     var portableReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
     if (portableReport.GetProperty("consumerSupportSha256").GetString() != Sha(manifest))
         throw new InvalidOperationException("Portable support provenance missing from certificate.");
+
+    // Opt-in restore lets a receiver skip rebuilding support, not only replaying it: the
+    // producer's compiled bytes stand in for a fresh build, as local receipts already do.
+    var files = Path.ChangeExtension(manifest, ".files");
+    var restoredOlean = Directory.EnumerateFiles(files, "Independent.olean", SearchOption.AllDirectories).Single();
+    Environment.SetEnvironmentVariable("LEANCIL_RESTORE_CONSUMER_SUPPORT", "true");
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify("--proof", Path.Combine(relocated, "Proof.lean"), "--proof-root", relocated);
+    if (BuiltModule(NewStageOutput(previous, "Building fresh consumer proof and dependencies"), "Client.Independent") ||
+        NewReplayCommands(previous).Any(command => command.Contains("Client.Independent")))
+        throw new InvalidOperationException("Restored portable support was rebuilt or replayed.");
+    Console.WriteLine("PASS opt-in portable restore skips the support build and its replay");
+
+    // Restored bytes are trusted only through the manifest digest, never as downloaded.
+    var restoredBytes = File.ReadAllBytes(restoredOlean);
+    File.AppendAllText(restoredOlean, "tampered portable artifact");
+    Reject("support file digest mismatch");
+    File.WriteAllBytes(restoredOlean, restoredBytes);
+    Console.WriteLine("PASS tampered portable support file is rejected");
+
+    // Without the shipped files a receiver falls back to rebuilding, and still skips replay.
+    Directory.Move(files, files + ".absent");
+    try
+    {
+        previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+        Verify();
+        if (!BuiltModule(NewStageOutput(previous, "Building fresh consumer proof and dependencies"), "Client.Independent") ||
+            NewReplayCommands(previous).Any(command => command.Contains("Client.Independent")))
+            throw new InvalidOperationException("Missing portable files did not fall back to a fresh build with fingerprint reuse.");
+    }
+    finally { Directory.Move(files + ".absent", files); }
+    Console.WriteLine("PASS missing portable files fall back to a fresh build");
+
+    // Lake traces do not see variables read by elaborators. Restore binds the declared ones:
+    // undeclared, a changed value reuses the producer's bytes; declared, it forces a rebuild.
+    Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", "changed");
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    if (BuiltModule(NewStageOutput(previous, "Building fresh consumer proof and dependencies"), "Client.Configuration"))
+        throw new InvalidOperationException("An undeclared elaborator variable invalidated restored support.");
+    Environment.SetEnvironmentVariable("LEANCIL_RESTORE_CONSUMER_SUPPORT", null);
+    Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", null);
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_ENVIRONMENT", "LEANCIL_TEST_CONFIGURATION");
+    var declaredDirectory = portableDirectory + "-declared";
+    Environment.SetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT", declaredDirectory);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", null);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", null);
+    Verify("--proof", producerProof, "--proof-root", root);
+    var declared = Directory.GetFiles(declaredDirectory, "*.json").Single();
+    Environment.SetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT", null);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", declared);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", Sha(declared));
+    Environment.SetEnvironmentVariable("LEANCIL_RESTORE_CONSUMER_SUPPORT", "true");
+    Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", "changed");
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify("--proof", Path.Combine(relocated, "Proof.lean"), "--proof-root", relocated);
+    if (!BuiltModule(NewStageOutput(previous, "Building fresh consumer proof and dependencies"), "Client.Configuration") ||
+        !NewReplayCommands(previous).Any(command => command.Contains("Client.Configuration")))
+        throw new InvalidOperationException("A declared elaborator variable change restored stale support.");
+    Environment.SetEnvironmentVariable("LEANCIL_RESTORE_CONSUMER_SUPPORT", null);
+    Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", null);
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_ENVIRONMENT", null);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", manifest);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", Sha(manifest));
+    Console.WriteLine("PASS restore binds declared elaborator variables and the toolchain");
 
     Environment.SetEnvironmentVariable("LEANCIL_TEST_CONFIGURATION", "changed");
     previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
@@ -621,4 +686,74 @@ finally
     File.Delete(alternate);
     File.Delete(forged);
     File.Delete(forgedProof);
+}
+
+// A batch session exports one manifest covering every workspace, so a producer need not split
+// a request out of its batch; receivers combine several manifests, each under its own digest.
+var savedUnionEnvironment = portableVariables.ToDictionary(name => name, Environment.GetEnvironmentVariable);
+var portableX = Path.Combine(root, "Client", "PortableX.lean");
+var portableY = Path.Combine(root, "Client", "PortableY.lean");
+var proofX = Path.Combine(root, "ProofX.lean");
+var proofY = Path.Combine(root, "ProofY.lean");
+var proofXY = Path.Combine(root, "ProofXY.lean");
+var unionDirectory = At("artifacts/PortableUnion-" + Guid.NewGuid().ToString("N"));
+try
+{
+    File.WriteAllText(portableX, "theorem portableX : True := True.intro\n");
+    File.WriteAllText(portableY, "theorem portableY : True := True.intro\n");
+    File.WriteAllText(proofX, "import Client.PortableX\n" + File.ReadAllText(proof));
+    File.WriteAllText(proofY, "import Client.PortableY\n" + File.ReadAllText(proof));
+    File.WriteAllText(proofXY, "import Client.PortableX\nimport Client.PortableY\n" + File.ReadAllText(proof));
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", null);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", null);
+    Environment.SetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT", Path.Combine(unionDirectory, "batch"));
+    var (code, text) = Batch(BatchRequest(batchA, proofX, "ExampleProof.correctness"),
+        BatchRequest(batchB, proofY, "ExampleProof.correctness"));
+    var exported = Directory.GetFiles(Path.Combine(unionDirectory, "batch"), "*.json");
+    if (code != 0 || exported.Length != 1)
+        throw new InvalidOperationException("A batch session must export exactly one manifest: " + text);
+    var union = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(exported[0]));
+    if (union.GetProperty("Schema").GetInt32() != 3 ||
+        !new[] { "Client.PortableX", "Client.PortableY" }.All(module =>
+            union.GetProperty("Modules").TryGetProperty(module, out _) && union.GetProperty("Files").TryGetProperty(module, out _)))
+        throw new InvalidOperationException("Batch export omitted a workspace's support closure.");
+    Console.WriteLine("PASS batch export unions the support of every workspace into one manifest");
+
+    string Export(string name, string proofPath)
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT", Path.Combine(unionDirectory, name));
+        Verify("--proof", proofPath, "--proof-root", root);
+        Environment.SetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT", null);
+        return Directory.GetFiles(Path.Combine(unionDirectory, name), "*.json").Single();
+    }
+    var manifestX = Export("x", proofX);
+    var manifestY = Export("y", proofY);
+    string[][] Receive(string paths, string digests)
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", paths);
+        Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", digests);
+        var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+        Verify("--proof", proofXY, "--proof-root", root);
+        return NewReplayCommands(previous);
+    }
+    var both = Receive(manifestX + Path.PathSeparator + manifestY, Sha(manifestX) + "," + Sha(manifestY));
+    var onlyX = Receive(manifestX, Sha(manifestX));
+    if (both.Any(command => command.Contains("Client.PortableX") || command.Contains("Client.PortableY")) ||
+        onlyX.Any(command => command.Contains("Client.PortableX")) || !onlyX.Any(command => command.Contains("Client.PortableY")))
+        throw new InvalidOperationException("Combined portable manifests were not each honored.");
+    // A digest count that does not pair with the paths has no trusted anchor for some manifest.
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", manifestX + Path.PathSeparator + manifestY);
+    Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", Sha(manifestX));
+    Reject("missing trusted digest", "--proof", proofXY, "--proof-root", root);
+    Console.WriteLine("PASS several trusted manifests combine, and unpaired digests are rejected");
+}
+finally
+{
+    foreach (var (name, value) in savedUnionEnvironment) Environment.SetEnvironmentVariable(name, value);
+    File.Delete(portableX);
+    File.Delete(portableY);
+    File.Delete(proofX);
+    File.Delete(proofY);
+    File.Delete(proofXY);
 }
