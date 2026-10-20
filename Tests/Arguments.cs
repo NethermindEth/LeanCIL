@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Numerics;
 using System.Reflection;
@@ -13,6 +14,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Arguments");
 Directory.CreateDirectory(root);
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 
 void Prove(string dll, string selector, string name, IEnumerable<string> statements)
 {
@@ -23,9 +25,11 @@ void Prove(string dll, string selector, string name, IEnumerable<string> stateme
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (claims.Length == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    cases += claims.Length;
-    Console.WriteLine($"PASS {name}: {claims.Length} cases");
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Length;
+        Console.WriteLine($"PASS {name}: {claims.Length} cases");
+    });
 }
 
 string Returns(string arguments, BigInteger result, int width = 32, string memory = "Examples.empty") =>
@@ -187,5 +191,7 @@ foreach (var op in new[] { OpCodes.Starg, OpCodes.Starg_S, OpCodes.Ldarga, OpCod
     }
     Prove(dll, selector, name, claims);
 }
+
+queue.Flush();
 
 Console.WriteLine($"Argument storage passed: {cases} runtime and memory cases.");

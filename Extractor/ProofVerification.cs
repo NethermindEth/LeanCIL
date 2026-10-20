@@ -7,6 +7,138 @@ using Nethermind.LeanCIL;
 partial class Program
 {
     sealed record VerificationSettings(int schema, string proof, string theorem, string? proofRoot = null);
+    sealed record BatchRequest(string output, string proof, string theorem, string? expect = null);
+    sealed record BatchManifest(int schema, string proofRoot, BatchRequest[] requests);
+    sealed record BatchResult(string output, string proof, string theorem, string expect, string status, string stage,
+        string? error, string[]? axioms, string? libraryBuild);
+
+    const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
+
+    internal static int VerifyBatch(string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+            throw new ArgumentException(BatchUsage);
+        var manifestPath = Path.GetFullPath(args[0]);
+        var fresh = false;
+        int? parallelism = null;
+        string? resultsPath = null;
+        for (var index = 1; index < args.Length; index++)
+        {
+            var option = args[index];
+            if (option == "--fresh" && !fresh)
+            {
+                fresh = true;
+                continue;
+            }
+            if (++index == args.Length || args[index].StartsWith("--", StringComparison.Ordinal))
+                throw new ArgumentException($"Missing value for {option}.");
+            switch (option)
+            {
+                case "--parallel" when parallelism is null:
+                    parallelism = int.TryParse(args[index], out var degree) && degree > 0 ? degree
+                        : throw new ArgumentException("--parallel requires a positive integer.");
+                    break;
+                case "--results" when resultsPath is null:
+                    resultsPath = Path.GetFullPath(args[index]);
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown or duplicate option: {option}");
+            }
+        }
+
+        var directory = Path.GetDirectoryName(manifestPath)!;
+        var manifest = JsonSerializer.Deserialize<BatchManifest>(File.ReadAllText(manifestPath),
+            new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow })
+            ?? throw new InvalidDataException("Missing batch manifest.");
+        if (manifest.schema != 1 || string.IsNullOrWhiteSpace(manifest.proofRoot) || manifest.requests is null || manifest.requests.Length == 0 ||
+            manifest.requests.Any(request => request is null || string.IsNullOrWhiteSpace(request.output) ||
+                string.IsNullOrWhiteSpace(request.proof) || string.IsNullOrWhiteSpace(request.theorem) ||
+                request.expect is not (null or "verified" or "rejected")))
+            throw new InvalidDataException("Invalid batch manifest: expected schema 1, proofRoot and requests with output, proof, theorem and optional expect (verified or rejected).");
+        var proofRoot = Path.GetFullPath(manifest.proofRoot, directory);
+        var count = manifest.requests.Length;
+        var outcomes = new ConsumerOutcome?[count];
+        var requests = new List<ConsumerRequest>();
+        var indices = new List<int>();
+        var outputs = manifest.requests.Select(request => Path.GetFullPath(request.output, directory)).ToArray();
+        var proofs = manifest.requests.Select(request => Path.GetFullPath(request.proof, directory)).ToArray();
+        var lastForOutput = Enumerable.Range(0, count).GroupBy(i => outputs[i], OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).Select(group => group.Max()).ToHashSet();
+        for (var i = 0; i < count; i++)
+        {
+            var request = manifest.requests[i];
+            var stage = "proof selection";
+            try
+            {
+                if (!Regex.IsMatch(request.theorem, @"\A[A-Za-z_][A-Za-z0-9_.]*\z"))
+                    throw new ArgumentException("Invalid theorem name");
+                if (!File.Exists(proofs[i]))
+                    throw new FileNotFoundException($"Proof file not found: {CliPaths.Display(proofs[i])}", proofs[i]);
+                var settingsPath = Path.Combine(outputs[i], "verification.json");
+                // As in sequential runs, the last request for an output owns its settings.
+                if (lastForOutput.Contains(i))
+                {
+                    Directory.CreateDirectory(outputs[i]);
+                    File.Delete(Path.Combine(outputs[i], "verified.json"));
+                    File.WriteAllText(settingsPath, JsonSerializer.Serialize(new VerificationSettings(1,
+                        Path.GetRelativePath(outputs[i], proofs[i]).Replace('\\', '/'), request.theorem,
+                        Path.GetRelativePath(outputs[i], proofRoot).Replace('\\', '/')), Json) + "\n");
+                }
+                stage = "extraction integrity";
+                var identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(outputs[i], "identity.json")));
+                var assembly = Path.GetFullPath(identity.GetProperty("assemblyPath").GetString()!, outputs[i]);
+                requests.Add(new(assembly, outputs[i], proofs[i], request.theorem, lastForOutput.Contains(i) ? settingsPath : null,
+                    request.expect == "rejected"));
+                indices.Add(i);
+            }
+            catch (Exception error)
+            {
+                outcomes[i] = new ConsumerOutcome { Stage = stage, Error = error };
+            }
+        }
+
+        using (var verification = new Program { freshLibrary = fresh })
+        {
+            var verified = requests.Count == 0 ? [] : verification.VerifyConsumerRequests(proofRoot, requests, null, batch: true,
+                parallelism ?? Math.Max(1, Environment.ProcessorCount / 8));
+            for (var k = 0; k < verified.Length; k++) outcomes[indices[k]] = verified[k];
+        }
+        // A rejected last request leaves no certificate for its output, as in sequential runs.
+        foreach (var i in lastForOutput.Where(i => !indices.Contains(i)))
+            File.Delete(Path.Combine(outputs[i], "verified.json"));
+
+        var results = new List<BatchResult>();
+        var failed = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var request = manifest.requests[i];
+            var outcome = outcomes[i]!;
+            var expect = request.expect ?? "verified";
+            var passed = outcome.Error is null && (expect == "rejected" ? outcome.Rejected : outcome.Report is not null);
+            var status = passed ? expect : "failed";
+            if (passed)
+                Console.WriteLine(expect == "rejected"
+                    ? $"PASS rejected {CliPaths.Display(outputs[i])} {request.theorem} ({outcome.Stage})"
+                    : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem}");
+            else
+            {
+                failed++;
+                var error = outcome.Error ?? new InvalidOperationException("Verification produced no result.");
+                Console.WriteLine($"FAIL {CliPaths.Display(outputs[i])} {request.theorem} (stage: {outcome.Stage})");
+                CliDiagnostics.Write(new CliFailure(outcome.Stage, error), outcome.Stage, true);
+            }
+            results.Add(new(outputs[i], proofs[i], request.theorem, expect, status, outcome.Stage,
+                passed ? null : (outcome.Error?.Message ?? "Verification produced no result."),
+                outcome.Report?.axioms, outcome.Report?.libraryBuild));
+        }
+        if (resultsPath is not null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(resultsPath)!);
+            File.WriteAllText(resultsPath, JsonSerializer.Serialize(results, Json) + "\n");
+        }
+        Console.WriteLine($"Batch: {count - failed} passed, {failed} failed of {count} requests.");
+        return failed == 0 ? 0 : 1;
+    }
 
     internal static void VerifyArtifacts(string[] args)
     {

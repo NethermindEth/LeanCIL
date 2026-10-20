@@ -4,6 +4,16 @@
 
 using System.Text.Json;
 
+// Child mode: one independent process publishing a receipt into a shared cache.
+if (args is ["publish", var publishCache, var publishKey, var publishSource])
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", publishCache);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
+    using var publisher = new Program();
+    publisher.PublishSuccess(publishKey, publishSource);
+    return;
+}
+
 var originalCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
 var originalDisabled = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
 var directory = Path.Combine(Path.GetTempPath(), "leancil-certified-cache-test-" + Guid.NewGuid().ToString("N"));
@@ -78,6 +88,33 @@ try
     if (ValidCertifiedLibrary(supplied, trustedDigest, "toolchain-and-sources", suppliedSources) ||
         ValidCertifiedLibrary(suppliedCopy, trustedDigest, "toolchain-and-sources", suppliedSources))
         throw new Exception("Rehashed artifact or changed private copy accepted against original producer digest");
+    // Republishing identical content is a no-op; it must not create a second copy.
+    var receipt = Path.Combine(SuccessCacheRoot, "original-identical", "receipt.hmac");
+    verifier.PublishSuccess("original-identical", source);
+    var firstWrite = File.GetLastWriteTimeUtc(receipt);
+    verifier.PublishSuccess("original-identical", source);
+    if (File.GetLastWriteTimeUtc(receipt) != firstWrite ||
+        Directory.EnumerateDirectories(SuccessCacheRoot, "original-identical*").Count() != 1)
+        throw new Exception("Identical publication was duplicated or rewritten");
+    // A corrupt entry is replaced by the next certified publication.
+    File.AppendAllText(Path.Combine(SuccessCacheRoot, "original-identical", "files", "Proof.olean"), "corruption");
+    verifier.PublishSuccess("original-identical", source);
+    if (!verifier.RestoreSuccess("original-identical", Path.Combine(directory, "replaced")) ||
+        Directory.EnumerateDirectories(SuccessCacheRoot, "original-identical*").Count() != 1)
+        throw new Exception("Corrupt entry was not replaced by a certified publication");
+    // Concurrent processes race only on an atomic rename: one entry, no staging leftovers.
+    string[] self = Path.GetFileNameWithoutExtension(Environment.ProcessPath) == "dotnet"
+        ? [Environment.ProcessPath!, typeof(Program).Assembly.Location] : [Environment.ProcessPath!];
+    var cacheDirectory = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR")!;
+    var publishers = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        Execute([.. self, "publish", cacheDirectory, "concurrent", source]))).ToArray();
+    Task.WaitAll(publishers);
+    if (publishers.Any(task => task.Result.Code != 0))
+        throw new Exception("Concurrent publisher failed: " + string.Join("\n", publishers.Select(task => task.Result.Output)));
+    if (Directory.EnumerateDirectories(SuccessCacheRoot, "concurrent*").Count() != 1 ||
+        !verifier.RestoreSuccess("concurrent", Path.Combine(directory, "concurrent")))
+        throw new Exception("Concurrent publication left duplicates, staging directories or an invalid entry");
+    Console.WriteLine("PASS idempotent publication, corrupt entry replacement and concurrent publishers");
     using var fresh = new Program { freshLibrary = true };
     fresh.PublishSuccess("fresh", source);
     if (Directory.Exists(Path.Combine(SuccessCacheRoot, "fresh")) || fresh.RestoreSuccess("original", destination))

@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -13,6 +14,7 @@ var root = At("artifacts/Enums");
 Directory.CreateDirectory(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Enums")!;
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 
 string LeanValue(object value)
 {
@@ -91,9 +93,11 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     var dll = method.Name.StartsWith("Storage", StringComparison.Ordinal) ? storageAssembly : assembly;
-    verification.Verify(dll, "Examples", $"Enums::{method.Name}({type.FullName})", proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {method.Name}: {claims.Count} runtime comparisons");
+    queue.Add(new($"Enums::{method.Name}({type.FullName})", proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {method.Name}: {claims.Count} runtime comparisons");
+    });
 }
 
 // The same universally quantified contract rejects an incorrect implementation.
@@ -147,5 +151,7 @@ foreach (var mutation in mutations)
         File.Exists(Path.Combine(output, "Extracted.lean")))
         throw new InvalidOperationException($"Enum metadata mutation accepted: {mutation}\n{result.Output}");
 }
+
+queue.Flush();
 
 Console.WriteLine($"PASS {cases} enum runtime comparisons and {mutations.Length} malformed metadata rejections");

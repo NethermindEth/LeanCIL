@@ -99,7 +99,8 @@ var previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY"
 string[][] NewReplayCommands(HashSet<string> previous) => Directory.EnumerateFiles(testTrace, "*.jsonl")
     .Where(path => !previous.Contains(path)).SelectMany(File.ReadLines)
     .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
-    .Where(item => item.GetProperty("stage").GetString() == "Kernel replay of consumer proof and dependencies")
+    .Where(item => item.GetProperty("stage").GetString() is "Kernel replay of consumer proof and dependencies"
+        or "Joint kernel replay of consumer proof and dependencies")
     .Select(item => File.ReadLines(Path.Combine(testTrace, item.GetProperty("transcript").GetString()!))
         .Where(line => line.StartsWith('{')).Select(line => JsonSerializer.Deserialize<JsonElement>(line)
             .GetProperty("module").GetString()!).ToArray()).ToArray();
@@ -115,6 +116,52 @@ try
 }
 finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
 Console.WriteLine("PASS extraction-independent helper reused across gates; dependent module replayed");
+
+// Support reuse is keyed by what Lean and Lake read, not by unrelated process
+// state or by consumer files outside the support modules' sources.
+string[] SupportGenerations() => Directory.EnumerateDirectories(SuccessCacheRoot)
+    .Where(path => File.Exists(Path.Combine(path, "files", "leancil-support.json"))).ToArray();
+var unrelated = Path.Combine(root, "Unrelated", "Refutation.lean");
+var relevantVariable = "LAKE_LEANCIL_TEST_" + Guid.NewGuid().ToString("N");
+var savedHostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+try
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(unrelated)!);
+    File.WriteAllText(unrelated, "theorem unrelatedRefutation : True := True.intro\n");
+    Environment.SetEnvironmentVariable("DOTNET_HOST_PATH", "irrelevant-" + Guid.NewGuid().ToString("N"));
+    var generations = SupportGenerations().Length;
+    var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    var replay = NewReplayCommands(previous);
+    if (replay.Length != 1 || replay[0].Contains("Client.Independent") || !replay[0].Contains("Client.Shared"))
+        throw new InvalidOperationException("Irrelevant environment or unrelated proof file invalidated certified support.");
+    // The same support closure republished from a new session must not add a copy.
+    var records = SupportGenerations().Select(path => Sha(Path.Combine(path, "files", "leancil-support.json"))).ToArray();
+    if (records.Length != generations || records.Distinct().Count() != records.Length ||
+        Directory.EnumerateDirectories(SuccessCacheRoot).Any(path => Path.GetFileName(path).Contains('.')))
+        throw new InvalidOperationException("Identical support generation was published again.");
+    Console.WriteLine("PASS irrelevant environment and unrelated proof files reuse one certified support generation");
+
+    Environment.SetEnvironmentVariable(relevantVariable, "changed");
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    if (!NewReplayCommands(previous).Any(command => command.Contains("Client.Independent")))
+        throw new InvalidOperationException("A Lake environment variable change reused certified support.");
+    Environment.SetEnvironmentVariable(relevantVariable, null);
+    File.AppendAllText(independent, "\n-- support source edit\n");
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    Verify();
+    if (!NewReplayCommands(previous).Any(command => command.Contains("Client.Independent")))
+        throw new InvalidOperationException("An edited support module reused its certified artifact.");
+    Console.WriteLine("PASS relevant environment and support source edits invalidate certified support");
+}
+finally
+{
+    Environment.SetEnvironmentVariable("DOTNET_HOST_PATH", savedHostPath);
+    Environment.SetEnvironmentVariable(relevantVariable, null);
+    File.WriteAllText(independent, "namespace Client\ntheorem independent (x : Nat) : x = x := rfl\nend Client\n");
+    Directory.Delete(Path.GetDirectoryName(unrelated)!, true);
+}
 
 // Portable manifests certify freshly rebuilt bytes, including the complete
 // import closure. Neither a receipt key nor the producer's environment travels.
@@ -343,3 +390,94 @@ try
 }
 finally { File.WriteAllText(framework, frameworkSource); }
 Console.WriteLine("PASS stale generated modules and mismatched framework sources rejected");
+
+// One batch session: requests sharing an extraction share a workspace and replay,
+// yet each keeps its own pass/fail, certificate and expected rejection.
+var batchA = At("artifacts/ConsumerBatchA");
+var batchB = At("artifacts/ConsumerBatchB");
+var batchC = At("artifacts/ConsumerBatchC");
+Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "InitializedTypes::Add(ulong,ulong)", batchA,
+    "--assume-initialized", "Examples.InitializedTypes"]);
+Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "Arithmetic::Add(ulong,ulong)", batchB]);
+Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "Arithmetic::WrongAdd(ulong,ulong)", batchC]);
+var alternate = Path.Combine(root, "ProofAlternate.lean");
+var forged = Path.Combine(root, "Client", "Forged.lean");
+var forgedProof = Path.Combine(root, "ProofForged.lean");
+var batchManifest = At("artifacts/ConsumerBatch.json");
+var batchResults = At("artifacts/ConsumerBatchResults.json");
+var batchVariable = "LAKE_LEANCIL_TEST_" + Guid.NewGuid().ToString("N");
+object BatchRequest(string extraction, string proofPath, string theorem, string? expect = null) => expect is null
+    ? new { output = extraction, proof = proofPath, theorem }
+    : new { output = extraction, proof = proofPath, theorem, expect };
+(int Code, string Output) Batch(params object[] requests)
+{
+    File.WriteAllText(batchManifest, JsonSerializer.Serialize(new { schema = 1, proofRoot = root, requests }));
+    var result = Execute([.. cli, "verify-batch", batchManifest, "--results", batchResults]);
+    return (result.Code, result.Output);
+}
+try
+{
+    File.WriteAllText(alternate, File.ReadAllText(proof).Replace("namespace ExampleProof", "namespace AlternateProof")
+        .Replace("end ExampleProof", "end AlternateProof"));
+    File.WriteAllText(forged, """
+        import Lean
+        set_option debug.skipKernelTC true
+        run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+          name := `Client.Batch.forged
+          levelParams := []
+          type := Lean.mkConst ``False
+          value := Lean.mkConst ``True.intro
+        })
+        """);
+    File.WriteAllText(forgedProof, "import Client.Forged\n" + File.ReadAllText(proof));
+    File.WriteAllText(Path.Combine(batchC, "verified.json"), "{}");
+    var (code, text) = Batch(
+        BatchRequest(batchA, proof, "ExampleProof.correctness", "rejected"),
+        BatchRequest(batchA, proof, "ExampleProof.correctness"),
+        BatchRequest(batchB, forgedProof, "ExampleProof.correctness"),
+        BatchRequest(batchB, proof, "ExampleProof.correctness"),
+        BatchRequest(batchB, alternate, "AlternateProof.correctness"),
+        BatchRequest(batchC, proof, "ExampleProof.correctness"),
+        BatchRequest(batchC, proof, "ExampleProof.correctness", "rejected"));
+    var statuses = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(batchResults))!
+        .Select(item => item.GetProperty("status").GetString() + "/" + item.GetProperty("stage").GetString()).ToArray();
+    string[] expected = ["failed/proof checking", "verified/extraction integrity", "failed/kernel replay", "verified/extraction integrity",
+        "verified/extraction integrity", "failed/proof checking", "rejected/proof checking"];
+    if (code != 1 || !statuses.SequenceEqual(expected) || !text.Contains("while replaying declaration") ||
+        !text.Contains("Batch: 4 passed, 3 failed of 7 requests."))
+        throw new InvalidOperationException("Unexpected batch outcomes: " + string.Join(", ", statuses) + "\n" + text);
+    // The last request for each output owns its certificate, as in sequential runs.
+    var certificateA = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(batchA, "verified.json")));
+    var certificateB = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(batchB, "verified.json")));
+    if (certificateA.GetProperty("initializedTypes")[0].GetString() != "Examples.InitializedTypes" ||
+        certificateB.GetProperty("theorem").GetString() != "AlternateProof.correctness" ||
+        !certificateB.GetProperty("inputs").TryGetProperty("proof:" + alternate, out _) ||
+        File.Exists(Path.Combine(batchC, "verified.json")))
+        throw new InvalidOperationException("Batch certificates were not bound per request or a stale certificate survived.");
+    Console.WriteLine("PASS batch requests keep independent outcomes, certificates and expected rejections");
+
+    // A relevant Lake variable forces fresh support: the first workspace certifies
+    // it and the second reuses those exact artifacts within the same session.
+    File.Delete(forged);
+    File.Delete(forgedProof);
+    Environment.SetEnvironmentVariable(batchVariable, "batch");
+    var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+    (code, text) = Batch(BatchRequest(batchA, proof, "ExampleProof.correctness"),
+        BatchRequest(batchB, alternate, "AlternateProof.correctness"));
+    var replays = NewReplayCommands(previous);
+    if (code != 0 || replays.Length != 2 || replays.Count(command => command.Contains("Client.Independent")) != 1)
+        throw new InvalidOperationException("Batch workspaces did not share certified support: " + text);
+    (code, text) = Batch(BatchRequest(batchA, proof, "ExampleProof.correctness"),
+        BatchRequest(batchB, alternate, "AlternateProof.correctness"));
+    if (code != 0 || JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(batchResults))!
+        .Any(item => item.GetProperty("libraryBuild").GetString() != "consumer-proof-cache"))
+        throw new InvalidOperationException("Unchanged batch requests did not reuse authenticated results: " + text);
+    Console.WriteLine("PASS batch workspaces share certified support and reuse unchanged results");
+}
+finally
+{
+    Environment.SetEnvironmentVariable(batchVariable, null);
+    File.Delete(alternate);
+    File.Delete(forged);
+    File.Delete(forgedProof);
+}

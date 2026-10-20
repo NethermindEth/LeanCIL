@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Numerics;
 using Mono.Cecil;
@@ -12,6 +13,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/NarrowIntegers");
 Directory.CreateDirectory(root);
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 
 // A universal mathematical contract over the C# compiler's conversion output.
 verification.Verify(assembly, "Examples", "NarrowIntegers::UnsignedShort(int)",
@@ -51,9 +53,11 @@ void VerifyCases(string dll, string selector, string output, int inputWidth,
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\ntheorem correctness :\n  " + string.Join(" ∧\n  ", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {Path.GetFileName(output)}: {claims.Count} cases");
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {Path.GetFileName(output)}: {claims.Count} cases");
+    });
 }
 
 // Exercise the compiled C# examples, including an actual call and packed fields.
@@ -185,6 +189,8 @@ foreach (var scenario in new[] { "local", "argument", "return", "call", "field",
     VerifyCases(dll, $"NarrowIntegers::Fixture({parameter})", output, inputWidth,
         value => Narrow(value, bits, signed), fault: fault);
 }
+
+queue.Flush();
 
 // Two-byte layouts and narrow type identities still receive strict validation.
 foreach (var mutation in new[] { "overrun", "scope" })

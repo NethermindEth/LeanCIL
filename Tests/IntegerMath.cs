@@ -149,7 +149,6 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         Balanced(Enumerable.Range(0, claims.Count).Select(i => "case" + i).ToArray(), true) + "\nend ExampleProof\n");
     var selector = $"IntegerMath::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     pending.Add((new GeneratedVerification(selector, proof, output), method.Name, claims.Count));
-    if (pending.Count == 4) Flush();
 }
 Flush();
 

@@ -38,7 +38,6 @@ void Prove(MethodDefinition method, List<string> claims, string definitions = ""
         "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (term ?? (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩")) + "\nend ExampleProof\n");
     pending.Add((new GeneratedVerification(method.FullName, proof, output), method.Name, claims.Count));
-    if (pending.Count == 8) Flush();
 }
 
 // Sizes come from .NET's managed layout, including packed/nested structs and vectors.

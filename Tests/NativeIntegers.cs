@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Numerics;
 using System.Reflection;
@@ -18,6 +19,7 @@ var runtime = Assembly.Load(File.ReadAllBytes(assembly));
 var owner = runtime.GetType("Examples.NativeIntegers")!;
 using var source = ModuleDefinition.ReadModule(assembly);
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 
 void Prove(string dll, string selector, string name, List<string> claims)
 {
@@ -26,9 +28,11 @@ void Prove(string dll, string selector, string name, List<string> claims)
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact " + (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons and proofs");
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons and proofs");
+    });
 }
 
 verification.Verify(assembly, "Examples", "NativeIntegers::Add(nint,nint)",
@@ -181,6 +185,7 @@ foreach (var (operations, group) in candidates.Chunk(6).Select((ops, index) => (
     }
     Prove(dll, selector, name, claims);
 }
+queue.Flush();
 
 // No argument-only exception: inlining/constant propagation can change whether
 // the JIT sees ldc.i4, even when this method itself loads an argument or local.

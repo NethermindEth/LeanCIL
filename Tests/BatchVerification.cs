@@ -1,10 +1,12 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Diagnostics;
 using System.Text.Json;
+using Mono.Cecil;
 
 if (args.Length > 0 && args is not ["--benchmark"])
     throw new ArgumentException("Usage: BatchVerification.cs [--benchmark]");
@@ -81,6 +83,28 @@ try
     if (!rejected || requests.Any(r => File.Exists(Path.Combine(r.Output, "verified.json"))))
         throw new InvalidOperationException("Failing batch retained successful reports");
     Console.WriteLine("PASS incorrect implementation rejects batch and removes all prior success reports");
+
+    // A fixture's own assembly replaces the batch assembly: Add bound to WrongAdd's body must fail.
+    var swapped = Path.Combine(root, "SwappedAdd.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var arithmetic = module.GetType("Examples.Arithmetic");
+        arithmetic.Methods.Single(m => m.Name == "Add").Name = "OriginalAdd";
+        arithmetic.Methods.Single(m => m.Name == "WrongAdd").Name = "Add";
+        module.Write(swapped);
+    }
+    rejected = false;
+    try
+    {
+        verification.VerifyGeneratedBatch(assembly, "Examples", [requests[0], requests[1] with { Assembly = swapped }]);
+    }
+    catch (InvalidOperationException error) when (error.Message.Contains("Batch.lean") && error.Message.Contains("error:"))
+    {
+        rejected = true;
+    }
+    if (!rejected || requests.Any(r => File.Exists(Path.Combine(r.Output, "verified.json"))))
+        throw new InvalidOperationException("Fixture assembly override ignored");
+    Console.WriteLine("PASS fixture assembly overrides the batch assembly");
 
     File.WriteAllText(requests[0].Proof, """
         import Extracted

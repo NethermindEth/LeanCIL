@@ -144,20 +144,33 @@ unsafe def main (args : List String) : IO Unit := do
                     changed |= invalid.Add(name);
         } while (changed);
         return manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal) &&
-            name is not ("Extracted" or "ExtractionAudit" or "LeanCILProof")).ToHashSet(StringComparer.Ordinal);
+            name is not ("Extracted" or "ExtractionAudit") && !name.StartsWith("LeanCILProof", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
     }
 
-    static void ReplayConsumerModules(string session, IEnumerable<string> modules)
+
+    // Every requested module is reported as replayed or rejected; a checker process failure throws.
+    Dictionary<string, string> ReplayConsumerModules(string session, IEnumerable<string> modules, string leanPath)
     {
         var targets = modules.ToArray();
         var profile = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") == "true";
+        // A rejected or ineligible joint replay falls through to per-module replay, which attributes failures.
+        if (!profile && targets.Length > 1 &&
+            ReplayModulesJointly(session, targets, leanPath, "Joint kernel replay of consumer proof and dependencies")) return [];
+        return ReplayConsumerModulesSeparately(session, targets, leanPath, profile);
+    }
+
+    Dictionary<string, string> ReplayConsumerModulesSeparately(string session, string[] targets, string leanPath, bool profile)
+    {
         var configuredThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
         var threads = string.IsNullOrWhiteSpace(configuredThreads) ? "2" : configuredThreads;
         if (!uint.TryParse(threads, out var count) || count == 0)
             throw new InvalidDataException("LEAN_NUM_THREADS must be a positive integer.");
         var runner = Path.Combine(Path.GetTempPath(), "leancil-replay-" + Guid.NewGuid().ToString("N") + ".lean");
+        var targetsPath = Path.ChangeExtension(runner, ".json");
         try
         {
+            // A literal target list exceeds Lean's recursion limit for large module sets.
+            File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
             // Use the pinned toolchain's checker, not a consumer implementation
             // of kernel replay. Explicit targets avoid repeated search-path scans.
             File.WriteAllText(runner, """
@@ -168,28 +181,58 @@ unsafe def replayConsumerModule (name : String) : IO Nat := do
   return (← IO.monoMsNow) - started
 def reportConsumerModule (name : String) (elapsed : Nat) : IO Unit :=
   IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("milliseconds", Lean.toJson elapsed)]).compress
+def reportConsumerFailure (name : String) (error : IO.Error) : IO Unit :=
+  IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("error", Lean.toJson (toString error))]).compress
 unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit := do
   Lean.initSearchPath (← Lean.findSysroot)
+  let mut failed := false
   if profile then
     for name in args do
-      reportConsumerModule name (← replayConsumerModule name)
+      try
+        reportConsumerModule name (← replayConsumerModule name)
+      catch error =>
+        reportConsumerFailure name error
+        failed := true
   else
     let tasks ← args.toArray.mapM fun name => do
       return (name, ← IO.asTask (replayConsumerModule name))
     for (name, task) in tasks do
       match task.get with
       | .ok elapsed => reportConsumerModule name elapsed
-      | .error error => throw error
-""" + "\n#eval do\n  let json := String.fromUTF8! (ByteArray.mk #[" +
-                string.Join(",", System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(targets))) +
-                "])\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayConsumerModules args " +
+      | .error error =>
+        reportConsumerFailure name error
+        failed := true
+  if failed then
+    throw (IO.userError "Kernel replay rejected at least one consumer module")
+""" + "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
+                string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
+                "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayConsumerModules args " +
                 profile.ToString().ToLowerInvariant() + "\n");
             // Unlike leanchecker, the lean frontend defaults to hardware
             // concurrency rather than honoring LEAN_NUM_THREADS itself.
-            Run(["lake", "env", "lean", "-j" + threads, runner], session, progress: profile
-                ? "Profiled kernel replay of consumer modules" : "Kernel replay of consumer proof and dependencies");
+            string[] command = [LeanExecutable, "-j" + threads, runner];
+            var result = Execute(command, session, leanPath, progress: profile
+                ? "Profiled kernel replay of consumer modules" : "Kernel replay of consumer proof and dependencies",
+                environment: LeanEnvironment);
+            var replayed = new HashSet<string>(StringComparer.Ordinal);
+            var failures = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!line.StartsWith('{')) continue;
+                JsonElement record;
+                try { record = JsonSerializer.Deserialize<JsonElement>(line); }
+                catch (JsonException) { continue; }
+                if (record.ValueKind != JsonValueKind.Object || !record.TryGetProperty("module", out var module) ||
+                    module.ValueKind != JsonValueKind.String) continue;
+                if (record.TryGetProperty("error", out var error)) failures[module.GetString()!] = error.ToString();
+                else replayed.Add(module.GetString()!);
+            }
+            if ((result.Code == 0) != (failures.Count == 0) || replayed.Overlaps(failures.Keys) ||
+                !targets.All(name => replayed.Contains(name) || failures.ContainsKey(name)))
+                throw new InvalidOperationException($"Command failed ({result.Code}): {string.Join(' ', command)}\n{result.Output}");
+            return failures;
         }
-        finally { File.Delete(runner); }
+        finally { File.Delete(runner); File.Delete(targetsPath); }
     }
 
     sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
@@ -242,9 +285,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }).ToArray();
     }
 
-    static SortedDictionary<string, string> ConsumerInputs(string root, string proof, string? settings, string output)
+    static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output)
     {
-        var inputs = Inputs(proof, settings);
+        var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var dependencies = ConsumerDependencies(root);
         foreach (var directory in new[] { root }.Concat(dependencies.Select(d => d.Directory)))
             foreach (var path in ConsumerSources(directory, output)) inputs["consumer:" + path] = Sha(path);
@@ -265,6 +308,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return inputs;
     }
 
+    static SortedDictionary<string, string> ConsumerInputs(string root, string proof, string? settings, string output)
+    {
+        var inputs = Inputs(proof, settings);
+        foreach (var (key, value) in ConsumerSnapshot(root, output)) inputs[key] = value;
+        return inputs;
+    }
+
+    static SortedDictionary<string, string> RequestInputs(SortedDictionary<string, string> common, string proof, string? settings)
+    {
+        var inputs = new SortedDictionary<string, string>(common, StringComparer.Ordinal);
+        inputs["proof:" + proof] = Sha(proof);
+        if (settings is not null) inputs["settings:" + settings] = Sha(settings);
+        return inputs;
+    }
+
     static void AddConsumerLibrary(string directory, string name)
     {
         var toml = Path.Combine(directory, "lakefile.toml");
@@ -274,41 +332,51 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             File.AppendAllText(Path.Combine(directory, "lakefile.lean"), $"\nlean_lib {name}\n");
     }
 
-    string[] ConsumerImportDirectories(string session)
+    (string[] Directories, string LeanPath) ConsumerImportDirectories(string session)
     {
         // Ask the same Lake environment used by the checker. Package buildDir and
         // leanLibDir need not be the default .lake/build/lib/lean directories.
-        var probe = Path.Combine(session, "LeanCILPaths" + Guid.NewGuid().ToString("N") + ".lean");
-        string output;
-        try
-        {
-            File.WriteAllText(probe, "def main : IO Unit := do\n  IO.println (\"LEANCIL_LEAN_PATH=\" ++ (← IO.getEnv \"LEAN_PATH\").getD \"\")\n");
-            output = Run(["lake", "env", "lean", "--run", probe], session);
-        }
-        finally { File.Delete(probe); }
-        var lines = output.Split('\n', StringSplitOptions.TrimEntries)
-            .Where(line => line.StartsWith("LEANCIL_LEAN_PATH=", StringComparison.Ordinal)).ToArray();
+        var lines = Run(["lake", "env"], session).Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => line.StartsWith("LEAN_PATH=", StringComparison.Ordinal)).ToArray();
         if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean import paths.");
+        var leanPath = lines[0]["LEAN_PATH=".Length..];
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var trusted = Path.GetFullPath(Path.Combine(Toolchain, "lib/lean"));
-        return lines[0]["LEANCIL_LEAN_PATH=".Length..].Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+        return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, session)))
             .Where(path => !path.Equals(trusted, comparison))
             .Select(path => Within(session, Path.GetRelativePath(session, path)))
-            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray(), leanPath);
     }
 
-    // A deliberately conservative key: include all package sources (not only the
-    // selected proof's syntactic imports), pinned revisions, and effective config.
-    // Only artifacts whose compiled import closure excludes Extracted are shared.
+    // Variables read by Lean, Lake and elan, plus any a consumer's elaborators read
+    // (LEANCIL_CACHE_ENVIRONMENT). Lake's traces already bind sources, options and tools.
+    static SortedDictionary<string, string> ConsumerCacheEnvironment()
+    {
+        static string Normalize(string name) => OperatingSystem.IsWindows() ? name.ToUpperInvariant() : name;
+        var named = (Environment.GetEnvironmentVariable("LEANCIL_CACHE_ENVIRONMENT") ?? "")
+            .Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(Normalize).Append("LEANCIL_CACHE_ENVIRONMENT").ToHashSet(StringComparer.Ordinal);
+        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            var name = Normalize((string)entry.Key);
+            // The thread count bounds parallelism only; elaboration results do not depend on it.
+            if (named.Contains(name) || (name != "LEAN_NUM_THREADS" &&
+                new[] { "LEAN_", "LAKE_", "ELAN_", "RESERVOIR_" }.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal))))
+                result[name] = (string?)entry.Value ?? "";
+        }
+        return result;
+    }
+
+    // Changes whenever the verifier, framework, Lean/Lake binaries, the variables they
+    // read, or the bound inputs change. Never log the environment values.
     string ConsumerCacheKey(string kind, SortedDictionary<string, string> inputs, string extra) =>
-        ContentKey("consumer-" + kind + "-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" +
-            Sha(Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean")) + "\n" +
+        ContentKey("consumer-" + kind + "-v2\n" + VerificationPolicy + "\n" + libraryKey + "\n" +
+            Sha(LeanExecutable) + "\n" +
             Sha(Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" +
-            // lakefile.lean may consult environment variables when choosing
-            // options/plugins. Bind them conservatively; never log their values.
-            JsonSerializer.Serialize(new SortedDictionary<string, string>(Environment.GetEnvironmentVariables()
-                .Cast<System.Collections.DictionaryEntry>().ToDictionary(entry => (string)entry.Key, entry => (string)entry.Value!), StringComparer.Ordinal)) + "\n" +
+            Sha(Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lake.exe" : "lake")) + "\n" +
+            JsonSerializer.Serialize(ConsumerCacheEnvironment()) + "\n" +
             JsonSerializer.Serialize(inputs) + "\n" + extra);
 
     Dictionary<string, string[]> ConsumerModuleImports(string session, Dictionary<string, string> modules)
@@ -331,7 +399,7 @@ unsafe def main (args : List String) : IO Unit := do
 """);
             var paths = modules.Values.ToArray();
             File.WriteAllText(input, JsonSerializer.Serialize(paths));
-            var result = Run(["lean", "--run", probe, input], session);
+            var result = Run([LeanExecutable, "--run", probe, input], session, environment: LeanEnvironment);
             var lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length != paths.Length) throw new InvalidDataException("Incomplete consumer compiled import graph.");
             return modules.Keys.Zip(lines).ToDictionary(pair => pair.First,
@@ -340,16 +408,20 @@ unsafe def main (args : List String) : IO Unit := do
         finally { File.Delete(probe); File.Delete(input); }
     }
 
-    void PublishConsumerSupport(string session, string key, string[] directories, string proofModule,
-        string root, SortedDictionary<string, string> inputs)
+    static HashSet<string> ImportClosure(Dictionary<string, string[]> graph, IEnumerable<string> roots)
     {
-        if (!UseSuccessCache && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"))) return;
-        var modules = directories.Where(Directory.Exists)
-            .SelectMany(directory => Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
-                .Select(path => (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
-            .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
-        var graph = ConsumerModuleImports(session, modules);
-        var dependent = new HashSet<string>(["Extracted", "ExtractionAudit", proofModule], StringComparer.Ordinal);
+        var closure = new HashSet<string>(roots, StringComparer.Ordinal);
+        var pending = new Queue<string>(closure);
+        while (pending.TryDequeue(out var name))
+            if (graph.TryGetValue(name, out var imports))
+                foreach (var import in imports)
+                    if (closure.Add(import)) pending.Enqueue(import);
+        return closure;
+    }
+
+    static HashSet<string> DependentModules(Dictionary<string, string[]> graph, IEnumerable<string> roots)
+    {
+        var dependent = new HashSet<string>(roots, StringComparer.Ordinal);
         bool changed;
         do
         {
@@ -357,194 +429,498 @@ unsafe def main (args : List String) : IO Unit := do
             foreach (var (name, imports) in graph)
                 if (imports.Any(dependent.Contains)) changed |= dependent.Add(name);
         } while (changed);
-        ExportConsumerSupport(session, root, inputs, modules.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph);
-        if (!UseSuccessCache) return;
-        var publication = Path.Combine(Path.GetTempPath(), "leancil-consumer-support-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(publication);
+        return dependent;
+    }
+
+    const string ConsumerSupportRecordName = "leancil-support.json";
+
+    // Sources are package-relative paths of every candidate source file for the module.
+    sealed record ConsumerSupportModule(SortedDictionary<string, string> Sources, string[] Imports, string[] Files);
+
+    bool ExternalConsumerModule(string name) => name == "CIL" || name.StartsWith("CIL.", StringComparison.Ordinal) ||
+        File.Exists(Path.Combine(Toolchain, "lib/lean", name.Replace('.', '/') + ".olean"));
+
+    // Keep only modules whose candidate sources are unchanged and whose imports are
+    // kept, certified framework modules or toolchain modules.
+    HashSet<string> RestorableConsumerSupport(SortedDictionary<string, ConsumerSupportModule> record, IReadOnlyDictionary<string, string> sources)
+    {
+        var result = record.Where(pair => pair.Value.Sources.Count > 0 &&
+                pair.Value.Sources.All(source => sources.TryGetValue(source.Key, out var hash) && hash == source.Value))
+            .Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var name in result.ToArray())
+                if (record[name].Imports.Any(import => !result.Contains(import) && !ExternalConsumerModule(import)))
+                    changed |= result.Remove(name);
+        } while (changed);
+        return result;
+    }
+
+    static SortedDictionary<string, ConsumerSupportModule>? ReadConsumerSupportRecord(string path)
+    {
         try
         {
-            var generatedArtifacts = Directory.EnumerateFiles(session, "*", SearchOption.AllDirectories)
-                .Select(path => (Path: path, Relative: Path.GetRelativePath(session, path).Replace('\\', '/')))
-                .Where(file => !file.Relative.Split('/').Contains(".git") &&
-                    new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }.Any(suffix => file.Relative.EndsWith(suffix, StringComparison.Ordinal)))
-                .ToArray();
-            foreach (var (name, path) in modules.Where(pair => !dependent.Contains(pair.Key) &&
-                pair.Key != "CIL" && !pair.Key.StartsWith("CIL.", StringComparison.Ordinal)))
-            {
-                var stem = Path.GetFileNameWithoutExtension(path);
-                foreach (var artifact in Directory.EnumerateFiles(Path.GetDirectoryName(path)!, stem + ".*"))
-                {
-                    // A sibling module Foo.Bar must not be mistaken for Foo's artifact.
-                    var suffix = Path.GetFileName(artifact)[stem.Length..];
-                    if (suffix is not (".olean" or ".olean.hash" or ".olean.private" or ".olean.private.hash" or
-                        ".olean.server" or ".olean.server.hash" or ".ilean" or ".ilean.hash" or ".trace" or ".ir" or ".ir.hash")) continue;
-                    var target = Within(publication, Path.GetRelativePath(session, artifact));
-                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                    File.Copy(artifact, target);
-                }
-                // Lake's olean trace also records generated C/IR outputs. Without
-                // those outputs it recompiles an otherwise valid cached module.
-                // Search by full module suffix to respect custom build/IR dirs.
-                var modulePath = name.Replace('.', '/');
-                foreach (var artifact in generatedArtifacts)
-                {
-                    if (!new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }
-                        .Any(suffix => artifact.Relative.EndsWith("/" + modulePath + suffix, StringComparison.Ordinal))) continue;
-                    var target = Within(publication, artifact.Relative);
-                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                    File.Copy(artifact.Path, target, true);
-                }
-            }
-            // Append immutable certified generations: later gates may discover
-            // additional independent helpers that were absent from the first gate.
-            PublishSuccess(key + "-" + ContentKey(JsonSerializer.Serialize(CacheFiles(publication))), publication);
+            var record = JsonSerializer.Deserialize<SortedDictionary<string, ConsumerSupportModule>>(File.ReadAllText(path));
+            return record is null || record.Values.Any(module => module?.Sources is null || module.Imports is null || module.Files is null)
+                ? null : new(record, StringComparer.Ordinal);
         }
-        finally { Directory.Delete(publication, true); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    static SortedDictionary<string, string> ConsumerSourceHashes(SortedDictionary<string, string> snapshot, string root) =>
+        new(snapshot.Where(pair => pair.Key.StartsWith("consumer:", StringComparison.Ordinal) && pair.Key.EndsWith(".lean", StringComparison.Ordinal))
+            .ToDictionary(pair => Path.GetRelativePath(root, pair.Key["consumer:".Length..]).Replace('\\', '/'), pair => pair.Value), StringComparer.Ordinal);
+
+    // Restores the largest unchanged, import-closed module set of one authenticated
+    // generation. Lake still decides reuse; a rebuilt restored module forces full replay.
+    SortedDictionary<string, string> RestoreConsumerSupport(string key, IReadOnlyDictionary<string, string> sources, string destination)
+    {
+        if (!UseSuccessCache || !Directory.Exists(SuccessCacheRoot)) return new(StringComparer.Ordinal);
+        var candidates = new List<(string Name, int Count, DateTime Time)>();
+        foreach (var generation in Directory.EnumerateDirectories(SuccessCacheRoot, key + "-*"))
+        {
+            var name = Path.GetFileName(generation);
+            // Staging and replaced entries carry a '.' suffix and are never restored.
+            if (name.Contains('.')) continue;
+            // Unauthenticated preselection only; the chosen generation is authenticated below.
+            var record = ReadConsumerSupportRecord(Path.Combine(generation, "files", ConsumerSupportRecordName));
+            var count = record is null ? 0 : RestorableConsumerSupport(record, sources).Count;
+            if (count > 0) candidates.Add((name, count, Directory.GetLastWriteTimeUtc(generation)));
+        }
+        foreach (var (name, _, _) in candidates.OrderByDescending(item => item.Count).ThenByDescending(item => item.Time))
+        {
+            var staging = Path.Combine(Path.GetTempPath(), "leancil-consumer-restored-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(staging);
+            try
+            {
+                // RestoreSuccess verifies the local producer signature and all artifact hashes.
+                if (!RestoreSuccess(name, staging)) continue;
+                var record = ReadConsumerSupportRecord(Path.Combine(staging, ConsumerSupportRecordName));
+                if (record is null) continue;
+                var files = RestorableConsumerSupport(record, sources).SelectMany(module => record[module].Files)
+                    .Select(file => (Source: Within(staging, file), Target: Within(destination, file))).ToArray();
+                if (files.Any(file => !File.Exists(file.Source))) continue;
+                foreach (var (source, target) in files)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(source, target, true);
+                }
+                return CacheFiles(destination);
+            }
+            catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException) { }
+            finally { Directory.Delete(staging, true); }
+        }
+        return new(StringComparer.Ordinal);
+    }
+
+    // Collects certified, extraction-independent modules with their sources and
+    // imports. Returns null when no module can be bound to its sources.
+    string? CollectConsumerSupport(string session, Dictionary<string, string> modules, Dictionary<string, string[]> graph,
+        HashSet<string> dependent, IReadOnlyDictionary<string, string> sources)
+    {
+        var generatedArtifacts = Directory.EnumerateFiles(session, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(session, path).Replace('\\', '/'))
+            .Where(relative => !relative.Split('/').Contains(".git") &&
+                new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }.Any(suffix => relative.EndsWith(suffix, StringComparison.Ordinal)))
+            .ToArray();
+        var record = new SortedDictionary<string, ConsumerSupportModule>(StringComparer.Ordinal);
+        foreach (var (name, path) in modules.Where(pair => !dependent.Contains(pair.Key) &&
+            pair.Key != "CIL" && !pair.Key.StartsWith("CIL.", StringComparison.Ordinal)))
+        {
+            var files = new SortedSet<string>(StringComparer.Ordinal);
+            var stem = Path.GetFileNameWithoutExtension(path);
+            foreach (var artifact in Directory.EnumerateFiles(Path.GetDirectoryName(path)!, stem + ".*"))
+            {
+                // A sibling module Foo.Bar must not be mistaken for Foo's artifact.
+                var suffix = Path.GetFileName(artifact)[stem.Length..];
+                if (suffix is ".olean" or ".olean.hash" or ".olean.private" or ".olean.private.hash" or
+                    ".olean.server" or ".olean.server.hash" or ".ilean" or ".ilean.hash" or ".trace" or ".ir" or ".ir.hash")
+                    files.Add(Path.GetRelativePath(session, artifact).Replace('\\', '/'));
+            }
+            // Lake's olean trace also records generated C/IR outputs. Without
+            // those outputs it recompiles an otherwise valid cached module.
+            // Search by full module suffix to respect custom build/IR dirs.
+            var modulePath = name.Replace('.', '/');
+            foreach (var artifact in generatedArtifacts)
+                if (new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }
+                    .Any(suffix => artifact.EndsWith("/" + modulePath + suffix, StringComparison.Ordinal)))
+                    files.Add(artifact);
+            var candidates = sources.Where(pair => pair.Key[..^".lean".Length] == modulePath ||
+                pair.Key[..^".lean".Length].EndsWith("/" + modulePath, StringComparison.Ordinal));
+            record[name] = new(new(candidates.ToDictionary(), StringComparer.Ordinal),
+                graph[name].Order(StringComparer.Ordinal).ToArray(), files.ToArray());
+        }
+        // A module without known sources cannot be matched later, nor can its importers.
+        var bound = RestorableConsumerSupport(record, record.Values.SelectMany(module => module.Sources)
+            .DistinctBy(pair => pair.Key).ToDictionary(StringComparer.Ordinal));
+        foreach (var name in record.Keys.Where(name => !bound.Contains(name)).ToArray()) record.Remove(name);
+        if (record.Count == 0) return null;
+        var publication = Path.Combine(Path.GetTempPath(), "leancil-consumer-support-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(publication);
+        foreach (var file in record.Values.SelectMany(module => module.Files))
+        {
+            var target = Within(publication, file);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(Within(session, file), target, true);
+        }
+        File.WriteAllText(Path.Combine(publication, ConsumerSupportRecordName), JsonSerializer.Serialize(record));
+        return publication;
+    }
+
+    sealed record ConsumerSession(string FrameworkCopy, Dictionary<string, string> Copied);
+
+    ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
+        SortedDictionary<string, string> snapshot, string certifiedLibrary, string extraction,
+        IReadOnlyList<(string Module, string Proof, string Output)> proofs)
+    {
+        foreach (var dependency in dependencies)
+        {
+            var destination = Within(session, Path.GetRelativePath(root, dependency.Directory));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            Run(["git", "clone", "--no-hardlinks", "--no-checkout", dependency.Directory, destination]);
+            Run(["git", "remote", "set-url", "origin", dependency.Url], destination);
+        }
+        foreach (var (key, hash) in snapshot.Where(p => p.Key.StartsWith("consumer:", StringComparison.Ordinal)))
+        {
+            var source = key["consumer:".Length..];
+            var destination = Within(session, Path.GetRelativePath(root, source));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(source, destination);
+            if (Sha(destination) != hash) throw new InvalidDataException("Consumer source changed during copying: " + source);
+        }
+        var framework = dependencies.Single(d => d.Name == "leancil");
+        var frameworkCopy = Within(session, Path.GetRelativePath(root, framework.Source));
+        // The snapshot already checked normalized source equality. Use the
+        // certified bytes (including line endings) so Lake can reuse its traces.
+        foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories).Append(At("CIL.lean")))
+            File.Copy(path, Path.Combine(frameworkCopy, Path.GetRelativePath(Root, path)), true);
+        var baseBuild = Path.Combine(certifiedLibrary, ".lake/build");
+        var frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
+        foreach (var path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
+            if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
+                .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
+            var destination = Path.Combine(frameworkBuild, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(path, destination, true);
+        }
+        // Give Lake a real generated-module target before building consumer imports.
+        if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
+            throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");
+        File.Copy(Path.Combine(extraction, "Extracted.lean"), Path.Combine(frameworkCopy, "Extracted.lean"));
+        var generated = Sha(Path.Combine(frameworkCopy, "Extracted.lean"));
+        foreach (var output in proofs.Select(proof => proof.Output).Distinct())
+            if (generated != JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")))
+                .GetProperty("generatedSha256").GetString())
+                throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
+        AddConsumerLibrary(frameworkCopy, "Extracted");
+        var extractionAuditPath = Path.Combine(frameworkCopy, "ExtractionAudit.lean");
+        if (File.Exists(extractionAuditPath)) throw new InvalidDataException("ExtractionAudit is reserved for the certificate audit.");
+        File.WriteAllText(extractionAuditPath, ExtractionAuditSource);
+        AddConsumerLibrary(frameworkCopy, "ExtractionAudit");
+        var copied = snapshot.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal))
+            .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
+            .Append(Path.Combine(frameworkCopy, "Extracted.lean"))
+            .Append(extractionAuditPath).ToList();
+        foreach (var (module, proof, _) in proofs)
+        {
+            if (File.Exists(Path.Combine(session, module + ".lean")))
+                throw new InvalidDataException(module + " is reserved for the selected proof.");
+            File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), Path.Combine(session, module + ".lean"));
+            AddConsumerLibrary(session, module);
+            copied.Add(Path.Combine(session, module + ".lean"));
+        }
+        return new(frameworkCopy, copied.ToDictionary(path => path, Sha));
+    }
+
+    sealed record ConsumerRequest(string Assembly, string Output, string Proof, string Theorem, string? Settings,
+        bool ExpectRejection = false);
+
+    sealed class ConsumerOutcome
+    {
+        public string Stage = "extraction integrity";
+        public Report? Report;
+        public Exception? Error;
+        public bool Rejected;
+        public string? Detail;
     }
 
     Report VerifyConsumer(string assembly, string proof, string output, string theorem, string root,
         string? settings, Action<string>? stage)
     {
+        var outcome = VerifyConsumerRequests(root, [new(assembly, output, proof, theorem, settings)],
+            (_, value) => stage?.Invoke(value), batch: false)[0];
+        if (outcome.Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
+        return outcome.Report!;
+    }
+
+    // Verifies requests against one consumer snapshot. Each request gets its own
+    // certificate, proof module, theorem audit and failure; requests that share an
+    // extraction share one Lake workspace, build and kernel replay.
+    ConsumerOutcome[] VerifyConsumerRequests(string root, IReadOnlyList<ConsumerRequest> requests,
+        Action<int, string>? stage, bool batch, int parallelism = 1)
+    {
         root = Path.GetFullPath(root);
-        proof = Within(root, Path.GetRelativePath(root, proof));
-        var reportPath = Path.Combine(output, "verified.json");
-        File.Delete(reportPath);
-        stage?.Invoke("extraction integrity");
-        Run(["dotnet", ExtractorPath, "check", output]);
-        stage?.Invoke("consumer source snapshot");
-        var before = ConsumerInputs(root, proof, settings, output);
-        if (!before.ContainsKey("consumer:" + proof))
-            throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
-        stage?.Invoke("Lean library build");
-        var certifiedLibrary = Library(Inputs(proof, settings));
-        var certifiedBase = ModuleArtifacts(certifiedLibrary).Where(pair =>
-            ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
-        var identityHash = Sha(Path.Combine(output, "identity.json"));
-        var proofKey = ConsumerCacheKey("proof", before, identityHash + "\n" + theorem + "\n" + Sha(assembly));
-        var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(session);
-        try
+        var outcomes = requests.Select(_ => new ConsumerOutcome()).ToArray();
+        bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected && outcomes[i].Report is null;
+        int[] Pending(IEnumerable<int> members) => members.Where(Live).ToArray();
+        void Stage(IEnumerable<int> members, string value)
         {
-            var receipt = Path.Combine(session, "certified-result");
-            if (RestoreSuccess(proofKey, receipt))
+            foreach (var i in Pending(members))
             {
-                var cached = JsonSerializer.Deserialize<Report>(File.ReadAllText(Path.Combine(receipt, "report.json")))!;
-                Run(["dotnet", ExtractorPath, "check", output]);
-                if (!Same(before, ConsumerInputs(root, proof, settings, output)) || identityHash != Sha(Path.Combine(output, "identity.json")))
-                    throw new InvalidOperationException("Inputs changed during consumer verification");
-                var reused = cached with { libraryBuild = "consumer-proof-cache" };
-                File.WriteAllText(reportPath, JsonSerializer.Serialize(reused, Json) + "\n");
-                CacheProgress("certified consumer proof: " + theorem);
-                return reused;
+                outcomes[i].Stage = value;
+                stage?.Invoke(i, value);
             }
-            var dependencies = ConsumerDependencies(root);
-            foreach (var dependency in dependencies)
+        }
+        void Fail(IEnumerable<int> members, Exception error)
+        {
+            foreach (var i in Pending(members)) outcomes[i].Error = error;
+        }
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var all = Enumerable.Range(0, requests.Count).ToArray();
+        var identities = new string[requests.Count];
+        var proofKeys = new string[requests.Count];
+        var outputs = requests.Select(request => Path.GetFullPath(request.Output)).ToArray();
+        var proofs = new string[requests.Count];
+        foreach (var i in all)
+            try { proofs[i] = Within(root, Path.GetRelativePath(root, Path.GetFullPath(requests[i].Proof))); }
+            catch (Exception error) { Fail([i], error); }
+        // Only the last request for an output may leave a certificate, as in sequential runs.
+        var last = all.GroupBy(i => outputs[i], comparer).ToDictionary(group => group.Key, group => group.Max(), comparer);
+        foreach (var output in last.Keys) File.Delete(Path.Combine(output, "verified.json"));
+        var parallel = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism) };
+        void CheckExtractions(int[] members)
+        {
+            Stage(members, "extraction integrity");
+            Parallel.ForEach(Pending(members).GroupBy(i => outputs[i], comparer), parallel, group =>
             {
-                var destination = Within(session, Path.GetRelativePath(root, dependency.Directory));
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                Run(["git", "clone", "--no-hardlinks", "--no-checkout", dependency.Directory, destination]);
-                Run(["git", "remote", "set-url", "origin", dependency.Url], destination);
-            }
-            foreach (var (key, hash) in before.Where(p => p.Key.StartsWith("consumer:", StringComparison.Ordinal)))
-            {
-                var source = key["consumer:".Length..];
-                var destination = Within(session, Path.GetRelativePath(root, source));
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(source, destination);
-                if (Sha(destination) != hash) throw new InvalidDataException("Consumer source changed during copying: " + source);
-            }
-            var framework = dependencies.Single(d => d.Name == "leancil");
-            var frameworkCopy = Within(session, Path.GetRelativePath(root, framework.Source));
-            // ConsumerInputs already checked normalized source equality. Use the
-            // certified bytes (including line endings) so Lake can reuse its traces.
-            foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories).Append(At("CIL.lean")))
-                File.Copy(path, Path.Combine(frameworkCopy, Path.GetRelativePath(Root, path)), true);
-            var baseBuild = Path.Combine(certifiedLibrary, ".lake/build");
-            var frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
-            foreach (var path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
-                if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
-                    .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
-                var destination = Path.Combine(frameworkBuild, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(path, destination, true);
-            }
-            // Give Lake a real generated-module target before building consumer imports.
-            if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
-                throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");
-            File.Copy(Path.Combine(output, "Extracted.lean"), Path.Combine(frameworkCopy, "Extracted.lean"));
-            var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
-            if (Sha(Path.Combine(frameworkCopy, "Extracted.lean")) != extraction.GetProperty("generatedSha256").GetString())
-                throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
-            AddConsumerLibrary(frameworkCopy, "Extracted");
-            var extractionAuditPath = Path.Combine(frameworkCopy, "ExtractionAudit.lean");
-            if (File.Exists(extractionAuditPath)) throw new InvalidDataException("ExtractionAudit is reserved for the certificate audit.");
-            File.WriteAllText(extractionAuditPath, ExtractionAuditSource);
-            AddConsumerLibrary(frameworkCopy, "ExtractionAudit");
-            const string proofModule = "LeanCILProof";
-            if (File.Exists(Path.Combine(session, proofModule + ".lean")))
-                throw new InvalidDataException("LeanCILProof is reserved for the selected proof.");
-            File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), Path.Combine(session, proofModule + ".lean"));
-            AddConsumerLibrary(session, proofModule);
-            var copied = before.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal))
-                .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
-                .Append(Path.Combine(frameworkCopy, "Extracted.lean"))
-                .Append(extractionAuditPath)
-                .Append(Path.Combine(session, proofModule + ".lean"))
-                .ToDictionary(path => path, Sha);
-            var initialImportDirectories = ConsumerImportDirectories(session);
-            var supportInputs = new SortedDictionary<string, string>(before.Where(pair =>
+                try { Run(["dotnet", ExtractorPath, "check", group.Key]); }
+                catch (Exception error) { Fail(group, error); }
+            });
+        }
+        CheckExtractions(all);
+        if (batch && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT")))
+            Fail(all, new InvalidOperationException("LEANCIL_EXPORT_CONSUMER_SUPPORT requires a single-request verify."));
+        var live = Pending(all);
+        if (live.Length == 0) return outcomes;
+
+        // A batch shares one snapshot, so no output may be part of the consumer sources.
+        string? excluded = batch ? null : outputs[live[0]];
+        SortedDictionary<string, string> Common(SortedDictionary<string, string> snapshot)
+        {
+            var common = new SortedDictionary<string, string>(Inputs(At("CIL.lean")).Where(pair =>
                 !pair.Key.StartsWith("proof:", StringComparison.Ordinal) && !pair.Key.StartsWith("settings:", StringComparison.Ordinal))
                 .ToDictionary(), StringComparer.Ordinal);
-            var configuration = copied.Where(pair => Path.GetFileName(pair.Key) is "lakefile.toml" or "lakefile.lean" or "lake-manifest.json")
-                .OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                .Select(pair => Path.GetRelativePath(session, pair.Key) + ":" + pair.Value);
-            var supportKey = ConsumerCacheKey("support", supportInputs,
-                string.Join("\n", initialImportDirectories.Select(path => Path.GetRelativePath(session, path))) + "\n" + string.Join("\n", configuration));
-            var restoredArtifacts = new SortedDictionary<string, string>(StringComparer.Ordinal);
-            var restoredDirectory = Path.Combine(Path.GetTempPath(), "leancil-consumer-restored-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(restoredDirectory);
+            foreach (var (key, value) in snapshot) common[key] = value;
+            return common;
+        }
+        var before = new SortedDictionary<string, string>[requests.Count];
+        SortedDictionary<string, string> snapshot;
+        Stage(live, "consumer source snapshot");
+        try
+        {
+            snapshot = ConsumerSnapshot(root, excluded);
+            var common = Common(snapshot);
+            foreach (var i in live)
+                try
+                {
+                    var output = outputs[i] + Path.DirectorySeparatorChar;
+                    if (batch && snapshot.Keys.Any(key => key.StartsWith("consumer:" + output, OperatingSystem.IsWindows()
+                        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+                        throw new InvalidDataException("Batch outputs must lie outside the consumer sources, for example under artifacts/: " + outputs[i]);
+                    before[i] = RequestInputs(common, proofs[i], requests[i].Settings);
+                    if (!before[i].ContainsKey("consumer:" + proofs[i]))
+                        throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
+                }
+                catch (Exception error) { Fail([i], error); }
+        }
+        catch (Exception error)
+        {
+            Fail(live, error);
+            return outcomes;
+        }
+        void Recheck(int[] members)
+        {
+            CheckExtractions(members);
+            members = Pending(members);
+            if (members.Length == 0) return;
             try
             {
-                var restored = false;
-                foreach (var generation in UseSuccessCache && Directory.Exists(SuccessCacheRoot)
-                    ? Directory.EnumerateDirectories(SuccessCacheRoot, supportKey + "-*").OrderByDescending(Directory.GetLastWriteTimeUtc)
-                    : Enumerable.Empty<string>())
-                {
-                    // RestoreSuccess verifies the local producer signature and all
-                    // artifact hashes. Staging directories never have a valid receipt.
-                    if (RestoreSuccess(Path.GetFileName(generation), restoredDirectory))
-                    {
-                        restored = true;
-                        break;
-                    }
-                    // An interrupted copy may leave partial files; they have no
-                    // reusable certificate and must never enter the package.
-                    Directory.Delete(restoredDirectory, true);
-                    Directory.CreateDirectory(restoredDirectory);
-                }
-                if (restored) restoredArtifacts = CacheFiles(restoredDirectory);
-                if (restoredArtifacts.Count > 0)
-                {
-                    CopyTree(restoredDirectory, session);
-                    CacheProgress("certified consumer support library");
-                }
+                var common = Common(ConsumerSnapshot(root, excluded));
+                foreach (var i in members)
+                    if (!Same(before[i], RequestInputs(common, proofs[i], requests[i].Settings)) ||
+                        identities[i] != Sha(Path.Combine(outputs[i], "identity.json")))
+                        Fail([i], new InvalidOperationException("Inputs changed during consumer verification"));
             }
-            finally { Directory.Delete(restoredDirectory, true); }
+            catch (Exception error) { Fail(members, error); }
+        }
+
+        live = Pending(all);
+        if (live.Length == 0) return outcomes;
+        Stage(live, "Lean library build");
+        string certifiedLibrary;
+        Dictionary<string, string> certifiedBase;
+        ConsumerDependency[] dependencies;
+        try
+        {
+            certifiedLibrary = Library(Inputs(proofs[live[0]], requests[live[0]].Settings));
+            certifiedBase = ModuleArtifacts(certifiedLibrary).Where(pair =>
+                ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
+            dependencies = ConsumerDependencies(root);
+            // Resolve lazily initialized identities before any parallel work.
+            _ = VerificationPolicy;
+            if (UseSuccessCache) _ = ReceiptKey;
+        }
+        catch (Exception error)
+        {
+            Fail(live, error);
+            return outcomes;
+        }
+        var cached = new List<int>();
+        foreach (var i in live)
+        {
+            try
+            {
+                identities[i] = Sha(Path.Combine(outputs[i], "identity.json"));
+                proofKeys[i] = ConsumerCacheKey("proof", before[i], identities[i] + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly));
+                if (requests[i].ExpectRejection) continue;
+                var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(receipt);
+                try
+                {
+                    if (!RestoreSuccess(proofKeys[i], receipt)) continue;
+                    var report = JsonSerializer.Deserialize<Report>(File.ReadAllText(Path.Combine(receipt, "report.json")))!;
+                    outcomes[i].Detail = JsonSerializer.Serialize(report with { libraryBuild = "consumer-proof-cache" }, Json);
+                    cached.Add(i);
+                }
+                finally { Directory.Delete(receipt, true); }
+            }
+            catch (Exception error) { Fail([i], error); }
+        }
+        if (cached.Count > 0)
+        {
+            // An unchanged proof reuses its authenticated result; integrity and inputs are still rechecked.
+            Recheck([.. cached]);
+            foreach (var i in Pending(cached))
+            {
+                var report = JsonSerializer.Deserialize<Report>(outcomes[i].Detail!)!;
+                outcomes[i].Detail = null;
+                if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
+                outcomes[i].Report = report;
+                CacheProgress("certified consumer proof: " + requests[i].Theorem);
+            }
+        }
+
+        var groups = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        foreach (var i in Pending(all))
+            try
+            {
+                var key = Sha(Path.Combine(outputs[i], "Extracted.lean"));
+                if (!groups.TryGetValue(key, out var members)) groups[key] = members = [];
+                members.Add(i);
+            }
+            catch (Exception error) { Fail([i], error); }
+        if (groups.Count == 0) return outcomes;
+        var ordered = groups.Values.Select(group => group.ToArray())
+            .OrderByDescending(group => group.Count(i => !requests[i].ExpectRejection)).ToArray();
+        var sources = ConsumerSourceHashes(snapshot, root);
+        var exporting = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
+        string supportKey = "";
+        string[] relativeImportDirectories = [];
+        // Certified extraction-independent support shared by later workspaces.
+        var support = Path.Combine(Path.GetTempPath(), "leancil-consumer-restored-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(support);
+        var supportArtifacts = new SortedDictionary<string, string>(StringComparer.Ordinal);
+
+        void VerifyGroup(int[] members, string session, bool first, bool share)
+        {
+            var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
+            var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, outputs[members[0]],
+                members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray());
+            var frameworkCopy = prepared.FrameworkCopy;
+            string[] initialImportDirectories;
+            if (!first && relativeImportDirectories.Length > 0)
+                initialImportDirectories = relativeImportDirectories.Select(path => Path.GetFullPath(path, session)).ToArray();
+            else if (!first)
+                initialImportDirectories = ConsumerImportDirectories(session).Directories;
+            else
+            {
+                initialImportDirectories = ConsumerImportDirectories(session).Directories;
+                relativeImportDirectories = initialImportDirectories.Select(path => Path.GetRelativePath(session, path)).ToArray();
+                // Lean sources are bound per module inside each generation, not by this key.
+                var configuration = prepared.Copied.Where(pair => Path.GetFileName(pair.Key) is "lakefile.toml" or "lakefile.lean" or "lake-manifest.json" or "lean-toolchain")
+                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => Path.GetRelativePath(session, pair.Key).Replace('\\', '/') + ":" + pair.Value);
+                supportKey = ConsumerCacheKey("support", new(snapshot.Where(pair => pair.Key.StartsWith("revision:", StringComparison.Ordinal))
+                        .ToDictionary(), StringComparer.Ordinal),
+                    string.Join("\n", relativeImportDirectories) + "\n" + string.Join("\n", configuration));
+                supportArtifacts = RestoreConsumerSupport(supportKey, sources, support);
+            }
+            var restoredArtifacts = new SortedDictionary<string, string>(supportArtifacts.Where(pair => pair.Key != ConsumerSupportRecordName)
+                .ToDictionary(), StringComparer.Ordinal);
+            foreach (var file in restoredArtifacts.Keys)
+            {
+                var target = Within(session, file);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(Within(support, file), target, true);
+            }
+            if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
             // Snapshot before invoking Lake: configuration elaboration and imported
             // metaprograms must not redefine the source bytes accepted by this run.
-            stage?.Invoke("extraction certificate audit");
+            Stage(members, "extraction certificate audit");
             var extractionAudit = Run(["lake", "build", "+ExtractionAudit:olean"], frameworkCopy,
                 progress: "Checking consumer extraction certificate");
             AuditedAxioms(extractionAudit, "ExtractionAudit.valid");
-            stage?.Invoke("proof checking");
-            Run(["lake", "build", "+" + proofModule + ":olean"], session, progress: "Building fresh consumer proof and dependencies");
+            Stage(members, "proof checking");
+            string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
+            var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies");
+            var buildFailure = build.Code == 0 ? null
+                : new InvalidOperationException($"Command failed ({build.Code}): {string.Join(' ', command)}\n{build.Output}");
+            string[] importDirectories = [];
+            var leanPath = "";
+            bool[] built = [false];
+            if (buildFailure is null || members.Length > 1)
+            {
+                if (members.Length == 1) Stage(members, "kernel replay");
+                (importDirectories, leanPath) = ConsumerImportDirectories(session);
+                // Lake writes a module's olean and trace only after it checks successfully.
+                built = names.Select(name => importDirectories.Any(directory =>
+                    File.Exists(Path.Combine(directory, name + ".olean")) && File.Exists(Path.Combine(directory, name + ".trace")))).ToArray();
+                if (buildFailure is null && !built.All(value => value))
+                    throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
+            }
+            var rejecting = new List<int>();
+            for (var k = 0; k < members.Length; k++)
+            {
+                var i = members[k];
+                if (!built[k])
+                {
+                    if (requests[i].ExpectRejection) rejecting.Add(i);
+                    else Fail([i], buildFailure!);
+                }
+                else if (requests[i].ExpectRejection)
+                    Fail([i], new InvalidOperationException("Expected proof checking to reject " + requests[i].Theorem + ", but the proof checked."));
+            }
+            if (rejecting.Count > 0)
+            {
+                // A rejection counts only for unchanged inputs and an intact extraction.
+                Recheck([.. rejecting]);
+                foreach (var i in Pending(rejecting))
+                {
+                    outcomes[i].Stage = "proof checking";
+                    outcomes[i].Detail = buildFailure!.Message;
+                    outcomes[i].Rejected = true;
+                }
+            }
+            var proceeding = Pending(members);
+            if (proceeding.Length == 0) return;
+            Stage(proceeding, "kernel replay");
             // Replay every consumer/external module, including unused declarations.
             // Only identical artifacts in the validated framework package can reuse
             // the base certificate; a same-named consumer module cannot inherit it.
-            stage?.Invoke("kernel replay");
-            var importDirectories = ConsumerImportDirectories(session);
             if (!initialImportDirectories.SequenceEqual(importDirectories))
                 throw new InvalidDataException("Consumer import paths changed during verification.");
             var supportUnchanged = restoredArtifacts.Count > 0 && restoredArtifacts.Where(pair =>
@@ -557,7 +933,7 @@ unsafe def main (args : List String) : IO Unit := do
             var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison)) &&
                 certifiedBase.Count == currentBase.Count &&
                 certifiedBase.All(pair => currentBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
-            var names = new HashSet<string>(StringComparer.Ordinal);
+            var moduleNames = new HashSet<string>(StringComparer.Ordinal);
             var discovered = new List<(string Name, bool Certified)>();
             foreach (var directory in importDirectories)
             {
@@ -567,7 +943,7 @@ unsafe def main (args : List String) : IO Unit := do
                     .Select(path => new KeyValuePair<string, string>(Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha(path)));
                 foreach (var module in artifacts.GroupBy(pair => ModuleName(pair.Key)))
                 {
-                    if (!names.Add(module.Key)) throw new InvalidDataException("Ambiguous consumer module: " + module.Key);
+                    if (!moduleNames.Add(module.Key)) throw new InvalidDataException("Ambiguous consumer module: " + module.Key);
                     if (File.Exists(Path.Combine(Toolchain, "lib/lean", module.Key.Replace('.', '/') + ".olean")))
                         throw new InvalidDataException("Consumer module shadows the trusted Lean toolchain: " + module.Key);
                     var unchanged = directory.Equals(frameworkModules, comparison) &&
@@ -583,7 +959,8 @@ unsafe def main (args : List String) : IO Unit := do
                     discovered.Add((module.Key, unchanged || certifiedSupport));
                 }
             }
-            if (!names.Contains(proofModule) || !names.Contains("Extracted") || !names.Contains("ExtractionAudit"))
+            if (!moduleNames.Contains("Extracted") || !moduleNames.Contains("ExtractionAudit") ||
+                proceeding.Any(i => !moduleNames.Contains(names[Array.IndexOf(members, i)])))
                 throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
             var currentArtifacts = importDirectories.Where(Directory.Exists).SelectMany(directory =>
                 Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
@@ -591,25 +968,49 @@ unsafe def main (args : List String) : IO Unit := do
                 .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
             var checkedArtifacts = JsonSerializer.Serialize(currentArtifacts.OrderBy(pair => pair.Key, StringComparer.Ordinal)
                 .ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)));
-            var portableSupport = ImportedConsumerSupport(session, root, before, currentArtifacts);
-            var modules = discovered.Where(module => !baseUnchanged || (!module.Certified && !portableSupport.Contains(module.Name)))
-                .Select(module => module.Name);
-            ReplayConsumerModules(session, modules);
-            var auditPath = Path.Combine(session, "LeanCILAudit.lean");
-            File.WriteAllText(auditPath, $"import {proofModule}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
-            stage?.Invoke("theorem audit");
-            var audit = Run(["lake", "env", "lean", auditPath], session);
-            var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
-            if (matches.Count > 1 || (matches.Count == 0 && !audit.Contains($"'{theorem}' does not depend on any axioms")))
-                throw new InvalidOperationException("Missing or ambiguous transitive theorem axiom audit");
-            var axioms = matches.Count == 0 ? [] : matches[0].Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (axioms.Any(a => a is not ("propext" or "Quot.sound" or "Classical.choice")))
-                throw new InvalidOperationException("Unapproved proof axioms: " + string.Join(", ", axioms));
-            stage?.Invoke("extraction integrity");
-            Run(["dotnet", ExtractorPath, "check", output]);
-            if (!Same(before, ConsumerInputs(root, proof, settings, output)) || identityHash != Sha(Path.Combine(output, "identity.json")))
-                throw new InvalidOperationException("Inputs changed during consumer verification");
-            if (copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
+            var portableSupport = ImportedConsumerSupport(session, root, before[proceeding[0]], currentArtifacts);
+            var graph = members.Length > 1 || share || UseSuccessCache || exporting ? ConsumerModuleImports(session, currentArtifacts) : null;
+            var failures = ReplayConsumerModules(session, discovered.Where(module => !baseUnchanged ||
+                (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name), leanPath);
+            foreach (var i in proceeding)
+            {
+                // A request depends only on its own proof's import closure and the extraction certificate.
+                var closure = graph is null ? null
+                    : ImportClosure(graph, [names[Array.IndexOf(members, i)], "Extracted", "ExtractionAudit"]);
+                var rejected = failures.Keys.Where(name => closure is null || closure.Contains(name)).Order(StringComparer.Ordinal).ToArray();
+                if (rejected.Length > 0)
+                    Fail([i], new InvalidOperationException("Kernel replay rejected " + string.Join(", ", rejected) + ":\n" +
+                        string.Join("\n", rejected.Select(name => failures[name]))));
+            }
+            proceeding = Pending(proceeding);
+            if (proceeding.Length == 0) return;
+            Stage(proceeding, "theorem audit");
+            var audits = new Dictionary<int, (string Audit, string[] Axioms)>();
+            foreach (var i in proceeding)
+            {
+                try
+                {
+                    var theorem = requests[i].Theorem;
+                    var module = names[Array.IndexOf(members, i)];
+                    var auditPath = Path.Combine(session, "LeanCILAudit" + module["LeanCILProof".Length..] + ".lean");
+                    File.WriteAllText(auditPath, $"import {module}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
+                    var audit = Run([LeanExecutable, auditPath], session, leanPath, environment: LeanEnvironment);
+                    var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
+                    if (matches.Count > 1 || (matches.Count == 0 && !audit.Contains($"'{theorem}' does not depend on any axioms")))
+                        throw new InvalidOperationException("Missing or ambiguous transitive theorem axiom audit");
+                    string[] axioms = matches.Count == 0 ? [] : matches[0].Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (axioms.Any(a => a is not ("propext" or "Quot.sound" or "Classical.choice")))
+                        throw new InvalidOperationException("Unapproved proof axioms: " + string.Join(", ", axioms));
+                    audits[i] = (audit, axioms);
+                }
+                catch (Exception error) { Fail([i], error); }
+            }
+            proceeding = Pending(proceeding);
+            if (proceeding.Length == 0) return;
+            Recheck(proceeding);
+            proceeding = Pending(proceeding);
+            if (proceeding.Length == 0) return;
+            if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
                 throw new InvalidOperationException("Sources changed in the fresh consumer build");
             var finalArtifacts = importDirectories.Where(Directory.Exists).SelectMany(directory =>
                 Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
@@ -618,21 +1019,68 @@ unsafe def main (args : List String) : IO Unit := do
                 .ToDictionary(pair => pair.Name, pair => ConsumerModuleParts(pair.Path));
             if (checkedArtifacts != JsonSerializer.Serialize(finalArtifacts))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
-            var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
-                ? assumptions.Deserialize<string[]>() : [];
-            var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before,
-                libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
-                consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
-                    ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null);
             // Publish only after the complete declaration replay, exact theorem
             // audit, extraction recheck and source-stability checks succeeded.
-            PublishConsumerSupport(session, supportKey, importDirectories, proofModule, root, before);
-            Directory.CreateDirectory(receipt);
-            File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));
-            PublishSuccess(proofKey, receipt);
-            File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
-            return report;
+            if (failures.Count == 0 && graph is not null)
+            {
+                var dependent = DependentModules(graph, ["Extracted", "ExtractionAudit", .. names]);
+                if (exporting)
+                    ExportConsumerSupport(session, root, before[proceeding[0]],
+                        currentArtifacts.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph);
+                if (UseSuccessCache || share)
+                {
+                    var collected = CollectConsumerSupport(session, currentArtifacts, graph, dependent, sources);
+                    if (collected is not null)
+                    {
+                        try
+                        {
+                            if (supportKey.Length > 0)
+                                PublishSuccess(supportKey + "-" + Sha(Path.Combine(collected, ConsumerSupportRecordName)), collected);
+                            if (share)
+                            {
+                                Directory.Delete(support, true);
+                                Directory.Move(collected, support);
+                                supportArtifacts = CacheFiles(support);
+                            }
+                        }
+                        finally { if (Directory.Exists(collected)) Directory.Delete(collected, true); }
+                    }
+                }
+            }
+            foreach (var i in proceeding)
+            {
+                var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(outputs[i], "identity.json")));
+                var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
+                    ? assumptions.Deserialize<string[]>() : [];
+                var report = new Report(3, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
+                    audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
+                    consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
+                        ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null);
+                var receipt = Path.Combine(session, "certified-result-" + i);
+                Directory.CreateDirectory(receipt);
+                File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));
+                PublishSuccess(proofKeys[i], receipt);
+                if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
+                outcomes[i].Report = report;
+            }
         }
-        finally { Directory.Delete(session, true); }
+
+        void RunGroup(int[] members, bool first, bool share)
+        {
+            var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(session);
+            try { VerifyGroup(members, session, first, share); }
+            catch (Exception error) { Fail(members, error); }
+            finally { Directory.Delete(session, true); }
+        }
+
+        try
+        {
+            // The first workspace certifies shared support before later ones start.
+            RunGroup(ordered[0], first: true, share: ordered.Length > 1);
+            Parallel.ForEach(ordered.Skip(1), parallel, group => RunGroup(group, first: false, share: false));
+        }
+        finally { Directory.Delete(support, true); }
+        return outcomes;
     }
 }

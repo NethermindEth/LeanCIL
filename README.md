@@ -176,15 +176,73 @@ new or changed consumer and dependency modules undergo kernel replay, and
 the selected theorem's transitive axioms are audited with the same policy as
 single-file verification. `verification.json` remembers the package root.
 Successful runs locally certify extraction-independent support artifacts for reuse
-across method gates. The certificate binds the full consumer source snapshot,
-effective Lake configuration, ordered resolved import paths, dependency revisions,
-compiler/kernel/verifier identity and artifact hashes. Lean's compiled import graph
-excludes modules that transitively depend on `Extracted` from this shared cache.
+across method gates. A support generation is keyed by the effective Lake
+configuration files, ordered resolved import paths, dependency revisions, the
+`lean`, `leanchecker` and `lake` binaries, the certified framework, the verifier,
+and the environment variables Lean, Lake and elan read (`LEAN_*` except
+`LEAN_NUM_THREADS`, `LAKE_*`, `ELAN_*`, `RESERVOIR_*`). Unrelated variables such
+as `DOTNET_HOST_PATH` do not affect reuse. If consumer elaborators read other
+variables, list them in `LEANCIL_CACHE_ENVIRONMENT` (comma-separated). Lean
+sources are bound per module: each generation records, for every module, the
+hashes of its candidate source files, its compiled imports and its artifacts.
+A later run restores the largest import-closed set of modules whose sources are
+unchanged, so editing one helper or adding unrelated proof files keeps the rest.
+Lean's compiled import graph excludes modules that transitively depend on
+`Extracted` from this shared cache. Lake still decides reuse from its own traces;
+if it rebuilds any restored module, every module is replayed again.
+Republishing the same module set from a new session is a no-op, and concurrent
+verifiers publish through an atomic rename; a corrupt entry is replaced.
 An unchanged proof may reuse its authenticated successful result only for the same
 extraction identity, theorem and inputs; extraction integrity is checked again.
 Modified or unsigned cache files fall back to rebuilding and kernel replay.
 `--fresh` disables both consumer caches. These receipts are local to the machine;
 the existing certified CIL producer artifact can still supply the base library.
+
+Kernel replay and the theorem audit run the pinned toolchain's `lean` directly
+with the `LEAN_PATH` that `lake env` resolves after the build (and `LEAN_SYSROOT`
+set to that toolchain), instead of starting Lake again for each step. The
+resolved import paths are still compared with those resolved before the build.
+
+### Batch consumer verification
+
+`leancil verify-batch requests.json` verifies many requests against one consumer
+snapshot in one session:
+
+```json
+{
+  "schema": 1,
+  "proofRoot": ".",
+  "requests": [
+    { "output": "artifacts/Add", "proof": "proofs/Add.lean", "theorem": "MyProof.correctness" },
+    { "output": "artifacts/Mutant", "proof": "proofs/Refutation.lean", "theorem": "Mutant.refuted" },
+    { "output": "artifacts/Mutant", "proof": "proofs/Add.lean", "theorem": "MyProof.correctness", "expect": "rejected" }
+  ]
+}
+```
+
+Paths are relative to the manifest. Outputs must lie outside the consumer
+sources (for example under `artifacts/`). The session takes one source snapshot,
+restores certified support once and checks each extraction's integrity. Requests
+whose `Extracted.lean` is identical share one Lake workspace: one `lake build`
+of all their proof modules, one extraction certificate audit and one kernel
+replay of the union of non-certified modules. Requests with different
+extractions need separate workspaces because `Extracted` is a single module name.
+The first workspace certifies the extraction-independent support and later
+workspaces reuse exactly those artifacts; `--parallel count` bounds how many
+later workspaces run at once (default: processor count / 8).
+
+Each request keeps an independent certificate. It is audited in its own Lean
+process importing only its own proof module, and it fails only for build or
+replay failures in its own import closure or in the shared extraction
+certificate. A request with `"expect": "rejected"` passes only when its proof
+fails during proof checking with unchanged inputs and an intact extraction; it
+stops there, never writes a certificate, and the stale `verified.json` is
+removed. As in sequential runs, only the last request for an output writes its
+`verification.json` and `verified.json`. Each request prints `PASS verified`,
+`PASS rejected` or `FAIL` with its stage and diagnostics; `--results` writes the
+outcomes as JSON. The exit code is 0 only when every request met its
+expectation. `LEANCIL_EXPORT_CONSUMER_SUPPORT` requires a single-request
+`verify`.
 
 For reuse across machines, set `LEANCIL_EXPORT_CONSUMER_SUPPORT` to an output
 directory on a trusted producer. A successful consumer verification writes a

@@ -66,19 +66,28 @@ partial class Program : IDisposable
 
     static string ContentKey(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    bool RestoreSuccess(string key, string destination)
+    SortedDictionary<string, string>? AuthenticatedSuccess(string key)
     {
-        if (!UseSuccessCache) return false;
         var cached = Path.Combine(SuccessCacheRoot, key);
         try
         {
             var manifest = File.ReadAllBytes(Path.Combine(cached, "receipt.json"));
             var signature = File.ReadAllBytes(Path.Combine(cached, "receipt.hmac"));
-            if (!CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()), signature)) return false;
+            if (!CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()), signature)) return null;
             var expected = JsonSerializer.Deserialize<SortedDictionary<string, string>>(manifest);
-            var files = Path.Combine(cached, "files");
-            if (expected is null || !Same(expected, CacheFiles(files))) return false;
-            CopyTree(files, destination);
+            return expected is not null && Same(expected, CacheFiles(Path.Combine(cached, "files"))) ? expected : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    bool RestoreSuccess(string key, string destination)
+    {
+        if (!UseSuccessCache) return false;
+        try
+        {
+            var expected = AuthenticatedSuccess(key);
+            if (expected is null) return false;
+            CopyTree(Path.Combine(SuccessCacheRoot, key, "files"), destination);
             foreach (var (name, hash) in expected)
                 if (Sha(Path.Combine(destination, name)) != hash)
                     throw new InvalidOperationException("Certified cache changed while copying");
@@ -87,10 +96,13 @@ partial class Program : IDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return false; }
     }
 
+    // Published entries are immutable: an authenticated entry is never duplicated
+    // or overwritten, and concurrent publishers race only on an atomic rename.
     void PublishSuccess(string key, string source)
     {
         if (!UseSuccessCache) return;
         Directory.CreateDirectory(SuccessCacheRoot);
+        if (AuthenticatedSuccess(key) is not null) return;
         var cached = Path.Combine(SuccessCacheRoot, key);
         var staging = cached + "." + Guid.NewGuid().ToString("N");
         try
@@ -101,10 +113,126 @@ partial class Program : IDisposable
             var manifest = JsonSerializer.SerializeToUtf8Bytes(CacheFiles(files));
             File.WriteAllBytes(Path.Combine(staging, "receipt.json"), manifest);
             File.WriteAllBytes(Path.Combine(staging, "receipt.hmac"), HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()));
-            try { Directory.Move(staging, cached); }
+            try
+            {
+                Directory.Move(staging, cached);
+                return;
+            }
             catch (IOException) when (Directory.Exists(cached)) { }
+            if (AuthenticatedSuccess(key) is not null) return;
+            // Replace a corrupt or unauthenticated entry; readers authenticate every file.
+            var invalid = cached + ".invalid-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                Directory.Move(cached, invalid);
+                Directory.Move(staging, cached);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            finally
+            {
+                try { if (Directory.Exists(invalid)) Directory.Delete(invalid, true); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            }
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+    }
+
+    string LeanExecutable => Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
+
+    // Pin the sysroot that `lake env` would supply, so direct Lean runs use the trusted toolchain.
+    IReadOnlyDictionary<string, string> LeanEnvironment => new Dictionary<string, string> { ["LEAN_SYSROOT"] = Toolchain };
+
+    // Per-module replay re-imports each module's dependencies; one shared import of
+    // everything outside the targets makes large sets several times cheaper.
+    // No target constant may preexist, since Replay skips matching theorems unchecked.
+    const string JointReplaySource = """
+import LeanChecker
+unsafe def readReplayParts (module : Lean.Name) : IO (Lean.ModuleData × Lean.ModuleData) := do
+  let mFile ← Lean.findOLean module
+  unless (← mFile.pathExists) do
+    throw <| IO.userError s!"object file '{mFile}' of module {module} does not exist"
+  let mut fnames := #[mFile]
+  let sFile := Lean.OLeanLevel.server.adjustFileName mFile
+  if (← sFile.pathExists) then
+    fnames := fnames.push sFile
+    let pFile := Lean.OLeanLevel.private.adjustFileName mFile
+    if (← pFile.pathExists) then
+      fnames := fnames.push pFile
+  let parts ← Lean.readModuleDataParts fnames
+  if h : parts.size = 0 then throw <| IO.userError "failed to read module data" else
+  return (parts[0].1, parts[parts.size-1].1)
+-- The duplicate rule of `finalizeImport` and `Replay`: on-demand equation lemmas recur across modules.
+def sameReplayTheorem : Lean.ConstantInfo → Lean.ConstantInfo → Bool
+  | .thmInfo a, .thmInfo b => a.name == b.name && a.type == b.type && a.levelParams == b.levelParams && a.all == b.all
+  | _, _ => false
+unsafe def replayModulesJointly (args : List String) : IO Unit := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  let started ← IO.monoMsNow
+  let names := args.map String.toName
+  let targets : Lean.NameSet := names.foldl (·.insert ·) {}
+  let mut imports : Std.HashMap Lean.Name Lean.Import := {}
+  let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
+  for module in names do
+    let (exported, complete) ← readReplayParts module
+    for i in exported.imports do
+      unless targets.contains i.module do
+        imports := imports.insert i.module <| match imports[i.module]? with
+          | some j => { j with importAll := j.importAll || i.importAll, isExported := j.isExported || i.isExported, isMeta := j.isMeta || i.isMeta }
+          | none => i
+    -- The most private part subsumes the others.
+    for name in complete.constNames, ci in complete.constants do
+      match constants[name]? with
+      | some prior =>
+        unless sameReplayTheorem prior ci do
+          throw <| IO.userError s!"Constant {name} is declared by more than one replay target"
+      | none => constants := constants.insert name ci
+  let external := imports.toArray.map (·.2) |>.qsort (·.module.toString < ·.module.toString)
+  let (_, s) ← Lean.importModulesCore external |>.run
+  let env ← Lean.finalizeImport s external {} 0 false false (isModule := true)
+  let imported := env.allImportedModuleNames
+  for (name, ci) in constants do
+    if let some prior := env.find? name then
+      -- Only an identical theorem from an untargeted module may be skipped, as per-module replay would.
+      let owner := (env.getModuleIdxFor? name).bind (imported[·.toNat]?)
+      unless owner.any (!targets.contains ·) && sameReplayTheorem prior ci do
+        throw <| IO.userError s!"Replay target constant {name} is already imported"
+  discard <| env.toKernelEnv.replay constants
+  env.freeRegions
+  let elapsed := (← IO.monoMsNow) - started
+  for name in args do
+    IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("joint", Lean.toJson true), ("milliseconds", Lean.toJson elapsed)]).compress
+""";
+
+    // False when the set is ineligible or any declaration is rejected; callers then replay per module.
+    bool ReplayModulesJointly(string cwd, string[] targets, string leanPath, string progress)
+    {
+        var runner = Path.Combine(Path.GetTempPath(), "leancil-joint-replay-" + Guid.NewGuid().ToString("N") + ".lean");
+        var targetsPath = Path.ChangeExtension(runner, ".json");
+        try
+        {
+            File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
+            File.WriteAllText(runner, JointReplaySource + "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
+                string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
+                "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayModulesJointly args\n");
+            var result = Execute([LeanExecutable, runner], cwd, leanPath, progress: progress, environment: LeanEnvironment);
+            if (result.Code != 0) return false;
+            var replayed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!line.StartsWith('{')) continue;
+                try
+                {
+                    var record = JsonSerializer.Deserialize<JsonElement>(line);
+                    if (record.ValueKind == JsonValueKind.Object && record.TryGetProperty("joint", out var joint) &&
+                        joint.ValueKind == JsonValueKind.True && record.TryGetProperty("module", out var module) &&
+                        module.ValueKind == JsonValueKind.String)
+                        replayed.Add(module.GetString()!);
+                }
+                catch (JsonException) { }
+            }
+            return replayed.SetEquals(targets);
+        }
+        finally { File.Delete(runner); File.Delete(targetsPath); }
     }
 
     static SortedDictionary<string, string> ModuleArtifacts(string session) =>
@@ -198,8 +326,10 @@ partial class Program : IDisposable
         return captured.ToString();
     }
 
+    static readonly object TraceGate = new();
+
     static (int Code, string Output, string Stdout, string Stderr) Execute(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
-        bool streamOutput = false, string? progress = null)
+        bool streamOutput = false, string? progress = null, IReadOnlyDictionary<string, string>? environment = null)
     {
         var traceStage = progress;
 #if LEANCIL_TOOL
@@ -227,6 +357,8 @@ partial class Program : IDisposable
 
         if (leanPath is not null)
             start.Environment["LEAN_PATH"] = leanPath;
+        foreach (var (name, value) in environment ?? new Dictionary<string, string>())
+            start.Environment[name] = value;
 
         if (progress is not null) Console.WriteLine("START " + progress);
         var startedAtUtc = DateTimeOffset.UtcNow;
@@ -258,7 +390,9 @@ partial class Program : IDisposable
             Console.WriteLine($"END {progress} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
         if (!string.IsNullOrWhiteSpace(traceDirectory))
         {
-            File.AppendAllText(Path.Combine(traceDirectory, $"{Environment.ProcessId}.jsonl"), JsonSerializer.Serialize(new {
+            // Concurrent commands in one process append to the same trace file.
+            lock (TraceGate)
+                File.AppendAllText(Path.Combine(traceDirectory, $"{Environment.ProcessId}.jsonl"), JsonSerializer.Serialize(new {
                 stage = traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, processId = Environment.ProcessId,
                 cwd = start.WorkingDirectory, durationSeconds = elapsed.Elapsed.TotalSeconds,
                 exitCode = process.ExitCode, transcript, command = args,
@@ -269,10 +403,10 @@ partial class Program : IDisposable
     }
 
     static string Run(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
-        bool streamOutput = false, string? progress = null)
+        bool streamOutput = false, string? progress = null, IReadOnlyDictionary<string, string>? environment = null)
     {
         var args = command.ToArray();
-        var result = Execute(args, cwd, leanPath, streamOutput, progress);
+        var result = Execute(args, cwd, leanPath, streamOutput, progress, environment);
 
         if (result.Code != 0)
             throw new InvalidOperationException($"Command failed ({result.Code}): {string.Join(' ', args)}\n{result.Output}");
@@ -444,8 +578,11 @@ partial class Program : IDisposable
                 }
                 Run(["lake", "build", "CIL"], library, streamOutput: true, progress: "Building fresh Lean verification library");
                 var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
-                Run([checker, "CIL"], library, Path.Combine(library, ".lake/build/lib/lean"), streamOutput: true,
-                    progress: "Kernel replay of fresh Lean verification library");
+                var compiledLibrary = Path.Combine(library, ".lake/build/lib/lean");
+                if (!ReplayModulesJointly(library, [.. ModuleArtifacts(library).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
+                    compiledLibrary, "Joint kernel replay of fresh Lean verification library"))
+                    Run([checker, "CIL"], library, compiledLibrary, streamOutput: true,
+                        progress: "Kernel replay of fresh Lean verification library");
                 libraryBuild = "fresh";
                 if (!fresh)
                 {

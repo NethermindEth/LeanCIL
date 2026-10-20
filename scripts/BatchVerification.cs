@@ -6,15 +6,33 @@ partial class Program
 {
     // Only generated, namespace-relative fixtures belong here. Arbitrary consumer
     // proofs keep their original module environment through Verify.
+    // Assembly overrides the batch assembly for fixtures generated from a modified copy.
     sealed record GeneratedVerification(string Entry, string Proof, string Output,
-        string Theorem = "ExampleProof.correctness");
+        string Theorem = "ExampleProof.correctness", string? Assembly = null);
+
+    // Per-fixture checks are dominated by Lean startup; passes are reported only after the whole batch is certified.
+    sealed class GeneratedQueue(Program verification, string assembly, string identity = "Examples")
+    {
+        readonly List<(GeneratedVerification Request, Action Passed)> pending = [];
+
+        public void Add(GeneratedVerification request, Action passed) => pending.Add((request, passed));
+
+        public void Flush()
+        {
+            if (pending.Count == 0) return;
+            verification.VerifyGeneratedBatch(assembly, identity, pending.Select(item => item.Request).ToArray());
+            foreach (var (_, passed) in pending) passed();
+            pending.Clear();
+        }
+    }
 
     void VerifyGeneratedBatch(string assembly, string identity, IReadOnlyList<GeneratedVerification> requests,
         string profile = "scalar")
     {
         if (requests.Count == 0) return;
         assembly = Path.GetFullPath(assembly);
-        requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof), Output = Path.GetFullPath(r.Output) }).ToArray();
+        requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof), Output = Path.GetFullPath(r.Output),
+            Assembly = Path.GetFullPath(r.Assembly ?? assembly) }).ToArray();
         if (requests.Select(r => Path.GetFullPath(r.Output)).Distinct(StringComparer.OrdinalIgnoreCase).Count() != requests.Count)
             throw new ArgumentException("Batch outputs must be distinct");
         foreach (var request in requests)
@@ -47,7 +65,7 @@ partial class Program
         for (var i = 0; i < requests.Count; i++)
         {
             var request = requests[i];
-            Run(Extract("extract", assembly, identity, request.Entry, request.Output, profile));
+            Run(Extract("extract", request.Assembly!, identity, request.Entry, request.Output, profile));
             hashes[i] = Sha(Path.Combine(request.Output, "identity.json"));
             bodies.AppendLine($"namespace BatchCase{i}");
             bodies.AppendLine(Body(File.ReadAllText(Path.Combine(request.Output, "Extracted.lean"))));
@@ -98,13 +116,13 @@ partial class Program
                 var theorem = $"BatchCase{i}.{request.Theorem}";
                 var axioms = AuditedAxioms(audit, theorem);
                 AuditedAxioms(audit, $"BatchCase{i}.ExtractionAudit.valid");
-                Run(Extract("check", assembly, identity, request.Entry, request.Output, profile));
+                Run(Extract("check", request.Assembly!, identity, request.Entry, request.Output, profile));
                 if (!Same(before[i], Inputs(request.Proof)) || hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
                     throw new InvalidOperationException("Batch inputs changed during verification");
                 var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
-                reports[i] = new Report(3, Sha(assembly), hashes[i], request.Theorem, axioms, audit, before[i],
+                reports[i] = new Report(3, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, audit, before[i],
                     libraryKey, libraryBuild, audit, initializedTypes, Sha(source), theorem);
             }
             // Nothing is published until every fixture, certificate and replay passes.
