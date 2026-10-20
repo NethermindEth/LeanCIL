@@ -239,8 +239,10 @@ fails during proof checking with unchanged inputs and an intact extraction; it
 stops there, never writes a certificate, and the stale `verified.json` is
 removed. As in sequential runs, only the last request for an output writes its
 `verification.json` and `verified.json`. Each request prints `PASS verified`,
-`PASS rejected` or `FAIL` with its stage and diagnostics; `--results` writes the
-outcomes as JSON. The exit code is 0 only when every request met its
+`PASS rejected` or `FAIL` with its stage and diagnostics as soon as its
+outcome is final (an unchanged-result cache hit, or the end of its workspace),
+so lines follow completion order; `--results` writes the outcomes as JSON in
+request order. The exit code is 0 only when every request met its
 expectation. `LEANCIL_EXPORT_CONSUMER_SUPPORT` requires a single-request
 `verify`.
 

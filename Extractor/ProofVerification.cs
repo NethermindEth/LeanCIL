@@ -97,10 +97,37 @@ partial class Program
             }
         }
 
+        // Print each request as soon as it is final, so a long batch shows progress; workspaces run in parallel.
+        var printed = new bool[count];
+        var gate = new object();
+        bool Print(int i, ConsumerOutcome outcome)
+        {
+            var request = manifest.requests[i];
+            var expect = request.expect ?? "verified";
+            var passed = outcome.Error is null && (expect == "rejected" ? outcome.Rejected : outcome.Report is not null);
+            lock (gate)
+            {
+                if (printed[i]) return passed;
+                printed[i] = true;
+                if (passed)
+                    Console.WriteLine(expect == "rejected"
+                        ? $"PASS rejected {CliPaths.Display(outputs[i])} {request.theorem} ({outcome.Stage})"
+                        : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem}");
+                else
+                {
+                    var error = outcome.Error ?? new InvalidOperationException("Verification produced no result.");
+                    Console.WriteLine($"FAIL {CliPaths.Display(outputs[i])} {request.theorem} (stage: {outcome.Stage})");
+                    CliDiagnostics.Write(new CliFailure(outcome.Stage, error), outcome.Stage, true);
+                }
+                Console.Out.Flush();
+            }
+            return passed;
+        }
+
         using (var verification = new Program { freshLibrary = fresh })
         {
             var verified = requests.Count == 0 ? [] : verification.VerifyConsumerRequests(proofRoot, requests, null, batch: true,
-                parallelism ?? Math.Max(1, Environment.ProcessorCount / 8));
+                parallelism ?? Math.Max(1, Environment.ProcessorCount / 8), (k, outcome) => Print(indices[k], outcome));
             for (var k = 0; k < verified.Length; k++) outcomes[indices[k]] = verified[k];
         }
         // A rejected last request leaves no certificate for its output, as in sequential runs.
@@ -114,19 +141,9 @@ partial class Program
             var request = manifest.requests[i];
             var outcome = outcomes[i]!;
             var expect = request.expect ?? "verified";
-            var passed = outcome.Error is null && (expect == "rejected" ? outcome.Rejected : outcome.Report is not null);
+            var passed = Print(i, outcome);
             var status = passed ? expect : "failed";
-            if (passed)
-                Console.WriteLine(expect == "rejected"
-                    ? $"PASS rejected {CliPaths.Display(outputs[i])} {request.theorem} ({outcome.Stage})"
-                    : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem}");
-            else
-            {
-                failed++;
-                var error = outcome.Error ?? new InvalidOperationException("Verification produced no result.");
-                Console.WriteLine($"FAIL {CliPaths.Display(outputs[i])} {request.theorem} (stage: {outcome.Stage})");
-                CliDiagnostics.Write(new CliFailure(outcome.Stage, error), outcome.Stage, true);
-            }
+            if (!passed) failed++;
             results.Add(new(outputs[i], proofs[i], request.theorem, expect, status, outcome.Stage,
                 passed ? null : (outcome.Error?.Message ?? "Verification produced no result."),
                 outcome.Report?.axioms, outcome.Report?.libraryBuild));

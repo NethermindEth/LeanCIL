@@ -473,6 +473,54 @@ try
         .Any(item => item.GetProperty("libraryBuild").GetString() != "consumer-proof-cache"))
         throw new InvalidOperationException("Unchanged batch requests did not reuse authenticated results: " + text);
     Console.WriteLine("PASS batch workspaces share certified support and reuse unchanged results");
+
+    // A long batch must report finished requests while later workspaces still run, or it looks hung.
+    // The second workspace's proof build ends seconds after the first request's line unless lines wait for the end.
+    Environment.SetEnvironmentVariable(batchVariable, "progress");
+    var progressTrace = At("artifacts/ConsumerProgressTrace-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(progressTrace);
+    var savedTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+    int CompletedBuilds() => Directory.EnumerateFiles(progressTrace, "*.jsonl").Sum(path =>
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd().Split('\n').Count(line => line.Contains("\"stage\":\"Building fresh consumer proof and dependencies\""));
+    });
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", progressTrace);
+        File.WriteAllText(batchManifest, JsonSerializer.Serialize(new { schema = 1, proofRoot = root, requests = new[] {
+            BatchRequest(batchA, proof, "ExampleProof.correctness"), BatchRequest(batchB, alternate, "AlternateProof.correctness") } }));
+        var start = new System.Diagnostics.ProcessStartInfo(cli[0])
+            { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in cli.Skip(1).Concat(["verify-batch", batchManifest, "--results", batchResults])) start.ArgumentList.Add(argument);
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var errors = process.StandardError.ReadToEndAsync();
+        var lines = new List<string>();
+        var buildsAtFirstResult = -1;
+        while (process.StandardOutput.ReadLine() is { } line)
+        {
+            if (buildsAtFirstResult < 0 && line.StartsWith("PASS ", StringComparison.Ordinal)) buildsAtFirstResult = CompletedBuilds();
+            lines.Add(line);
+        }
+        process.WaitForExit();
+        var all = string.Join("\n", lines) + "\n" + errors.GetAwaiter().GetResult();
+        if (process.ExitCode != 0 || buildsAtFirstResult != 1 || CompletedBuilds() != 2 ||
+            !lines.First(line => line.StartsWith("PASS ", StringComparison.Ordinal)).Contains("ExampleProof.correctness") ||
+            lines.Count(line => line.StartsWith("PASS verified", StringComparison.Ordinal)) != 2 ||
+            lines[^1] != "Batch: 2 passed, 0 failed of 2 requests.")
+            throw new InvalidOperationException($"Batch results were not reported as workspaces finished (builds at first result: {buildsAtFirstResult}):\n{all}");
+        var results = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(batchResults))!;
+        if (results.Length != 2 || results[0].GetProperty("theorem").GetString() != "ExampleProof.correctness" ||
+            results[1].GetProperty("theorem").GetString() != "AlternateProof.correctness")
+            throw new InvalidOperationException("Batch results file no longer follows request order.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", savedTrace);
+        Directory.Delete(progressTrace, true);
+    }
+    Console.WriteLine("PASS batch reports each request when its workspace finishes; summary and results keep request order");
 }
 finally
 {
