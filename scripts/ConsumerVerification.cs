@@ -536,7 +536,8 @@ unsafe def main (args : List String) : IO Unit := do
                 // A sibling module Foo.Bar must not be mistaken for Foo's artifact.
                 var suffix = Path.GetFileName(artifact)[stem.Length..];
                 if (suffix is ".olean" or ".olean.hash" or ".olean.private" or ".olean.private.hash" or
-                    ".olean.server" or ".olean.server.hash" or ".ilean" or ".ilean.hash" or ".trace" or ".ir" or ".ir.hash")
+                    ".olean.server" or ".olean.server.hash" or ".ilean" or ".ilean.hash" or ".trace" or ".ir" or ".ir.hash" or
+                    ".ir.sig" or ".ir.sig.hash")
                     files.Add(Path.GetRelativePath(session, artifact).Replace('\\', '/'));
             }
             // Lake's olean trace also records generated C/IR outputs. Without
