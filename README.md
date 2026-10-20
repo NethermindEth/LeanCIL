@@ -488,7 +488,7 @@ The parameter list remains required. Matching is case-sensitive; an explicit ret
 
 The generated `Extracted.lean` contains `arg 0`, `arg 1`, `add`, `ret`, the exact method signature, metadata, profile and kernel-checked fetch equations; the assembly hash lives in `identity.json` and the report. The entry is method zero; reachable managed callees are emitted in dependency order.
 
-Extraction also emits raw metadata and a `translation_valid` certificate. Independent Lean validators recompute layouts, check all layout-dependent sites and parameter-home mappings, validate structural generic substitution and managed-call bindings, and check feature-analysis states and control-flow coverage. Per-site validators walk the raw code, reachability mask and emitted code in lockstep, so a long branch excluded by the profile adds linear rather than quadratic checking cost. Verification requires this certificate to have the exact validator type for the complete emitted program and kernel-replays it separately from the user proof. Raw metadata serialization and transformations outside those checks remain trusted.
+Extraction also emits raw metadata and a `translation_valid` certificate. Independent Lean validators recompute layouts, check all layout-dependent sites and parameter-home mappings, validate structural generic substitution and managed-call bindings, and check feature-analysis states, decided type tests and control-flow coverage. Per-site validators walk the raw code, reachability mask and emitted code in lockstep, so a long branch excluded by the profile adds linear rather than quadratic checking cost. Verification requires this certificate to have the exact validator type for the complete emitted program and kernel-replays it separately from the user proof. Raw metadata serialization and transformations outside those checks remain trusted.
 
 `Examples/Proofs/Add.lean` states the mathematical property independently: the returned word's natural value equals `(x.toNat + y.toNat) % 2^64`. Its universal proof derives execution from the generated program. Changing the implementation to subtraction causes the unchanged addition proof to fail. `WrongAdd.lean` independently proves a counterexample for every successful fuel budget.
 
@@ -598,7 +598,7 @@ dotnet run --file scripts/Test.cs -- --suite fsharp
 
 These examples cover F# programs that compile into the supported CIL subset. F# lists, closures, discriminated unions and arbitrary FSharp.Core calls are not generally supported; the suite includes an explicitly rejected list example.
 
-The `GenericMethods` module also demonstrates generic identity and selection functions. LeanCIL specializes their compiled CIL for the concrete value types used by reachable calls. The F# and C# identity examples share the same [universal Lean contract](Examples/Proofs/GenericIdentity.lean):
+The `GenericMethods` module also demonstrates generic identity and selection functions. LeanCIL specializes their compiled CIL for the concrete value types used by reachable calls. In a specialized body, `typeof(T) == typeof(Marker)` and `!=` become constants when both types are closed and decided, as the JIT folds them, so a profile-dependent or marker-type branch is pruned like a feature check. Lean recomputes each folded constant from the raw closed body; see [type tests](docs/OPCODES.md#type-tests) for the exact pattern. `Examples.TypeTests` exercises a matching and a non-matching type argument. The F# and C# identity examples share the same [universal Lean contract](Examples/Proofs/GenericIdentity.lean):
 
 ```sh
 leancil extract Examples/FSharp/bin/Examples.FSharp.dll "GenericMethods::Identity64(ulong)" artifacts/FSharpIdentity
@@ -617,6 +617,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
 | Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons; termination requires a separate proof |
 | `call`, `ret` | Partial | Acyclic static/struct instance methods, concrete generic-method specializations and explicitly modelled runtime calls |
+| `ldtoken` | Partial | Only as an operand of a decided closed `typeof(A) == typeof(B)` or `!=` test, which folds to a constant |
 | Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
 | `initblk`, `cpblk`, `unaligned.` | Partial | Checked managed references, 32-bit byte counts and validated alignment prefixes; overlapping block copies rejected |
 | `switch`, `sizeof` | Partial | Forward jump tables and validated integer and reference-free aggregate sizes |
