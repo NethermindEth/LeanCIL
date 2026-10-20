@@ -250,8 +250,10 @@ removed. As in sequential runs, only the last request for an output writes its
 outcome is final (an unchanged-result cache hit, or the end of its workspace),
 so lines follow completion order; `--results` writes the outcomes as JSON in
 request order. The exit code is 0 only when every request met its
-expectation. `LEANCIL_EXPORT_CONSUMER_SUPPORT` requires a single-request
-`verify`.
+expectation. With `LEANCIL_EXPORT_CONSUMER_SUPPORT` set, a batch writes one
+manifest: the union of the extraction-independent support of every workspace
+that passed replay, audits and stability checks. A module whose bytes differ
+between workspaces is left out, together with its importers.
 
 For reuse across machines, set `LEANCIL_EXPORT_CONSUMER_SUPPORT` to an output
 directory on a trusted producer. A successful consumer verification writes a
@@ -278,6 +280,23 @@ when a referencing theorem's own bytes are unchanged. Extraction-dependent
 modules and the public proof are always checked. Incompatible manifests fall
 back to replay; a missing or incorrect trusted digest fails verification.
 Reports record `consumerSupportSha256` when portable support was used.
+
+Schema 3 manifests also name each module's compiled artifacts and their hashes,
+shipped beside the manifest in `<digest>.files/`, plus a digest of the Lean,
+Lake and checker binaries and of the variables bound into local cache keys
+(`LEAN_*`, `LAKE_*`, `ELAN_*`, `RESERVOIR_*` and those named in
+`LEANCIL_CACHE_ENVIRONMENT`; values are never written). Several manifests may
+be supplied: separate the paths in `LEANCIL_CONSUMER_SUPPORT` with the platform
+path separator and their trusted digests in `LEANCIL_CONSUMER_SUPPORT_SHA256`
+with commas, in the same order; each manifest is authenticated by its own digest.
+With `LEANCIL_RESTORE_CONSUMER_SUPPORT=true` a receiver whose binaries and bound
+variables match copies those artifacts before building, so Lake reuses them
+instead of rebuilding. Each restored file must match its manifest hash, or
+verification fails; a manifest without its files falls back to a fresh build.
+Restored bytes are the producer's, as with local receipts: an elaborator that
+reads the source path or an undeclared variable keeps the producer's result.
+Declare such variables in `LEANCIL_CACHE_ENVIRONMENT`. Replay is still skipped
+only for modules whose bytes match a manifest fingerprint.
 `--fresh` bypasses portable reuse too; `LEANCIL_DISABLE_SUCCESS_CACHE` disables
 local receipts without disabling an explicitly supplied portable manifest.
 

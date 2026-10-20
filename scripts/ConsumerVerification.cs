@@ -3,9 +3,13 @@ using System.Text.RegularExpressions;
 
 partial class Program
 {
+    // Files maps each module to its session-relative compiled artifacts and their hashes.
     sealed record ConsumerSupportManifest(int Schema, string Policy, string Library, string Toolchain,
         SortedDictionary<string, string> Sources, SortedDictionary<string, SortedDictionary<string, string>> Modules,
-        SortedDictionary<string, string[]> Imports);
+        SortedDictionary<string, string[]> Imports, string Tools,
+        SortedDictionary<string, SortedDictionary<string, string>> Files);
+
+    const string RestoreConsumerSupportVariable = "LEANCIL_RESTORE_CONSUMER_SUPPORT";
 
     static SortedDictionary<string, string> PortableConsumerSources(string root, SortedDictionary<string, string> inputs) =>
         new(inputs.Where(pair => !pair.Key.StartsWith("proof:", StringComparison.Ordinal) &&
@@ -78,20 +82,100 @@ unsafe def main (args : List String) : IO Unit := do
         finally { Directory.Delete(temporary, true); }
     }
 
-    void ExportConsumerSupport(string session, string root, SortedDictionary<string, string> inputs,
-        Dictionary<string, string> independent, Dictionary<string, string[]> graph)
+    // Lake reuses restored artifacts by its traces; bind the tools and variables traces do not cover.
+    string ConsumerToolsIdentity() => ContentKey(Sha(LeanExecutable) + "\n" +
+        Sha(Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" +
+        Sha(Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lake.exe" : "lake")) + "\n" +
+        JsonSerializer.Serialize(ConsumerCacheEnvironment()));
+
+    // Union of the certified extraction-independent support of every workspace in one session.
+    sealed class ConsumerSupportExport
+    {
+        public readonly object Gate = new();
+        public readonly string Staging = Path.Combine(Path.GetTempPath(), "leancil-consumer-export-" + Guid.NewGuid().ToString("N"));
+        public readonly SortedDictionary<string, SortedDictionary<string, string>> Modules = new(StringComparer.Ordinal);
+        public readonly SortedDictionary<string, string[]> Imports = new(StringComparer.Ordinal);
+        public readonly SortedDictionary<string, SortedDictionary<string, string>> Files = new(StringComparer.Ordinal);
+        public readonly HashSet<string> Conflicts = new(StringComparer.Ordinal);
+        public SortedDictionary<string, string>? Sources;
+    }
+
+    // Called only after the workspace's replay, audits, rechecks and source-stability checks passed.
+    void AddExportedSupport(ConsumerSupportExport export, string session, string root, SortedDictionary<string, string> inputs,
+        Dictionary<string, string> independent, Dictionary<string, string[]> graph, string? collected)
+    {
+        var fingerprints = PortableConsumerModuleParts(session, independent);
+        var record = collected is null ? null : ReadConsumerSupportRecord(Path.Combine(collected, ConsumerSupportRecordName));
+        var sources = PortableConsumerSources(root, inputs);
+        lock (export.Gate)
+        {
+            export.Sources ??= sources;
+            if (!Same(export.Sources, sources)) throw new InvalidDataException("Consumer sources changed between workspaces.");
+            foreach (var (name, parts) in fingerprints)
+            {
+                if (export.Modules.TryGetValue(name, out var known))
+                {
+                    // Workspaces restore shared support, so differing bytes are left to receivers to replay.
+                    if (!Same(known, parts)) export.Conflicts.Add(name);
+                    continue;
+                }
+                export.Modules[name] = parts;
+                export.Imports[name] = graph[name];
+                if (record is null || !record.TryGetValue(name, out var module)) continue;
+                var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+                foreach (var file in module.Files)
+                {
+                    var target = Within(export.Staging, file);
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(Within(collected!, file), target, true);
+                    files[file] = Sha(target);
+                }
+                export.Files[name] = files;
+            }
+        }
+    }
+
+    void WriteExportedSupport(ConsumerSupportExport export)
     {
         var destination = Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT");
-        if (string.IsNullOrWhiteSpace(destination)) return;
+        if (string.IsNullOrWhiteSpace(destination) || export.Sources is null || export.Modules.Count == 0) return;
+        // A conflicting module invalidates its importers, as on receivers.
+        var dropped = new HashSet<string>(export.Conflicts, StringComparer.Ordinal);
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var (name, imports) in export.Imports)
+                if (!dropped.Contains(name) && imports.Any(dropped.Contains)) changed |= dropped.Add(name);
+        } while (changed);
         var modules = new SortedDictionary<string, SortedDictionary<string, string>>(
-            PortableConsumerModuleParts(session, independent), StringComparer.Ordinal);
-        var manifest = new ConsumerSupportManifest(2, VerificationPolicy, libraryKey!, ConsumerToolchainIdentity(),
-            PortableConsumerSources(root, inputs), modules,
-            new(independent.Keys.ToDictionary(name => name, name => graph[name]), StringComparer.Ordinal));
+            export.Modules.Where(pair => !dropped.Contains(pair.Key)).ToDictionary(), StringComparer.Ordinal);
+        if (modules.Count == 0) return;
+        var files = new SortedDictionary<string, SortedDictionary<string, string>>(
+            export.Files.Where(pair => modules.ContainsKey(pair.Key)).ToDictionary(), StringComparer.Ordinal);
+        var manifest = new ConsumerSupportManifest(3, VerificationPolicy, libraryKey!, ConsumerToolchainIdentity(),
+            export.Sources, modules, new(modules.Keys.ToDictionary(name => name, name => export.Imports[name]), StringComparer.Ordinal),
+            ConsumerToolsIdentity(), files);
         var json = JsonSerializer.Serialize(manifest, Json) + "\n";
         var digest = ContentKey(json);
         Directory.CreateDirectory(destination);
         var path = Path.GetFullPath(Path.Combine(destination, digest + ".json"));
+        // Files first: a manifest is never visible without the artifacts it names.
+        var directory = Path.ChangeExtension(path, ".files");
+        var staging = directory + "." + Guid.NewGuid().ToString("N");
+        try
+        {
+            foreach (var file in files.Values.SelectMany(module => module.Keys))
+            {
+                var target = Within(staging, file);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(Within(export.Staging, file), target);
+            }
+            Directory.CreateDirectory(staging);
+            try { Directory.Move(staging, directory); }
+            catch (IOException) when (Directory.Exists(directory)) { }
+        }
+        finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
         // The trusted digest must travel separately from the downloadable manifest.
         var temporary = path + "." + Guid.NewGuid().ToString("N");
         try
@@ -108,43 +192,102 @@ unsafe def main (args : List String) : IO Unit := do
             File.AppendAllText(githubOutput, "consumer-support-sha256=" + digest + "\n");
     }
 
-    HashSet<string> ImportedConsumerSupport(string session, string root, SortedDictionary<string, string> inputs,
-        Dictionary<string, string> modules)
+    sealed record TrustedSupport(ConsumerSupportManifest Manifest, string Path);
+
+    // Paths are separated by the platform path separator and digests by commas, pairwise.
+    // Each manifest is authenticated by its own independently trusted digest.
+    TrustedSupport[] TrustedConsumerSupport(string root, SortedDictionary<string, string> inputs)
     {
         if (freshLibrary) return [];
-        var path = Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT");
-        var digest = Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256");
-        if (string.IsNullOrWhiteSpace(path) && string.IsNullOrWhiteSpace(digest)) return [];
-        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(digest))
+        var paths = (Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT") ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var digests = (Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (paths.Length == 0 && digests.Length == 0) return [];
+        if (paths.Length != digests.Length)
             throw new InvalidDataException("Consumer support manifest digest mismatch or missing trusted digest.");
-        var bytes = File.ReadAllBytes(path);
-        if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != digest)
-            throw new InvalidDataException("Consumer support manifest digest mismatch or missing trusted digest.");
-        var manifest = JsonSerializer.Deserialize<ConsumerSupportManifest>(bytes)
-            ?? throw new InvalidDataException("Invalid consumer support manifest.");
-        if (manifest.Sources is null || manifest.Modules is null || manifest.Imports is null ||
-            manifest.Modules.Any(pair => pair.Value is null || !manifest.Imports.TryGetValue(pair.Key, out var imports) || imports is null))
-            throw new InvalidDataException("Invalid consumer support manifest.");
-        if (manifest.Schema != 2 || manifest.Policy != VerificationPolicy || manifest.Library != libraryKey ||
-            !Same(manifest.Sources, PortableConsumerSources(root, inputs)) || manifest.Toolchain != ConsumerToolchainIdentity()) return [];
-        var fingerprints = PortableConsumerModuleParts(session,
-            modules.Where(pair => manifest.Modules.ContainsKey(pair.Key)).ToDictionary());
-        // Invalidate the entire dependent closure of changed or missing modules.
-        // Unused producer modules need not be built by a different method gate.
-        var invalid = manifest.Modules.Where(pair => !fingerprints.TryGetValue(pair.Key, out var parts) ||
-            !Same(pair.Value, parts)).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
-        bool changed;
-        do
+        var sources = PortableConsumerSources(root, inputs);
+        string? toolchain = null;
+        var trusted = new List<TrustedSupport>();
+        for (var i = 0; i < paths.Length; i++)
         {
-            changed = false;
-            foreach (var name in manifest.Modules.Keys)
-                if (manifest.Imports[name].Any(import => invalid.Contains(import) ||
-                    (!manifest.Modules.ContainsKey(import) &&
-                     !File.Exists(Path.Combine(Toolchain, "lib/lean", import.Replace('.', '/') + ".olean")))))
-                    changed |= invalid.Add(name);
-        } while (changed);
-        return manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal) &&
-            name is not ("Extracted" or "ExtractionAudit") && !name.StartsWith("LeanCILProof", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
+            var bytes = File.ReadAllBytes(paths[i]);
+            if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != digests[i])
+                throw new InvalidDataException("Consumer support manifest digest mismatch or missing trusted digest.");
+            ConsumerSupportManifest? manifest;
+            try { manifest = JsonSerializer.Deserialize<ConsumerSupportManifest>(bytes); }
+            catch (JsonException) { manifest = null; }
+            if (manifest is null) throw new InvalidDataException("Invalid consumer support manifest.");
+            // Older schemas lack fields; an incompatible manifest falls back to replay.
+            if (manifest.Schema != 3) continue;
+            if (manifest.Sources is null || manifest.Modules is null || manifest.Imports is null || manifest.Files is null ||
+                manifest.Tools is null || manifest.Files.Values.Any(files => files is null) ||
+                manifest.Modules.Any(pair => pair.Value is null || !manifest.Imports.TryGetValue(pair.Key, out var imports) || imports is null))
+                throw new InvalidDataException("Invalid consumer support manifest.");
+            if (manifest.Policy != VerificationPolicy || manifest.Library != libraryKey || !Same(manifest.Sources, sources) ||
+                manifest.Toolchain != (toolchain ??= ConsumerToolchainIdentity())) continue;
+            trusted.Add(new(manifest, Path.GetFullPath(paths[i])));
+        }
+        return [.. trusted];
+    }
+
+    // Opt-in: copies trusted producer artifacts so Lake can skip rebuilding them. Replay is still
+    // skipped only for modules whose resulting bytes match a manifest fingerprint.
+    void RestorePortableSupport(string session, TrustedSupport[] trusted)
+    {
+        if (trusted.Length == 0 || Environment.GetEnvironmentVariable(RestoreConsumerSupportVariable) != "true") return;
+        var tools = ConsumerToolsIdentity();
+        var restored = 0;
+        foreach (var (manifest, path) in trusted)
+        {
+            if (manifest.Tools != tools) continue;
+            var directory = Path.ChangeExtension(path, ".files");
+            if (!Directory.Exists(directory)) continue;
+            foreach (var (module, files) in manifest.Files)
+            {
+                // Restore whole modules only; an earlier manifest or a missing file keeps the module fresh.
+                if (files.Count == 0 || files.Keys.Any(file => File.Exists(Within(session, file)) || !File.Exists(Within(directory, file))))
+                    continue;
+                foreach (var (file, hash) in files)
+                {
+                    var target = Within(session, file);
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(Within(directory, file), target);
+                    if (Sha(target) != hash) throw new InvalidDataException("Consumer support file digest mismatch: " + file);
+                }
+                restored++;
+            }
+        }
+        if (restored > 0) CacheProgress($"portable consumer support library ({restored} modules)");
+    }
+
+    HashSet<string> ImportedConsumerSupport(string session, TrustedSupport[] trusted, Dictionary<string, string> modules)
+    {
+        if (trusted.Length == 0) return [];
+        var fingerprints = PortableConsumerModuleParts(session,
+            modules.Where(pair => trusted.Any(support => support.Manifest.Modules.ContainsKey(pair.Key))).ToDictionary());
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (manifest, _) in trusted)
+        {
+            // Invalidate the entire dependent closure of changed or missing modules.
+            // Unused producer modules need not be built by a different method gate.
+            var invalid = manifest.Modules.Where(pair => !fingerprints.TryGetValue(pair.Key, out var parts) ||
+                !Same(pair.Value, parts)).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+            bool changed;
+            do
+            {
+                changed = false;
+                foreach (var name in manifest.Modules.Keys)
+                    if (manifest.Imports[name].Any(import => invalid.Contains(import) ||
+                        (!manifest.Modules.ContainsKey(import) &&
+                         !File.Exists(Path.Combine(Toolchain, "lib/lean", import.Replace('.', '/') + ".olean")))))
+                        changed |= invalid.Add(name);
+            } while (changed);
+            result.UnionWith(manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" &&
+                !name.StartsWith("CIL.", StringComparison.Ordinal) && name is not ("Extracted" or "ExtractionAudit") &&
+                !name.StartsWith("LeanCILProof", StringComparison.Ordinal)));
+        }
+        return result;
     }
 
 
@@ -719,8 +862,6 @@ unsafe def main (args : List String) : IO Unit := do
             });
         }
         CheckExtractions(all);
-        if (batch && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT")))
-            Fail(all, new InvalidOperationException("LEANCIL_EXPORT_CONSUMER_SUPPORT requires a single-request verify."));
         var live = Pending(all);
         if (live.Length == 0) return outcomes;
 
@@ -781,12 +922,14 @@ unsafe def main (args : List String) : IO Unit := do
         string certifiedLibrary;
         Dictionary<string, string> certifiedBase;
         ConsumerDependency[] dependencies;
+        TrustedSupport[] trusted;
         try
         {
             certifiedLibrary = Library(Inputs(proofs[live[0]], requests[live[0]].Settings));
             certifiedBase = ModuleArtifacts(certifiedLibrary).Where(pair =>
                 ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
             dependencies = ConsumerDependencies(root);
+            trusted = TrustedConsumerSupport(root, before[live[0]]);
             // Resolve lazily initialized identities before any parallel work.
             _ = VerificationPolicy;
             if (UseSuccessCache) _ = ReceiptKey;
@@ -846,6 +989,7 @@ unsafe def main (args : List String) : IO Unit := do
             .OrderByDescending(group => group.Count(i => !requests[i].ExpectRejection)).ToArray();
         var sources = ConsumerSourceHashes(snapshot, root);
         var exporting = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
+        var export = new ConsumerSupportExport();
         string supportKey = "";
         string[] relativeImportDirectories = [];
         // Certified extraction-independent support shared by later workspaces.
@@ -879,6 +1023,7 @@ unsafe def main (args : List String) : IO Unit := do
                 // Workspaces differ in Extracted, so only extraction-independent support is shared.
                 supportArtifacts = RestoreConsumerSupport(supportKey, bound, support, dependent: false);
             }
+            RestorePortableSupport(session, trusted);
             var restoredArtifacts = new SortedDictionary<string, string>(supportArtifacts.Where(pair => pair.Key != ConsumerSupportRecordName)
                 .ToDictionary(), StringComparer.Ordinal);
             foreach (var file in restoredArtifacts.Keys)
@@ -1006,7 +1151,7 @@ unsafe def main (args : List String) : IO Unit := do
                 .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
             var checkedArtifacts = JsonSerializer.Serialize(currentArtifacts.OrderBy(pair => pair.Key, StringComparer.Ordinal)
                 .ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)));
-            var portableSupport = ImportedConsumerSupport(session, root, before[proceeding[0]], currentArtifacts);
+            var portableSupport = ImportedConsumerSupport(session, trusted, currentArtifacts);
             var graph = members.Length > 1 || share || UseSuccessCache || exporting || restoredArtifacts.Count > 0
                 ? ConsumerModuleImports(session, currentArtifacts) : null;
             // Cached support was checked against another Extracted, so its importers are always replayed.
@@ -1066,35 +1211,34 @@ unsafe def main (args : List String) : IO Unit := do
             if (failures.Count == 0 && graph is not null)
             {
                 var dependent = DependentModules(graph, ["Extracted", "ExtractionAudit", .. names]);
-                if (exporting)
-                    ExportConsumerSupport(session, root, before[proceeding[0]],
-                        currentArtifacts.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph);
-                if (UseSuccessCache || share)
+                // Extraction-dependent modules are recorded too, bound to this Extracted; export uses only the others.
+                var excluded = DependentModules(graph, ["ExtractionAudit", .. names]);
+                excluded.Add("Extracted");
+                var collected = UseSuccessCache || share || exporting
+                    ? CollectConsumerSupport(session, currentArtifacts, graph, excluded, extractionDependent, bound) : null;
+                try
                 {
-                    var excluded = DependentModules(graph, ["ExtractionAudit", .. names]);
-                    excluded.Add("Extracted");
-                    var collected = CollectConsumerSupport(session, currentArtifacts, graph, excluded, extractionDependent, bound);
+                    if (exporting)
+                        AddExportedSupport(export, session, root, before[proceeding[0]],
+                            currentArtifacts.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph, collected);
                     if (collected is not null)
                     {
-                        try
+                        if (supportKey.Length > 0)
+                            PublishSuccess(supportKey + "-" + Sha(Path.Combine(collected, ConsumerSupportRecordName)), collected);
+                        if (share)
                         {
-                            if (supportKey.Length > 0)
-                                PublishSuccess(supportKey + "-" + Sha(Path.Combine(collected, ConsumerSupportRecordName)), collected);
-                            if (share)
-                            {
-                                Directory.Delete(support, true);
-                                Directory.Move(collected, support);
-                                // Later workspaces restore their own extraction-dependent modules.
-                                var record = ReadConsumerSupportRecord(Path.Combine(support, ConsumerSupportRecordName));
-                                foreach (var file in record?.Values.Where(module => module.Sources.ContainsKey(ExtractedSourceKey))
-                                    .SelectMany(module => module.Files) ?? [])
-                                    File.Delete(Within(support, file));
-                                supportArtifacts = CacheFiles(support);
-                            }
+                            Directory.Delete(support, true);
+                            Directory.Move(collected, support);
+                            // Later workspaces restore their own extraction-dependent modules.
+                            var record = ReadConsumerSupportRecord(Path.Combine(support, ConsumerSupportRecordName));
+                            foreach (var file in record?.Values.Where(module => module.Sources.ContainsKey(ExtractedSourceKey))
+                                .SelectMany(module => module.Files) ?? [])
+                                File.Delete(Within(support, file));
+                            supportArtifacts = CacheFiles(support);
                         }
-                        finally { if (Directory.Exists(collected)) Directory.Delete(collected, true); }
                     }
                 }
+                finally { if (collected is not null && Directory.Exists(collected)) Directory.Delete(collected, true); }
             }
             foreach (var i in proceeding)
             {
@@ -1129,8 +1273,14 @@ unsafe def main (args : List String) : IO Unit := do
             // The first workspace certifies shared support before later ones start.
             RunGroup(ordered[0], first: true, share: ordered.Length > 1);
             Parallel.ForEach(ordered.Skip(1), parallel, group => RunGroup(group, first: false, share: false));
+            // One manifest per session: the union of every workspace that passed all checks.
+            if (exporting) WriteExportedSupport(export);
         }
-        finally { Directory.Delete(support, true); }
+        finally
+        {
+            Directory.Delete(support, true);
+            if (Directory.Exists(export.Staging)) Directory.Delete(export.Staging, true);
+        }
         return outcomes;
     }
 }
