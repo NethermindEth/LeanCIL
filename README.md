@@ -226,6 +226,36 @@ its full message block, omitting axiom reports, traces and warnings. Long
 messages are truncated in this summary only; the unmodified Lake output follows
 under `Details:` (and in the `LEANCIL_TRACE_DIRECTORY` transcripts when set).
 
+#### Binding extraction-independent bodies
+
+Reusable execution and contract theorems are stated over a generic program and
+bound to each extraction by a method-body equality. Prove those equalities with
+`cil_body` (from `CIL.MethodBinding`, also imported by `CIL`) instead of `rfl`:
+
+```lean
+import CIL.MethodBinding
+
+have found : Extracted.program[2]? = some (Full.fullBody Extracted.profile 9 5 7) := by cil_body
+```
+
+`cil_body` runs `rfl`, so the proof is the same kernel-checked `Eq.refl`. Only
+when `rfl` fails does it evaluate both closed sides and report, for each
+differing `Method` field, the first differing index, both elements and both
+lengths, instead of only `rfl`'s type mismatch:
+
+```text
+cil_body: rfl could not prove the method-body binding
+method index 1
+field code: first difference at index 1 (left length 6, right length 6)
+  left:  CIL.Op.brzero 10
+  right: CIL.Op.brzero 4
+```
+
+The left side is the extraction's body. An index past the end of the program is
+reported with the program's length. The diagnostic is computed after the
+failure through compiled evaluation and is never proof evidence; it also works
+for `Method = Method` goals. `Tests/MethodBinding.lean` covers both outcomes.
+
 ### Batch consumer verification
 
 `leancil verify-batch requests.json` verifies many requests against one consumer
