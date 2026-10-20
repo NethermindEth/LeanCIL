@@ -70,17 +70,17 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
 
 // A fold never hides reachable unsupported code.
 var live = Execute(Extract("extract", assembly, "Examples", "TypeTests::Word(int)", Path.Combine(root, "Word")));
-if (live.Code == 0 || !live.Output.Contains("External or mismatched managed dependency"))
+if (live.Code == 0 || !live.Output.Contains("External managed dependency: System.Int32 System.Environment::get_ProcessorCount()"))
     throw new InvalidOperationException("Reachable unsupported code after a fold was accepted:\n" + live.Output);
 Console.WriteLine("PASS Word: the live non-matching branch is still validated");
 
 // Anything other than the exact closed encoding stays unsupported.
 foreach (var (mutation, marker) in new[]
 {
-    ("operand-gap", "External or mismatched managed dependency"),
+    ("operand-gap", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
     ("type-local", "Unsupported type: System.Type"),
-    ("forwarded-scope", "External or mismatched managed dependency"),
-    ("reference-equality", "External or mismatched managed dependency"),
+    ("forwarded-scope", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
+    ("reference-equality", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
     ("interior-branch", "Branch into a folded type comparison")
 })
 {
