@@ -78,7 +78,7 @@ Invalid: Stale or mismatched verification artifact: artifacts/Add/Extracted.lean
   Next: Rerun leancil extract with the intended assembly, method and profile, then rerun this command.
 ```
 
-Validation failures name the rejected item and the method containing it. A rejected call reports the callee, the calling method and the IL offset of the call. For example, `typeof(ulong) == typeof(uint)` compiles to calls into the runtime library that LeanCIL does not model:
+Method and call validation failures name the rejected item and the method containing it. A rejected call reports the callee, the calling method and the IL offset of the call. For example, `typeof(ulong) == typeof(uint)` compiles to calls into the runtime library that LeanCIL does not model:
 
 ```text
 Error: External managed dependency: System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)
