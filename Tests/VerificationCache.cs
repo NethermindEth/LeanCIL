@@ -115,6 +115,95 @@ try
         !verifier.RestoreSuccess("concurrent", Path.Combine(directory, "concurrent")))
         throw new Exception("Concurrent publication left duplicates, staging directories or an invalid entry");
     Console.WriteLine("PASS idempotent publication, corrupt entry replacement and concurrent publishers");
+    // Generations of one family share unchanged bytes instead of holding a full copy each.
+    var family = new string('a', 64);
+    string Generation(char c) => family + "-" + new string(c, 64);
+    var first = Path.Combine(directory, "generation-1");
+    Directory.CreateDirectory(first);
+    File.WriteAllText(Path.Combine(first, "Shared.olean"), "unchanged support module");
+    File.WriteAllText(Path.Combine(first, "Proof.olean"), "first proof");
+    verifier.PublishSuccess(Generation('b'), first, family);
+    var second = Path.Combine(directory, "generation-2");
+    CopyTree(first, second);
+    File.WriteAllText(Path.Combine(second, "Proof.olean"), "second proof");
+    // A sibling whose receipt misstates its bytes must not be linked into a new entry.
+    var forged = Path.Combine(SuccessCacheRoot, Generation('0'));
+    Directory.CreateDirectory(Path.Combine(forged, "files"));
+    File.WriteAllText(Path.Combine(forged, "files", "Proof.olean"), "forged bytes");
+    File.WriteAllText(Path.Combine(forged, "receipt.json"), JsonSerializer.Serialize(
+        new SortedDictionary<string, string> { ["Proof.olean"] = Sha(Path.Combine(second, "Proof.olean")) }));
+    verifier.PublishSuccess(Generation('c'), second, family);
+    var linked = Path.Combine(directory, "linked");
+    if (!verifier.RestoreSuccess(Generation('c'), linked) || File.ReadAllText(Path.Combine(linked, "Proof.olean")) != "second proof")
+        throw new Exception("Generation linked to bytes its sibling's receipt misstated");
+    File.AppendAllText(Path.Combine(SuccessCacheRoot, Generation('b'), "files", "Shared.olean"), " changed in place");
+    if (File.ReadAllText(Path.Combine(SuccessCacheRoot, Generation('c'), "files", "Shared.olean")) != "unchanged support module changed in place" ||
+        File.ReadAllText(Path.Combine(SuccessCacheRoot, Generation('c'), "files", "Proof.olean")) != "second proof")
+        throw new Exception("Unchanged file was copied into a new generation, or a changed file was shared");
+    // Shared bytes stay authenticated per entry: in-place damage rejects every sharer.
+    if (verifier.RestoreSuccess(Generation('c'), Path.Combine(directory, "damaged")))
+        throw new Exception("Damaged shared file accepted");
+    Console.WriteLine("PASS support generations share unchanged files and stay individually authenticated");
+
+    // Eviction removes only exact cache entry names past their age, never receipts or other names.
+    var evictionRoot = Path.Combine(directory, "eviction");
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", evictionRoot);
+    Directory.CreateDirectory(SuccessCacheRoot);
+    string Entry(string name, int days)
+    {
+        var path = Path.Combine(SuccessCacheRoot, name);
+        Directory.CreateDirectory(Path.Combine(path, "files"));
+        File.WriteAllText(Path.Combine(path, "files", "artifact.olean"), name);
+        Directory.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-days));
+        return path;
+    }
+    var staleGeneration = Entry(Generation('1'), 8);
+    var usedGeneration = Entry(Generation('2'), 6);
+    var restored = Entry(Generation('3'), 30);
+    TouchSuccess(restored);
+    var staleReceipt = Entry(new string('4', 64), 30);
+    var abandoned = Entry(new string('5', 64) + "." + new string('6', 32), 2);
+    var replaced = Entry(Generation('7') + ".invalid-" + new string('8', 32), 2);
+    var publishing = Entry(Generation('9') + "." + new string('a', 32), 0);
+    var unrelated = Entry("notes-" + Generation('b'), 30);
+    var outside = Path.Combine(directory, "outside");
+    Directory.CreateDirectory(outside);
+    File.WriteAllText(Path.Combine(outside, "keep.txt"), "outside the cache");
+    var link = Path.Combine(SuccessCacheRoot, Generation('c'));
+    var linkCreated = true;
+    try
+    {
+        Directory.CreateSymbolicLink(link, outside);
+        Directory.SetLastWriteTimeUtc(link, DateTime.UtcNow.AddDays(-30));
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException) { linkCreated = false; }
+    supportEvicted = 0;
+    EvictStaleSupport();
+    if (Directory.Exists(staleGeneration) || Directory.Exists(abandoned) || Directory.Exists(replaced) ||
+        !Directory.Exists(usedGeneration) || !Directory.Exists(restored) || !Directory.Exists(staleReceipt) ||
+        !Directory.Exists(publishing) || !Directory.Exists(unrelated) || !File.Exists(Path.Combine(outside, "keep.txt")) ||
+        linkCreated && !Directory.Exists(link) ||
+        Directory.EnumerateDirectories(SuccessCacheRoot).Any(path => path.Contains(".evicted-")))
+        throw new Exception("Eviction removed a used, unrelated or linked entry, or kept a stale one");
+    Console.WriteLine(linkCreated
+        ? "PASS eviction of unused support generations and abandoned staging; receipts, unrelated names and links kept"
+        : "PASS eviction of unused support generations and abandoned staging; receipts and unrelated names kept (symbolic link check not run: no privilege)");
+
+    // A cache that cannot be written leaves verification to succeed and says why.
+    var blocked = Path.Combine(directory, "blocked");
+    Directory.CreateDirectory(blocked);
+    File.WriteAllText(Path.Combine(blocked, "success-v1"), "a file where the cache directory belongs");
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", blocked);
+    var savedError = Console.Error;
+    var warnings = new StringWriter();
+    Console.SetError(warnings);
+    try { verifier.PublishSuccess("blocked", source); }
+    finally { Console.SetError(savedError); }
+    if (!warnings.ToString().Contains("warning: success cache " + SuccessCacheRoot + " not updated"))
+        throw new Exception("Unwritable cache did not report a warning naming the cache: " + warnings);
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(directory, "cache"));
+    Console.WriteLine("PASS unwritable cache warns with its location instead of failing a verified result");
+
     using var fresh = new Program { freshLibrary = true };
     fresh.PublishSuccess("fresh", source);
     if (Directory.Exists(Path.Combine(SuccessCacheRoot, "fresh")) || fresh.RestoreSuccess("original", destination))

@@ -214,6 +214,15 @@ extraction identity, theorem and inputs; extraction integrity is checked again.
 Modified or unsigned cache files fall back to rebuilding and kernel replay.
 `--fresh` disables both consumer caches. These receipts are local to the machine;
 the existing certified CIL producer artifact can still supply the base library.
+They live under `LEANCIL_CACHE_DIR` (default `<local application data>/LeanCIL/libraries`)
+in `success-v1`. Support generations hard-link files whose bytes an earlier
+generation already holds, so a new generation costs about its changed modules;
+each entry is still authenticated on its own, and in-place damage to a shared
+file rejects every entry holding it. A generation not restored or republished for
+`LEANCIL_SUPPORT_RETENTION_DAYS` (default 7) is evicted when a later one is
+published, together with staging directories left by killed runs. A cache that
+cannot be written, for example on a full disk, prints a warning with its location
+and free space; the verification result stands.
 
 Kernel replay and the theorem audit run the pinned toolchain's `lean` directly
 with the `LEAN_PATH` that `lake env` resolves after the build (and `LEAN_SYSROOT`

@@ -663,6 +663,7 @@ unsafe def main (args : List String) : IO Unit := do
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     File.Copy(source, target, true);
                 }
+                TouchSuccess(Path.Combine(SuccessCacheRoot, name));
                 return CacheFiles(destination);
             }
             catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException) { }
@@ -1231,7 +1232,10 @@ unsafe def main (args : List String) : IO Unit := do
                     if (collected is not null)
                     {
                         if (supportKey.Length > 0)
-                            PublishSuccess(supportKey + "-" + Sha(Path.Combine(collected, ConsumerSupportRecordName)), collected);
+                        {
+                            PublishSuccess(supportKey + "-" + Sha(Path.Combine(collected, ConsumerSupportRecordName)), collected, supportKey);
+                            if (UseSuccessCache) EvictStaleSupport();
+                        }
                         if (share)
                         {
                             Directory.Delete(support, true);
