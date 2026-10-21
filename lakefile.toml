@@ -55,3 +55,6 @@ name = "Tests.ValueBitCasts"
 
 [[lean_lib]]
 name = "Tests.TypeTestEvidence"
+
+[[lean_lib]]
+name = "Tests.InterpreterEquations"

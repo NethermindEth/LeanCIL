@@ -130,10 +130,14 @@ universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, feature selection, infinite-loop fuel
 exhaustion, backward switch and malformed-input rejection.
 
+`Tests.InterpreterEquations` checks that each shared equation lemma is stored by
+its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
+naming `CIL.step.eq_def` elaborates.
+
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.AggregateSetup Tests.Semantics
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
