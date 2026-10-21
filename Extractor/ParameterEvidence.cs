@@ -46,6 +46,6 @@ internal static class ParameterEvidence
         });
         lean.AppendLine($"def method{number}RawArguments : Extraction.RawArguments := {{ arguments := [{string.Join(", ", arguments)}], locals := [{string.Join(", ", locals)}], code := [{string.Join(", ", code)}] }}");
         lean.AppendLine($"def method{number}Reachable : List Bool := [{string.Join(", ", method.Body.Instructions.Select(instruction => reachable.Contains(instruction).ToString().ToLowerInvariant()))}]");
-        lean.AppendLine($"theorem method{number}_parameters_validated : Extraction.ParameterHomesValid computedLayouts method{number}RawArguments method{number}Reachable method{number} := by decide");
+        lean.AppendLine($"theorem method{number}_parameters_validated : Extraction.ParameterHomesValid computedLayouts method{number}RawArguments method{number}Reachable method{number} := {LeanEmitter.Decide}");
     }
 }

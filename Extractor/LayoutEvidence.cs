@@ -65,7 +65,7 @@ internal sealed class LayoutEvidence(TypeReference[] types)
         lean.AppendLine("]");
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +
             string.Join(", ", rawTypes.Select(type => $"⟨layout{Array.FindIndex(types, entry => entry.FullName == type.FullName)}, {MetadataValidation.AggregateLayout(type, type.Module).Alignment}⟩")) + "]");
-        lean.AppendLine("theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts := by decide");
+        lean.AppendLine("theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts := " + LeanEmitter.Decide);
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number, HashSet<Instruction> reachable,
@@ -110,6 +110,6 @@ internal sealed class LayoutEvidence(TypeReference[] types)
             if (MetadataValidation.IsAggregate(type, method.Module)) uses.Add($".parameter {home} {Index(type)}");
         }
         lean.AppendLine($"def method{number}LayoutUses : List Extraction.LayoutUse := [{string.Join(", ", uses)}]");
-        lean.AppendLine($"theorem method{number}_layouts_validated : Extraction.MethodLayoutsValid rawLayouts computedLayouts method{number} method{number}LayoutUses := by decide");
+        lean.AppendLine($"theorem method{number}_layouts_validated : Extraction.MethodLayoutsValid rawLayouts computedLayouts method{number} method{number}LayoutUses := {LeanEmitter.Decide}");
     }
 }
