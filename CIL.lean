@@ -59,8 +59,6 @@ import CIL.Safety.FrameLemmas
 import CIL.Safety.FrameMemoryBelow
 import CIL.Safety.FrameOwnership
 import CIL.Safety.FrameProgress
-import CIL.Safety.FrameEffects
-import CIL.Safety.FrameSetupContracts
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.FrameStaticWorld
 import CIL.Safety.Frames
