@@ -15,6 +15,7 @@ inductive ExecutionFault where
   | memory (rule : Fault) (reference : ManagedReference) (width : Nat)
   | invalidState
   | unsupported (description : String)
+  | thrown (exception : String)
   | fuelExhausted
   deriving DecidableEq, Repr
 

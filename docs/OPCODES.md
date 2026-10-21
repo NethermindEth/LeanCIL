@@ -65,6 +65,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist. No arbitrary external calls, generic declaring types, class instance methods or virtual dispatch. |
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also the explicitly modelled `ReadOnlySpan<byte>(void*, int)` runtime constructor. Class construction, generic constructors and cyclic dependencies are rejected. |
 | `ldtoken` | Partial | Only a type token as an operand of a decided closed type test (see below); it emits a no-op. Other tokens and other uses are rejected. |
+| `throw` | Partial | Only `throw new E(...)` with `ldstr`/`ldnull` arguments (see below): it raises a located `thrown "E"` fault. Other throws are rejected. |
 | `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. |
 | `initblk`, `cpblk` | Partial | Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
 | `unaligned.` | Partial | Values 1, 2 and 4 before supported ordinary or block memory accesses; malformed prefix sequences and interior branch targets are rejected. |
@@ -88,14 +89,18 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`, `constrained.` |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*`, `localloc` |
-| Objects, arrays and metadata | `ldnull`, `ldstr`, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` outside a decided type test |
+| Objects, arrays and metadata | `ldnull` and `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` outside a decided type test |
 | Static field values | `ldsfld`, `stsfld` |
-| Dispatch and exceptions | `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw`, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
+| Dispatch and exceptions | `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
 
 ### Type tests
 
 In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof(B)` compile to `ldtoken A; call Type::GetTypeFromHandle; ldtoken B; call Type::GetTypeFromHandle; call Type::op_Equality` (or `op_Inequality`), with the `System.Runtime` signatures. When both types are closed and their identity is decided, the four operand instructions emit `nop` and the comparison emits `ldc.i4.0` or `ldc.i4.1`, as the JIT folds them. Profile reachability then prunes the dead branch. Types are equal when their metadata is identical, and different when their full names differ; one full name in two scopes, decorated names and `void` stay undecided. Undecided tests, any other instruction between the five, a branch into the last four, other `System.Type` members and `Type` values in locals remain rejected.
+
+### Throws
+
+`throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of `E`'s constructor and `throw`. When `E` is a `System.Runtime` type, the loads and `newobj` emit `nop` and `throw` emits `.throw "E"`, which ends execution with a fault located at the `throw`. A `[DoesNotReturn]` helper containing only this pattern is an ordinary call. Other arguments, any instruction between the parts, a branch past the first part, rethrowing a stored exception and exception handlers remain rejected.
 
 Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable array allocation or exception handling is still rejected.
 
