@@ -6,6 +6,20 @@ These tables list the overloads currently recognised by the extractor, not entir
 
 Values are modelled as bit patterns with lane zero in the least-significant bits. Integer arithmetic wraps at the lane width. Floating-point vector types appear in a few reinterpretation, selection and mask operations; this does **not** provide floating-point arithmetic semantics.
 
+## Overview
+
+| Family | Extractable operations |
+| --- | --- |
+| [Vector128 / Vector256](#vector128-and-vector256) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction, extraction, reductions, arithmetic shifts and bit reinterpretation |
+| [SSE](#sse) | `Sse2.ShiftLeftLogical128BitLane`, `Ssse3.AlignRight`; SSE4.1/4.2 getters only |
+| [AVX](#avx) | Selected `MoveMask`, `Blend`, `TestZ` overloads |
+| [AVX2](#avx2) | `Permute4x64`, `Blend`, `Add`, `CompareEqual`, `CompareGreaterThan`, widening even-lane `Multiply`, logical shifts |
+| [AVX512](#avx512) | F.VL alignment, ternary logic and unsigned comparisons; DQ mask extraction and DQ.VL low multiplication, all on 256-bit vectors |
+| [BMI](#bmi) | `Bmi1.BitFieldExtract(uint, byte, byte)`, `Bmi2.X64.MultiplyNoFlags(ulong, ulong)` |
+| [ARM](#arm) | `AdvSimd.ExtractVector128` on `ulong` lanes, `ArmBase.Arm64.MultiplyHigh(ulong, ulong)` |
+
+An enabled CPU feature does not imply support for all of its APIs. Float/double vectors are used only for selected bit operations, not floating-point arithmetic. Vector64 and Vector512 are not supported. See the [profile table](#feature-getters-profiles-and-execution-restrictions) for the exact flags enabled by each built-in profile.
+
 ## Vector128 and Vector256
 
 Every row applies to both widths, with matching input/output widths. These portable vector operations require no ISA flag in the extractor and can be modelled under the `scalar` profile; that is a semantics choice, not a claim about how a JIT implements them.
