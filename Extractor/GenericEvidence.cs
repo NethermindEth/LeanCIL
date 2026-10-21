@@ -103,6 +103,6 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {Method(original)}");
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
         lean.AppendLine($"def method{number}Closed : Extraction.RawMethod := {Method(method)}");
-        lean.AppendLine($"theorem method{number}_specialization_validated : Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw method{number}Closed method{number}RawArguments := by decide");
+        lean.AppendLine($"theorem method{number}_specialization_validated : Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw method{number}Closed method{number}RawArguments := {LeanEmitter.Decide}");
     }
 }

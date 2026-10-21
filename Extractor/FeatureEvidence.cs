@@ -19,6 +19,6 @@ internal static class FeatureEvidence
                 $"locals := [{string.Join(", ", state.Locals.Select(Fact))}] }}";
         });
         lean.AppendLine($"def method{number}FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", states)}]");
-        lean.AppendLine($"theorem method{number}_features_validated : Extraction.FeatureFlowValid method{number}Closed profile method{number}FeatureStates method{number}Reachable method{number}.code := by decide");
+        lean.AppendLine($"theorem method{number}_features_validated : Extraction.FeatureFlowValid method{number}Closed profile method{number}FeatureStates method{number}Reachable method{number}.code := {LeanEmitter.Decide}");
     }
 }

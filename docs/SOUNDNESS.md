@@ -114,7 +114,7 @@ Static data is immutable, extraction-bound RVA storage with field identities ret
 
 The C# compiler/JIT is not assumed to prove a source-level contract. Extraction reads the compiler's actual output, but executing that output on a real runtime still relies on the runtime correspondence assumptions above. Hardware and platform implementation correctness are not proved here.
 
-No `sorry`, `admit`, new axioms, native proof evaluation, or unchecked correctness summaries are used in the delivered proofs. `rfl` and `decide` generate kernel-checkable proofs. A failed build, unexpected diagnostic, resource exhaustion or missing audit is a verification failure, not a successful negative semantic test.
+No `sorry`, `admit`, new axioms, native proof evaluation, or unchecked correctness summaries are used in the delivered proofs. `rfl` and `decide` generate kernel-checkable proofs; generated evidence uses `decide +kernel`, which reduces the decision procedure in the kernel instead of the elaborator, adds no axioms, and keeps certificates for long method bodies within the default heartbeat budget. A failed build, unexpected diagnostic, resource exhaustion or missing audit is a verification failure, not a successful negative semantic test.
 
 ## Independently checked extraction evidence
 

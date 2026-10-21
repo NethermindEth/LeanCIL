@@ -47,6 +47,16 @@ if (excluded < 700 || states.Count != reachable.Count || extracted.Contains("set
 Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")]);
 Console.WriteLine($"PASS {excluded} excluded sites validate at the default heartbeat budget");
 
+// Live under AVX2, the same branch is reachable; elaborator `decide` exceeded the budget on bodies this long.
+var liveOutput = Path.Combine(directory, "Live");
+Run(Extract("extract", assembly, "Excluded", "Excluded::Accumulate(ulong,ulong)", liveOutput, "x64-avx2"));
+var liveExtracted = File.ReadAllText(Path.Combine(liveOutput, "Extracted.lean"));
+var liveSites = liveExtracted.Split('\n').Single(l => l.StartsWith("def method0Reachable ", StringComparison.Ordinal)).Split("true").Length - 1;
+if (liveSites < 800 || liveExtracted.Contains("set_option maxHeartbeats"))
+    throw new InvalidOperationException($"Expected a long live branch checked at the default budget; found {liveSites} live sites.");
+Run(["lake", "env", "lean", Path.Combine(liveOutput, "Extracted.lean")]);
+Console.WriteLine($"PASS {liveSites} live sites validate at the default heartbeat budget");
+
 // Each validator must still reach and reject a forged claim at the last pruned site it checks.
 void Reject(string name, string validator, Func<int, bool> site, bool forgeState)
 {

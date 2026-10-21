@@ -16,6 +16,8 @@ internal static class LeanEmitter
         _ => null
     };
 
+    // The kernel rechecks every decide; elaborator whnf costs grow superlinearly with body size.
+    internal const string Decide = "by decide +kernel";
     internal static string Kind(TypeReference type, ModuleDefinition module)
     {
         // A span local is only touched by a receiver fold, so its slot is an inert root.
@@ -43,7 +45,7 @@ internal static class LeanEmitter
     {
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
-        lean.AppendLine("theorem profile_valid : profile.Valid := by decide");
+        lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
         FieldDefinition[] data = methods.SelectMany(m => Reachability.Analyze(m, profile))
             .Where(StaticSite)
             .Select(i => StaticData.Validate((FieldReference)i.Operand, methods[0].Module)).Distinct().ToArray();
@@ -73,7 +75,7 @@ internal static class LeanEmitter
             string fields = string.Join(", ", types[i].Resolve().Fields.Where(f => !f.IsStatic)
                 .Select(f => $"⟨{MetadataValidation.FieldOffset(f, methods[0].Module)}, {MetadataValidation.FieldSize(f.FieldType, methods[0].Module)}, {MetadataValidation.IsAggregate(f.FieldType, methods[0].Module).ToString().ToLowerInvariant()}⟩"));
             lean.AppendLine($"def layout{i} : AggregateLayout := ⟨{size}, [{fields}]⟩");
-            lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := by decide");
+            lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := {Decide}");
         }
         var layoutEvidence = new LayoutEvidence(types);
         layoutEvidence.EmitLayouts(lean);
@@ -116,14 +118,14 @@ internal static class LeanEmitter
         }
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
         for (int n = 0; n < methods.Length; n++)
-            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods method{n}Closed method{n}Reachable method{n} := by decide");
+            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods method{n}Closed method{n}Reachable method{n} := {Decide}");
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, layoutUses := method{n}LayoutUses }}")) + "]");
         for (int n = 0; n < methods.Length; n++)
         {
-            lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := by decide");
-            lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := by decide");
-            lean.AppendLine($"theorem method{n}_skipInit_validated : Extraction.SkipInitValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := by decide");
+            lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
+            lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_skipInit_validated : Extraction.SkipInitValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence methodEvidence[{n}] method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_skipInit_validated⟩");
         }
