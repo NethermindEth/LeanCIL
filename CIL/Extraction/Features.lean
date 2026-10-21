@@ -30,7 +30,8 @@ private def featureNames : List (String × Feature) := [
   ("X86.Sse42", .sse42), ("X86.Avx", .avx), ("X86.Avx2", .avx2),
   ("X86.Avx512F", .avx512F), ("X86.Avx512F/VL", .avx512FVL),
   ("X86.Avx512DQ", .avx512DQ), ("X86.Avx512DQ/VL", .avx512DQVL),
-  ("X86.Bmi1", .bmi1), ("X86.Bmi2/X64", .bmi2), ("Vector256", .vector256Accelerated)]
+  ("X86.Bmi1", .bmi1), ("X86.Bmi2/X64", .bmi2), ("X86.X86Base/X64", .x86Base64),
+  ("Vector128", .vector128Accelerated), ("Vector256", .vector256Accelerated)]
 
 /-- Identify getters from raw member and assembly identity, never an emitter-supplied flag. -/
 def featureGetter (site : CallSite) : Option Feature := do
@@ -38,7 +39,8 @@ def featureGetter (site : CallSite) : Option Feature := do
   if site.parameterCount != 0 || site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none
   else (featureNames.find? fun (name, feature) =>
     identity == intrinsicIdentity ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++ "::" ++
-      (if feature == .vector256Accelerated then "get_IsHardwareAccelerated" else "get_IsSupported") ++
+      (if feature == .vector128Accelerated || feature == .vector256Accelerated then "get_IsHardwareAccelerated"
+        else "get_IsSupported") ++
       "()").map Prod.snd
 
 private def localIndex (i : RawInstruction) : Option Nat :=
