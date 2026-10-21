@@ -95,19 +95,93 @@ theorem StaticInstructionEffect.allocations {body : CIL.Method} {m result : Memo
   | ordinary effect => exact effect.allocations
   | reference _ h => exact staticReference_extends_allocations _ _ _ _ h
 
+theorem access_reference_valid (m : Memory) (r : Reference) (width alignment : Nat)
+    (writing : Bool) (h : access m r width alignment writing = .ok ()) : form m r = .ok r := by
+  unfold access at h
+  cases hf : form m r with
+  | error fault => simp [hf, Bind.bind, Except.bind] at h
+  | ok formed =>
+    have same := form_returns_input _ _ _ hf
+    subst formed
+    rfl
+
+theorem read_reference_valid (m : Memory) (r : Reference) (width alignment : Nat)
+    (bytes : List (BitVec 8)) (h : read m r width alignment = .ok bytes) : form m r = .ok r := by
+  unfold read at h
+  cases ha : access m r width alignment false with
+  | error fault => simp [ha, Bind.bind, Except.bind] at h
+  | ok accessed =>
+    cases accessed
+    exact access_reference_valid _ _ _ _ _ ha
+
+theorem staticReference_reference_valid (descriptor : CIL.StaticDescriptor) (m result : Memory)
+    (reference : Reference) (h : staticReference descriptor m = .ok (result, reference)) :
+    form result reference = .ok reference := by
+  cases hc : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with
+  | some binding =>
+    obtain ⟨key, cached⟩ := binding
+    obtain ⟨rfl, rfl, bytes⟩ := cached_static_reference_checked _ _ _ _ _ _ hc h
+    exact read_reference_valid _ _ _ _ _ bytes
+  | none =>
+    simp only [staticReference, hc] at h
+    cases ha : allocate m ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩,
+        true, [descriptor.bytes.length]⟩ <;>
+      simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
+        Pure.pure, Except.pure] at h
+    · cases h
+    · rename_i allocated
+      obtain ⟨id, memory⟩ := allocated
+      cases h
+      have lookup := allocation_lookup m _ id memory ha
+      have position : 0 < descriptor.bytes.length ∨ 0 = descriptor.bytes.length := by omega
+      simp [form, liveAllocation, lookup, validPosition, nativeLimit, position,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]
+theorem formValue_reference_valid (m : Memory) (r : ManagedReference) (value : Value)
+    (h : formValue m r = .ok value) : (Value.reference r).Valid m := by
+  have valid := formValue_result_valid _ _ _ h
+  rw [formValue_returns_input _ _ _ h] at valid
+  exact valid
+
+structure StaticInstructionContract (body : CIL.Method) (m result : Memory)
+    (stack values : List Value) : Prop where
+  effect : StaticInstructionEffect body m result
+  values : m.WellFormed → ValuesValid m stack → ValuesValid result values
+
+theorem StaticInstructionContract.ordinary {body : CIL.Method} {m result : Memory} {stack values : List Value}
+    (contract : InstructionContract m result stack values) : StaticInstructionContract body m result stack values :=
+  ⟨.ordinary contract.effect, contract.values⟩
+
+theorem StaticInstructionContract.of_effect {body : CIL.Method} {m result : Memory} {stack values : List Value}
+    (effect : StaticInstructionEffect body m result)
+    (preserve : ValuesValid result stack → ValuesValid result values) : StaticInstructionContract body m result stack values :=
+  ⟨effect, fun hm valid => preserve (valid.preserve hm effect.allocations)⟩
+
+theorem staticInstruction_contract (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
+    (stack values : List Value) (m result : Memory)
+    (h : staticInstruction body pc operation stack m = .ok (result, values)) :
+    StaticInstructionContract body m result stack values := by
+  unfold staticInstruction at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals repeat' first
+    | solve | exact .ordinary (memoryInstruction_contract _ _ _ _ _ (by assumption))
+    | solve |
+        refine StaticInstructionContract.of_effect ?_ ?_
+        · first | exact .ordinary (.unchanged _) | exact .reference (by assumption) (by assumption)
+        · intro retained
+          apply ValuesValid.cons
+          · first
+            | exact True.intro
+            | exact retained.tail.head
+            | apply staticReference_reference_valid; assumption
+            | apply formValue_reference_valid; assumption
+          · first | exact retained | exact retained.tail | exact retained.tail.tail
+    | cases h
+    | split at h
+
 theorem staticInstruction_effect (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     (stack values : List Value) (m result : Memory)
     (h : staticInstruction body pc operation stack m = .ok (result, values)) :
-    StaticInstructionEffect body m result := by
-  unfold staticInstruction at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals
-    repeat' first
-      | exact .ordinary (.unchanged _)
-      | solve | exact .reference (by assumption) (by assumption)
-      | solve | exact .ordinary (memoryInstruction_effect _ _ _ _ _ (by assumption))
-      | cases h
-      | split at h
+    StaticInstructionEffect body m result := (staticInstruction_contract _ _ _ _ _ _ _ h).effect
 
 theorem staticInstruction_preserves_wellFormed (body : CIL.Method) (pc : Nat)
     (operation : CIL.MemoryOp) (stack values : List Value) (m result : Memory)

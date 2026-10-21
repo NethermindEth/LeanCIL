@@ -22,10 +22,11 @@ theorem step_live_state (program : CIL.Program) (method : Nat) (body : CIL.Metho
     (found : program[method]? = some body)
     (h : step body operation pc args frame stack m = .ok action) :
     action.StateValid program args frame := by
-  have ext := step_extends_allocations _ _ _ _ _ _ _ _ h
-  have memory := step_preserves_wellFormed _ _ _ _ _ _ _ _ state.memory h
+  have contract := step_contract _ _ _ _ _ _ _ _ h
+  have ext := contract.effect.allocations
+  have memory := contract.effect.wellFormed state.memory
   have arguments := state.arguments.preserve state.memory ext
-  have values := step_values_valid _ _ _ _ _ _ _ _ state.memory state.stack h
+  have values := contract.values state.memory state.stack
   have references := step_preserves_frame_references _ _ _ _ _ _ _ _ state.memory state.references h
   have owned := step_preserves_frame_allocations _ _ _ _ _ _ _ _ state.memory state.owned h
   have statics := step_preserves_static_world _ _ _ _ _ _ _ _ _ state.memory
