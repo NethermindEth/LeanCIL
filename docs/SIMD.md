@@ -136,7 +136,7 @@ Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `S
 | `arm64-armbase` | `ArmBase64` |
 | `arm64-advsimd` | `ArmBase64`, `AdvSimd`, `Vector128Accelerated` |
 
-Every x86 ISA flag requires `X86Base64`, since each of those classes derives from `X86Base`. `Vector128Accelerated` and `Vector256Accelerated` are independent of the ISA flags: the built-ins set `Vector128Accelerated` with `Sse2` or `AdvSimd`, and only `x64-vector256` sets `Vector256Accelerated`. Use an explicit `@profile.json` when a different combination is needed. Custom profiles must supply every capability field and satisfy the architecture and prerequisite checks in [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs).
+Every x86 ISA flag requires `X86Base64`, since each of those classes derives from `X86Base`. `Vector128Accelerated` and `Vector256Accelerated` are independent of the ISA flags: the built-ins set `Vector128Accelerated` with `Sse2` or `AdvSimd`, and only `x64-vector256` sets `Vector256Accelerated`. Use an explicit `@profile.json` when a different combination is needed. Custom profiles must supply every capability field and satisfy the architecture and prerequisite checks in [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs). Custom profiles written before `x86Base64` and `vector128Accelerated` existed must add both fields, with `x86Base64` true whenever an x86 ISA flag is set.
 
 Pass the profile after the extraction output directory, for example:
 

@@ -40,7 +40,6 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
     {
         if (string.IsNullOrWhiteSpace(Name) || NativeWidth != 64 || !LittleEndian || Architecture is not ("scalar" or "arm64" or "x64") ||
             ((AdvSimd || ArmBase64) && Architecture != "arm64") ||
-            ((Sse2 || Ssse3 || Sse42 || Avx || Avx2 || Avx512F || Avx512FVL || Bmi1 || Sse41 || Avx512DQ || Avx512DQVL || Bmi2) && !X86Base64) ||
             (X86Base64 && Architecture != "x64") ||
             (Ssse3 && !Sse2) || (Sse42 && (!Sse2 || !Ssse3)) ||
             (Avx2 && !Avx) || (Avx512FVL && !Avx512F) ||
@@ -49,6 +48,9 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             (Avx512DQ && !Avx512F) || (Avx512DQVL && (!Avx512DQ || !Avx512FVL)) ||
             (AdvSimd && !ArmBase64))
             throw new InvalidDataException($"Invalid execution profile: {Name}");
+        // Every x86 ISA class derives from X86Base.
+        if ((Sse2 || Ssse3 || Sse42 || Avx || Avx2 || Avx512F || Avx512FVL || Bmi1 || Sse41 || Avx512DQ || Avx512DQVL || Bmi2) && !X86Base64)
+            throw new InvalidDataException($"Invalid execution profile: {Name}: x86 ISA flags require x86Base64");
     }
 
     internal static FeatureProfile Select(string name)

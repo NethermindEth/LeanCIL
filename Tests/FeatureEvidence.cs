@@ -54,4 +54,16 @@ foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-bmi2", 1), ("arm64
     verification.Verify(assembly, "Examples", "Capabilities::Flags()", proof, Path.Combine(capabilities, "Verified"), profile);
     Console.WriteLine($"PASS Capabilities::Flags under {profile} returns {flags}");
 }
+// A custom profile names the rule it breaks.
+var noBase = Path.Combine(output, "bmi2-without-x86base.json");
+File.WriteAllText(noBase, """
+    { "name": "bmi2-only", "architecture": "x64", "nativeWidth": 64, "littleEndian": true, "advSimd": false, "sse2": false,
+      "ssse3": false, "sse42": false, "avx": false, "avx2": false, "avx512F": false, "avx512FVL": false, "bmi1": false,
+      "sse41": false, "avx512DQ": false, "avx512DQVL": false, "bmi2": true, "armBase64": false, "vector256Accelerated": false,
+      "x86Base64": false, "vector128Accelerated": false }
+    """);
+var invalid = Execute(Extract("extract", assembly, "Examples", "Capabilities::Flags()", Path.Combine(output, "Reject-profile"), "@" + noBase));
+if (invalid.Code == 0 || !invalid.Output.Contains("bmi2-only: x86 ISA flags require x86Base64"))
+    throw new InvalidOperationException("Profile without X86Base64 was not rejected by name: " + invalid.Output);
+Console.WriteLine("PASS x86 ISA flags without X86Base64 rejected with the rule");
 Console.WriteLine("PASS raw feature analysis, join/backedge weakening, local eligibility, switches and emitted-code binding");
