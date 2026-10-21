@@ -187,10 +187,11 @@ internal static class MetadataValidation
                 Visit(callee);
             }
             var typeTests = TypeTests.Analyze(method);
+            var throws = Throws.Analyze(method);
             foreach (Instruction instruction in reachable)
             {
                 if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
-                    typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction) ||
+                    typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction) || throws.Operands.Contains(instruction) ||
                     InstructionTranslation.RuntimeModel(reference, profile) is not null) continue;
                 if (reference is GenericInstanceMethod generic)
                 {

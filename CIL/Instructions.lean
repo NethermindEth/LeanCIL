@@ -96,6 +96,8 @@ inductive Op where
   | intrinsic (operation : Intrinsic) (argc : Nat)
   | memory (operation : MemoryOp)
   | ret (narrow : Option NarrowKind := none)
+  /-- Raises an exception of the named type; there are no handlers. -/
+  | throw (exception : String)
   | unsupported (description : String)
   deriving Repr
 

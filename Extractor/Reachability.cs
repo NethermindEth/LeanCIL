@@ -36,6 +36,7 @@ internal static class Reachability
         // Revisit successors when a backedge or join weakens a constant fact.
         // Facts only move from a constant to unknown, so this reaches a fixed point.
         var typeTests = TypeTests.Analyze(method);
+        var throws = Throws.Analyze(method);
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];
         pending.Enqueue(instructions[0]);
@@ -59,11 +60,13 @@ internal static class Reachability
                 if (queued.Add(target)) pending.Enqueue(target);
             }
 
-            // The emitted operands of a folded type test push nothing, so it must be entered at its start.
+            // Folded operands push nothing, so a fold must be entered at its start.
             void Jump(Instruction target)
             {
                 if (typeTests.Interior.Contains(target))
                     throw new InvalidDataException($"Branch into a folded type comparison: {i}");
+                if (throws.Interior.Contains(target))
+                    throw new InvalidDataException($"Branch into a folded throw: {i}");
                 Successor(target);
             }
 

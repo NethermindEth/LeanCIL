@@ -9,7 +9,7 @@ internal static class TypeTests
 {
     internal sealed record Analysis(Dictionary<Instruction, bool> Results, HashSet<Instruction> Operands, HashSet<Instruction> Interior);
 
-    const string RuntimeScope = "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
+    internal const string RuntimeScope = "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
 
     sealed record Node(string Kind, string Scope = "", string Name = "", Node? Left = null, Node? Right = null);
 
@@ -28,8 +28,10 @@ internal static class TypeTests
         _ => new("named", LayoutEvidence.Scope(type), type.FullName)
     };
 
-    static bool Plain(Node node) => node.Kind == "named" && node.Scope.Length > 0 && !node.Scope.Contains(':') &&
-        node.Name.Length > 0 && node.Name.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '/' or '`');
+    internal static bool PlainName(string name) =>
+        name.Length > 0 && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '/' or '`');
+
+    static bool Plain(Node node) => node.Kind == "named" && node.Scope.Length > 0 && !node.Scope.Contains(':') && PlainName(node.Name);
 
     static bool Constructed(Node node) => node.Kind is "pointer" or "byref" or "apply";
 

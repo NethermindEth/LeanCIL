@@ -95,33 +95,59 @@ def typeTestInstruction (i : RawInstruction) : Bool :=
       | _ => false
     | _ => false
 
-inductive TypeTestRole where
-  /-- The first token load: emits nothing, and may be a branch target. -/
+private def messageLoad (i : RawInstruction) : Bool := i.opcode == 114 || i.opcode == 20
+
+/-- `newobj` of a plainly named `System.Runtime` constructor taking `count` arguments: the raised type. -/
+private def raisedType (count : Nat) : RawInstruction → Option String
+  | ⟨_, 115, .call site⟩ => match site.declaringType, site.target with
+    | .atom scope name, .external _ =>
+      if scope == runtimeScope && plainName name.toList && site.name == ".ctor" && site.hasThis &&
+        !site.returnsValue && site.typeArguments.isEmpty && site.parameterCount == count then some name else none
+    | _, _ => none
+  | _ => none
+
+/-- `throw new E(...)` with only string or null arguments: the argument count and raised type. -/
+def throwFold (code : List RawInstruction) : Option (Nat × String) :=
+  let count := (code.takeWhile messageLoad).length
+  match code.drop count with
+  | constructor :: ⟨_, 122, .none⟩ :: _ => (count, ·) <$> raisedType count constructor
+  | _ => none
+
+inductive FoldRole where
+  /-- The first instruction: emits nothing, and may be a branch target. -/
   | head
-  /-- Later operand loads: emit nothing, and are entered only from the preceding instruction. -/
+  /-- Later instructions: emit nothing, and are entered only from the preceding instruction. -/
   | interior
-  /-- The comparison: pushes the decided Boolean. -/
+  /-- A type comparison: pushes the decided Boolean. -/
   | result (value : Bool)
+  /-- The raw `throw`: raises the constructed type. -/
+  | raise (exception : String)
   deriving DecidableEq, Repr
 
+/-- The roles of a fold starting at `a`, if any; type tests take precedence. -/
+private def foldAt (a : RawInstruction) (tail : List RawInstruction) : Option (List (Option FoldRole)) :=
+  (match tail with
+    | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
+        [some .head, some .interior, some .interior, some .interior, some (.result value)]
+    | _ => none) <|>
+  (throwFold (a :: tail)).map fun (count, name) =>
+    some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
+
 /-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural. -/
-def typeTestRolesFrom : List (Option TypeTestRole) → List RawInstruction → List (Option TypeTestRole)
+def foldRolesFrom : List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
   | _, [] => []
-  | role :: pending, _ :: tail => role :: typeTestRolesFrom pending tail
-  | [], a :: tail => match tail with
-    | b :: c :: d :: e :: _ => match typeTest a b c d e with
-      | some value => some .head ::
-          typeTestRolesFrom [some .interior, some .interior, some .interior, some (.result value)] tail
-      | none => none :: typeTestRolesFrom [] tail
-    | _ => none :: typeTestRolesFrom [] tail
+  | role :: pending, _ :: tail => role :: foldRolesFrom pending tail
+  | [], a :: tail => match foldAt a tail with
+    | some (role :: pending) => role :: foldRolesFrom pending tail
+    | _ => none :: foldRolesFrom [] tail
 
 /-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
-def typeTestRoles (code : List RawInstruction) : List (Option TypeTestRole) := typeTestRolesFrom [] code
+def foldRoles (code : List RawInstruction) : List (Option FoldRole) := foldRolesFrom [] code
 
-/-- A non-fallthrough edge may enter a type test only at its first instruction. -/
-def typeTestEntry (roles : List (Option TypeTestRole)) (target : Nat) : Bool :=
+/-- A non-fallthrough edge may enter a fold only at its first instruction. -/
+def foldEntry (roles : List (Option FoldRole)) (target : Nat) : Bool :=
   match roles[target]? with
-  | some (some .interior) | some (some (.result _)) => false
+  | some (some .interior) | some (some (.result _)) | some (some (.raise _)) => false
   | _ => true
 
 end CIL.Extraction

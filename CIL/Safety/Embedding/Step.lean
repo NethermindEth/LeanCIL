@@ -343,6 +343,10 @@ theorem step_relabel_unsupported (description : String) : StepRelabel (.unsuppor
   plain_cases
   fallback_vacuous
 
+theorem step_relabel_throw (exception : String) : StepRelabel (.throw exception) := by
+  explicit_intro
+  cases h
+
 /-- Every instruction steps in lockstep with its relabeled form. Pure operations
     share the base-step contract; ordinary memory operations share an unchanged
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
@@ -368,6 +372,7 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
   case ret narrow => exact step_relabel_ret narrow
+  case throw exception => exact step_relabel_throw exception
   case unsupported description => exact step_relabel_unsupported description
   case nop | neg | gt | bgt | ble | bleu | convI1 | convI2 | convU2 | convI8 | convI4 | convU1 | convU4
     | convU8 | convU | bnot | add | sub | mul | band | bor | bxor | shl | shr | shrUn | lt | ltu | gtu | eq

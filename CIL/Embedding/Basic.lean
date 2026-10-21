@@ -23,7 +23,7 @@ def Op.relabel (r : Nat → Nat) : Op → Op
 
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Op.continues : Op → Bool
-  | .branch _ | .ret _ | .unsupported _ => false
+  | .branch _ | .ret _ | .throw _ | .unsupported _ => false
   | _ => true
 
 /-- `.unsupported` faults whenever it executes, so it constrains nothing. -/

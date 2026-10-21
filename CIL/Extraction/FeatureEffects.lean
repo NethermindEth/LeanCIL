@@ -38,7 +38,7 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
   | .localAddr _ | .vectorLocalAddr _ | .vectorArgAddr _ | .setLocal .. | .setVectorLocal _
-  | .feature _ | .ret _ | .unsupported _ | .branch _ | .switch _ | .brzero _ | .brnonzero _
+  | .feature _ | .ret _ | .throw _ | .unsupported _ | .branch _ | .switch _ | .brzero _ | .brnonzero _
   | .bgt _ | .ble _ | .bleu _ | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => none
 
 end CIL.Extraction

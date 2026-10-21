@@ -155,6 +155,7 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .memory operation, _ =>
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory
+  | .throw exception, _ => .error (.thrown exception)
   | .ret (some kind), [.scalar (.i32 bits)] =>
     if body.returnsValue then
       return .returned (← [.scalar (.i32 (kind.extend bits))].mapM (checkedValue m)) m

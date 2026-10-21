@@ -106,6 +106,11 @@ theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {
   change Except.error (ExecutionFault.unsupported "Non-memory instruction requires execution adapter") = .ok action at h
   cases h
 
+theorem step_throw {body : CIL.Method} {exception : String} {pc : Nat} {args : List Value}
+    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+    (h : step body (.throw exception) pc args frame stack m = .ok action) : False := by
+  cases h
+
 theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.ret narrow) pc args frame stack m = .ok action) :
@@ -145,6 +150,7 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {ar
     (resumes : match action with | .call .. | .construct .. => True | _ => False) :
     op.continues = true := by
   cases op
+  case throw => exact (step_throw h).elim
   case unsupported => exact (step_unsupported h).elim
   case branch target =>
     change Except.ok (.next target stack frame m) = .ok action at h
