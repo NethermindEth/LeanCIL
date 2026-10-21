@@ -1,5 +1,8 @@
 # LeanCIL: Formal Verification for .NET
 
+<img width="1280" height="640" alt="image" src="https://github.com/user-attachments/assets/9a5636da-9f4c-44fc-b46c-db78c57a421b" />
+
+
 LeanCIL is a Lean 4 formal verification framework for .NET programs. It enables machine-checked proofs of correctness and safety against compiled Common Intermediate Language (CIL), supporting applications written in C#, F#, and other .NET languages.
 
 Verification operates on the assembly's actual compiled instructions using CIL semantics defined in Lean. The current [supported subset](#supported-subset-and-limits) covers selected instructions and runtime features; unsupported behaviour is rejected explicitly.
