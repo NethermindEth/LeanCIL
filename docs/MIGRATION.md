@@ -57,6 +57,13 @@ library artifact size; moving work out of an imported proof can expose repeated
 work in its callers. See [proof automation validation](VALIDATION.md#proof-automation)
 for the regression coverage.
 
+Lean stores a definition's equation lemmas in the first module that unfolds it,
+so every import chain that unfolds the interpreter rebuilds them. Import
+`CIL.Safety.Equations` (checked dispatchers, `CIL.binary` and `CIL.unary`) and,
+only when unfolding the full `CIL.step` dispatcher, `CIL.StepEquations` (about
+20 MB) to reuse one copy. `CIL.Safety.Execution` provides `CIL.step.eq_def` and
+`CIL.Safety.step.eq_def`, which tactic macros cannot generate themselves.
+
 ## Extension points
 
 Loops are now extractable: reachable branch and switch backedges use fixed-point feature reachability and stack-join validation. Recursive calls remain unsupported. Regenerate artifacts when upgrading. `CIL.Safety.Loops` provides `LoopState`, `LoopSegment`, `LoopTerminates` and `loop_terminates`; `CIL.Verification.ensures_of_loop` connects successful loop execution and frame setup to total correctness. Proofs supply their own invariant and decreasing measure. The existing instruction-count `executionBound` remains only a candidate budget and is generally insufficient for input-dependent loops.

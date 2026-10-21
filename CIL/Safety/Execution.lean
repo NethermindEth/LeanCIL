@@ -215,4 +215,10 @@ def invoke (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : 
   let (frame, memory) ← (enterFrame body args m).mapError fun fault => ⟨method, 0, fault⟩
   run program fuel method 0 args frame [] memory
 
+/-- Consumer macros name the dispatchers' `eq_def`, which a quotation cannot generate itself. -/
+private theorem dispatch_eq_def_generated : True := by
+  have := @CIL.step.eq_def
+  have := @step.eq_def
+  trivial
+
 end CIL.Safety
