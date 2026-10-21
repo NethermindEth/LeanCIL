@@ -4,6 +4,23 @@ LeanCIL is a Lean 4 formal verification framework for .NET programs. It enables 
 
 Verification operates on the assembly's actual compiled instructions using CIL semantics defined in Lean. The current [supported subset](#supported-subset-and-limits) covers selected instructions and runtime features; unsupported behaviour is rejected explicitly.
 
+```mermaid
+flowchart TD
+    source["C#, F# or other .NET source"] -- ".NET compiler" --> assembly["Compiled assembly<br/>(the actual CIL)"]
+    assembly --> extract["leancil extract<br/>validate and translate"]
+    extract --> generated["Extracted.lean<br/>and identity.json"]
+    semantics["CIL semantics<br/>in Lean"] --> verify
+    generated --> verify["leancil verify<br/>kernel check, replay, axiom audit"]
+    assembly -. "SHA-256, regenerate and compare" .-> verify
+    proof["Your theorem<br/>and proof"] --> verify
+    verify --> report["verified.json<br/>the theorem holds for this CIL"]
+
+    classDef trusted stroke-dasharray: 6 4
+    class extract,semantics,verify trusted
+```
+
+Dashed boxes are trusted rather than proved; see the [trusted computing base](docs/SOUNDNESS.md#trusted-computing-base). They are the extractor's metadata decoding and instruction translation, the CIL semantics as a model of .NET 10, and the Lean kernel with the verifier's hashing and process execution. Lean independently checks the extractor's layout, generic-specialization and feature evidence, but not the general translation. The compiler is not trusted: extraction reads its actual output. The kernel checks your proof but not your statement, so the guarantee is exactly what the theorem says, including its preconditions.
+
 ## Build and test
 
 Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.402**. The extractor uses Mono.Cecil; the F# examples also use FSharp.Core. Both packages are pinned in `Directory.Packages.props`. Lean uses Std and Lean, without Mathlib.
