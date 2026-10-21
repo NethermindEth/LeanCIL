@@ -186,9 +186,11 @@ internal static class MetadataValidation
                     throw Call("Recursive managed dependency", reference, method, instruction);
                 Visit(callee);
             }
+            var typeTests = TypeTests.Analyze(method);
             foreach (Instruction instruction in reachable)
             {
                 if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
+                    typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction) ||
                     InstructionTranslation.RuntimeModel(reference, profile) is not null) continue;
                 if (reference is GenericInstanceMethod generic)
                 {

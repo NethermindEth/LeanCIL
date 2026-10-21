@@ -68,6 +68,6 @@ internal static class Arithmetic
         return ref Unsafe.AsRef(in local);
     }
     public static int Unsupported(int x) => new int[x].Length;
-    // Type and its equality operator are external CoreLib calls with no runtime model.
-    public static ulong TypeCheck(ulong x) => typeof(ulong) == typeof(uint) ? x : unchecked(x + 1);
+    // Only Type.op_Equality and op_Inequality fold; GetTypeFromHandle stays an unmodelled CoreLib call.
+    public static ulong TypeCheck(ulong x) => ReferenceEquals(typeof(ulong), typeof(uint)) ? x : unchecked(x + 1);
 }

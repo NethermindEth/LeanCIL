@@ -97,7 +97,7 @@ var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Tes
 if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
-    projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
+    projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "unsafe") projects.Add("Tests/SkipInitialization.cs");
 foreach (var (name, entry) in independentSuites)
