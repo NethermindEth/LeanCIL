@@ -120,23 +120,23 @@ No other AdvSimd operations, signed `MultiplyHigh` overload or ARM ISA family is
 
 ## Feature getters, profiles and execution restrictions
 
-Recognised `IsSupported` getters are `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Avx`, `Avx2`, `Avx512F`, `Avx512F.VL`, `Avx512DQ`, `Avx512DQ.VL`, `Bmi1`, `Bmi2.X64`, `AdvSimd` and `ArmBase.Arm64`. `Vector256.IsHardwareAccelerated` is also recognised. The getter result comes from the chosen profile, not the host CPU. Other getters, including `Vector128.IsHardwareAccelerated`, are rejected.
+Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Avx`, `Avx2`, `Avx512F`, `Avx512F.VL`, `Avx512DQ`, `Avx512DQ.VL`, `Bmi1`, `Bmi2.X64`, `AdvSimd` and `ArmBase.Arm64`. `Vector128.IsHardwareAccelerated` and `Vector256.IsHardwareAccelerated` are also recognised. The getter result comes from the chosen profile, not the host CPU. Other getters are rejected.
 
 | Built-in profile | Enabled capabilities |
 | --- | --- |
 | `scalar` | No hardware feature flags |
 | `x64-vector256` | `Vector256Accelerated` only |
-| `x64-sse41` | `Sse2`, `Ssse3`, `Sse41` |
+| `x64-sse41` | `X86Base64`, `Vector128Accelerated`, `Sse2`, `Ssse3`, `Sse41` |
 | `x64-sse42` | The above plus `Sse42` |
 | `x64-avx2` | The above plus `Avx`, `Avx2` |
 | `x64-avx2-bmi1` | The above plus `Bmi1` |
 | `x64-avx512` | `x64-avx2` capabilities plus `Avx512F`, `Avx512FVL` |
 | `x64-avx512-bmi1` | The above plus `Bmi1` |
-| `x64-bmi2` | `Bmi2` only |
+| `x64-bmi2` | `X86Base64`, `Bmi2` |
 | `arm64-armbase` | `ArmBase64` |
-| `arm64-advsimd` | `ArmBase64`, `AdvSimd` |
+| `arm64-advsimd` | `ArmBase64`, `AdvSimd`, `Vector128Accelerated` |
 
-`Vector256Accelerated` is set only by `x64-vector256` among these built-ins; it is not inferred from an AVX profile. Use an explicit `@profile.json` when a different combination is needed. Custom profiles must supply every capability field and satisfy the architecture and prerequisite checks in [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs).
+Every x86 ISA flag requires `X86Base64`, since each of those classes derives from `X86Base`. `Vector128Accelerated` and `Vector256Accelerated` are independent of the ISA flags: the built-ins set `Vector128Accelerated` with `Sse2` or `AdvSimd`, and only `x64-vector256` sets `Vector256Accelerated`. Use an explicit `@profile.json` when a different combination is needed. Custom profiles must supply every capability field and satisfy the architecture and prerequisite checks in [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs).
 
 Pass the profile after the extraction output directory, for example:
 

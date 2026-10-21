@@ -10,6 +10,19 @@ private def intType : TypeExpr := .atom
 private def getter : CallSite := {
   target := .external "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()"
   typeArguments := [], parameterCount := 0, hasThis := false, returnsValue := true }
+private def intrinsic (member : String) : CallSite :=
+  { getter with target := .external ("System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean System.Runtime.Intrinsics." ++ member ++ "()") }
+
+-- Each getter binds to its own flag; Vector128 has no IsSupported.
+example : featureGetter (intrinsic "X86.X86Base/X64::get_IsSupported") = some .x86Base64 := by decide
+example : featureGetter (intrinsic "Vector128::get_IsHardwareAccelerated") = some .vector128Accelerated := by decide
+example : featureGetter (intrinsic "Vector128::get_IsSupported") = none := by decide
+-- Every x86 ISA class derives from X86Base, and X86Base.X64 exists only on x64.
+example : ¬ ({ architecture := .x64, bmi2 := true } : FeatureProfile).Valid := by decide
+example : ({ architecture := .x64, bmi2 := true, x86Base64 := true } : FeatureProfile).Valid := by decide
+example : ¬ ({ architecture := .arm64, x86Base64 := true } : FeatureProfile).Valid := by decide
+example : ({ architecture := .arm64, vector128Accelerated := true } : FeatureProfile).Valid := by decide
+
 private def raw (code : List RawInstruction) (locals : List TypeExpr := [])
     (returnType : TypeExpr := intType) : RawMethod := {
   token := 1, owner := "Fixture", hasThis := false, explicitThis := false,

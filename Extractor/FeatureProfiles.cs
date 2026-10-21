@@ -7,7 +7,8 @@ namespace Nethermind.LeanCIL;
 internal enum Feature
 {
     AdvSimd, Sse2, Ssse3, Sse42, Avx, Avx2, Avx512F, Avx512FVL, Bmi1,
-    Sse41, Avx512DQ, Avx512DQVL, Bmi2, ArmBase64, Vector256Accelerated
+    Sse41, Avx512DQ, Avx512DQVL, Bmi2, ArmBase64, Vector256Accelerated,
+    X86Base64, Vector128Accelerated
 }
 
 // A profile describes runtime-visible capabilities, including runtime disabling.
@@ -18,7 +19,8 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
     bool Sse42 = false, bool Avx = false, bool Avx2 = false,
     bool Avx512F = false, bool Avx512FVL = false, bool Bmi1 = false,
     bool Sse41 = false, bool Avx512DQ = false, bool Avx512DQVL = false,
-    bool Bmi2 = false, bool ArmBase64 = false, bool Vector256Accelerated = false)
+    bool Bmi2 = false, bool ArmBase64 = false, bool Vector256Accelerated = false,
+    bool X86Base64 = false, bool Vector128Accelerated = false)
 {
     internal static FeatureProfile Scalar { get; } = new("scalar", "scalar", 64, true);
 
@@ -30,6 +32,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         Feature.Bmi1 => Bmi1, Feature.Sse41 => Sse41, Feature.Avx512DQ => Avx512DQ,
         Feature.Avx512DQVL => Avx512DQVL, Feature.Bmi2 => Bmi2, Feature.ArmBase64 => ArmBase64,
         Feature.Vector256Accelerated => Vector256Accelerated,
+        Feature.X86Base64 => X86Base64, Feature.Vector128Accelerated => Vector128Accelerated,
         _ => throw new InvalidDataException($"Unknown feature: {feature}")
     };
 
@@ -37,7 +40,8 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
     {
         if (string.IsNullOrWhiteSpace(Name) || NativeWidth != 64 || !LittleEndian || Architecture is not ("scalar" or "arm64" or "x64") ||
             ((AdvSimd || ArmBase64) && Architecture != "arm64") ||
-            ((Sse2 || Ssse3 || Sse42 || Avx || Avx2 || Avx512F || Avx512FVL || Bmi1 || Sse41 || Avx512DQ || Avx512DQVL || Bmi2) && Architecture != "x64") ||
+            ((Sse2 || Ssse3 || Sse42 || Avx || Avx2 || Avx512F || Avx512FVL || Bmi1 || Sse41 || Avx512DQ || Avx512DQVL || Bmi2) && !X86Base64) ||
+            (X86Base64 && Architecture != "x64") ||
             (Ssse3 && !Sse2) || (Sse42 && (!Sse2 || !Ssse3)) ||
             (Avx2 && !Avx) || (Avx512FVL && !Avx512F) ||
             (Avx && !Sse42) || (Avx512F && !Avx2) ||
@@ -70,17 +74,19 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         FeatureProfile profile = name switch
         {
             "scalar" => Scalar,
-            "arm64-advsimd" => new(name, "arm64", 64, true, AdvSimd: true, ArmBase64: true),
+            "arm64-advsimd" => new(name, "arm64", 64, true, AdvSimd: true, ArmBase64: true, Vector128Accelerated: true),
             "arm64-armbase" => new(name, "arm64", 64, true, ArmBase64: true),
-            "x64-sse41" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true),
+            "x64-sse41" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, X86Base64: true, Vector128Accelerated: true),
             "x64-vector256" => new(name, "x64", 64, true, Vector256Accelerated: true),
-            "x64-bmi2" => new(name, "x64", 64, true, Bmi2: true),
-            "x64-sse42" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, Sse42: true),
+            "x64-bmi2" => new(name, "x64", 64, true, Bmi2: true, X86Base64: true),
+            "x64-sse42" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, Sse42: true, X86Base64: true, Vector128Accelerated: true),
             "x64-avx2" or "x64-avx2-bmi1" => new(name, "x64", 64, true,
-                Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true, Bmi1: name.EndsWith("-bmi1", StringComparison.Ordinal)),
+                Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true, Bmi1: name.EndsWith("-bmi1", StringComparison.Ordinal),
+                X86Base64: true, Vector128Accelerated: true),
             "x64-avx512" or "x64-avx512-bmi1" => new(name, "x64", 64, true,
                 Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true,
-                Avx512F: true, Avx512FVL: true, Bmi1: name.EndsWith("-bmi1", StringComparison.Ordinal)),
+                Avx512F: true, Avx512FVL: true, Bmi1: name.EndsWith("-bmi1", StringComparison.Ordinal),
+                X86Base64: true, Vector128Accelerated: true),
             _ => throw new ArgumentException($"Unknown execution profile: {name}")
         };
         profile.Validate();
@@ -91,7 +97,8 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         $"advSimd := {Bool(AdvSimd)}, sse2 := {Bool(Sse2)}, ssse3 := {Bool(Ssse3)}, sse42 := {Bool(Sse42)}, " +
         $"avx := {Bool(Avx)}, avx2 := {Bool(Avx2)}, avx512F := {Bool(Avx512F)}, avx512FVL := {Bool(Avx512FVL)}, bmi1 := {Bool(Bmi1)}, " +
         $"sse41 := {Bool(Sse41)}, avx512DQ := {Bool(Avx512DQ)}, avx512DQVL := {Bool(Avx512DQVL)}, " +
-        $"bmi2 := {Bool(Bmi2)}, armBase64 := {Bool(ArmBase64)}, vector256Accelerated := {Bool(Vector256Accelerated)} }}";
+        $"bmi2 := {Bool(Bmi2)}, armBase64 := {Bool(ArmBase64)}, vector256Accelerated := {Bool(Vector256Accelerated)}, " +
+        $"x86Base64 := {Bool(X86Base64)}, vector128Accelerated := {Bool(Vector128Accelerated)} }}";
 
     internal static string LeanFeature(Feature feature) =>
         "." + char.ToLowerInvariant(feature.ToString()[0]) + feature.ToString()[1..];
@@ -112,6 +119,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         RuntimeModels.ValidateSignature(reference);
         return reference.DeclaringType.FullName switch
         {
+            "System.Runtime.Intrinsics.Vector128" when reference.Name == "get_IsHardwareAccelerated" => Feature.Vector128Accelerated,
             "System.Runtime.Intrinsics.Vector256" when reference.Name == "get_IsHardwareAccelerated" => Feature.Vector256Accelerated,
             _ when reference.Name != "get_IsSupported" => throw new InvalidDataException($"Unclassified feature getter: {reference.FullName}"),
             "System.Runtime.Intrinsics.Arm.AdvSimd" => Feature.AdvSimd,
@@ -126,6 +134,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             "System.Runtime.Intrinsics.X86.Avx512F/VL" => Feature.Avx512FVL,
             "System.Runtime.Intrinsics.X86.Bmi1" => Feature.Bmi1,
             "System.Runtime.Intrinsics.X86.Bmi2/X64" => Feature.Bmi2,
+            "System.Runtime.Intrinsics.X86.X86Base/X64" => Feature.X86Base64,
             "System.Runtime.Intrinsics.X86.Avx512DQ" => Feature.Avx512DQ,
             "System.Runtime.Intrinsics.X86.Avx512DQ/VL" => Feature.Avx512DQVL,
             _ => throw new InvalidDataException($"Unclassified feature getter: {reference.FullName}")

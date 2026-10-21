@@ -13,8 +13,10 @@ SSE4.1, AVX512DQ and ARM prerequisites follow the .NET 10 source declarations:
 https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Sse41.cs
 https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Avx512DQ.cs
 https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/Arm/AdvSimd.cs
-Vector256.IsHardwareAccelerated is an independent fixed JIT/runtime capability in
-this declared domain, including its portable fallback when AVX2 is unavailable:
+Every x86 ISA class above derives from X86Base, so each implies X86Base.X64 on 64-bit:
+https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/X86Base.cs
+Vector128/256.IsHardwareAccelerated are independent fixed JIT/runtime capabilities in
+this declared domain, including their portable fallbacks:
 https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/Vector256.cs
 https://learn.microsoft.com/dotnet/api/system.runtime.intrinsics.x86.avx512f?view=net-10.0
 https://devblogs.microsoft.com/dotnet/hardware-intrinsics-in-net-core/ -/
@@ -24,6 +26,7 @@ namespace CIL
 inductive Feature where
   | advSimd | sse2 | ssse3 | sse42 | avx | avx2 | avx512F | avx512FVL | bmi1
   | sse41 | avx512DQ | avx512DQVL | bmi2 | armBase64 | vector256Accelerated
+  | x86Base64 | vector128Accelerated
   deriving DecidableEq, Repr
 
 inductive Architecture where
@@ -51,6 +54,8 @@ structure FeatureProfile where
   bmi2 : Bool := false
   armBase64 : Bool := false
   vector256Accelerated : Bool := false
+  x86Base64 : Bool := false
+  vector128Accelerated : Bool := false
   deriving DecidableEq, Repr
 
 def FeatureProfile.scalar : FeatureProfile := {}
@@ -71,6 +76,8 @@ def FeatureProfile.evaluate (p : FeatureProfile) : Feature → Bool
   | .bmi2 => p.bmi2
   | .armBase64 => p.armBase64
   | .vector256Accelerated => p.vector256Accelerated
+  | .x86Base64 => p.x86Base64
+  | .vector128Accelerated => p.vector128Accelerated
 
 /-- Declared capability domain: 64-bit little-endian execution, architecture
 separation, and prerequisites used by the reachable SSE/AVX operations. This is
@@ -79,7 +86,8 @@ def FeatureProfile.Valid (p : FeatureProfile) : Prop :=
   p.nativeWidth = 64 ∧ p.littleEndian = true ∧
   (p.advSimd = true → p.architecture = .arm64) ∧
   ((p.sse2 || p.ssse3 || p.sse42 || p.avx || p.avx2 || p.avx512F || p.avx512FVL || p.bmi1 || p.sse41 || p.avx512DQ || p.avx512DQVL || p.bmi2) = true →
-    p.architecture = .x64) ∧
+    p.x86Base64 = true) ∧
+  (p.x86Base64 = true → p.architecture = .x64) ∧
   (p.ssse3 = true → p.sse2 = true) ∧
   (p.sse42 = true → p.sse2 = true ∧ p.ssse3 = true) ∧
   (p.avx2 = true → p.avx = true) ∧
