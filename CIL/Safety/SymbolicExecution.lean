@@ -16,6 +16,21 @@ elab "cil_strict " tactic:tactic : tactic =>
     evalTactic tactic
     if ← MonadLog.hasErrors then throwError "Checked step candidate failed"
 
+/-- Use a local instruction equation before falling back to the dispatcher. -/
+macro "cil_checked_step " "[" facts:term,* "]" : tactic => `(tactic| (
+  try simp only [cil_code, Nat.reduceAdd]
+  first
+  | rw [CIL.Safety.step_argument_eq]
+  | rw [CIL.Safety.step_return_eq]
+  | rw [CIL.Safety.step_brzero_i32_eq]
+  | rw [CIL.Safety.step_brzero_i64_eq]
+  | rw [CIL.Safety.step_brnonzero_i32_eq]
+  | rw [CIL.Safety.step_brnonzero_i64_eq]
+  | skip
+  all_goals simp [CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+    CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
+    $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+
 /-- Execute checked instructions using extracted lookups and proved semantic facts.
     Unresolved memory and arithmetic conditions remain proof obligations. -/
 syntax "cil_checked_steps" "[" term,* "]" : tactic
@@ -32,23 +47,18 @@ macro_rules
     | (cil_strict refine CIL.Safety.run_return
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp [cil_code, CIL.Safety.step, CIL.Safety.checkedValue,
-          CIL.Safety.numericValue, CIL.Safety.pureArity, CIL.Safety.scalars,
-          CIL.Safety.leaveFrame, CIL.step, $[$facts:term],*] <;> (repeat constructor) <;> rfl)
+        (by cil_checked_step [$[$facts:term],*])
         (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)))
     -- Elaborate each intermediate-state proof before creating the continuation
     -- goal, so reference/frame metavariables remain assignable by the step facts.
     | (cil_strict refine Eq.trans (CIL.Safety.run_next
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp [cil_code, CIL.Safety.step, CIL.Safety.checkedValue,
-          CIL.Safety.numericValue, CIL.Safety.pureArity, CIL.Safety.scalars, CIL.step,
-          $[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
+        (by cil_checked_step [$[$facts:term],*])) ?_)
     | (cil_strict apply CIL.Safety.run_call_of_invoke
        · simp only [cil_code, Nat.reduceAdd]; rfl
        · simp only [cil_code, Nat.reduceAdd]; rfl
-       · simp [cil_code, CIL.Safety.step, CIL.Safety.checkedValue,
-           CIL.Safety.numericValue, $[$facts:term],*] <;> (repeat constructor) <;> rfl
+       · cil_checked_step [$[$facts:term],*]
        · solve | cil_checked_steps [$[$facts:term],*]
        · solve | cil_checked_steps [$[$facts:term],*])
     ))

@@ -41,10 +41,27 @@ theorem step_profile_eq (op : Op) (p q : FeatureProfile)
     (h : op.ProfileAgreement p q) (returns : Bool) (pc : Nat) (args : List Value)
     (frame : Nat) (stack : List Value) (memory : Memory) :
     step op returns pc args frame stack memory p = step op returns pc args frame stack memory q := by
-  unfold step
-  split <;> try rfl
-  all_goals simp only [Op.ProfileAgreement] at h
-  all_goals simp only [h]
+  cases op <;> try rfl
+  case feature id =>
+    change p.evaluate id = q.evaluate id at h
+    change some (Action.next (pc + 1) (.i32 (if p.evaluate id then 1 else 0) :: stack) memory) =
+      some (Action.next (pc + 1) (.i32 (if q.evaluate id then 1 else 0) :: stack) memory)
+    rw [h]
+  case intrinsic operation argc =>
+    change operation.available p = operation.available q at h
+    exact congrArg (fun available =>
+      if stack.length < argc || !available then none else do
+        return Action.next (pc + 1)
+          ((← evalIntrinsic operation (stack.take argc).reverse) :: stack.drop argc) memory) h
+  all_goals
+    cases stack with
+    | nil => rfl
+    | cons a rest =>
+      first
+      | rfl
+      | cases rest with
+        | nil => first | rfl | (cases a <;> rfl)
+        | cons b rest => first | rfl | (cases a <;> first | rfl | (cases b <;> rfl))
 
 @[simp] theorem reprofile_lookup (program : Program) (profile : FeatureProfile) (index : Nat) :
     (reprofile program profile)[index]? = program[index]?.map (fun body => { body with profile := profile }) := by

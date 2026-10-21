@@ -8,23 +8,36 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Op) (pc : Nat)
     (agreement : ∀ index narrow, op = .arg index narrow → args[index]? = other[index]?) :
     step body op pc args frame stack memory = step body op pc other frame stack memory := by
   cases op <;> try rfl
-  case arg index narrow => cases narrow <;> simp only [step, agreement index _ rfl]
-  case nativeBinary operation =>
-    simp only [step]
-    repeat' first | rfl | contradiction | split
-  case divide signed remainder =>
-    simp only [step]
-    repeat' first | rfl | contradiction | split
-  case checkedArithmetic kind signed =>
-    simp only [step]
-    repeat' first | rfl | contradiction | split
-  case checkedConvert width signed unsignedInput =>
-    simp only [step]
-    repeat' first | rfl | contradiction | split
+  case arg index narrow =>
+    cases narrow with
+    | none =>
+      exact congrArg (fun selected => do
+        let some value := selected | .error .invalidState
+        return FrameAction.next (pc + 1) ((← checkedValue memory value) :: stack) frame memory)
+        (agreement index none rfl)
+    | some kind =>
+      exact congrArg (fun selected => do
+        let some (Value.scalar (.i32 bits)) := selected | .error .invalidState
+        return FrameAction.next (pc + 1)
+          ((← checkedValue memory (.scalar (.i32 (kind.extend bits)))) :: stack) frame memory)
+        (agreement index (some kind) rfl)
   case ret narrow =>
-    cases narrow <;> simp only [step]
-    all_goals repeat' first | rfl | contradiction | split
-  all_goals cases stack <;> rfl
+    cases narrow <;> try rfl
+    cases stack with
+    | nil => rfl
+    | cons value rest =>
+      cases value <;> try rfl
+      rename_i scalar
+      cases scalar <;> cases rest <;> rfl
+  all_goals
+    cases stack with
+    | nil => rfl
+    | cons value rest =>
+      first
+      | rfl
+      | cases rest with
+        | nil => first | rfl | (cases value <;> rfl)
+        | cons next rest => first | rfl | (cases value <;> first | rfl | (cases next <;> rfl))
 
 /-- Changing unobserved arguments preserves every checked execution step.
     Child calls receive the same evaluated stack arguments on both sides. -/

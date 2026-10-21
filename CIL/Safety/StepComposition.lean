@@ -1,5 +1,45 @@
 import CIL.Safety.Execution
 namespace CIL.Safety
+
+section InstructionEquations
+
+variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
+
+/-- Expose an argument load without expanding the instruction dispatcher. -/
+theorem step_argument_eq (index : Nat) (stack : List Value) :
+    step body (.arg index) pc args frame stack memory = do
+      let some value := args[index]? | .error .invalidState
+      return FrameAction.next (pc + 1) ((← checkedValue memory value) :: stack) frame memory := rfl
+
+/-- Expose return validation without expanding the instruction dispatcher. -/
+theorem step_return_eq (stack : List Value) :
+    step body .ret pc args frame stack memory =
+      if stack.length = (if body.returnsValue then 1 else 0) then
+        (do return FrameAction.returned (← stack.mapM (checkedValue memory)) memory)
+      else .error .invalidState := rfl
+
+theorem step_brzero_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
+    step body (.brzero target) pc args frame (.scalar (.i32 value) :: rest) memory = do
+      let some taken := CIL.truth (.i32 value) | .error .invalidState
+      return FrameAction.next (if taken then pc + 1 else target) rest frame memory := rfl
+
+theorem step_brzero_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
+    step body (.brzero target) pc args frame (.scalar (.i64 value) :: rest) memory = do
+      let some taken := CIL.truth (.i64 value) | .error .invalidState
+      return FrameAction.next (if taken then pc + 1 else target) rest frame memory := rfl
+
+theorem step_brnonzero_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
+    step body (.brnonzero target) pc args frame (.scalar (.i32 value) :: rest) memory = do
+      let some taken := CIL.truth (.i32 value) | .error .invalidState
+      return FrameAction.next (if taken then target else pc + 1) rest frame memory := rfl
+
+theorem step_brnonzero_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
+    step body (.brnonzero target) pc args frame (.scalar (.i64 value) :: rest) memory = do
+      let some taken := CIL.truth (.i64 value) | .error .invalidState
+      return FrameAction.next (if taken then target else pc + 1) rest frame memory := rfl
+
+end InstructionEquations
+
 /-- Compose checked argument/frame setup with execution. Keeping this boundary
     explicit avoids rechecking an expanded interpreter expression at every call. -/
 theorem invoke_of_run {program : CIL.Program} {fuel method : Nat} {body : CIL.Method}
