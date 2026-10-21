@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -96,20 +97,39 @@ partial class Program : IDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return false; }
     }
 
-    // Published entries are immutable: an authenticated entry is never duplicated
-    // or overwritten, and concurrent publishers race only on an atomic rename.
-    void PublishSuccess(string key, string source)
+    // The cache only saves work: a full disk warns instead of failing a verified result.
+    void PublishSuccess(string key, string source, string? family = null)
     {
         if (!UseSuccessCache) return;
+        try { PublishCertified(key, source, family); }
+        catch (IOException error)
+        {
+            long? free = null;
+            try { free = new DriveInfo(Path.GetFullPath(SuccessCacheRoot)).AvailableFreeSpace; }
+            catch (Exception probe) when (probe is IOException or ArgumentException or UnauthorizedAccessException) { }
+            Console.Error.WriteLine($"warning: success cache {SuccessCacheRoot} not updated" +
+                (free is long bytes ? $" ({bytes / 1e9:0.0} GB free)" : "") + ": " + error.Message);
+        }
+    }
+
+    // Published entries are immutable: an authenticated entry is never duplicated
+    // or overwritten, and concurrent publishers race only on an atomic rename.
+    void PublishCertified(string key, string source, string? family)
+    {
         Directory.CreateDirectory(SuccessCacheRoot);
-        if (AuthenticatedSuccess(key) is not null) return;
         var cached = Path.Combine(SuccessCacheRoot, key);
+        if (AuthenticatedSuccess(key) is not null)
+        {
+            TouchSuccess(cached);
+            return;
+        }
         var staging = cached + "." + Guid.NewGuid().ToString("N");
         try
         {
             var files = Path.Combine(staging, "files");
             Directory.CreateDirectory(files);
-            CopyTree(source, files);
+            if (family is null) CopyTree(source, files);
+            else LinkOrCopyTree(source, files, family);
             var manifest = JsonSerializer.SerializeToUtf8Bytes(CacheFiles(files));
             File.WriteAllBytes(Path.Combine(staging, "receipt.json"), manifest);
             File.WriteAllBytes(Path.Combine(staging, "receipt.hmac"), HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifest).ToArray()));
@@ -505,6 +525,94 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             var target = Path.Combine(destination, Path.GetRelativePath(source, path));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(path, target, true);
+        }
+    }
+
+    // Generations of one family share most compiled files; cache readers only copy out, so a
+    // hard link is never written through. Each candidate is rehashed against the source bytes.
+    static void LinkOrCopyTree(string source, string destination, string family)
+    {
+        var known = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var generation in Directory.EnumerateDirectories(SuccessCacheRoot, family + "-*"))
+        {
+            if (Path.GetFileName(generation).Contains('.')) continue;
+            try
+            {
+                var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(File.ReadAllBytes(Path.Combine(generation, "receipt.json")));
+                foreach (var (name, hash) in manifest ?? []) known.TryAdd(hash, Path.Combine(generation, "files", name));
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { }
+        }
+        foreach (var path in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(destination, Path.GetRelativePath(source, path));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            var hash = Sha(path);
+            if (!known.TryGetValue(hash, out var existing) || !TryHardLink(existing, hash, target)) File.Copy(path, target, true);
+        }
+    }
+
+    static bool TryHardLink(string existing, string hash, string target)
+    {
+        try
+        {
+            if (Sha(existing) != hash) return false;
+            return OperatingSystem.IsWindows() ? CreateHardLinkW(Win32Path(target), Win32Path(existing), 0) : link(existing, target) == 0;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    // Cache paths exceed MAX_PATH, which raw Win32 calls reject without the extended prefix.
+    static string Win32Path(string path)
+    {
+        var full = Path.GetFullPath(path);
+        return full.StartsWith(@"\\?\", StringComparison.Ordinal) ? full
+            : full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full[2..] : @"\\?\" + full;
+    }
+
+    [DllImport("kernel32", CharSet = CharSet.Unicode)]
+    static extern bool CreateHardLinkW(string fileName, string existingFileName, nint securityAttributes);
+
+    [DllImport("libc", CharSet = CharSet.Ansi)]
+    static extern int link(string existing, string target);
+
+    // Recency is last use: restoring or republishing an entry renews it.
+    static void TouchSuccess(string entry)
+    {
+        try { Directory.SetLastWriteTimeUtc(entry, DateTime.UtcNow); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
+    static readonly Regex SupportGeneration = new(@"^[0-9a-f]{64}-[0-9a-f]{64}$");
+    static readonly Regex AbandonedStaging = new(@"^[0-9a-f]{64}(?:-[0-9a-f]{64})?\.(?:(?:invalid|evicted)-)?[0-9a-f]{32}$");
+    static int supportEvicted;
+
+    static TimeSpan SupportRetention => TimeSpan.FromDays(double.TryParse(Environment.GetEnvironmentVariable("LEANCIL_SUPPORT_RETENTION_DAYS"),
+        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var days) && days > 0 ? days : 7);
+
+    // Once per process, removes support generations unused for the retention period and staging
+    // left by killed publishers. Only exact cache entry names directly under the root are touched.
+    static void EvictStaleSupport()
+    {
+        if (Interlocked.Exchange(ref supportEvicted, 1) != 0) return;
+        var now = DateTime.UtcNow;
+        var root = new DirectoryInfo(SuccessCacheRoot);
+        foreach (var entry in root.EnumerateDirectories())
+        {
+            var age = now - entry.LastWriteTimeUtc;
+            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                !(SupportGeneration.IsMatch(entry.Name) && age > SupportRetention ||
+                  AbandonedStaging.IsMatch(entry.Name) && age > TimeSpan.FromDays(1)))
+                continue;
+            try
+            {
+                // Readers skip dotted names, so a renamed generation is never restored half-deleted.
+                var doomed = entry.Name.Contains('.') ? entry.FullName
+                    : Path.Combine(root.FullName, entry.Name + ".evicted-" + Guid.NewGuid().ToString("N"));
+                if (doomed != entry.FullName) entry.MoveTo(doomed);
+                Directory.Delete(doomed, true);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         }
     }
 
