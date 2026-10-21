@@ -28,7 +28,7 @@ internal static class InstructionTranslation
         if (typeTests.Operands.Contains(i)) return ".nop";
         var throws = Throws.Analyze(m);
         if (throws.Raises.TryGetValue(i, out string? raised)) return $".throw \"{raised}\"";
-        if (throws.Operands.Contains(i)) return ".nop";
+        if (throws.Operands.Contains(i) || Spans.Analyze(m).Operands.Contains(i)) return ".nop";
         int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);
         int Local() => ((VariableDefinition)i.Operand).Index;
         string Narrow(TypeReference type) => LeanEmitter.Narrow(type) is { } kind ? $" (some .{kind})" : "";
@@ -119,7 +119,7 @@ internal static class InstructionTranslation
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",
             Code.Ble_Un or Code.Ble_Un_S => $".bleu {Target()}",
-            Code.Ldsflda => $".memory (.staticAddress {StaticData.LeanBytes(StaticData.Validate((FieldReference)i.Operand, m.Module))})",
+            Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference => $".memory (.staticAddress {StaticData.LeanBytes(StaticData.Validate((FieldReference)i.Operand, m.Module))})",
             Code.Ldobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".loadAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",
             Code.Initobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".initAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",
             Code.Stobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".storeAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",

@@ -7,10 +7,10 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 => (2, 0)
   | .init256 | .skipInit => (1, 0)
-  | .dataToken _ | .staticAddress _ => (0, 1)
-  | .add .. | .spanCreate => (2, 1)
+  | .staticAddress _ => (0, 1)
+  | .add .. | .spanCreate | .spanItem _ => (2, 1)
   | .load128 | .load256 | .asRef | .bitcast256 | .bitcastByteBool | .bitcastValue ..
-  | .createSpan | .spanReference => (1, 1)
+  | .createSpan _ | .spanReference | .spanLength => (1, 1)
 
 /-- Successful stack effects for instructions that cannot create a local alias or
 change a local root. Control flow, returns, stores and addresses require exact

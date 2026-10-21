@@ -44,13 +44,13 @@ example : sameRuntimeType (.parameter 0) word = none := by decide
 example : sameRuntimeType .void .void = none := by decide
 example : sameRuntimeType (.aggregate "Fixture::Bad::Name" 0) (.aggregate "Fixture::Bad::Other" 0) = none := by decide
 
-example : foldRoles (test marker marker) =
+example : foldRoles [] (test marker marker) =
     [some .head, some .interior, some .interior, some .interior, some (.result true)] := by decide
-example : foldRoles (test marker other inequality) =
+example : foldRoles [] (test marker other inequality) =
     [some .head, some .interior, some .interior, some .interior, some (.result true)] := by decide
-example : foldRoles (test (.atom "Forwarder" "System.UInt64") word) = List.replicate 5 none := by decide
+example : foldRoles [] (test (.atom "Forwarder" "System.UInt64") word) = List.replicate 5 none := by decide
 -- Any instruction between the operands breaks the exact encoding.
-example : foldRoles ((test marker marker).insertIdx 2 (i 0)) = List.replicate 6 none := by decide
+example : foldRoles [] ((test marker marker).insertIdx 2 (i 0)) = List.replicate 6 none := by decide
 
 -- 0: typeof(Marker) == typeof(Marker); 5: brfalse 8; 6: ldc.i4.1; 7: ret; 8: ldc.i4.0; 9: ret
 private def foldRaw := raw (test marker marker ++ [i 44 (.target 8), i 23, i 42, i 22, i 42])

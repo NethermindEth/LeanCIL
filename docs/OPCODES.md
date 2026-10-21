@@ -61,10 +61,10 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1–65,536 bytes, or exactly `Vector128<ulong>` / `Vector256<ulong>`. No general objects, reference-bearing storage, floating-point tokens. Native-integer tokens use eight-byte storage. |
 | `cpobj` | Partial | Copy validated integer, aggregate or Vector128/256 ulong storage through checked references. Requires initialized readable source and writable destination; self-copy is supported, partial overlap is rejected. No reference-bearing or floating-point tokens. |
 | `initobj` | Partial | Zero the validated width of an admitted integer type or same-assembly explicit- or sequential-layout aggregate. This initializes previously unknown bytes without touching neighboring storage. No general vector or managed-object initialization. |
-| `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data with an explicit packed blob layout and no static constructor. A `ReadOnlySpan<byte>` over such data may be returned by value (for example from a C# collection-expression property); span parameters, locals and byrefs are rejected. Not arbitrary static fields or mutable global state. |
+| `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data with an explicit packed blob layout and no static constructor. A `ReadOnlySpan<byte>` over such data may be returned by value (for example from a C# collection-expression property); see [static span tables](#static-span-tables) for other element types. Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist. No arbitrary external calls, generic declaring types, class instance methods or virtual dispatch. |
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also the explicitly modelled `ReadOnlySpan<byte>(void*, int)` runtime constructor. Class construction, generic constructors and cyclic dependencies are rejected. |
-| `ldtoken` | Partial | Only a type token as an operand of a decided closed type test (see below); it emits a no-op. Other tokens and other uses are rejected. |
+| `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Only `throw new E(...)` with `ldstr`/`ldnull` arguments (see below): it raises a located `thrown "E"` fault. Other throws are rejected. |
 | `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. |
 | `initblk`, `cpblk` | Partial | Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
@@ -89,7 +89,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`, `constrained.` |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*`, `localloc` |
-| Objects, arrays and metadata | `ldnull` and `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` outside a decided type test |
+| Objects, arrays and metadata | `ldnull` and `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `ldsfld`, `stsfld` |
 | Dispatch and exceptions | `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
@@ -101,6 +101,10 @@ In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof
 ### Throws
 
 `throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of `E`'s constructor and `throw`. When `E` is a `System.Runtime` type, the loads and `newobj` emit `nop` and `throw` emits `.throw "E"`, which ends execution with a fault located at the `throw`. A `[DoesNotReturn]` helper containing only this pattern is an ordinary call. Other arguments, any instruction between the parts, a branch past the first part, rethrowing a stored exception and exception handlers remain rejected.
+
+### Static span tables
+
+A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda` rules, packing 1, 2, 4 or 8). The span covers the whole field and has `size / sizeof(T)` elements, for any primitive integer `T`. A caller reads it as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with `System.IndexOutOfRangeException` at the call when the index is out of range, compared unsigned as in .NET. `MemoryMarshal.GetReference` also accepts these spans. Any other use of the span local, an index that is not a single load or constant, a branch to the `ldloca`, span parameters and byref spans remain rejected.
 
 Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable array allocation or exception handling is still rejected.
 

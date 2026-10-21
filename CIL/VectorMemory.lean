@@ -91,8 +91,9 @@ inductive MemoryOp where
   | asRef | add (sizeBytes : Nat) (signed : Bool)
   | bitcast256 | bitcastByteBool | skipInit
   | bitcastValue (source target : SnapshotShape)
-  | dataToken (bytes : List (BitVec 8)) | createSpan | spanReference
-  | staticAddress (bytes : List (BitVec 8)) | spanCreate
+  | staticAddress (bytes : List (BitVec 8)) | spanCreate | spanReference
+  /-- A span of `width`-byte elements over a whole static field; indexing is bounds checked. -/
+  | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
   deriving Repr
 
 /-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
@@ -128,9 +129,14 @@ def evalMemory (op : MemoryOp) (stack : List Value) (m : Memory) :
   | .bitcastByteBool, .i8 bits :: rest =>
     return (m, .i32 (bits.zeroExtend 32) :: rest)
   | .skipInit, .object _ :: rest | .skipInit, .ref _ :: rest => return (m, rest)
-  | .dataToken bytes, _ => return (m, .dataToken bytes :: stack)
-  | .createSpan, .dataToken bytes :: rest =>
-    return (m, .span (.static bytes 0) bytes.length :: rest)
+  | .createSpan width, .ref (.static bytes 0) :: rest =>
+    if 0 < width ∧ bytes.length % width = 0 then
+      return (m, .span (.static bytes 0) (bytes.length / width) :: rest)
+    else none
+  | .spanItem width, .i32 index :: .span (.static bytes offset) length :: rest =>
+    if index.toNat < length then return (m, .ref (.static bytes (offset + index.toNat * width)) :: rest)
+    else none
+  | .spanLength, .span _ length :: rest => return (m, .i32 (BitVec.ofNat 32 length) :: rest)
   | .staticAddress bytes, _ => return (m, .ref (.static bytes 0) :: stack)
   | .spanCreate, .i32 length :: .ref (.static bytes offset) :: rest =>
     if 0 ≤ length.toInt ∧ offset + length.toNat ≤ bytes.length then

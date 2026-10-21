@@ -43,16 +43,6 @@ def featureGetter (site : CallSite) : Option Feature := do
         else "get_IsSupported") ++
       "()").map Prod.snd
 
-private def localIndex (i : RawInstruction) : Option Nat :=
-  match i.opcode, i.operand with
-  | 6, .none | 10, .none => some 0
-  | 7, .none | 11, .none => some 1
-  | 8, .none | 12, .none => some 2
-  | 9, .none | 13, .none => some 3
-  | 17, .local n | 18, .local n | 19, .local n
-  | 65036, .local n | 65037, .local n | 65038, .local n => some n
-  | _, _ => none
-
 private def addressed (raw : RawMethod) (index : Nat) : Bool := raw.code.any fun i =>
   (i.opcode == 18 || i.opcode == 65037) && localIndex i == some index
 
@@ -184,6 +174,8 @@ def featureOpMatches (raw : RawMethod) (i : RawInstruction) (emitted : Op) : Boo
   if let .call site := i.operand then
     if let some feature := featureGetter site then
       return match emitted with | .feature actual => i.opcode == 40 && feature == actual | _ => false
+  -- A span local has no storage; outside a receiver fold it has no translation.
+  if spanLocalOp raw.locals i then return false
   if i.opcode ∈ [6, 7, 8, 9, 17, 65036, 10, 11, 12, 13, 19, 65038] then
     let some index := localIndex i | return false
     let narrow := match raw.locals[index]? with
@@ -266,8 +258,8 @@ def FeatureFlowValid (raw : RawMethod) (profile : FeatureProfile)
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := List.replicate raw.locals.length none }) ∧
-  all3 (checkFeatureSite raw profile certificate (foldRoles raw.code))
-    (raw.code.zip (foldRoles raw.code)).zipIdx certificate code = true
+  all3 (checkFeatureSite raw profile certificate (foldRoles raw.locals raw.code))
+    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true
 
 instance (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
     (reachable : List Bool) (code : List Op) : Decidable (FeatureFlowValid raw profile certificate reachable code) :=
@@ -315,7 +307,7 @@ theorem factsWeaken_preserves {source target : List (Option W32)} {values : List
 def FeatureEdge (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) (pc target : Nat) : Prop :=
   ∃ i role state after successors,
-    (raw.code.zip (foldRoles raw.code))[pc]? = some (i, role) ∧
+    (raw.code.zip (foldRoles raw.locals raw.code))[pc]? = some (i, role) ∧
     certificate[pc]? = some (some state) ∧
     featureTransferAt raw profile role i state = some after ∧
     featureSuccessors pc i state = some successors ∧ target ∈ successors
@@ -331,7 +323,7 @@ theorem FeatureFlowValid.edge_closed {raw : RawMethod} {profile : FeatureProfile
   have zipped := (List.getElem?_eq_some_iff.mp hi).1
   have bound : pc < code.length := by
     rw [valid.2.1]; exact Nat.lt_of_lt_of_le zipped (by simp [List.length_zip, Nat.min_le_left])
-  have indexed : (raw.code.zip (foldRoles raw.code)).zipIdx[pc]? = some ((i, role), pc) := by
+  have indexed : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? = some ((i, role), pc) := by
     simp [List.getElem?_zipIdx, hi]
   have checked := all3_at valid.2.2.2.2 indexed hs (List.getElem?_eq_getElem bound)
   simp only [checkFeatureSite, ht, hn, Bool.and_eq_true] at checked

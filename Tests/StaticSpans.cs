@@ -43,7 +43,7 @@ Prove("Tampered", tampered, "StaticSpans::First()", Result(".ok [.scalar (.i32 9
 var byteSpan = "Unsupported type: System.ReadOnlySpan`1<System.Byte>";
 foreach (var (mutation, marker) in new[]
 {
-    ("element", "Unsupported type: System.ReadOnlySpan`1<System.Int32>"), ("scope", "Unresolved aggregate"),
+    ("element", "Unsupported type: System.ReadOnlySpan`1<System.Double>"), ("scope", "Unresolved aggregate"),
     ("value-type", "Unsupported type identity"), ("byref-return", byteSpan), ("parameter", byteSpan), ("local", byteSpan)
 })
 {
@@ -59,7 +59,7 @@ foreach (var (mutation, marker) in new[]
         var span = (GenericInstanceType)getter.ReturnType;
         switch (mutation)
         {
-            case "element": span.GenericArguments[0] = module.TypeSystem.Int32; break;
+            case "element": span.GenericArguments[0] = module.TypeSystem.Double; break;
             case "scope": span.ElementType.Scope = new AssemblyNameReference("Foreign.Runtime", new Version(10, 0, 0, 0)); break;
             case "value-type": span.IsValueType = false; break;
             case "byref-return": getter.ReturnType = new ByReferenceType(span); break;

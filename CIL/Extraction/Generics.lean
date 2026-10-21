@@ -33,6 +33,14 @@ private def enumField : FieldType → Bool
   | .signed64 | .unsigned64 => true
   | _ => false
 
+/-- `ReadOnlySpan<T>` over a primitive integer `T`. As a local it has no storage: only a
+    receiver fold may touch it, so its slot is an inert root. -/
+def spanLocal : TypeExpr → Bool
+  | .apply (.constructor scope "System.ReadOnlySpan`1") (.atom elementScope element) =>
+    scope == runtimeScope && elementScope == runtimeScope && element ∈ ["System.Byte", "System.SByte",
+      "System.Int16", "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64"]
+  | _ => false
+
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
@@ -158,7 +166,7 @@ def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
 
 def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments := do
   let parameters ← closed.parameters.mapM (typeStorage layouts)
-  let locals ← closed.locals.mapM (typeStorage layouts)
+  let locals ← closed.locals.mapM fun type => if spanLocal type then some .reference else typeStorage layouts type
   let code ← closed.code.mapM argumentOperation
   return ⟨(if closed.hasThis then [.reference] else []) ++ parameters, locals, code⟩
 

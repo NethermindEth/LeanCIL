@@ -10,7 +10,8 @@ internal static class ParameterEvidence
 {
     static string Type(TypeReference type, ModuleDefinition module, LayoutEvidence layouts)
     {
-        if (type is ByReferenceType) return ".reference";
+        // Only folded span locals reach here; Lean derives the same inert root from the type.
+        if (type is ByReferenceType || Spans.Width(type) is not null) return ".reference";
         if (type is GenericInstanceType vector)
             return vector.ElementType.FullName switch
             {

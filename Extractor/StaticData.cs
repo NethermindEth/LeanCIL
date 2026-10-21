@@ -18,7 +18,7 @@ internal static class StaticData
             module.GetTypes().Count(candidate => candidate.FullName == field.DeclaringType.FullName) != 1 ||
             (field.Attributes & FieldAttributes.HasFieldRVA) == 0 || field.InitialValue.Length == 0 ||
             field.RVA == 0 || !layout.IsValueType || !RuntimeModels.HasRuntimeValueTypeBase(layout) || layout.HasGenericParameters ||
-            !layout.IsExplicitLayout || layout.PackingSize != 1 || layout.ClassSize != field.InitialValue.Length ||
+            !layout.IsExplicitLayout || layout.PackingSize is not (1 or 2 or 4 or 8) || layout.ClassSize != field.InitialValue.Length ||
             layout.Fields.Any(f => !f.IsStatic) ||
             field.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) ||
             layout.Methods.Any(m => m.IsConstructor && m.IsStatic))

@@ -15,7 +15,7 @@ internal static class RuntimeModels
     {
         string name = type.FullName;
         return name is "System.UInt32" or "System.Byte" or "System.UIntPtr" or "System.IntPtr" or
-            "System.ReadOnlySpan`1<System.Byte>" ||
+            "System.RuntimeFieldHandle" || Spans.Width(type) is not null ||
             (type is ByReferenceType byRef && SupportedType(byRef.ElementType)) ||
             new[] { 128, 256 }.Any(width => new[] { "System.UInt64", "System.Int64", "System.UInt32", "System.Int32", "System.Byte", "System.Double", "System.Single" }
                 .Any(element => name == Vector(width, element)));
@@ -49,7 +49,7 @@ internal static class RuntimeModels
         bool expectedValueType = type.FullName is "System.UInt64" or "System.Int64" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char" or
             "System.UInt32" or "System.Int32" or "System.Byte" or "System.Boolean" or "System.Double" or "System.Single" or
-            "System.IntPtr" or "System.UIntPtr" or "System.ReadOnlySpan`1" or
+            "System.IntPtr" or "System.UIntPtr" or "System.ReadOnlySpan`1" or "System.RuntimeFieldHandle" or
             "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1";
         var expectedScope = type.FullName == "System.Buffers.Binary.BinaryPrimitives" ? "System.Memory" :
             type.FullName.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal) ? "System.Runtime.Intrinsics" : "System.Runtime";
@@ -71,7 +71,7 @@ internal static class RuntimeModels
     internal static string? Translate(MethodReference reference, FeatureProfile profile)
     {
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
-            (reference.HasThis && reference.Name != ".ctor") ||
+            (reference.HasThis && reference.Name is not (".ctor" or "get_Item" or "get_Length")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
         if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" && !ExactScope(reference.DeclaringType.Scope, scope))
@@ -163,10 +163,27 @@ internal static class RuntimeModels
         "System.Void System.Runtime.CompilerServices.Unsafe::InitBlock(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 8)",
         "System.Void System.Runtime.CompilerServices.Unsafe::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
         "!!1 System.Runtime.CompilerServices.Unsafe::BitCast<System.Byte,System.Boolean>(!!0)" => ".memory .bitcastByteBool",
-        "!!0& System.Runtime.InteropServices.MemoryMarshal::GetReference<System.Byte>(System.ReadOnlySpan`1<!!0>)" => ".memory .spanReference",
         "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" => ".memory .spanCreate",
-        _ => null
+        _ => Span(signature)
     };
+
+    // Primitive spans over whole static fields: creation, bounds-checked indexing, length and the first element.
+    private static string? Span(string signature)
+    {
+        foreach (var (element, width) in new[] { ("System.Byte", 1), ("System.SByte", 1), ("System.Int16", 2), ("System.UInt16", 2),
+            ("System.Int32", 4), ("System.UInt32", 4), ("System.Int64", 8), ("System.UInt64", 8) })
+        {
+            var span = $"System.ReadOnlySpan`1<{element}>";
+            if (signature == $"System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::CreateSpan<{element}>(System.RuntimeFieldHandle)")
+                return $".memory (.createSpan {width})";
+            if (signature == $"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)")
+                return $".memory (.spanItem {width})";
+            if (signature == $"System.Int32 {span}::get_Length()") return ".memory .spanLength";
+            if (signature == $"!!0& System.Runtime.InteropServices.MemoryMarshal::GetReference<{element}>(System.ReadOnlySpan`1<!!0>)")
+                return ".memory .spanReference";
+        }
+        return null;
+    }
 
     private static string? Intrinsic(string signature, FeatureProfile profile)
     {

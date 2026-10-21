@@ -172,6 +172,7 @@ theorem staticInstruction_contract (body : CIL.Method) (pc : Nat) (operation : C
           · first
             | exact True.intro
             | exact retained.tail.head
+            | exact retained.head
             | apply staticReference_reference_valid; assumption
             | apply formValue_reference_valid; assumption
           · first | exact retained | exact retained.tail | exact retained.tail.tail

@@ -66,7 +66,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             case TypeReference type: return $".type ({Type(type)})";
             case MethodReference callee: return $".call {Call(callee)}";
             case FieldReference field:
-                var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda;
+                var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
                 var index = 0;
                 if (field.DeclaringType.Scope is ModuleDefinition)
                 {

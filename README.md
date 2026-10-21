@@ -227,7 +227,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
 | Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons; termination requires a separate proof |
 | `call`, `ret` | Partial | Acyclic static/struct instance methods, concrete generic-method specializations and explicitly modelled runtime calls |
-| `ldtoken` | Partial | Only as an operand of a decided closed `typeof(A) == typeof(B)` or `!=` test, which folds to a constant |
+| `ldtoken` | Partial | A type in a decided closed `typeof(A) == typeof(B)` or `!=` test, which folds to a constant, or a static data field for a `ReadOnlySpan<T>` table |
 | Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
 | `initblk`, `cpblk`, `unaligned.` | Partial | Checked managed references, 32-bit byte counts and validated alignment prefixes; overlapping block copies rejected |
 | `switch`, `sizeof` | Partial | Forward jump tables and validated integer and reference-free aggregate sizes |

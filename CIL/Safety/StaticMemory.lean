@@ -50,6 +50,12 @@ def staticInstruction (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     if reference.offset + length.toNat ≤ allocation.layout.size then pure () else
       .error (.memory .outsideAllocation (.address reference) length.toNat)
     return (m, .span (.address reference) length.toNat :: rest)
+  | .createSpan width, .reference (.address reference) :: rest =>
+    let allocation ← checkedAt (.address reference) 0 (liveAllocation m reference.allocation)
+    if allocation.kind == .immutableStatic && reference.offset == 0 && 0 < width &&
+        allocation.layout.size % width == 0 then
+      return (m, .span (.address reference) (allocation.layout.size / width) :: rest)
+    else .error (.unsupported "Typed span outside a whole extracted static field")
   | .spanCreate, .scalar (.i32 length) :: .reference .null :: rest =>
     if length == 0 then return (m, .span .null 0 :: rest)
     else .error (.memory .nullDereference .null length.toNat)

@@ -88,12 +88,33 @@ def typeTest (a b c d e : RawInstruction) : Option Bool := do
 
 /-- Raw instructions that are admitted only as part of a decided type test. -/
 def typeTestInstruction (i : RawInstruction) : Bool :=
-  i.opcode == 208 || match i.operand with
+  (i.opcode == 208 && i.operand matches .type _) || match i.operand with
     | .call site => match site.declaringType with
       | .atom _ "System.Type" =>
         site.name == "GetTypeFromHandle" || site.name == "op_Equality" || site.name == "op_Inequality"
       | _ => false
     | _ => false
+
+def localIndex (i : RawInstruction) : Option Nat :=
+  match i.opcode, i.operand with
+  | 6, .none | 10, .none => some 0
+  | 7, .none | 11, .none => some 1
+  | 8, .none | 12, .none => some 2
+  | 9, .none | 13, .none => some 3
+  | 17, .local n | 18, .local n | 19, .local n
+  | 65036, .local n | 65037, .local n | 65038, .local n => some n
+  | _, _ => none
+
+/-- Whether `i` names a span local; such locals are only touched by a receiver fold. -/
+def spanLocalOp (locals : List TypeExpr) (i : RawInstruction) : Bool :=
+  match localIndex i with
+  | some index => (locals[index]?.map spanLocal).getD false
+  | none => false
+
+/-- `stloc s; ldloca s` over a span local `s`: the span stays on the stack as the receiver. -/
+def receiverFold (locals : List TypeExpr) (a b : RawInstruction) : Bool :=
+  a.opcode ∈ [10, 11, 12, 13, 19, 65038] && (b.opcode == 18 || b.opcode == 65037) &&
+    localIndex a == localIndex b && spanLocalOp locals a
 
 private def messageLoad (i : RawInstruction) : Bool := i.opcode == 114 || i.opcode == 20
 
@@ -125,7 +146,11 @@ inductive FoldRole where
   deriving DecidableEq, Repr
 
 /-- The roles of a fold starting at `a`, if any; type tests take precedence. -/
-private def foldAt (a : RawInstruction) (tail : List RawInstruction) : Option (List (Option FoldRole)) :=
+private def foldAt (locals : List TypeExpr) (a : RawInstruction) (tail : List RawInstruction) :
+    Option (List (Option FoldRole)) :=
+  (match tail with
+    | b :: _ => if receiverFold locals a b then some [some .head, some .interior] else none
+    | _ => none) <|>
   (match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
         [some .head, some .interior, some .interior, some .interior, some (.result value)]
@@ -134,15 +159,16 @@ private def foldAt (a : RawInstruction) (tail : List RawInstruction) : Option (L
     some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
 
 /-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural. -/
-def foldRolesFrom : List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
+def foldRolesFrom (locals : List TypeExpr) : List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
   | _, [] => []
-  | role :: pending, _ :: tail => role :: foldRolesFrom pending tail
-  | [], a :: tail => match foldAt a tail with
-    | some (role :: pending) => role :: foldRolesFrom pending tail
-    | _ => none :: foldRolesFrom [] tail
+  | role :: pending, _ :: tail => role :: foldRolesFrom locals pending tail
+  | [], a :: tail => match foldAt locals a tail with
+    | some (role :: pending) => role :: foldRolesFrom locals pending tail
+    | _ => none :: foldRolesFrom locals [] tail
 
 /-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
-def foldRoles (code : List RawInstruction) : List (Option FoldRole) := foldRolesFrom [] code
+def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
+  foldRolesFrom locals [] code
 
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
 def foldEntry (roles : List (Option FoldRole)) (target : Nat) : Bool :=
