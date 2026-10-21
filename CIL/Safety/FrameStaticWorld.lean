@@ -3,39 +3,25 @@ import CIL.Safety.FrameSetupLemmas
 
 namespace CIL.Safety
 
+/-- Setup preserves every existing static binding because it only touches fresh
+    homes and retains the registry. No traversal-specific static proof is needed. -/
+theorem FrameSetup.staticWorld {activation : Nat} {before after : Memory}
+    {slots : List LocalSlot} {owned : List AllocationId}
+    (setup : FrameSetup activation before after slots owned) (descriptors : List CIL.StaticDescriptor)
+    (hm : before.WellFormed) (world : StaticWorldValid descriptors before) :
+    StaticWorldValid descriptors after := by
+  apply PreservesImmutable.world (m := before) (result := after) ?_ descriptors world setup.registry
+  intro id a present _
+  have old := (hm.1 id a present).1
+  exact ⟨(setup.below.allocations id old).trans present, setup.below.cells id old,
+    fun offset => setup.below.permissions id old offset false⟩
+
+
 theorem allocateHome_preserves_static_world {alignment : Nat} (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (activation width : Nat) (r : Reference) (hm : m.WellFormed)
     (world : StaticWorldValid descriptors m)
     (h : allocateHome m activation width alignment = .ok (r, result)) : StaticWorldValid descriptors result := by
-  unfold allocateHome at h
-  cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
-    simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
-      Pure.pure, Except.pure] at h
-  · cases h
-  · rename_i home
-    obtain ⟨id, memory⟩ := home
-    cases h
-    have retained := allocate_preserves_immutable _ _ _ _ hm ha
-    have allocationWorld : StaticWorldValid descriptors memory := by
-      apply retained.world descriptors world
-      have success := ha
-      simp only [allocate] at success
-      repeat' first | cases success | split at success
-      rfl
-    refine PreservesImmutable.world (m := memory)
-      (result := { memory with views := ⟨id, 0, width, true, true⟩ :: memory.views })
-      ?_ descriptors allocationWorld rfl
-    intro other a present kind
-    have different : other ≠ id := by
-      have lookup := allocation_lookup m _ id memory ha
-      intro same
-      subst other
-      have equal := Option.some.inj (present.symm.trans lookup)
-      subst a
-      cases kind
-    refine ⟨present, fun _ => rfl, ?_⟩
-    intro offset
-    simp [permitted, viewContains, Ne.symm different]
+  exact (allocateHome_setup _ _ _ _ _ .byte h).staticWorld descriptors hm world
 
 theorem storeLocal_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (slot final : LocalSlot) (value : Value)
@@ -57,30 +43,7 @@ theorem makeLocal_preserves_static_world (descriptors : List CIL.StaticDescripto
     (world : StaticWorldValid descriptors m)
     (h : makeLocal activation kind initial m = .ok (slot, owned, result)) :
     StaticWorldValid descriptors result := by
-  unfold makeLocal at h
-  split at h
-  · split at h
-    · cases h; exact world
-    · cases h; exact world
-    · cases h
-  all_goals
-    cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>
-      simp only [ha, Bind.bind, Except.bind] at h
-    · cases h
-    · rename_i home
-      obtain ⟨reference, memory⟩ := home
-      have updated := allocateHome_preserves_static_world _ _ _ _ _ _ hm world ha
-      split at h
-      · simp only [Pure.pure, Except.pure] at h
-        cases h
-        exact updated
-      · cases hs : storeLocal memory (.bytes kind reference) (.scalar initial) <;>
-          simp only [hs, Pure.pure, Except.pure] at h
-        · cases h
-        · rename_i stored
-          obtain ⟨slot', memory'⟩ := stored
-          cases h
-          exact storeLocal_preserves_static_world _ _ _ _ _ _ updated hs
+  exact (makeLocal_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
 
 theorem makeLocals_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (activation : Nat) (kinds : List CIL.LocalKind)
@@ -88,30 +51,7 @@ theorem makeLocals_preserves_static_world (descriptors : List CIL.StaticDescript
     (hm : m.WellFormed) (world : StaticWorldValid descriptors m)
     (h : makeLocals activation kinds initializers m = .ok (slots, owned, result)) :
     StaticWorldValid descriptors result := by
-  induction kinds generalizing initializers m slots owned result with
-  | nil =>
-    cases initializers
-    · cases h; exact world
-    · cases h
-  | cons kind kinds ih =>
-    cases initializers with
-    | nil => cases h
-    | cons initial initials =>
-      simp only [makeLocals] at h
-      cases hl : makeLocal activation kind initial m <;>
-        simp only [hl, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i home
-        obtain ⟨slot, ids, memory⟩ := home
-        have hw := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ hm hl
-        have updated := makeLocal_preserves_static_world _ _ _ _ _ _ _ _ hm world hl
-        cases hr : makeLocals activation kinds initials memory <;>
-          simp only [hr, Pure.pure, Except.pure] at h
-        · cases h
-        · rename_i rest
-          obtain ⟨rest, other, final⟩ := rest
-          cases h
-          exact ih memory final initials rest other hw updated hr
+  exact (makeLocals_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
 
 theorem makeArgumentHomes_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (activation : Nat) (indices : List Nat) (args : List Value)
@@ -119,34 +59,7 @@ theorem makeArgumentHomes_preserves_static_world (descriptors : List CIL.StaticD
     (world : StaticWorldValid descriptors m)
     (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
     StaticWorldValid descriptors result := by
-  induction indices generalizing m homes owned result with
-  | nil => cases h; exact world
-  | cons index indices ih =>
-    simp only [makeArgumentHomes] at h
-    split at h
-    · rename_i bits hv
-      cases ha : allocateHome m activation (localWidth .vector256) <;>
-        simp only [ha, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i home
-        obtain ⟨reference, memory⟩ := home
-        have hw := allocateHome_preserves_wellFormed _ _ _ _ _ hm ha
-        have updated := allocateHome_preserves_static_world _ _ _ _ _ _ hm world ha
-        cases hs : storeLocal memory (.bytes .vector256 reference) (.scalar (.v256 bits)) <;>
-          simp only [hs] at h
-        · cases h
-        · rename_i stored
-          obtain ⟨slot, memory'⟩ := stored
-          have hws := storeLocal_preserves_wellFormed _ _ _ _ _ hw hs
-          have stored := storeLocal_preserves_static_world _ _ _ _ _ _ updated hs
-          cases hr : makeArgumentHomes activation indices args memory' <;>
-            simp only [hr, Pure.pure, Except.pure] at h
-          · cases h
-          · rename_i rest
-            obtain ⟨rest, other, final⟩ := rest
-            cases h
-            exact ih memory' final rest other hws stored hr
-    · cases h
+  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
 
 theorem makeParameterHomes_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (activation : Nat) (parameters : List (Nat × CIL.LocalKind))
@@ -154,61 +67,13 @@ theorem makeParameterHomes_preserves_static_world (descriptors : List CIL.Static
     (hm : m.WellFormed) (world : StaticWorldValid descriptors m)
     (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
     StaticWorldValid descriptors result := by
-  induction parameters generalizing m homes owned result with
-  | nil => cases h; exact world
-  | cons parameter parameters ih =>
-    obtain ⟨index, kind⟩ := parameter
-    simp only [makeParameterHomes] at h
-    split at h
-    · rename_i value argument
-      cases hl : makeLocal activation kind .unmodeled m <;>
-        simp only [hl, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i made
-        obtain ⟨slot, ids, memory⟩ := made
-        have hw := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ hm hl
-        have initial := makeLocal_preserves_static_world _ _ _ _ _ _ _ _ hm world hl
-        cases hs : storeLocal memory slot value <;> simp only [hs] at h
-        · cases h
-        · rename_i stored
-          obtain ⟨slot', memory'⟩ := stored
-          have hws := storeLocal_preserves_wellFormed _ _ _ _ _ hw hs
-          have updated := storeLocal_preserves_static_world _ _ _ _ _ _ initial hs
-          cases hr : makeParameterHomes activation parameters args memory' <;>
-            simp only [hr, Pure.pure, Except.pure] at h
-          · cases h
-          · rename_i remaining
-            obtain ⟨rest, other, final⟩ := remaining
-            cases h
-            exact ih memory' final rest other hws updated hr
-    · cases h
+  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
 
 theorem enterFrame_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (body : CIL.Method) (args : List Value) (m result : Memory) (frame : Frame)
     (hm : m.WellFormed) (world : StaticWorldValid descriptors m)
     (h : enterFrame body args m = .ok (frame, result)) : StaticWorldValid descriptors result := by
-  simp only [enterFrame] at h
-  cases hl : makeLocals m.nextIdentity body.localKinds body.locals m <;>
-    simp only [hl, Bind.bind, Except.bind] at h
-  · cases h
-  · rename_i locals
-    obtain ⟨slots, owned, memory⟩ := locals
-    have hw := makeLocals_preserves_wellFormed _ _ _ _ _ _ _ hm hl
-    have updated := makeLocals_preserves_static_world _ _ _ _ _ _ _ _ hm world hl
-    cases ha : makeArgumentHomes m.nextIdentity body.vectorArgs args memory <;>
-      simp only [ha, Pure.pure, Except.pure] at h
-    · cases h
-    · rename_i homes
-      obtain ⟨arguments, other, final⟩ := homes
-      have hv := makeArgumentHomes_preserves_wellFormed _ _ _ _ _ _ _ hw ha
-      have first := makeArgumentHomes_preserves_static_world _ _ _ _ _ _ _ _ hw updated ha
-      cases hp : makeParameterHomes m.nextIdentity body.parameterHomes args final <;>
-        simp only [hp] at h
-      · cases h
-      · rename_i parameters
-        obtain ⟨parameters, ids, final'⟩ := parameters
-        cases h
-        exact makeParameterHomes_preserves_static_world _ _ _ _ _ _ _ _ hv first hp
+  exact (enterFrame_setup _ _ _ _ _ h).staticWorld descriptors hm world
 
 #print axioms allocateHome_preserves_static_world
 #print axioms storeLocal_preserves_static_world

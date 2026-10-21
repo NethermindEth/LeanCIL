@@ -2,210 +2,36 @@ import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.AllocationExtension
 namespace CIL.Safety
 
-theorem allocateHome_fresh {alignment : Nat} (m result : Memory) (activation width : Nat) (r : Reference)
-    (h : allocateHome m activation width alignment = .ok (r, result)) :
-    AllocationExtension m result ∧ r.allocation = m.nextIdentity ∧
-      r.allocation < result.nextIdentity := by
-  unfold allocateHome at h
-  cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
-    simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
-      Pure.pure, Except.pure] at h
-  · cases h
-  · rename_i home
-    obtain ⟨id, memory⟩ := home
-    cases h
-    have ext := allocate_extends_allocations _ _ _ _ ha
-    have ids := allocation_identity_fresh _ _ _ _ ha
-    exact ⟨⟨ext.next, ext.lookup⟩, ids.1, by rw [ids.1, ids.2]; exact Nat.lt_succ_self _⟩
-
-theorem storeLocal_extends_allocations (m result : Memory) (slot final : LocalSlot)
-    (value : Value) (h : storeLocal m slot value = .ok (final, result)) :
-    AllocationExtension m result := by
-  unfold storeLocal at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals repeat' first
-    | exact .refl m
-    | solve | exact write_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
-    | solve | exact writeSnapshot_extends_allocations _ _ _ _ _ (checkedAt_ok (by assumption))
-    | cases h
-    | split at h
-def FreshOwned (before after : Memory) (owned : List AllocationId) : Prop :=
-  AllocationExtension before after ∧
-    ∀ id ∈ owned, before.nextIdentity ≤ id ∧ id < after.nextIdentity
-
 theorem makeLocal_fresh (m result : Memory) (activation : Nat) (kind : CIL.LocalKind)
     (initial : CIL.Value) (slot : LocalSlot) (owned : List AllocationId)
     (h : makeLocal activation kind initial m = .ok (slot, owned, result)) :
     FreshOwned m result owned := by
-  unfold makeLocal at h
-  split at h
-  · split at h
-    · cases h; exact ⟨.refl m, by simp⟩
-    · cases h; exact ⟨.refl m, by simp⟩
-    · cases h
-  all_goals
-    cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>
-      simp only [ha, Bind.bind, Except.bind] at h
-    · cases h
-    · rename_i home
-      obtain ⟨reference, memory⟩ := home
-      have fresh := allocateHome_fresh _ _ _ _ _ ha
-      split at h
-      · simp only [Pure.pure, Except.pure] at h
-        cases h
-        refine ⟨fresh.1, ?_⟩
-        intro id member
-        simp only [List.mem_singleton] at member
-        subst id
-        exact ⟨by rw [fresh.2.1]; exact Nat.le_refl _, fresh.2.2⟩
-      · cases hs : storeLocal memory (.bytes kind reference) (.scalar initial) <;>
-          simp only [hs, Pure.pure, Except.pure] at h
-        · cases h
-        · rename_i stored
-          obtain ⟨slot', memory'⟩ := stored
-          cases h
-          have ext := storeLocal_extends_allocations _ _ _ _ _ hs
-          refine ⟨fresh.1.trans ext, ?_⟩
-          intro id member
-          simp only [List.mem_singleton] at member
-          subst id
-          exact ⟨by rw [fresh.2.1]; exact Nat.le_refl _, Nat.lt_of_lt_of_le fresh.2.2 ext.next⟩
+  exact (makeLocal_setup _ _ _ _ _ _ _ h).fresh
 
 #print axioms makeLocal_fresh
-
-theorem FreshOwned.trans {first middle last : Memory} {left right : List AllocationId}
-    (hl : FreshOwned first middle left) (hr : FreshOwned middle last right) :
-    FreshOwned first last (left ++ right) := by
-  refine ⟨hl.1.trans hr.1, ?_⟩
-  intro id member
-  rcases List.mem_append.mp member with member | member
-  · obtain ⟨lo, hi⟩ := hl.2 id member
-    exact ⟨lo, Nat.lt_of_lt_of_le hi hr.1.next⟩
-  · obtain ⟨lo, hi⟩ := hr.2 id member
-    exact ⟨Nat.le_trans hl.1.next lo, hi⟩
 
 theorem makeLocals_fresh (m result : Memory) (activation : Nat) (kinds : List CIL.LocalKind)
     (initializers : List CIL.Value) (slots : List LocalSlot) (owned : List AllocationId)
     (h : makeLocals activation kinds initializers m = .ok (slots, owned, result)) :
     FreshOwned m result owned := by
-  induction kinds generalizing initializers m slots owned result with
-  | nil =>
-    cases initializers
-    · cases h; exact ⟨.refl m, by simp⟩
-    · cases h
-  | cons kind kinds ih =>
-    cases initializers with
-    | nil => cases h
-    | cons initial initials =>
-      simp only [makeLocals] at h
-      cases hl : makeLocal activation kind initial m <;>
-        simp only [hl, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i home
-        obtain ⟨slot, ids, memory⟩ := home
-        have fresh := makeLocal_fresh _ _ _ _ _ _ _ hl
-        cases hr : makeLocals activation kinds initials memory <;>
-          simp only [hr, Pure.pure, Except.pure] at h
-        · cases h
-        · rename_i rest
-          obtain ⟨rest, other, final⟩ := rest
-          cases h
-          exact fresh.trans (ih memory final initials rest other hr)
+  exact (makeLocals_setup _ _ _ _ _ _ _ h).fresh
 
 theorem makeArgumentHomes_fresh (m result : Memory) (activation : Nat) (indices : List Nat)
     (args : List Value) (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
     (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
     FreshOwned m result owned := by
-  induction indices generalizing m homes owned result with
-  | nil => cases h; exact ⟨.refl m, by simp⟩
-  | cons index indices ih =>
-    simp only [makeArgumentHomes] at h
-    split at h
-    · rename_i bits hv
-      cases ha : allocateHome m activation (localWidth .vector256) <;>
-        simp only [ha, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i home
-        obtain ⟨reference, memory⟩ := home
-        have fresh := allocateHome_fresh _ _ _ _ _ ha
-        cases hs : storeLocal memory (.bytes .vector256 reference) (.scalar (.v256 bits)) <;>
-          simp only [hs] at h
-        · cases h
-        · rename_i stored
-          obtain ⟨slot, memory'⟩ := stored
-          have ext := storeLocal_extends_allocations _ _ _ _ _ hs
-          have first : FreshOwned m memory' [reference.allocation] := by
-            refine ⟨fresh.1.trans ext, ?_⟩
-            intro id member
-            simp only [List.mem_singleton] at member
-            subst id
-            exact ⟨by rw [fresh.2.1]; exact Nat.le_refl _, Nat.lt_of_lt_of_le fresh.2.2 ext.next⟩
-          cases hr : makeArgumentHomes activation indices args memory' <;>
-            simp only [hr, Pure.pure, Except.pure] at h
-          · cases h
-          · rename_i rest
-            obtain ⟨rest, other, final⟩ := rest
-            cases h
-            exact first.trans (ih memory' final rest other hr)
-    · cases h
+  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).fresh
 
 theorem makeParameterHomes_fresh (m result : Memory) (activation : Nat)
     (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
     (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
     (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
     FreshOwned m result owned := by
-  induction parameters generalizing m homes owned result with
-  | nil => cases h; exact ⟨.refl m, by simp⟩
-  | cons parameter parameters ih =>
-    obtain ⟨index, kind⟩ := parameter
-    simp only [makeParameterHomes] at h
-    split at h
-    · rename_i value argument
-      cases hl : makeLocal activation kind .unmodeled m <;>
-        simp only [hl, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i made
-        obtain ⟨slot, ids, memory⟩ := made
-        have fresh := makeLocal_fresh _ _ _ _ _ _ _ hl
-        cases hs : storeLocal memory slot value <;> simp only [hs] at h
-        · cases h
-        · rename_i stored
-          obtain ⟨slot', memory'⟩ := stored
-          have ext := storeLocal_extends_allocations _ _ _ _ _ hs
-          have first : FreshOwned m memory' ids :=
-            ⟨fresh.1.trans ext, fun id member =>
-              ⟨(fresh.2 id member).1, Nat.lt_of_lt_of_le (fresh.2 id member).2 ext.next⟩⟩
-          cases hr : makeParameterHomes activation parameters args memory' <;>
-            simp only [hr, Pure.pure, Except.pure] at h
-          · cases h
-          · rename_i remaining
-            obtain ⟨rest, other, final⟩ := remaining
-            cases h
-            exact first.trans (ih memory' final rest other hr)
-    · cases h
+  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).fresh
 
 theorem enterFrame_fresh (body : CIL.Method) (args : List Value) (m result : Memory) (frame : Frame)
     (h : enterFrame body args m = .ok (frame, result)) : FreshOwned m result frame.owned := by
-  simp only [enterFrame] at h
-  cases hl : makeLocals m.nextIdentity body.localKinds body.locals m <;>
-    simp only [hl, Bind.bind, Except.bind] at h
-  · cases h
-  · rename_i locals
-    obtain ⟨slots, owned, memory⟩ := locals
-    have fresh := makeLocals_fresh _ _ _ _ _ _ _ hl
-    cases ha : makeArgumentHomes m.nextIdentity body.vectorArgs args memory <;>
-      simp only [ha, Pure.pure, Except.pure] at h
-    · cases h
-    · rename_i homes
-      obtain ⟨arguments, other, final⟩ := homes
-      have first := fresh.trans (makeArgumentHomes_fresh _ _ _ _ _ _ _ ha)
-      cases hp : makeParameterHomes m.nextIdentity body.parameterHomes args final <;>
-        simp only [hp] at h
-      · cases h
-      · rename_i parameters
-        obtain ⟨parameters, ids, final'⟩ := parameters
-        cases h
-        exact first.trans (makeParameterHomes_fresh _ _ _ _ _ _ _ hp)
+  exact (enterFrame_setup _ _ _ _ _ h).fresh
 
 theorem leaveFrame_preserves_older_allocations (frame : Frame) (m : Memory) (watermark : Nat)
     (fresh : ∀ id ∈ frame.owned, watermark ≤ id) (id : AllocationId) (old : id < watermark) :
