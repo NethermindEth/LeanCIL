@@ -28,91 +28,54 @@ theorem AllocationsBelow.preserves_reference {m result : Memory} {watermark : Na
   rw [form_allocation_congr _ _ _ (ext.lookup r.allocation old)]
   exact h
 
+theorem programStep_extends_allocations {program : CIL.Program} {method pc : Nat}
+    {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+    (h : ProgramStep program method pc args frame stack m action) :
+    AllocationExtension m action.memory := by
+  obtain ⟨body, op, _, _, h⟩ := h
+  exact step_extends_allocations _ _ _ _ _ _ _ _ h
+
+theorem programStep_ownedAbove {program : CIL.Program} {method pc : Nat}
+    {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+    {watermark : Nat} (h : ProgramStep program method pc args frame stack m action)
+    (bound : watermark ≤ m.nextIdentity) (owned : frame.OwnedAbove watermark) :
+    action.OwnedAbove watermark := by
+  obtain ⟨body, op, _, _, h⟩ := h
+  exact step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound h
+
 theorem run_preserves_caller_allocations (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value) (watermark : Nat) (bound : watermark ≤ m.nextIdentity)
     (owned : frame.OwnedAbove watermark)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     AllocationsBelow m final watermark := by
-  induction fuel generalizing method pc args frame stack m final values with
-  | zero => cases h
-  | succ fuel ih =>
-    cases hb : program[method]? with
-    | none => simp [run, hb] at h
-    | some body =>
-      cases ho : body.code[pc]? with
-      | none => simp [run, hb, ho] at h
-      | some op =>
-        cases hs : step body op pc args frame stack m with
-        | error fault => simp [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-        | ok action =>
-          have ext := step_extends_allocations _ _ _ _ _ _ _ _ hs
-          have afterBound := Nat.le_trans bound ext.next
-          have afterOwned := step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound hs
-          have first := ext.below watermark bound
-          cases action with
-          | next target stack' frame' memory =>
-            simp only [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-            exact first.trans (ih method target args frame' stack' memory final values
-              afterBound afterOwned h)
-          | returned result memory =>
-            cases hr : result.mapM (checkedValue (leaveFrame frame memory)) <;>
-              simp only [run, hb, ho, hs, hr, Except.mapError, Bind.bind, Except.bind,
-                Pure.pure, Except.pure] at h
-            · cases h
-            · cases h
-              exact first.trans ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
-                fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩
-          | call callee arguments rest memory =>
-            cases hc : program[callee]? with
-            | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
-            | some child =>
-              cases he : enterFrame child arguments memory with
-              | error fault => simp [run, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
-              | ok entered =>
-                obtain ⟨childFrame, childMemory⟩ := entered
-                have fresh := enterFrame_fresh _ _ _ _ _ he
-                have childBound := Nat.le_trans afterBound fresh.1.next
-                have childOwned : childFrame.OwnedAbove watermark :=
-                  fun id member => Nat.le_trans afterBound (fresh.2 id member).1
-                cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
-                | error fault => simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
-                  have childPreserves := ih callee 0 arguments childFrame [] childMemory memory' result
-                    childBound childOwned hr
-                  have prior := (first.trans (fresh.1.below watermark afterBound)).trans childPreserves
-                  simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                  exact prior.trans (ih method (pc + 1) args frame (result ++ rest) memory' final values
-                    (Nat.le_trans bound prior.next) owned h)
-          | construct callee arguments rest frame' temporary kind memory =>
-            cases hc : program[callee]? with
-            | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
-            | some child =>
-              cases he : enterFrame child arguments memory with
-              | error fault => simp [run, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
-              | ok entered =>
-                obtain ⟨childFrame, childMemory⟩ := entered
-                have fresh := enterFrame_fresh _ _ _ _ _ he
-                have childBound := Nat.le_trans afterBound fresh.1.next
-                have childOwned : childFrame.OwnedAbove watermark :=
-                  fun id member => Nat.le_trans afterBound (fresh.2 id member).1
-                cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
-                | error fault => simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
-                  have childPreserves := ih callee 0 arguments childFrame [] childMemory memory' result
-                    childBound childOwned hr
-                  have prior := (first.trans (fresh.1.below watermark afterBound)).trans childPreserves
-                  simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                  split at h
-                  · cases h
-                  · cases hl : loadLocal memory' (.bytes kind temporary) <;>
-                      simp only [hl] at h
-                    · cases h
-                    · rename_i value
-                      exact prior.trans (ih method (pc + 1) args frame' (value :: rest) memory'
-                        final values (Nat.le_trans bound prior.next) afterOwned h)
+  have trace := run_success_trace program fuel method pc args frame stack m final values h
+  clear h
+  induction trace with
+  | next step _ ih =>
+    have first := programStep_extends_allocations step
+    exact (first.below watermark bound).trans
+      (ih (Nat.le_trans bound first.next) (programStep_ownedAbove step bound owned))
+  | returned step _ =>
+    have first := (programStep_extends_allocations step).below watermark bound
+    exact first.trans ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
+      fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩
+  | call step _ enter _ _ _ childIH ih =>
+    have first := programStep_extends_allocations step
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have setup := first.trans fresh.1
+    have child := childIH (Nat.le_trans bound setup.next)
+      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
+    have prior := (setup.below watermark bound).trans child
+    exact prior.trans (ih (Nat.le_trans bound prior.next) owned)
+  | construct step _ enter _ _ _ _ childIH ih =>
+    have first := programStep_extends_allocations step
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have setup := first.trans fresh.1
+    have child := childIH (Nat.le_trans bound setup.next)
+      (fun id member => Nat.le_trans (Nat.le_trans bound first.next) (fresh.2 id member).1)
+    have prior := (setup.below watermark bound).trans child
+    exact prior.trans (ih (Nat.le_trans bound prior.next) (programStep_ownedAbove step bound owned))
 
 /-- A child may mutate caller bytes, but cannot expire or replace caller storage. -/
 theorem entered_run_preserves_caller_allocations (program : CIL.Program) (fuel method : Nat)
@@ -130,19 +93,8 @@ theorem invoke_preserves_caller_allocations (program : CIL.Program) (fuel method
     (args values : List Value) (m final : Memory)
     (h : invoke program fuel method args m = .ok (final, values)) :
     AllocationExtension m final := by
-  unfold invoke at h
-  cases hb : program[method]? with
-  | none => simp [hb] at h
-  | some body =>
-    cases ha : args.mapM (checkedValue m) <;>
-      simp only [hb, ha, Except.mapError, Bind.bind, Except.bind] at h
-    · cases h
-    · rename_i arguments
-      cases he : enterFrame body arguments m <;> simp only [he] at h
-      · cases h
-      · rename_i entered
-        obtain ⟨frame, memory⟩ := entered
-        exact entered_run_preserves_caller_allocations _ _ _ _ _ _ _ _ _ _ he h
+  obtain ⟨_, _, _, _, _, _, setup, executed⟩ := invoke_success_setup h
+  exact entered_run_preserves_caller_allocations _ _ _ _ _ _ _ _ _ _ setup executed
 
 theorem invoke_preserves_caller_reference (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory) (r formed : Reference) (hm : m.WellFormed)
@@ -151,23 +103,9 @@ theorem invoke_preserves_caller_reference (program : CIL.Program) (fuel method :
     form final r = .ok formed :=
   (invoke_preserves_caller_allocations _ _ _ _ _ _ _ h).preserves_reference hm r formed valid
 
-theorem programStep_extends_allocations {program : CIL.Program} {method pc : Nat}
-    {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : ProgramStep program method pc args frame stack m action) :
-    AllocationExtension m action.memory := by
-  obtain ⟨body, op, _, _, h⟩ := h
-  exact step_extends_allocations _ _ _ _ _ _ _ _ h
-
-theorem programStep_ownedAbove {program : CIL.Program} {method pc : Nat}
-    {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    {watermark : Nat} (h : ProgramStep program method pc args frame stack m action)
-    (bound : watermark ≤ m.nextIdentity) (owned : frame.OwnedAbove watermark) :
-    action.OwnedAbove watermark := by
-  obtain ⟨body, op, _, _, h⟩ := h
-  exact step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound h
-
 /-- Caller lifetimes are preserved even at prefixes of runs which later fault.
     Each observation uses actual fetched steps and actual nested execution. -/
+
 theorem runVisits_preserves_caller_allocations {program : CIL.Program} {fuel method pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m observed : Memory}
     (visit : RunVisits program fuel method pc args frame stack m observed)

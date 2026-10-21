@@ -12,32 +12,23 @@ theorem checkedValues_mapError_valid (m : Memory) (values result : List Value)
 
 /-- Normal results have passed the reference check after frame expiration.
     This includes results returning through arbitrary nested call chains. -/
+
 theorem run_result_valid (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     ValuesValid final values := by
-  induction fuel generalizing method pc args frame stack m final values with
-  | zero => cases h
-  | succ fuel ih =>
-    simp only [run] at h
-    repeat' first
-      | solve | apply ih; assumption
-      | solve | exact (checkedValues_valid _ _ _ (by assumption)).2
-      | solve | apply checkedValues_mapError_valid; assumption
-      | cases h
-      | split at h
-      | simp only [Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  have trace := run_success_trace program fuel method pc args frame stack m final values h
+  clear h
+  induction trace with
+  | returned _ checked => exact (checkedValues_valid _ _ _ checked).2
+  | next _ _ ih | call _ _ _ _ _ _ _ ih | construct _ _ _ _ _ _ _ _ ih => exact ih
 
 theorem invoke_result_valid (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory)
     (h : invoke program fuel method args m = .ok (final, values)) : ValuesValid final values := by
-  unfold invoke at h
-  repeat' first
-    | solve | apply run_result_valid; assumption
-    | cases h
-    | split at h
-    | simp only [Except.mapError, Bind.bind, Except.bind] at h
+  obtain ⟨_, _, _, _, _, _, _, executed⟩ := invoke_success_setup h
+  exact run_result_valid _ _ _ _ _ _ _ _ _ _ executed
 
 #print axioms run_result_valid
 #print axioms invoke_result_valid

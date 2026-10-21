@@ -41,113 +41,6 @@ theorem step_preserves_static_world (descriptors : List CIL.StaticDescriptor)
       | cases h
       | split at h
 
-theorem run_preserves_static_world (program : CIL.Program) (fuel method pc : Nat)
-    (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
-    (values : List Value) (hm : m.WellFormed)
-    (owns : FrameAllocations m frame.activation frame.owned)
-    (world : StaticWorldValid (programStaticDescriptors program) m)
-    (h : run program fuel method pc args frame stack m = .ok (final, values)) :
-    StaticWorldValid (programStaticDescriptors program) final := by
-  induction fuel generalizing method pc args frame stack m final values with
-  | zero => cases h
-  | succ fuel ih =>
-    cases hb : program[method]? with
-    | none => simp [run, hb] at h
-    | some body =>
-      cases ho : body.code[pc]? with
-      | none => simp [run, hb, ho] at h
-      | some op =>
-        cases hs : step body op pc args frame stack m with
-        | error fault => simp [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-        | ok action =>
-          have hw := step_preserves_wellFormed _ _ _ _ _ _ _ _ hm hs
-          have updated := step_preserves_static_world _ _ _ _ _ _ _ _ _ hm
-            (program_static_sites_valid _ _ _ hb) world hs
-          have ownership := step_preserves_frame_allocations _ _ _ _ _ _ _ _ hm owns hs
-          cases action with
-          | next target stack' frame' memory =>
-            simp only [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-            exact ih method target args frame' stack' memory final values hw ownership updated h
-          | returned result memory =>
-            cases hr : result.mapM (checkedValue (leaveFrame frame memory)) <;>
-              simp only [run, hb, ho, hs, hr, Except.mapError, Bind.bind, Except.bind,
-                Pure.pure, Except.pure] at h
-            · cases h
-            · cases h
-              exact leaveFrame_preserves_static_world _ _ _ ownership updated
-          | call callee arguments rest memory =>
-            cases hc : program[callee]? with
-            | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
-            | some child =>
-              cases he : enterFrame child arguments memory with
-              | error fault => simp [run, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
-              | ok entered =>
-                obtain ⟨childFrame, childMemory⟩ := entered
-                have childWF := enterFrame_preserves_wellFormed _ _ _ _ _ hw he
-                have childWorld := enterFrame_preserves_static_world _ _ _ _ _ _ hw updated he
-                have childOwn := enterFrame_owned _ _ _ _ _ he
-                cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
-                | error fault => simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
-                  have returnedWF := run_preserves_wellFormed _ _ _ _ _ _ _ _ _ _ childWF hr
-                  have returnedWorld := ih callee 0 arguments childFrame [] childMemory memory' result
-                    childWF childOwn childWorld hr
-                  have parentOwn := child_run_preserves_parent_frame _ _ _ _ _ _ _ _ _ _ _ hw ownership he hr
-                  simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                  exact ih method (pc + 1) args frame (result ++ rest) memory' final values
-                    returnedWF parentOwn returnedWorld h
-          | construct callee arguments rest frame' temporary kind memory =>
-            cases hc : program[callee]? with
-            | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
-            | some child =>
-              cases he : enterFrame child arguments memory with
-              | error fault => simp [run, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
-              | ok entered =>
-                obtain ⟨childFrame, childMemory⟩ := entered
-                have childWF := enterFrame_preserves_wellFormed _ _ _ _ _ hw he
-                have childWorld := enterFrame_preserves_static_world _ _ _ _ _ _ hw updated he
-                have childOwn := enterFrame_owned _ _ _ _ _ he
-                cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
-                | error fault => simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
-                  have returnedWF := run_preserves_wellFormed _ _ _ _ _ _ _ _ _ _ childWF hr
-                  have returnedWorld := ih callee 0 arguments childFrame [] childMemory memory' result
-                    childWF childOwn childWorld hr
-                  have parentOwn := child_run_preserves_parent_frame _ _ _ _ _ _ _ _ _ _ _ hw ownership he hr
-                  simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                  split at h
-                  · cases h
-                  · cases hl : loadLocal memory' (.bytes kind temporary) <;>
-                      simp only [hl] at h
-                    · cases h
-                    · rename_i value
-                      exact ih method (pc + 1) args frame' (value :: rest) memory' final values
-                        returnedWF parentOwn returnedWorld h
-
-theorem invoke_preserves_static_world (program : CIL.Program) (fuel method : Nat)
-    (args values : List Value) (m final : Memory) (hm : m.WellFormed)
-    (world : StaticWorldValid (programStaticDescriptors program) m)
-    (h : invoke program fuel method args m = .ok (final, values)) :
-    StaticWorldValid (programStaticDescriptors program) final := by
-  unfold invoke at h
-  cases hb : program[method]? with
-  | none => simp [hb] at h
-  | some body =>
-    cases ha : args.mapM (checkedValue m) <;>
-      simp only [hb, ha, Except.mapError, Bind.bind, Except.bind] at h
-    · cases h
-    · rename_i arguments
-      cases he : enterFrame body arguments m <;> simp only [he] at h
-      · cases h
-      · rename_i entered
-        obtain ⟨frame, memory⟩ := entered
-        exact run_preserves_static_world _ _ _ _ _ _ _ _ _ _
-          (enterFrame_preserves_wellFormed _ _ _ _ _ hm he)
-          (enterFrame_owned _ _ _ _ _ he)
-          (enterFrame_preserves_static_world _ _ _ _ _ _ hm world he) h
-
 theorem programStep_preserves_static_world {program : CIL.Program} {method pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (step : ProgramStep program method pc args frame stack m action) (hm : m.WellFormed)
@@ -165,8 +58,49 @@ theorem programStep_preserves_frame_allocations {program : CIL.Program} {method 
   obtain ⟨body, op, _, _, success⟩ := step
   exact step_preserves_frame_allocations _ _ _ _ _ _ _ _ hm owns success
 
+theorem run_preserves_static_world (program : CIL.Program) (fuel method pc : Nat)
+    (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
+    (values : List Value) (hm : m.WellFormed)
+    (owns : FrameAllocations m frame.activation frame.owned)
+    (world : StaticWorldValid (programStaticDescriptors program) m)
+    (h : run program fuel method pc args frame stack m = .ok (final, values)) :
+    StaticWorldValid (programStaticDescriptors program) final := by
+  have trace := run_success_trace program fuel method pc args frame stack m final values h
+  clear h
+  induction trace with
+  | next step _ ih =>
+    exact ih (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
+      (programStep_preserves_frame_allocations step hm owns)
+      (programStep_preserves_static_world step hm world)
+  | returned step _ =>
+    exact leaveFrame_preserves_static_world _ _ _
+      (programStep_preserves_frame_allocations step hm owns)
+      (programStep_preserves_static_world step hm world)
+  | call step _ enter finish _ _ childIH ih
+  | construct step _ enter finish _ _ _ childIH ih =>
+    have hw := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step
+    have updated := programStep_preserves_static_world step hm world
+    have ownership := programStep_preserves_frame_allocations step hm owns
+    have childWF := enterFrame_preserves_wellFormed _ _ _ _ _ hw enter
+    exact ih (run_preserves_wellFormed _ _ _ _ _ _ _ _ _ _ childWF finish)
+      (child_run_preserves_parent_frame _ _ _ _ _ _ _ _ _ _ _ hw ownership enter finish)
+      (childIH childWF (enterFrame_owned _ _ _ _ _ enter)
+        (enterFrame_preserves_static_world _ _ _ _ _ _ hw updated enter))
+
+theorem invoke_preserves_static_world (program : CIL.Program) (fuel method : Nat)
+    (args values : List Value) (m final : Memory) (hm : m.WellFormed)
+    (world : StaticWorldValid (programStaticDescriptors program) m)
+    (h : invoke program fuel method args m = .ok (final, values)) :
+    StaticWorldValid (programStaticDescriptors program) final := by
+  obtain ⟨_, _, _, _, _, _, setup, executed⟩ := invoke_success_setup h
+  exact run_preserves_static_world _ _ _ _ _ _ _ _ _ _
+    (enterFrame_preserves_wellFormed _ _ _ _ _ hm setup)
+    (enterFrame_owned _ _ _ _ _ setup)
+    (enterFrame_preserves_static_world _ _ _ _ _ _ hm world setup) executed
+
 /-- This invariant holds at actual instruction boundaries, nested calls and
     teardown, even when a later instruction faults. -/
+
 theorem runVisits_preserves_static_world {program : CIL.Program} {fuel method pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m observed : Memory}
     (visit : RunVisits program fuel method pc args frame stack m observed) (hm : m.WellFormed)
