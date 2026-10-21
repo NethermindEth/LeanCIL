@@ -1,6 +1,8 @@
-# Validation results
+# Validation coverage
 
-Baseline validated on Windows with .NET SDK **10.0.402** and Lean **4.35.0** on 2026-10-14. Loop extraction and termination proofs were validated with the same toolchains on 2026-10-15.
+For checked-step and loop tactics, see [proof automation](#proof-automation).
+
+The repository pins .NET SDK **10.0.402** and Lean **4.35.0**. The checks below cover semantic behavior, extracted contracts, artifact integrity and rejection cases.
 
 ```sh
 lake build
@@ -95,9 +97,9 @@ Struct construction validation: 56 runtime comparisons passed, covering packed a
 
 F# validation: 324 comparisons with actual .NET execution passed for addition, unsigned branching, managed calls, mutable structs and by-reference stores. The existing addition, store/load and constructor contracts passed unchanged against the F# assembly. Subtraction failed the addition contract, and a list-returning function was rejected during extraction. These examples require no F#-specific CIL semantics or proof shortcuts.
 
-## Verification follow-ups (2026-10-15)
+## Contracts and extraction evidence
 
-The combined contracts, loop automation, extraction evidence and memory-view branch passed the CIL, Semantics and Automation build (143 jobs), all 34 core checks, and the universal-contract suite. Choose and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect compiled implementation. Countdown validation passed with original instructions, inserted NOPs and reordered blocks, and rejected wrong results and nontermination.
+The core and universal-contract suites cover checked execution and memory preservation. Choose and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect compiled implementation. Countdown validation covers original instructions, inserted NOPs and reordered blocks, and rejects wrong results and nontermination.
 
 Extraction evidence validation passed 74 Lean regressions, 34 compiled certificate fixtures, 29 generated-evidence mutation rejections, and mandatory-certificate positive/negative checks. All six CLI checks passed, including kernel replay of imported helpers and rejection of unchecked direct/transitive proofs. These tests do not establish full raw-CIL/runtime correspondence.
 
@@ -105,4 +107,43 @@ The native extraction suite passed 2,511 runtime comparisons and kernel proofs, 
 
 Memory-view equivalence covers access, writes and subsequent checked execution, including calls, constructors and frame cleanup. At 128 alternating stores the benchmark retained one view rather than 129; median local kernel-reduction time was 5.6s versus 17.7s over three runs, including startup and shared-machine activity. These timings are illustrative, not a performance guarantee.
 
-After incorporating initialized-type assumptions from main, the initialized-types end-to-end test and all four mandatory-certificate audit cases passed. The resulting report records both schema-3 extraction audit and initialized-type assumptions. Analyzer rebuilds passed without IDE0005. The native stack's final CI matrix validates the complete rebased revision.
+The initialized-types end-to-end test and four mandatory-certificate audit cases check that verification reports record both the schema-3 extraction audit and initialized-type assumptions.
+
+## Proof automation
+
+The checked proof APIs share execution traces, frame-setup effects and instruction
+contracts. Their validity fields retain the required well-formedness and input
+validity hypotheses. See [Writing checked proofs](PROOFS.md) for API locations
+and examples.
+
+`Tests.Automation` checks an eight-instruction arithmetic method with symbolic
+inputs and arbitrary caller memory, using `cil_checked_steps`. Its instruction
+sequence is `arg, arg, const32, shl, add, const32, gtu, ret`; the theorem's axiom
+assertion permits only `propext` and `Quot.sound`. The same module checks both
+paths of a symbolic branch using a supplied truth hypothesis, and verifies that
+failed candidate summaries do not escape their transaction.
+
+`Tests.MethodEmbedding` checks transport of checked executions to actual method
+bodies with mapped program counters. `Tests.AggregateSetup` and `Tests.Semantics`
+cover frame setup and interpreter behavior. The extracted-loop suite checks
+universal countdown termination, NOP/reordered variants, runtime comparisons,
+incorrect/nondecreasing loop rejection, feature selection, infinite-loop fuel
+exhaustion, backward switch and malformed-input rejection.
+
+Run the focused Lean targets and extracted-loop suite with:
+
+```sh
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.AggregateSetup Tests.Semantics
+dotnet run --file scripts/Test.cs -- --suite loops
+```
+
+The loop suite builds a fresh verification library and performs kernel replay
+as part of extracted-loop verification. Use the full test command at the top
+of this document for the complete verification suite.
+
+When changing proof tactics or shared contracts, measure fresh elaboration of
+the library and its consumers, compiled artifact size, CPU time, peak process
+memory and kernel replay separately. Compile identical consumer sources against
+both revisions and alternate serial runs with prebuilt dependencies on the same
+machine. A smaller compiled proof alone does not establish a speed or memory
+improvement. Preserve the kernel replay, axiom audits and negative regressions.

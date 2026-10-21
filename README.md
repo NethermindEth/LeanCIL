@@ -419,13 +419,27 @@ code, so use this mode with packages you trust.
 | Values and instructions | `CIL.Types`, `CIL.Instructions`, `CIL.Layout` | Bit vectors, references, byte snapshots, validated aggregate layouts |
 | Execution | `CIL.Semantics`, `CIL.ExecutionLemmas` | Functional byte-memory interpreter, calls, finite fuel, result uniqueness |
 | Memory safety | `CIL.Safety.Memory`, `CIL.Safety.Execution` | Allocation-aware interpreter, access checks, initialization, permissions and lifetime |
-| Proofs | `CIL.Safety.Certificate`, `CIL.Verification` | Invariants, invocation certificates, total-correctness specifications and finite execution conditions |
-| Automation | `CIL.SymbolicExecution` | Kernel-checked instruction equations, symbolic stepping, transactional proved summaries |
+| Proofs | `CIL.Safety.ExecutionTrace`, `CIL.Safety.ExecutionInvariants`, `CIL.Safety.Certificate`, `CIL.Verification` | Shared execution traces and instruction contracts, invariants, invocation certificates and total-correctness specifications |
+| Automation | `CIL.Safety.SymbolicExecution`, `CIL.Safety.LoopAutomation`, `CIL.SymbolicExecution` | Checked instruction composition, loop segments, definitional reduction and transactional proved summaries |
 | Runtime features | `CIL.Features`, `CIL.SIMD.*`, `CIL.ProfileEquivalence` | Fixed capability profiles, supported SIMD semantics, justified profile equivalence |
 | Extraction | `Extractor/` | Metadata validation, managed-call reachability, CIL translation and Lean generation |
 | Verification | `leancil verify` | Source-keyed library cache, explicit fresh builds, kernel replay, theorem audit and assembly/source identity binding |
 
 **Use `CIL.Safety.invoke` for memory-safety claims.** Successful `CIL.invoke` alone does not establish allocation bounds or lifetime. The checked interpreter supports arbitrary admitted aggregate widths; the earlier interpreter retains explicitly named fixed vector-home operations and rejects the new general aggregate instructions. These are two defined models, not an unproved correspondence theorem between them.
+
+### Writing compact checked proofs
+
+Import `CIL.Safety.SymbolicExecution` and use `cil_checked_steps` to compose
+checked instruction steps. It first tries definitional equality when no facts
+are supplied, then uses local instruction equations and simplification as needed.
+For symbolic branches or memory operations, supply the proved conditions with
+`cil_checked_steps [facts]`. Loop segments use `CIL.Safety.LoopAutomation` and
+still require an invariant and a decreasing measure.
+
+The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
+contracts for framework proofs, and advice on avoiding repeated interpreter
+expansion. See [proof automation validation](docs/VALIDATION.md#proof-automation)
+for the regression coverage and commands to run it.
 
 ## Worked example: addition
 

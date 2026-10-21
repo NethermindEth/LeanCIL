@@ -65,6 +65,25 @@ Scope and limits:
 
 `cil_embed` (`CIL.Embedding.Tactic`) computes the map outside the kernel by aligning live instructions, following fallthroughs and branch targets. The alignment is untrusted: the proof term passes the map to `Embeds.mk` with every field closed by `Eq.refl`, and the kernel checks it against the body reduced from `program[index]?`. A wrong map can only make the kernel reject the proof. Before building the proof, the tactic evaluates the same conditions and reports the first violated one.
 
+## Shared proof contracts and reduction
+
+`RunTrace` exposes the four successful control-flow cases of checked execution.
+`FrameSetup` composes setup effects, while `InstructionContract`,
+`StaticInstructionContract` and `StepContract` combine effects and conditional
+value-validity results. Their constructors and theorems are kernel checked;
+clients retain the original well-formedness and validity hypotheses. Sharing
+these proofs changes neither the interpreter definitions nor the trusted base.
+
+Checked symbolic execution composes proved instruction equations. Its `rfl`
+path uses definitional equality checked by the kernel; equation rewriting and
+simplification also produce checked proof terms. Return candidates are limited
+to fetched return instructions, and fact-dependent steps retain their explicit
+hypotheses. These tactics cannot turn an unresolved obligation or failed
+candidate into a correctness certificate. See [the proof guide](PROOFS.md) for
+their use and [validation coverage](VALIDATION.md#proof-automation).
+Compiled artifact size and elaboration speed do not change
+the theorem's logical guarantee.
+
 ## Runtime assumptions
 
 The supported runtime convention is 64-bit, little-endian .NET 10, with fixed hardware capability flags throughout execution. ISA-specific instructions require their declared features; portable vector operations use the supplied software semantics. A selected profile describes runtime-visible availability, including runtime/OS disabling, not merely physical CPU features.

@@ -38,6 +38,25 @@ Fixed-vector helpers remain separate: `vectorArg`, `vectorLocal`, their address/
 7. Select hardware profiles explicitly. Reuse proofs across profiles only with the generic profile-agreement theorems.
 8. Bind the final named theorem to the compiled assembly using the verification driver, and retain negative and stale-artifact regressions.
 
+## Updating existing proofs
+
+Pin a tested revision, rebuild dependencies, and recheck consumer proofs against
+it. Use `cil_checked_steps`, `cil_loop_steps` and `cil_loop_finish` for checked
+instruction composition; their shared step helper handles definitional
+reduction and instruction-equation selection.
+
+For handwritten proofs that repeatedly simplify `run` or the complete `step`
+dispatcher, use the composition lemmas in `CIL.Safety.StepComposition` and
+`CIL.Safety.CallComposition`, or the checked tactics. Keep branch and memory
+hypotheses explicit. Framework invariant proofs can reuse `RunTrace`,
+`FrameSetup` and the instruction/step contracts instead of repeating the same
+case analysis. See [Writing checked proofs](PROOFS.md) for examples and API locations.
+
+Measure consumer elaboration and kernel replay after upgrading as well as
+library artifact size; moving work out of an imported proof can expose repeated
+work in its callers. See [proof automation validation](VALIDATION.md#proof-automation)
+for the regression coverage.
+
 ## Extension points
 
 Loops are now extractable: reachable branch and switch backedges use fixed-point feature reachability and stack-join validation. Recursive calls remain unsupported. Regenerate artifacts when upgrading. `CIL.Safety.Loops` provides `LoopState`, `LoopSegment`, `LoopTerminates` and `loop_terminates`; `CIL.Verification.ensures_of_loop` connects successful loop execution and frame setup to total correctness. Proofs supply their own invariant and decreasing measure. The existing instruction-count `executionBound` remains only a candidate budget and is generally insufficient for input-dependent loops.
