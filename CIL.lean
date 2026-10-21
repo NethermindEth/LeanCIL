@@ -46,6 +46,7 @@ import CIL.Safety.Certificate
 import CIL.Safety.ConstructComposition
 import CIL.Safety.ConstructSetup
 import CIL.Safety.Execution
+import CIL.Safety.ExecutionTrace
 import CIL.Safety.ExecutionAllocations
 import CIL.Safety.ExecutionFrameOwnership
 import CIL.Safety.ExecutionInvariants

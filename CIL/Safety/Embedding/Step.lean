@@ -155,7 +155,9 @@ macro "step_relabel_fallback" base:term:max plain:term:max : tactic => `(tactic|
   unfold step at h ⊢
   dsimp only [CIL.Op.relabel] at h ⊢
   rw [context.profile]
-  exact fallback_relabel (profile := expected.profile) _ rfl $base $plain context.next h))
+  refine fallback_relabel (profile := expected.profile) _ rfl ?_ ?_ context.next h
+  · exact $base
+  · exact $plain))
 
 theorem except_bind_ok {x : Except ε α} {f : α → Except ε β} {y : β} (h : (x >>= f) = .ok y) :
     ∃ a, x = .ok a ∧ f a = .ok y := by
@@ -238,57 +240,6 @@ theorem step_relabel_checkedConvert (width : Nat) (signed unsignedInput : Bool) 
   stack_cases
   all_goals first | fallback_vacuous | lockstep
 
-theorem step_relabel_nop : StepRelabel .nop := by
-  step_relabel_fallback (fun _ => base_relabel_nop) (fun absent => nomatch absent)
-
-theorem step_relabel_neg : StepRelabel .neg := by
-  step_relabel_fallback (fun _ => base_relabel_neg) (fun absent => nomatch absent)
-
-theorem step_relabel_gt : StepRelabel .gt := by
-  step_relabel_fallback (fun _ => base_relabel_gt) (fun absent => nomatch absent)
-
-theorem step_relabel_bgt (target : Nat) : StepRelabel (.bgt target) := by
-  step_relabel_fallback (fun _ => base_relabel_bgt target) (fun absent => nomatch absent)
-
-theorem step_relabel_ble (target : Nat) : StepRelabel (.ble target) := by
-  step_relabel_fallback (fun _ => base_relabel_ble target) (fun absent => nomatch absent)
-
-theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
-  step_relabel_fallback (fun _ => base_relabel_bleu target) (fun absent => nomatch absent)
-
-theorem step_relabel_loadAggregate (size : Nat) : StepRelabel (.loadAggregate size) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_copyObject (size : Nat) : StepRelabel (.copyObject size) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_storeAggregate (size : Nat) : StepRelabel (.storeAggregate size) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_initAggregate (size : Nat) : StepRelabel (.initAggregate size) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_loadScalar (width : Nat) (signed : Bool) : StepRelabel (.loadScalar width signed) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_storeScalar (width : Nat) : StepRelabel (.storeScalar width) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_fieldAt (offset : Nat) (width : Nat) (signed : Bool) : StepRelabel (.fieldAt offset width signed) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_fieldAddress (offset : Nat) : StepRelabel (.fieldAddress offset) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_setFieldAt (offset : Nat) (width : Nat) : StepRelabel (.setFieldAt offset width) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_aggregateFieldAt (offset : Nat) (size : Nat) : StepRelabel (.aggregateFieldAt offset size) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_setAggregateFieldAt (offset : Nat) (size : Nat) : StepRelabel (.setAggregateFieldAt offset size) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
 theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) : StepRelabel (.arg index narrow) := by
   plain_cases
   cases narrow <;> dsimp only at h ⊢ <;> lookup_lockstep
@@ -325,135 +276,6 @@ theorem step_relabel_setLocal (index : Nat) (narrow : Option NarrowKind) : StepR
   stack_cases
   all_goals first | fallback_vacuous | lookup_lockstep
 
-theorem step_relabel_lane (index : Fin 4) : StepRelabel (.lane index) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_laneAddress (index : Fin 4) : StepRelabel (.laneAddress index) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_setLane (index : Fin 4) : StepRelabel (.setLane index) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_const32 (word : W32) : StepRelabel (.const32 word) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_const64 (word : W64) : StepRelabel (.const64 word) := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_convI1 : StepRelabel .convI1 := by
-  step_relabel_fallback (fun _ => base_relabel_convI1) (fun absent => nomatch absent)
-
-theorem step_relabel_convI2 : StepRelabel .convI2 := by
-  step_relabel_fallback (fun _ => base_relabel_convI2) (fun absent => nomatch absent)
-
-theorem step_relabel_convU2 : StepRelabel .convU2 := by
-  step_relabel_fallback (fun _ => base_relabel_convU2) (fun absent => nomatch absent)
-
-theorem step_relabel_convI8 : StepRelabel .convI8 := by
-  step_relabel_fallback (fun _ => base_relabel_convI8) (fun absent => nomatch absent)
-
-theorem step_relabel_convI4 : StepRelabel .convI4 := by
-  step_relabel_fallback (fun _ => base_relabel_convI4) (fun absent => nomatch absent)
-
-theorem step_relabel_convU1 : StepRelabel .convU1 := by
-  step_relabel_fallback (fun _ => base_relabel_convU1) (fun absent => nomatch absent)
-
-theorem step_relabel_convU4 : StepRelabel .convU4 := by
-  step_relabel_fallback (fun _ => base_relabel_convU4) (fun absent => nomatch absent)
-
-theorem step_relabel_convU8 : StepRelabel .convU8 := by
-  step_relabel_fallback (fun _ => base_relabel_convU8) (fun absent => nomatch absent)
-
-theorem step_relabel_convU : StepRelabel .convU := by
-  step_relabel_fallback (fun _ => base_relabel_convU) (fun absent => nomatch absent)
-
-theorem step_relabel_bnot : StepRelabel .bnot := by
-  step_relabel_fallback (fun _ => base_relabel_bnot) (fun absent => nomatch absent)
-
-theorem step_relabel_add : StepRelabel .add := by
-  step_relabel_fallback (fun _ => base_relabel_add) (fun absent => nomatch absent)
-
-theorem step_relabel_sub : StepRelabel .sub := by
-  step_relabel_fallback (fun _ => base_relabel_sub) (fun absent => nomatch absent)
-
-theorem step_relabel_mul : StepRelabel .mul := by
-  step_relabel_fallback (fun _ => base_relabel_mul) (fun absent => nomatch absent)
-
-theorem step_relabel_band : StepRelabel .band := by
-  step_relabel_fallback (fun _ => base_relabel_band) (fun absent => nomatch absent)
-
-theorem step_relabel_bor : StepRelabel .bor := by
-  step_relabel_fallback (fun _ => base_relabel_bor) (fun absent => nomatch absent)
-
-theorem step_relabel_bxor : StepRelabel .bxor := by
-  step_relabel_fallback (fun _ => base_relabel_bxor) (fun absent => nomatch absent)
-
-theorem step_relabel_shl : StepRelabel .shl := by
-  step_relabel_fallback (fun _ => base_relabel_shl) (fun absent => nomatch absent)
-
-theorem step_relabel_shr : StepRelabel .shr := by
-  step_relabel_fallback (fun _ => base_relabel_shr) (fun absent => nomatch absent)
-
-theorem step_relabel_shrUn : StepRelabel .shrUn := by
-  step_relabel_fallback (fun _ => base_relabel_shrUn) (fun absent => nomatch absent)
-
-theorem step_relabel_lt : StepRelabel .lt := by
-  step_relabel_fallback (fun _ => base_relabel_lt) (fun absent => nomatch absent)
-
-theorem step_relabel_ltu : StepRelabel .ltu := by
-  step_relabel_fallback (fun _ => base_relabel_ltu) (fun absent => nomatch absent)
-
-theorem step_relabel_gtu : StepRelabel .gtu := by
-  step_relabel_fallback (fun _ => base_relabel_gtu) (fun absent => nomatch absent)
-
-theorem step_relabel_eq : StepRelabel .eq := by
-  step_relabel_fallback (fun _ => base_relabel_eq) (fun absent => nomatch absent)
-
-theorem step_relabel_load64 : StepRelabel .load64 := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_store64 : StepRelabel .store64 := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_dup : StepRelabel .dup := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_pop : StepRelabel .pop := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_branch (target : Nat) : StepRelabel (.branch target) := by
-  step_relabel_fallback (fun _ => base_relabel_branch target) (fun absent => nomatch absent)
-
-theorem step_relabel_switch (targets : List Nat) : StepRelabel (.switch targets) := by
-  step_relabel_fallback (fun _ => base_relabel_switch targets) (fun absent => nomatch absent)
-
-theorem step_relabel_brzero (target : Nat) : StepRelabel (.brzero target) := by
-  step_relabel_fallback (fun _ => base_relabel_brzero target) (fun absent => nomatch absent)
-
-theorem step_relabel_brnonzero (target : Nat) : StepRelabel (.brnonzero target) := by
-  step_relabel_fallback (fun _ => base_relabel_brnonzero target) (fun absent => nomatch absent)
-
-theorem step_relabel_bltu (target : Nat) : StepRelabel (.bltu target) := by
-  step_relabel_fallback (fun _ => base_relabel_bltu target) (fun absent => nomatch absent)
-
-theorem step_relabel_bgeu (target : Nat) : StepRelabel (.bgeu target) := by
-  step_relabel_fallback (fun _ => base_relabel_bgeu target) (fun absent => nomatch absent)
-
-theorem step_relabel_bgtu (target : Nat) : StepRelabel (.bgtu target) := by
-  step_relabel_fallback (fun _ => base_relabel_bgtu target) (fun absent => nomatch absent)
-
-theorem step_relabel_bge (target : Nat) : StepRelabel (.bge target) := by
-  step_relabel_fallback (fun _ => base_relabel_bge target) (fun absent => nomatch absent)
-
-theorem step_relabel_blt (target : Nat) : StepRelabel (.blt target) := by
-  step_relabel_fallback (fun _ => base_relabel_blt target) (fun absent => nomatch absent)
-
-theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := by
-  step_relabel_fallback (fun _ => base_relabel_beq target) (fun absent => nomatch absent)
-
-theorem step_relabel_bne (target : Nat) : StepRelabel (.bne target) := by
-  step_relabel_fallback (fun _ => base_relabel_bne target) (fun absent => nomatch absent)
-
 theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) := by
   plain_cases
   by_cases short : stack.length < argc
@@ -475,15 +297,6 @@ theorem step_relabel_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
   · simp only [short, ↓reduceIte] at h; cases h
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
     lockstep
-
-theorem step_relabel_skipInit : StepRelabel .skipInit := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_asRef : StepRelabel .asRef := by
-  step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
-
-theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := by
-  step_relabel_fallback (fun _ => base_relabel_feature id) (fun absent => nomatch absent)
 
 theorem step_relabel_intrinsic (operation : Intrinsic) (argc : Nat) : StepRelabel (.intrinsic operation argc) := by
   explicit_intro
@@ -530,30 +343,16 @@ theorem step_relabel_unsupported (description : String) : StepRelabel (.unsuppor
   plain_cases
   fallback_vacuous
 
-/-- Every instruction steps in lockstep with its relabeled form. -/
+/-- Every instruction steps in lockstep with its relabeled form. Pure operations
+    share the base-step contract; ordinary memory operations share an unchanged
+    instruction result. Dedicated dispatcher cases retain their own proofs. -/
+
 theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   cases op
   case nativeBinary operation => exact step_relabel_nativeBinary operation
   case divide signed remainder => exact step_relabel_divide signed remainder
   case checkedArithmetic kind signed => exact step_relabel_checkedArithmetic kind signed
   case checkedConvert width signed unsignedInput => exact step_relabel_checkedConvert width signed unsignedInput
-  case nop => exact step_relabel_nop
-  case neg => exact step_relabel_neg
-  case gt => exact step_relabel_gt
-  case bgt target => exact step_relabel_bgt target
-  case ble target => exact step_relabel_ble target
-  case bleu target => exact step_relabel_bleu target
-  case loadAggregate size => exact step_relabel_loadAggregate size
-  case copyObject size => exact step_relabel_copyObject size
-  case storeAggregate size => exact step_relabel_storeAggregate size
-  case initAggregate size => exact step_relabel_initAggregate size
-  case loadScalar width signed => exact step_relabel_loadScalar width signed
-  case storeScalar width => exact step_relabel_storeScalar width
-  case fieldAt offset width signed => exact step_relabel_fieldAt offset width signed
-  case fieldAddress offset => exact step_relabel_fieldAddress offset
-  case setFieldAt offset width => exact step_relabel_setFieldAt offset width
-  case aggregateFieldAt offset size => exact step_relabel_aggregateFieldAt offset size
-  case setAggregateFieldAt offset size => exact step_relabel_setAggregateFieldAt offset size
   case arg index narrow => exact step_relabel_arg index narrow
   case vectorArg index => exact step_relabel_vectorArg index
   case vectorArgAddr index => exact step_relabel_vectorArgAddr index
@@ -563,59 +362,101 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case setVectorLocal index => exact step_relabel_setVectorLocal index
   case localAddr index => exact step_relabel_localAddr index
   case setLocal index narrow => exact step_relabel_setLocal index narrow
-  case lane index => exact step_relabel_lane index
-  case laneAddress index => exact step_relabel_laneAddress index
-  case setLane index => exact step_relabel_setLane index
-  case const32 word => exact step_relabel_const32 word
-  case const64 word => exact step_relabel_const64 word
-  case convI1 => exact step_relabel_convI1
-  case convI2 => exact step_relabel_convI2
-  case convU2 => exact step_relabel_convU2
-  case convI8 => exact step_relabel_convI8
-  case convI4 => exact step_relabel_convI4
-  case convU1 => exact step_relabel_convU1
-  case convU4 => exact step_relabel_convU4
-  case convU8 => exact step_relabel_convU8
-  case convU => exact step_relabel_convU
-  case bnot => exact step_relabel_bnot
-  case add => exact step_relabel_add
-  case sub => exact step_relabel_sub
-  case mul => exact step_relabel_mul
-  case band => exact step_relabel_band
-  case bor => exact step_relabel_bor
-  case bxor => exact step_relabel_bxor
-  case shl => exact step_relabel_shl
-  case shr => exact step_relabel_shr
-  case shrUn => exact step_relabel_shrUn
-  case lt => exact step_relabel_lt
-  case ltu => exact step_relabel_ltu
-  case gtu => exact step_relabel_gtu
-  case eq => exact step_relabel_eq
-  case load64 => exact step_relabel_load64
-  case store64 => exact step_relabel_store64
-  case dup => exact step_relabel_dup
-  case pop => exact step_relabel_pop
-  case branch target => exact step_relabel_branch target
-  case switch targets => exact step_relabel_switch targets
-  case brzero target => exact step_relabel_brzero target
-  case brnonzero target => exact step_relabel_brnonzero target
-  case bltu target => exact step_relabel_bltu target
-  case bgeu target => exact step_relabel_bgeu target
-  case bgtu target => exact step_relabel_bgtu target
-  case bge target => exact step_relabel_bge target
-  case blt target => exact step_relabel_blt target
-  case beq target => exact step_relabel_beq target
-  case bne target => exact step_relabel_bne target
   case call method argc => exact step_relabel_call method argc
   case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
-  case skipInit => exact step_relabel_skipInit
-  case asRef => exact step_relabel_asRef
-  case feature id => exact step_relabel_feature id
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
   case ret narrow => exact step_relabel_ret narrow
   case unsupported description => exact step_relabel_unsupported description
+  case nop | neg | gt | bgt | ble | bleu | convI1 | convI2 | convU2 | convI8 | convI4 | convU1 | convU4
+    | convU8 | convU | bnot | add | sub | mul | band | bor | bxor | shl | shr | shrUn | lt | ltu | gtu | eq
+    | branch | switch | brzero | brnonzero | bltu | bgeu | bgtu | bge | blt | beq | bne | feature =>
+    step_relabel_fallback (fun _ => by
+      solve_by_elim [base_relabel_nop, base_relabel_neg, base_relabel_gt, base_relabel_bgt, base_relabel_ble,
+        base_relabel_bleu, base_relabel_convI1, base_relabel_convI2, base_relabel_convU2,
+        base_relabel_convI8, base_relabel_convI4, base_relabel_convU1, base_relabel_convU4,
+        base_relabel_convU8, base_relabel_convU, base_relabel_bnot, base_relabel_add, base_relabel_sub,
+        base_relabel_mul, base_relabel_band, base_relabel_bor, base_relabel_bxor, base_relabel_shl,
+        base_relabel_shr, base_relabel_shrUn, base_relabel_lt, base_relabel_ltu, base_relabel_gtu,
+        base_relabel_eq, base_relabel_branch, base_relabel_switch, base_relabel_brzero,
+        base_relabel_brnonzero, base_relabel_bltu, base_relabel_bgeu, base_relabel_bgtu, base_relabel_bge,
+        base_relabel_blt, base_relabel_beq, base_relabel_bne, base_relabel_feature]) (fun absent => nomatch absent)
+  case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar | fieldAt
+    | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | lane | laneAddress | setLane
+    | const32 | const64 | load64 | store64 | dup | pop | skipInit | asRef =>
+    step_relabel_fallback (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
+-- Preserve the named specializations for callers of the existing API.
+theorem step_relabel_nop : StepRelabel .nop := step_relabel _
+theorem step_relabel_neg : StepRelabel .neg := step_relabel _
+theorem step_relabel_gt : StepRelabel .gt := step_relabel _
+theorem step_relabel_bgt (target : Nat) : StepRelabel (.bgt target) := step_relabel _
+theorem step_relabel_ble (target : Nat) : StepRelabel (.ble target) := step_relabel _
+theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := step_relabel _
+theorem step_relabel_loadAggregate (size : Nat) : StepRelabel (.loadAggregate size) := step_relabel _
+theorem step_relabel_copyObject (size : Nat) : StepRelabel (.copyObject size) := step_relabel _
+theorem step_relabel_storeAggregate (size : Nat) : StepRelabel (.storeAggregate size) := step_relabel _
+theorem step_relabel_initAggregate (size : Nat) : StepRelabel (.initAggregate size) := step_relabel _
+theorem step_relabel_loadScalar (width : Nat) (signed : Bool) : StepRelabel (.loadScalar width signed) := step_relabel _
+theorem step_relabel_storeScalar (width : Nat) : StepRelabel (.storeScalar width) := step_relabel _
+theorem step_relabel_fieldAt (offset : Nat) (width : Nat) (signed : Bool) : StepRelabel (.fieldAt offset width signed) :=
+  step_relabel _
 
+theorem step_relabel_fieldAddress (offset : Nat) : StepRelabel (.fieldAddress offset) := step_relabel _
+theorem step_relabel_setFieldAt (offset : Nat) (width : Nat) : StepRelabel (.setFieldAt offset width) := step_relabel _
+theorem step_relabel_aggregateFieldAt (offset : Nat) (size : Nat) : StepRelabel (.aggregateFieldAt offset size) :=
+  step_relabel _
+
+theorem step_relabel_setAggregateFieldAt (offset : Nat) (size : Nat) : StepRelabel (.setAggregateFieldAt offset size) :=
+  step_relabel _
+
+theorem step_relabel_lane (index : Fin 4) : StepRelabel (.lane index) := step_relabel _
+theorem step_relabel_laneAddress (index : Fin 4) : StepRelabel (.laneAddress index) := step_relabel _
+theorem step_relabel_setLane (index : Fin 4) : StepRelabel (.setLane index) := step_relabel _
+theorem step_relabel_const32 (word : W32) : StepRelabel (.const32 word) := step_relabel _
+theorem step_relabel_const64 (word : W64) : StepRelabel (.const64 word) := step_relabel _
+theorem step_relabel_convI1 : StepRelabel .convI1 := step_relabel _
+theorem step_relabel_convI2 : StepRelabel .convI2 := step_relabel _
+theorem step_relabel_convU2 : StepRelabel .convU2 := step_relabel _
+theorem step_relabel_convI8 : StepRelabel .convI8 := step_relabel _
+theorem step_relabel_convI4 : StepRelabel .convI4 := step_relabel _
+theorem step_relabel_convU1 : StepRelabel .convU1 := step_relabel _
+theorem step_relabel_convU4 : StepRelabel .convU4 := step_relabel _
+theorem step_relabel_convU8 : StepRelabel .convU8 := step_relabel _
+theorem step_relabel_convU : StepRelabel .convU := step_relabel _
+theorem step_relabel_bnot : StepRelabel .bnot := step_relabel _
+theorem step_relabel_add : StepRelabel .add := step_relabel _
+theorem step_relabel_sub : StepRelabel .sub := step_relabel _
+theorem step_relabel_mul : StepRelabel .mul := step_relabel _
+theorem step_relabel_band : StepRelabel .band := step_relabel _
+theorem step_relabel_bor : StepRelabel .bor := step_relabel _
+theorem step_relabel_bxor : StepRelabel .bxor := step_relabel _
+theorem step_relabel_shl : StepRelabel .shl := step_relabel _
+theorem step_relabel_shr : StepRelabel .shr := step_relabel _
+theorem step_relabel_shrUn : StepRelabel .shrUn := step_relabel _
+theorem step_relabel_lt : StepRelabel .lt := step_relabel _
+theorem step_relabel_ltu : StepRelabel .ltu := step_relabel _
+theorem step_relabel_gtu : StepRelabel .gtu := step_relabel _
+theorem step_relabel_eq : StepRelabel .eq := step_relabel _
+theorem step_relabel_load64 : StepRelabel .load64 := step_relabel _
+theorem step_relabel_store64 : StepRelabel .store64 := step_relabel _
+theorem step_relabel_dup : StepRelabel .dup := step_relabel _
+theorem step_relabel_pop : StepRelabel .pop := step_relabel _
+theorem step_relabel_branch (target : Nat) : StepRelabel (.branch target) := step_relabel _
+theorem step_relabel_switch (targets : List Nat) : StepRelabel (.switch targets) := step_relabel _
+theorem step_relabel_brzero (target : Nat) : StepRelabel (.brzero target) := step_relabel _
+theorem step_relabel_brnonzero (target : Nat) : StepRelabel (.brnonzero target) := step_relabel _
+theorem step_relabel_bltu (target : Nat) : StepRelabel (.bltu target) := step_relabel _
+theorem step_relabel_bgeu (target : Nat) : StepRelabel (.bgeu target) := step_relabel _
+theorem step_relabel_bgtu (target : Nat) : StepRelabel (.bgtu target) := step_relabel _
+theorem step_relabel_bge (target : Nat) : StepRelabel (.bge target) := step_relabel _
+theorem step_relabel_blt (target : Nat) : StepRelabel (.blt target) := step_relabel _
+theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := step_relabel _
+theorem step_relabel_bne (target : Nat) : StepRelabel (.bne target) := step_relabel _
+theorem step_relabel_skipInit : StepRelabel .skipInit := step_relabel _
+theorem step_relabel_asRef : StepRelabel .asRef := step_relabel _
+theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_relabel _
+
+#print axioms step_relabel
 end CIL.Safety

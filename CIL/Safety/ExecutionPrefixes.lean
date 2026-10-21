@@ -1,19 +1,6 @@
 import CIL.Safety.ExecutionInvariants
 namespace CIL.Safety
 
-/-- A step at an actual fetched instruction, not an arbitrary instruction body. -/
-def ProgramStep (program : CIL.Program) (method pc : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) (m : Memory) (action : FrameAction) : Prop :=
-  ∃ body op, program[method]? = some body ∧ body.code[pc]? = some op ∧
-    step body op pc args frame stack m = .ok action
-
-theorem programStep_preserves_wellFormed (program : CIL.Program) (method pc : Nat)
-    (args : List Value) (frame : Frame) (stack : List Value) (m : Memory) (action : FrameAction)
-    (hm : m.WellFormed) (hs : ProgramStep program method pc args frame stack m action) :
-    action.memory.WellFormed := by
-  obtain ⟨body, op, _, _, hs⟩ := hs
-  exact step_preserves_wellFormed _ _ _ _ _ _ _ _ hm hs
-
 /-- A nested call or constructor invokes exactly these captured arguments. -/
 def FrameAction.child (action : FrameAction) (callee : Nat) (arguments : List Value) : Prop :=
   (∃ rest, action = .call callee arguments rest action.memory) ∨
@@ -98,68 +85,14 @@ theorem run_success_visits (program : CIL.Program) (fuel method pc : Nat)
     (values : List Value)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     RunVisits program fuel method pc args frame stack m final := by
-  induction fuel generalizing method pc args frame stack m final values with
-  | zero => cases h
-  | succ fuel ih =>
-    cases hb : program[method]? with
-    | none => simp [run, hb] at h
-    | some body =>
-      cases ho : body.code[pc]? with
-      | none => simp [run, hb, ho] at h
-      | some op =>
-        cases hs : step body op pc args frame stack m with
-        | error fault => simp [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-        | ok action =>
-          have actual : ProgramStep program method pc args frame stack m action := ⟨body, op, hb, ho, hs⟩
-          cases action with
-          | next target stack' frame' memory =>
-            simp only [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-            exact .next actual (ih method target args frame' stack' memory final values h)
-          | returned result memory =>
-            cases hr : result.mapM (checkedValue (leaveFrame frame memory)) <;>
-              simp only [run, hb, ho, hs, hr, Except.mapError, Bind.bind, Except.bind,
-                Pure.pure, Except.pure] at h
-            · cases h
-            · cases h
-              exact .expired actual
-          | call callee arguments rest memory =>
-            cases hc : program[callee]? with
-            | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
-            | some child =>
-              cases he : enterFrame child arguments memory with
-              | error fault => simp [run, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
-              | ok entered =>
-                obtain ⟨childFrame, childMemory⟩ := entered
-                cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
-                | error fault => simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
-                  simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                  exact .callContinue actual hc he hr
-                    (ih method (pc + 1) args frame (result ++ rest) memory' final values h)
-          | construct callee arguments rest frame' temporary kind memory =>
-            cases hc : program[callee]? with
-            | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
-            | some child =>
-              cases he : enterFrame child arguments memory with
-              | error fault => simp [run, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
-              | ok entered =>
-                obtain ⟨childFrame, childMemory⟩ := entered
-                cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
-                | error fault => simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
-                  simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                  cases result with
-                  | cons value rest' => simp at h
-                  | nil =>
-                    simp only [List.isEmpty_nil, Bool.not_true, Bool.false_eq_true, ite_false] at h
-                    cases hl : loadLocal memory' (.bytes kind temporary) <;>
-                      simp only [hl] at h
-                    · cases h
-                    · rename_i value
-                      exact .constructContinue actual hc he hr hl
-                        (ih method (pc + 1) args frame' (value :: rest) memory' final values h)
+  have trace := run_success_trace program fuel method pc args frame stack m final values h
+  clear h
+  induction trace with
+  | next step _ ih => exact .next step ih
+  | returned step _ => exact .expired step
+  | call step lookup enter finish _ _ _ ih => exact .callContinue step lookup enter finish ih
+  | construct step lookup enter finish _ load _ _ ih =>
+    exact .constructContinue step lookup enter finish load ih
 
 #print axioms run_success_visits
 end CIL.Safety

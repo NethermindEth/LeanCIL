@@ -1,4 +1,4 @@
-import CIL.Safety.Execution
+import CIL.Safety.ExecutionTrace
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.StaticMemoryLemmas
 namespace CIL.Safety
@@ -31,93 +31,39 @@ theorem step_preserves_wellFormed (body : CIL.Method) (operation : CIL.Op) (pc :
 
 #print axioms step_preserves_wellFormed
 
+theorem programStep_preserves_wellFormed (program : CIL.Program) (method pc : Nat)
+    (args : List Value) (frame : Frame) (stack : List Value) (m : Memory) (action : FrameAction)
+    (hm : m.WellFormed) (hs : ProgramStep program method pc args frame stack m action) :
+    action.memory.WellFormed := by
+  obtain ⟨body, op, _, _, hs⟩ := hs
+  exact step_preserves_wellFormed _ _ _ _ _ _ _ _ hm hs
+
 theorem run_preserves_wellFormed (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value) (hm : m.WellFormed)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     final.WellFormed := by
-  induction fuel generalizing method pc args frame stack m final values with
-  | zero => cases h
-  | succ fuel ih =>
-    cases hb : program[method]? with
-    | none => simp [run, hb] at h
-    | some body =>
-      cases ho : body.code[pc]? with
-      | none => simp [run, hb, ho] at h
-      | some op =>
-        cases hs : step body op pc args frame stack m with
-        | error fault => simp [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-        | ok action =>
-          have hw := step_preserves_wellFormed _ _ _ _ _ _ _ _ hm hs
-          cases action with
-          | next target stack' frame' memory =>
-            simp only [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-            exact ih method target args frame' stack' memory final values hw h
-          | returned result memory =>
-            cases hr : result.mapM (checkedValue (leaveFrame frame memory)) <;>
-              simp only [run, hb, ho, hs, hr, Except.mapError, Bind.bind, Except.bind,
-                Pure.pure, Except.pure] at h
-            · cases h
-            · cases h
-              exact leaveFrame_preserves_wellFormed _ _ hw
-          | call callee arguments rest memory =>
-            cases hc : program[callee]? with
-            | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
-            | some child =>
-              cases he : enterFrame child arguments memory with
-              | error fault => simp [run, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
-              | ok entered =>
-                obtain ⟨childFrame, childMemory⟩ := entered
-                have childWF := enterFrame_preserves_wellFormed _ _ _ _ _ hw he
-                cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
-                | error fault => simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
-                  have returnedWF := ih callee 0 arguments childFrame [] childMemory memory' result childWF hr
-                  simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                  exact ih method (pc + 1) args frame (result ++ rest) memory' final values returnedWF h
-          | construct callee arguments rest frame' temporary kind memory =>
-            cases hc : program[callee]? with
-            | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
-            | some child =>
-              cases he : enterFrame child arguments memory with
-              | error fault => simp [run, hb, ho, hs, hc, he, Except.mapError, Bind.bind, Except.bind] at h
-              | ok entered =>
-                obtain ⟨childFrame, childMemory⟩ := entered
-                have childWF := enterFrame_preserves_wellFormed _ _ _ _ _ hw he
-                cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
-                | error fault => simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
-                  have returnedWF := ih callee 0 arguments childFrame [] childMemory memory' result childWF hr
-                  simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
-                  split at h
-                  · cases h
-                  · cases hl : loadLocal memory' (.bytes kind temporary) <;>
-                      simp only [hl] at h
-                    · cases h
-                    · rename_i value
-                      exact ih method (pc + 1) args frame' (value :: rest) memory' final values returnedWF h
+  have trace := run_success_trace program fuel method pc args frame stack m final values h
+  clear h
+  induction trace with
+  | next step _ ih =>
+    exact ih (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
+  | returned step _ =>
+    exact leaveFrame_preserves_wellFormed _ _
+      (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
+  | call step _ enter _ _ _ childIH ih
+  | construct step _ enter _ _ _ _ childIH ih =>
+    exact ih (childIH (enterFrame_preserves_wellFormed _ _ _ _ _
+      (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step) enter))
 
 #print axioms run_preserves_wellFormed
 
 theorem invoke_preserves_wellFormed (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory) (hm : m.WellFormed)
     (h : invoke program fuel method args m = .ok (final, values)) : final.WellFormed := by
-  unfold invoke at h
-  cases hb : program[method]? with
-  | none => simp [hb] at h
-  | some body =>
-    cases ha : args.mapM (checkedValue m) <;>
-      simp only [hb, ha, Except.mapError, Bind.bind, Except.bind] at h
-    · cases h
-    · rename_i arguments
-      cases he : enterFrame body arguments m <;> simp only [he] at h
-      · cases h
-      · rename_i entered
-        obtain ⟨frame, memory⟩ := entered
-        exact run_preserves_wellFormed _ _ _ _ _ _ _ _ _ _
-          (enterFrame_preserves_wellFormed _ _ _ _ _ hm he) h
+  obtain ⟨_, _, _, _, _, _, setup, executed⟩ := invoke_success_setup h
+  exact run_preserves_wellFormed _ _ _ _ _ _ _ _ _ _
+    (enterFrame_preserves_wellFormed _ _ _ _ _ hm setup) executed
 
 #print axioms invoke_preserves_wellFormed
 end CIL.Safety
