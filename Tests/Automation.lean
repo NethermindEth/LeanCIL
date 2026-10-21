@@ -36,4 +36,18 @@ theorem checked_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) 
     cil_checked_steps [truth]
 
 #print axioms checked_branch
+
+@[cil_code] def arithmeticMethod : CIL.Method := {
+  code := [.arg 0, .arg 1, .const32 1, .shl, .add, .const32 0, .gtu, .ret]
+  locals := [], returnsValue := true }
+
+-- Symbolic values still reduce definitionally, including the final return.
+theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
+    CIL.Safety.invoke [arithmeticMethod] 9 0
+      [.scalar (.i32 left), .scalar (.i32 right)] memory =
+      .ok (memory, [.scalar (.i32 (if left + (right <<< 1) > 0 then 1 else 0))]) := by
+  cil_checked_steps
+
+/-- info: 'Tests.Automation.checked_arithmetic' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms checked_arithmetic
 end Tests.Automation

@@ -81,7 +81,7 @@ macro "cil_loop_steps" "[" facts:term,* "]" : tactic =>
 macro "cil_loop_finish" "[" facts:term,* "]" : tactic =>
   `(tactic| repeat first
     | (simp only [$[$facts:term],*])
-    | (apply CIL.Safety.loop_terminates_return
+    | (apply CIL.Safety.loop_terminates_return (op := .ret _)
        · first | (simp only [cil_code]; rfl) | rfl
        · first | (simp only [cil_code]; rfl) | rfl
        · cil_checked_step [CIL.truth, $[$facts:term],*]
