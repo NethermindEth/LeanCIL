@@ -3,24 +3,6 @@ import CIL.Safety.FrameAllocations
 
 namespace CIL.Safety
 
-theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
-    (h : loadLocal m slot = .ok value) : value.Valid m := by
-  unfold loadLocal at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals
-    repeat' first
-      | rfl
-      | solve | exact loadSnapshot_numeric (by assumption)
-      | solve | apply formValue_result_valid; assumption
-      | cases h
-      | split at h
-
-theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
-    (h : localAddress m slot = .ok value) : value.Valid m := by
-  cases slot with
-  | root root => cases h
-  | bytes kind r => exact formValue_result_valid m (.address r) value h
-
 theorem makeLocal_reference_valid (m result : Memory) (activation : Nat) (kind : CIL.LocalKind)
     (initial : CIL.Value) (slot : LocalSlot) (owned : List AllocationId) (hm : m.WellFormed)
     (h : makeLocal activation kind initial m = .ok (slot, owned, result)) :

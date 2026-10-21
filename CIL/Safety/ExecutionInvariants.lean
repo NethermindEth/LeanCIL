@@ -30,23 +30,6 @@ inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) : Frame �
       (stored : storeLocal home slot value = .ok (final, result)) :
       StepEffect body frame m { frame with owned := r.allocation :: frame.owned } result
 
-theorem step_effect (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
-    (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
-    (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
-    StepEffect body frame m (action.frameAfter frame) action.memory := by
-  unfold step at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals
-    repeat' first
-      | exact .memory (.ordinary (.unchanged _))
-      | solve | exact .store (by assumption) (by assumption)
-      | solve | exact .memory (staticInstruction_effect _ _ _ _ _ _ _ (by assumption))
-      | solve | exact .memory (.ordinary (instruction_effect _ _ _ _ _ (by assumption)))
-      | solve | exact .valueHome (by assumption) (by assumption)
-      | solve | exact .localHome (by assumption) (by assumption)
-      | cases h
-      | split at h
-
 theorem StepEffect.wellFormed {body : CIL.Method} {frame final : Frame} {m result : Memory}
     (effect : StepEffect body frame m final result) (hm : m.WellFormed) : result.WellFormed := by
   cases effect with
@@ -68,6 +51,130 @@ theorem StepEffect.allocations {body : CIL.Method} {frame final : Frame} {m resu
     exact (allocateHome_fresh _ _ _ _ _ allocated).1.trans (storeValue_effect _ _ _ _ stored).allocations
   | localHome allocated stored =>
     exact (allocateHome_fresh _ _ _ _ _ allocated).1.trans (storeLocal_extends_allocations _ _ _ _ _ stored)
+
+theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
+    (h : loadLocal m slot = .ok value) : value.Valid m := by
+  unfold loadLocal at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals
+    repeat' first
+      | rfl
+      | solve | exact loadSnapshot_numeric (by assumption)
+      | solve | apply formValue_result_valid; assumption
+      | cases h
+      | split at h
+
+theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
+    (h : localAddress m slot = .ok value) : value.Valid m := by
+  cases slot with
+  | root root => cases h
+  | bytes kind r => exact formValue_result_valid m (.address r) value h
+
+theorem ValuesValid.drop {m : Memory} {values : List Value}
+    (valid : ValuesValid m values) (count : Nat) : ValuesValid m (values.drop count) :=
+  fun _ member => valid _ (List.mem_of_mem_drop member)
+
+theorem checkedValues_preserved (m result : Memory) (values checked : List Value)
+    (hm : m.WellFormed) (ext : AllocationExtension m result)
+    (h : values.mapM (checkedValue m) = .ok checked) : ValuesValid result checked :=
+  (checkedValues_valid _ _ _ h).2.preserve hm ext
+
+theorem allocated_store_reference_valid (m home result : Memory) (activation width : Nat)
+    (r : Reference) (value : CIL.Value) (hm : m.WellFormed)
+    (allocation : allocateHome m activation width = .ok (r, home))
+    (store : storeValue home (.address r) value = .ok result) : form result r = .ok r :=
+  (storeValue_effect _ _ _ _ store).allocations.preserves_reference
+    (allocateHome_preserves_wellFormed _ _ _ _ _ hm allocation) r r
+    (allocateHome_reference_valid _ _ _ _ _ allocation)
+
+theorem allocated_storeLocal_reference_valid (m home result : Memory) (activation width : Nat)
+    (r : Reference) (slot finalSlot : LocalSlot) (value : Value) (hm : m.WellFormed)
+    (allocation : allocateHome m activation width = .ok (r, home))
+    (store : storeLocal home slot value = .ok (finalSlot, result)) : form result r = .ok r :=
+  (storeLocal_extends_allocations _ _ _ _ _ store).preserves_reference
+    (allocateHome_preserves_wellFormed _ _ _ _ _ hm allocation) r r
+    (allocateHome_reference_valid _ _ _ _ _ allocation)
+
+def FrameAction.LiveValues (action : FrameAction) : Prop :=
+  match action with
+  | .next _ values _ memory | .returned values memory => ValuesValid memory values
+  | .call _ args rest memory | .construct _ args rest _ _ _ memory =>
+    ValuesValid memory args ∧ ValuesValid memory rest
+
+/-- One dispatcher proof supplies memory/frame effects and conditional value validity. -/
+structure StepContract (body : CIL.Method) (frame : Frame) (stack : List Value)
+    (m : Memory) (action : FrameAction) : Prop where
+  effect : StepEffect body frame m (action.frameAfter frame) action.memory
+  values : m.WellFormed → ValuesValid m stack → action.LiveValues
+
+theorem StepContract.of_effect {body : CIL.Method} {frame : Frame} {stack : List Value}
+    {m : Memory} {action : FrameAction}
+    (effect : StepEffect body frame m (action.frameAfter frame) action.memory)
+    (preserve : m.WellFormed → AllocationExtension m action.memory →
+      ValuesValid action.memory stack → action.LiveValues) : StepContract body frame stack m action :=
+  ⟨effect, fun hm valid => preserve hm effect.allocations (valid.preserve hm effect.allocations)⟩
+
+theorem StepContract.instruction {body : CIL.Method} {frame : Frame} {stack values : List Value}
+    {m result : Memory} {pc : Nat} (contract : InstructionContract m result stack values) :
+    StepContract body frame stack m (.next pc values frame result) :=
+  ⟨.memory (.ordinary contract.effect), contract.values⟩
+
+theorem StepContract.staticInstruction {body : CIL.Method} {frame : Frame} {stack values : List Value}
+    {m result : Memory} {pc : Nat} (contract : StaticInstructionContract body m result stack values) :
+    StepContract body frame stack m (.next pc values frame result) :=
+  ⟨.memory contract.effect, contract.values⟩
+
+theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+    (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
+    (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
+    StepContract body frame stack m action := by
+  unfold step at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals repeat' first
+    | solve | exact .staticInstruction (staticInstruction_contract _ _ _ _ _ _ _ (by assumption))
+    | solve | exact .instruction (instruction_contract _ _ _ _ _ (by assumption))
+    | solve |
+        refine StepContract.of_effect ?_ ?_
+        · first
+          | exact .memory (.ordinary (.unchanged _))
+          | exact .store (by assumption) (by assumption)
+          | exact .valueHome (by assumption) (by assumption)
+          | exact .localHome (by assumption) (by assumption)
+        · intro hm ext retained
+          repeat' first
+            | exact retained
+            | solve | simp [FrameAction.LiveValues, ValuesValid, Value.Valid, numericValue]
+            | exact retained.tail
+            | solve | exact retained.drop _
+            | solve | apply checkedValues_preserved _ _ _ _ hm ext; assumption
+            | solve |
+                apply ValuesValid.append
+                · apply checkedValues_preserved _ _ _ _ hm ext; assumption
+                · first | exact retained.drop _ | exact retained.tail.tail
+            | solve |
+                apply ValuesValid.cons
+                · first
+                  | rfl
+                  | exact (checkedValue_valid _ _ _ (by assumption)).2
+                  | apply loadLocal_result_valid; assumption
+                  | apply localAddress_result_valid; assumption
+                  | apply allocated_store_reference_valid; exact hm; assumption; assumption
+                  | apply allocated_storeLocal_reference_valid; exact hm; assumption; assumption
+                · first
+                  | exact retained
+                  | exact retained.drop _
+                  | exact retained.tail.tail
+                  | exact retained.tail
+                  | apply checkedValues_preserved _ _ _ _ hm ext; assumption
+            | constructor
+    | cases h
+    | split at h
+
+theorem step_effect (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+    (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
+    (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
+    StepEffect body frame m (action.frameAfter frame) action.memory :=
+  (step_contract _ _ _ _ _ _ _ _ h).effect
 
 theorem step_preserves_wellFormed (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
