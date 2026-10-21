@@ -1,5 +1,8 @@
 import CIL.AggregateMemory
 import CIL.ExecutionLemmas
+import CIL.Embedding.Basic
+import CIL.Embedding.BaseStep
+import CIL.Embedding.Tactic
 import CIL.Features
 import CIL.Instructions
 import CIL.Layout
@@ -36,6 +39,8 @@ import CIL.Safety.ValueBitCasts
 import CIL.Safety.ByteEncoding
 import CIL.Safety.ByteRoundTrip
 import CIL.Safety.CallComposition
+import CIL.Safety.Embedding.Simulation
+import CIL.Safety.Embedding.Step
 import CIL.Safety.Calling
 import CIL.Safety.Certificate
 import CIL.Safety.ConstructComposition
