@@ -151,3 +151,9 @@ memory and kernel replay separately. Compile identical consumer sources against
 both revisions and alternate serial runs with prebuilt dependencies on the same
 machine. A smaller compiled proof alone does not establish a speed or memory
 improvement. Preserve the kernel replay, axiom audits and negative regressions.
+
+## Store view reuse
+
+Stores reuse existing read permissions when they already cover the written range, including coverage spread across multiple views. The `write_run_equivalent` theorem proves that replacing the previous always-prepending write preserves any subsequent checked execution: returned values, exact faults, allocation state, bytes and permissions. `Memory.Equivalent.run` and `.invoke` cover branches, calls, constructors and frame cleanup.
+
+Run `pwsh scripts/BenchmarkViews.ps1 -Stores 128 -Repetitions 3` to compare kernel reduction against the previous write implementation. In a local Windows run with Lean 4.35.0, 128 alternating stores retained 1 view instead of 129; median elapsed time was 5.6 seconds versus 17.7 seconds. These timings include process startup and shared-machine activity; view counts are checked by kernel reduction.
