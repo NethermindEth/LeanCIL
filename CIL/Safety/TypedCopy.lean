@@ -11,7 +11,13 @@ theorem copyObject_writes_snapshot (m result : Memory) (source destination : Ref
       (.reference (.address source) :: .reference (.address destination) :: rest) m = .ok (result, rest)) :
     result.cells destination.allocation (destination.offset + index) =
       ⟨(m.cells source.allocation (source.offset + index)).bits, true⟩ := by
-  simp only [instruction, referenceAt, Bind.bind, Except.bind] at copied
+  change (if source.allocation = destination.allocation && source.offset != destination.offset &&
+      source.offset < destination.offset + size && destination.offset < source.offset + size then
+    .error (.unsupported "Partially overlapping typed copy") else do
+      let bytes ← checkedAt (.address source) size (read m source size ordinaryAccessAlignment)
+      return (← checkedAt (.address destination) size (write m destination bytes ordinaryAccessAlignment), rest)) =
+    .ok (result, rest) at copied
+  simp only [Bind.bind, Except.bind] at copied
   split at copied
   · cases copied
   · cases hr : read m source size ordinaryAccessAlignment <;>

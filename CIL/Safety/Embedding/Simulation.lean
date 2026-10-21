@@ -103,35 +103,17 @@ theorem enterFrame_congr {expected actual : CIL.Method} {r : Nat → Nat} (refin
 theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.unsupported description) pc args frame stack m = .ok action) : False := by
-  unfold step at h
-  dsimp only [pureArity] at h
-  simp only [bind, Except.bind] at h
-  split at h
-  · cases h
-  · rename_i ran
-    unfold instruction at ran
-    dsimp only at ran
-    cases ran
-
-set_option hygiene false in
-/-- Closes a step that reached the shared tail with an instruction `instruction` rejects. -/
-macro "tail_error" : tactic => `(tactic| (
-  dsimp only [pureArity] at h
-  simp only [bind, Except.bind] at h
-  split at h
-  · cases h
-  · rename_i ran
-    unfold instruction at ran
-    dsimp only at ran
-    cases ran))
+  change Except.error (ExecutionFault.unsupported "Non-memory instruction requires execution adapter") = .ok action at h
+  cases h
 
 theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.ret narrow) pc args frame stack m = .ok action) :
     ∃ values m', action = .returned values m' := by
-  unfold step at h
   cases narrow
-  · dsimp only at h
+  · change (if stack.length = (if body.returnsValue then 1 else 0) then
+        (do return FrameAction.returned (← stack.mapM (checkedValue m)) m)
+      else .error .invalidState) = .ok action at h
     by_cases sized : stack.length = (if body.returnsValue then 1 else 0)
     · rw [ite_eq_left sized] at h
       obtain ⟨_, _, h⟩ := except_bind_ok h
@@ -139,18 +121,22 @@ theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : 
       exact ⟨_, _, rfl⟩
     · rw [ite_eq_right sized] at h
       cases h
-  · rcases stack with _ | ⟨v, rest⟩
-    · dsimp only at h
-      tail_error
-    · cases v <;> (try (rename_i x; cases x)) <;> cases rest
-      all_goals dsimp only at h
-      all_goals first
-        | tail_error
-        | (split at h
-           · obtain ⟨_, _, h⟩ := except_bind_ok h
-             cases h
-             exact ⟨_, _, rfl⟩
-           · cases h)
+  · rename_i kind
+    cases stack with
+    | nil => cases h
+    | cons value rest =>
+      cases value <;> try (solve | cases rest <;> cases h)
+      rename_i value
+      cases value <;> cases rest <;> try (solve | cases h)
+      rename_i bits
+      change (if body.returnsValue then
+        (do return FrameAction.returned (← [Value.scalar (.i32 (kind.extend bits))].mapM (checkedValue m)) m)
+        else .error .invalidState) = .ok action at h
+      split at h
+      · obtain ⟨_, _, h⟩ := except_bind_ok h
+        cases h
+        exact ⟨_, _, rfl⟩
+      · cases h
 
 /-- Calls and constructions come only from instructions that resume at the next pc. -/
 theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
@@ -161,11 +147,8 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {ar
   cases op
   case unsupported => exact (step_unsupported h).elim
   case branch target =>
-    unfold step at h
-    dsimp only [pureArity] at h
-    simp only [List.take_zero, List.drop_zero, scalars, CIL.step, bind, Except.bind, pure, Except.pure,
-      List.map_nil, List.mapM_nil, List.nil_append] at h
-    split at h <;> cases h
+    change Except.ok (.next target stack frame m) = .ok action at h
+    cases h
     exact resumes.elim
   case ret narrow =>
     obtain ⟨_, _, rfl⟩ := step_ret_returns h
