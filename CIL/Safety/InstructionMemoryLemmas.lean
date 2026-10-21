@@ -32,42 +32,88 @@ theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List
     rcases result with ⟨memory, stack'⟩
     exact ⟨memory, stack', rfl⟩
 
+/-- The only memory changes made by an ordinary instruction. Successful
+    primitive operations retain their checks, independently of input invariants. -/
+inductive InstructionEffect : Memory → Memory → Prop where
+  | unchanged (m) : InstructionEffect m m
+  | write {m result r bytes alignment} (h : write m r bytes alignment = .ok result) :
+      InstructionEffect m result
+  | snapshot {m result r bytes alignment} (h : writeSnapshot m r bytes alignment = .ok result) :
+      InstructionEffect m result
+
+theorem InstructionEffect.wellFormed {m result : Memory} (effect : InstructionEffect m result)
+    (hm : m.WellFormed) : result.WellFormed := by
+  cases effect with
+  | unchanged => exact hm
+  | write h => exact write_preserves_wellFormed _ _ _ _ _ hm h
+  | snapshot h => exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm h
+
+theorem InstructionEffect.allocations {m result : Memory} (effect : InstructionEffect m result) :
+    AllocationExtension m result := by
+  cases effect with
+  | unchanged => exact .refl _
+  | write h => exact write_extends_allocations _ _ _ _ _ h
+  | snapshot h => exact writeSnapshot_extends_allocations _ _ _ _ _ h
+
+theorem storeValue_effect (m result : Memory) (reference : ManagedReference) (value : CIL.Value)
+    (h : storeValue m reference value = .ok result) : InstructionEffect m result := by
+  unfold storeValue at h
+  repeat' first
+    | solve | exact .write (checkedAt_ok (by assumption))
+    | solve | exact .snapshot (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
+    | simp only [Bind.bind, Except.bind] at h
+
+set_option maxHeartbeats 800000 in
+theorem memoryInstruction_effect (operation : CIL.MemoryOp) (stack values : List Value)
+    (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
+    InstructionEffect m result := by
+  unfold memoryInstruction at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals
+    repeat' first
+      | exact .unchanged _
+      | solve | exact .write (checkedAt_ok (by assumption))
+      | solve | exact .snapshot (checkedAt_ok (by assumption))
+      | solve | apply storeValue_effect; assumption
+      | cases h
+      | split at h
+
+set_option maxHeartbeats 800000 in
+theorem instruction_effect (operation : CIL.Op) (stack values : List Value) (m result : Memory)
+    (h : instruction operation stack m = .ok (result, values)) : InstructionEffect m result := by
+  unfold instruction at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals
+    repeat' first
+      | exact .unchanged _
+      | solve | exact .write (checkedAt_ok (by assumption))
+      | solve | exact .snapshot (checkedAt_ok (by assumption))
+      | solve | apply memoryInstruction_effect; assumption
+      | solve | apply storeValue_effect; assumption
+      | cases h
+      | split at h
+
 theorem checked_write_preserves_wellFormed (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat) (reference : ManagedReference) (width : Nat)
     (hm : m.WellFormed)
     (h : checkedAt reference width (write m r bytes alignment) = .ok result) :
     result.WellFormed := by
-  cases hw : write m r bytes alignment <;> simp only [hw, checkedAt, Except.mapError] at h
-  · cases h
-  · cases h
-    exact write_preserves_wellFormed _ _ _ _ _ hm hw
+  exact write_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok h)
 
 theorem storeValue_preserves_wellFormed (m result : Memory) (reference : ManagedReference)
     (value : CIL.Value) (hm : m.WellFormed)
     (h : storeValue m reference value = .ok result) : result.WellFormed := by
-  unfold storeValue at h
-  repeat' first
-    | solve | exact write_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
-    | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
-    | cases h
-    | split at h
-    | simp only [Bind.bind, Except.bind] at h
+  exact (storeValue_effect _ _ _ _ h).wellFormed hm
+
 #print axioms storeValue_preserves_wellFormed
 
 set_option maxHeartbeats 800000 in
 theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (hm : m.WellFormed)
     (h : memoryInstruction operation stack m = .ok (result, values)) : result.WellFormed := by
-  unfold memoryInstruction at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals
-    repeat' first
-      | exact hm
-      | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
-      | solve | apply checked_write_preserves_wellFormed _ _ _ _ _ _ _ hm; assumption
-      | solve | apply storeValue_preserves_wellFormed _ _ _ _ hm; assumption
-      | cases h
-      | split at h
+  exact (memoryInstruction_effect _ _ _ _ _ h).wellFormed hm
 
 #print axioms memoryInstruction_preserves_wellFormed
 
@@ -75,17 +121,7 @@ set_option maxHeartbeats 800000 in
 theorem instruction_preserves_wellFormed (operation : CIL.Op) (stack values : List Value)
     (m result : Memory) (hm : m.WellFormed)
     (h : instruction operation stack m = .ok (result, values)) : result.WellFormed := by
-  unfold instruction at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals
-    repeat' first
-      | exact hm
-      | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
-      | solve | apply checked_write_preserves_wellFormed _ _ _ _ _ _ _ hm; assumption
-      | solve | apply memoryInstruction_preserves_wellFormed _ _ _ _ _ hm; assumption
-      | solve | apply storeValue_preserves_wellFormed _ _ _ _ hm; assumption
-      | cases h
-      | split at h
+  exact (instruction_effect _ _ _ _ _ h).wellFormed hm
 
 #print axioms instruction_preserves_wellFormed
 

@@ -22,24 +22,17 @@ theorem step_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (world : StaticWorldValid descriptors m)
     (h : step body operation pc args frame stack m = .ok action) :
     StaticWorldValid descriptors action.memory := by
-  unfold step at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals
-    repeat' first
-      | exact world
-      | solve | apply storeLocal_preserves_static_world _ _ _ _ _ _ world; assumption
-      | solve | apply staticInstruction_preserves_static_world _ _ _ _ _ _ _ _ hm sites world; assumption
-      | solve | apply instruction_preserves_static_world _ _ _ _ _ _ world; assumption
-      | solve |
-          apply storeValue_preserves_static_world
-          · apply allocateHome_preserves_static_world _ _ _ _ _ _ hm world; assumption
-          · assumption
-      | solve |
-          apply storeLocal_preserves_static_world
-          · apply allocateHome_preserves_static_world _ _ _ _ _ _ hm world; assumption
-          · assumption
-      | cases h
-      | split at h
+  have effect := step_effect _ _ _ _ _ _ _ _ h
+  generalize action.frameAfter frame = final, action.memory = result at effect ⊢
+  cases effect with
+  | memory effect => exact effect.staticWorld descriptors hm sites world
+  | store _ stored => exact storeLocal_preserves_static_world _ _ _ _ _ _ world stored
+  | valueHome allocated stored =>
+    exact storeValue_preserves_static_world _ _ _ _ _
+      (allocateHome_preserves_static_world _ _ _ _ _ _ hm world allocated) stored
+  | localHome allocated stored =>
+    exact storeLocal_preserves_static_world _ _ _ _ _ _
+      (allocateHome_preserves_static_world _ _ _ _ _ _ hm world allocated) stored
 
 theorem programStep_preserves_static_world {program : CIL.Program} {method pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}

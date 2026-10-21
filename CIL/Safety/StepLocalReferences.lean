@@ -23,20 +23,12 @@ theorem step_preserves_frame_references (body : CIL.Method) (operation : CIL.Op)
     (action : FrameAction) (hm : m.WellFormed) (valid : frame.ReferencesValid m)
     (h : step body operation pc args frame stack m = .ok action) :
     (action.frameAfter frame).ReferencesValid action.memory := by
-  have retained := valid.preserve hm (step_extends_allocations _ _ _ _ _ _ _ _ h)
-  unfold step at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals
-    repeat' first
-      | exact retained
-      | solve |
-          apply stored_frame_references_valid
-          · exact hm
-          · exact valid
-          · assumption
-          · assumption
-      | cases h
-      | split at h
+  have effect := step_effect _ _ _ _ _ _ _ _ h
+  have retained := valid.preserve hm effect.allocations
+  generalize action.frameAfter frame = final, action.memory = result at effect retained ⊢
+  cases effect with
+  | memory | valueHome | localHome => exact retained
+  | store found stored => exact stored_frame_references_valid _ _ _ _ _ _ _ hm valid found stored
 
 #print axioms stored_frame_references_valid
 #print axioms step_preserves_frame_references
