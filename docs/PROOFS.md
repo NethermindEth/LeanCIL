@@ -130,6 +130,44 @@ reported with the program's length. The diagnostic is computed after the
 failure through compiled evaluation and is never proof evidence; it also works
 for `Method = Method` goals. `Tests/MethodBinding.lean` covers both outcomes.
 
+### Methods by signature
+
+Extraction numbers methods by the reachable call graph, so adding or reordering
+a callee renumbers unrelated methods and breaks every literal index. Name them
+by their exact emitted signature (`Extracted.signatures`) instead:
+
+```lean
+import CIL.MethodIdentity
+
+bind_method root rootBody := "System.UInt64 Examples.Calls::Root(System.UInt64,System.UInt64)"
+bind_callee left leftBody := "System.UInt64 Examples.Calls::Left(System.UInt64,System.UInt64)" from rootBody
+
+theorem left_spec (x y : W64) (m : Memory) :
+    invoke Extracted.program 4 left [.i64 x, .i64 y] m = some (m, [.i64 (x - y)]) := rfl
+```
+
+`bind_method` defines `root` (the index), `rootBody` (the extracted body) and
+the `rfl` theorems `root.signature` and `root.found` (`@[cil_code]`).
+`bind_callee` also requires the parent to call that method and adds
+`left.call`, the instruction at its first call site; expected bodies take the
+index as a parameter, so `.call left 2` survives renumbering. `method_named "sig"`
+is the bare index as a term. A missing signature lists the methods with the
+same name, or every method; a duplicate lists each index; a parent that does not
+call the method lists what it does call:
+
+```text
+no extracted method has signature
+  System.UInt64 Examples.Overloads::Pick(System.Int64)
+methods named Pick:
+  [3] System.UInt64 Examples.Overloads::Pick(System.UInt64)
+  [4] System.UInt32 Examples.Overloads::Pick(System.UInt32)
+```
+
+The signature is the Cecil full name, matched exactly. Resolution only locates
+an index; the body is still bound by the kernel and the extraction certificate.
+`Tests/MethodIdentity.lean` covers the diagnostics, and `Tests/MethodIdentity.cs`
+verifies one unedited proof against two builds with different numbering.
+
 ### Bodies modulo dead code
 
 A profile can make the extractor emit dead `.unsupported` blocks that shift
