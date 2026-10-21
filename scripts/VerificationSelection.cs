@@ -54,9 +54,9 @@ internal static class VerificationSelection
         inputs["core"].UnionWith(new[] { "Add", "Choose", "Calls", "Alias", "Struct", "StructCopy", "LargeStruct",
             "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
-            "Throws", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
+            "Throws", "SpanTables", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "TypeTestEvidence",
-            "ThrowEvidence", "LayoutCoverage" }.Select(name => $"Tests/{name}.lean"));
+            "ThrowEvidence", "SpanEvidence", "LayoutCoverage" }.Select(name => $"Tests/{name}.lean"));
         inputs["unsafe"].Add("Tests/SkipInitialization.cs");
 
         // Follow literal source paths, file-based includes and Lean imports.

@@ -33,7 +33,6 @@ inductive Value where
   | v128 (bits : BitVec 128)
   | v256 (bits : BitVec 256)
   | span (address : Address) (length : Nat)
-  | dataToken (bytes : List (BitVec 8))
   | object (id : Nat)
   | ref (address : Address)
   | nullRef

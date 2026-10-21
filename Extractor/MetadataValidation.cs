@@ -109,7 +109,7 @@ internal static class MetadataValidation
         return result;
     }
 
-    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false)
+    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, bool span = false)
     {
         if (type is ByReferenceType byRef)
         {
@@ -124,8 +124,8 @@ internal static class MetadataValidation
             ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char") &&
             !(type is GenericInstanceType && type.FullName.StartsWith("System.Runtime.Intrinsics.Vector", StringComparison.Ordinal) && RuntimeModels.SupportedType(type)) &&
-            // Byte spans are admitted only as by-value returns; elsewhere their reference field would sit in unmodelled storage.
-            !(returns && type is GenericInstanceType && type.FullName == "System.ReadOnlySpan`1<System.Byte>"))
+            // Spans are admitted only as by-value returns and folded receivers; elsewhere their reference field would sit in unmodelled storage.
+            !((returns || span) && Spans.Width(type) is not null))
             throw new InvalidDataException($"Unsupported type: {type.FullName}");
         RuntimeModels.ValidateTypeIdentity(type, module);
     }
@@ -176,7 +176,9 @@ internal static class MetadataValidation
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
                 Type(method.ReturnType, module, returns: true);
                 foreach (ParameterDefinition parameter in method.Parameters) Type(parameter.ParameterType, module);
-                foreach (VariableDefinition local in method.Body.Variables) Type(local.VariableType, module);
+                var spans = Spans.Analyze(method);
+                foreach (VariableDefinition local in method.Body.Variables)
+                    Type(local.VariableType, module, span: spans.Locals.Contains(local.Index));
                 return Reachability.Analyze(method, profile);
             });
             state[method] = 1;

@@ -18,7 +18,8 @@ internal static class LeanEmitter
 
     internal static string Kind(TypeReference type, ModuleDefinition module)
     {
-        if (type is ByReferenceType) return ".reference";
+        // A span local is only touched by a receiver fold, so its slot is an inert root.
+        if (type is ByReferenceType || Spans.Width(type) is not null) return ".reference";
         if (MetadataValidation.IsAggregate(type, module)) return $".aggregate {MetadataValidation.Layout(type, module)}";
         if (Narrow(type) is { } narrow) return $".narrow .{narrow}";
         return EnumTypes.Storage(type).FullName switch
@@ -30,6 +31,7 @@ internal static class LeanEmitter
             _ => throw new InvalidDataException($"Unsupported local: {type.FullName}")
         };
     }
+    static bool StaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
     internal static string Initial(TypeReference type, ModuleDefinition module) => Kind(type, module) switch
     {
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
@@ -43,7 +45,7 @@ internal static class LeanEmitter
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := by decide");
         FieldDefinition[] data = methods.SelectMany(m => Reachability.Analyze(m, profile))
-            .Where(i => i.OpCode.Code == Code.Ldsflda)
+            .Where(StaticSite)
             .Select(i => StaticData.Validate((FieldReference)i.Operand, methods[0].Module)).Distinct().ToArray();
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
             .Concat(m.HasThis ? [m.DeclaringType] : [])
@@ -86,7 +88,7 @@ internal static class LeanEmitter
             string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module) : ".unmodeled"));
             string kinds = string.Join(", ", m.Body.Variables.Select(v => Kind(v.VariableType, m.Module)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
-                .Where(s => reachable.Contains(s.i) && s.i.OpCode.Code == Code.Ldsflda).Select(s =>
+                .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
                 {
                     FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
                     return $"({s.pc}, {{ identity := {Array.IndexOf(data, f)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)} }})";

@@ -26,10 +26,10 @@ private def raw (code : List RawInstruction) : RawMethod := {
 private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, []⟩
 
 -- The exact encoding folds; extra loads, a wrong arity or a non-runtime type do not.
-example : foldRoles [i 114 (.text "zero"), i 115 argument, i 122] =
+example : foldRoles [] [i 114 (.text "zero"), i 115 argument, i 122] =
     [some .head, some .interior, some (.raise "System.ArgumentException")] := by decide
-example : foldRoles [i 115 divide, i 122] = [some .head, some (.raise "System.DivideByZeroException")] := by decide
-example : foldRoles [i 20, i 114 (.text "zero"), i 115 argument, i 122] =
+example : foldRoles [] [i 115 divide, i 122] = [some .head, some (.raise "System.DivideByZeroException")] := by decide
+example : foldRoles [] [i 20, i 114 (.text "zero"), i 115 argument, i 122] =
     [none, some .head, some .interior, some (.raise "System.ArgumentException")] := by decide
 example : throwFold [i 115 argument, i 122] = none := by decide
 example : throwFold [i 115 (ctor owner "Fixture.Failure" 0), i 122] = none := by decide
