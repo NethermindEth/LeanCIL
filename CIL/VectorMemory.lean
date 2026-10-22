@@ -92,6 +92,8 @@ inductive MemoryOp where
   | bitcast256 | bitcastByteBool | skipInit
   | bitcastValue (source target : SnapshotShape)
   | staticAddress (bytes : List (BitVec 8)) | spanCreate | spanReference
+  /-- The value of a constructor-initialized readonly field; its address is never formed. -/
+  | staticValue (bytes : List (BitVec 8))
   /-- A span of `width`-byte elements over a whole static field; indexing is bounds checked. -/
   | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
   deriving Repr

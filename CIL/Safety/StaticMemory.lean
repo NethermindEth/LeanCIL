@@ -40,6 +40,13 @@ def staticInstruction (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     if descriptor.bytes == bytes then pure () else .error .invalidState
     let (memory, reference) ← staticReference descriptor m
     return (memory, .reference (.address reference) :: stack)
+  | .staticValue bytes, _ =>
+    let some (_, descriptor) := body.staticSites.find? (fun site => site.1 == pc) |
+      .error (.unsupported "Missing extracted static field identity")
+    -- The translation certificate checks each initializer's result against these bytes.
+    if descriptor.bytes == bytes && descriptor.initializer.isSome then
+      return (m, .scalar (.aggregate bytes) :: stack)
+    else .error .invalidState
   | .spanCreate, .scalar (.i32 length) :: .reference (.address reference) :: rest =>
     if length.toInt < 0 then .error .invalidState else pure ()
     let allocation ← checkedAt (.address reference) length.toNat

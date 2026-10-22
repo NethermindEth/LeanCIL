@@ -271,8 +271,30 @@ internal static class MetadataValidation
                         "newobj must construct a reference-free struct declared in this assembly");
                 Enter(callee, reference, instruction);
             }
+            void StaticLoad(Instruction instruction, FieldReference loaded)
+            {
+                StaticValues.Value value;
+                try
+                {
+                    var field = StaticValues.Field(loaded, module);
+                    if (!initializedTypes.Contains(field.DeclaringType.FullName, StringComparer.Ordinal))
+                        throw new InvalidDataException($"Unsupported static field load: {loaded.FullName}\n  Loading it requires --assume-initialized {field.DeclaringType.FullName}.");
+                    value = StaticValues.Resolve(loaded, module);
+                }
+                catch (InvalidDataException error) when (Rejections.Of(error) is null)
+                {
+                    throw new InvalidDataException($"{error.Message}\n  Site: {instruction}", error);
+                }
+                Enter(value.Initializer, value.Initializer, instruction);
+            }
             foreach (Instruction instruction in reachable)
             {
+                if (instruction.OpCode.Code == Code.Ldsfld && instruction.Operand is FieldReference loaded)
+                {
+                    if (!Check(method, instruction, () => StaticLoad(instruction, loaded), named: true))
+                        skipped.Add(instruction);
+                    continue;
+                }
                 if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
                     typeTests!.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction) || throws!.Operands.Contains(instruction))
                     continue;

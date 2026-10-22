@@ -263,6 +263,9 @@ partial class Program
             if (manifest.TryGetProperty("initializedTypes", out var initializedTypes))
                 foreach (var name in initializedTypes.EnumerateArray())
                     Console.WriteLine($"  Caller assumption: {name.GetString()} initialization completed successfully before invocation.");
+            if (manifest.TryGetProperty("staticValues", out var staticValues))
+                foreach (var name in staticValues.EnumerateArray())
+                    Console.WriteLine($"  Caller assumption: {name.GetString()} keeps the value its static constructor stored.");
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
             var refuted = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);

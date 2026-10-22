@@ -1,6 +1,7 @@
 import CIL.Extraction.Features
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.SkipInit
+import CIL.Extraction.StaticValues
 
 namespace CIL.Extraction
 
@@ -77,12 +78,13 @@ private instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
 def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (program : Program) : Prop :=
   LayoutsValid rawLayouts layouts ∧ evidence.length = program.length ∧
-  ∀ index : Fin evidence.length, MethodAtValid rawLayouts layouts evidence evidence[index] program[index.val]?
+  (∀ index : Fin evidence.length, MethodAtValid rawLayouts layouts evidence evidence[index] program[index.val]?) ∧
+  StaticValuesValid program
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (program : Program) :
     Decidable (TranslationValid rawLayouts layouts evidence program) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
@@ -94,7 +96,7 @@ inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array Computed
 
 theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {evidence : List MethodEvidence} {program : Program}
-    (layout : LayoutsValid rawLayouts layouts)
+    (layout : LayoutsValid rawLayouts layouts) (statics : StaticValuesValid program)
     (methods : MethodsChecked rawLayouts layouts evidence evidence program) :
     TranslationValid rawLayouts layouts evidence program := by
   have compose {items code} (checked : MethodsChecked rawLayouts layouts evidence items code) :
@@ -108,14 +110,14 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
       cases index with
       | zero => exact valid
       | succ index => exact ih.2 ⟨index, Nat.lt_of_succ_lt_succ bound⟩
-  exact ⟨layout, compose methods⟩
+  exact ⟨layout, (compose methods).1, (compose methods).2, statics⟩
 
 theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {evidence : List MethodEvidence} {program : Program}
     (valid : TranslationValid rawLayouts layouts evidence program)
     (index : Fin evidence.length) (method : Method) (found : program[index.val]? = some method) :
     MethodEvidenceValid rawLayouts layouts evidence evidence[index] method := by
-  have checked := valid.2.2 index
+  have checked := valid.2.2.1 index
   simpa [MethodAtValid, found] using checked
 
 #print axioms translation_method_checked

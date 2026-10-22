@@ -70,7 +70,7 @@ theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
     (m : Memory) : staticInstruction actual q operation stack m = staticInstruction expected pc operation stack m := by
   unfold staticAt at same
   cases operation
-  case staticAddress bytes =>
+  case staticAddress bytes | staticValue bytes =>
     simp only [staticInstruction]
     cases h1 : actual.staticSites.find? (fun site => site.1 == q) <;>
       cases h2 : expected.staticSites.find? (fun site => site.1 == pc) <;> simp_all

@@ -171,6 +171,7 @@ theorem staticInstruction_contract (body : CIL.Method) (pc : Nat) (operation : C
           apply ValuesValid.cons
           · first
             | exact True.intro
+            | rfl
             | exact retained.tail.head
             | exact retained.head
             | apply staticReference_reference_valid; assumption
