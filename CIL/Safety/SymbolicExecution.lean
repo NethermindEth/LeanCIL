@@ -193,6 +193,28 @@ macro "cil_checked_call_at " methodFound:term:max instructionFound:term:max "[" 
     (by cil_checked_steps_normalized [$[$facts:term],*]; done)
     (by cil_checked_steps_normalized [$[$facts:term],*]; done))
 
+open Lean Elab Tactic Meta in
+/-- Instantiate `lemma` against the goal through `select`, close its method and instruction lookups
+    (the premises `lookups` places from the end) with `cil_lookup`, and return both proofs as syntax
+    with the fetched opcode's constructor. -/
+def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (lookups : Nat)
+    (facts : Array Lean.Term) : Lean.Elab.Tactic.TacticM (Lean.Term × Lean.Term × Lean.Name) := do
+  let target ← instantiateMVars (← getMainTarget)
+  let (premises, _, conclusion) ← forallMetaTelescopeReducing (← inferType (← mkConstWithFreshMVarLevels lemma))
+  let some goalPart := select target | throwError "The goal does not have the shape of {lemma}"
+  let some lemmaPart := select conclusion | throwError "Unexpected statement of {lemma}"
+  unless ← isDefEq lemmaPart goalPart do throwError "The goal does not have the shape of {lemma}"
+  let methodFound := premises[premises.size - lookups]!
+  let instructionFound := premises[premises.size - lookups + 1]!
+  for proof in [methodFound, instructionFound] do
+    let remaining ← Tactic.run proof.mvarId! (evalTactic (← `(tactic| cil_lookup [$facts,*])))
+    unless remaining.isEmpty do throwError "The method or instruction lookup did not close"
+  let fetched ← instantiateMVars (← inferType instructionFound)
+  let some (_, _, found) := fetched.eq? | throwError "Unexpected instruction lookup"
+  let operation := (← whnfR found.appArg!).getAppFn.constName?.getD Name.anonymous
+  return (← Term.exprToSyntax (← instantiateMVars methodFound),
+    ← Term.exprToSyntax (← instantiateMVars instructionFound), operation)
+
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
     composition lemma for the fetched opcode instead of trying each in turn. -/
 syntax "cil_checked_run_step" "[" term,* "]" : tactic
@@ -200,22 +222,8 @@ syntax "cil_checked_run_step" "[" term,* "]" : tactic
 open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_run_step [$facts:term,*]) => withMainContext do
-    let target ← instantiateMVars (← getMainTarget)
-    let some (_, lhs, _) := target.eq? | throwError "Expected a run equation"
-    let (premises, _, conclusion) ← forallMetaTelescopeReducing
-      (← inferType (← mkConstWithFreshMVarLevels ``CIL.Safety.run_next))
-    let some (_, pattern, _) := conclusion.eq? | throwError "Unexpected run_next statement"
-    unless ← isDefEq pattern lhs do throwError "Expected a run equation with successor fuel"
-    let methodFound := premises[premises.size - 3]!
-    let instructionFound := premises[premises.size - 2]!
-    for proof in [methodFound, instructionFound] do
-      let remaining ← Tactic.run proof.mvarId! (evalTactic (← `(tactic| cil_lookup [$facts,*])))
-      unless remaining.isEmpty do throwError "The method or instruction lookup did not close"
-    let fetched ← instantiateMVars (← inferType instructionFound)
-    let some (_, _, found) := fetched.eq? | throwError "Unexpected instruction lookup"
-    let operation := (← whnfR found.appArg!).getAppFn.constName?.getD Name.anonymous
-    let methodSyntax ← Term.exprToSyntax (← instantiateMVars methodFound)
-    let instructionSyntax ← Term.exprToSyntax (← instantiateMVars instructionFound)
+    let (methodSyntax, instructionSyntax, operation) ←
+      cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts.getElems
     evalTactic (← if operation == ``CIL.Op.ret then
         `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
       else if operation == ``CIL.Op.call then
