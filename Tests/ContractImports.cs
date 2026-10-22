@@ -47,7 +47,9 @@ void Save(bool bind = true, bool updatePin = true)
     if (bind)
     {
         contract["interfaceDigest"] = InterfaceDigest(contract);
-        contract["certifications"]![0]!["interfaceDigest"] = contract["interfaceDigest"]!.DeepClone();
+        foreach (JsonNode? certification in contract["certifications"]!.AsArray())
+            if (certification is JsonObject record)
+                record["interfaceDigest"] = contract["interfaceDigest"]!.DeepClone();
     }
     if (updatePin) expectedInterfaceHash = contract["interfaceDigest"]!.GetValue<string>();
     File.WriteAllText(sidecar, contract.ToJsonString());
@@ -72,6 +74,7 @@ string closureDigest = ContentKey(closureRecord.GetProperty("canonical").GetStri
 
 void Reset()
 {
+    Directory.CreateDirectory(output);
     File.Delete(Path.Combine(output, "verification.json"));
     File.Copy(originalApp, app, true);
     File.Copy(originalLibrary, library, true);
@@ -429,6 +432,7 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
     ("signature counts mismatch", value => value["exports"]![0]!["returnsValue"] = false),
     ("profile not listed", value => value["exports"]![0]!["profiles"] = new JsonArray("x64-sse41")),
     ("certification not present", value => value["certifications"] = new JsonArray()),
+    ("Invalid or duplicate contract export", value => value["exports"] = new JsonArray()),
     ("certification binding mismatch", value => value["certifications"]![0]!["closureDigest"] = new string('0', 64)),
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "CIL.Types"),
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "../Escape"),
