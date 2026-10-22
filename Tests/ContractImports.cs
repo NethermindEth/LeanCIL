@@ -465,14 +465,26 @@ foreach (Action<MethodDefinition> mutation in new Action<MethodDefinition>[]
     MutateLibrary(module => mutation(module.GetType("ImportFixture.Library").Methods.Single(method => method.Name == "AddOne")));
     Reject(Command(), "must be static, non-virtual and public or protected");
 }
-foreach (OpCode opcode in new[] { OpCodes.Callvirt, OpCodes.Newobj, OpCodes.Ldftn })
+foreach ((OpCode opcode, string diagnostic) in new[]
+{
+    (OpCodes.Callvirt, "Unsupported stack effect:"),
+    (OpCodes.Newobj, "support call only"),
+    (OpCodes.Ldftn, "support call only")
+})
 {
     Reset();
     using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(app)));
     module.GetType("ImportFixture.Application").Methods.Single(method => method.Name == "Entry")
         .Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Call).OpCode = opcode;
     module.Write(app);
-    Reject(Command(), "support call only");
+    string rejectedOutput = Path.Combine(directory, "Reject-" + opcode.Code + "-" + Guid.NewGuid().ToString("N"));
+    string[] command = Command();
+    command[5] = rejectedOutput;
+    (int Code, string Output, string Stdout, string Stderr) rejected = Execute(command);
+    if (rejected.Code != 1 || !rejected.Output.Contains(diagnostic, StringComparison.Ordinal) ||
+        !rejected.Output.Contains(opcode.Name, StringComparison.Ordinal) ||
+        new[] { "Extracted.lean", "identity.json", "verified.json" }.Any(file => File.Exists(Path.Combine(rejectedOutput, file))))
+        throw new InvalidOperationException("Unsupported import opcode was not rejected before extraction: " + rejected.Output);
 }
 Reset();
 string stableInterface = contract["interfaceDigest"]!.GetValue<string>();
