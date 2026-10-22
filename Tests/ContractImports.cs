@@ -120,17 +120,35 @@ if (report.GetProperty("contractImports").GetArrayLength() != 1)
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
 
 string originalInterface = contract["interfaceModules"]![0]!["source"]!.GetValue<string>();
-contract["interfaceModules"]![0]!["source"] = "module\n  public /- outer /- nested -/ -/ import ZContractBase\n\npublic section\n" +
-    originalInterface.Replace("import CIL.Safety.MethodContract\n", "", StringComparison.Ordinal);
+contract["interfaceModules"]![0]!["source"] = "  /- outer /- nested -/ -/ import ZContractBase\n" +
+    originalInterface + "\nexample : ZContractHeader.token = 7 := rfl\n";
 contract["interfaceModules"]!.AsArray().Add(new JsonObject
 {
     ["name"] = "ZContractBase",
-    ["source"] = "module\npublic import CIL.Safety.MethodContract\n\npublic section\n"
+    ["source"] = """
+module
+  public /- outer /- nested -/ -/ import ZContractData
+  public meta /- outer /- nested -/ -/ import ZContractMeta
+
+public section
+def ZContractHeader.token : Nat := ZContractHeader.data
+meta def ZContractHeader.metaToken : Nat := ZContractHeader.metaData
+"""
+});
+contract["interfaceModules"]!.AsArray().Add(new JsonObject
+{
+    ["name"] = "ZContractData",
+    ["source"] = "module\npublic section\ndef ZContractHeader.data : Nat := 7\n"
+});
+contract["interfaceModules"]!.AsArray().Add(new JsonObject
+{
+    ["name"] = "ZContractMeta",
+    ["source"] = "module\npublic section\nmeta def ZContractHeader.metaData : Nat := 3\n"
 });
 Save();
 Run(Command());
 Run([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"]);
-Console.WriteLine("PASS interface modules compile in parsed dependency order with public imports and nested comments");
+Console.WriteLine("PASS interface modules compile in parsed dependency order with public/meta imports and nested comments");
 Reset();
 contract["interfaceModules"]![0]!["source"] = """
 import CIL.Safety.Imports
