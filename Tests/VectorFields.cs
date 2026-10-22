@@ -6,6 +6,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.Intrinsics;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 
@@ -14,6 +15,12 @@ string assembly = At("Examples/Assembly/bin/Examples.dll");
 string root = At("artifacts/VectorFields");
 Assembly runtime = Assembly.LoadFile(assembly);
 Type owner = runtime.GetType("Examples.VectorFields")!;
+string profile = RuntimeInformation.ProcessArchitecture switch
+{
+    Architecture.Arm64 => "arm64-armbase",
+    Architecture.X64 => "x64-vector256",
+    _ => throw new InvalidOperationException("Vector layout comparisons require ARM64 or x64")
+};
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
 Dictionary<string, string> selectors = metadata.GetType("Examples.VectorFields").Methods
     .ToDictionary(method => method.Name, method => method.FullName);
@@ -52,7 +59,7 @@ void Prove(string name, List<string> claims, string definitions = "")
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + definitions +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by exact ⟨" +
         string.Join(", ", claims.Select(_ => "by rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", selectors[name], proof, output);
+    verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: name == "WritePacked" ? "scalar" : profile);
     Console.WriteLine("PASS vector fields: " + name);
 }
 
@@ -115,7 +122,7 @@ Prove("Address256", [
     $"Extracted.layout0.size = {addressSize}"],
     $"def memory : CIL.Safety.Memory := {{ Examples.empty with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{addressSize}, 1, []⟩, true, [{addressSize}]⟩ else none, nextIdentity := 1 }}\n");
 
-foreach (string mutation in new[] { "element", "width", "scope", "version", "token", "arity", "encoding", "reference", "packing" })
+foreach (string mutation in new[] { "element", "width", "scope", "version", "token", "arity", "encoding", "reference", "packing", "default-packing" })
 {
     string output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
@@ -135,11 +142,14 @@ foreach (string mutation in new[] { "element", "width", "scope", "version", "tok
             case "encoding": vector.IsValueType = false; break;
             case "reference": vector.GenericArguments[0] = module.TypeSystem.Object; break;
             case "packing": holder.PackingSize = 32; break;
+            case "default-packing": holder.PackingSize = 0; break;
         }
         module.Write(dll);
     }
     File.Delete(Path.Combine(output, "Extracted.lean"));
-    (int Code, string Output, string Stdout, string Stderr) result = Execute(Extract("extract", dll, "Examples", selectors["Read256"], output));
+    string selectedProfile = mutation is "packing" or "default-packing" ? "scalar" : profile;
+    (int Code, string Output, string Stdout, string Stderr) result = Execute(
+        Extract("extract", dll, "Examples", selectors["Read256"], output, selectedProfile));
     if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")))
         throw new InvalidOperationException("Unsupported vector field accepted: " + mutation);
     Console.WriteLine("PASS vector field rejection: " + mutation);
@@ -164,3 +174,15 @@ foreach ((string name, string changed) in new[]
         throw new InvalidOperationException("Malformed vector field evidence accepted: " + name + "\n" + result.Output);
     Console.WriteLine("PASS vector field evidence rejection: " + name);
 }
+
+string architectureBaseline = File.ReadAllText(Path.Combine(root, "Read256", "Extracted.lean"));
+string otherArchitecture = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "x64" : "arm64";
+string mismatched = Regex.Replace(architectureBaseline, @"def profile : FeatureProfile := [^\r\n]*",
+    "def profile : FeatureProfile := { architecture := ." + otherArchitecture + " }");
+if (mismatched == architectureBaseline) throw new InvalidOperationException("Architecture mutation did not change source");
+string architecturePath = Path.Combine(root, "Evidence-architecture.lean");
+File.WriteAllText(architecturePath, mismatched);
+(int Code, string Output, string Stdout, string Stderr) architectureResult = Execute(["lake", "env", "lean", architecturePath]);
+if (architectureResult.Code == 0 || !architectureResult.Output.Contains("decide"))
+    throw new InvalidOperationException("Vector layout accepted under a different method architecture\n" + architectureResult.Output);
+Console.WriteLine("PASS vector field evidence rejects method architecture mismatch");

@@ -77,7 +77,7 @@ private instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
 /-- The certificate covers the entire emitted program, with no optional method list; calls past it must match `imports`. -/
 def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) : Prop :=
-  LayoutsValid rawLayouts layouts ∧ evidence.length = program.length ∧
+  LayoutsValid rawLayouts layouts (((program.head?).map fun method => method.profile.architecture).getD .scalar) ∧ evidence.length = program.length ∧
   (∀ index : Fin evidence.length, MethodAtValid rawLayouts layouts evidence imports evidence[index] program[index.val]?) ∧
   StaticValuesValid program
 
@@ -96,7 +96,8 @@ inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array Computed
 
 theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}
-    (layout : LayoutsValid rawLayouts layouts) (statics : StaticValuesValid program)
+    (layout : LayoutsValid rawLayouts layouts (((program.head?).map fun method => method.profile.architecture).getD .scalar))
+    (statics : StaticValuesValid program)
     (methods : MethodsChecked rawLayouts layouts evidence imports evidence program) :
     TranslationValid rawLayouts layouts evidence imports program := by
   have compose {items code} (checked : MethodsChecked rawLayouts layouts evidence imports items code) :

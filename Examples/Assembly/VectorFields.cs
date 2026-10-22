@@ -16,6 +16,7 @@ public static class VectorFields
     public struct Packed256 { [FieldOffset(3)] public Vector256<ulong> Value; }
 
     public struct Words256 { public ulong A, B, C, D; }
+    [StructLayout(LayoutKind.Sequential)]
     public struct Single256 { public Vector256<ulong> Value; }
 
     public static Vector128<ulong> Read128(Holder128 value) => value.Value;

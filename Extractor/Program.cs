@@ -133,7 +133,7 @@ internal static class Program
             string source = LeanEmitter.Emit(methods, profile, originalModule);
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
                 .Where(i => i.OpCode.Code == Code.Ldsfld)
-                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module).Field.FullName), StringComparer.Ordinal);
+                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";

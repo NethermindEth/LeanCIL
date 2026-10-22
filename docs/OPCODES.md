@@ -190,8 +190,13 @@ Instance fields support `Vector128<ulong>` and `Vector256<ulong>`, matching the
 vector types admitted by `ldobj` and `stobj`. The owner must have a validated,
 reference-free sequential or explicit layout. Other vector element types and
 widths in fields are rejected. Auto-layout tuples do not admit vector fields.
-`Vector256<ulong>` fields require an effective packing limit of at most 16 bytes.
-Higher packing limits have different managed alignment on x64 and ARM64.
+Layout computation uses CoreCLR's default packing limit of 64 bytes.
+`Vector128<ulong>` has natural field alignment 16. `Vector256<ulong>` has natural
+field alignment 32 under x64 profiles and 16 under ARM64 profiles. Explicit
+packing caps these values. The checked method profile selects the layout in both
+the extractor and the Lean certificate. A scalar profile must use an explicit
+packing limit of at most 16 for `Vector256<ulong>` fields because it does not
+select a target architecture.
 
 Field widths come from the vector type. Raw layout evidence keeps vector storage
 separate from integer and nested aggregate storage. Lean recomputes each field

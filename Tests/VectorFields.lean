@@ -24,6 +24,9 @@ example : instruction (.fieldAt 3 32)
     [.scalar (.snapshot (.aggregate 35) ([(0, true), (0, true), (0, true)] ++ cells))] memory =
     .ok (memory, [.scalar (.snapshot .vector256 cells)]) := by rfl
 
+example : instruction (.fieldAt 0 32)
+    [.scalar (.snapshot (.aggregate 35) cells)] memory = .error .invalidState := by rfl
+
 example : instruction (.fieldAt 4 32)
     [.scalar (.aggregate (List.replicate 35 0))] memory = .error .invalidState := by rfl
 
@@ -48,6 +51,30 @@ example : computeLayouts [{ explicit := false, auto := true, packing := 0, decla
 
 example : computeLayouts [{ explicit := false, packing := 32, declaredSize := -1,
     fields := [⟨.vector256, none⟩] }] = none := by decide
+
+example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1,
+    fields := [⟨.vector256, none⟩] }] = none := by decide
+
+example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1,
+    fields := [⟨.unsigned8, none⟩, ⟨.vector128, none⟩] }] =
+    some #[⟨⟨32, [⟨0, 1, false⟩, ⟨16, 16, false⟩]⟩, 16⟩] := by decide
+
+def defaultVector256 : List RawLayout := [{ explicit := false, packing := 0, declaredSize := -1,
+  fields := [⟨.unsigned8, none⟩, ⟨.vector256, none⟩] }]
+
+def x64Layout : Array ComputedLayout := #[⟨⟨64, [⟨0, 1, false⟩, ⟨32, 32, false⟩]⟩, 32⟩]
+def arm64Layout : Array ComputedLayout := #[⟨⟨48, [⟨0, 1, false⟩, ⟨16, 32, false⟩]⟩, 16⟩]
+
+example : LayoutsValid defaultVector256 x64Layout .x64 := by decide
+example : LayoutsValid defaultVector256 arm64Layout .arm64 := by decide
+example : ¬ LayoutsValid defaultVector256 x64Layout .arm64 := by decide
+example : ¬ LayoutsValid defaultVector256 arm64Layout .x64 := by decide
+
+example : MethodLayoutsValid defaultVector256 x64Layout
+    { profile := { architecture := .x64 }, locals := [], returnsValue := true, code := [.fieldAt 32 32] } [.field 0 0 1 .load] := by decide
+
+example : ¬ MethodLayoutsValid defaultVector256 x64Layout
+    { profile := { architecture := .arm64 }, locals := [], returnsValue := true, code := [.fieldAt 32 32] } [.field 0 0 1 .load] := by decide
 
 def raw : List RawLayout := [{ identity := "VectorHolder", explicit := true, packing := 1,
   declaredSize := 35, fields := [⟨.vector256, some 3⟩] }]
