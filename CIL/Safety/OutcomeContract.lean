@@ -181,6 +181,53 @@ theorem run_call_raises_after_outcome {Input Output : Type} {c : OutcomeContract
   rw [Nat.add_comm parentFuel childFuel] at parent
   exact ⟨childFuel + parentFuel + 1, fault, run_call_of_invoke methodFound instructionFound stepped child parent, thrown⟩
 
+/-- `run_call_of_outcome` from a well-formed memory, with both call invariants supplied. -/
+theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
+    {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
+    (holds : c.Holds program callee) (input : Input)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (encoded : arguments = c.args input) (permitted : c.pre input updated) (formed : memory.WellFormed)
+    (normal : c.raises input updated = none)
+    (continuation : ∀ final values,
+      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
+      (StaticWorldValid (programStaticDescriptors program) memory →
+        StaticWorldValid (programStaticDescriptors program) final) →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
+      ∃ fuel result returned,
+        run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
+        post result returned) :
+    ∃ fuel result returned,
+      run program fuel method pc args frame stack memory = .ok (result, returned) ∧ post result returned :=
+  run_call_of_outcome holds input methodFound instructionFound stepped encoded permitted normal
+    fun final values ⟨fuel, invoked⟩ =>
+      have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
+      continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
+
+/-- `run_call_raises_after_outcome` from a well-formed memory, with both call invariants supplied. -/
+theorem run_call_raises_after_outcome_formed {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
+    {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {exception : String}
+    (holds : c.Holds program callee) (input : Input)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (encoded : arguments = c.args input) (permitted : c.pre input updated) (formed : memory.WellFormed)
+    (normal : c.raises input updated = none)
+    (continuation : ∀ final values,
+      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
+      (StaticWorldValid (programStaticDescriptors program) memory →
+        StaticWorldValid (programStaticDescriptors program) final) →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
+      RunRaises program method (pc + 1) args frame (values ++ rest) final exception) :
+    RunRaises program method pc args frame stack memory exception :=
+  run_call_raises_after_outcome holds input methodFound instructionFound stepped encoded permitted normal
+    fun final values ⟨fuel, invoked⟩ =>
+      have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
+      continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
+
+#print axioms run_call_of_outcome_formed
+#print axioms run_call_raises_after_outcome_formed
 #print axioms run_call_error
 #print axioms run_call_raises_after_outcome
 #print axioms run_call_raises_of_contract
@@ -223,6 +270,20 @@ macro_rules
     | refine CIL.Safety.run_call_of_outcome $holds $input
         (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
         (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_)
+
+/-- `cil_outcome_call` through the `_formed` theorems: leaves the precondition, the caller
+    memory's `WellFormed`, the `raises` equation, then the continuation with both invariants. -/
+syntax "cil_formed_outcome_call" term:max term:max " at " ident "[" term,* "]" : tactic
+
+macro_rules
+  | `(tactic| cil_formed_outcome_call $holds $input at $site:ident [$facts:term,*]) =>
+  `(tactic| first
+    | refine CIL.Safety.run_call_raises_after_outcome_formed $holds $input
+        (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+        (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_ ?_
+    | refine CIL.Safety.run_call_of_outcome_formed $holds $input
+        (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+        (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_ ?_)
 
 /-- At a `bind_call` site, propagate the exception the callee's contract names for this
     input, leaving the precondition and the `raises` equation. -/

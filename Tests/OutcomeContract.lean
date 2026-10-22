@@ -132,6 +132,51 @@ theorem root_correct : rootContract.Holds Extracted.program root := root_holds (
 
 #print axioms root_correct
 
+def rootFormedContract : OutcomeContract CIL.W64 CIL.W64 where
+  args v := [.scalar (.i64 v)]
+  results out := [.scalar (.i64 out)]
+  pre _ m := m.WellFormed
+  footprint _ := []
+  post v _ final out := final.WellFormed ∧ out = v + 1
+  raises v _ := strictRaises v
+
+/-- The call hands back `WellFormed`, so `post` can state it though `strictContract` does not. -/
+theorem root_formed (strictHolds : strictContract.Holds Extracted.program strict) :
+    rootFormedContract.Holds Extracted.program root := by
+  rintro v m formed
+  dsimp only [rootFormedContract]
+  cases raised : strictRaises v with
+  | some exception =>
+    cil_raise_steps []
+    cil_outcome_raise strictHolds v at strictSite []
+    · trivial
+    · exact raised
+  | none =>
+    cil_contract_steps []
+    cil_formed_outcome_call strictHolds v at strictSite []
+    · trivial
+    · exact formed
+    · exact raised
+    rintro m1 _ - formed1 - confined ⟨out, rfl, same⟩
+    subst out
+    dsimp only [strictContract]
+    cil_contract_steps []
+    exact ⟨confined, _, rfl, formed1, rfl⟩
+
+/-- The raising-after form: zero returns from `Percent` and then raises here. -/
+example (percentHolds : percentContract.Holds Extracted.program percent) (m : Memory) (formed : m.WellFormed) :
+    Raises Extracted.program strict [.scalar (.i64 0)] m "System.ArgumentException" := by
+  cil_raise_steps []
+  cil_formed_outcome_call percentHolds 0 at percentSite []
+  · trivial
+  · exact formed
+  · simp only [percentContract]; decide
+  rintro m1 _ - - - - ⟨_, rfl, rfl⟩
+  dsimp only [percentContract]
+  cil_raise_steps [CIL.truth]
+
+#print axioms root_formed
+
 /-! A raised outcome is exactly `.thrown`: no other fault satisfies it at any fuel. -/
 
 @[cil_code] def stuck : CIL.Method := { returnsValue := false, locals := [], code := [.unsupported "fixture"] }

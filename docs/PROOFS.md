@@ -110,7 +110,11 @@ to each `.call` and return; `cil_contract_call holds input at site [facts]` appl
 the contract at a `bind_call` site (or the fetched call without `at`), leaving the precondition and then a continuation over the
 callee's final memory, values, invocation, frame and `Returns`. Destructure
 `Returns` as `⟨out, rfl, post⟩` and unfold the contract (`dsimp only [mixContract]`)
-so the stack holds the encoded output. Stated
+so the stack holds the encoded output.
+`cil_formed_call` (`run_call_of_contract_formed`) also takes the caller memory's
+`WellFormed` and hands the continuation the callee's `final.WellFormed` and
+static-world preservation, so contracts need not restate either; `cil_formed_outcome_call`
+does the same for `cil_outcome_call`. Stated
 store facts must match the computed value syntactically: `generalize` a value
 the simplifier would rewrite, or state the fact in the computed form.
 
