@@ -203,8 +203,9 @@ Import `CIL.Safety.SymbolicExecution` and use `cil_checked_steps` to compose
 checked instruction steps. It first tries definitional equality when no facts
 are supplied, then uses local instruction equations and simplification as needed.
 For symbolic branches or memory operations, supply the proved conditions with
-`cil_checked_steps [facts]`. Loop segments use `CIL.Safety.LoopAutomation` and
-still require an invariant and a decreasing measure.
+`cil_checked_steps [facts]`; local facts are normalised with the goal, so a
+store fact may state its value in source form. Loop segments use
+`CIL.Safety.LoopAutomation` and still require an invariant and a decreasing measure.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter

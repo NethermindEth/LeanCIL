@@ -54,6 +54,9 @@ name = "Tests.Imports"
 name = "Tests.Linking"
 
 [[lean_lib]]
+name = "Tests.StoreFacts"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]
