@@ -1,13 +1,9 @@
 import CIL.Safety.Imports
+import CIL.Safety.StepFlow
 
 /-! A closed library relocated into a linked program runs exactly as alone; static identities are not renamed. -/
 
 namespace CIL
-
-/-- Every method index an instruction calls or constructs with. -/
-def Op.callees : Op → List Nat
-  | .call method _ | .newVector256 method _ | .newAggregate method _ _ => [method]
-  | _ => []
 
 /-- Renames the methods an instruction calls or constructs with; `.nativeBinary` never dispatches its operand. -/
 def Op.relocate (f : Nat → Nat) : Op → Op
@@ -60,11 +56,6 @@ def FrameAction.relocate (f : Nat → Nat) : FrameAction → FrameAction
     .construct (f callee) arguments rest frame temporary kind memory
   | action => action
 
-/-- The method an action enters, if any. -/
-def FrameAction.callee : FrameAction → Option Nat
-  | .call callee .. | .construct callee .. => some callee
-  | _ => none
-
 theorem FrameAction.relocate_of_callee_none (f : Nat → Nat) (action : FrameAction) (none : action.callee = .none) :
     action.relocate f = action := by
   cases action <;> simp_all [FrameAction.relocate, FrameAction.callee]
@@ -75,18 +66,6 @@ theorem enterFrame_relocate (f : Nat → Nat) (body : CIL.Method) (args : List V
 theorem step_body_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) :
     step (body.relocate f) op pc args frame stack m = step body op pc args frame stack m := rfl
-
-/-- Only `.call`, `.newVector256` and `.newAggregate` enter a method, and each enters the one it names. -/
-theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value} {frame : Frame}
-    {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body op pc args frame stack m = .ok action) : action.callee = op.callees.head? := by
-  unfold step at h
-  split at h
-  all_goals
-    (try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.mapError] at h)
-    repeat' (first | contradiction | split at h)
-  all_goals (try (cases h; first | rfl | (cases op <;> simp_all [Op.callees, FrameAction.callee]); done))
-  all_goals done
 
 /-- A relocated instruction steps exactly as the original, entering the renamed method. -/
 theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)

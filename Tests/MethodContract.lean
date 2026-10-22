@@ -72,6 +72,47 @@ def rootContract : MethodContract RootInput where
   post input _ final values := values = [] ∧
     read final input.r 8 1 = .ok (numberBytes ((input.x + input.y) * 3 + input.y).toNat 8)
 
+@[cil_code] def boundedBody : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.nop, .nop, .nop, .ret] }
+
+@[cil_code] def boundedProgram : CIL.Program := [boundedBody]
+
+def boundedRun (pc : Nat) (frame : Frame) (memory : Memory) : Prop :=
+  ∃ fuel result returned,
+    run boundedProgram fuel 0 pc [] frame [] memory = .ok (result, returned) ∧ True
+
+theorem bounded_steps_stop_at_continuation (frame : Frame) (memory : Memory)
+    (continuation : boundedRun 2 frame memory) : boundedRun 0 frame memory := by
+  unfold boundedRun at *
+  cil_contract_steps 2 []
+  exact continuation
+
+theorem bounded_steps_zero_preserves_goal (frame : Frame) (memory : Memory)
+    (continuation : boundedRun 0 frame memory) : boundedRun 0 frame memory := by
+  unfold boundedRun at *
+  cil_contract_steps 0 []
+  exact continuation
+
+theorem bounded_steps_stop_at_return (frame : Frame) (memory : Memory) : boundedRun 0 frame memory := by
+  unfold boundedRun
+  cil_contract_steps 1000000 []
+  trivial
+
+theorem contract_steps_until_continuation (frame : Frame) (memory : Memory)
+    (continuation : boundedRun 2 frame memory) : boundedRun 0 frame memory := by
+  unfold boundedRun at *
+  cil_contract_steps [] until continuation
+
+theorem contract_steps_until_checks_initial_goal (frame : Frame) (memory : Memory)
+    (continuation : boundedRun 0 frame memory) : boundedRun 0 frame memory := by
+  unfold boundedRun at *
+  cil_contract_steps [] until continuation
+
+theorem contract_steps_until_postcondition (frame : Frame) (memory : Memory)
+    (finished : True) : boundedRun 0 frame memory := by
+  unfold boundedRun
+  cil_contract_steps [] until finished
+
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   dsimp only [mixContract]
@@ -164,5 +205,36 @@ theorem frame_confined (m entered home stored final : Memory) (frame : Frame) (s
 #print axioms root_holds
 #print axioms root_correct
 #print axioms frame_confined
+
+example (program : CIL.Program) (before after : Memory) :
+    FrameInvariants program before after =
+      (after.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) before →
+        StaticWorldValid (programStaticDescriptors program) after)) := rfl
+
+example (program : CIL.Program) (memory : Memory) (formed : memory.WellFormed) :
+    FrameInvariants program memory memory :=
+  FrameInvariants.refl program formed
+
+example (program : CIL.Program) (before after : Memory) (formed : after.WellFormed)
+    (preserved : StaticWorldPreserved program before after) : FrameInvariants program before after := by
+  constructor
+  · exact formed
+  · intro world
+    exact preserved world
+
+example {program : CIL.Program} {first middle last : Memory}
+    (left : StaticWorldPreserved program first middle) (right : StaticWorldPreserved program middle last) :
+    StaticWorldPreserved program first last :=
+  left.trans right
+
+example {program : CIL.Program} {first middle last : Memory}
+    (left : FrameInvariants program first middle) (right : FrameInvariants program middle last) :
+    FrameInvariants program first last :=
+  left.trans right
+
+example {program : CIL.Program} {before after : Memory} (kept : FrameInvariants program before after)
+    (world : StaticWorldValid (programStaticDescriptors program) before) :
+    after.WellFormed ∧ StaticWorldValid (programStaticDescriptors program) after :=
+  ⟨kept.formed, kept.staticWorld world⟩
 
 end Tests.MethodContract

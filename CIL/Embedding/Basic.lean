@@ -33,8 +33,13 @@ def Op.targets : Op → List Nat
 theorem Op.targets_relabel (r : Nat → Nat) (op : Op) : (op.relabel r).targets = op.targets.map r := by
   induction op <;> simp_all [Op.relabel, Op.targets]
 
-theorem Op.relabel_of_targets_nil (r : Nat → Nat) (op : Op) (none : op.targets = []) : op.relabel r = op := by
+theorem Op.relabel_eq_self (r : Nat → Nat) (op : Op) (fixed : ∀ target ∈ op.targets, r target = target) :
+    op.relabel r = op := by
   induction op <;> simp_all [Op.relabel, Op.targets]
+  exact (List.map_congr_left fixed).trans (List.map_id _)
+
+theorem Op.relabel_of_targets_nil (r : Nat → Nat) (op : Op) (none : op.targets = []) : op.relabel r = op :=
+  op.relabel_eq_self r (by simp [none])
 
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Op.continues : Op → Bool

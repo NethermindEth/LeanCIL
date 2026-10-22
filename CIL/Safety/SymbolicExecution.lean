@@ -174,13 +174,17 @@ macro_rules
          · cil_lookup [$[$facts:term],*]
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
-    cil_stack_cleanup
     cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" first
-    | (cil_strict refine CIL.Safety.run_return (op := .ret _)
+    | (cil_strict refine Eq.trans (CIL.Safety.run_return (op := .ret _)
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
         (by cil_checked_step_normalized [$[$facts:term],*])
-        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)))
+        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
+       try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
+         List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend, BitVec.reduceOfInt, BitVec.isValue,
+         Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
+       try with_reducible rfl
+       try (with_reducible simp [$[$facts:term],*]; done))
     -- Elaborate each intermediate-state proof before creating the continuation
     -- goal, so reference/frame metavariables remain assignable by the step facts.
     | (cil_strict refine Eq.trans (CIL.Safety.run_next

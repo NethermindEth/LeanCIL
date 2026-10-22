@@ -40,6 +40,14 @@ infers intermediate states, and checks the returned values. These lemmas are
 also available directly from [StepComposition](../CIL/Safety/StepComposition.lean)
 and [CallComposition](../CIL/Safety/CallComposition.lean) for manual proofs.
 
+At a return, the tactic leaves the equation between the computed checked result
+and the stated result as a proof goal. It closes that equation automatically
+only when `with_reducible rfl` succeeds after frame cleanup, list normalization
+and literal shift-count reduction. A mathematical result can need a separate
+`simp` or case split, especially when a narrow return extends a Boolean value.
+The remaining goal contains the returned values, rather than an unexecuted
+`run`. `cil_contract_steps` likewise leaves the return postcondition as a goal.
+
 The single-step helper, `cil_checked_step [facts]`, selects its closing strategy
 from the opcode. Pure scalar operations try `rfl` even when facts are supplied.
 Memory operations, local operations, instruction-dispatcher arms and branches
@@ -191,10 +199,23 @@ the contract at a `bind_call` site (or the fetched call without `at`), leaving t
 callee's final memory, values, invocation, frame and `Returns`. Destructure
 `Returns` as `⟨out, rfl, post⟩` and unfold the contract (`dsimp only [mixContract]`)
 so the stack holds the encoded output.
+Use `cil_contract_steps n [facts]` to take at most `n` instruction steps and
+leave the remaining goal for a continuation. With `n = 0`, no instruction is
+executed. `cil_contract_steps [facts] until continuation` tries the continuation
+before each step, including at the initial goal. It stops when the continuation
+closes the goal or no instruction can be stepped.
 `cil_formed_call` (`run_call_of_contract_formed`) also takes the caller memory's
 `WellFormed` and hands the continuation the callee's `final.WellFormed` and
 static-world preservation, so contracts need not restate either; `cil_formed_outcome_call`
 does the same for `cil_outcome_call`.
+
+`StaticWorldPreserved program before after` names static-world preservation.
+Use `left.trans right` to compose it across calls. `FrameInvariants program before after`
+bundles `after.WellFormed` with that preservation. Its `formed` and `staticWorld`
+projections give each fact, and `left.trans right` composes both invariants.
+`call_frame_invariants` and `construct_frame_invariants` return this bundle.
+Both names are abbreviations, so existing conjunction proofs and formed-call
+continuations keep their proof structure and argument order.
 
 Store facts may name their values in source form, such as
 `write m r (numberBytes (a + b + c).toNat 8) 1 = .ok m'`. Each checked step
@@ -347,6 +368,41 @@ its own after `Percent` returns, and `Root` reads all three off `Strict`'s contr
 build, and refutes the callee's contract with concrete runs on builds with an
 off-by-one threshold or a different exception type.
 
+Import `CIL.Safety.RuntimeExceptions` to name modeled arithmetic failures with
+`RaisesCLR` and `OutcomeContract.HoldsCLR`. This contract mode uses the existing
+arguments, preconditions, normal-return clause, footprint and `raises` field.
+Its fixed `ExecutionFault.clrException` mapping is:
+
+| Fault | Named CLR exception |
+| --- | --- |
+| `.thrown exception` | `exception` |
+| `.arithmetic .overflow` | `System.OverflowException` |
+| `.arithmetic .divideByZero` | `System.DivideByZeroException` |
+| Every other fault | None |
+
+Checked add, subtract, multiply and integer conversions report overflow through
+this mapping. Integer division and remainder by zero report divide-by-zero.
+The admitted runtime model reports overflow for signed minimum divided by
+negative one, including its remainder instruction. Invalid arithmetic operands,
+invalid bounds, memory faults, unsupported instructions, invalid state and fuel
+exhaustion have no name in this mode. `Raises` and `.thrown` keep their existing
+meaning. `OutcomeContract.Holds.clr` lifts an existing thrown-outcome proof.
+
+For a UInt256 `Divide` or `Mod` contract, select
+`some "System.DivideByZeroException"` in `raises` when its divisor is zero and
+prove `HoldsCLR`. Both an explicit throw and the mapped arithmetic failure can
+establish this exact outcome. The proof must still reach that fault through the
+actual extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and
+`raisesCLR_of_run` compose that execution; `run_call_raisesCLR_of_contract`
+propagates a callee contract's named outcome. `RaisesCLR.not_of_invoke` refutes a
+wrong name from a settled checked invocation.
+
+`Tests/RuntimeExceptions.lean` proves all mapped cases and refutes wrong names.
+It also proves unsigned division and remainder by zero for every dividend and
+caller memory. `Tests/RuntimeExceptions.cs`, run by the outcomes suite, checks
+the CLR type and verifies each positive contract and wrong-name refutation
+against its compiled C# method.
+
 ## Derive public contracts
 
 A method's proved contract can be more detailed than its callers need. Export a
@@ -428,6 +484,47 @@ vacuously, and composes an imported raising `Percent` through both outcomes of
 `Strict` and `Root`. The identity checks that bind a slot to a certified library
 implementation are not part of this rule; relocating a library into the slot is
 described next.
+
+## Read control flow off one step
+
+`CIL.Safety.StepFlow` says where a successful `step` can go without unfolding it.
+`step_next_target`: an action that stays in the frame resumes at `pc + 1` of a
+continuing instruction or at one of `op.targets`. `step_callee`: only `.call`,
+`.newVector256` and `.newAggregate` enter a method, the one they name
+(`Op.callees`). `step_call_action` and `step_newVector256_action` /
+`step_newAggregate_action` separate a call from a construction. The module
+imports only the step simulation, so a consumer reasoning about reachable pcs
+does not compile the import and linking layers.
+
+## Move a run that starts inside a region
+
+Embedding relates whole bodies. When only a suffix is shared, `CIL.Safety.RegionRun`
+cuts the rest away first. `RegionClosed program region` says fallthroughs, targets
+and callee entries of region instructions stay in the region; `regionClosedCheck`
+decides it for a region listed as `(method, lower)` suffixes (`inStarts`).
+`AgreesOn program other region` says `other` has the same methods and metadata and
+the same instruction at every region pc; `AgreesOn.set` and `code_agrees_of_drop`
+build it for one replaced body. Then `run_congr_region` gives equal runs from any
+region pc, faults included. Masking the code outside the region with `.unsupported`
+makes it dead for `Embeds`, so `run_refines` carries the suffix run on to a body
+with a different prefix; `Tests/RegionRun.lean` moves a suffix after inline code
+to the same suffix after a helper call, one pc earlier.
+
+For a long suffix, import `CIL.Safety.Embedding.Suffix` and use
+`CIL.Embedding.BodyRefines.of_relocated_suffix`. It uses one list equality:
+`actual.code.drop start = (expected.code.drop lower).map (Op.relabel (fun pc => pc - lower + start))`.
+The expected prefix must contain only dead instructions. All branch targets in
+the suffix must be at least `lower`. The constructor also requires equal method
+metadata, equal static descriptor lists, and equal static lookups at each moved
+pc. If `lower = 0`, `start` must also be zero to preserve method entry.
+
+The resulting map, `suffixRename lower start`, sends prefix pcs to zero and
+suffix pcs to `pc - lower + start`. Pass the proof to `ProgramRefines.set_body`
+and then `run_refines`. This avoids evaluating `sites` and `pick` for each
+instruction. `Tests/RegionRun.lean` combines it with `run_congr_region` for a
+100-instruction suffix with a symbolic feature profile and callee index. The
+test includes conditional, switch, and wrapped native branch targets and uses
+the default heartbeat limit.
 
 ## Link separately extracted libraries
 
