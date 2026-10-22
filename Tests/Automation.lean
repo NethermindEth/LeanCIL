@@ -110,4 +110,22 @@ theorem checked_plain_return_preserves_semireducible_goal
   rfl
 
 #print axioms checked_plain_return_preserves_semireducible_goal
+
+theorem checked_literal_extension_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (left right : CIL.W64) :
+    CIL.Safety.run [branchMethod] 1 0 3 [] frame
+      [.scalar (.i64 (left * BitVec.signExtend 64 (3#32) + right))] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i64 (left * 3 + right))]) := by
+  cil_checked_steps
+
+theorem checked_decided_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (condition : Bool) (left right : CIL.W64) :
+    CIL.Safety.run [branchMethod] 1 0 3 [] frame
+      [.scalar (.i64 (if condition then left else right))] memory =
+      .ok (CIL.Safety.leaveFrame frame memory,
+        [.scalar (.i64 (if condition = true then left else right))]) := by
+  cases condition <;> cil_checked_steps
+
+#print axioms checked_literal_extension_return
+#print axioms checked_decided_return
 end Tests.Automation
