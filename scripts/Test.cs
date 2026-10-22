@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "contracts" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names]")
+    ["--suite", "all" or "core" or "contracts" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "scaling" or "excluded"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|scaling|excluded]")
 };
 
 using var verification = new Program();
@@ -42,7 +42,10 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["native"] = ("Tests/NativeIntegers.cs", "native integer storage, arithmetic and runtime comparisons"),
     ["identity"] = ("Tests/MethodIdentity.cs", "signature-bound methods that survive extraction renumbering"),
     ["labels"] = ("Tests/StructuralLabels.cs", "loop-head and call-site labels that survive inserted statements"),
-    ["names"] = ("Tests/DebugNames.cs", "PDB local names and source locations that never change extraction")
+    ["names"] = ("Tests/DebugNames.cs", "PDB local names and source locations that never change extraction"),
+    // Split from evidence: each fixture alone runs for minutes, so they take separate runners.
+    ["scaling"] = ("Tests/TranslationScaling.cs", "compositional certificate for a six-method call graph and its consumer replay"),
+    ["excluded"] = ("Tests/ExcludedBranchScaling.cs", "hundreds of excluded and live sites at the default heartbeat budget")
 };
 
 void Passed(string name)
@@ -124,7 +127,7 @@ foreach (var project in projects)
         throw new InvalidOperationException("Unused imports: " + log);
 }
 
-if (suite is "all" or "core" or "unsafe" or "evidence")
+if (suite is "all" or "core" or "unsafe" or "evidence" or "scaling" or "excluded")
 {
     // Direct semantic/evidence checks use the checkout's Lake build directory.
     // Seed it from the same validated private library instead of rebuilding CIL.
