@@ -1058,7 +1058,7 @@ unsafe def main (args : List String) : IO Unit := do
                 {
                     schema = 4, identitySha256 = Sha(Path.Combine(outputs[i], "identity.json")),
                     assemblySha256 = Sha(requests[i].Assembly), inputs = before[i], imports = PublishedImports(current),
-                    contractImports = ContractImportAssumptions(current)
+                    contractImports = ContractImportAssumptions(current), contractDependencies = DeploymentDependencies(current)
                 };
                 outcomes[i].Detail = null;
                 if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
@@ -1396,7 +1396,8 @@ unsafe def main (args : List String) : IO Unit := do
                     audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
-                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: PublishedImports(extraction));
+                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: PublishedImports(extraction),
+                    contractDependencies: DeploymentDependencies(extraction));
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));

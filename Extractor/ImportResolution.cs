@@ -12,10 +12,18 @@ internal sealed class ImportResolution : IDisposable
         string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind,
         string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
+    internal sealed record Node(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest,
+        string SidecarPath, string ImplementationPath, string ExpectedInterfaceDigest, bool IsReferenceAssembly,
+        ContractDependency[] Dependencies);
     readonly List<Library> libraries = [];
     readonly List<Binding> bindings = [];
     readonly Dictionary<Instruction, int> sites = [];
     internal IReadOnlyList<Binding> Bindings => bindings;
+    internal Node[] Nodes => libraries.OrderBy(library => library.Interface.AssemblyIdentity, StringComparer.Ordinal)
+        .Select(library => new Node(library.Interface.AssemblyIdentity, library.Interface.ImplementationSha256,
+            library.Interface.InterfaceDigest, Path.GetFullPath(library.Source.SidecarPath),
+            Path.GetFullPath(library.Source.ImplementationPath), library.Source.ExpectedInterfaceDigest,
+            library.Interface.IsReferenceAssembly, library.Interface.Dependencies)).ToArray();
 
     internal ImportResolution(IEnumerable<Source> sources)
     {
@@ -52,12 +60,23 @@ internal sealed class ImportResolution : IDisposable
                         attribute.AttributeType.FullName == "System.Runtime.Versioning.TargetFrameworkAttribute")?.ConstructorArguments.Single().Value as string;
                     if (framework != contract.TargetFramework || framework != ".NETCoreApp,Version=v10.0")
                         throw new InvalidDataException("Import target framework mismatch.");
+                    Library? existing = libraries.SingleOrDefault(library => library.Interface.AssemblyIdentity == contract.AssemblyIdentity);
+                    if (existing is not null)
+                    {
+                        if (existing.Interface.ImplementationSha256 != contract.ImplementationSha256)
+                            throw new InvalidDataException("Conflicting contract dependency implementation hashes: " + contract.AssemblyIdentity);
+                        if (existing.Interface.InterfaceDigest != contract.InterfaceDigest || existing.SidecarSha256 != ContractInterface.Hash(sidecar))
+                            throw new InvalidDataException("Conflicting contract dependency interface or certification: " + contract.AssemblyIdentity);
+                        module.Dispose();
+                        continue;
+                    }
                     if (libraries.Any(library => library.Module.Assembly.Name.Name == module.Assembly.Name.Name))
-                        throw new InvalidDataException("Duplicate import assembly: " + module.Assembly.Name.Name);
+                        throw new InvalidDataException("Ambiguous import assembly simple name: " + module.Assembly.Name.Name);
                     libraries.Add(new(source, contract, ContractInterface.Hash(sidecar), module));
                 }
                 catch { module.Dispose(); throw; }
             }
+            ContractDependencyGraph.Validate(libraries.Select(library => library.Interface));
             InterfaceModules();
         }
         catch { Dispose(); throw; }

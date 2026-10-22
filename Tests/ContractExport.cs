@@ -179,3 +179,4 @@ string prior = Sha(sidecar);
 File.WriteAllText(contractSource, File.ReadAllText(contractSource).Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
 RejectExport(ProducerManifest(), "unsolved goals", prior);
 Console.WriteLine("PASS a failing library contract cannot replace a published sidecar");
+Run(["dotnet", "run", "--file", "Tests/TransitiveImports.cs"], streamOutput: true, progress: "Transitive contract import checks");

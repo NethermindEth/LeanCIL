@@ -146,6 +146,16 @@ internal static class Program
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
             List<ImportResolution.Source> importSources = [];
+            if (recorded is { } recordedGraph && recordedGraph.TryGetProperty("importGraph", out JsonElement graphNodes))
+                foreach (JsonElement node in graphNodes.EnumerateArray())
+                {
+                    string name = AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name;
+                    string sidecar = node.GetProperty("sidecarPath").GetString()!;
+                    string implementation = implementationPaths.GetValueOrDefault(name) ?? node.GetProperty("implementationPath").GetString()!;
+                    string expected = importHashes.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
+                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ?? node.GetProperty("expectedInterfaceDigest").GetString()!;
+                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
+                }
             if (recorded is { } recordedImports && recordedImports.TryGetProperty("imports", out JsonElement importRecords))
                 foreach (JsonElement binding in importRecords.EnumerateArray())
                 {
@@ -207,6 +217,7 @@ internal static class Program
             {
                 schema = 3,
                 imports = imports.Bindings.Select(binding => JsonSerializer.SerializeToElement(binding, ContractInterface.Json)),
+                importGraph = imports.Nodes.Select(node => JsonSerializer.SerializeToElement(node, ContractInterface.Json)),
                 importModules = importModuleHashes,
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),

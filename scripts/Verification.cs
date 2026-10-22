@@ -991,7 +991,21 @@ unsafe def main (args : List String) : IO Unit := do
     }
 
     static bool ReferenceOnlyImports(string output) =>
-        ImportedBindings(output).Any(import => import.GetProperty("isReferenceAssembly").GetBoolean());
+        ImportedBindings(output).Any(import => import.GetProperty("isReferenceAssembly").GetBoolean()) ||
+        ImportGraph(output).Any(node => node.GetProperty("isReferenceAssembly").GetBoolean());
+
+    static JsonElement[] ImportGraph(string output)
+    {
+        JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+        return identity.TryGetProperty("importGraph", out JsonElement graph) ? graph.EnumerateArray().ToArray() : [];
+    }
+
+    sealed record DeploymentDependency(string assemblyIdentity, string implementationSha256, string interfaceDigest);
+
+    static DeploymentDependency[] DeploymentDependencies(JsonElement identity) =>
+        identity.TryGetProperty("importGraph", out JsonElement graph) ? graph.EnumerateArray().Select(node =>
+            new DeploymentDependency(node.GetProperty("assemblyIdentity").GetString()!,
+                node.GetProperty("implementationSha256").GetString()!, node.GetProperty("interfaceDigest").GetString()!)).ToArray() : [];
 
     static JsonElement[] ImportedBindings(string output)
     {
@@ -1012,6 +1026,8 @@ unsafe def main (args : List String) : IO Unit := do
         {
             assembly = identity.GetProperty("assemblySha256"), generated = identity.GetProperty("generatedSha256"),
             profile = identity.GetProperty("profile"), interfaces = ImportSources(output),
+            dependencyGraph = ImportGraph(output).Any(node => node.GetProperty("dependencies").GetArrayLength() > 0)
+                ? ImportGraph(output) : [],
             imports = ImportedBindings(output).Select(import => new
             {
                 slot = import.GetProperty("slot"), identity = import.GetProperty("identity"),
@@ -1053,7 +1069,8 @@ unsafe def main (args : List String) : IO Unit := do
         string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
-        string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null);
+        string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
+        DeploymentDependency[]? contractDependencies = null);
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -1289,7 +1306,8 @@ unsafe def main (args : List String) : IO Unit := do
             ? assumptions.Deserialize<string[]>() : [];
         RequireImplementationImports(output);
         var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-            staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: PublishedImports(extraction));
+            staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: PublishedImports(extraction),
+            contractDependencies: DeploymentDependencies(extraction));
         File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
         return report;

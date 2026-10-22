@@ -11,10 +11,11 @@ internal sealed record ContractExport(string Identity, string Signature, int Par
     bool ReturnsValue, string Visibility, string ContractConstant, string ClosureDigest, string[] Profiles, string Kind);
 internal sealed record ContractCertification(string Identity, string Profile, string ImplementationSha256,
     string InterfaceDigest, string ClosureDigest, string Theorem, string Statement, string StatementDigest);
+internal sealed record ContractDependency(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest);
 internal sealed record ContractInterface(int Schema, int SemanticsVersion, int FormatVersion, string FrameworkKey,
     string AssemblyIdentity, Guid Mvid, string TargetFramework, string ImplementationSha256, bool IsReferenceAssembly,
     InterfaceModule[] InterfaceModules, string InterfaceDigest, ContractExport[] Exports,
-    ContractCertification[] Certifications, string[] Dependencies, string? FullVerificationLocator = null)
+    ContractCertification[] Certifications, ContractDependency[] Dependencies, string? FullVerificationLocator = null)
 {
     internal static readonly JsonSerializerOptions Json = new()
     {
@@ -55,12 +56,17 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
             Require(export, "identity", "signature", "parameterCount", "hasThis", "returnsValue", "visibility", "contractConstant", "closureDigest", "profiles", "kind");
         foreach (JsonElement record in document.RootElement.GetProperty("certifications").EnumerateArray())
             Require(record, "identity", "profile", "implementationSha256", "interfaceDigest", "closureDigest", "theorem", "statement", "statementDigest");
+        foreach (JsonElement dependency in document.RootElement.GetProperty("dependencies").EnumerateArray())
+            Require(dependency, "assemblyIdentity", "implementationSha256", "interfaceDigest");
         ContractInterface value = document.RootElement.Deserialize<ContractInterface>(Json)
             ?? throw new InvalidDataException("Missing contract interface.");
         if (value.Schema != 1 || value.SemanticsVersion != 1 || value.FormatVersion != 1)
             throw new InvalidDataException("Unsupported contract interface format or semantics version.");
-        if (value.Dependencies is null || value.Dependencies.Length != 0)
-            throw new InvalidDataException("Contract interface version 1 does not support dependencies.");
+        if (value.Dependencies is null || value.Dependencies.Any(dependency => dependency is null ||
+            string.IsNullOrWhiteSpace(dependency.AssemblyIdentity) || !Digest(dependency.ImplementationSha256) ||
+            !Digest(dependency.InterfaceDigest)) ||
+            value.Dependencies.Select(dependency => dependency.AssemblyIdentity).Distinct(StringComparer.Ordinal).Count() != value.Dependencies.Length)
+            throw new InvalidDataException("Invalid or duplicate contract dependency.");
         if (value.FrameworkKey != CurrentFrameworkKey())
             throw new InvalidDataException("Contract interface framework key mismatch.");
         if (!Digest(value.ImplementationSha256) || !Digest(value.InterfaceDigest) || value.Mvid == Guid.Empty ||

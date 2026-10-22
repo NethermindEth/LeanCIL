@@ -46,8 +46,20 @@ theorem root_composed : rootContract.Holds linked root :=
     (fun j bound => by cases j with | zero => exact addLib_closed | succ => simp at bound)
     (fun j bound _ => by cases j with | zero => exact add_holds | succ => simp at bound)
 
+def relocatedCompletion : CIL.Program :=
+  { code := [.ret] } :: linked.map (CIL.Method.relocate (fun index => index + 1))
+
+theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1) := by
+  have imported : Tests.Imports.Calls.importsAdd linked :=
+    add_holds.relocate addLib_closed (link_relocates _ _ (j := 0) (by decide))
+  apply MethodContract.relocateGiven (f := fun index => index + 1)
+    root_given (link_links _ _) imported (Closed.of_check (by decide))
+  intro index bound
+  simp [relocatedCompletion, List.getElem?_eq_getElem bound]
+
 #print axioms add_holds
 #print axioms root_composed
+#print axioms root_prefix_relocated
 
 end Tests.Linking.Calls
 
@@ -105,6 +117,17 @@ theorem root_composed : rootContract.Holds linked root :=
     (fun j bound => by cases j with | zero => exact percentLib_closed | succ => simp at bound)
     (fun j bound _ => by cases j with | zero => exact percent_holds | succ => simp at bound)
 
+def relocatedCompletion : CIL.Program :=
+  { code := [.ret] } :: linked.map (CIL.Method.relocate (fun index => index + 1))
+
+theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1) := by
+  have imported : Tests.Imports.Outcomes.importsPercent linked :=
+    percent_holds.relocate percentLib_closed (link_relocates _ _ (j := 0) (by decide))
+  apply OutcomeContract.relocateGiven (f := fun index => index + 1)
+    root_given (link_links _ _) imported (Closed.of_check (by decide))
+  intro index bound
+  simp [relocatedCompletion, List.getElem?_eq_getElem bound]
+
 /-- The relocated helper's exception reaches `Root` through two relocated calls. -/
 example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "System.ArgumentOutOfRangeException" :=
   root_composed.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
@@ -116,5 +139,6 @@ example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map (fun body => bo
 #print axioms check_holds
 #print axioms percent_holds
 #print axioms root_composed
+#print axioms root_prefix_relocated
 
 end Tests.Linking.Outcomes

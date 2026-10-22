@@ -318,3 +318,33 @@ Each cache hit still checks current DLL/sidecar/profile identities and writes a
 new report with current deployment records. `--fresh` bypasses proof reuse.
 Reference-only input can check a caller proof for authoring, but exits with status
 1 and produces neither `verified.json` nor a successful proof receipt.
+## Transitive contract imports
+
+A library can export a theorem conditional on its own imports. Its exact statement
+is `CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold
+(fun linked => CIL.Safety.MethodContract.Holds contract linked 0)`, with the
+corresponding canonical `OutcomeContract.Holds` for an outcome contract.
+The producer freshly checks that statement and records the dependency identities.
+It does not claim that the open extracted prefix is closed.
+
+Supply every graph node with `--import`, `--import-sha256` and
+`--import-interface-sha256`. The existing `--import-implementation` option selects
+its DLL path. A dependency record binds its full assembly identity, implementation
+SHA-256 and interface digest. Each dependency must match the independently pinned
+node. A shared dependency has one identity and one selected implementation.
+Conflicting hashes, missing nodes and cycles fail before extraction. Cycle errors
+name the complete cycle path.
+
+The extraction identity records all nodes in `importGraph`. A verification report
+records their deployment bindings in `contractDependencies`. Only methods actually
+called by the selected App entry receive import slots. Published certifications
+remain the stated trust boundary for library implementations; caller proofs remain
+conditional on the published contracts. A source bundle or graph digest does not
+prove that those contracts hold.
+
+`MethodContract.relocateGiven` and `OutcomeContract.relocateGiven` turn a prefix
+proof into a contract at a relocated entry. They require an explicit closed
+completion, its prefix relation, satisfaction of imported contracts in that
+completion, and a relocation of the completion into the target program.
+Transitive graph implementation changes conservatively invalidate proof reuse.
+Static and initialization assumptions still cannot be exported in this feature.
