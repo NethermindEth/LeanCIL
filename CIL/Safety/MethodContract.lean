@@ -444,7 +444,8 @@ theorem MethodContract.Holds.weaken {Input Output : Type} {internal exported : M
 macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
   `(tactic| (
     -- A contract continuation resumes at `pc + 1` on `values ++ rest` with projected inputs.
-    try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
+    try dsimp only [Nat.reduceAdd]
+    cil_stack_cleanup
     try (cil_strict refine CIL.Safety.invoke_exists_of_run
            (by cil_lookup [$[$facts:term],*])
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
@@ -461,40 +462,52 @@ macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
             let operation := (target.getArg! 1).getArg! 1
             if operation.isAppOf ``CIL.Op.ret then
               throwError "Return requires run_return_exists"
-          cil_checked_step [$[$facts:term],*]) ?_)
+          cil_checked_step_normalized [$[$facts:term],*]) ?_
+       cil_stack_cleanup)
     | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step [$[$facts:term],*])
+        (by cil_checked_step_normalized [$[$facts:term],*])
         (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
     leaving each `.call` for `cil_contract_call` and the postcondition at each return. -/
-macro "cil_contract_steps" "[" facts:term,* "]" : tactic =>
-  `(tactic| (
-    cil_contract_prepare [$[$facts:term],*]
-    cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" cil_contract_step [$[$facts:term],*]))
+syntax "cil_contract_steps" "[" term,* "]" : tactic
+/-- As `cil_contract_steps`, but stop silently after at most `count` steps. -/
+syntax "cil_contract_steps" num "[" term,* "]" : tactic
+/-- As `cil_contract_steps`, but stop silently once `continuation` closes the goal. -/
+syntax "cil_contract_steps" "[" term,* "]" " until " term : tactic
 
 open Lean Elab Tactic in
-elab "cil_contract_steps" count:num "[" facts:term,* "]" : tactic => do
-  evalTactic (← `(tactic| cil_contract_prepare [$[$facts:term],*]))
-  let next ← `(tactic| cil_contract_step [$[$facts:term],*])
-  for _ in [:count.getNat] do
-    let saved ← saveState
-    try
-      evalTactic next
-    catch _ =>
-      saved.restore
-      break
-
-macro "cil_contract_steps" "[" facts:term,* "]" " until " continuation:term : tactic =>
-  `(tactic| (first
-    | (cil_strict exact $continuation)
-    | (
-      cil_contract_prepare [$[$facts:term],*]
-      repeat first
+elab_rules : tactic
+  | `(tactic| cil_contract_steps [$facts:term,*]) => do
+    let config ← `(Lean.Parser.Tactic.optConfig|)
+    let prepared ← normaliseStepFacts config facts.getElems
+    withMainContext <| evalTactic (← `(tactic| (
+      cil_contract_prepare [$[$prepared:term],*]
+      cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" cil_contract_step [$[$prepared:term],*])))
+  | `(tactic| cil_contract_steps $count:num [$facts:term,*]) => do
+    let config ← `(Lean.Parser.Tactic.optConfig|)
+    let prepared ← normaliseStepFacts config facts.getElems
+    withMainContext <| evalTactic (← `(tactic| cil_contract_prepare [$[$prepared:term],*]))
+    let next ← `(tactic| cil_contract_step [$[$prepared:term],*])
+    for _ in [:count.getNat] do
+      let saved ← saveState
+      try
+        evalTactic next
+      catch _ =>
+        saved.restore
+        break
+  | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
+    let config ← `(Lean.Parser.Tactic.optConfig|)
+    let prepared ← normaliseStepFacts config facts.getElems
+    withMainContext <| evalTactic (← `(tactic| (first
       | (cil_strict exact $continuation)
-      | cil_contract_step [$[$facts:term],*])))
+      | (
+        cil_contract_prepare [$[$prepared:term],*]
+        repeat first
+        | (cil_strict exact $continuation)
+        | cil_contract_step [$[$prepared:term],*]))))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
     site: leaves the precondition, then the continuation over the callee's final memory,
