@@ -175,6 +175,14 @@ so the stack holds the encoded output.
 static-world preservation, so contracts need not restate either; `cil_formed_outcome_call`
 does the same for `cil_outcome_call`.
 
+`StaticWorldPreserved program before after` names static-world preservation.
+Use `left.trans right` to compose it across calls. `FrameInvariants program before after`
+bundles `after.WellFormed` with that preservation. Its `formed` and `staticWorld`
+projections give each fact, and `left.trans right` composes both invariants.
+`call_frame_invariants` and `construct_frame_invariants` return this bundle.
+Both names are abbreviations, so existing conjunction proofs and formed-call
+continuations keep their proof structure and argument order.
+
 Store facts may name their values in source form, such as
 `write m r (numberBytes (a + b + c).toNat 8) 1 = .ok m'`. Each checked step
 simplifies the goal with the default simp set, its interpreter definitions and

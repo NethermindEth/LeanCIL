@@ -94,8 +94,7 @@ theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Inpu
     (normal : c.raises input updated = none)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       LoopOutcome program method args post raises ⟨pc + 1, frame, values ++ rest, final⟩) :
     LoopOutcome program method args post raises ⟨pc, frame, stack, memory⟩ :=
