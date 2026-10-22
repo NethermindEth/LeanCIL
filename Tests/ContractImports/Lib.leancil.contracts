@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "semanticsVersion": 1,
+  "formatVersion": 1,
+  "frameworkKey": "FRAMEWORK",
+  "assemblyIdentity": "ImportFixture.Lib, Version=0.1.0.0, Culture=neutral, PublicKeyToken=null",
+  "mvid": "00000000-0000-0000-0000-000000000000",
+  "targetFramework": ".NETCoreApp,Version=v10.0",
+  "implementationSha256": "IMPLEMENTATION",
+  "isReferenceAssembly": false,
+  "interfaceModules": [{ "name": "ImportFixture", "source": "SOURCE" }],
+  "interfaceDigest": "INTERFACE",
+  "exports": [{
+    "identity": "ImportFixture.Lib, Version=0.1.0.0, Culture=neutral, PublicKeyToken=null::System.UInt64 ImportFixture.Library::AddOne(System.UInt64)",
+    "signature": "System.UInt64 ImportFixture.Library::AddOne(System.UInt64)",
+    "parameterCount": 1,
+    "hasThis": false,
+    "returnsValue": true,
+    "visibility": "public",
+    "contractConstant": "ImportFixture.addOne",
+    "closureDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "profiles": ["scalar"]
+  }],
+  "certifications": [{
+    "identity": "ImportFixture.Lib, Version=0.1.0.0, Culture=neutral, PublicKeyToken=null::System.UInt64 ImportFixture.Library::AddOne(System.UInt64)",
+    "profile": "scalar",
+    "implementationSha256": "IMPLEMENTATION",
+    "interfaceDigest": "INTERFACE",
+    "closureDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }],
+  "dependencies": [],
+  "fullVerificationLocator": null
+}

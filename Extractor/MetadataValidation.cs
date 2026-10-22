@@ -159,7 +159,7 @@ internal static class MetadataValidation
     // With `blocked`, failures after entry selection are recorded and the walk continues past them;
     // without it, the first failure throws. Either way only profile-reachable code is checked.
     internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
-        IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null)
+        IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null)
     {
         profile.Validate();
         initializedTypes ??= [];
@@ -257,6 +257,14 @@ internal static class MetadataValidation
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
+                if (ImportResolution.External(reference, module))
+                {
+                    if (imports is null)
+                        throw Call("External managed dependency", reference, method, instruction,
+                            $"Next: supply --import {ScopeName(reference.DeclaringType.Scope)}.leancil.contracts.");
+                    imports.Admit(reference, instruction, profile);
+                    return;
+                }
                 if (reference is GenericInstanceMethod generic)
                 {
                     if (instruction.OpCode.Code != Code.Call)
@@ -319,7 +327,7 @@ internal static class MetadataValidation
                         skipped.Add(instruction);
                     continue;
                 }
-                if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
+                if (instruction.OpCode.Code is not (Code.Call or Code.Callvirt or Code.Newobj or Code.Ldftn or Code.Ldvirtftn) || instruction.Operand is not MethodReference reference ||
                     typeTests!.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction) || throws!.Operands.Contains(instruction))
                     continue;
                 if (!Check(method, instruction, () =>
@@ -347,7 +355,7 @@ internal static class MetadataValidation
             foreach (Instruction instruction in Reachability.Analyze(method, profile))
                 if (!skipped.Contains(instruction))
                     Check(method, instruction, () =>
-                        InstructionTranslation.Translate(instruction, method, methods, index, profile, nativeOperands, parameterHomes), named: true);
+                        InstructionTranslation.Translate(instruction, method, methods, index, profile, nativeOperands, parameterHomes, imports), named: true);
         }
         return methods;
     }

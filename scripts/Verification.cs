@@ -859,11 +859,65 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         return axioms;
     }
 
+    static SortedDictionary<string, string> ImportSources(string output)
+    {
+        JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+        SortedDictionary<string, string> sources = new(StringComparer.Ordinal);
+        if (!identity.TryGetProperty("importModules", out JsonElement modules)) return sources;
+        foreach (JsonProperty module in modules.EnumerateObject())
+        {
+            if (!Regex.IsMatch(module.Name, @"\A[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z") ||
+                (module.Name != "ExtractedImports" && module.Name.Split('.')[0] is
+                    "CIL" or "Lean" or "Init" or "Std" or "Extracted" or "Proof" or "Audit" or "ExtractionAudit" or "ExtractedSymbols" or "Symbols" or "Examples" or "Tests" or "lakefile"))
+                throw new InvalidDataException("Invalid imported interface module: " + module.Name);
+            string path = Path.Combine(output, module.Name.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+            string source = File.ReadAllText(path);
+            if (ContentKey(source) != module.Value.GetString()) throw new InvalidDataException("Imported interface source hash mismatch: " + module.Name);
+            sources.Add(module.Name, source);
+        }
+        return sources;
+    }
+
+    static string[] StageImportSources(string output, string destination)
+    {
+        SortedDictionary<string, string> sources = ImportSources(output);
+        List<string> ordered = [];
+        HashSet<string> active = new(StringComparer.Ordinal);
+        void Stage(string module)
+        {
+            if (ordered.Contains(module, StringComparer.Ordinal)) return;
+            if (!active.Add(module)) throw new InvalidDataException("Cyclic contract interface module imports: " + module);
+            foreach (Match dependency in Regex.Matches(sources[module], @"(?m)^import\s+([A-Za-z_][A-Za-z0-9_.]*)"))
+                if (sources.ContainsKey(dependency.Groups[1].Value)) Stage(dependency.Groups[1].Value);
+            string path = Path.Combine(destination, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+            if (File.Exists(path)) throw new InvalidDataException("Contract interface module shadows an existing source: " + module);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, sources[module], new UTF8Encoding(false));
+            active.Remove(module);
+            ordered.Add(module);
+        }
+        foreach (string module in sources.Keys) Stage(module);
+        return ordered.ToArray();
+    }
+
+    static string ImportAuditHeader(string output) => ImportSources(output).ContainsKey("ExtractedImports") ? "import ExtractedImports\n" : "";
+
+    static string ImportClaimAudit(string output, string theorem) => ImportSources(output).ContainsKey("ExtractedImports")
+        ? "def LeanCILImportAudit.requireConditional {claim : CIL.Program -> Prop} " +
+          "(proved : CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold claim) := proved\n" +
+          "#check LeanCILImportAudit.requireConditional " + theorem + "\n"
+        : "";
+
+    static string[] ContractImportAssumptions(JsonElement extraction) =>
+        extraction.TryGetProperty("imports", out JsonElement imports) ? imports.EnumerateArray().Select(import =>
+            import.GetProperty("contractConstant").GetString() + ".Holds linked " +
+            (extraction.GetProperty("methods").GetArrayLength() + import.GetProperty("slot").GetInt32())).ToArray() : [];
+
     sealed record Report(int schema, string assemblySha256, string identitySha256, string theorem, string[] axioms,
         string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
-        string[]? staticValues = null);
+        string[]? staticValues = null, string[]? contractImports = null);
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -973,10 +1027,11 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         try
         {
             File.Copy(Path.Combine(output, "Extracted.lean"), Path.Combine(fresh, "Extracted.lean"));
+            string[] importModules = StageImportSources(output, fresh);
             File.Copy(proof, Path.Combine(fresh, "Proof.lean"));
             var symbols = ImportsSymbols(File.ReadAllText(proof));
             if (symbols) File.Copy(SymbolsFor(output), Path.Combine(fresh, "ExtractedSymbols.lean"));
-            File.WriteAllText(Path.Combine(fresh, "Audit.lean"), $"import Proof\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + RefutationAudit(theorem));
+            File.WriteAllText(Path.Combine(fresh, "Audit.lean"), ImportAuditHeader(output) + $"import Proof\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + ImportClaimAudit(output, theorem) + RefutationAudit(theorem));
             File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
 
@@ -1026,11 +1081,20 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                 File.WriteAllText(Path.Combine(publication, "extraction-audit.txt"), extractionAudit);
                 extractionPublication = publication;
             }
+            foreach (string module in importModules)
+            {
+                string source = Path.Combine(fresh, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+                Run(["lean", "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source], leanPath: leanPath,
+                    progress: "Checking contract interface: " + module);
+            }
+            if (importModules.Length > 0)
+                Run([checker, .. importModules], leanPath: leanPath, progress: "Kernel replay of contract interfaces: " + entry);
             if (symbols)
                 Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), Path.Combine(fresh, "ExtractedSymbols.lean")],
                     leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);
             var proofKey = ContentKey("theorem-audit-v1\n" + extractedKey + "\n" + Sha(Path.Combine(fresh, "Proof.lean")) + "\n" +
-                (symbols ? Sha(Path.Combine(fresh, "ExtractedSymbols.lean")) + "\n" : "") + theorem);
+                (symbols ? Sha(Path.Combine(fresh, "ExtractedSymbols.lean")) + "\n" : "") +
+                JsonSerializer.Serialize(ImportSources(output)) + "\n" + theorem);
             if (RestoreSuccess(proofKey, fresh))
             {
                 if (extractionPublication is not null)
@@ -1079,7 +1143,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
             ? assumptions.Deserialize<string[]>() : [];
         var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-            staticValues: StaticValueAssumptions(extraction));
+            staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction));
         File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
         return report;

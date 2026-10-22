@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem]")
+    ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem" or "imports"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports]")
 };
 
 using var verification = new Program();
@@ -16,6 +16,7 @@ var results = new List<string>();
 
 var independentSuites = new Dictionary<string, (string Script, string Description)>
 {
+    ["imports"] = ("Tests/ContractImports.cs", "implementation-bound contract imports and conditional caller verification"),
     ["contracts"] = ("Tests/UniversalContracts.cs", "universal checked contracts, caller memory preservation and incorrect implementations"),
     ["evidence"] = ("Tests/ExtractionEvidence.cs", "independent extraction certificates and malformed evidence rejection"),
     ["loops"] = ("Tests/Loops.cs", "cyclic control-flow validation, universal termination and negative contracts"),
