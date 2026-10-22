@@ -65,12 +65,13 @@ protected, non-P/Invoke, and non-generic. Instance, constructor, function pointe
 and virtual call sites are rejected. Import signatures must use supported
 parameter and result types with matching assembly-scoped type identities.
 Profiles must name an exact built-in profile; custom profiles are not admitted.
-For an implementation DLL, the selected export must satisfy the closed v1
-producer's admission rules without external initialization assumptions. Its
-reachable static identity set must match the selected certification exactly.
+For an implementation DLL, the selected export is validated with its independently
+pinned direct dependencies and without external initialization assumptions. Its
+own reachable static identity set must match the selected certification exactly.
 This checks metadata and serialization; it does not verify the imported theorem.
-Static identities from App and all selected imports are checked together before
-output. A collision reports both scoped field names.
+Each node's static identities are checked with those of its direct imports before
+output. A collision reports both scoped field names. `linkChecked` checks all
+descriptors in the complete linked program.
 
 The framework manifest lists `CIL.lean`, all `CIL/**/*.lean`, and `lean-toolchain`
 in ordinal relative-path order. Paths use `/`. Each line is `path=sha256(bytes)`.
