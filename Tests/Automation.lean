@@ -120,6 +120,14 @@ theorem bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featu
       .ok (memory, [.scalar (.i64 x)]) := by
   cil_checked_steps [above]
 
+/-- A signed branch takes its fact in the interpreter's own form, so no linear-arithmetic restatement is needed. -/
+theorem signed_bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some { boundBody profile with code := [.arg 0, .arg 1, .blt 5, .arg 0, .ret, .arg 1, .ret] })
+    (memory : CIL.Safety.Memory) (x y : CIL.W64) (above : ¬ x.toInt < y.toInt) :
+    CIL.Safety.invoke program 8 index [.scalar (.i64 x), .scalar (.i64 y)] memory =
+      .ok (memory, [.scalar (.i64 x)]) := by
+  cil_checked_steps [above]
+
 -- The step equations alone rewrite a compare-branch; the dispatcher stays folded.
 example (body : CIL.Method) (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame) (m : CIL.Safety.Memory)
     (x y : CIL.W64) (above : ¬ x < y) :

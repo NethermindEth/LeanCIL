@@ -2,6 +2,9 @@ import CIL.Safety.StepComposition
 
 namespace CIL.Safety
 
+private theorem operands_present_one (n : Nat) : (n + 1 < 1) = False := by simp
+private theorem operands_present_two (n : Nat) : (n + 1 + 1 < 2) = False := by simp
+
 /-- Declares `step_<op>_<widths>_eq` for each listed value-only op and i32/i64 operand shape, evaluating the
     dispatcher once here, so a step rewrites by constructor and never unfolds `CIL.step` in a proof. -/
 syntax "cil_value_steps " ("(" ident " : " term ")")? " [" ident,* "] " num : command
@@ -34,9 +37,11 @@ elab_rules : command
       if let some name := arm.getAppFn.constName? then
         if (← isMatcher name) then return .continue
       return .visit arm)
-    let cleanup ← Simp.mkContext (config := { arith := true }) (congrTheorems := congruences)
-      (simpTheorems := #[← unfolding #[``CIL.Safety.checkedValue, ``CIL.Safety.numericValue, ``Pure.pure,
-        ``Except.pure, ``Functor.map, ``Except.map, ``Bind.bind, ``Except.bind] (← getSimpTheorems)])
+    -- No `arith`: it would restate each branch condition in a linear form the caller's facts do not match.
+    let unfolded ← unfolding #[``CIL.Safety.checkedValue, ``CIL.Safety.numericValue, ``Pure.pure, ``Except.pure,
+      ``Functor.map, ``Except.map, ``Bind.bind, ``Except.bind] (← getSimpTheorems)
+    let present ← (← unfolded.addConst ``operands_present_one).addConst ``operands_present_two
+    let cleanup ← Simp.mkContext (congrTheorems := congruences) (simpTheorems := #[present])
     let mut declared := #[]
     for op in ops.getElems do
       for shape in widths do
