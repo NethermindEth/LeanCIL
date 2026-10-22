@@ -6,6 +6,8 @@ import CIL.Safety.WriteEffects
 import CIL.Safety.MemoryLemmas
 import CIL.Safety.AccessSlices
 import CIL.Safety.WordFootprint
+import CIL.Safety.ExecutionInvariants
+import CIL.Safety.ExecutionStaticWorld
 
 namespace CIL.Safety
 
@@ -217,6 +219,46 @@ theorem run_call_of_contract {Input : Type} {c : MethodContract Input} {program 
     ⟨parentFuel, resumed⟩
   exact ⟨fuel, result, returned, composed, finished⟩
 
+/-- A successful call from a well-formed memory returns a well-formed memory and keeps
+    the static world, whatever the callee's contract states. -/
+theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {frame : Frame} {memory updated final : Memory}
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (formed : memory.WellFormed) (invoked : invoke program fuel callee arguments updated = .ok (final, values)) :
+    final.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) memory →
+      StaticWorldValid (programStaticDescriptors program) final) := by
+  have called : ProgramStep program method pc args frame stack memory (.call callee arguments rest updated) :=
+    ⟨body, op, methodFound, instructionFound, stepped⟩
+  have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed called
+  exact ⟨invoke_preserves_wellFormed _ _ _ _ _ _ _ entered invoked, fun world =>
+    invoke_preserves_static_world _ _ _ _ _ _ _ entered (programStep_preserves_static_world called formed world) invoked⟩
+
+/-- `run_call_of_contract` from a well-formed memory: the continuation also receives the
+    callee's well-formed final memory and static-world preservation across the call. -/
+theorem run_call_of_contract_formed {Input : Type} {c : MethodContract Input} {program : CIL.Program}
+    {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
+    (holds : c.Holds program callee) (input : Input)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (encoded : arguments = c.args input) (permitted : c.pre input updated) (formed : memory.WellFormed)
+    (continuation : ∀ final values,
+      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
+      (StaticWorldValid (programStaticDescriptors program) memory →
+        StaticWorldValid (programStaticDescriptors program) final) →
+      Confined (c.footprint input) updated final → c.post input updated final values →
+      ∃ fuel result returned,
+        run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
+        post result returned) :
+    ∃ fuel result returned,
+      run program fuel method pc args frame stack memory = .ok (result, returned) ∧ post result returned :=
+  run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
+    fun final values ⟨fuel, invoked⟩ =>
+      have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
+      continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
+
 theorem run_return_exists {program : CIL.Program} {method pc : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
@@ -254,6 +296,8 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
 #print axioms Confined.write
 #print axioms Confined.read_eq
 #print axioms run_call_of_contract
+#print axioms call_frame_invariants
+#print axioms run_call_of_contract_formed
 #print axioms invoke_ok_unique
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
@@ -298,5 +342,22 @@ macro_rules
     refine CIL.Safety.run_call_of_contract $holds $input
       (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+
+/-- `cil_contract_call` through `run_call_of_contract_formed`: leaves the precondition,
+    the caller memory's `WellFormed`, then the continuation with both invariants. -/
+syntax "cil_formed_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
+
+macro_rules
+  | `(tactic| cil_formed_call $holds $input [$facts:term,*]) =>
+  `(tactic| (
+    refine CIL.Safety.run_call_of_contract_formed $holds $input
+      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
+  | `(tactic| cil_formed_call $holds $input at $site:ident [$facts:term,*]) =>
+  `(tactic| (
+    refine CIL.Safety.run_call_of_contract_formed $holds $input
+      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
 
 end CIL.Safety

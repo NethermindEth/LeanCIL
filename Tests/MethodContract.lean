@@ -37,7 +37,7 @@ bind_call mixSite := mix from rootBody
 
 def mixContract : MethodContract (CIL.W64 × CIL.W64) where
   args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
-  pre _ _ := True
+  pre _ m := m.WellFormed
   footprint _ := []
   post input _ _ values := values = [.scalar (.i64 (input.1 * 3 + input.2))]
 
@@ -107,10 +107,12 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   cil_contract_steps [checkedValue, formValue, checkedAt, fr, fb,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cil_contract_call addHolds ⟨r, b, r, x, y⟩ at addSite [checkedValue, formValue, checkedAt, fr, fb,
+  cil_formed_call addHolds ⟨r, b, r, x, y⟩ at addSite [checkedValue, formValue, checkedAt, fr, fb,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   · exact ⟨readR, readB, writable⟩
-  rintro m1 _ - framed1 ⟨rfl, readR1⟩
+  · exact formed
+  -- The call supplies `m1.WellFormed`, which `mixContract.pre` needs; `addContract.post` does not state it.
+  rintro m1 _ - formed1 - framed1 ⟨rfl, readR1⟩
   have readB1 : read m1 b 8 1 = .ok (numberBytes y.toNat 8) :=
     (framed1.read_eq b bOld 8 1 disjoint.outside).trans readB
   have writable1 : access m1 r 8 1 true = .ok () := (framed1.access_write r rOld 8 1).trans writable
@@ -122,7 +124,7 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
     fr1, fb1, lr1, lb1, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cil_contract_call mixHolds (x + y, y) at mixSite [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
-  · trivial
+  · exact formed1
   rintro m2 _ - framed2 rfl
   dsimp only
   -- Simp would normalize the stored sum in the goal but not in `store`.

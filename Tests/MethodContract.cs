@@ -116,7 +116,7 @@ def empty : Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, 
 /-- This build returns `Mix(0, 0) = 1`; the contract requires `0 * 3 + 0`. -/
 theorem correctness : ¬ mixContract.Holds Extracted.program mix := by
   intro holds
-  obtain ⟨_, final, values, ran, -, wrong⟩ := holds (0, 0) empty trivial
+  obtain ⟨_, final, values, ran, -, wrong⟩ := holds (0, 0) empty ⟨fun _ _ h => (nomatch h), fun _ h => (nomatch h)⟩
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 mix
     (mixContract.args (0, 0)) empty = .ok _))
   simp [mixContract] at wrong
