@@ -76,6 +76,7 @@ internal static class Blockers
             ? new SortedSet<string>(types.Deserialize<string[]>() ?? [], StringComparer.Ordinal) : new SortedSet<string>(StringComparer.Ordinal);
 
         var assembly = File.ReadAllBytes(assemblyPath);
+        VectorSignatures.Validate(assembly);
         string identity, symbols;
         Guid mvid;
         using (var probe = ModuleDefinition.ReadModule(new MemoryStream(assembly)))

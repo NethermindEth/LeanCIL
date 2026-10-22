@@ -114,6 +114,8 @@ internal static class Program
                 : FeatureProfile.Select(positional.Count == 4 ? positional[3] : "scalar");
             stage = "assembly loading";
             byte[] assembly = File.ReadAllBytes(assemblyPath);
+            stage = "metadata and CIL validation";
+            VectorSignatures.Validate(assembly);
             using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
             var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");

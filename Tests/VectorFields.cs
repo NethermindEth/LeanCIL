@@ -160,6 +160,8 @@ foreach (string mutation in new[] { "element", "width", "scope", "version", "tok
         Extract("extract", dll, "Examples", selectors["Read256"], output, selectedProfile));
     if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")))
         throw new InvalidOperationException("Unsupported vector field accepted: " + mutation);
+    if (mutation == "encoding" && !result.Output.Contains("Unsupported vector type encoding", StringComparison.Ordinal))
+        throw new InvalidOperationException("Malformed vector signature did not reach the raw metadata check: " + result.Output);
     Console.WriteLine("PASS vector field rejection: " + mutation);
 }
 
