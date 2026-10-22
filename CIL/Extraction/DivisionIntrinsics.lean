@@ -86,15 +86,16 @@ def DivisionIntrinsicsValid (closed : RawMethod) (reachable : List Bool) (method
 instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Decidable (DivisionIntrinsicsValid closed reachable method) := inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
-private def opaqueEligible (closed : RawMethod) (index : Nat) : Bool :=
+private def opaqueEligible (closed : RawMethod) (addressed : List Nat) (index : Nat) : Bool :=
   (match closed.locals[index]? with
   | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom scalarScope "System.UInt64")) =>
     scope == intrinsicScope && scalarScope == "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-  | _ => false) && !(closed.code.any fun instruction =>
-    (instruction.opcode == 18 || instruction.opcode == 65037) && localIndex instruction == some index)
+  | _ => false) && !addressed.contains index
 
 def opaqueLocalIndices (closed : RawMethod) : List Nat :=
-  (List.range closed.locals.length).filter (opaqueEligible closed)
+  let addressed := closed.code.filterMap fun instruction =>
+    if instruction.opcode == 18 || instruction.opcode == 65037 then localIndex instruction else none
+  (List.range closed.locals.length).filter (opaqueEligible closed addressed)
 
 def OpaqueLocalsValid (closed : RawMethod) (method : Method) : Prop :=
   method.opaqueVectorLocals = opaqueLocalIndices closed ∧
