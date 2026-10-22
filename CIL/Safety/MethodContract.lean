@@ -59,6 +59,29 @@ theorem Confined.ofMemoryBelow {footprint : List (Reference × Nat)} {before aft
     fun id bound offset => preserved.permissions id (old bound) offset true,
     fun id bound offset _ => preserved.permissions id (old bound) offset false⟩
 
+/-- Footprint entries in identities allocated after `before`, such as a callee's locals, can be dropped. -/
+theorem Confined.forget_fresh {fresh footprint : List (Reference × Nat)} {before after : Memory}
+    (framed : Confined (fresh ++ footprint) before after)
+    (young : ∀ entry ∈ fresh, before.nextIdentity ≤ entry.1.allocation) :
+    Confined footprint before after :=
+  have outside : ∀ {id offset}, id < before.nextIdentity → Outside footprint id offset →
+      Outside (fresh ++ footprint) id offset := fun bound outside entry member =>
+    (List.mem_append.mp member).elim (fun own => Or.inl (by have := young entry own; omega))
+      (outside entry)
+  ⟨framed.grows, framed.allocations, fun id bound offset o => framed.cells id bound offset (outside bound o),
+    framed.writable, fun id bound offset o => framed.readable id bound offset (outside bound o)⟩
+
+/-- A step that keeps all memory older than `first`, such as frame entry or teardown, keeps `Confined`. -/
+theorem Confined.then_below {footprint : List (Reference × Nat)} {first middle last : Memory}
+    (framed : Confined footprint first middle) (preserved : MemoryBelow first.nextIdentity middle last)
+    (grows : middle.nextIdentity ≤ last.nextIdentity) : Confined footprint first last :=
+  ⟨Nat.le_trans framed.grows grows,
+    fun id bound => (preserved.allocations id bound).trans (framed.allocations id bound),
+    fun id bound offset outside => (preserved.cells id bound offset).trans (framed.cells id bound offset outside),
+    fun id bound offset => (preserved.permissions id bound offset true).trans (framed.writable id bound offset),
+    fun id bound offset outside => (preserved.permissions id bound offset false).trans
+      (framed.readable id bound offset outside)⟩
+
 /-- A checked write inside the footprint keeps every other byte and all write authority. -/
 theorem Confined.write {footprint : List (Reference × Nat)} {m result : Memory} {r : Reference}
     {bytes : List (BitVec 8)} {alignment : Nat}
@@ -226,6 +249,8 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
   rw [Nat.add_comm] at down
   exact Except.ok.inj (up.symm.trans down)
 
+#print axioms Confined.forget_fresh
+#print axioms Confined.then_below
 #print axioms Confined.write
 #print axioms Confined.read_eq
 #print axioms run_call_of_contract
