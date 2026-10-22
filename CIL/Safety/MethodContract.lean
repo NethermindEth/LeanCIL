@@ -443,8 +443,6 @@ theorem MethodContract.Holds.weaken {Input Output : Type} {internal exported : M
 #print axioms run_call_of_contract_formed
 #print axioms invoke_ok_unique
 
-/-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
-    leaving each `.call` for `cil_contract_call` and the postcondition at each return. -/
 macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
   `(tactic| (
     try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
@@ -470,13 +468,16 @@ macro "cil_contract_steps" "[" facts:term,* "]" : tactic =>
     cil_contract_prepare [$[$facts:term],*]
     repeat cil_contract_step [$[$facts:term],*]))
 
-macro "cil_contract_steps" count:num "[" facts:term,* "]" : tactic => do
-  let mut steps ← `(tactic| skip)
+open Lean Elab Tactic in
+elab "cil_contract_steps" count:num "[" facts:term,* "]" : tactic => do
+  evalTactic (← `(tactic| cil_contract_prepare [$[$facts:term],*]))
   for _ in [:count.getNat] do
-    steps ← `(tactic| try (cil_contract_step [$[$facts:term],*]; $steps:tactic))
-  `(tactic| (
-    cil_contract_prepare [$[$facts:term],*]
-    $steps:tactic))
+    let saved ← saveState
+    try
+      evalTactic (← `(tactic| cil_contract_step [$[$facts:term],*]))
+    catch _ =>
+      saved.restore
+      break
 
 macro "cil_contract_steps" "[" facts:term,* "]" " until " continuation:term : tactic =>
   `(tactic| (first

@@ -95,7 +95,7 @@ theorem bounded_steps_zero_preserves_goal (frame : Frame) (memory : Memory)
 
 theorem bounded_steps_stop_at_return (frame : Frame) (memory : Memory) : boundedRun 0 frame memory := by
   unfold boundedRun
-  cil_contract_steps 10 []
+  cil_contract_steps 1000000 []
   trivial
 
 theorem contract_steps_until_continuation (frame : Frame) (memory : Memory)
