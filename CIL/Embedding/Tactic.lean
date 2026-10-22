@@ -15,14 +15,6 @@ namespace CIL.MethodBinding
 
 open Lean Meta Elab Tactic CIL.Embedding
 
-/-- Code targets of an instruction, in the order `Op.relabel` maps them. -/
-def opTargets : Op → List Nat
-  | .nativeBinary op => opTargets op
-  | .bgt t | .ble t | .bleu t | .branch t | .brzero t | .brnonzero t | .bltu t | .bgeu t
-  | .bgtu t | .bge t | .blt t | .beq t | .bne t => [t]
-  | .switch ts => ts
-  | _ => []
-
 /-- An instruction with its code targets erased. -/
 def shape (op : Op) : Op := op.relabel (fun _ => 0)
 
@@ -53,7 +45,7 @@ def alignLive (expected actual : Array Op) : Array Nat := Id.run do
     if let some k := chosen then
       cursor := k + 1
       if let some found := opAt actual k then
-        for (t, t') in (opTargets op).zip (opTargets found) do
+        for (t, t') in op.targets.zip found.targets do
           unless hints.contains t do hints := hints.insert t t'
   -- Dead expected pcs only matter as targets or as the fallthrough of a live pc.
   let mut full : Array Nat := #[]
@@ -106,7 +98,7 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option String := 
       | none => return some s!"{header}\n  no actual instruction of this shape follows the previous aligned instruction"
       | some present =>
         if shape present == shape op then
-          let mismatch := ((opTargets op).zip (opTargets present)).find? fun (t, t') => r t != t'
+          let mismatch := (op.targets.zip present.targets).find? fun (t, t') => r t != t'
           match mismatch with
           | some (t, t') =>
             return some s!"{header}\n  code target differs: expected target {t} maps to actual pc {r t}, but the actual instruction targets {t'}; {describe t'}"
