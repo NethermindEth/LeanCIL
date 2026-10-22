@@ -17,7 +17,11 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     let .field (.aggregate parent) ← typeStorage layouts owner | none
     let metadata ← layouts[parent]?
     let field ← metadata.fields[index]?
-    if typeStorage layouts type != some (.field field.type) then none else
+    let storage := match field.type with
+      | .vector128 => StorageType.vector128
+      | .vector256 => StorageType.vector256
+      | kind => .field kind
+    if typeStorage layouts type != some storage then none else
       return [.field pc parent index (if instruction.opcode = 0x7b then .load
         else if instruction.opcode = 0x7c then .address else .store)]
   | opcode, .type type =>

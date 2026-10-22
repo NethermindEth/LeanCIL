@@ -1,4 +1,5 @@
 import CIL.Safety.SymbolicExecution
+import CIL.SIMD.VectorLemmas
 
 namespace Tests.Automation
 
@@ -58,6 +59,85 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 
 /-- info: 'Tests.Automation.checked_arithmetic' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms checked_arithmetic
+
+@[cil_code] def narrowEqualityMethod : CIL.Method := {
+  code := [.arg 0, .arg 1, .bxor, .const32 0, .eq, .ret (some .unsigned8)]
+  locals := [], returnsValue := true }
+
+def scalarDifference (left right : CIL.W32) : CIL.W32 := left ^^^ right
+
+theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (left right : CIL.W32) :
+    CIL.Safety.run [narrowEqualityMethod] 6 0 0
+      [.scalar (.i32 left), .scalar (.i32 right)] frame [] memory =
+      .ok (CIL.Safety.leaveFrame frame memory,
+        [.scalar (.i32 (if scalarDifference left right = 0 then 1 else 0))]) := by
+  cil_checked_steps
+  run_tac do
+    let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
+    unless (target.getArg! 1).isAppOf ``Except.ok do
+      throwError "Expected the checked return equation"
+  change (Except.ok (CIL.Safety.leaveFrame frame memory,
+    [.scalar (.i32 (CIL.NarrowKind.extend .unsigned8 (if left = right then 1 else 0)))]) :
+    Except CIL.Safety.LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) = _
+  by_cases same : left = right <;>
+    simp [scalarDifference, CIL.NarrowKind.extend, CIL.Safety.leaveFrame, same]
+
+#print axioms checked_narrow_return
+
+theorem checked_plain_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (value : CIL.W32) :
+    CIL.Safety.run [branchMethod] 1 0 3
+      [] frame [.scalar (.i32 value)] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps
+
+#print axioms checked_plain_return
+
+def deferredReturnValue (value : CIL.W32) : CIL.W32 := value
+
+theorem checked_plain_return_preserves_semireducible_goal
+    (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (value : CIL.W32) :
+    CIL.Safety.run [branchMethod] 1 0 3
+      [] frame [.scalar (.i32 value)] memory =
+      .ok (CIL.Safety.leaveFrame frame memory,
+        [.scalar (.i32 (deferredReturnValue value))]) := by
+  cil_checked_steps
+  run_tac do
+    let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
+    unless (target.getArg! 1).isAppOf ``Except.ok do
+      throwError "Expected the checked return equation"
+  rfl
+
+#print axioms checked_plain_return_preserves_semireducible_goal
+
+theorem checked_literal_extension_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (left right : CIL.W64) :
+    CIL.Safety.run [branchMethod] 1 0 3 [] frame
+      [.scalar (.i64 (left * BitVec.signExtend 64 (3#32) + right))] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i64 (left * 3 + right))]) := by
+  cil_checked_steps
+
+theorem checked_decided_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (condition : Bool) (left right : CIL.W64) :
+    CIL.Safety.run [branchMethod] 1 0 3 [] frame
+      [.scalar (.i64 (match condition with | true => left | false => right))] memory =
+      .ok (CIL.Safety.leaveFrame frame memory,
+        [.scalar (.i64 (if condition = true then left else right))]) := by
+  cases condition <;> cil_checked_steps
+
+#print axioms checked_literal_extension_return
+#print axioms checked_decided_return
+
+theorem checked_negative_literal_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (left : CIL.W32) :
+    CIL.Safety.run [branchMethod] 1 0 3 [] frame
+      [.scalar (.i32 (left + BitVec.ofInt 32 (-1)))] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 (left + 4294967295#32))]) := by
+  cil_checked_steps
+
+#print axioms checked_negative_literal_return
 /-- A reusable body, bound to an extraction only through a lookup hypothesis. -/
 def wordBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [], code := [.arg 0, .bnot, .arg 1, .bnot, .bor, .bnot, .ret] }
@@ -138,4 +218,61 @@ example (body : CIL.Method) (args : List CIL.Safety.Value) (frame : CIL.Safety.F
 #guard_msgs in #print axioms leaf_checked
 /-- info: 'Tests.Automation.bound_checked' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms bound_checked
+open CIL.Safety in
+theorem scalar_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
+    (memory : Memory) (left right : CIL.W64) (word : Nat) (unrelated : word = 7) :
+    ∃ stack, step body .bxor 0 args frame [.scalar (.i64 right), .scalar (.i64 left)] memory =
+      .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.i64 (left ^^^ right))] := by
+  refine ⟨?_, ?_, ?_⟩
+  rotate_left
+  · cil_checked_step [unrelated]
+  · rfl
+
+open CIL.Safety in
+theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
+    (memory : Memory) (bytes : List (BitVec 8)) (value : BitVec 256)
+    (casted : bitcastValue (.aggregate 32) .vector256 (.aggregate bytes) = .ok (.v256 value)) :
+    ∃ stack, step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame
+      [.scalar (.aggregate bytes)] memory = .ok (.next 1 stack frame memory) ∧
+      stack = [.scalar (.v256 value)] := by
+  refine ⟨?_, ?_, ?_⟩
+  rotate_left
+  · cil_checked_step [staticInstruction, memoryInstruction, casted]
+  · rfl
+
+@[cil_eval] theorem eval_reverse256 (a b c d : CIL.W64) :
+    CIL.evalIntrinsic (.avx2 .permute4x64)
+      [.v256 (CIL.Vector.pack256 a b c d), .i32 (BitVec.ofNat 32 27)] =
+      some (.v256 (CIL.Vector.pack256 d c b a)) := by
+  change some (CIL.Value.v256 (CIL.Vector.permute4x64 (CIL.Vector.pack256 a b c d) 27)) = _
+  simp [CIL.Vector.permute4x64]
+
+@[cil_code] def permuteStoreMethod : CIL.Method := {
+  profile := { architecture := .x64, avx2 := true }
+  code := [.intrinsic (.avx2 .permute4x64) 2, .memory .store256, .ret]
+  locals := [], returnsValue := false }
+
+@[cil_code] def permuteStoreProgram : CIL.Program := [permuteStoreMethod]
+
+open CIL.Safety in
+theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory final : Memory)
+    (stored : ∀ rest, memoryInstruction .store256
+      (.scalar (.v256 (CIL.Vector.pack256 d c b a)) :: .reference (.address destination) :: rest) memory =
+      .ok (final, rest)) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 (CIL.Vector.pack256 a b c d)),
+        .reference (.address destination)] memory = .ok (final, []) := by
+  cil_checked_steps [staticInstruction, stored]
+
+open CIL.Safety in
+theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : Memory)
+    (value : Value) (fuel : Nat) :
+    run program fuel 0 0 [] frame (([value].reverse ++ []).drop 0) memory =
+      run program fuel 0 0 [] frame [value] memory := by
+  cil_stack_cleanup
+
+#print axioms scalar_fact_stack
+#print axioms bitcast_fact_stack
+#print axioms permute_then_store
+
 end Tests.Automation
