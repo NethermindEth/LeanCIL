@@ -91,7 +91,7 @@ macro_rules
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by cil_checked_step [$[$facts:term],*])
         (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
-       try with_reducible rfl)
+       try (dsimp only [CIL.Safety.leaveFrame, List.foldl]; with_reducible rfl))
     -- Elaborate each intermediate-state proof before creating the continuation
     -- goal, so reference/frame metavariables remain assignable by the step facts.
     | (cil_strict refine Eq.trans (CIL.Safety.run_next

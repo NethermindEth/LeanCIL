@@ -92,4 +92,22 @@ theorem checked_plain_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Fr
   cil_checked_steps
 
 #print axioms checked_plain_return
+
+def deferredReturnValue (value : CIL.W32) : CIL.W32 := value
+
+theorem checked_plain_return_preserves_semireducible_goal
+    (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (value : CIL.W32) :
+    CIL.Safety.run [branchMethod] 1 0 3
+      [] frame [.scalar (.i32 value)] memory =
+      .ok (CIL.Safety.leaveFrame frame memory,
+        [.scalar (.i32 (deferredReturnValue value))]) := by
+  cil_checked_steps
+  run_tac do
+    let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
+    unless (target.getArg! 1).isAppOf ``Except.ok do
+      throwError "Expected the checked return equation"
+  rfl
+
+#print axioms checked_plain_return_preserves_semireducible_goal
 end Tests.Automation

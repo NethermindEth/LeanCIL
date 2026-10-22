@@ -42,7 +42,7 @@ and [CallComposition](../CIL/Safety/CallComposition.lean) for manual proofs.
 
 At a return, the tactic leaves the equation between the computed checked result
 and the stated result as a proof goal. It closes that equation automatically
-only when `with_reducible rfl` succeeds. A mathematical result can need a separate
+only when `with_reducible rfl` succeeds after frame cleanup. A mathematical result can need a separate
 `simp` or case split, especially when a narrow return extends a Boolean value.
 The remaining goal contains the returned values, rather than an unexecuted
 `run`. `cil_contract_steps` likewise leaves the return postcondition as a goal.
