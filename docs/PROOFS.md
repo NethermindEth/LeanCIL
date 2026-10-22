@@ -173,7 +173,9 @@ contents `Apart` from a write or every footprint entry, including disjoint slice
 of one allocation; `Filled.push` extends the prefix by one element write without
 reading the room. `Filled.fill` and `Contents.transform` prove fill and in-place
 map loops of any length (`writeElements`, `transformElements`) as sequence
-properties confined to the buffer. `Tests/BufferContents.lean` checks unchanged
+properties confined to the buffer; `add_element` steps `Unsafe.Add` to an element, and the
+[buffer fill proof](../Examples/Proofs/FillWords.lean) carries `Filled` as the invariant
+of a compiled loop. `Tests/BufferContents.lean` checks unchanged
 neighbouring bytes and sibling slices, and refutes uninitialized, past-end,
 overlapping, unjoined and stale claims.
 

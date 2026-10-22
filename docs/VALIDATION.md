@@ -17,7 +17,7 @@ The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integ
 
 | Coverage | Result |
 | --- | --- |
-| Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; 12 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected |
+| Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 12 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected |
 | Generic method specialization | 125 C#/F# runtime comparisons, six universal identity proofs, six reference checks, twelve metadata/recursion rejections, wrong-implementation rejection and provenance tamper detection |
 | Block memory and alignment prefixes | 251 checks; ten malformed-prefix/type cases rejected; universal out-of-bounds fill rejection |
 | Layout-based Unsafe helpers | 418 checks across 19 element types and all three managed offset overloads; ten malformed generic calls rejected |
@@ -131,7 +131,8 @@ throws, unsupported execution and fuel exhaustion do not transfer. `Tests.Aggreg
 cover frame setup and interpreter behavior. The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, a counted loop composed through its
-helper's contract and reused for a reimplemented helper, feature selection, infinite-loop fuel
+helper's contract and reused for a reimplemented helper, a buffer fill proved as a
+sequence property, feature selection, infinite-loop fuel
 exhaustion, backward switch and malformed-input rejection.
 
 `Tests.ContractConsequence` derives public method and outcome contracts from proved

@@ -109,6 +109,22 @@ theorem Reference.element_run_within (base : Reference) (width : Nat) {first cou
   rw [Nat.mul_add, Nat.mul_add] at high
   exact ⟨rfl, by simp only [Reference.element_offset]; omega, by simp only [Reference.element_offset]; omega⟩
 
+/-- Offsetting a formed base by `index` elements reaches that element whenever it is accessible. -/
+theorem add_element {m : Memory} {base : Reference} {width index : Nat} {writing : Bool}
+    (formed : m.WellFormed) (valid : form m base = .ok base)
+    (target : access m (base.element width index) width 1 writing = .ok ()) :
+    add m base width (BitVec.ofNat 64 index) = .ok (base.element width index) := by
+  obtain ⟨allocation, ready⟩ := access_requirements target
+  have native := (formed.1 _ _ ready.present).2.1
+  have extent := ready.extent
+  have bound : base.offset + width * index < 2^64 := by
+    change allocation.layout.size < 2^64 at native
+    simp only [Reference.element_offset] at extent
+    omega
+  simp only [add, valid, Bind.bind, Except.bind, BitVec.ofNat_mul_ofNat, BitVec.ofNat_add_ofNat,
+    BitVec.toNat_ofNat, Nat.mod_eq_of_lt bound]
+  exact access_reference_valid _ _ _ _ _ target
+
 /-- Each element of `xs` reads back at its position with the byte alignment scalar loads use; grants no write authority. -/
 def Contents (m : Memory) (base : Reference) (width : Nat) (xs : List (BitVec (8 * width))) : Prop :=
   ∀ index x, xs[index]? = some x → read m (base.element width index) width 1 = .ok (numberBytes x.toNat width)
@@ -280,6 +296,12 @@ theorem Contents.after_confined {footprint : List (Reference × Nat)} {before af
     have bound : index < xs.length := (List.getElem?_eq_some_iff.mp found).1
     framed.read_apart formed (contents index x found) fun entry member => (apart entry member).sub (element_le bound)
 
+/-- Contents of memory below `watermark` survive any change that keeps that memory, such as frame exit. -/
+theorem Contents.after_below {watermark : Nat} {before after : Memory} {xs : List (BitVec (8 * width))}
+    (contents : Contents before base width xs) (preserved : MemoryBelow watermark before after)
+    (old : base.allocation < watermark) : Contents after base width xs :=
+  fun index x found => (preserved.read (base.element width index) old width 1).trans (contents index x found)
+
 end Contents
 
 section Writable
@@ -313,6 +335,12 @@ theorem Writable.after_confined {footprint : List (Reference × Nat)} {before af
     (writable : Writable before base width start count) (framed : Confined footprint before after)
     (formed : before.WellFormed) : Writable after base width start count := fun i bound =>
   (framed.access_write _ (formed.access_bound (writable i bound)) width 1).trans (writable i bound)
+
+/-- Write authority below `watermark` survives any change that keeps that memory, such as frame entry. -/
+theorem Writable.after_below {watermark : Nat} {before after : Memory} {start count : Nat}
+    (writable : Writable before base width start count) (preserved : MemoryBelow watermark before after)
+    (old : base.allocation < watermark) : Writable after base width start count :=
+  fun i bound => (preserved.access (base.element width (start + i)) old width 1 true).trans (writable i bound)
 
 /-- A writable element accepts its encoding; no prior initialization or read authority is needed. -/
 theorem Writable.write_succeeds {start count : Nat} (writable : Writable m base width start (count + 1))
@@ -450,6 +478,7 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat} (f : Bi
 #print axioms elementBytes_slice
 #print axioms element_value
 #print axioms Reference.element_apart
+#print axioms add_element
 #print axioms Contents.singleton
 #print axioms Contents.load_word
 #print axioms Contents.append
@@ -460,9 +489,11 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat} (f : Bi
 #print axioms Contents.write_element
 #print axioms Contents.write_run
 #print axioms Contents.after_confined
+#print axioms Contents.after_below
 #print axioms Writable.append
 #print axioms Writable.after_write
 #print axioms Writable.after_confined
+#print axioms Writable.after_below
 #print axioms Writable.write_succeeds
 #print axioms Filled.push
 #print axioms Filled.fill
