@@ -445,10 +445,10 @@ theorem MethodContract.Holds.weaken {Input Output : Type} {internal exported : M
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
     leaving each `.call` for `cil_contract_call` and the postcondition at each return. -/
-syntax "cil_contract_steps" "[" term,* "]" : tactic
+syntax "cil_contract_steps_normalized" "[" term,* "]" : tactic
 
 macro_rules
-  | `(tactic| cil_contract_steps [$facts:term,*]) =>
+  | `(tactic| cil_contract_steps_normalized [$facts:term,*]) =>
   `(tactic| (
     -- A contract continuation resumes at `pc + 1` on `values ++ rest` with projected inputs.
     try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
@@ -460,12 +460,21 @@ macro_rules
     | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step [$[$facts:term],*])
+        (by cil_checked_step_normalized [$[$facts:term],*])
         (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
     | (cil_strict refine CIL.Safety.run_next_exists (post := _)
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step [$[$facts:term],*]) ?_)))
+        (by cil_checked_step_normalized [$[$facts:term],*]) ?_)))
+
+syntax "cil_contract_steps" "[" term,* "]" : tactic
+
+open Lean Elab Tactic in
+elab_rules : tactic
+  | `(tactic| cil_contract_steps [$facts:term,*]) => do
+    let config ← `(Lean.Parser.Tactic.optConfig|)
+    let prepared ← normaliseStepFacts config facts.getElems
+    withMainContext <| evalTactic (← `(tactic| cil_contract_steps_normalized [$[$prepared:term],*]))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
     site: leaves the precondition, then the continuation over the callee's final memory,

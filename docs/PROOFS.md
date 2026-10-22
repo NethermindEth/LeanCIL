@@ -191,7 +191,7 @@ does the same for `cil_outcome_call`.
 Store facts may name their values in source form, such as
 `write m r (numberBytes (a + b + c).toNat 8) 1 = .ok m'`. Each checked step
 simplifies the goal with the default simp set, its interpreter definitions and
-the facts; it also adds every local fact normalised by the default simp set and
+the facts. Fact preparation also adds each local fact normalised by the default simp set and
 the supplied non-local facts, so both sides meet in the same form. Supply any
 definition the computed value is stated through, such as a carry or borrow
 word, among the facts. The original hypotheses stay in the proof context and in
@@ -199,6 +199,22 @@ the simp set; a fact that still differs stops the steps at its instruction, with
 the hypothesis shown as stated. Hand-written stepping can use the same
 simplification, with an optional simp configuration, as
 `cil_fact_simp (config := ...) [definitions] [facts]`.
+`cil_checked_steps`, `cil_contract_steps`, and `cil_raise_steps` prepare local
+facts once at entry. All later steps reuse these copies, including nested
+checked calls. The original hypotheses stay in the local context.
+
+When a local fact starts with `∀ index : Fin n`, preparation instantiates every
+index for a concrete `n`. Any later binders, such as a stack suffix `rest`, stay
+quantified. This lets one four-limb field-load fact rewrite offsets 0, 8, 16,
+and 24. Preparation and stepping also normalize Fin constructor indices and
+the projection of the literal `3`. For example, a fact `words 1 = 0` applies to
+a value read as `words ⟨1, proof⟩`.
+
+Enable `trace.CIL.factNormalize` to see one event per supplied local proposition
+when it is prepared. `Tests/StoreFacts.lean` counts exactly 12 such events for a
+27-instruction run. This count checks normalization frequency; it is not an
+elapsed-time measurement.
+
 [`Tests/StoreFacts.lean`](../Tests/StoreFacts.lean) checks carry and borrow
 stores and rejects a wrong value, address or memory state.
 
