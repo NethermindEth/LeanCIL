@@ -134,6 +134,12 @@ incorrect/nondecreasing loop rejection, a counted loop composed through its
 helper's contract and reused for a reimplemented helper, feature selection, infinite-loop fuel
 exhaustion, backward switch and malformed-input rejection.
 
+`Tests.ContractConsequence` derives public method and outcome contracts from proved
+internal ones without re-executing the callee, composes callers through the derived
+contracts, and proves that an unjustified stronger postcondition, a weaker
+precondition, a smaller footprint and a changed exception type each fail both the
+refinement premises and the derived contract on a concrete input.
+
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
 naming `CIL.step.eq_def` elaborates.
@@ -141,7 +147,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.ContractConsequence
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

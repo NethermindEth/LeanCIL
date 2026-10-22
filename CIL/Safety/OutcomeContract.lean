@@ -226,6 +226,70 @@ theorem run_call_raises_after_outcome_formed {Input Output : Type} {c : OutcomeC
       have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
       continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
 
+/-- `exported` follows from `internal`: same encodings and outcome under a weaker pre; on return, covering footprint and implied post. -/
+structure OutcomeContract.Refines {Input Output : Type} (internal exported : OutcomeContract Input Output) : Prop where
+  args : ∀ input, exported.args input = internal.args input
+  results : ∀ out, exported.results out = internal.results out
+  pre : ∀ input initial, exported.pre input initial → internal.pre input initial
+  raises : ∀ input initial, exported.pre input initial → exported.raises input initial = internal.raises input initial
+  footprint : ∀ input initial, exported.pre input initial → exported.raises input initial = none →
+    ∀ entry ∈ internal.footprint input, ∃ outer ∈ exported.footprint input, Within entry outer
+  post : ∀ input initial final out, exported.pre input initial → exported.raises input initial = none →
+    Confined (internal.footprint input) initial final → internal.post input initial final out →
+    exported.post input initial final out
+
+/-- A normal-contract refinement whose outcomes agree under the exported pre refines the outcome contracts. -/
+theorem OutcomeContract.Refines.of_method {Input Output : Type} {internal exported : OutcomeContract Input Output}
+    (refines : internal.toMethodContract.Refines exported.toMethodContract)
+    (raises : ∀ input initial, exported.pre input initial → exported.raises input initial = internal.raises input initial) :
+    internal.Refines exported :=
+  ⟨refines.args, refines.results, refines.pre, raises, fun _ _ permitted _ => refines.footprint _ _ permitted,
+    fun _ _ _ _ permitted _ => refines.post _ _ _ _ permitted⟩
+
+theorem OutcomeContract.Refines.refl {Input Output : Type} (c : OutcomeContract Input Output) : c.Refines c :=
+  .of_method (.refl c.toMethodContract) fun _ _ _ => rfl
+
+theorem OutcomeContract.Refines.trans {Input Output : Type} {first middle last : OutcomeContract Input Output}
+    (left : first.Refines middle) (right : middle.Refines last) : first.Refines last where
+  args input := (right.args input).trans (left.args input)
+  results out := (right.results out).trans (left.results out)
+  pre _ _ permitted := left.pre _ _ (right.pre _ _ permitted)
+  raises _ _ permitted := (right.raises _ _ permitted).trans (left.raises _ _ (right.pre _ _ permitted))
+  footprint _ _ permitted normal entry member := by
+    have between := right.pre _ _ permitted
+    obtain ⟨inner, inside, within⟩ :=
+      left.footprint _ _ between ((right.raises _ _ permitted).symm.trans normal) entry member
+    obtain ⟨outer, contains, enclosed⟩ := right.footprint _ _ permitted normal inner inside
+    exact ⟨outer, contains, within.trans enclosed⟩
+  post _ _ _ _ permitted normal framed satisfied :=
+    have between := right.pre _ _ permitted
+    have inner := (right.raises _ _ permitted).symm.trans normal
+    right.post _ _ _ _ permitted normal (framed.widen_within (left.footprint _ _ between inner))
+      (left.post _ _ _ _ between inner framed satisfied)
+
+/-- Derive an outcome contract from a proved one it refines; the method is neither unfolded nor executed. -/
+theorem OutcomeContract.Holds.weaken {Input Output : Type} {internal exported : OutcomeContract Input Output}
+    {program : CIL.Program} {method : Nat} (holds : internal.Holds program method)
+    (refines : internal.Refines exported) : exported.Holds program method := by
+  intro input initial permitted
+  have outcome := holds input initial (refines.pre _ _ permitted)
+  have agree := refines.raises _ _ permitted
+  rw [refines.args]
+  cases selected : exported.raises input initial with
+  | some exception =>
+    rw [selected] at agree
+    rw [← agree] at outcome
+    exact outcome
+  | none =>
+    rw [selected] at agree
+    rw [← agree] at outcome
+    obtain ⟨fuel, final, values, invoked, framed, out, encoded, satisfied⟩ := outcome
+    refine ⟨fuel, final, values, invoked, framed.widen_within (refines.footprint _ _ permitted selected), out, ?_,
+      refines.post _ _ _ _ permitted selected framed satisfied⟩
+    rw [refines.results]; exact encoded
+
+#print axioms OutcomeContract.Refines.trans
+#print axioms OutcomeContract.Holds.weaken
 #print axioms run_call_of_outcome_formed
 #print axioms run_call_raises_after_outcome_formed
 #print axioms run_call_error

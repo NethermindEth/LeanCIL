@@ -376,6 +376,56 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
   rw [Nat.add_comm] at down
   exact Except.ok.inj (up.symm.trans down)
 
+theorem Within.refl (entry : Reference × Nat) : Within entry entry :=
+  ⟨rfl, Nat.le_refl _, Nat.le_refl _⟩
+
+theorem Within.trans {inner middle outer : Reference × Nat} (left : Within inner middle)
+    (right : Within middle outer) : Within inner outer :=
+  ⟨left.1.trans right.1, Nat.le_trans right.2.1 left.2.1, Nat.le_trans left.2.2 right.2.2⟩
+
+/-- `exported` follows from `internal`: same encodings, weaker pre, covering footprint, implied post. -/
+structure MethodContract.Refines {Input Output : Type} (internal exported : MethodContract Input Output) : Prop where
+  args : ∀ input, exported.args input = internal.args input
+  results : ∀ out, exported.results out = internal.results out
+  pre : ∀ input initial, exported.pre input initial → internal.pre input initial
+  footprint : ∀ input initial, exported.pre input initial →
+    ∀ entry ∈ internal.footprint input, ∃ outer ∈ exported.footprint input, Within entry outer
+  /-- The internal footprint's `Confined` is available, so the exported post may state frame facts. -/
+  post : ∀ input initial final out, exported.pre input initial → Confined (internal.footprint input) initial final →
+    internal.post input initial final out → exported.post input initial final out
+
+theorem MethodContract.Refines.refl {Input Output : Type} (c : MethodContract Input Output) : c.Refines c :=
+  ⟨fun _ => rfl, fun _ => rfl, fun _ _ permitted => permitted,
+    fun _ _ _ entry member => ⟨entry, member, Within.refl entry⟩, fun _ _ _ _ _ _ satisfied => satisfied⟩
+
+theorem MethodContract.Refines.trans {Input Output : Type} {first middle last : MethodContract Input Output}
+    (left : first.Refines middle) (right : middle.Refines last) : first.Refines last where
+  args input := (right.args input).trans (left.args input)
+  results out := (right.results out).trans (left.results out)
+  pre _ _ permitted := left.pre _ _ (right.pre _ _ permitted)
+  footprint _ _ permitted entry member := by
+    obtain ⟨between, inside, within⟩ := left.footprint _ _ (right.pre _ _ permitted) entry member
+    obtain ⟨outer, contains, enclosed⟩ := right.footprint _ _ permitted between inside
+    exact ⟨outer, contains, within.trans enclosed⟩
+  post _ _ _ _ permitted framed satisfied :=
+    right.post _ _ _ _ permitted (framed.widen_within (left.footprint _ _ (right.pre _ _ permitted)))
+      (left.post _ _ _ _ (right.pre _ _ permitted) framed satisfied)
+
+/-- Derive a contract from a proved one it refines; the method is neither unfolded nor executed. -/
+theorem MethodContract.Holds.weaken {Input Output : Type} {internal exported : MethodContract Input Output}
+    {program : CIL.Program} {method : Nat} (holds : internal.Holds program method)
+    (refines : internal.Refines exported) : exported.Holds program method := by
+  intro input initial permitted
+  obtain ⟨fuel, final, values, invoked, framed, out, encoded, satisfied⟩ :=
+    holds input initial (refines.pre _ _ permitted)
+  refine ⟨fuel, final, values, ?_, framed.widen_within (refines.footprint _ _ permitted), out, ?_,
+    refines.post _ _ _ _ permitted framed satisfied⟩
+  · rw [refines.args]; exact invoked
+  · rw [refines.results]; exact encoded
+
+#print axioms Within.trans
+#print axioms MethodContract.Refines.trans
+#print axioms MethodContract.Holds.weaken
 #print axioms Confined.forget_fresh
 #print axioms Confined.then_below
 #print axioms Confined.write
