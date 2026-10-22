@@ -258,6 +258,13 @@ certification theorem/statement/digest, and deployment obligation. CLI output
 prints the accepted certification and obligation. The caller theorem remains
 conditional on those imported contracts.
 
+`--force-full-verify` freshly checks the selected library implementations and
+discharges those imports in a concrete linked CIL theorem. Repeat
+`--full-artifact Lib=directory` to select relocated copies of the published
+source bundles. Missing or invalid bundles fail without fallback. See
+[Independent imported-library verification](FULL_VERIFICATION.md) for the
+supported source format, checks and remaining trust boundaries.
+
 Reference-only extraction is an authoring input. Verification checks its caller
 proof, then exits with status 1 and an authoring-only diagnostic. It does not
 write `verified.json` or publish a successful proof receipt.
