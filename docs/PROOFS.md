@@ -330,6 +330,41 @@ its own after `Percent` returns, and `Root` reads all three off `Strict`'s contr
 build, and refutes the callee's contract with concrete runs on builds with an
 off-by-one threshold or a different exception type.
 
+Import `CIL.Safety.RuntimeExceptions` to name modeled arithmetic failures with
+`RaisesCLR` and `OutcomeContract.HoldsCLR`. This contract mode uses the existing
+arguments, preconditions, normal-return clause, footprint and `raises` field.
+Its fixed `ExecutionFault.clrException` mapping is:
+
+| Fault | Named CLR exception |
+| --- | --- |
+| `.thrown exception` | `exception` |
+| `.arithmetic .overflow` | `System.OverflowException` |
+| `.arithmetic .divideByZero` | `System.DivideByZeroException` |
+| Every other fault | None |
+
+Checked add, subtract, multiply and integer conversions report overflow through
+this mapping. Integer division and remainder by zero report divide-by-zero.
+The admitted runtime model reports overflow for signed minimum divided by
+negative one, including its remainder instruction. Invalid arithmetic operands,
+invalid bounds, memory faults, unsupported instructions, invalid state and fuel
+exhaustion have no name in this mode. `Raises` and `.thrown` keep their existing
+meaning. `OutcomeContract.Holds.clr` lifts an existing thrown-outcome proof.
+
+For a UInt256 `Divide` or `Mod` contract, select
+`some "System.DivideByZeroException"` in `raises` when its divisor is zero and
+prove `HoldsCLR`. Both an explicit throw and the mapped arithmetic failure can
+establish this exact outcome. The proof must still reach that fault through the
+actual extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and
+`raisesCLR_of_run` compose that execution; `run_call_raisesCLR_of_contract`
+propagates a callee contract's named outcome. `RaisesCLR.not_of_invoke` refutes a
+wrong name from a settled checked invocation.
+
+`Tests/RuntimeExceptions.lean` proves all mapped cases and refutes wrong names.
+It also proves unsigned division and remainder by zero for every dividend and
+caller memory. `Tests/RuntimeExceptions.cs`, run by the outcomes suite, checks
+the CLR type and verifies each positive contract and wrong-name refutation
+against its compiled C# method.
+
 ## Derive public contracts
 
 A method's proved contract can be more detailed than its callers need. Export a
