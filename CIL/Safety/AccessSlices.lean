@@ -111,7 +111,50 @@ theorem read_slice_bytes {m : Memory} {r : Reference} {width alignment : Nat}
   · intro i hi hj
     simp [Nat.add_assoc]
 
+/-- Adjacent byte-aligned reads inside one admitted interval compose into one read of the whole interval. -/
+theorem read_append {m : Memory} {r : Reference} {left right : Nat} {writing : Bool}
+    {first second : List (BitVec 8)} (covered : access m r (left + right) 1 writing = .ok ())
+    (low : read m r left 1 = .ok first)
+    (high : read m { r with offset := r.offset + left } right 1 = .ok second) :
+    read m r (left + right) 1 = .ok (first ++ second) := by
+  have readable : ∀ {q width bytes}, read m q width 1 = .ok bytes → access m q width 1 false = .ok () := by
+    intro q width bytes h
+    unfold read at h
+    cases ha : access m q width 1 false with
+    | error fault => simp [ha, Bind.bind, Except.bind] at h
+    | ok value => cases value; rfl
+  obtain ⟨allocation, whole⟩ := access_requirements covered
+  obtain ⟨_, lower⟩ := access_requirements (readable low)
+  obtain ⟨_, upper⟩ := access_requirements (readable high)
+  have ready : AccessRequirements m r (left + right) 1 false allocation := by
+    refine ⟨whole.present, whole.live, whole.position, whole.layout, whole.extent, whole.aligned, by simp, ?_⟩
+    intro i bound
+    by_cases inside : i < left
+    · exact lower.permission i inside
+    · have permission := upper.permission (i - left) (by omega)
+      simp only at permission
+      rwa [show r.offset + left + (i - left) = r.offset + i by omega] at permission
+  have initialized : ∀ i < left + right, (m.cells r.allocation (r.offset + i)).initialized = true := by
+    intro i bound
+    by_cases inside : i < left
+    · exact read_requires_initialization _ _ _ _ _ low i (List.mem_range.mpr inside)
+    · have cell := read_requires_initialization _ _ _ _ _ high (i - left) (List.mem_range.mpr (by omega))
+      simp only at cell
+      rwa [show r.offset + left + (i - left) = r.offset + i by omega] at cell
+  rw [read_snapshot ready initialized, read_result_snapshot low, read_result_snapshot high]
+  congr 1
+  apply List.ext_getElem
+  · simp
+  · intro i bound _
+    simp only [List.length_map, List.length_range] at bound
+    by_cases inside : i < left
+    · rw [List.getElem_append_left (by simpa using inside)]
+      simp
+    · rw [List.getElem_append_right (by simpa using inside)]
+      simp [show r.offset + left + (i - left) = r.offset + i by omega]
+
 #print axioms read_slice_bytes
+#print axioms read_append
 #print axioms access_requirements
 #print axioms AccessRequirements.slice
 #print axioms read_slice
