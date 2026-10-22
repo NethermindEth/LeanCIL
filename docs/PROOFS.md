@@ -239,6 +239,41 @@ its own after `Percent` returns, and `Root` reads all three off `Strict`'s contr
 build, and refutes the callee's contract with concrete runs on builds with an
 off-by-one threshold or a different exception type.
 
+## Derive public contracts
+
+A method's proved contract can be more detailed than its callers need. Export a
+smaller interface by proving that the internal contract refines it, without
+unfolding or executing the method again:
+
+```lean
+theorem add_public : addPublic.Holds Extracted.program addTo := add_internal.weaken add_public_refines
+```
+
+`MethodContract.Refines internal exported` requires the same `args` and `results`
+encodings, the exported precondition to imply the internal one, every internal
+footprint entry to lie `Within` an exported entry under the exported precondition
+(so `Confined.widen_within` applies), and the internal postcondition to imply the
+exported one under the exported precondition and the internal footprint's
+`Confined`. That last premise lets the exported post state a frame fact, such as a
+read apart from the footprint surviving through `Confined.read_apart`.
+`MethodContract.Holds.weaken` turns a proved `Holds` and a `Refines` into the
+exported `Holds`.
+
+`OutcomeContract.Refines` adds that both contracts select the same outcome (`raises`)
+under the exported precondition; the footprint and postcondition premises apply
+only where that outcome is normal return. `OutcomeContract.Holds.weaken` derives
+the exported outcome contract, and `OutcomeContract.Refines.of_method` builds a
+refinement from a normal one and the agreeing outcomes. A stronger precondition
+can exclude every exception, after which `OutcomeContract.Holds.normal` yields a
+normal-only contract. Both `Refines` are reflexive and transitive.
+
+`Tests/ContractConsequence.lean` derives a bounded `Percent` contract and a
+framed `AddTo` contract over an enclosing region, and proves callers through the
+derived contracts at their call sites, in both returning and raising outcomes.
+Its rejections are proved negations: an unjustified stronger postcondition, a
+weaker precondition, a smaller footprint and a changed exception type each
+refute the `Refines` premise and the derived `Holds` on a concrete input.
+
 ## Reuse framework contracts
 
 When extending generic safety proofs, reuse the facts established by the shared
