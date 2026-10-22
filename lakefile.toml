@@ -121,3 +121,9 @@ name = "Tests.InterpreterEquations"
 
 [[lean_lib]]
 name = "Tests.ImportEvidence"
+
+[[lean_lib]]
+name = "Tests.ScalarEvidence"
+
+[[lean_lib]]
+name = "Tests.VectorFields"

@@ -5,11 +5,17 @@ import CIL.ExecutionLemmas
 -- Registering a definition supplies its kernel-checked unfolding equations;
 -- it does not assign a behavioral contract to the method.
 register_simp_attr cil_code
+register_simp_attr cil_eval
 
 namespace CIL
 
 -- Complete Std's numeral projection rules (which cover zero, one and two).
 theorem fin_val_three (n : Nat) : (3 : Fin (n + 4)).val = 3 := rfl
+
+theorem fin_mk_ofNat {n k : Nat} [NeZero n] (bound : k < n) :
+    (⟨k, bound⟩ : Fin n) = Fin.ofNat n k := by
+  apply Fin.ext
+  simp [Fin.val_ofNat, Nat.mod_eq_of_lt bound]
 
 -- A conservative candidate budget for the selected method and later callees.
 -- Sufficiency is established by each execution proof, not assumed here.

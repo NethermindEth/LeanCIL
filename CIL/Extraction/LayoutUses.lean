@@ -63,7 +63,7 @@ def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
 
 def MethodLayoutsValid (raw : List RawLayout) (layouts : Array ComputedLayout)
     (method : Method) (uses : List LayoutUse) : Prop :=
-  LayoutsValid raw layouts ∧ ∀ use ∈ uses, validateLayoutUse raw layouts method use = true
+  LayoutsValid raw layouts method.profile.architecture ∧ ∀ use ∈ uses, validateLayoutUse raw layouts method use = true
 
 instance (raw : List RawLayout) (layouts : Array ComputedLayout) (method : Method)
     (uses : List LayoutUse) : Decidable (MethodLayoutsValid raw layouts method uses) :=

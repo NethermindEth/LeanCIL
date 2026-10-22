@@ -5,7 +5,7 @@ using Mono.Cecil.Cil;
 namespace Nethermind.LeanCIL;
 
 // Specialization substitutes metadata types; it never rewrites the compiled assembly.
-internal sealed class MethodSpecialization(ModuleDefinition module)
+internal sealed class MethodSpecialization(ModuleDefinition module, string architecture = "scalar")
 {
     internal sealed record Origin(string Definition, string[] TypeArguments);
     static readonly ConditionalWeakTable<MethodDefinition, Origin> origins = new();
@@ -36,7 +36,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module)
         {
             if (argument is ByReferenceType or PointerType or GenericParameter)
                 throw new InvalidDataException($"Unsupported generic method type argument: {argument.FullName}");
-            MetadataValidation.Type(argument, module);
+            MetadataValidation.Type(argument, module, architecture: architecture);
         }
         foreach (var parameter in definition.GenericParameters)
         {
@@ -55,7 +55,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module)
                     type = modifier.ElementType;
                 if (type.FullName != "System.ValueType" || !RuntimeModels.ExactScope(type.Scope, "System.Runtime"))
                     throw new InvalidDataException($"Unsupported generic method constraints: {definition.FullName}");
-                RuntimeModels.ValidateTypeIdentity(type, module);
+                RuntimeModels.ValidateTypeIdentity(type, module, architecture);
             }
         }
 
