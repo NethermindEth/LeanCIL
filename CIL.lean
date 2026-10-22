@@ -30,6 +30,7 @@ import CIL.SIMD.Intrinsics
 import CIL.SIMD.SSE
 import CIL.SIMD.Vector
 import CIL.SIMD.VectorLemmas
+import CIL.SIMD.X86Base
 import CIL.Safety.AccessAlignment
 import CIL.Safety.AccessBelow
 import CIL.Safety.AccessRequirements
@@ -141,6 +142,7 @@ import CIL.VectorMemoryLemmas
 import CIL.Verification
 import CIL.WideMultiply
 import CIL.Safety.WideMultiply
+import CIL.Safety.TupleDivision
 import CIL.Extraction.Translation
 import CIL.Safety.MemoryEquivalence
 import CIL.Safety.FrameEquivalence

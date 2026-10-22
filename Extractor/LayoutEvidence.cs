@@ -18,8 +18,8 @@ internal sealed class LayoutEvidence(TypeReference[] types)
         void Include(TypeReference type)
         {
             if (!seen.Add(type.FullName)) return;
-            foreach (var field in type.Resolve().Fields.Where(field => !field.IsStatic))
-                if (MetadataValidation.IsAggregate(field.FieldType, type.Module)) Include(field.FieldType);
+            foreach (var field in MetadataValidation.Fields(type))
+                if (MetadataValidation.IsAggregate(field.Type, type.Module)) Include(field.Type);
             ordered.Add(type);
         }
         foreach (var entry in entries) Include(entry);
@@ -57,10 +57,12 @@ internal sealed class LayoutEvidence(TypeReference[] types)
         lean.AppendLine("def rawLayouts : List Extraction.RawLayout := [");
         lean.AppendLine(string.Join(",\n", rawTypes.Select(type =>
         {
-            var metadata = type.Resolve();
-            var fields = metadata.Fields.Where(field => !field.IsStatic).Select(field =>
-                $"{{ type := {RawFieldType(field.FieldType, metadata.Module)}, offset := {(field.Offset < 0 ? "none" : $"some {field.Offset}")} }}");
-            return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
+            var metadata = ValueTuples.Is(type) ? ((GenericInstanceType)type).ElementType.Resolve() : type.Resolve();
+            var fields = MetadataValidation.Fields(type).Select(field =>
+                $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
+            return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
+                (metadata.IsAutoLayout ? "auto := true, " : "") +
+                $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
         })));
         lean.AppendLine("]");
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +
@@ -78,9 +80,10 @@ internal sealed class LayoutEvidence(TypeReference[] types)
             if (!reachable.Contains(instruction)) continue;
             if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda)
             {
-                var field = ((FieldReference)instruction.Operand).Resolve();
-                var owner = field.DeclaringType;
-                var fieldIndex = owner.Fields.Where(candidate => !candidate.IsStatic).ToList().IndexOf(field);
+                var reference = (FieldReference)instruction.Operand;
+                var field = reference.Resolve();
+                var owner = ValueTuples.Is(reference.DeclaringType) ? reference.DeclaringType : field.DeclaringType;
+                var fieldIndex = Array.FindIndex(MetadataValidation.Fields(owner), candidate => candidate.Definition == field);
                 var access = instruction.OpCode.Code switch { Code.Ldfld => "load", Code.Stfld => "store", _ => "address" };
                 uses.Add($".field {pc} {Index(owner)} {fieldIndex} .{access}");
             }
