@@ -15,7 +15,7 @@ def Outside (footprint : List (Reference × Nat)) (id offset : Nat) : Prop :=
 
 /-- What a call may change in memory that existed before it: bytes and read authority
     inside `footprint`. Allocations and write authority are kept everywhere. -/
-structure Frames (footprint : List (Reference × Nat)) (before after : Memory) : Prop where
+structure Confined (footprint : List (Reference × Nat)) (before after : Memory) : Prop where
   grows : before.nextIdentity ≤ after.nextIdentity
   allocations : ∀ id, id < before.nextIdentity → after.allocations id = before.allocations id
   cells : ∀ id, id < before.nextIdentity → ∀ offset, Outside footprint id offset →
@@ -25,12 +25,12 @@ structure Frames (footprint : List (Reference × Nat)) (before after : Memory) :
   readable : ∀ id, id < before.nextIdentity → ∀ offset, Outside footprint id offset →
     permitted after false ⟨id, offset⟩ = permitted before false ⟨id, offset⟩
 
-theorem Frames.refl (footprint : List (Reference × Nat)) (m : Memory) : Frames footprint m m :=
+theorem Confined.refl (footprint : List (Reference × Nat)) (m : Memory) : Confined footprint m m :=
   ⟨Nat.le_refl _, fun _ _ => rfl, fun _ _ _ _ => rfl, fun _ _ _ => rfl, fun _ _ _ _ => rfl⟩
 
-theorem Frames.trans {footprint : List (Reference × Nat)} {first middle last : Memory}
-    (left : Frames footprint first middle) (right : Frames footprint middle last) :
-    Frames footprint first last := by
+theorem Confined.trans {footprint : List (Reference × Nat)} {first middle last : Memory}
+    (left : Confined footprint first middle) (right : Confined footprint middle last) :
+    Confined footprint first last := by
   have old : ∀ {id}, id < first.nextIdentity → id < middle.nextIdentity :=
     fun bound => Nat.lt_of_lt_of_le bound left.grows
   exact ⟨Nat.le_trans left.grows right.grows,
@@ -42,17 +42,17 @@ theorem Frames.trans {footprint : List (Reference × Nat)} {first middle last : 
       (left.readable id bound offset outside)⟩
 
 /-- A contract with a smaller footprint also holds for any larger one. -/
-theorem Frames.widen {small large : List (Reference × Nat)} {before after : Memory}
-    (framed : Frames small before after) (covered : ∀ entry ∈ small, entry ∈ large) :
-    Frames large before after :=
+theorem Confined.widen {small large : List (Reference × Nat)} {before after : Memory}
+    (framed : Confined small before after) (covered : ∀ entry ∈ small, entry ∈ large) :
+    Confined large before after :=
   have narrow : ∀ {id offset}, Outside large id offset → Outside small id offset :=
     fun outside entry member => outside entry (covered entry member)
   ⟨framed.grows, framed.allocations, fun id bound offset outside => framed.cells id bound offset (narrow outside),
     framed.writable, fun id bound offset outside => framed.readable id bound offset (narrow outside)⟩
 
-theorem Frames.ofMemoryBelow {footprint : List (Reference × Nat)} {before after : Memory} {watermark : Nat}
+theorem Confined.ofMemoryBelow {footprint : List (Reference × Nat)} {before after : Memory} {watermark : Nat}
     (preserved : MemoryBelow watermark before after) (covers : before.nextIdentity ≤ watermark)
-    (grows : before.nextIdentity ≤ after.nextIdentity) : Frames footprint before after :=
+    (grows : before.nextIdentity ≤ after.nextIdentity) : Confined footprint before after :=
   have old : ∀ {id}, id < before.nextIdentity → id < watermark := fun bound => Nat.lt_of_lt_of_le bound covers
   ⟨grows, fun id bound => preserved.allocations id (old bound),
     fun id bound offset _ => preserved.cells id (old bound) offset,
@@ -60,10 +60,10 @@ theorem Frames.ofMemoryBelow {footprint : List (Reference × Nat)} {before after
     fun id bound offset _ => preserved.permissions id (old bound) offset false⟩
 
 /-- A checked write inside the footprint keeps every other byte and all write authority. -/
-theorem Frames.write {footprint : List (Reference × Nat)} {m result : Memory} {r : Reference}
+theorem Confined.write {footprint : List (Reference × Nat)} {m result : Memory} {r : Reference}
     {bytes : List (BitVec 8)} {alignment : Nat}
     (h : write m r bytes alignment = .ok result) (member : (r, bytes.length) ∈ footprint) :
-    Frames footprint m result := by
+    Confined footprint m result := by
   have shape : result.views = writeViews m r bytes.length ∧ result.nextIdentity = m.nextIdentity := by
     unfold CIL.Safety.write at h
     cases ha : access m r bytes.length alignment true <;>
@@ -91,8 +91,8 @@ theorem Frames.write {footprint : List (Reference × Nat)} {m result : Memory} {
     · simp [permitted, viewContains, show ¬ offset < r.offset + bytes.length by omega]
 
 /-- Write access to memory that existed before the call is unchanged. -/
-theorem Frames.access_write {footprint : List (Reference × Nat)} {before after : Memory}
-    (framed : Frames footprint before after) (r : Reference) (old : r.allocation < before.nextIdentity)
+theorem Confined.access_write {footprint : List (Reference × Nat)} {before after : Memory}
+    (framed : Confined footprint before after) (r : Reference) (old : r.allocation < before.nextIdentity)
     (width alignment : Nat) :
     access after r width alignment true = access before r width alignment true := by
   have same : ∀ i, permitted after true { r with offset := r.offset + i } =
@@ -100,8 +100,8 @@ theorem Frames.access_write {footprint : List (Reference × Nat)} {before after 
   simp only [CIL.Safety.access, form, liveAllocation, framed.allocations _ old, same]
 
 /-- A read wholly outside the footprint sees the same bytes and authority. -/
-theorem Frames.read_eq {footprint : List (Reference × Nat)} {before after : Memory}
-    (framed : Frames footprint before after) (r : Reference) (old : r.allocation < before.nextIdentity)
+theorem Confined.read_eq {footprint : List (Reference × Nat)} {before after : Memory}
+    (framed : Confined footprint before after) (r : Reference) (old : r.allocation < before.nextIdentity)
     (width alignment : Nat) (outside : ∀ i < width, Outside footprint r.allocation (r.offset + i)) :
     read after r width alignment = read before r width alignment := by
   have authority : (List.range width).all (fun i => permitted after false { r with offset := r.offset + i }) =
@@ -159,13 +159,13 @@ structure MethodContract (Input : Type) where
 def MethodContract.Holds {Input : Type} (c : MethodContract Input) (program : CIL.Program) (method : Nat) : Prop :=
   ∀ input initial, c.pre input initial →
     ∃ fuel final values, invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Frames (c.footprint input) initial final ∧ c.post input initial final values
+      Confined (c.footprint input) initial final ∧ c.post input initial final values
 
 /-- A contract is `Ensures` at each input, with the footprint as part of the postcondition. -/
 theorem MethodContract.Holds.ensures {Input : Type} {c : MethodContract Input} {program : CIL.Program}
     {method : Nat} (holds : c.Holds program method) (input : Input) :
     Ensures program method (fun args m => args = c.args input ∧ c.pre input m)
-      (fun _ initial final values => Frames (c.footprint input) initial final ∧ c.post input initial final values) := by
+      (fun _ initial final values => Confined (c.footprint input) initial final ∧ c.post input initial final values) := by
   rintro args initial ⟨rfl, permitted⟩
   exact holds input initial permitted
 
@@ -180,7 +180,7 @@ theorem run_call_of_contract {Input : Type} {c : MethodContract Input} {program 
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Frames (c.footprint input) updated final → c.post input updated final values →
+      Confined (c.footprint input) updated final → c.post input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
         post result returned) :
@@ -226,8 +226,8 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
   rw [Nat.add_comm] at down
   exact Except.ok.inj (up.symm.trans down)
 
-#print axioms Frames.write
-#print axioms Frames.read_eq
+#print axioms Confined.write
+#print axioms Confined.read_eq
 #print axioms run_call_of_contract
 #print axioms invoke_ok_unique
 
@@ -255,9 +255,10 @@ macro_rules
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by cil_checked_step [$[$facts:term],*]) ?_)))
 
-/-- Apply a proved contract at the fetched call: leaves the precondition, then the
-    continuation with the callee's final memory, values, invocation, frame and post. -/
-syntax "cil_contract_call" term:max term:max "[" term,* "]" : tactic
+/-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
+    site: leaves the precondition, then the continuation over the callee's final memory,
+    values, invocation, footprint and postcondition. -/
+syntax "cil_contract_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
 macro_rules
   | `(tactic| cil_contract_call $holds $input [$facts:term,*]) =>
@@ -265,6 +266,12 @@ macro_rules
     refine CIL.Safety.run_call_of_contract $holds $input
       (by simp only [cil_code, Nat.reduceAdd]; rfl)
       (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+  | `(tactic| cil_contract_call $holds $input at $site:ident [$facts:term,*]) =>
+  `(tactic| (
+    -- The site fixes the body, so the lookup may close during simplification.
+    refine CIL.Safety.run_call_of_contract $holds $input
+      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
 
 end CIL.Safety

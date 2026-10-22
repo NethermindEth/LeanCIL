@@ -1,4 +1,5 @@
 import CIL.MethodIdentity
+import CIL.StructuralLabels
 import CIL.Safety.MethodContract
 import CIL.Safety.WordMemory
 import CIL.Safety.WordFootprint
@@ -30,6 +31,8 @@ open CIL.Safety
 bind_method root rootBody := "System.Void Contracts.Calls::Root(System.UInt64&,System.UInt64&)"
 bind_callee mix mixBody := "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)" from rootBody
 bind_callee addTo addBody := "System.Void Contracts.Calls::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)" from rootBody
+bind_call addSite := addTo from rootBody
+bind_call mixSite := mix from rootBody
 
 def mixContract : MethodContract (CIL.W64 × CIL.W64) where
   args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
@@ -70,7 +73,7 @@ def rootContract : MethodContract RootInput where
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   dsimp only [mixContract]
-  refine ⟨8, m, _, ?_, Frames.refl _ m, rfl⟩
+  refine ⟨8, m, _, ?_, Confined.refl _ m, rfl⟩
   cil_checked_steps
 
 theorem add_holds : addContract.Holds Extracted.program addTo := by
@@ -87,12 +90,12 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨9, stored, [], ?_, Frames.write wrote (by simp [numberBytes]), rfl, readback⟩
+  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 set_option maxHeartbeats 400000 in
-/-- Uses only the callees' contracts; neither callee body is unfolded. -/
+/-- Uses only the callees' contracts at their call sites; neither callee body is unfolded. -/
 theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
     (addHolds : addContract.Holds Extracted.program addTo) : rootContract.Holds Extracted.program root := by
   rintro ⟨r, b, x, y⟩ m ⟨formed, readR, readB, writable, disjoint⟩
@@ -103,7 +106,7 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   cil_contract_steps [checkedValue, formValue, checkedAt, fr, fb,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cil_contract_call addHolds ⟨r, b, r, x, y⟩ [checkedValue, formValue, checkedAt, fr, fb,
+  cil_contract_call addHolds ⟨r, b, r, x, y⟩ at addSite [checkedValue, formValue, checkedAt, fr, fb,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   · exact ⟨readR, readB, writable⟩
   rintro m1 _ - framed1 ⟨rfl, readR1⟩
@@ -116,7 +119,7 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have lb1 := load_word64_of_read readB1
   cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     fr1, fb1, lr1, lb1, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cil_contract_call mixHolds (x + y, y) [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind,
+  cil_contract_call mixHolds (x + y, y) at mixSite [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
   · trivial
   rintro m2 _ - framed2 rfl
@@ -136,7 +139,7 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     staticInstruction, fr2, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   simp only [leaveFrame, List.foldl_nil]
-  exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Frames.write wrote (by simp [addContract, numberBytes]))), trivial, readback⟩
+  exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))), trivial, readback⟩
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds mix_holds add_holds
 

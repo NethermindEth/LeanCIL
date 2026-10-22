@@ -67,7 +67,7 @@ const string Composed = "theorem correctness : rootContract.Holds Extracted.prog
 string Proof(string name, string body)
 {
     var path = Path.Combine(root, name + ".lean");
-    File.WriteAllText(path, "import Extracted\nimport CIL.MethodIdentity\nimport CIL.Safety.MethodContract\n" +
+    File.WriteAllText(path, "import Extracted\nimport CIL.MethodIdentity\nimport CIL.StructuralLabels\nimport CIL.Safety.MethodContract\n" +
         "import CIL.Safety.WordMemory\nimport CIL.Safety.WordFootprint\n\nopen CIL.Safety\nnamespace ExampleProof\n\n" +
         contracts + body + "\nend ExampleProof\n");
     return path;
@@ -78,7 +78,7 @@ theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   dsimp only [mixContract]
   have same : x + x + x + y = x * 3 + y := by bv_omega
-  refine ⟨16, m, _, ?_, Frames.refl _ m, rfl⟩
+  refine ⟨16, m, _, ?_, Confined.refl _ m, rfl⟩
   rw [← same]
   cil_checked_steps
 
@@ -97,7 +97,7 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨12, stored, [], ?_, Frames.write wrote (by simp [numberBytes]), rfl, readback⟩
+  refine ⟨12, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 

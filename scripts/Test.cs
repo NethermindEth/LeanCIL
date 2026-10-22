@@ -167,7 +167,7 @@ Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true,
 Passed("method selector aliases, overloads and actionable diagnostics");
 
 Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels", "Tests.DebugNames", "Tests.MethodContract"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
-Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label and debug name tests");
+Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, debug name and method contract tests");
 
 // Verify each extracted method and immediately check its artifact identity.
 foreach (var (name, signature) in signatures)

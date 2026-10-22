@@ -81,17 +81,17 @@ theorem root_holds (add : addContract.Holds Extracted.program addTo) : rootContr
 `pre` holds formation, authority and the permitted aliasing; the example lets
 `res` overlap either input. `Holds` is `Ensures` with the footprint added to the
 postcondition (`Holds.ensures`), and fuel stays existential so callers never
-depend on a callee's step count. `Frames footprint before after` is the memory
+depend on a callee's step count. `Confined footprint before after` is the memory
 guarantee: earlier allocations and write authority are unchanged, and bytes and
 read authority change only inside the footprint (a write grants read access to
-what it wrote). `Frames.trans`, `Frames.widen`, `Frames.write`, `Frames.read_eq`
-and `Frames.access_write` compose and consume it. The contract fixes no profile:
+what it wrote). `Confined.trans`, `Confined.widen`, `Confined.write`, `Confined.read_eq`
+and `Confined.access_write` compose and consume it. The contract fixes no profile:
 the program does, so a cross-profile contract is a theorem quantified over the
 per-profile extractions.
 
 In the caller, `cil_contract_steps [facts]` steps a `∃ fuel, run ...` goal up
-to each `.call` and return; `cil_contract_call holds input [facts]` applies the
-contract there, leaving the precondition and then a continuation over the
+to each `.call` and return; `cil_contract_call holds input at site [facts]` applies
+the contract at a `bind_call` site (or the fetched call without `at`), leaving the precondition and then a continuation over the
 callee's final memory, values, invocation, frame and postcondition. Stated
 store facts must match the computed value syntactically: `generalize` a value
 the simplifier would rewrite, or state the fact in the computed form.
