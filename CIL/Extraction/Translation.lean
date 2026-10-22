@@ -1,6 +1,6 @@
 import CIL.Extraction.Features
 import CIL.Extraction.LayoutCoverage
-import CIL.Extraction.SkipInit
+import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.StaticValues
 
 namespace CIL.Extraction
@@ -57,7 +57,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ManagedCallsValid (specializationTable all) imports item.closed item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid rawLayouts item.closed method ∧
-  SkipInitValid rawLayouts item.closed item.reachable method.code
+  UnsafeCallsValid rawLayouts item.closed item.reachable method.code
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Method) :

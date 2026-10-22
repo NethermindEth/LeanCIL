@@ -285,6 +285,56 @@ theorem nested_null :
     (instruction (.aggregateFieldAt 0 8) [.reference .null] Examples.empty).map Prod.snd =
       .error (.memory .nullDereference .null 0) := rfl
 
+theorem null_reference_pushed :
+    instruction (.memory .nullRef) [.scalar (.i32 7)] Examples.empty =
+      .ok (Examples.empty, [.reference .null, .scalar (.i32 7)]) := rfl
+
+theorem null_reference_detected :
+    instruction (.memory .isNullRef) [.reference .null] Examples.empty =
+      .ok (Examples.empty, [.scalar (.i32 1)]) := rfl
+
+theorem live_reference_not_null :
+    instruction (.memory .isNullRef) [Examples.reference] Examples.caller =
+      .ok (Examples.caller, [.scalar (.i32 0)]) := rfl
+
+-- Testing performs no access, so an expired reference is still not null.
+theorem expired_reference_not_null :
+    instruction (.memory .isNullRef) [Examples.reference] (expire Examples.caller 0) =
+      .ok (expire Examples.caller 0, [.scalar (.i32 0)]) := rfl
+
+theorem null_test_requires_reference :
+    instruction (.memory .isNullRef) [.scalar (.i64 0)] Examples.empty = .error .invalidState := rfl
+
+-- Every load and store through `NullRef` faults as a null dereference.
+theorem null_reference_accesses_fault :
+    instructions [.memory .nullRef, .load64] [] Examples.empty =
+      .error (.memory .nullDereference .null 8) ∧
+    instructions [.memory .nullRef, .loadScalar 4 true] [] Examples.empty =
+      .error (.memory .nullDereference .null 4) ∧
+    instructions [.memory .nullRef, .const64 7, .store64] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) ∧
+    instructions [.memory .nullRef, .const32 7, .storeScalar 4] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) ∧
+    instructions [.memory .nullRef, .loadAggregate 32] [] Examples.empty =
+      .error (.memory .nullDereference .null 32) ∧
+    instructions [.memory .nullRef, .initAggregate 32] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) ∧
+    instructions [.memory .nullRef, .memory .load256] [] Examples.empty =
+      .error (.memory .nullDereference .null 32) ∧
+    instructions [.memory .nullRef, .fieldAt 8 8] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) ∧
+    instructions [.memory .nullRef, .fieldAddress 8] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) ∧
+    instructions [.memory .nullRef, .const64 7, .setFieldAt 8 8] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) ∧
+    instructions [.memory .nullRef, .lane 1] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) ∧
+    instructions [.memory .nullRef, .laneAddress 1] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) ∧
+    instructions [.memory .nullRef, .const64 7, .setLane 1] [] Examples.empty =
+      .error (.memory .nullDereference .null 0) :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+
 theorem nested_uninitialized :
     (instruction (.aggregateFieldAt 0 8) [Examples.reference]
       { Examples.caller with cells := fun _ _ => ⟨0, false⟩ }).map Prod.snd =

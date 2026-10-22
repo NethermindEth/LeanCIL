@@ -57,7 +57,7 @@ internal static class VerificationSelection
             "Throws", "SpanTables", "StaticValues", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "TypeTestEvidence",
             "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence" }.Select(name => $"Tests/{name}.lean"));
-        inputs["unsafe"].Add("Tests/SkipInitialization.cs");
+        inputs["unsafe"].UnionWith(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
 
         // Follow literal source paths, file-based includes and Lean imports.
         // Dynamic/new paths absent from this graph still fall back to the full matrix.

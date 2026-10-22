@@ -9,7 +9,7 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/SkipInitialization");
 Directory.CreateDirectory(root);
-Run(["lake", "build", "Tests.SkipInitEvidence"]);
+Run(["lake", "build", "Tests.UnsafeCallEvidence"]);
 
 verification.Verify(assembly, "Examples", "SkipInitialization::Skip(Examples.FourLimbs&)",
     At("Examples/Proofs/SkipInitialization.lean"), Path.Combine(root, "Skip"));

@@ -58,6 +58,7 @@ Test("test entry points", () =>
 {
     Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
     Equal(VerificationSelection.Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
+    Equal(VerificationSelection.Select(["Tests/NullReferences.cs"]), ["unsafe"]);
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
 });
@@ -65,7 +66,7 @@ Test("proof and transitive imports", () =>
 {
     Equal(VerificationSelection.Select(["Examples/Proofs/Countdown.lean"]), ["contracts", "fsharp", "loops"]);
     Equal(VerificationSelection.Select(["Examples/Support.lean"]), All());
-    Equal(VerificationSelection.Select(["Tests/SkipInitEvidence.lean"]), ["unsafe"]);
+    Equal(VerificationSelection.Select(["Tests/UnsafeCallEvidence.lean"]), ["unsafe"]);
 });
 Test("dynamic proof paths", () =>
 {

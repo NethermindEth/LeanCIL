@@ -78,7 +78,7 @@ name = "Tests.LayoutCoverage"
 name = "Tests.ViewReuse"
 
 [[lean_lib]]
-name = "Tests.SkipInitEvidence"
+name = "Tests.UnsafeCallEvidence"
 
 [[lean_lib]]
 name = "Tests.WrapperProofs"
