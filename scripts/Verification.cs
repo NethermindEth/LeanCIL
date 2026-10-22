@@ -948,7 +948,8 @@ unsafe def main (args : List String) : IO Unit := do
 
     static string[] ContractImportAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("imports", out JsonElement imports) ? imports.EnumerateArray().Select(import =>
-            import.GetProperty("contractConstant").GetString() + ".Holds linked " +
+            "_root_.CIL.Safety." + (import.GetProperty("contractKind").GetString() == "method" ? "MethodContract" : "OutcomeContract") +
+            ".Holds _root_." + import.GetProperty("contractConstant").GetString() + " linked " +
             (extraction.GetProperty("methods").GetArrayLength() + import.GetProperty("slot").GetInt32())).ToArray() : [];
 
     sealed record Report(int schema, string assemblySha256, string identitySha256, string theorem, string[] axioms,

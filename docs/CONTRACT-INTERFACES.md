@@ -49,7 +49,7 @@ overrides can be supplied again for an explicit recheck.
 - `interfaceDigest`: the canonical descriptor digest described below.
 - `exports`: exact assembly-scoped method identity, Cecil full signature,
   `parameterCount`, `hasThis`, `returnsValue`, `visibility`, `contractConstant`,
-  `closureDigest`, and `profiles`.
+  `closureDigest`, `profiles`, and `kind` (`method` or `outcome`).
 - `certifications`: records with `identity`, `profile`, `implementationSha256`,
   `interfaceDigest`, and `closureDigest`. The selected record must bind the
   selected export, profile, DLL and interface.
@@ -96,12 +96,17 @@ return arity. The implementation hash is absent from `Extracted.lean`.
 `ExtractedImports.lean` imports the declared interface sources and defines:
 
 ```
-def Extracted.ImportsHold (linked : CIL.Program) : Prop :=
-  Library.Contract.Holds linked <absolute-slot>
+def Extracted.ImportsHold (linked : _root_.CIL.Program) : Prop :=
+  @_root_.CIL.Safety.MethodContract.Holds _ _ _root_.Library.Contract linked <absolute-slot>
 ```
 
-Several slots form a conjunction. Each named contract must elaborate against the
-actual linked program and its absolute slot. No body, axiom, summary or
+Several slots form a conjunction. The selected kind uses the fully qualified
+framework `MethodContract.Holds` or `OutcomeContract.Holds` predicate. Both the
+framework predicate and selected contract use `_root_` qualification, so an
+`Extracted` namespace declaration cannot replace either one. Lean checks
+that the named value has that actual framework contract type. A user-defined
+`Contract.Holds` predicate cannot replace this check. Each contract applies to
+the actual linked program and its absolute slot. No body, axiom, summary or
 implementation proof is generated for an import.
 
 The caller theorem must have the conditional form:

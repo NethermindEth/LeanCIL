@@ -8,7 +8,7 @@ namespace Nethermind.LeanCIL;
 
 internal sealed record InterfaceModule(string Name, string Source);
 internal sealed record ContractExport(string Identity, string Signature, int ParameterCount, bool HasThis,
-    bool ReturnsValue, string Visibility, string ContractConstant, string ClosureDigest, string[] Profiles);
+    bool ReturnsValue, string Visibility, string ContractConstant, string ClosureDigest, string[] Profiles, string Kind);
 internal sealed record ContractCertification(string Identity, string Profile, string ImplementationSha256,
     string InterfaceDigest, string ClosureDigest);
 internal sealed record ContractInterface(int Schema, int SemanticsVersion, int FormatVersion, string FrameworkKey,
@@ -24,7 +24,7 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
 
     internal static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
     internal static bool Digest(string value) => value is not null && Regex.IsMatch(value, @"\A[0-9a-f]{64}\z");
-    internal static bool Constant(string value) => value is not null && Regex.IsMatch(value, @"\A[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z");
+    internal static bool Constant(string value) => value is not null && !value.Split('.').Contains("_root_", StringComparer.Ordinal) && Regex.IsMatch(value, @"\A[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z");
     internal static bool ModuleName(string value) => Constant(value) && value.Split('.')[0] is not
         ("CIL" or "Lean" or "Init" or "Std" or "Extracted" or "ExtractedImports" or "Proof" or "Audit" or "ExtractionAudit" or "ExtractedSymbols" or "Symbols" or "Examples" or "Tests" or "lakefile");
 
@@ -52,7 +52,7 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
             "targetFramework", "implementationSha256", "isReferenceAssembly", "interfaceModules", "interfaceDigest", "exports", "certifications", "dependencies");
         foreach (JsonElement module in document.RootElement.GetProperty("interfaceModules").EnumerateArray()) Require(module, "name", "source");
         foreach (JsonElement export in document.RootElement.GetProperty("exports").EnumerateArray())
-            Require(export, "identity", "signature", "parameterCount", "hasThis", "returnsValue", "visibility", "contractConstant", "closureDigest", "profiles");
+            Require(export, "identity", "signature", "parameterCount", "hasThis", "returnsValue", "visibility", "contractConstant", "closureDigest", "profiles", "kind");
         foreach (JsonElement record in document.RootElement.GetProperty("certifications").EnumerateArray())
             Require(record, "identity", "profile", "implementationSha256", "interfaceDigest", "closureDigest");
         ContractInterface value = document.RootElement.Deserialize<ContractInterface>(Json)
@@ -70,6 +70,8 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
             value.InterfaceModules.Any(module => module is null || !ModuleName(module.Name) || string.IsNullOrWhiteSpace(module.Source)) ||
             value.InterfaceModules.Select(module => module.Name).Distinct(StringComparer.Ordinal).Count() != value.InterfaceModules.Length)
             throw new InvalidDataException("Invalid or duplicate contract interface module.");
+        if (value.Exports is not null && value.Exports.Any(export => export is not null && export.Kind is not ("method" or "outcome")))
+            throw new InvalidDataException("Unsupported contract export kind; expected method or outcome.");
         if (value.Exports is null || value.Exports.Length == 0 || value.Certifications is null ||
             value.Exports.Any(export => export is null || string.IsNullOrWhiteSpace(export.Identity) || string.IsNullOrWhiteSpace(export.Signature) ||
                 export.ParameterCount < 0 || export.HasThis || !Constant(export.ContractConstant) || !Digest(export.ClosureDigest) ||

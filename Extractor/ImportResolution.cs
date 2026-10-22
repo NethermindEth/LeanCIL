@@ -9,7 +9,7 @@ internal sealed class ImportResolution : IDisposable
     internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256, string ExpectedInterfaceDigest);
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
         string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
-        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest);
+        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     readonly List<Library> libraries = [];
     readonly List<Binding> bindings = [];
@@ -111,7 +111,7 @@ internal sealed class ImportResolution : IDisposable
             slot = bindings.Count;
             bindings.Add(new(slot, identity, Path.GetFullPath(library.Source.ImplementationPath), library.Interface.ImplementationSha256,
                 "contract", Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
-                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest));
+                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest, export.Kind));
         }
         sites[instruction] = slot;
     }
@@ -150,11 +150,11 @@ internal sealed class ImportResolution : IDisposable
 
     internal string EmitImports(int methodCount)
     {
-        StringBuilder lean = new("import Extracted\nimport CIL.Safety.Imports\n");
+        StringBuilder lean = new("import Extracted\nimport CIL.Safety.Imports\nimport CIL.Safety.OutcomeContract\n");
         foreach (string module in InterfaceModules().Keys) lean.AppendLine("import " + module);
-        lean.AppendLine("\nnamespace Extracted\ndef ImportsHold (linked : CIL.Program) : Prop :=");
+        lean.AppendLine("\nnamespace Extracted\ndef ImportsHold (linked : _root_.CIL.Program) : Prop :=");
         lean.AppendLine(bindings.Count == 0 ? "  True" : "  " + string.Join(" \u2227\n  ", bindings.Select(binding =>
-            $"{binding.ContractConstant}.Holds linked {methodCount + binding.Slot}")));
+            $"@_root_.CIL.Safety.{(binding.ContractKind == "method" ? "MethodContract" : "OutcomeContract")}.Holds _ _ _root_.{binding.ContractConstant} linked {methodCount + binding.Slot}")));
         lean.AppendLine("end Extracted");
         return lean.ToString();
     }
