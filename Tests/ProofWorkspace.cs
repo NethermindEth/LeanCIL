@@ -48,7 +48,7 @@ end WorkspaceProof
 """);
 Run(["lake", "update"], package);
 string[] command = [.. cli, "workspace", assembly, "Words.UInt256::Low(Words.UInt256)",
-    "--profile", "arm64", "--proof", proof, "--output", workspace];
+    "--profile", "arm64-armbase", "--proof", proof, "--output", workspace];
 string created = Run(command);
 string editorProof = Path.Combine(workspace, "LeanCILProofWorkspace.lean");
 if (!created.Contains("Editor checking is not a certificate", StringComparison.Ordinal) || Sha(editorProof) != Sha(proof))
@@ -64,7 +64,7 @@ if (Sha(editorProof) != changedProof) throw new InvalidOperationException("Reope
 Run(["lake", "build", "+LeanCILProofWorkspace:olean"], workspace);
 File.Copy(editorProof, proof, true);
 string output = Path.Combine(root, "Verification");
-Run([.. cli, "extract", assembly, "Words.UInt256::Low(Words.UInt256)", output, "arm64"]);
+Run([.. cli, "extract", assembly, "Words.UInt256::Low(Words.UInt256)", output, "arm64-armbase"]);
 Run([.. cli, "verify", output, "--proof", proof, "--proof-root", package, "--theorem", "WorkspaceProof.correctness", "--fresh"]);
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 if (!report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid", StringComparison.Ordinal) ||
@@ -97,7 +97,7 @@ foreach ((string path, string name) in new[]
     finally { File.WriteAllBytes(path, original); }
 }
 string[] wrongProfile = [.. command];
-wrongProfile[Array.IndexOf(wrongProfile, "arm64")] = "scalar";
+wrongProfile[Array.IndexOf(wrongProfile, "arm64-armbase")] = "scalar";
 Reject(wrongProfile, "Stale editor workspace");
 string pdb = Path.ChangeExtension(assembly, ".pdb");
 byte[] savedPdb = File.ReadAllBytes(pdb);
