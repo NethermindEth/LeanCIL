@@ -56,7 +56,7 @@ internal static class VerificationSelection
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
             "Throws", "SpanTables", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "TypeTestEvidence",
-            "ThrowEvidence", "SpanEvidence", "LayoutCoverage" }.Select(name => $"Tests/{name}.lean"));
+            "ThrowEvidence", "SpanEvidence", "LayoutCoverage", "ImportEvidence" }.Select(name => $"Tests/{name}.lean"));
         inputs["unsafe"].Add("Tests/SkipInitialization.cs");
 
         // Follow literal source paths, file-based includes and Lean imports.
