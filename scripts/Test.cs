@@ -66,14 +66,14 @@ void RunSuite(string name)
 
 void SaveResults()
 {
-    Directory.CreateDirectory(At("artifacts"));
     File.WriteAllText(ResultsPath(), JsonSerializer.Serialize(new { suite, passed = results, count = results.Count }, Json) + "\n");
     Console.WriteLine($"All {results.Count} checks passed ({suite}).");
 }
 
 string ResultsPath() => At(suite == "all" ? "artifacts/test-results.json" : $"artifacts/test-results-{suite}.json");
 
-// A failed run must never leave an earlier successful summary behind.
+// A failed run must never leave an earlier successful summary behind; a fresh checkout has no artifacts/ yet.
+Directory.CreateDirectory(At("artifacts"));
 File.Delete(ResultsPath());
 
 void Rejected(string[] command, string marker)
