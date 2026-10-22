@@ -87,4 +87,55 @@ example (program : CIL.Program) (index : Nat) (memory : CIL.Safety.Memory) (a b 
 
 /-- info: 'Tests.Automation.word_checked' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms word_checked
+
+/-- A 27-instruction read-only leaf over symbolic memory: each field load comes from a fact, every step from an
+    equation, so no step unfolds the dispatcher. -/
+def leafBody (profile : CIL.FeatureProfile) : CIL.Method := { profile, returnsValue := true, locals := [], code := [
+  .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .bxor,
+  .arg 0, .fieldAt 8 8, .arg 1, .fieldAt 8 8, .bxor, .bor,
+  .arg 0, .fieldAt 16 8, .arg 1, .fieldAt 16 8, .bxor, .bor,
+  .arg 0, .fieldAt 24 8, .arg 1, .fieldAt 24 8, .bxor, .bor,
+  .const32 0, .convI8, .eq, .ret (some .unsigned8)] }
+
+open CIL.Safety in
+theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (leafBody profile)) (memory : Memory) (left right : Reference)
+    (limb : Reference → Nat → BitVec 64) (fl : form memory left = .ok left) (fr : form memory right = .ok right)
+    (field : ∀ r offset rest, instruction (.fieldAt offset 8) (.reference (.address r) :: rest) memory =
+      .ok (memory, .scalar (.i64 (limb r offset)) :: rest)) :
+    let difference := (limb left 0 ^^^ limb right 0) ||| (limb left 8 ^^^ limb right 8) |||
+      (limb left 16 ^^^ limb right 16) ||| (limb left 24 ^^^ limb right 24)
+    invoke program 28 index [.reference (.address left), .reference (.address right)] memory =
+      .ok (memory, [.scalar (.i32 (CIL.NarrowKind.unsigned8.extend (if difference = 0 then 1 else 0)))]) := by
+  cil_checked_steps [checkedValue, formValue, checkedAt, fl, fr, field]
+
+def boundBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := [.arg 0, .arg 1, .bltu 5, .arg 0, .ret, .arg 1, .ret] }
+
+/-- A fact decides an unsigned i64 branch, so the run falls through to pc 3. -/
+theorem bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (boundBody profile)) (memory : CIL.Safety.Memory) (x y : CIL.W64)
+    (above : ¬ x < y) :
+    CIL.Safety.invoke program 8 index [.scalar (.i64 x), .scalar (.i64 y)] memory =
+      .ok (memory, [.scalar (.i64 x)]) := by
+  cil_checked_steps [above]
+
+/-- A signed branch takes its fact in the interpreter's own form, so no linear-arithmetic restatement is needed. -/
+theorem signed_bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some { boundBody profile with code := [.arg 0, .arg 1, .blt 5, .arg 0, .ret, .arg 1, .ret] })
+    (memory : CIL.Safety.Memory) (x y : CIL.W64) (above : ¬ x.toInt < y.toInt) :
+    CIL.Safety.invoke program 8 index [.scalar (.i64 x), .scalar (.i64 y)] memory =
+      .ok (memory, [.scalar (.i64 x)]) := by
+  cil_checked_steps [above]
+
+-- The step equations alone rewrite a compare-branch; the dispatcher stays folded.
+example (body : CIL.Method) (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame) (m : CIL.Safety.Memory)
+    (x y : CIL.W64) (above : ¬ x < y) :
+    CIL.Safety.step body (.bltu 5) 2 args frame [.scalar (.i64 y), .scalar (.i64 x)] m = .ok (.next 3 [] frame m) := by
+  simp only [cil_step, above, ↓reduceIte]
+
+/-- info: 'Tests.Automation.leaf_checked' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms leaf_checked
+/-- info: 'Tests.Automation.bound_checked' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms bound_checked
 end Tests.Automation
