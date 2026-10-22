@@ -64,8 +64,8 @@ private def showOp (op : Option Op) : String := match op with
   | some op => reprStr op
   | none => "(past the end)"
 
-/-- The first violated `Embeds` condition, explained by expected and actual pc. -/
-def embedFailure (expected actual : Method) (map : List Nat) : Option String := Id.run do
+/-- The first violated `Embeds` condition, explained by expected and actual pc, and the actual pc it concerns. -/
+def embedFailure (expected actual : Method) (map : List Nat) : Option (String × Option Nat) := Id.run do
   let fields := [ valueField "profile" expected.profile actual.profile,
     valueField "returnsValue" expected.returnsValue actual.returnsValue,
     listField "locals" expected.locals actual.locals,
@@ -75,11 +75,11 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option String := 
     listField "parameterHomes" expected.parameterHomes actual.parameterHomes,
     listField "static descriptors" (expected.staticSites.map Prod.snd) (actual.staticSites.map Prod.snd) ].filterMap id
   if let some field := fields.head? then
-    return some s!"non-code field differs (left: expected, right: actual)\n{field}"
+    return some (s!"non-code field differs (left: expected, right: actual)\n{field}", none)
   let limit := actual.code.length
   let r := rename map limit
   let actualCode := actual.code.toArray
-  if r 0 != 0 then return some s!"expected pc 0 must map to actual pc 0, not {r 0}"
+  if r 0 != 0 then return some (s!"expected pc 0 must map to actual pc 0, not {r 0}", none)
   let imageOf : Std.HashMap Nat Nat := (sites limit 0 expected.code map).foldl
     (fun table site => table.insert site.image site.pc) {}
   let describe (k : Nat) : String := match imageOf.get? k with
@@ -95,24 +95,24 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option String := 
       let renamed := if wanted == op then "" else s!"\n  renamed:  {reprStr wanted}"
       let header := s!"expected pc {p} maps to actual pc {q}\n  expected: {reprStr op}{renamed}\n  actual:   {showOp found}"
       match found with
-      | none => return some s!"{header}\n  no actual instruction of this shape follows the previous aligned instruction"
+      | none => return some (s!"{header}\n  no actual instruction of this shape follows the previous aligned instruction", some q)
       | some present =>
         if shape present == shape op then
           let mismatch := (op.targets.zip present.targets).find? fun (t, t') => r t != t'
           match mismatch with
           | some (t, t') =>
-            return some s!"{header}\n  code target differs: expected target {t} maps to actual pc {r t}, but the actual instruction targets {t'}; {describe t'}"
-          | none => return some s!"{header}\n  the code targets differ"
+            return some (s!"{header}\n  code target differs: expected target {t} maps to actual pc {r t}, but the actual instruction targets {t'}; {describe t'}", some q)
+          | none => return some (s!"{header}\n  the code targets differ", some q)
         else
           let entered := match p, expected.code[p - 1]? with
             | prior + 1, some previous => if previous.live && previous.continues then
                 s!"\n  expected pc {prior} falls through to it, so it must be actual pc {r prior + 1}" else ""
             | _, _ => ""
-          return some s!"{header}\n  the instructions differ{entered}"
+          return some (s!"{header}\n  the instructions differ{entered}", some q)
     if staticAt actual q != staticAt expected p then
-      return some s!"expected pc {p} (actual pc {q}) resolves a different static descriptor\n  expected: {reprStr (staticAt expected p)}\n  actual:   {reprStr (staticAt actual q)}"
+      return some (s!"expected pc {p} (actual pc {q}) resolves a different static descriptor\n  expected: {reprStr (staticAt expected p)}\n  actual:   {reprStr (staticAt actual q)}", some q)
     if op.continues && r (p + 1) != q + 1 then
-      return some s!"fallthrough differs: expected pc {p} ({reprStr op}) continues at expected pc {p + 1}, which maps to actual pc {r (p + 1)}, but actual pc {q} continues at actual pc {q + 1}\n  {describe (q + 1)}"
+      return some (s!"fallthrough differs: expected pc {p} ({reprStr op}) continues at expected pc {p + 1}, which maps to actual pc {r (p + 1)}, but actual pc {q} continues at actual pc {q + 1}\n  {describe (q + 1)}", some q)
   return none
 
 private def methodType : Expr := mkConst ``CIL.Method
@@ -144,8 +144,11 @@ syntax (name := cilEmbed) "cil_embed" : tactic
   let some actualValue := programValue[indexValue]? |
     fail m!"method index {indexValue}: the program has {programValue.length} methods"
   let map := (alignLive expectedValue.code.toArray actualValue.code.toArray).toList
-  if let some reason := embedFailure expectedValue actualValue map then
-    fail m!"method index {indexValue}\n{reason}"
+  if let some (reason, actualPc) := embedFailure expectedValue actualValue map then
+    let source ← match actualPc with
+      | some pc => CIL.DebugNames.sourceLine indexValue pc
+      | none => pure ""
+    fail m!"method index {indexValue}\n{reason}{source}"
   let lookup ← mkAppM ``GetElem?.getElem? #[program, index]
   -- The kernel reduces this to the extracted method; `expected` is never selected.
   let actual ← mkAppM ``Option.getD #[lookup, expected]

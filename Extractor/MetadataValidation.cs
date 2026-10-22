@@ -24,7 +24,7 @@ internal static class MetadataValidation
         try { return validate(); }
         catch (InvalidDataException error) when (Rejections.Of(error) is null)
         {
-            throw new InvalidDataException($"{error.Message}\n  Method: {method.FullName}", error);
+            throw new InvalidDataException($"{error.Message}\n  Method: {method.FullName}{Symbols.Locate(method, error.Message)}", error);
         }
     }
 

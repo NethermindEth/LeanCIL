@@ -201,6 +201,41 @@ keeps a unique-instruction predicate. `Tests/StructuralLabels.lean` covers the
 diagnostics, and `Tests/StructuralLabels.cs` verifies one unedited proof against
 a build with a statement inserted before both loops.
 
+### PDB local names and source locations
+
+When a portable PDB matches the assembly (next to it, or embedded), extraction
+also writes `Symbols.lean`, the module `ExtractedSymbols`; `Extracted.lean` is
+byte-identical either way. A proof that imports it can name locals by their C#
+names, resolved in the scope that contains a pc:
+
+```lean
+import ExtractedSymbols
+
+theorem stores : sumBody.code[atWide + 1]? = some (.setLocal (local_named sum "carry" at (atWide + 1))) := rfl
+```
+
+A name used for one slot needs no `at`; a name the PDB gives two slots, such as
+`carry` declared in two sibling blocks, is an error listing each slot and range
+until `at pc` picks the innermost scope containing it. Compiler temporaries and
+values the compiler keeps on the stack have no name and keep their index; a
+missing name lists the method's named locals. Importing `ExtractedSymbols`
+without a matching PDB fails verification with that reason. Consumer packages
+cannot import it yet; verify such proofs with `leancil verify`.
+
+With the module imported, `cil_body` and `cil_embed` failures end with the
+nearest sequence point of the actual pc they report:
+
+```text
+source of actual pc 23: Names.cs:12:9
+```
+
+Extraction errors for an unsupported instruction add `Source: Names.cs:16:21`
+after the method whenever the PDB is present, imported or not. Source paths are
+relative to the directory the method documents share. Without a PDB every
+message is unchanged. `Tests/DebugNames.lean` covers scoping and both
+diagnostics, and `Tests/DebugNames.cs` checks byte-identical extraction, an
+unedited proof across an inserted local, and each message with and without a PDB.
+
 ### Bodies modulo dead code
 
 A profile can make the extractor emit dead `.unsupported` blocks that shift

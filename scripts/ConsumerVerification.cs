@@ -770,6 +770,10 @@ unsafe def main (args : List String) : IO Unit := do
         // Give Lake a real generated-module target before building consumer imports.
         if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
             throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");
+        // Cached support and replay sets are keyed on Extracted alone, so PDB symbols are not offered here yet.
+        if (snapshot.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal) && k.EndsWith(".lean", StringComparison.Ordinal))
+            .Any(k => ImportsSymbols(File.ReadAllText(k["consumer:".Length..]))))
+            throw new InvalidDataException("Consumer packages cannot import ExtractedSymbols; verify that proof with leancil verify instead.");
         File.Copy(Path.Combine(extraction, "Extracted.lean"), Path.Combine(frameworkCopy, "Extracted.lean"));
         var generated = Sha(Path.Combine(frameworkCopy, "Extracted.lean"));
         foreach (var output in proofs.Select(proof => proof.Output).Distinct())
