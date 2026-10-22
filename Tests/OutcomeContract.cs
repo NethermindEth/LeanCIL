@@ -94,3 +94,5 @@ foreach (var (name, assembly, refutation) in new[] { ("Threshold", threshold, Re
     verification.Verify(assembly, "Outcomes", Selector, Proof(name + "Refuted", refutation), Path.Combine(root, name + "-Refuted"));
     Console.WriteLine($"PASS {name}: the bug fails the outcome proofs and its contract is refuted");
 }
+
+Run(["dotnet", "run", "--file", "Tests/RuntimeExceptions.cs"], streamOutput: true);

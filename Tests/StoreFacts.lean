@@ -93,8 +93,8 @@ formedCarry1 : form m1 carry = Except.ok carry
 sumWrite : write m sum (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m1
 carryWrite : write m1 carry (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m2
 ⊢ run carryProgram 3 0 16 (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
-      ([Value.scalar (CIL.Value.i64 (BitVec.zeroExtend 64 (if a + b + c < a then 1#32 else 0#32)))].reverse ++
-        [Value.reference (ManagedReference.address carry)])
+      [Value.scalar (CIL.Value.i64 (BitVec.setWidth 64 (if a + b + c < a then 1#32 else 0#32))),
+        Value.reference (ManagedReference.address carry)]
       m1 =
     Except.ok (m2, [])
 -/
@@ -120,7 +120,7 @@ formedSum : form m sum = Except.ok sum
 formedCarry : form m carry = Except.ok carry
 sumWrite : write m carry (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m1
 ⊢ run carryProgram 13 0 6 (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
-      ([Value.scalar (CIL.Value.i64 (a + b + c))].reverse ++ [Value.reference (ManagedReference.address sum)]) m =
+      [Value.scalar (CIL.Value.i64 (a + b + c)), Value.reference (ManagedReference.address sum)] m =
     Except.ok (m1, [])
 -/
 #guard_msgs in
@@ -142,7 +142,7 @@ formedSum : form m sum = Except.ok sum
 formedCarry : form m carry = Except.ok carry
 sumWrite : write m1 sum (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m2
 ⊢ run carryProgram 13 0 6 (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
-      ([Value.scalar (CIL.Value.i64 (a + b + c))].reverse ++ [Value.reference (ManagedReference.address sum)]) m =
+      [Value.scalar (CIL.Value.i64 (a + b + c)), Value.reference (ManagedReference.address sum)] m =
     Except.ok (m2, [])
 -/
 #guard_msgs in

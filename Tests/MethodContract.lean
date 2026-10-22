@@ -206,4 +206,35 @@ theorem frame_confined (m entered home stored final : Memory) (frame : Frame) (s
 #print axioms root_correct
 #print axioms frame_confined
 
+example (program : CIL.Program) (before after : Memory) :
+    FrameInvariants program before after =
+      (after.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) before →
+        StaticWorldValid (programStaticDescriptors program) after)) := rfl
+
+example (program : CIL.Program) (memory : Memory) (formed : memory.WellFormed) :
+    FrameInvariants program memory memory :=
+  FrameInvariants.refl program formed
+
+example (program : CIL.Program) (before after : Memory) (formed : after.WellFormed)
+    (preserved : StaticWorldPreserved program before after) : FrameInvariants program before after := by
+  constructor
+  · exact formed
+  · intro world
+    exact preserved world
+
+example {program : CIL.Program} {first middle last : Memory}
+    (left : StaticWorldPreserved program first middle) (right : StaticWorldPreserved program middle last) :
+    StaticWorldPreserved program first last :=
+  left.trans right
+
+example {program : CIL.Program} {first middle last : Memory}
+    (left : FrameInvariants program first middle) (right : FrameInvariants program middle last) :
+    FrameInvariants program first last :=
+  left.trans right
+
+example {program : CIL.Program} {before after : Memory} (kept : FrameInvariants program before after)
+    (world : StaticWorldValid (programStaticDescriptors program) before) :
+    after.WellFormed ∧ StaticWorldValid (programStaticDescriptors program) after :=
+  ⟨kept.formed, kept.staticWorld world⟩
+
 end Tests.MethodContract

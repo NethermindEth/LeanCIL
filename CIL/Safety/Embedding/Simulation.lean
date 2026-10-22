@@ -187,12 +187,11 @@ theorem programStaticDescriptors_set (program : CIL.Program) (index : Nat) (body
       simp only [List.set_cons_succ, programStaticDescriptors, List.flatMap_cons] at this ⊢
       rw [this]
 
-/-- Replacing one expected method by a body that embeds into the actual method keeps the refinement. -/
-theorem ProgramRefines.set {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
-    (refines : ProgramRefines expected actual maps) {index : Nat} {body target : CIL.Method} {map : List Nat}
-    (found : actual[index]? = some target) (embeds : Embeds body target map) :
-    ProgramRefines (expected.set index body)  actual
-      (fun j => if j = index then rename map target.code.length else maps j) := by
+theorem ProgramRefines.set_body {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
+    (refines : ProgramRefines expected actual maps) {index : Nat} {body target : CIL.Method} {r : Nat → Nat}
+    (found : actual[index]? = some target) (refined : BodyRefines body target r) :
+    ProgramRefines (expected.set index body) actual
+      (fun j => if j = index then r else maps j) := by
   constructor
   · intro j candidate fetched
     by_cases same : j = index
@@ -200,7 +199,7 @@ theorem ProgramRefines.set {expected actual : CIL.Program} {maps : Nat → Nat �
       simp only [List.getElem?_set_self'] at fetched
       cases present : expected[j]? <;> simp [present] at fetched
       subst fetched
-      exact ⟨target, found, by simpa using embeds.refines⟩
+      exact ⟨target, found, by simpa using refined⟩
     · rw [List.getElem?_set_ne (Ne.symm same)] at fetched
       simpa [same] using refines.method j candidate fetched
   · rw [programStaticDescriptors_set _ _ _ ?_]
@@ -209,7 +208,14 @@ theorem ProgramRefines.set {expected actual : CIL.Program} {maps : Nat → Nat �
       obtain ⟨actualOld, fetched, oldRefines⟩ := refines.method index old present
       rw [found] at fetched
       cases fetched
-      exact oldRefines.descriptors.symm.trans embeds.descriptors
+      exact oldRefines.descriptors.symm.trans refined.descriptors
+
+theorem ProgramRefines.set {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
+    (refines : ProgramRefines expected actual maps) {index : Nat} {body target : CIL.Method} {map : List Nat}
+    (found : actual[index]? = some target) (embeds : Embeds body target map) :
+    ProgramRefines (expected.set index body) actual
+      (fun j => if j = index then rename map target.code.length else maps j) :=
+  refines.set_body found embeds.refines
 
 /-- `fault` at the pc that `maps` assigns its instruction in its own method. -/
 def LocatedFault.relocate (maps : Nat → Nat → Nat) (fault : LocatedFault) : LocatedFault :=

@@ -67,8 +67,7 @@ theorem construct_frame_invariants {program : CIL.Program} {method pc callee fue
     (stepped : step body op pc args frame stack memory =
       .ok (.construct callee arguments rest constructedFrame temporary kind updated))
     (formed : memory.WellFormed) (invoked : invoke program fuel callee arguments updated = .ok (final, values)) :
-    final.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) memory →
-      StaticWorldValid (programStaticDescriptors program) final) := by
+    FrameInvariants program memory final := by
   have constructed : ProgramStep program method pc args frame stack memory
       (.construct callee arguments rest constructedFrame temporary kind updated) :=
     ⟨body, op, methodFound, instructionFound, stepped⟩
@@ -91,8 +90,7 @@ theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContra
     (formed : memory.WellFormed)
     (continuation : ∀ final out,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, [])) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.post input updated final out →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args constructedFrame
@@ -122,8 +120,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
     (continuation : ∀ temporary updated final out, ConstructStorage memory updated temporary size →
       (∃ fuel, invoke program fuel callee (c.args (input temporary)) updated = .ok (final, [])) →
       final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint (input temporary)) updated final → c.post (input temporary) updated final out →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args { frame with owned := temporary.allocation :: frame.owned }
@@ -163,8 +160,8 @@ macro_rules
   | `(tactic| cil_contract_construct $holds $constructs $input [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_newAggregate_of_contract $holds $constructs $input
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
       (by decide) ?_ (by simp)
       (by first | rfl | (simp [CIL.Safety.checkedValue, CIL.Safety.numericValue, $[$facts:term],*] <;>
         (repeat constructor) <;> rfl))

@@ -7,7 +7,7 @@ import CIL.Safety.MemoryLemmas
 import CIL.Safety.AccessSlices
 import CIL.Safety.WordFootprint
 import CIL.Safety.ExecutionInvariants
-import CIL.Safety.ExecutionStaticWorld
+import CIL.Safety.FrameInvariants
 
 namespace CIL.Safety
 
@@ -312,8 +312,7 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (formed : memory.WellFormed) (invoked : invoke program fuel callee arguments updated = .ok (final, values)) :
-    final.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) memory →
-      StaticWorldValid (programStaticDescriptors program) final) := by
+    FrameInvariants program memory final := by
   have called : ProgramStep program method pc args frame stack memory (.call callee arguments rest updated) :=
     ⟨body, op, methodFound, instructionFound, stepped⟩
   have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed called
@@ -331,8 +330,7 @@ theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract In
     (encoded : arguments = c.args input) (permitted : c.pre input updated) (formed : memory.WellFormed)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
@@ -445,17 +443,18 @@ theorem MethodContract.Holds.weaken {Input Output : Type} {internal exported : M
 
 macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
   `(tactic| (
+    -- A contract continuation resumes at `pc + 1` on `values ++ rest` with projected inputs.
     try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
     try (cil_strict refine CIL.Safety.invoke_exists_of_run
-           (by simp only [cil_code, Nat.reduceAdd]; rfl)
+           (by cil_lookup [$[$facts:term],*])
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
 
 macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
   `(tactic| (first
     | (cil_strict refine CIL.Safety.run_next_exists (post := _)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_lookup [$[$facts:term],*])
+        (by cil_lookup [$[$facts:term],*])
         (by
           run_tac do
             let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
@@ -464,15 +463,17 @@ macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
               throwError "Return requires run_return_exists"
           cil_checked_step [$[$facts:term],*]) ?_)
     | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_lookup [$[$facts:term],*])
+        (by cil_lookup [$[$facts:term],*])
         (by cil_checked_step [$[$facts:term],*])
         (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
 
+/-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
+    leaving each `.call` for `cil_contract_call` and the postcondition at each return. -/
 macro "cil_contract_steps" "[" facts:term,* "]" : tactic =>
   `(tactic| (
     cil_contract_prepare [$[$facts:term],*]
-    repeat cil_contract_step [$[$facts:term],*]))
+    cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" cil_contract_step [$[$facts:term],*]))
 
 open Lean Elab Tactic in
 elab "cil_contract_steps" count:num "[" facts:term,* "]" : tactic => do
@@ -504,14 +505,14 @@ macro_rules
   | `(tactic| cil_contract_call $holds $input [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_contract $holds $input
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
   | `(tactic| cil_contract_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     -- The site fixes the body, so the lookup may close during simplification.
     refine CIL.Safety.run_call_of_contract $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
 
 /-- `cil_contract_call` through `run_call_of_contract_formed`: leaves the precondition,
@@ -522,13 +523,13 @@ macro_rules
   | `(tactic| cil_formed_call $holds $input [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_contract_formed $holds $input
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
   | `(tactic| cil_formed_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_contract_formed $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
 
 end CIL.Safety
