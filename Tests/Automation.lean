@@ -128,4 +128,13 @@ theorem checked_decided_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.
 
 #print axioms checked_literal_extension_return
 #print axioms checked_decided_return
+
+theorem checked_negative_literal_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (left : CIL.W32) :
+    CIL.Safety.run [branchMethod] 1 0 3 [] frame
+      [.scalar (.i32 (left + BitVec.ofInt 32 (-1)))] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 (left + 4294967295#32))]) := by
+  cil_checked_steps
+
+#print axioms checked_negative_literal_return
 end Tests.Automation
