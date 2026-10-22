@@ -18,6 +18,8 @@ structure RawField where
 structure RawLayout where
   identity : String := ""
   explicit : Bool
+  /-- Auto layout; CoreCLR keeps declaration order only among fields of equal width. -/
+  auto : Bool := false
   packing : Int
   declaredSize : Int
   fields : List RawField
@@ -40,11 +42,22 @@ private def fieldStorage (previous : Array ComputedLayout) : FieldType → Optio
 private def alignUp (size alignment : Nat) : Nat :=
   (size + alignment - 1) / alignment * alignment
 
+/-- Auto layout is admitted only where it coincides with sequential placement. -/
+private def autoSequential (previous : Array ComputedLayout) (raw : RawLayout) : Bool :=
+  !raw.explicit && raw.packing ≤ 0 && raw.declaredSize ≤ 0 &&
+  match raw.fields.mapM (fun field => do
+      if field.offset.isSome then none else
+        let (width, _, aggregate) ← fieldStorage previous field.type
+        if aggregate then none else some width) with
+  | some (width :: widths) => widths.all (· == width)
+  | _ => false
+
 /-- Recompute CoreCLR reference-free 64-bit layout from ordered metadata fields. -/
 def computeLayout (previous : Array ComputedLayout) (raw : RawLayout) : Option ComputedLayout := do
   if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
   else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
   else if raw.explicit && raw.declaredSize ≤ 0 then none
+  else if raw.auto && !autoSequential previous raw then none
   else
     let pack := if raw.packing ≤ 0 then 8 else raw.packing.toNat
     let (size, alignment, fields) ← raw.fields.foldlM (init := (0, 1, ([] : List FieldLayout))) fun (size, alignment, fields) field => do

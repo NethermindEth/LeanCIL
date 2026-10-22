@@ -64,16 +64,16 @@ internal static class LeanEmitter
         {
             if (!seenLayouts.Add(type.FullName)) return;
             layouts.Add(type);
-            foreach (var field in type.Resolve().Fields.Where(f => !f.IsStatic))
-                if (MetadataValidation.IsAggregate(field.FieldType, methods[0].Module)) IncludeLayout(field.FieldType);
+            foreach (var field in MetadataValidation.Fields(type))
+                if (MetadataValidation.IsAggregate(field.Type, methods[0].Module)) IncludeLayout(field.Type);
         }
         foreach (var type in types) IncludeLayout(type);
         types = layouts.ToArray();
         for (int i = 0; i < types.Length; i++)
         {
             int size = MetadataValidation.Layout(types[i], methods[0].Module);
-            string fields = string.Join(", ", types[i].Resolve().Fields.Where(f => !f.IsStatic)
-                .Select(f => $"⟨{MetadataValidation.FieldOffset(f, methods[0].Module)}, {MetadataValidation.FieldSize(f.FieldType, methods[0].Module)}, {MetadataValidation.IsAggregate(f.FieldType, methods[0].Module).ToString().ToLowerInvariant()}⟩"));
+            string fields = string.Join(", ", MetadataValidation.Fields(types[i])
+                .Select(f => $"⟨{MetadataValidation.FieldOffset(types[i], f.Definition, methods[0].Module)}, {MetadataValidation.FieldSize(f.Type, methods[0].Module)}, {MetadataValidation.IsAggregate(f.Type, methods[0].Module).ToString().ToLowerInvariant()}⟩"));
             lean.AppendLine($"def layout{i} : AggregateLayout := ⟨{size}, [{fields}]⟩");
             lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := {Decide}");
         }
