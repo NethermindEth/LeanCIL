@@ -11,7 +11,6 @@ theorem _root_.CIL.Op.relabel_congr {left right : Nat → Nat} (op : Op)
     (same : ∀ target ∈ op.targets, left target = right target) :
     op.relabel left = op.relabel right := by
   induction op <;> simp_all [Op.relabel, Op.targets]
-  exact List.map_congr_left same
 
 theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start : Nat}
     (metadata : actual = { expected with code := actual.code, staticSites := actual.staticSites })
@@ -31,9 +30,10 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     · simp [suffixRename, show 0 < lower by omega]
   · intro pc op found live
     have after : lower ≤ pc := by
-      by_contra before
-      have := dead pc op (by omega) found
-      simp_all
+      by_cases before : pc < lower
+      · rw [dead pc op before found] at live
+        cases live
+      · omega
     have fetched : (expected.code.drop lower)[pc - lower]? = some op := by
       simpa only [List.getElem?_drop, Nat.add_sub_cancel' after] using found
     have member := List.mem_of_getElem? fetched
