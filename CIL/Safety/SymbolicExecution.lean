@@ -1,4 +1,6 @@
 import CIL.SymbolicExecution
+import CIL.StepEquations
+import CIL.Safety.Equations
 import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
 import CIL.Safety.CallComposition
