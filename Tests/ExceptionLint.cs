@@ -13,7 +13,7 @@ string documentation = Path.Combine(root, "Examples.xml");
 string reportPath = Path.Combine(output, "exception-lint.json");
 string[] cli = ["dotnet", ExtractorPath];
 
-void Extract(string selector) => Run([.. cli, "extract", assembly, selector, output]);
+void Extract(string selector, string profile = "scalar") => Run([.. cli, "extract", assembly, selector, output, profile]);
 void Document(string member, params string[] exceptions)
 {
     XDocument document = new(new XElement("doc", new XElement("assembly", new XElement("name", "Examples")),
@@ -75,6 +75,20 @@ foreach ((string Selector, string[] Expected) item in new (string, string[])[]
     bool expectedDrift = item.Selector.Contains("Clamp", StringComparison.Ordinal) || item.Selector.Contains("Profile", StringComparison.Ordinal);
     if (report.GetProperty("findings").GetArrayLength() != (expectedDrift ? 1 : 0))
         throw new InvalidOperationException("Compiler XML matching or separate invalid-bounds/profile exclusion failed: " + item.Selector);
+}
+foreach ((string Selector, string Profile, string[] Expected) item in new (string, string, string[])[]
+{
+    ("Examples.ExceptionDocumentation::CheckedAdd(long,long)", "scalar", ["System.OverflowException"]),
+    ("Examples.ExceptionDocumentation::CheckedNarrow(long)", "scalar", ["System.OverflowException"]),
+    ("Examples.ExceptionDocumentation::SpanItem(int)", "scalar", ["System.IndexOutOfRangeException"]),
+    ("Examples.ExceptionDocumentation::DivRem(ulong,ulong,ulong)", "x64-bmi2", ["System.DivideByZeroException", "System.OverflowException"])
+})
+{
+    Extract(item.Selector, item.Profile);
+    File.Copy(compilerDocumentation, documentation, true);
+    JsonElement report = Lint();
+    if (!Potential(report).SequenceEqual(item.Expected) || report.GetProperty("findings").GetArrayLength() != 0)
+        throw new InvalidOperationException("Wrong runtime-operation exception mapping: " + item.Selector);
 }
 Extract("Examples.Throws::Percent(uint)");
 

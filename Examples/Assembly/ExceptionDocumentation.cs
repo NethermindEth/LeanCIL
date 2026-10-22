@@ -25,6 +25,19 @@ public static class ExceptionDocumentation
         return value;
     }
 
+    /// <exception cref="OverflowException">The checked sum overflows.</exception>
+    public static long CheckedAdd(long left, long right) => checked(left + right);
+
+    /// <exception cref="OverflowException">The input does not fit a signed 32-bit value.</exception>
+    public static int CheckedNarrow(long value) => checked((int)value);
+
+    /// <exception cref="IndexOutOfRangeException">The index is outside the modeled static span.</exception>
+    public static uint SpanItem(int index) => SpanTables.Word(index);
+
+    /// <exception cref="DivideByZeroException">The divisor is zero.</exception>
+    /// <exception cref="OverflowException">The quotient does not fit an unsigned 64-bit value.</exception>
+    public static ulong DivRem(ulong lower, ulong upper, ulong divisor) => TupleDivision.Quotient(lower, upper, divisor);
+
     /// <summary>Updates the referenced word.</summary>
     public static void Reference(ref ulong value) => value++;
 }

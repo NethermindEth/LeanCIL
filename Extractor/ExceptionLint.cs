@@ -51,14 +51,17 @@ internal static class ExceptionLint
         string member = DocumentationId(MethodSpecialization.Definition(methods[0]));
         Declaration[] declarations = ReadDocumentation(xml, module.Assembly.Name.Name, member);
         List<Site> sites = [];
-        foreach (MethodDefinition method in methods)
+        for (int methodIndex = 0; methodIndex < methods.Length; methodIndex++)
         {
+            MethodDefinition method = methods[methodIndex];
+            HashSet<Instruction> nativeOperands = NativeOperands.Analyze(method, profile);
+            int[] parameterHomes = ParameterStorage.Analyze(method, profile);
             Throws.Analysis folded = Throws.Analyze(method);
             foreach (Instruction instruction in Reachability.Analyze(method, profile).OrderBy(value => value.Offset))
             {
                 if (folded.Raises.TryGetValue(instruction, out string? exception))
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
-                string operation = InstructionTranslation.Translate(instruction, method, methods, Array.IndexOf(methods, method), profile);
+                string operation = InstructionTranslation.Translate(instruction, method, methods, methodIndex, profile, nativeOperands, parameterHomes);
                 foreach (string named in RuntimeExceptions(operation))
                     sites.Add(new(method.FullName, instruction.Offset, named, "interpreter operation: " + operation));
             }
