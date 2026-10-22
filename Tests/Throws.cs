@@ -58,7 +58,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
 foreach (var (mutation, marker) in new[]
 {
     ("handler", "Unsupported method metadata"),
-    ("no-throw", "External managed dependency: System.Void System.DivideByZeroException::.ctor()"),
+    ("no-throw", "Contract imports support call only, not callvirt, newobj or ldftn."),
     ("thrown-null", "Unsupported instruction"),
     ("interior-branch", "Branch into a folded throw")
 })
@@ -100,7 +100,8 @@ foreach (var (mutation, marker) in new[]
         module.Write(dll);
     }
     var result = Execute(Extract("extract", dll, "Examples", "Throws::Quotient(uint,uint)", output));
-    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) || !result.Output.Contains(marker))
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
+        File.Exists(Path.Combine(output, "verified.json")) || !result.Output.Contains(marker))
         throw new InvalidOperationException("Incorrect throw rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
