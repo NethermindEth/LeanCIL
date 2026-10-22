@@ -61,6 +61,47 @@ proves an exit path and its postcondition. Supply an invariant and decreasing
 measure to the loop termination theorem; these tactics do not infer termination.
 See the [countdown proof](../Examples/Proofs/Countdown.lean).
 
+## Compose calls through contracts
+
+A caller proof that steps into its callee breaks whenever the callee is
+reimplemented. State the callee's interface as a `MethodContract` instead
+(`CIL.Safety.MethodContract`) and prove the caller against it:
+
+```lean
+def addContract : MethodContract AddInput where
+  args input := [.reference (.address input.a), .reference (.address input.b), .reference (.address input.res)]
+  pre input m := read m input.a 8 1 = .ok (numberBytes input.x.toNat 8) ∧
+    read m input.b 8 1 = .ok (numberBytes input.y.toNat 8) ∧ access m input.res 8 1 true = .ok ()
+  footprint input := [(input.res, 8)]
+  post input _ final values := values = [] ∧ read final input.res 8 1 = .ok (numberBytes (input.x + input.y).toNat 8)
+
+theorem root_holds (add : addContract.Holds Extracted.program addTo) : rootContract.Holds Extracted.program root
+```
+
+`pre` holds formation, authority and the permitted aliasing; the example lets
+`res` overlap either input. `Holds` is `Ensures` with the footprint added to the
+postcondition (`Holds.ensures`), and fuel stays existential so callers never
+depend on a callee's step count. `Frames footprint before after` is the memory
+guarantee: earlier allocations and write authority are unchanged, and bytes and
+read authority change only inside the footprint (a write grants read access to
+what it wrote). `Frames.trans`, `Frames.widen`, `Frames.write`, `Frames.read_eq`
+and `Frames.access_write` compose and consume it. The contract fixes no profile:
+the program does, so a cross-profile contract is a theorem quantified over the
+per-profile extractions.
+
+In the caller, `cil_contract_steps [facts]` steps a `∃ fuel, run ...` goal up
+to each `.call` and return; `cil_contract_call holds input [facts]` applies the
+contract there, leaving the precondition and then a continuation over the
+callee's final memory, values, invocation, frame and postcondition. Stated
+store facts must match the computed value syntactically: `generalize` a value
+the simplifier would rewrite, or state the fact in the computed form.
+
+`Tests/MethodContract.lean` proves a caller from two contracts without unfolding
+either callee. `Tests/MethodContract.cs` verifies that caller proof unedited
+against a build whose helpers are reimplemented and renumbered, and refutes
+each contract with a concrete run on builds with an arithmetic or an aliasing
+bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
+
 ## Reuse framework contracts
 
 When extending generic safety proofs, reuse the facts established by the shared
