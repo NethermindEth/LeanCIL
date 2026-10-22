@@ -176,10 +176,149 @@ foreach (var (name, original, mutated, obligation) in new[]
     Console.WriteLine($"PASS loop rule rejects {name} at its obligation");
 }
 
-int[] RejectedLines(string dll, string proof, string name, bool existingArtifacts)
+// A loop whose helper can throw is proved from the helper's outcome contract alone: every input
+// returns its value, or raises the helper's exception after `limit` successful calls.
+const string CountUntil = "Loops::CountUntil(uint,uint)";
+var untilPath = At("Examples/Proofs/CountUntil.lean");
+var untilProof = File.ReadAllText(untilPath);
+var bumpStart = untilProof.IndexOf("theorem bump_holds", StringComparison.Ordinal);
+var bumpEnd = bumpStart < 0 ? -1 : untilProof.IndexOf("/-- `CountUntil` raises exactly", bumpStart, StringComparison.Ordinal);
+var untilLoopStart = untilProof.IndexOf("theorem outcome", StringComparison.Ordinal);
+var contractStart = untilProof.IndexOf("def bumpContract", StringComparison.Ordinal);
+if (contractStart < 0 || bumpStart < contractStart || bumpEnd < 0 || untilLoopStart < bumpEnd)
+    throw new InvalidDataException("Examples/Proofs/CountUntil.lean has no helper section before its loop proof");
+var untilLoopLine = untilProof[..untilLoopStart].Count(c => c == '\n') + 1;
+verification.Verify(assembly, "Examples", CountUntil, untilPath, Path.Combine(root, "CountUntil"));
+Console.WriteLine("PASS loop returns its input or propagates the helper exception for every pair of uints");
+
+// Runtime throws are independent expected values: a raise after earlier calls, on the first call, and none.
+object Outcome(string dll, string name, uint value, uint limit)
+{
+    try { return Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Loops")!.GetMethod(name)!.Invoke(null, [value, limit])!; }
+    catch (TargetInvocationException error) { return error.InnerException!.GetType().FullName!; }
+}
+(uint Value, uint Limit)[] untilInputs = [(0, 0), (3, 7), (3, 3), (5, 2), (4, 0)];
+var untilClaims = untilInputs.Select(input => (input, Outcome(assembly, "CountUntil", input.Value, input.Limit))).Select(pair =>
+{
+    var invocation = $"CIL.Safety.invoke Extracted.program {32 + 16 * pair.input.Value} 0 [.scalar (.i32 {pair.input.Value}), .scalar (.i32 {pair.input.Limit})] Examples.empty";
+    return pair.Item2 is uint result
+        ? $"({invocation}).map Prod.snd = .ok [.scalar (.i32 {result})]"
+        : $"(match {invocation} with | .error fault => fault.fault | .ok _ => .invalidState) = .thrown \"{pair.Item2}\"";
+}).ToArray();
+if (untilClaims.Count(claim => claim.Contains("System.InvalidOperationException")) != 2)
+    throw new InvalidOperationException("CountUntil fixture did not raise for exactly the two inputs above their limit");
+Prove(assembly, CountUntil, "CountUntilRuntime",
+    "theorem correctness :\n" + string.Join(" ∧\n", untilClaims) + " := by\n  exact ⟨" + string.Join(", ", untilClaims.Select(_ => "rfl")) + "⟩");
+Console.WriteLine($"PASS CountUntil: {untilClaims.Length} runtime comparisons, including raises after earlier calls");
+
+string UntilVariant(string name, Action<ModuleDefinition, MethodDefinition> mutate)
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        mutate(module, module.GetType("Examples.Loops").Methods.Single(m => m.Name == "Bump"));
+        module.Write(dll);
+    }
+    Run(Extract("extract", dll, "Examples", CountUntil, output));
+    return dll;
+}
+
+// Testing inequality instead of equality and subtracting minus one keep the contract, so only the helper proof changes.
+var replacedBump = UntilVariant("CountUntilReplaced", (_, helper) =>
+{
+    var ctor = helper.Body.Instructions.Single(i => i.OpCode == OpCodes.Newobj);
+    var thrown = ctor.Next;
+    var il = helper.Body.GetILProcessor();
+    var normal = Instruction.Create(OpCodes.Ldarg_0);
+    helper.Body.Instructions.Clear();
+    il.Append(Instruction.Create(OpCodes.Ldarg_0));
+    il.Append(Instruction.Create(OpCodes.Ldarg_1));
+    il.Append(Instruction.Create(OpCodes.Bne_Un, normal));
+    il.Append(ctor);
+    il.Append(thrown);
+    il.Append(normal);
+    il.Append(Instruction.Create(OpCodes.Ldc_I4_M1));
+    il.Append(Instruction.Create(OpCodes.Sub));
+    il.Append(Instruction.Create(OpCodes.Ret));
+});
+foreach (var input in untilInputs)
+    if (!Outcome(replacedBump, "CountUntil", input.Value, input.Limit).Equals(Outcome(assembly, "CountUntil", input.Value, input.Limit)))
+        throw new InvalidOperationException("The reimplemented helper changed the runtime outcome");
+const string ReplacedBump = """
+theorem bump_holds : bumpContract.Holds Extracted.program bump := by
+  rintro ⟨count, limit⟩ m -
+  by_cases same : count = limit
+  · subst same
+    simp only [bumpContract, ite_true]
+    cil_raise_steps []
+    simp only [ne_eq, not_true_eq_false, ite_false, Nat.reduceAdd]
+    cil_raise_steps []
+  · simp only [bumpContract, same, ite_false]
+    refine ⟨8, m, _, ?_, Confined.refl _ m, count - 4294967295#32, rfl, by bv_omega⟩
+    cil_checked_steps [same]
+
+
+""";
+var replacedUntil = Path.Combine(root, "CountUntilReplaced", "CountUntil.lean");
+File.WriteAllText(replacedUntil, untilProof[..bumpStart] + ReplacedBump + untilProof[bumpEnd..]);
+verification.Verify(replacedBump, "Examples", CountUntil, replacedUntil, Path.Combine(root, "CountUntilReplaced"), existingArtifacts: true);
+Console.WriteLine("PASS unchanged outcome loop proof after reimplementing the throwing helper");
+
+int UntilLine(string text) => untilProof.IndexOf(text, StringComparison.Ordinal) is var at and >= 0 && untilProof.Split(text).Length == 2
+    ? untilProof[..at].Count(c => c == '\n') + 1
+    : throw new InvalidDataException("Examples/Proofs/CountUntil.lean has no unique line containing: " + text);
+var exceptionalExit = UntilLine("· simp only [bumpContract, ite_true]");
+
+// A helper that throws another type, with its contract re-proved to say so, no longer
+// establishes the loop's specified exception: the unchanged loop proof fails at that exit.
+var otherException = UntilVariant("CountUntilOtherException", (module, helper) =>
+{
+    var ctor = helper.Body.Instructions.Single(i => i.OpCode == OpCodes.Newobj);
+    var original = (MethodReference)ctor.Operand;
+    var type = new TypeReference("System", "ArgumentException", module, original.DeclaringType.Scope);
+    ctor.Operand = new MethodReference(".ctor", module.TypeSystem.Void, type) { HasThis = true };
+});
+if (!Outcome(otherException, "CountUntil", 5, 2).Equals("System.ArgumentException"))
+    throw new InvalidOperationException("The other-exception fixture did not change the thrown type");
+var helperContract = untilProof[contractStart..bumpStart];
+if (helperContract.Split("\"System.InvalidOperationException\"").Length != 2)
+    throw new InvalidDataException("Ambiguous helper contract mutation");
+Directory.CreateDirectory(Path.Combine(root, "CountUntilOtherException"));
+var otherProof = Path.Combine(root, "CountUntilOtherException", "CountUntil.lean");
+File.WriteAllText(otherProof, untilProof[..contractStart] +
+    helperContract.Replace("System.InvalidOperationException", "System.ArgumentException") + untilProof[bumpStart..]);
+var otherLines = RejectedLines(otherException, otherProof, "CountUntilOtherException", existingArtifacts: true, CountUntil);
+if (otherLines.Length == 0 || otherLines.Any(line => line != exceptionalExit))
+    throw new InvalidOperationException($"CountUntilOtherException was not rejected at line {exceptionalExit}: lines {string.Join(", ", otherLines)}");
+Console.WriteLine("PASS unchanged outcome loop proof rejects a helper that raises another exception");
+
+// On the correct build, a nondecreasing measure, an invariant that holds at entry and both exits
+// but is not preserved, and a different specified exception each fail at exactly that obligation.
+foreach (var (name, original, mutated, obligation) in new[]
+{
+    ("CountUntilCountMeasure", "(fun s => s.1.toNat)", "(fun s => s.2.1.toNat)", "show (x - 1).toNat < x.toNat"),
+    ("CountUntilLimitInvariant", "state.2.1.toNat ≤ limit.toNat\n", "state.2.1.toNat ≤ limit.toNat - state.1.toNat\n",
+        "show (count + 1).toNat ≤ limit.toNat"),
+    ("CountUntilWrongException", "then some \"System.InvalidOperationException\" else none\n\nprivate def frame",
+        "then some \"System.ArgumentException\" else none\n\nprivate def frame", "· simp only [bumpContract, ite_true]")
+})
+{
+    if (untilProof.Split(original).Length != 2) throw new InvalidDataException("Ambiguous proof mutation: " + original);
+    Directory.CreateDirectory(Path.Combine(root, name));
+    var proof = Path.Combine(root, name, "CountUntil.lean");
+    File.WriteAllText(proof, untilProof.Replace(original, mutated));
+    var lines = RejectedLines(assembly, proof, name, existingArtifacts: false, CountUntil);
+    if (lines.Length == 0 || lines.Any(line => line != UntilLine(obligation) || line < untilLoopLine))
+        throw new InvalidOperationException($"{name} was not rejected at line {UntilLine(obligation)}: lines {string.Join(", ", lines)}");
+    Console.WriteLine($"PASS outcome loop rule rejects {name} at its obligation");
+}
+
+int[] RejectedLines(string dll, string proof, string name, bool existingArtifacts, string selector = CountCalls)
 {
     string? failure = null;
-    try { verification.Verify(dll, "Examples", CountCalls, proof, Path.Combine(root, name), existingArtifacts: existingArtifacts); }
+    try { verification.Verify(dll, "Examples", selector, proof, Path.Combine(root, name), existingArtifacts: existingArtifacts); }
     catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
     {
         failure = error.Message;

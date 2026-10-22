@@ -17,7 +17,7 @@ The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integ
 
 | Coverage | Result |
 | --- | --- |
-| Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 12 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected |
+| Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a loop that returns or raises its helper's exception after earlier calls, proved for every pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper and rejecting another exception type, a nondecreasing measure, a non-inductive invariant and a wrong specified exception; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 17 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected |
 | Generic method specialization | 125 C#/F# runtime comparisons, six universal identity proofs, six reference checks, twelve metadata/recursion rejections, wrong-implementation rejection and provenance tamper detection |
 | Block memory and alignment prefixes | 251 checks; ten malformed-prefix/type cases rejected; universal out-of-bounds fill rejection |
 | Layout-based Unsafe helpers | 418 checks across 19 element types and all three managed offset overloads; ten malformed generic calls rejected |
@@ -131,9 +131,15 @@ throws, unsupported execution and fuel exhaustion do not transfer. `Tests.Aggreg
 cover frame setup and interpreter behavior. The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, a counted loop composed through its
-helper's contract and reused for a reimplemented helper, a buffer fill proved as a
-sequence property, feature selection, infinite-loop fuel
+helper's contract and reused for a reimplemented helper, a loop that returns or
+propagates its helper's named exception, a buffer fill proved as a sequence
+property, feature selection, infinite-loop fuel
 exhaustion, backward switch and malformed-input rejection.
+
+`Tests.LoopOutcome` derives the normal-only loop induction, loop call and `Ensures`
+as the `none` instances of the outcome rules, and proves that unsupported
+execution, invalid state, fuel exhaustion, normal return and a different
+exception never satisfy an expected loop exception.
 
 `Tests.ContractConsequence` derives public method and outcome contracts from proved
 internal ones without re-executing the callee, composes callers through the derived
@@ -155,7 +161,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
