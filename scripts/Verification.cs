@@ -1271,9 +1271,9 @@ unsafe def main (args : List String) : IO Unit := do
                     leanPath: leanPath, progress: "Checking App import assumptions");
             }
             CheckContractInterfaces(output, fresh, importModules, leanPath);
+            if (importModules.Length > 0)
+                Run([checker, .. importModules], leanPath: leanPath, progress: "Kernel replay of published contract interfaces and App import assumptions");
             SortedDictionary<string, string> acceptedInterfaceArtifacts = ContractInterfaceArtifacts(fresh, importModules);
-            if (importModules.Contains("ExtractedImports", StringComparer.Ordinal))
-                Run([checker, "ExtractedImports"], leanPath: leanPath, progress: "Kernel replay of App import assumptions");
             if (symbols)
                 Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), Path.Combine(fresh, "ExtractedSymbols.lean")],
                     leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);

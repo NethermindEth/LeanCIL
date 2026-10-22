@@ -21,7 +21,7 @@ def scalarType : TypeExpr → ScalarKind
 
 private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .native]
 
-private def homeCompatible (value home : ScalarKind) : Bool :=
+private def storageCompatible (value home : ScalarKind) : Bool :=
   value == home || value ∈ [.word64, .native] && home ∈ [.word64, .native]
 
 private def scalarBinary : Nat → Bool
@@ -171,10 +171,10 @@ private def parameterTypeMatches (token : List UInt8) (type : TypeExpr) : Bool :
         token.reverse.head? == some 42 && scalarType element == .other
     | _ => [33].isPrefixOf token && ![33, 33].isPrefixOf token && scalarType type == .other
 
-private def normalizeExternalIdentity (site : CallSite) (identity : String) : Option (List UInt8) := do
+private def normalizeExternalIdentity (site : CallSite) (identity : List UInt8) : Option (List UInt8) := do
   let normalized ← site.typeArguments.zipIdx.reverse.foldlM (fun text (type, index) => do
     let name ← scalarTypeBytes type
-    return replaceBytes text (signatureBytes ("!!" ++ toString index)) name) (signatureBytes identity)
+    return replaceBytes text (signatureBytes ("!!" ++ toString index)) name) identity
   let owner ← scalarTypeBytes site.declaringType
   match splitBytes owner [60] with
   | [] | [_] => return normalized
@@ -194,12 +194,13 @@ private def balancedParentheses : Nat → List UInt8 → Bool
 
 private def externalParametersMatch (site : CallSite) (identity : String) : Bool :=
   ((do
-    let normalized ← normalizeExternalIdentity site identity
-    if !balancedParentheses 0 normalized then none else
-    let head :: rest := splitBytes normalized [40] | none
+    let original := identity.toByteArray.data.toList
+    if !balancedParentheses 0 original then none else
+    let head :: rest := splitBytes original [40] | none
     let _ := head
-    let tail ← rest.getLast?
-    if tail.reverse.head? != some 41 then none else
+    let rawTail ← rest.getLast?
+    let tail ← normalizeExternalIdentity site rawTail
+    if !balancedParentheses 1 tail || tail.reverse.head? != some 41 then none else
       let tokens ← parameterTokens 0 [] (tail.take (tail.length - 1))
       return tokens.length == site.parameterTypes.length &&
         (tokens.zip site.parameterTypes).all fun (token, type) => parameterTypeMatches token type) : Option Bool).getD false
@@ -211,7 +212,7 @@ private def callParametersMatch (site : CallSite) : Bool :=
 
 private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
   if scalarType site.returnType == .other then .other else
-  match normalizeExternalIdentity site identity with
+  match normalizeExternalIdentity site identity.toByteArray.data.toList with
   | none => .other
   | some normalized =>
     let signature := (splitBytes normalized [58, 58])[1]?.getD []
@@ -228,6 +229,22 @@ private def callResult (site : CallSite) : ScalarKind :=
   match site.target with
   | .managed _ => scalarType site.returnType
   | .external identity => externalResult site identity
+
+private def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
+  let runtime := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+  opcode == 115 && site.name == ".ctor" && site.hasThis && !site.returnsValue &&
+    site.typeArguments.isEmpty && site.parameterCount == 2 && site.returnType == .void &&
+    site.declaringType == .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte") &&
+    site.parameterTypes == [.pointer .void, .atom runtime "System.Int32"] &&
+    site.target == .external (runtime ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)")
+
+private def spanCreateMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
+  let modeled := match instruction.operand with
+    | .call site => byteSpanConstructor instruction.opcode site
+    | _ => false
+  match emitted with
+  | .memory .spanCreate => modeled
+  | _ => !modeled
 
 private def argumentKind (raw : RawMethod) (index : Nat) : Option ScalarKind :=
   if raw.hasThis && index == 0 then some .reference
@@ -272,18 +289,18 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let index ← localIndex instruction
     let type ← raw.locals[index]?
     let value :: tail := stack | none
-    if homeCompatible value (scalarType type) then return tail else none
+    if storageCompatible value (scalarType type) then return tail else none
   if let some (.store index) := argumentOperation instruction then
     let expected ← argumentKind raw index
     let value :: tail := stack | none
-    if homeCompatible value expected then return tail else none
+    if storageCompatible value expected then return tail else none
   if opcode == 37 then
     let value :: tail := stack | none
     return value :: value :: tail
   if opcode == 40 || opcode == 115 then
     let .call site := instruction.operand | none
-    let expected := site.parameterTypes.reverse.map scalarType ++
-      (if opcode == 40 && site.hasThis then [.reference] else [])
+    let expected := if byteSpanConstructor opcode site then [.word32, .reference] else
+      site.parameterTypes.reverse.map scalarType ++ (if opcode == 40 && site.hasThis then [.reference] else [])
     let pops := expected.length
     if !callParametersMatch site || pops > stack.length || stack.take pops != expected ||
         site.returnsValue != (site.returnType != .void) then none else
@@ -292,7 +309,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     if raw.returnType == .void then
       if stack.isEmpty then return [] else none
     else match stack with
-      | [value] => if value == scalarType raw.returnType then return [] else none
+      | [value] => if storageCompatible value (scalarType raw.returnType) then return [] else none
       | _ => none
   let (pops, pushes) ← rawStackEffect opcode
   if pops > stack.length then none else
@@ -317,7 +334,7 @@ private def checkScalarSite (raw : RawMethod) (features : FeatureCertificate) (c
   | (_, _), none, none, .unsupported _ => true
   | (instruction, pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
-      (!scalarCovered instruction.opcode || scalarOpMatches instruction stack emitted) &&
+      spanCreateMatches instruction emitted && (!scalarCovered instruction.opcode || scalarOpMatches instruction stack emitted) &&
       (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack, featureSuccessors pc instruction feature with
       | some after, some successors =>
