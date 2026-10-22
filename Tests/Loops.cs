@@ -389,6 +389,58 @@ if (!rejected || File.Exists(Path.Combine(wrong, "verified.json")))
     throw new InvalidOperationException("Incorrect countdown passed or retained a verification report");
 Console.WriteLine("PASS unchanged universal contract rejects incorrect loop");
 
+// A buffer loop is proved as a sequence property: every nonnegative count fills exactly that
+// many words from write authority alone and changes no other caller byte.
+const string FillWords = "Loops::FillWords(ulong&,ulong,int)";
+var fillProof = At("Examples/Proofs/FillWords.lean");
+verification.Verify(assembly, "Examples", FillWords, fillProof, Path.Combine(root, "FillWords"));
+Console.WriteLine("PASS buffer fill loop yields the replicated words for every nonnegative count");
+
+var fill = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Loops")!.GetMethod("FillWords")!
+    .CreateDelegate<FillWordsDelegate>();
+foreach (var count in new[] { 0, 1, 2, 5 })
+{
+    var buffer = new ulong[count + 2];
+    Array.Fill(buffer, 3UL);
+    fill(ref buffer[1], 7, count);
+    if (buffer[0] != 3 || buffer[^1] != 3 || buffer[1..^1].Any(word => word != 7))
+        throw new InvalidOperationException($"FillWords({count}) changed the wrong words: {string.Join(", ", buffer)}");
+}
+Console.WriteLine("PASS buffer fill runtime comparisons keep both neighbouring words");
+
+// Shifting every store one word and skipping every other word each break the sequence claim.
+foreach (var (name, mutate) in new (string, Action<MethodDefinition>)[]
+{
+    ("FillWordsShifted", method =>
+    {
+        var index = method.Body.Instructions.Single(i => i.OpCode == OpCodes.Call).Previous;
+        var il = method.Body.GetILProcessor();
+        il.InsertAfter(index, Instruction.Create(OpCodes.Add));
+        il.InsertAfter(index, Instruction.Create(OpCodes.Ldc_I4_1));
+    }),
+    ("FillWordsSkipping", method => method.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_2)
+})
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        mutate(module.GetType("Examples.Loops").Methods.Single(m => m.Name == "FillWords"));
+        module.Write(dll);
+    }
+    Run(Extract("extract", dll, "Examples", FillWords, output));
+    var refused = false;
+    try { verification.Verify(dll, "Examples", FillWords, fillProof, output, existingArtifacts: true); }
+    catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
+    {
+        refused = true;
+    }
+    if (!refused || File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException($"{name} satisfied the buffer fill proof");
+    Console.WriteLine($"PASS unchanged buffer fill proof rejects {name}");
+}
+
 string Fixture(string name, Action<ModuleDefinition, MethodDefinition> populate)
 {
     var output = Path.Combine(root, name);
@@ -573,3 +625,5 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
         throw new InvalidOperationException("Incorrect loop rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
+
+delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);

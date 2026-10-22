@@ -42,6 +42,9 @@ name = "Tests.ConfinedFootprints"
 name = "Tests.ContractConsequence"
 
 [[lean_lib]]
+name = "Tests.BufferContents"
+
+[[lean_lib]]
 name = "Tests.ConstructContract"
 
 [[lean_lib]]
