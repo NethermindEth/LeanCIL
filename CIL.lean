@@ -47,6 +47,7 @@ import CIL.Safety.BufferContents
 import CIL.Safety.CallComposition
 import CIL.Safety.Embedding.Outcomes
 import CIL.Safety.Embedding.Simulation
+import CIL.Safety.Embedding.Suffix
 import CIL.Safety.Embedding.Step
 import CIL.Safety.Calling
 import CIL.Safety.Certificate
