@@ -61,6 +61,27 @@ theorem Confined.ofMemoryBelow {footprint : List (Reference × Nat)} {before aft
     fun id bound offset => preserved.permissions id (old bound) offset true,
     fun id bound offset _ => preserved.permissions id (old bound) offset false⟩
 
+/-- Interval `inner` lies wholly inside interval `outer` of the same allocation. -/
+def Within (inner outer : Reference × Nat) : Prop :=
+  inner.1.allocation = outer.1.allocation ∧ outer.1.offset ≤ inner.1.offset ∧
+    inner.1.offset + inner.2 ≤ outer.1.offset + outer.2
+
+instance (inner outer : Reference × Nat) : Decidable (Within inner outer) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+
+/-- A footprint whose intervals each lie inside an entry of `large` widens to `large`. -/
+theorem Confined.widen_within {small large : List (Reference × Nat)} {before after : Memory}
+    (framed : Confined small before after) (covered : ∀ entry ∈ small, ∃ outer ∈ large, Within entry outer) :
+    Confined large before after :=
+  have narrow : ∀ {id offset}, Outside large id offset → Outside small id offset := fun outside entry member => by
+    obtain ⟨outer, contains, same, start, finish⟩ := covered entry member
+    rcases outside outer contains with different | below | above
+    · exact Or.inl (same ▸ different)
+    · exact Or.inr (Or.inl (by omega))
+    · exact Or.inr (Or.inr (by omega))
+  ⟨framed.grows, framed.allocations, fun id bound offset outside => framed.cells id bound offset (narrow outside),
+    framed.writable, fun id bound offset outside => framed.readable id bound offset (narrow outside)⟩
+
 /-- Footprint entries in identities allocated after `before`, such as a callee's locals, can be dropped. -/
 theorem Confined.forget_fresh {fresh footprint : List (Reference × Nat)} {before after : Memory}
     (framed : Confined (fresh ++ footprint) before after)
@@ -114,6 +135,14 @@ theorem Confined.write {footprint : List (Reference × Nat)} {m result : Memory}
     · simp [permitted, viewContains, Ne.symm different]
     · simp [permitted, viewContains, show ¬ r.offset ≤ offset by omega]
     · simp [permitted, viewContains, show ¬ offset < r.offset + bytes.length by omega]
+
+/-- A checked write wholly inside one footprint entry is confined to that footprint. -/
+theorem Confined.write_within {footprint : List (Reference × Nat)} {m result : Memory} {r : Reference}
+    {bytes : List (BitVec 8)} {alignment : Nat}
+    (h : CIL.Safety.write m r bytes alignment = .ok result)
+    (within : ∃ entry ∈ footprint, Within (r, bytes.length) entry) :
+    Confined footprint m result :=
+  (Confined.write h (List.mem_singleton_self _)).widen_within fun _ member => List.mem_singleton.mp member ▸ within
 
 /-- Write access to memory that existed before the call is unchanged. -/
 theorem Confined.access_write {footprint : List (Reference × Nat)} {before after : Memory}
@@ -318,6 +347,8 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
 #print axioms Confined.forget_fresh
 #print axioms Confined.then_below
 #print axioms Confined.write
+#print axioms Confined.widen_within
+#print axioms Confined.write_within
 #print axioms Confined.read_eq
 #print axioms Outside.nil
 #print axioms Outside.cons
