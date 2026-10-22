@@ -170,6 +170,39 @@ if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contract
     !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
 
+string substitutionMarker = Path.Combine(directory, "interface-substitution-" + Guid.NewGuid().ToString("N"));
+string substitutedProof = Path.Combine(directory, "SubstitutedInterface.lean");
+string replacementInterface = interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal);
+string replacementCommand = """
+open Lean Elab Command in
+run_cmd do
+  let folder := (System.FilePath.mk (← getFileName)).parent.getD "."
+  let source := folder / "ImportFixture.lean"
+  let artifact := folder / "ImportFixture.olean"
+  let original ← IO.FS.readFile source
+  try
+    IO.FS.writeFile source REPLACEMENT_SOURCE
+    let compiled ← IO.Process.output {
+      cmd := LEAN_EXECUTABLE
+      args := #["--root=" ++ folder.toString, "-o", artifact.toString, source.toString] }
+    if compiled.exitCode != 0 then
+      throwError "Interface substitution compile failed: {compiled.stdout} {compiled.stderr}"
+  finally
+    IO.FS.writeFile source original
+  IO.FS.writeFile SUBSTITUTION_MARKER "replaced"
+
+""".Replace("REPLACEMENT_SOURCE", JsonSerializer.Serialize(replacementInterface), StringComparison.Ordinal)
+    .Replace("LEAN_EXECUTABLE", JsonSerializer.Serialize(interfaceVerification.LeanExecutable), StringComparison.Ordinal)
+    .Replace("SUBSTITUTION_MARKER", JsonSerializer.Serialize(substitutionMarker), StringComparison.Ordinal);
+File.WriteAllText(substitutedProof, "import Lean\n" + File.ReadAllText(Path.Combine(fixture, "Caller.lean"))
+    .Replace("namespace ExampleProof", replacementCommand + "namespace ExampleProof", StringComparison.Ordinal));
+(int Code, string Output, string Stdout, string Stderr) substitution = Execute([.. cli, "verify", output, "--proof", substitutedProof]);
+if (substitution.Code == 0 || !substitution.Output.Contains("Published contract interface artifacts changed after their closure audit", StringComparison.Ordinal) ||
+    !File.Exists(substitutionMarker) || File.Exists(Path.Combine(output, "verified.json")) ||
+    File.ReadAllText(Path.Combine(output, "ImportFixture.lean")) != interfaceSource)
+    throw new InvalidOperationException("An elaborator replaced audited interface artifacts without rejection, or changed the interface source: " + substitution.Output);
+Console.WriteLine("PASS single-file verification rejects elaborator substitution of audited interface artifacts with unchanged sources");
+
 string originalInterface = contract["interfaceModules"]![0]!["source"]!.GetValue<string>();
 contract["interfaceModules"]![0]!["source"] = "module\n  public /- outer /- nested -/ -/ import ZContractBase\n\npublic section\n" +
     originalInterface.Replace("import CIL.Safety.MethodContract\n", "", StringComparison.Ordinal);
