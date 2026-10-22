@@ -18,6 +18,9 @@ name = "Tests.Automation"
 name = "Tests.MethodBinding"
 
 [[lean_lib]]
+name = "Tests.MethodIdentity"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]

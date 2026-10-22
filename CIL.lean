@@ -9,6 +9,7 @@ import CIL.Layout
 import CIL.Memory
 import CIL.MemoryLemmas
 import CIL.MethodBinding
+import CIL.MethodIdentity
 import CIL.ProfileEquivalence
 import CIL.SIMD.AVX
 import CIL.SIMD.AVX2
