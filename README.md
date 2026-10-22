@@ -232,7 +232,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda` | Partial | Checked references, validated integer/aggregate layouts and restricted static data |
 | `initblk`, `cpblk`, `unaligned.` | Partial | Checked managed references, 32-bit byte counts and validated alignment prefixes; overlapping block copies rejected |
 | `switch`, `sizeof` | Partial | Forward jump tables and validated integer and reference-free aggregate sizes |
-| `newobj` | Partial | Validated reference-free struct constructors and the modelled byte-span constructor; no class allocation |
+| `newobj` | Partial | Validated reference-free struct constructors, composable through constructor contracts, and the modelled byte-span constructor; no class allocation |
 | `throw` | Partial | Only `throw new E(...)` of a runtime exception with string or null arguments, as a located fault; no handlers |
 | Argument storage | Partial | Parameter assignment and addressing, shared aliases, narrow/native storage and frame lifetime checks |
 | Native integers | Partial | `nint`/`nuint` signatures, locals, fields, memory, casts, arithmetic and `sizeof` on validated 64-bit targets |

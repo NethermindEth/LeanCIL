@@ -49,6 +49,7 @@ import CIL.Safety.Calling
 import CIL.Safety.Certificate
 import CIL.Safety.ConfinedSnapshots
 import CIL.Safety.ConstructComposition
+import CIL.Safety.ConstructContract
 import CIL.Safety.ConstructSetup
 import CIL.Safety.Equations
 import CIL.Safety.Execution

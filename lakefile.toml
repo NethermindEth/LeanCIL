@@ -36,6 +36,9 @@ name = "Tests.OutcomeContract"
 name = "Tests.ConfinedFootprints"
 
 [[lean_lib]]
+name = "Tests.ConstructContract"
+
+[[lean_lib]]
 name = "Tests.Imports"
 
 [[lean_lib]]

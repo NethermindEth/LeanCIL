@@ -136,6 +136,58 @@ against a build whose helpers are reimplemented and renumbered, and refutes
 each contract with a concrete run on builds with an arithmetic or an aliasing
 bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
 
+## Construct structs through contracts
+
+A `newobj` of a reference-free struct allocates caller-owned storage, writes
+zero to every byte, then runs the constructor with that storage as `this`. The
+constructor's interface is an ordinary `MethodContract` whose first argument is
+`this`; `MethodContract.Constructs c size this value` adds that it returns no
+values and that `post` reads back all `size` bytes at `this` as `value`:
+
+```lean
+def pairContract : MethodContract PairInput Unit where
+  args input := [.reference (.address input.this), .scalar (.i64 input.low), .scalar (.i64 input.high)]
+  results _ := []
+  pre input m := m.WellFormed ∧ access m input.this 16 1 true = .ok ()
+  footprint input := [(input.this, 16)]
+  post input _ final _ := read final input.this 16 1 = .ok (pairBytes input)
+
+theorem pair_constructs : pairContract.Constructs 16 PairInput.this fun input _ => pairBytes input :=
+  ⟨fun _ => rfl, fun _ _ _ _ readback => readback⟩
+```
+
+The storage does not exist before the step, so a caller names the contract
+input as a function of it. `cil_contract_construct holds constructs input [facts]`
+applies `run_newAggregate_of_contract` at the fetched `newobj` and leaves the
+caller memory's `WellFormed`, the precondition over the fresh storage, and a
+continuation that resumes at `pc + 1` with the read-back value on the stack.
+Both obligations receive `ConstructStorage memory updated this size`: the
+storage reads back as `size` zero bytes, is writable at full width, is
+allocated at `memory.nextIdentity`, and the step kept all older memory. The
+continuation also gets the constructor's invocation, the final memory's
+`WellFormed`, static-world preservation, `Confined` and `post`. No invocation,
+step or `loadLocal` equation is stated. `ConstructStorage.confined` moves
+`Confined` back to the memory before `newobj`; `Confined.forget_fresh` then
+drops the storage, which the caller's frame owns and expires on return.
+
+Because `newobj` zeroes the storage, a constructor that leaves a field
+unassigned still has a full-width readback: the field reads back as zero, not
+as an uninitialized read. A contract may take that zero readback as a
+precondition. `run_construct_of_contract` and `run_construct_of_contract_formed`
+take the construct step equation instead, like `run_call_of_contract`; they
+cover aggregate storage only. `read_append` joins adjacent field reads into the
+full readback, and `Confined.write_within` confines a field write to the
+whole struct.
+
+`Tests/ConstructContract.lean` proves a caller that constructs a 16-byte and a
+32-byte (four-limb, `UInt256`-shaped) struct and reads a field of each, from
+the constructors' contracts alone; a constructor that assigns one of two fields;
+and rejections: a contract without write authority over its storage, a
+constructor that writes outside its footprint, and an 8-byte readback at a
+16-byte site. `Tests/ConstructContract.cs` verifies that caller proof unedited
+against a build whose constructors write their fields in the opposite order,
+and refutes the constructor's contract on a build that stores a wrong field.
+
 ## Name exceptional outcomes
 
 An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds
