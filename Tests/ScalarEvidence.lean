@@ -39,6 +39,17 @@ example : scalarOpMatches (i 88) [.word32, .native] .add = false := by decide
 example : scalarOpMatches (i 88) [.word64, .word64] (.nativeBinary .add) = false := by decide
 example : scalarOpMatches (i 88) [.word32, .native] (.nativeBinary .sub) = false := by decide
 
+private def arithmeticFlagMutations : List (Nat × Op) := [
+  (91, .divide false false), (91, .divide true true), (91, .divide false true),
+  (92, .divide true false), (92, .divide false true), (92, .divide true true),
+  (93, .divide false true), (93, .divide true false), (93, .divide false false),
+  (94, .divide true true), (94, .divide false false), (94, .divide true false),
+  (214, .checkedArithmetic .add false), (215, .checkedArithmetic .add true),
+  (216, .checkedArithmetic .mul false), (217, .checkedArithmetic .mul true),
+  (218, .checkedArithmetic .sub false), (219, .checkedArithmetic .sub true)]
+example : arithmeticFlagMutations.all (fun (opcode, operation) =>
+    !scalarOpMatches (i opcode) [.word64, .word64] operation) = true := by decide
+
 private def conversions : List (Nat × Op) := [
   (103, .convI1), (104, .convI2), (105, .convI4), (106, .convI8), (109, .convU4), (110, .convU8),
   (130, .checkedConvert 8 true true), (131, .checkedConvert 16 true true),
@@ -93,6 +104,19 @@ example : ¬ ScalarFlowValid addRaw addFeatures (addStates.set 0 (some [.word64]
 example : ¬ ScalarFlowValid addRaw addFeatures (addStates.drop 1) addCode := by decide
 example : ¬ ScalarFlowValid addRaw addFeatures addStates (addCode.drop 1) := by decide
 example : ¬ ScalarFlowValid addRaw (addFeatures.drop 1) addStates addCode := by decide
+
+private def binaryEvidence (opcode : Nat) : MethodEvidence :=
+  { addEvidence with original := { addRaw with code := addRaw.code.set 2 (i opcode) }, closed := { addRaw with code := addRaw.code.set 2 (i opcode) } }
+private def binaryMethod (operation : Op) : Method := { addMethod with code := addCode.set 2 operation }
+private def arithmeticFlagCases : List (Nat × Op) := [
+  (91, .divide true false), (92, .divide false false), (93, .divide true true), (94, .divide false true),
+  (214, .checkedArithmetic .add true), (215, .checkedArithmetic .add false),
+  (216, .checkedArithmetic .mul true), (217, .checkedArithmetic .mul false),
+  (218, .checkedArithmetic .sub true), (219, .checkedArithmetic .sub false)]
+example : arithmeticFlagCases.all (fun (opcode, operation) =>
+    decide (TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by decide
+example : arithmeticFlagMutations.all (fun (opcode, operation) =>
+    decide (¬ TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by decide
 
 private def literalRaw := raw [i 33 (.integer (-9223372036854775808)), i 42] []
 private def literalFeatures : FeatureCertificate := [unknown 0, unknown 1]
