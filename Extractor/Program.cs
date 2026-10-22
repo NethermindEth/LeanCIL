@@ -156,7 +156,7 @@ internal static class Program
                 if (File.ReadAllText(identityPath) != manifest)
                     throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(identityPath)} differs from regenerated assembly, extractor or configuration metadata.");
                 if (symbolSource is not null && File.Exists(symbolPath) && File.ReadAllText(symbolPath) != symbolSource)
-                    throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(symbolPath)} differs from the regenerated PDB names and locations.");
+                    throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(symbolPath)} differs from the regenerated PDB names and locations.\n  Assembly: {CliPaths.Display(assemblyPath)}\n  Method: {methods[0].FullName}");
                 Console.WriteLine("Valid: extraction artifacts match the assembly and recorded settings.");
                 Console.WriteLine($"  Assembly: {assemblyIdentity}");
                 Console.WriteLine($"  DLL: {CliPaths.Display(assemblyPath)}");
