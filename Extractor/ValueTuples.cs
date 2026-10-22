@@ -26,9 +26,9 @@ internal static class ValueTuples
     }
 
     // The modelled X86Base.X64.DivRem result stores Quotient at offset 0 and Remainder at offset 8.
-    internal static void RequireWordPair(TypeReference type, ModuleDefinition module)
+    internal static void RequireWordPair(TypeReference type, ModuleDefinition module, string architecture = "scalar")
     {
-        var layout = MetadataValidation.AggregateLayout(type, module);
+        MetadataValidation.AggregateInfo layout = MetadataValidation.AggregateLayout(type, module, architecture);
         var fields = Fields(type);
         if (layout.Size != 16 || layout.Offsets[fields[0].Definition.FullName] != 0 || layout.Offsets[fields[1].Definition.FullName] != 8)
             throw new InvalidDataException($"Unsupported aggregate layout: {type.FullName}");

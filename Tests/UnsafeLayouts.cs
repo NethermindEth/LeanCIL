@@ -133,3 +133,5 @@ Run(["dotnet", "run", "--file", "Tests/NullReferences.cs"], streamOutput: true, 
 Run(["dotnet", "run", "--file", "Tests/UnsafeReferences.cs"], streamOutput: true, progress: "Unsafe byref reinterpretation checks");
 Run(["dotnet", "run", "--file", "Tests/ValueBitCasts.cs"], streamOutput: true, progress: "Value BitCast checks");
 Run(["dotnet", "run", "--file", "Tests/StaticSpans.cs"], streamOutput: true, progress: "Static byte span checks");
+
+Run(["dotnet", "run", "--file", "Tests/VectorFields.cs"], streamOutput: true, progress: "Vector field checks");
