@@ -69,8 +69,8 @@ def longMasked (profile : CIL.FeatureProfile) : Method :=
   { longExpected profile with code := List.replicate 3 (.unsupported "Outside the region") ++ longSuffix }
 
 def longActual (profile : CIL.FeatureProfile) (callee : Nat) : Method :=
-  { longExpected profile with code := [.arg 0, .call callee 1] ++
-      longSuffix.map (Op.relabel (fun pc => pc - 3 + 2)) }
+  { longExpected profile with
+    code := [.arg 0, .call callee 1] ++ longSuffix.map (Op.relabel (fun pc => pc - 3 + 2)) }
 
 theorem longSuffix_length : longSuffix.length = 100 := by simp [longSuffix]
 
@@ -83,9 +83,9 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
   · omega
   · intro pc op before found
     have lookup : (longMasked profile).code[pc]? = some (.unsupported "Outside the region") := by
-      simp only [longMasked]
-      rw [List.getElem?_append_left (by simpa using before)]
-      simp [List.getElem?_replicate, before]
+      exact (List.getElem?_append_left (l₁ := List.replicate 3 (.unsupported "Outside the region"))
+        (l₂ := longSuffix) (by simpa only [List.length_replicate] using before)).trans
+          (List.getElem?_replicate_of_lt before)
     rw [lookup] at found
     cases found
     rfl
@@ -93,9 +93,9 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
   · simp only [longMasked, List.drop_append, List.length_replicate, Nat.sub_self, List.drop_zero,
       List.drop_replicate, List.replicate_zero, List.nil_append]
     intro op member target inside
-    simp only [longSuffix, List.mem_append, List.mem_replicate, List.mem_cons, List.mem_singleton,
+    simp only [longSuffix, List.mem_append, List.mem_replicate, List.mem_cons,
       List.not_mem_nil, or_false] at member
-    rcases member with ⟨_, rfl⟩ | rfl | rfl | rfl | rfl <;> simp_all [Op.targets]
+    rcases member with ⟨_, rfl⟩ | rfl | rfl | rfl | rfl <;> simp_all [Op.targets] <;> omega
   · intro pc after
     rfl
 
@@ -103,7 +103,7 @@ theorem longSuffix_moves (profile : CIL.FeatureProfile) (callee fuel : Nat) (arg
     (frame : Frame) (m : Memory) (result : Memory × List Value)
     (ran : run [longExpected profile] fuel 0 3 args frame stack m = .ok result) :
     run [longActual profile callee] fuel 0 2 args frame stack m = .ok result := by
-  have closed : RegionClosed [longExpected profile] suffix := RegionClosed.of_check (by decide)
+  have closed : RegionClosed [longExpected profile] suffix := RegionClosed.of_check (by rfl)
   have agrees : AgreesOn [longExpected profile] [longMasked profile] suffix :=
     AgreesOn.set (program := [longExpected profile]) (index := 0) rfl (longMasked profile).code fun _ inside =>
       code_agrees_of_drop (lower := 3) (by simp [longMasked, longExpected])
