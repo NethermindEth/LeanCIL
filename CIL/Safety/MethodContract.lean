@@ -216,6 +216,38 @@ theorem Outside.word {r : Reference} {rest : List (Reference × Nat)} {id offset
     (word : OutsideWord r id offset) (outside : Outside rest id offset) : Outside ((r, 8) :: rest) id offset :=
   Outside.cons.mpr ⟨word, outside⟩
 
+/-- Interval `(r, width)` shares no byte with interval `entry`. -/
+def Apart (r : Reference) (width : Nat) (entry : Reference × Nat) : Prop :=
+  r.allocation ≠ entry.1.allocation ∨ r.offset + width ≤ entry.1.offset ∨ entry.1.offset + entry.2 ≤ r.offset
+
+/-- Every byte of an interval apart from each footprint entry is outside the footprint. -/
+theorem Outside.of_apart {footprint : List (Reference × Nat)} {r : Reference} {width : Nat}
+    (apart : ∀ entry ∈ footprint, Apart r width entry) : ∀ i < width, Outside footprint r.allocation (r.offset + i) := by
+  intro i bound
+  induction footprint with
+  | nil => exact Outside.nil _ _
+  | cons entry rest rest_outside =>
+    obtain ⟨head, tail⟩ := List.forall_mem_cons.mp apart
+    refine Outside.cons.mpr ⟨?_, rest_outside tail⟩
+    rcases head with different | below | above
+    · exact Or.inl different
+    · exact Or.inr (Or.inl (by omega))
+    · exact Or.inr (Or.inr (by omega))
+
+/-- A checked read of memory older than the call, apart from every footprint entry, is unchanged. -/
+theorem Confined.read_apart {footprint : List (Reference × Nat)} {before after : Memory} {r : Reference}
+    {width alignment : Nat} {bytes : List (BitVec 8)} (framed : Confined footprint before after)
+    (formed : before.WellFormed) (loaded : read before r width alignment = .ok bytes)
+    (apart : ∀ entry ∈ footprint, Apart r width entry) : read after r width alignment = .ok bytes :=
+  (framed.read_eq r (formed.access_bound (read_access loaded)) width alignment (Outside.of_apart apart)).trans loaded
+
+/-- An old allocation that no footprint entry names keeps every byte. -/
+theorem Confined.cells_apart {footprint : List (Reference × Nat)} {before after : Memory} {id : Nat}
+    (framed : Confined footprint before after) (old : id < before.nextIdentity)
+    (separate : ∀ entry ∈ footprint, id ≠ entry.1.allocation) (offset : Nat) :
+    after.cells id offset = before.cells id offset :=
+  framed.cells id old offset fun entry member => Or.inl (separate entry member)
+
 /-- A typed method contract. `pre` carries formation, authority and the permitted
     aliasing; `footprint` bounds the bytes of earlier memory the method may change.
     `post` speaks of an `Output` that `results` encodes; by default the returned values. -/
@@ -353,6 +385,9 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
 #print axioms Outside.nil
 #print axioms Outside.cons
 #print axioms Outside.word
+#print axioms Outside.of_apart
+#print axioms Confined.read_apart
+#print axioms Confined.cells_apart
 #print axioms run_call_of_contract
 #print axioms call_frame_invariants
 #print axioms run_call_of_contract_formed

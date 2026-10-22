@@ -47,6 +47,7 @@ import CIL.Safety.Embedding.Simulation
 import CIL.Safety.Embedding.Step
 import CIL.Safety.Calling
 import CIL.Safety.Certificate
+import CIL.Safety.ConfinedSnapshots
 import CIL.Safety.ConstructComposition
 import CIL.Safety.ConstructSetup
 import CIL.Safety.Equations

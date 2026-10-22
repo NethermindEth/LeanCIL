@@ -1,4 +1,5 @@
 import CIL.Safety.MethodContract
+import CIL.Safety.ConfinedSnapshots
 
 /-! Footprint reasoning for `Confined` contracts, checked without an extraction. -/
 namespace Tests.ConfinedFootprints
@@ -82,6 +83,61 @@ theorem other_allocation_unconfined {m result : Memory} {out : Reference} {other
     ¬ Confined [(out, 32)] m result :=
   write_escapes (i := 0) h (by simp [numberBytes]) old fresh (by simp [different])
 
+/-- A 32-byte input beside the carry word and a completed result beside the output survive a carry call. -/
+theorem carry_call_keeps_snapshots {before after : Memory} {carry output input done : Reference}
+    {inputBytes doneBytes : List (BitVec 8)}
+    (framed : Confined [(carry, 8), (output, 8)] before after) (formed : before.WellFormed)
+    (loadedInput : read before input 32 1 = .ok inputBytes) (loadedDone : read before done 8 1 = .ok doneBytes)
+    (inputCarry : input.offset + 32 ≤ carry.offset) (inputOutput : input.allocation ≠ output.allocation)
+    (doneCarry : done.allocation ≠ carry.allocation) (doneOutput : done.offset + 8 ≤ output.offset) :
+    read after input 32 1 = .ok inputBytes ∧ read after done 8 1 = .ok doneBytes :=
+  ⟨framed.read_apart formed loadedInput (by simp [Apart, *]),
+    framed.read_apart formed loadedDone (by simp [Apart, *])⟩
+
+/-- Private word homes in other allocations keep their remembered words across the call. -/
+theorem carry_call_keeps_words {before after : Memory} {carry output first second : Reference}
+    {known : Nat → Option (BitVec 64)}
+    (snapshots : WordSnapshots before [.bytes .word64 first, .bytes .word64 second] known)
+    (framed : Confined [(carry, 8), (output, 8)] before after) (formed : before.WellFormed)
+    (firstApart : ∀ entry ∈ [(carry, 8), (output, 8)], Apart first 8 entry)
+    (secondApart : ∀ entry ∈ [(carry, 8), (output, 8)], Apart second 8 entry) :
+    WordSnapshots after [.bytes .word64 first, .bytes .word64 second] known :=
+  snapshots.after_confined framed formed fun index _ reference _ slot => by
+    rcases index with _ | _ | _ <;> simp at slot <;> subst slot <;> assumption
+
+/-- An input allocation the footprint never names keeps every byte. -/
+theorem carry_call_keeps_allocation {before after : Memory} {carry output input : Reference}
+    (framed : Confined [(carry, 8), (output, 8)] before after) (old : input.allocation < before.nextIdentity)
+    (inputCarry : input.allocation ≠ carry.allocation) (inputOutput : input.allocation ≠ output.allocation) :
+    (fun offset => after.cells input.allocation offset) = (fun offset => before.cells input.allocation offset) :=
+  funext (framed.cells_apart old (by simp [*]))
+
+/-- A snapshot overlapping the footprint by one byte does not meet the preservation premise. -/
+theorem overlapping_not_apart (output : Reference) :
+    ¬ ∀ entry ∈ [(output, 8)], Apart ⟨output.allocation, output.offset + 7⟩ 8 entry := by
+  simp [Apart]
+  omega
+
+/-- A confined call can change a snapshot of its own footprint, so only a postcondition may restore it. -/
+theorem footprint_snapshot_changes {m result : Memory} {output : Reference} {old new : List (BitVec 8)}
+    (h : write m output new 1 = .ok result) (width : new.length = 8) (differ : new ≠ old) :
+    Confined [(output, 8)] m result ∧ read result output 8 1 ≠ .ok old := by
+  refine ⟨Confined.write h (by simp [width]), fun same => differ ?_⟩
+  have readback := write_readback _ _ _ _ _ h
+  rw [width, same] at readback
+  exact (Except.ok.inj readback).symm
+
+/-- A confined call never makes an uninitialized byte outside its footprint readable. -/
+theorem uninitialized_stays_unreadable {before after : Memory} {footprint : List (Reference × Nat)}
+    {r : Reference} {width alignment i : Nat} (framed : Confined footprint before after)
+    (old : r.allocation < before.nextIdentity) (apart : ∀ entry ∈ footprint, Apart r width entry)
+    (index : i < width) (fresh : (before.cells r.allocation (r.offset + i)).initialized = false)
+    (bytes : List (BitVec 8)) : read after r width alignment ≠ .ok bytes := by
+  intro loaded
+  have ready := read_requires_initialization _ _ _ _ _ loaded i (List.mem_range.mpr index)
+  rw [framed.cells _ old _ (Outside.of_apart apart i index)] at ready
+  simp [ready] at fresh
+
 #print axioms outside_three_words
 #print axioms outside_three_words_term
 #print axioms inside_listed_word
@@ -93,5 +149,11 @@ theorem other_allocation_unconfined {m result : Memory} {out : Reference} {other
 #print axioms write_escapes
 #print axioms past_boundary_unconfined
 #print axioms other_allocation_unconfined
+#print axioms carry_call_keeps_snapshots
+#print axioms carry_call_keeps_words
+#print axioms carry_call_keeps_allocation
+#print axioms overlapping_not_apart
+#print axioms footprint_snapshot_changes
+#print axioms uninitialized_stays_unreadable
 
 end Tests.ConfinedFootprints
