@@ -162,7 +162,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

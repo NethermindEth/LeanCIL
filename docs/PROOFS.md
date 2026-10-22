@@ -366,8 +366,48 @@ for a concrete linked program whose import meets its contract, and
 closed `Mix` proof, discharges it for one appended implementation, shows the
 unlinked program faults at the import's call so its contract holds only
 vacuously, and composes an imported raising `Percent` through both outcomes of
-`Strict` and `Root`. The relocation and identity checks that bind a slot to a
-certified library implementation are not part of this rule.
+`Strict` and `Root`. The identity checks that bind a slot to a certified library
+implementation are not part of this rule; relocating a library into the slot is
+described next.
+
+## Link separately extracted libraries
+
+A library extracted on its own calls its helpers by its own method indices.
+`CIL.Safety.Linking` relocates it into a linked program. `Op.relocate f` renames
+only the method index of `.call`, `.newVector256` and `.newAggregate`
+(`Op.callees`); pcs, locals, profiles and static sites are unchanged.
+`Closed lib` says every callee index in `lib` is one of its methods
+(`Closed.of_check` decides it), and `RelocatesInto lib linked f` says method `i`
+sits at `f i` relocated by `f`. Then `run_relocate` and `invoke_relocate` give
+exactly the same result: the same memory and values on return, and on a fault
+the same pc and fault with only its method index renamed to `f method`. A raise
+is still the same `.thrown`, so `MethodContract.Holds.relocate` and
+`OutcomeContract.Holds.relocate` move a contract proved on the library alone to
+its relocated index.
+
+A `Library` is its exported entry and its private helpers. `link app libs` puts
+library `j`'s entry at import slot `importIndex app j` and all helpers after the
+entries, library by library (`linkSlot`). `link_links` and `link_relocates`
+hold by construction, so `composed` discharges a caller's `HoldsGiven` for the
+concrete linked program from contracts proved on each library alone:
+
+```lean
+theorem root_composed : rootContract.Holds (link Extracted.program [addLib]) root :=
+  composed (specs := [addContract.relocatable]) (root_given.mono fun _ met => met 0 (by decide)) rfl
+    closed proved
+```
+
+Here `closed` and `proved` are each library's `Closed` and `Holds` facts.
+`Imports app specs` names one `Relocatable` property per slot, so libraries may
+export contracts of different types. Each library exports only its index-0
+method. Static identities are not renamed: two linked libraries that use the
+same identity for different bytes fault `invalidState` at the second static
+access, so a collision can only make a proof fail, never prove a false statement.
+
+`Tests/Linking.lean` links an `AddTo` library whose entry calls its own `Sum`
+helper (renamed from index 1 to 3) and proves the imported `Root` for the
+concrete linked program, then links a `Percent` library whose helper raises and
+shows the exception reaches `Root` through two relocated calls.
 
 ## Reuse framework contracts
 
