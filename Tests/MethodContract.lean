@@ -72,6 +72,47 @@ def rootContract : MethodContract RootInput where
   post input _ final values := values = [] ∧
     read final input.r 8 1 = .ok (numberBytes ((input.x + input.y) * 3 + input.y).toNat 8)
 
+@[cil_code] def boundedBody : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.nop, .nop, .nop, .ret] }
+
+@[cil_code] def boundedProgram : CIL.Program := [boundedBody]
+
+def boundedRun (pc : Nat) (frame : Frame) (memory : Memory) : Prop :=
+  ∃ fuel result returned,
+    run boundedProgram fuel 0 pc [] frame [] memory = .ok (result, returned) ∧ True
+
+theorem bounded_steps_stop_at_continuation (frame : Frame) (memory : Memory)
+    (continuation : boundedRun 2 frame memory) : boundedRun 0 frame memory := by
+  unfold boundedRun at *
+  cil_contract_steps 2 []
+  exact continuation
+
+theorem bounded_steps_zero_preserves_goal (frame : Frame) (memory : Memory)
+    (continuation : boundedRun 0 frame memory) : boundedRun 0 frame memory := by
+  unfold boundedRun at *
+  cil_contract_steps 0 []
+  exact continuation
+
+theorem bounded_steps_stop_at_return (frame : Frame) (memory : Memory) : boundedRun 0 frame memory := by
+  unfold boundedRun
+  cil_contract_steps 1000000 []
+  trivial
+
+theorem contract_steps_until_continuation (frame : Frame) (memory : Memory)
+    (continuation : boundedRun 2 frame memory) : boundedRun 0 frame memory := by
+  unfold boundedRun at *
+  cil_contract_steps [] until continuation
+
+theorem contract_steps_until_checks_initial_goal (frame : Frame) (memory : Memory)
+    (continuation : boundedRun 0 frame memory) : boundedRun 0 frame memory := by
+  unfold boundedRun at *
+  cil_contract_steps [] until continuation
+
+theorem contract_steps_until_postcondition (frame : Frame) (memory : Memory)
+    (finished : True) : boundedRun 0 frame memory := by
+  unfold boundedRun
+  cil_contract_steps [] until finished
+
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   dsimp only [mixContract]
