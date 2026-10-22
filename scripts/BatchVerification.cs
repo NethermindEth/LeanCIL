@@ -125,7 +125,7 @@ partial class Program
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
                 reports[i] = new Report(3, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, audit, before[i],
-                    libraryKey, libraryBuild, audit, initializedTypes, Sha(source), theorem);
+                    libraryKey, libraryBuild, audit, initializedTypes, Sha(source), theorem, staticValues: StaticValueAssumptions(extraction));
             }
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)

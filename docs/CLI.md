@@ -56,12 +56,16 @@ leancil extract assembly.dll 'Type::Method(ulong)' artifacts/Method --assume-ini
 
 Repeat `--assume-initialized` for each required type, using its exact metadata
 name. Assumptions apply only to named types in this assembly and do not propagate
-to helper types. They do not execute or prove initialization, admit calls to
-static constructors, or enable unsupported static field accesses. The generated
-Lean source and identity manifest retain the assumptions; `check` reuses them and
-rejects conflicting explicit assumptions. Verification binds the manifest hash
-and prints the initialization preconditions with the theorem. Re-extract older
-artifacts to include the new manifest field.
+to helper types. They do not execute or prove initialization, or admit calls to
+static constructors. They do enable `ldsfld` of the type's static readonly struct
+fields whose value its static constructor fixes (see
+[static readonly values](OPCODES.md#static-readonly-values)); each such field is
+recorded in `staticValues` and reported as a caller assumption that it keeps the
+value its static constructor stored. The generated Lean source and identity
+manifest retain the assumptions; `check` reuses them and rejects conflicting
+explicit assumptions. Verification binds the manifest hash, prints the
+initialization preconditions with the theorem and copies both lists into
+`verified.json`. Re-extract older artifacts to include the new manifest fields.
 
 ## Report extraction blockers
 
