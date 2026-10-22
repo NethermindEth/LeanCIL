@@ -7,7 +7,8 @@
 using var verification = new Program();
 var root = At("artifacts/OutcomeContract");
 const string Selector = "Calls::Root(ulong)";
-const string Root = "public static ulong Root(ulong value) => Percent(value) + 1;";
+const string Callers = "public static ulong Strict(ulong value) => Percent(value) == 0 ? throw new ArgumentException(nameof(value)) : value; " +
+    "public static ulong Root(ulong value) => Strict(value) + 1;";
 
 string Build(string name, string percent)
 {
@@ -17,7 +18,7 @@ string Build(string name, string percent)
     <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Outcomes.cs"),
-        "using System; namespace Outcomes; public static class Calls { " + percent + " " + Root + " }");
+        "using System; namespace Outcomes; public static class Calls { " + percent + " " + Callers + " }");
     Run(["dotnet", "build", Path.Combine(source, "Outcomes.csproj"), "-c", "Release"]);
     return Path.Combine(source, "bin/Outcomes.dll");
 }
@@ -39,7 +40,7 @@ string Section(string from, string to)
 }
 var contracts = Section("bind_method root rootBody", "theorem percent_holds");
 var proofs = Section("theorem percent_holds", "theorem root_correct");
-const string Composed = "theorem correctness : rootContract.Holds Extracted.program root := root_holds percent_holds\n";
+const string Composed = "theorem correctness : rootContract.Holds Extracted.program root := root_holds (strict_holds percent_holds)\n";
 
 string Proof(string name, string body)
 {
@@ -50,7 +51,7 @@ string Proof(string name, string body)
 }
 
 verification.Verify(original, "Outcomes", Selector, Proof("Original", proofs + Composed), Path.Combine(root, "Original-Verified"));
-Console.WriteLine("PASS Original: both outcomes of the caller follow from the callee's contract");
+Console.WriteLine("PASS Original: every outcome of both callers follows from their callees' contracts");
 
 const string Empty = """
 def empty : Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [], nextIdentity := 0 }
