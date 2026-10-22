@@ -121,7 +121,7 @@ theorem checked_literal_extension_return (memory : CIL.Safety.Memory) (frame : C
 theorem checked_decided_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
     (condition : Bool) (left right : CIL.W64) :
     CIL.Safety.run [branchMethod] 1 0 3 [] frame
-      [.scalar (.i64 (if condition then left else right))] memory =
+      [.scalar (.i64 (match condition with | true => left | false => right))] memory =
       .ok (CIL.Safety.leaveFrame frame memory,
         [.scalar (.i64 (if condition = true then left else right))]) := by
   cases condition <;> cil_checked_steps
