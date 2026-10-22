@@ -248,16 +248,16 @@ theorem OutcomeContract.Holds.relocate {Input Output : Type} {c : OutcomeContrac
 theorem MethodContract.relocateGiven {Input Output : Type} {c : MethodContract Input Output}
     {base completion target : CIL.Program} {imports : CIL.Program -> Prop} {method : Nat} {f : Nat -> Nat}
     (given : HoldsGiven base imports (fun linked => c.Holds linked method))
-    (prefix : Links base completion) (met : imports completion) (closed : Closed completion)
+    (linkedPrefix : Links base completion) (met : imports completion) (closed : Closed completion)
     (relocates : RelocatesInto completion target f) : c.Holds target (f method) :=
-  (given completion prefix met).relocate closed relocates
+  (given completion linkedPrefix met).relocate closed relocates
 
 theorem OutcomeContract.relocateGiven {Input Output : Type} {c : OutcomeContract Input Output}
     {base completion target : CIL.Program} {imports : CIL.Program -> Prop} {method : Nat} {f : Nat -> Nat}
     (given : HoldsGiven base imports (fun linked => c.Holds linked method))
-    (prefix : Links base completion) (met : imports completion) (closed : Closed completion)
+    (linkedPrefix : Links base completion) (met : imports completion) (closed : Closed completion)
     (relocates : RelocatesInto completion target f) : c.Holds target (f method) :=
-  (given completion prefix met).relocate closed relocates
+  (given completion linkedPrefix met).relocate closed relocates
 
 /-- A separately extracted library: its exported method at index 0, then its private helpers. -/
 structure Library where
