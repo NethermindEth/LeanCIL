@@ -24,6 +24,16 @@ example : computeLayouts [{ explicit := true, packing := 0, declaredSize := 4, f
 example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1, fields := [] }] = some #[⟨⟨1, []⟩, 1⟩] := by decide
 -- Declared size is not rounded to alignment; nested alignment remains independent of size.
 example : computeLayouts [{ explicit := false, packing := 0, declaredSize := 9, fields := [⟨.unsigned64, none⟩] }] = some #[⟨⟨9, [⟨0, 8, false⟩]⟩, 8⟩] := by decide
+-- Auto layout is sequential only for equal-width primitive fields: CoreCLR reorders mixed widths.
+example : computeLayouts [{ explicit := false, auto := true, packing := -1, declaredSize := -1, fields := [⟨.unsigned64, none⟩, ⟨.unsigned64, none⟩] }] = some #[⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, 8⟩] := by decide
+example : computeLayouts [{ explicit := false, auto := true, packing := -1, declaredSize := -1, fields := [⟨.unsigned32, none⟩, ⟨.unsigned64, none⟩] }] = none := by decide
+example : computeLayouts [{ explicit := false, auto := true, packing := -1, declaredSize := -1, fields := [⟨.unsigned64, some 0⟩, ⟨.unsigned64, none⟩] }] = none := by decide
+example : computeLayouts [{ explicit := false, auto := true, packing := 4, declaredSize := -1, fields := [⟨.unsigned64, none⟩, ⟨.unsigned64, none⟩] }] = none := by decide
+example : computeLayouts [{ explicit := false, auto := true, packing := -1, declaredSize := 32, fields := [⟨.unsigned64, none⟩, ⟨.unsigned64, none⟩] }] = none := by decide
+example : computeLayouts [{ explicit := true, auto := true, packing := -1, declaredSize := 16, fields := [⟨.unsigned64, some 0⟩, ⟨.unsigned64, some 8⟩] }] = none := by decide
+example : computeLayouts [{ explicit := false, auto := true, packing := -1, declaredSize := -1, fields := [] }] = none := by decide
+example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1, fields := [⟨.unsigned64, none⟩] },
+  { explicit := false, auto := true, packing := -1, declaredSize := -1, fields := [⟨.aggregate 0, none⟩, ⟨.aggregate 0, none⟩] }] = none := by decide
 
 def goodMethod : Method := { code := [.fieldAt 4 4], locals := [], returnsValue := true }
 def wrongMethod : Method := { goodMethod with code := [.fieldAt 3 4] }

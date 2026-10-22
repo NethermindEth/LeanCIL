@@ -12,7 +12,7 @@ internal static class ParameterEvidence
     {
         // Only folded span locals reach here; Lean derives the same inert root from the type.
         if (type is ByReferenceType || Spans.Width(type) is not null) return ".reference";
-        if (type is GenericInstanceType vector)
+        if (type is GenericInstanceType vector && !ValueTuples.Is(type))
             return vector.ElementType.FullName switch
             {
                 "System.Runtime.Intrinsics.Vector128`1" => ".vector128",

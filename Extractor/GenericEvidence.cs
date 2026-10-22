@@ -21,6 +21,8 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
                 $".atom \"\" {Quote("type-parameter:" + parameter.FullName)}";
         if (type is ByReferenceType byRef) return $".byref ({Type(byRef.ElementType)})";
         if (type is PointerType pointer) return $".pointer ({Type(pointer.ElementType)})";
+        if (ValueTuples.Is(type) && layouts.Index(type) is >= 0 and var tuple)
+            return $".aggregate {Quote(LayoutEvidence.Identity(type))} {tuple}";
         if (type is GenericInstanceType generic)
         {
             var result = $".constructor {Quote(LayoutEvidence.Scope(generic.ElementType))} {Quote(generic.ElementType.FullName)}";
@@ -68,13 +70,22 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             case FieldReference field:
                 var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
                 var index = 0;
+                var fieldType = field.FieldType;
                 if (field.DeclaringType.Scope is ModuleDefinition)
                 {
                     var resolved = field.Resolve();
                     var fields = resolved.DeclaringType.Fields.Where(candidate => isStatic || !candidate.IsStatic).ToList();
                     index = fields.IndexOf(resolved);
                 }
-                return $".field ({Type(field.DeclaringType)}) {index} ({Type(field.FieldType)}) {Bool(isStatic)}";
+                else if (!isStatic && ValueTuples.Is(field.DeclaringType))
+                {
+                    // Tuple fields are typed by the instance's arguments, not the definition's T1/T2.
+                    var fields = MetadataValidation.Fields(field.DeclaringType);
+                    index = Array.FindIndex(fields, candidate => candidate.Definition == field.Resolve());
+                    if (index < 0) throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
+                    fieldType = fields[index].Type;
+                }
+                return $".field ({Type(field.DeclaringType)}) {index} ({Type(fieldType)}) {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
             case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";

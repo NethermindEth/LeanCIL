@@ -52,16 +52,21 @@ internal static class InstructionTranslation
             FieldDefinition resolved = f.Resolve() ?? throw new InvalidDataException("Unresolved field");
             MetadataValidation.Layout(f.DeclaringType, m.Module);
             RuntimeModels.ValidateTypeIdentity(f.FieldType, m.Module);
-            if (resolved.IsStatic || resolved.Module != m.Module || resolved.FullName != f.FullName)
+            var tuple = ValueTuples.Is(f.DeclaringType);
+            var field = tuple ? MetadataValidation.Fields(f.DeclaringType).SingleOrDefault(candidate =>
+                candidate.Definition == resolved && f.FieldType is GenericParameter parameter &&
+                resolved.FieldType is GenericParameter definition && parameter.Position == definition.Position) : null;
+            if (resolved.IsStatic || (tuple ? field is null : resolved.Module != m.Module || resolved.FullName != f.FullName))
                 throw new InvalidDataException($"Unsupported field {f.FullName}");
-            var aggregate = MetadataValidation.IsAggregate(resolved.FieldType, m.Module);
-            int width = MetadataValidation.FieldSize(resolved.FieldType, m.Module);
-            var offset = MetadataValidation.FieldOffset(resolved, m.Module);
+            var fieldType = field?.Type ?? resolved.FieldType;
+            var aggregate = MetadataValidation.IsAggregate(fieldType, m.Module);
+            int width = MetadataValidation.FieldSize(fieldType, m.Module);
+            var offset = MetadataValidation.FieldOffset(tuple ? f.DeclaringType : resolved.DeclaringType, resolved, m.Module);
             if (aggregate && op != "fieldAddr")
                 return $".{(op == "field" ? "aggregateFieldAt" : "setAggregateFieldAt")} {offset} {width}";
             return op == "fieldAddr" ? $".fieldAddress {offset}" :
                 $".{(op == "field" ? "fieldAt" : "setFieldAt")} {offset} {width}" +
-                (op == "field" && EnumTypes.Storage(resolved.FieldType).FullName is "System.SByte" or "System.Int16" ? " true" : "");
+                (op == "field" && EnumTypes.Storage(fieldType).FullName is "System.SByte" or "System.Int16" ? " true" : "");
         }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj && i.Operand is TypeReference operandType)
             RuntimeModels.ValidateTypeIdentity(operandType, m.Module);

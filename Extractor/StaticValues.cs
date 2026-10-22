@@ -147,7 +147,7 @@ internal static class StaticValues
                 {
                     var value = stack.Pop();
                     if (stack.Pop() is not Self self) throw Unsupported(field, $"Its initializer stores outside the constructed value: {i}");
-                    var offset = MetadataValidation.FieldOffset(resolved, module);
+                    var offset = MetadataValidation.FieldOffset(resolved.DeclaringType, resolved, module);
                     var width = MetadataValidation.FieldSize(resolved.FieldType, module);
                     for (var b = 0; b < width; b++)
                         self.Data[offset + b] = value switch
