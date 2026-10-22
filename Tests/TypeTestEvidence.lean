@@ -15,7 +15,8 @@ private def other : TypeExpr := .aggregate (owner ++ "::Fixture.Other") 1
 private def typeCall (name signature : String) (parameters : Nat) : RawOperand := .call {
   declaringType := .atom runtime "System.Type", name,
   target := .external (runtime ++ "::" ++ signature),
-  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true }
+  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true,
+  returnType := .atom runtime (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean") }
 private def fromHandle := typeCall "GetTypeFromHandle" "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
 private def equality := typeCall "op_Equality" "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2
 private def inequality := typeCall "op_Inequality" "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2

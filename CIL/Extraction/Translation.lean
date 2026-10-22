@@ -1,4 +1,4 @@
-import CIL.Extraction.Features
+import CIL.Extraction.Scalars
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.StaticValues
@@ -13,6 +13,7 @@ structure MethodEvidence where
   parameterInput : RawArguments
   reachable : List Bool
   featureStates : FeatureCertificate
+  scalarStates : ScalarCertificate := []
   layoutUses : List LayoutUse
 
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=
@@ -57,12 +58,13 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ManagedCallsValid (specializationTable all) imports item.closed item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid rawLayouts item.closed method ∧
-  UnsafeCallsValid rawLayouts item.closed item.reachable method.code
+  UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
+  ScalarFlowValid item.closed item.featureStates item.scalarStates method.code
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Option Method) : Prop :=

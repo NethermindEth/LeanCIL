@@ -62,7 +62,8 @@ private def typeHandle : RawInstruction → Option TypeExpr
 private def typeMethod (name signature : String) (parameters : Nat) : CallSite := {
   declaringType := .atom runtimeScope "System.Type", name,
   target := .external (runtimeScope ++ "::" ++ signature),
-  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true }
+  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true,
+  returnType := .atom runtimeScope (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean") }
 
 private def getTypeFromHandle : CallSite :=
   typeMethod "GetTypeFromHandle" "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1

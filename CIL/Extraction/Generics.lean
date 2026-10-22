@@ -82,6 +82,7 @@ structure CallSite where
   parameterCount : Nat
   hasThis : Bool
   returnsValue : Bool
+  returnType : TypeExpr := .void
   deriving DecidableEq, Repr
 
 inductive RawOperand where
@@ -129,7 +130,7 @@ def substituteOperand (arguments : List TypeExpr) : RawOperand → Option RawOpe
   | .type type => RawOperand.type <$> substituteType arguments type
   | .field owner index type isStatic => do
     return .field (← substituteType arguments owner) index (← substituteType arguments type) isStatic
-  | .call site => do return .call { site with declaringType := ← substituteType arguments site.declaringType, typeArguments := ← site.typeArguments.mapM (substituteType arguments) }
+  | .call site => do return .call { site with declaringType := ← substituteType arguments site.declaringType, typeArguments := ← site.typeArguments.mapM (substituteType arguments), returnType := ← substituteType arguments site.returnType }
   | operand => some operand
 
 private def allowedConstraint (constraint : GenericConstraint) : Bool :=
@@ -228,6 +229,7 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
           callee.closed.parameters.length == site.parameterCount &&
           callee.closed.hasThis == site.hasThis &&
           (callee.closed.returnType != .void) == site.returnsValue &&
+          callee.closed.returnType == site.returnType &&
           count == site.parameterCount + (if raw.opcode == 40 && site.hasThis then 1 else 0)
     | .external identity => match emitted with
       | .call target count => validateImportCall methods imports raw.opcode site identity target count
@@ -268,7 +270,7 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
   obtain ⟨offset, opcode, operand⟩ := raw
   cases operand with
   | call site =>
-    obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue⟩ := site
+    obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue, returnType⟩ := site
     cases method with
     | managed token =>
       have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside
