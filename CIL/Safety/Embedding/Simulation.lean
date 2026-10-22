@@ -5,8 +5,9 @@ import CIL.Safety.Certificate
 A program whose methods embed into the methods of another program simulates it:
 every successful checked run, invocation or invocation certificate of the
 expected program is one of the actual program, with each pc renamed by its
-method's map. Only successful results transfer; a fault reports the pc it
-occurred at, which the renaming changes.
+method's map. A thrown exception transfers with the same name, and its fault
+location moves to the pc its method's map assigns. Other faults do not transfer:
+the actual program may run code where the expected one has none.
 -/
 
 namespace CIL.Embedding
@@ -210,29 +211,62 @@ theorem ProgramRefines.set {expected actual : CIL.Program} {maps : Nat → Nat �
       cases fetched
       exact oldRefines.descriptors.symm.trans embeds.descriptors
 
-/-- A successful expected run is the actual run from the renamed pc, with the same fuel and result. -/
-theorem run_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
+/-- `fault` at the pc that `maps` assigns its instruction in its own method. -/
+def LocatedFault.relocate (maps : Nat → Nat → Nat) (fault : LocatedFault) : LocatedFault :=
+  { fault with instruction := maps fault.method fault.instruction }
+
+/-- What the simulation carries: every result and every thrown exception, never another fault. -/
+def Transported : Except LocatedFault α → Prop
+  | .ok _ => True
+  | .error fault => ∃ exception, fault.fault = .thrown exception
+
+/-- An expected result or throw is the actual run's from the renamed pc, with the fault relocated. -/
+theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
     (refines : ProgramRefines expected actual maps) :
-    ∀ fuel method pc args frame stack (m : Memory) result,
-      run expected fuel method pc args frame stack m = .ok result →
-      run actual fuel method (maps method pc) args frame stack m = .ok result := by
+    ∀ fuel method pc args frame stack (m : Memory) outcome,
+      run expected fuel method pc args frame stack m = outcome → Transported outcome →
+      run actual fuel method (maps method pc) args frame stack m = outcome.mapError (·.relocate maps) := by
   intro fuel
   induction fuel with
-  | zero => intro _ _ _ _ _ _ _ h; cases h
+  | zero =>
+    intro _ _ _ _ _ _ _ h transported
+    subst h
+    obtain ⟨_, thrown⟩ := transported
+    cases thrown
   | succ fuel ih =>
-    intro method pc args frame stack m result h
+    intro method pc args frame stack m outcome h transported
     rw [run] at h ⊢
     cases fetched : expected[method]? with
-    | none => simp only [fetched] at h; cases h
+    | none =>
+      simp only [fetched] at h
+      subst h
+      obtain ⟨_, thrown⟩ := transported
+      cases thrown
     | some body =>
       simp only [fetched] at h
       obtain ⟨target, found, refined⟩ := refines.method method body fetched
       cases decoded : body.code[pc]? with
-      | none => simp only [decoded] at h; cases h
+      | none =>
+        simp only [decoded] at h
+        subst h
+        obtain ⟨_, thrown⟩ := transported
+        cases thrown
       | some op =>
         simp only [decoded, bind, Except.bind] at h
         cases stepped : step body op pc args frame stack m with
-        | error _ => simp only [stepped, Except.mapError] at h; cases h
+        | error fault =>
+          simp only [stepped, Except.mapError] at h
+          subst h
+          obtain ⟨exception, thrown⟩ := transported
+          dsimp only at thrown
+          subst thrown
+          have live : op.live = true := by
+            cases op <;> first | rfl | (change Except.error (ExecutionFault.unsupported _) = _ at stepped; cases stepped)
+          obtain ⟨code, statics, next⟩ := refined.code pc op decoded live
+          have actualStep := step_raise op body target (maps method) pc (maps method pc) args frame stack m exception
+            ⟨refined.profile, refined.returnsValue, statics, next⟩ stepped
+          simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
+          rfl
         | ok action =>
           simp only [stepped, Except.mapError] at h
           have live : op.live = true := by
@@ -244,88 +278,150 @@ theorem run_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
           cases action with
           | next target' stack' frame' m' =>
             dsimp only [FrameAction.relabel] at h ⊢
-            exact ih method target' args frame' stack' m' result h
+            exact ih method target' args frame' stack' m' outcome h transported
           | call callee arguments rest m' =>
             dsimp only [FrameAction.relabel] at h ⊢
             cases child : expected[callee]? with
-            | none => simp only [child] at h ⊢; cases h
+            | none =>
+              simp only [child] at h
+              subst h
+              obtain ⟨_, thrown⟩ := transported
+              cases thrown
             | some childBody =>
               simp only [child] at h ⊢
               obtain ⟨childTarget, childFound, childRefines⟩ := refines.method callee childBody child
               simp only [childFound, enterFrame_congr childRefines]
               cases entered : enterFrame childBody arguments m' with
-              | error _ => simp only [entered] at h; cases h
+              | error _ => simp only [entered] at h ⊢; subst h; rfl
               | ok setup =>
                 simp only [entered] at h ⊢
                 cases ran : run expected fuel callee 0 arguments setup.1 [] setup.2 with
-                | error _ => simp only [ran] at h; cases h
+                | error fault =>
+                  simp only [ran] at h
+                  subst h
+                  have childRun := ih callee 0 arguments setup.1 [] setup.2 _ ran transported
+                  rw [childRefines.entry] at childRun
+                  simp only [childRun, Except.mapError]
                 | ok returned =>
                   simp only [ran] at h
-                  have childRun := ih callee 0 arguments setup.1 [] setup.2 returned ran
+                  have childRun := ih callee 0 arguments setup.1 [] setup.2 _ ran trivial
                   rw [childRefines.entry] at childRun
-                  simp only [childRun]
-                  have resumed := ih method (pc + 1) args frame (returned.2 ++ rest) returned.1 result h
+                  simp only [childRun, Except.mapError]
+                  have resumed := ih method (pc + 1) args frame (returned.2 ++ rest) returned.1 outcome h transported
                   rw [next (continues_of_invocation stepped trivial)] at resumed
                   exact resumed
           | construct callee arguments rest frame' temporary kind m' =>
             dsimp only [FrameAction.relabel] at h ⊢
             cases child : expected[callee]? with
-            | none => simp only [child] at h ⊢; cases h
+            | none =>
+              simp only [child] at h
+              subst h
+              obtain ⟨_, thrown⟩ := transported
+              cases thrown
             | some childBody =>
               simp only [child] at h ⊢
               obtain ⟨childTarget, childFound, childRefines⟩ := refines.method callee childBody child
               simp only [childFound, enterFrame_congr childRefines]
               cases entered : enterFrame childBody arguments m' with
-              | error _ => simp only [entered] at h; cases h
+              | error _ => simp only [entered] at h ⊢; subst h; rfl
               | ok setup =>
                 simp only [entered] at h ⊢
                 cases ran : run expected fuel callee 0 arguments setup.1 [] setup.2 with
-                | error _ => simp only [ran] at h; cases h
+                | error fault =>
+                  simp only [ran] at h
+                  subst h
+                  have childRun := ih callee 0 arguments setup.1 [] setup.2 _ ran transported
+                  rw [childRefines.entry] at childRun
+                  simp only [childRun, Except.mapError]
                 | ok returned =>
                   simp only [ran] at h
-                  have childRun := ih callee 0 arguments setup.1 [] setup.2 returned ran
+                  have childRun := ih callee 0 arguments setup.1 [] setup.2 _ ran trivial
                   rw [childRefines.entry] at childRun
-                  simp only [childRun]
+                  simp only [childRun, Except.mapError]
                   split at h
-                  · cases h
+                  · subst h
+                    obtain ⟨_, thrown⟩ := transported
+                    cases thrown
                   · rename_i empty
                     simp only [empty]
                     cases loaded : loadLocal returned.1 (.bytes kind temporary) with
-                    | error _ => simp only [loaded] at h; cases h
+                    | error _ => simp only [loaded] at h ⊢; subst h; rfl
                     | ok value =>
                       simp only [loaded] at h ⊢
-                      have resumed := ih method (pc + 1) args frame' (value :: rest) returned.1 result h
+                      have resumed := ih method (pc + 1) args frame' (value :: rest) returned.1 outcome h transported
                       rw [next (continues_of_invocation stepped trivial)] at resumed
                       exact resumed
           | returned values m' =>
             dsimp only [FrameAction.relabel] at h ⊢
             cases checked : List.mapM (checkedValue (leaveFrame frame m')) values with
-            | error _ => simp only [checked] at h; cases h
-            | ok _ => simp only [checked] at h ⊢; exact h
+            | error _ => simp only [checked] at h ⊢; subst h; rfl
+            | ok _ => simp only [checked] at h ⊢; subst h; rfl
 
+/-- A successful expected run is the actual run from the renamed pc, with the same fuel and result. -/
+theorem run_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
+    (refines : ProgramRefines expected actual maps) :
+    ∀ fuel method pc args frame stack (m : Memory) result,
+      run expected fuel method pc args frame stack m = .ok result →
+      run actual fuel method (maps method pc) args frame stack m = .ok result :=
+  fun fuel method pc args frame stack m result h =>
+    run_outcome_refines refines fuel method pc args frame stack m (.ok result) h trivial
+
+/-- An expected run that throws `exception` throws it in the actual run, at the relocated pc. -/
+theorem run_raise_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
+    (refines : ProgramRefines expected actual maps) {fuel method pc : Nat} {args : List Value} {frame : Frame}
+    {stack : List Value} {m : Memory} {fault : LocatedFault} {exception : String}
+    (h : run expected fuel method pc args frame stack m = .error fault) (thrown : fault.fault = .thrown exception) :
+    run actual fuel method (maps method pc) args frame stack m = .error (fault.relocate maps) :=
+  run_outcome_refines refines fuel method pc args frame stack m _ h ⟨exception, thrown⟩
+
+/-- A result or thrown exception of an expected invocation is the actual one's, with the fault relocated. -/
+theorem invoke_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
+    (refines : ProgramRefines expected actual maps) {fuel method : Nat} {args : List Value} {m : Memory}
+    {outcome : Except LocatedFault (Memory × List Value)}
+    (h : invoke expected fuel method args m = outcome) (transported : Transported outcome) :
+    invoke actual fuel method args m = outcome.mapError (·.relocate maps) := by
+  unfold invoke at h ⊢
+  cases fetched : expected[method]? with
+  | none =>
+    simp only [fetched] at h
+    subst h
+    obtain ⟨_, thrown⟩ := transported
+    cases thrown
+  | some body =>
+    obtain ⟨target, found, refined⟩ := refines.method method body fetched
+    simp only [fetched, found, enterFrame_congr refined, bind, Except.bind, Except.mapError] at h ⊢
+    cases checkedArgs : args.mapM (checkedValue m) with
+    | error _ =>
+      simp only [checkedArgs] at h ⊢
+      subst h
+      simp only [LocatedFault.relocate, refined.entry]
+    | ok checked =>
+      simp only [checkedArgs] at h ⊢
+      cases entered : enterFrame body checked m with
+      | error _ =>
+        simp only [entered] at h ⊢
+        subst h
+        simp only [LocatedFault.relocate, refined.entry]
+      | ok setup =>
+        simp only [entered] at h ⊢
+        have ran := run_outcome_refines refines fuel method 0 _ setup.1 [] setup.2 outcome h transported
+        rw [refined.entry] at ran
+        exact ran
 
 /-- A successful expected invocation is the actual invocation with the same fuel and result. -/
 theorem invoke_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
     (refines : ProgramRefines expected actual maps) {fuel method : Nat} {args : List Value} {m : Memory}
     {result : Memory × List Value} (h : invoke expected fuel method args m = .ok result) :
-    invoke actual fuel method args m = .ok result := by
-  unfold invoke at h ⊢
-  cases fetched : expected[method]? with
-  | none => simp only [fetched] at h; cases h
-  | some body =>
-    obtain ⟨target, found, refined⟩ := refines.method method body fetched
-    simp only [fetched, found, enterFrame_congr refined, bind, Except.bind, Except.mapError] at h ⊢
-    cases checkedArgs : args.mapM (checkedValue m) with
-    | error _ => simp only [checkedArgs] at h; cases h
-    | ok checked =>
-      simp only [checkedArgs] at h ⊢
-      cases entered : enterFrame body checked m with
-      | error _ => simp only [entered] at h; cases h
-      | ok setup =>
-        simp only [entered] at h ⊢
-        have ran := run_refines refines fuel method 0 _ setup.1 [] setup.2 result h
-        rw [refined.entry] at ran
-        exact ran
+    invoke actual fuel method args m = .ok result :=
+  invoke_outcome_refines refines h trivial
+
+/-- An expected invocation that throws `exception` throws it in the actual one, at the relocated pc. -/
+theorem invoke_raise_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
+    (refines : ProgramRefines expected actual maps) {fuel method : Nat} {args : List Value} {m : Memory}
+    {fault : LocatedFault} {exception : String}
+    (h : invoke expected fuel method args m = .error fault) (thrown : fault.fault = .thrown exception) :
+    invoke actual fuel method args m = .error (fault.relocate maps) :=
+  invoke_outcome_refines refines h ⟨exception, thrown⟩
 
 
 theorem LiveState.of_descriptors {expected actual : CIL.Program}
@@ -367,6 +463,16 @@ theorem _root_.CIL.MethodEmbeds.invoke {program : CIL.Program} {index : Nat} {ex
     CIL.Safety.invoke program fuel method args m = .ok result := by
   obtain ⟨_, refines⟩ := embeds.refines
   exact invoke_refines refines h
+
+/-- An expected throw is `program`'s, at the pc the map assigns in method `index` and unchanged elsewhere. -/
+theorem _root_.CIL.Embeds.invoke_raise {program : CIL.Program} {index : Nat} {expected target : CIL.Method}
+    {map : List Nat} (found : program[index]? = some target) (embeds : Embeds expected target map)
+    {fuel method : Nat} {args : List Value} {m : Memory} {fault : LocatedFault} {exception : String}
+    (h : CIL.Safety.invoke (program.set index expected) fuel method args m = .error fault)
+    (thrown : fault.fault = .thrown exception) :
+    CIL.Safety.invoke program fuel method args m =
+      .error (fault.relocate fun j => if j = index then rename map target.code.length else id) :=
+  invoke_raise_refines ((ProgramRefines.refl program).set found embeds) h thrown
 
 theorem _root_.CIL.MethodEmbeds.certificate {program : CIL.Program} {index : Nat} {expected : CIL.Method}
     (embeds : MethodEmbeds program index expected) {method : Nat} {args : List Value} {initial : Memory}
