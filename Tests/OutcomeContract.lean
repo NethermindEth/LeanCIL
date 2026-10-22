@@ -34,29 +34,32 @@ bind_callee percent percentBody := "System.UInt64 Outcomes.Calls::Percent(System
 bind_call strictSite := strict from rootBody
 bind_call percentSite := percent from strictBody
 
-def percentContract : OutcomeContract CIL.W64 where
+def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
+  results out := [.scalar (.i64 out)]
   pre _ _ := True
   footprint _ := []
-  post v _ _ values := values = [.scalar (.i64 v)]
+  post v _ _ out := out = v
   raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
 
 def strictRaises (v : CIL.W64) : Option String :=
   if v ≤ 100 then if v = 0 then some "System.ArgumentException" else none
   else some "System.ArgumentOutOfRangeException"
 
-def strictContract : OutcomeContract CIL.W64 where
+def strictContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
+  results out := [.scalar (.i64 out)]
   pre _ _ := True
   footprint _ := []
-  post v _ _ values := values = [.scalar (.i64 v)]
+  post v _ _ out := out = v
   raises v _ := strictRaises v
 
-def rootContract : OutcomeContract CIL.W64 where
+def rootContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
+  results out := [.scalar (.i64 out)]
   pre _ _ := True
   footprint _ := []
-  post v _ _ values := values = [.scalar (.i64 (v + 1))]
+  post v _ _ out := out = v + 1
   raises v _ := strictRaises v
 
 theorem percent_holds : percentContract.Holds Extracted.program percent := by
@@ -64,7 +67,7 @@ theorem percent_holds : percentContract.Holds Extracted.program percent := by
   by_cases within : v ≤ 100
   · have bound : v ≤ 100#64 := within
     simp only [percentContract, within, ite_true]
-    refine ⟨10, m, _, ?_, Confined.refl _ m, rfl⟩
+    refine ⟨10, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
     cil_checked_steps [bound]
   · have bound : ¬ v ≤ 100#64 := within
     simp only [percentContract, within, ite_false]
@@ -83,18 +86,20 @@ theorem strict_holds (percentHolds : percentContract.Holds Extracted.program per
       cil_outcome_call percentHolds 0 at percentSite []
       · trivial
       · simp only [percentContract, within, ite_true]
-      rintro m1 _ - - rfl
-      have truth : CIL.truth (.i64 0#64) = some false := rfl
-      cil_raise_steps [truth]
+      rintro m1 _ - - ⟨_, rfl, rfl⟩
+      dsimp only [percentContract]
+      cil_raise_steps [CIL.truth]
     · simp only [strictContract, strictRaises, within, zero, ite_true, ite_false]
       cil_contract_steps []
       cil_outcome_call percentHolds v at percentSite []
       · trivial
       · simp only [percentContract, within, ite_true]
-      rintro m1 _ - confined rfl
+      rintro m1 _ - confined ⟨out, rfl, same⟩
+      subst out
+      dsimp only [percentContract]
       have truth : CIL.truth (.i64 v) = some true := by simp [CIL.truth]; exact zero
       cil_contract_steps [truth]
-      exact ⟨confined, rfl⟩
+      exact ⟨confined, _, rfl, rfl⟩
   · simp only [strictContract, strictRaises, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise percentHolds v at percentSite []
@@ -117,9 +122,11 @@ theorem root_holds (strictHolds : strictContract.Holds Extracted.program strict)
     cil_outcome_call strictHolds v at strictSite []
     · trivial
     · exact raised
-    rintro m1 _ - confined rfl
+    rintro m1 _ - confined ⟨out, rfl, same⟩
+    subst out
+    dsimp only [strictContract]
     cil_contract_steps []
-    exact ⟨confined, rfl⟩
+    exact ⟨confined, _, rfl, rfl⟩
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds (strict_holds percent_holds)
 

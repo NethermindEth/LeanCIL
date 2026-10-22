@@ -78,7 +78,7 @@ theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   dsimp only [mixContract]
   have same : x + x + x + y = x * 3 + y := by bv_omega
-  refine ⟨16, m, _, ?_, Confined.refl _ m, rfl⟩
+  refine ⟨16, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   rw [← same]
   cil_checked_steps
 
@@ -97,7 +97,7 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨12, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), rfl, readback⟩
+  refine ⟨12, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
@@ -116,10 +116,12 @@ def empty : Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, 
 /-- This build returns `Mix(0, 0) = 1`; the contract requires `0 * 3 + 0`. -/
 theorem correctness : ¬ mixContract.Holds Extracted.program mix := by
   intro holds
-  obtain ⟨_, final, values, ran, -, wrong⟩ := holds (0, 0) empty trivial
+  obtain ⟨_, final, values, ran, -, out, encoded, wrong⟩ := holds (0, 0) empty trivial
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 mix
     (mixContract.args (0, 0)) empty = .ok _))
-  simp [mixContract] at wrong
+  simp only [mixContract] at encoded wrong
+  subst wrong
+  simp at encoded
 
 """;
 const string RefuteAliasing = """
@@ -133,7 +135,7 @@ def aliased : Memory := {
 /-- The contract permits `res` to alias `b`; this build then writes `2`, not `1 + 2`. -/
 theorem correctness : ¬ addContract.Holds Extracted.program addTo := by
   intro holds
-  obtain ⟨_, final, values, ran, -, -, wrong⟩ := holds ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 8⟩, 1, 2⟩ aliased ⟨rfl, rfl, rfl⟩
+  obtain ⟨_, final, values, ran, -, _, -, -, wrong⟩ := holds ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 8⟩, 1, 2⟩ aliased ⟨rfl, rfl, rfl⟩
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 addTo
     (addContract.args ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 8⟩, 1, 2⟩) aliased = .ok _))
   have observed : (Except.ok (numberBytes (1 + 2 : CIL.W64).toNat 8) : Checked (List (BitVec 8))) =
