@@ -18,11 +18,11 @@ structure RawField where
 structure RawLayout where
   identity : String := ""
   explicit : Bool
-  /-- Auto layout; CoreCLR keeps declaration order only among fields of equal width. -/
-  auto : Bool := false
   packing : Int
   declaredSize : Int
   fields : List RawField
+  /-- Auto layout; CoreCLR keeps declaration order only among fields of equal width. -/
+  auto : Bool := false
   deriving DecidableEq, Repr
 
 structure ComputedLayout where
