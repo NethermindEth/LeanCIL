@@ -300,10 +300,10 @@ theorem OutcomeContract.Holds.weaken {Input Output : Type} {internal exported : 
 
 /-- Step a `Raises` or `RunRaises` goal through checked instructions to a `throw`,
     leaving each `.call` for `cil_outcome_raise`. -/
-syntax "cil_raise_steps" "[" term,* "]" : tactic
+syntax "cil_raise_steps_normalized" "[" term,* "]" : tactic
 
 macro_rules
-  | `(tactic| cil_raise_steps [$facts:term,*]) =>
+  | `(tactic| cil_raise_steps_normalized [$facts:term,*]) =>
   `(tactic| (
     try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
     try (cil_strict refine CIL.Safety.raises_of_run
@@ -318,7 +318,16 @@ macro_rules
     | (cil_strict refine CIL.Safety.run_next_raises
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step [$[$facts:term],*]) ?_)))
+        (by cil_checked_step_normalized [$[$facts:term],*]) ?_)))
+
+syntax "cil_raise_steps" "[" term,* "]" : tactic
+
+open Lean Elab Tactic in
+elab_rules : tactic
+  | `(tactic| cil_raise_steps [$facts:term,*]) => do
+    let config ← `(Lean.Parser.Tactic.optConfig|)
+    let prepared ← normaliseStepFacts config facts.getElems
+    withMainContext <| evalTactic (← `(tactic| cil_raise_steps_normalized [$[$prepared:term],*]))
 
 /-- At a `bind_call` site, continue past a callee whose contract names no exception for this
     input, in a returning or a raising caller goal, leaving the precondition, the `raises`
