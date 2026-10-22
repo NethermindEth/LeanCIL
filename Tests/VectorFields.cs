@@ -94,7 +94,7 @@ foreach ((string name, string holder, int width, bool write) in new[]
     if (holder != "Words256")
     {
         claims.Add($"Extracted.layout0.size = {size}");
-        claims.Add($"Extracted.method0.code.contains (.fieldAt {offset} {width}) = true");
+        claims.Add($"Extracted.method0.code.any (fun op => match op with | .fieldAt actualOffset actualWidth _ => actualOffset == {offset} && actualWidth == {width} | _ => false) = true");
     }
     Prove(name, claims, definitions);
 
