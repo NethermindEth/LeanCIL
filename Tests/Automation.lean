@@ -37,6 +37,14 @@ theorem checked_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) 
 
 #print axioms checked_branch
 
+-- An error logged earlier in the same proof must not reject a later valid candidate.
+example : True := by
+  run_tac do
+    let earlier ← Lean.Core.getMessageLog
+    Lean.logError "earlier failure"
+    Lean.Elab.Tactic.evalTactic (← `(tactic| cil_strict exact trivial))
+    Lean.Core.setMessageLog earlier
+
 @[cil_code] def arithmeticMethod : CIL.Method := {
   code := [.arg 0, .arg 1, .const32 1, .shl, .add, .const32 0, .gtu, .ret]
   locals := [], returnsValue := true }
