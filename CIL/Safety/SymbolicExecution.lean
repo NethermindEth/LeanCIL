@@ -1,5 +1,6 @@
 import CIL.SymbolicExecution
 import CIL.Safety.StepComposition
+import CIL.Safety.ValueSteps
 import CIL.Safety.CallComposition
 
 namespace CIL.Safety
@@ -78,16 +79,14 @@ macro "cil_checked_step " "[" facts:term,* "]" : tactic => do
     try simp only [cil_code, Nat.reduceAdd]
     first
     | $reflexivity:tactic
-    | (
-      first
-      | rw [CIL.Safety.step_argument_eq]
-      | rw [CIL.Safety.step_return_eq]
-      | rw [CIL.Safety.step_brzero_i32_eq]
-      | rw [CIL.Safety.step_brzero_i64_eq]
-      | rw [CIL.Safety.step_brnonzero_i32_eq]
-      | rw [CIL.Safety.step_brnonzero_i64_eq]
-      | skip
-      all_goals cil_fact_simp [CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+    -- An equation is an exact rewrite of `step`, so only an op without one falls back to unfolding the dispatcher.
+    | (simp only [cil_step, CIL.Safety.instructionStep]
+       try cil_fact_simp [CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
+         Pure.pure, Except.pure] [$[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl))
+    | (fail_if_success simp only [cil_step]
+       cil_fact_simp [CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
         CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step]
         [$[$facts:term],*] <;> (repeat constructor) <;> rfl)))
 
