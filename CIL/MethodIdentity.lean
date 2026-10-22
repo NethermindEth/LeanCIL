@@ -28,11 +28,17 @@ partial def strings (list : Expr) (found : Array String := #[]) : MetaM (Array S
 def methodName (signature : String) : String :=
   (((signature.splitOn "::").getLastD signature).splitOn "(").headD ""
 
+/-- The constant `name` refers to here, preferring the innermost namespace: batch
+verification places each extraction in its own namespace. -/
+def visible (name : Name) : MetaM Name := do
+  let found := (← resolveGlobalName name).filter (·.2.isEmpty) |>.map (·.1)
+  let some innermost := found.foldl (fun best n => if best.all (·.getNumParts < n.getNumParts) then some n else best) none
+    | throwError "{name} is not in scope; import the extraction"
+  return innermost
+
 /-- The index of the method whose signature in `table` is exactly `signature`. -/
 def resolveIn (tableName : Name) (signature : String) : MetaM Nat := do
-  unless (← getEnv).contains tableName do
-    throwError "{tableName} is not in scope; import the extraction"
-  let table ← strings (mkConst tableName)
+  let table ← strings (mkConst (← visible tableName))
   let indices := List.range table.size
   let listing (shown : List Nat) := "\n".intercalate (shown.map fun i => s!"  [{i}] {table[i]!}")
   match indices.filter (table[·]! == signature) with
@@ -103,7 +109,7 @@ elab_rules : command
       let parentBody ← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method)))
       let sites ← calls parentBody
       let some site := sites.find? (·.2.1 == method) | do
-        let table ← strings (mkConst `Extracted.signatures)
+        let table ← strings (mkConst (← visible `Extracted.signatures))
         let called := sites.toList.map (·.2.1) |>.eraseDups
         throwError "{parent} does not call\n  {signature.getString}\nit calls:\n{"\n".intercalate (called.map fun i => s!"  [{i}] {table[i]?.getD "?"}")}"
       return (method, site)
