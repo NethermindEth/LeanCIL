@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include LeanDiagnostics.cs
+#:include FailureReports.cs
 
 static void Require(bool condition, string message, string? text = null)
 {
@@ -71,3 +72,44 @@ Require(bounded.Contains($"... {501 - LeanDiagnostics.MaxLines} more lines in th
 
 Require(LeanDiagnostics.Summarize("Command failed (1): dotnet build\nerror CS1002: ; expected\n") is null, "non-Lean output has no summary");
 Console.WriteLine("PASS Lean diagnostic summaries keep located error blocks of failing modules and stay bounded");
+
+var package = Path.GetFullPath("package");
+var proof = Path.Combine(package, "Proofs", "Mix.lean");
+var output = Path.GetFullPath("artifacts/Mix");
+FailureReports.Report Classify(string stage, string text, string[]? hidden = null, string? root = null) =>
+    FailureReports.Classify(stage, text, hidden, "ExampleProof.correctness", proof, output, root ?? package);
+var goals = Classify("proof checking", transcript, ["LeanCILProof1"]);
+Require(goals.kind == FailureReports.ElaborationError && goals.diagnostics.Length == 4 && goals.diagnostics[0].module == "Client.Shared" &&
+    goals.file == Path.Combine(package, "Client", "Shared.lean") && goals.line == 7 && goals.column == 43, "first error leads and keeps its package path");
+Require(goals.diagnostics[2] is { kind: FailureReports.ElaborationError, module: "Proofs.Mix", line: 5, column: 2 } &&
+    goals.diagnostics[2].file == proof && goals.message == transcript, "workspace proof copy maps to the request's proof, message verbatim");
+var unsolved = Classify("proof checking", "error: LeanCILProof.lean:12:3: unsolved goals\nx : W64\n⊢ x * 3 + 1 = x * 3\n");
+Require(unsolved is { kind: FailureReports.UnsolvedGoal, line: 12, column: 3, module: "Proofs.Mix" } && unsolved.file == proof &&
+    unsolved.diagnostics[0].message == "unsolved goals\nx : W64\n⊢ x * 3 + 1 = x * 3", "unsolved goal and its location");
+var heartbeats = Classify("proof checking", "error: LeanCILProof.lean:8:0: (deterministic) timeout at `whnf`, maximum number of heartbeats (1) has been reached\n");
+Require(heartbeats is { kind: FailureReports.ResourceLimit, resource: "heartbeats", line: 8 }, "heartbeat limit");
+var kernel = Classify("kernel replay", "error: LeanCILProof.lean:8:0: (kernel) deterministic timeout\n");
+Require(kernel is { kind: FailureReports.ResourceLimit, resource: "heartbeats" }, "kernel heartbeat limit precedes the stage");
+Require(Classify("extraction certificate audit", "error: ExtractionAudit.lean:3:0: unsolved goals\n").kind == FailureReports.UnsupportedExtraction,
+    "a rejected extraction certificate is unsupported extraction, not a proof goal");
+Require(Classify("kernel replay", "Kernel replay rejected Proofs.Mix:\n(kernel) declaration type mismatch").kind == FailureReports.ReplayOrAuditRejected &&
+    Classify("theorem audit", "Unapproved proof axioms: sorryAx").kind == FailureReports.ReplayOrAuditRejected, "replay and axiom audit");
+var stale = Classify("extraction integrity", "Command failed (1): dotnet leancil check out\nInvalid: Stale or mismatched verification artifact: assembly has changed since extraction.\n  Stage: extraction integrity\n");
+var unsupported = Classify("extraction integrity", "Command failed (1): dotnet leancil check out\nInvalid: Unsupported opcode\n  Stage: metadata and CIL validation\n");
+Require(stale is { kind: FailureReports.StaleInput, file: null, line: null } && unsupported.kind == FailureReports.UnsupportedExtraction,
+    "nested check stage separates stale artifacts from unsupported extraction");
+Require(Classify("theorem audit", "Inputs changed during consumer verification").kind == FailureReports.StaleInput &&
+    Classify("proof selection", "Proof file not found: P.lean").kind == FailureReports.InvalidRequest &&
+    Classify("Lean library build", "Required command not found: lake").kind == FailureReports.Unclassified, "stage fallbacks");
+var unrooted = FailureReports.Classify("proof checking", Path.Combine(output, "proof-0123", "Proof.lean") + ":4:2: error: unsolved goals\n⊢ False\n",
+    null, "ExampleProof.correctness", proof, output, null);
+Require(unrooted is { kind: FailureReports.UnsolvedGoal, module: "Proof", line: 4, column: 2 } && unrooted.file == proof &&
+    unrooted.rerun.SequenceEqual(["leancil", "verify", output, "--proof", proof, "--theorem", "ExampleProof.correctness"]), "unrooted proof copy and rerun");
+const string Audit = "ExampleProof.correctness : ¬mixContract.Holds Extracted.program mix\n'ExampleProof.correctness' depends on axioms: [propext]\n";
+var refuted = FailureReports.Refuted(Audit + "LeanCIL refutes: CIL.Safety.MethodContract.Holds at 21:0\n", "ExampleProof.correctness", proof, output, package);
+Require(refuted is { kind: FailureReports.Refutation, line: 21, column: 0, stage: "theorem audit" } && refuted.file == proof &&
+    refuted.rerun[^2..].SequenceEqual(["--proof-root", package]), "verified refutation");
+// The marker comes from the Lean audit only; statement text never makes a refutation.
+Require(FailureReports.Refuted(Audit, "ExampleProof.correctness", proof, output, package) is null &&
+    unsolved.kind != FailureReports.Refutation, "an unsolved goal or a negated statement alone is never a refutation");
+Console.WriteLine("PASS failure reports classify stages and Lean diagnostics and map locations to the user's files");

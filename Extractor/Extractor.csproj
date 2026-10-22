@@ -21,6 +21,7 @@
     <Compile Include="../scripts/Verification.cs" Link="Verification.cs" />
     <Compile Include="../scripts/ConsumerVerification.cs" Link="ConsumerVerification.cs" />
     <Compile Include="../scripts/LeanDiagnostics.cs" Link="LeanDiagnostics.cs" />
+    <Compile Include="../scripts/FailureReports.cs" Link="FailureReports.cs" />
     <Content Include="../CIL/**/*.lean;../Examples/**/*.lean;../Tests/**/*.lean;../CIL.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
       <Link>verification/%(Identity)</Link>
       <TargetPath>verification/$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/..', '%(FullPath)'))</TargetPath>

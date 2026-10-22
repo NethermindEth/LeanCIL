@@ -842,6 +842,8 @@ unsafe def main (args : List String) : IO Unit := do
         public Exception? Error;
         public bool Rejected;
         public string? Detail;
+        // Proof modules of other requests in the workspace, omitted from this request's diagnostics.
+        public string[]? Hidden;
     }
 
     Report VerifyConsumer(string assembly, string proof, string output, string theorem, string root,
@@ -1157,6 +1159,7 @@ unsafe def main (args : List String) : IO Unit := do
                 {
                     outcomes[i].Stage = "proof checking";
                     outcomes[i].Detail = buildFailure!.Message;
+                    if (members.Length > 1) outcomes[i].Hidden = names.Where((_, m) => members[m] != i).ToArray();
                     outcomes[i].Rejected = true;
                 }
             }
@@ -1243,7 +1246,7 @@ unsafe def main (args : List String) : IO Unit := do
                     var theorem = requests[i].Theorem;
                     var module = names[Array.IndexOf(members, i)];
                     var auditPath = Path.Combine(session, "LeanCILAudit" + module["LeanCILProof".Length..] + ".lean");
-                    File.WriteAllText(auditPath, $"import {module}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
+                    File.WriteAllText(auditPath, $"import {module}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + RefutationAudit(theorem));
                     var audit = Run([LeanExecutable, auditPath], session, leanPath, environment: LeanEnvironment);
                     var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
                     if (matches.Count > 1 || (matches.Count == 0 && !audit.Contains($"'{theorem}' does not depend on any axioms")))

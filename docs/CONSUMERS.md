@@ -126,13 +126,15 @@ process importing only its own proof module, and it fails only for build or
 replay failures in its own import closure or in the shared extraction
 certificate. A request with `"expect": "rejected"` passes only when its proof
 fails during proof checking with unchanged inputs and an intact extraction; it
-stops there, never writes a certificate, and the stale `verified.json` is
-removed. As in sequential runs, only the last request for an output writes its
+stops there, never writes a certificate, removes the stale `verified.json`
+and writes `failed.json` describing the rejection. As in sequential runs, only the last request for an output writes its
 `verification.json` and `verified.json`. Each request prints `PASS verified`,
 `PASS rejected` or `FAIL` with its stage and diagnostics as soon as its
 outcome is final (an unchanged-result cache hit, or the end of its workspace),
 so lines follow completion order; `--results` writes the outcomes as JSON in
-request order. The exit code is 0 only when every request met its
+request order. Each outcome's `failure` field and each failed or rejected
+output's `failed.json` hold the classified, located failure report described in
+[Failure reports](CLI.md#failure-reports). The exit code is 0 only when every request met its
 expectation. With `LEANCIL_EXPORT_CONSUMER_SUPPORT` set, a batch writes one
 manifest: the union of the extraction-independent support of every workspace
 that passed replay, audits and stability checks. A module whose bytes differ
