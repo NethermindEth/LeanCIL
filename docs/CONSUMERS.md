@@ -30,6 +30,64 @@ new or changed consumer and dependency modules undergo kernel replay, and
 the selected theorem's transitive axioms are audited with the same policy as
 single-file verification. `verification.json` remembers the package root.
 
+## Proof-authoring workspace
+
+Materialize the same source package and selected extraction for editor tooling:
+
+```sh
+leancil workspace path/to/Nethermind.Int256.dll 'Type::Method(parameter-types)' --profile arm64 --proof proofs/Method.lean --proof-root .
+```
+
+Use the exact assembly and method selector for the consumer build. The command
+requires an explicit profile and proof. It finds the nearest Lake package when
+`--proof-root` is omitted. Run `lake update` in that source package first. The
+same pinned Git dependencies and framework/toolchain checks as consumer
+verification apply. `--assembly` and `--assume-initialized` have the extraction
+command's meaning.
+
+The default output is `.work/leancil/<request-key>` under the source package.
+Use `--output directory` to choose an external directory, or one under the
+package's excluded `.work`, `artifacts`, `generated`, `bin` or `obj` tree. The
+output must not already contain unrelated files.
+
+Open the printed workspace directory with the Lean language server. Edit
+`LeanCILProofWorkspace.lean`, or check it with:
+
+```sh
+lake build +LeanCILProofWorkspace:olean
+```
+
+The workspace copies source dependencies and configuration. It supplies
+`Extracted` and, when the assembly has a matching portable PDB, `ExtractedSymbols`
+as Lake targets. It does not import consumer build caches or certified artifacts.
+The editor proof starts with exactly the selected proof's bytes. Editor changes
+stay separate from the recorded generated/support sources.
+
+Re-run the same workspace command before checking after an input change.
+It hashes the assembly, PDB presence and bytes, extractor, profile configuration,
+consumer sources, dependency sources and pinned revisions. It also checks the
+recorded generated modules, framework, Lake configuration and toolchain pin in
+the workspace. Changed inputs or managed files cause an explicit rejection;
+select a new `--output` directory after preserving proof edits. Reopening an
+unchanged workspace preserves the edited proof and Lake build outputs. Editor
+tooling itself does not watch or invalidate an external assembly automatically.
+
+**Editor checking is not a certificate.** The command writes no `verified.json`,
+trusted support manifest or verification receipt. Copy only the edited proof
+source back to the original consumer proof path, then run ordinary verification:
+
+```sh
+leancil extract path/to/Nethermind.Int256.dll 'Type::Method(parameter-types)' artifacts/Method arm64
+leancil verify artifacts/Method --proof proofs/Method.lean --proof-root . --theorem MyProof.correctness --fresh
+```
+
+Keep workspace generated files, caches and manifests out of that source package.
+The ordinary verifier still requires extraction identity checks, its fresh source
+package, exact theorem and certificate audits, and independent kernel replay.
+The workspace root itself is not a supported `--proof-root` because it contains
+reserved generated modules. The CI workspace fixture uses a four-limb struct
+named `UInt256`; it does not claim to test every external UInt256 implementation.
+
 ## Local support cache
 
 Successful runs locally certify extraction-independent support artifacts for reuse

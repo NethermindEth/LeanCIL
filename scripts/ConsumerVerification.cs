@@ -755,9 +755,12 @@ unsafe def main (args : List String) : IO Unit := do
 
     sealed record ConsumerSession(string FrameworkCopy, Dictionary<string, string> Copied);
 
+    enum ConsumerSessionPurpose { Verification, Editor }
+
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
-        SortedDictionary<string, string> snapshot, string certifiedLibrary, string extraction,
-        IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols)
+        SortedDictionary<string, string> snapshot, string? certifiedLibrary, string extraction,
+        IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
+        ConsumerSessionPurpose purpose = ConsumerSessionPurpose.Verification)
     {
         foreach (var dependency in dependencies)
         {
@@ -780,16 +783,23 @@ unsafe def main (args : List String) : IO Unit := do
         // certified bytes (including line endings) so Lake can reuse its traces.
         foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories).Append(At("CIL.lean")))
             File.Copy(path, Path.Combine(frameworkCopy, Path.GetRelativePath(Root, path)), true);
-        var baseBuild = Path.Combine(certifiedLibrary, ".lake/build");
-        var frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
-        foreach (var path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
+        if (purpose == ConsumerSessionPurpose.Verification && certifiedLibrary is null)
+            throw new InvalidDataException("Verification requires a certified framework library.");
+        if (purpose == ConsumerSessionPurpose.Editor && certifiedLibrary is not null)
+            throw new InvalidDataException("Editor workspaces cannot receive certified framework artifacts.");
+        if (purpose == ConsumerSessionPurpose.Verification)
         {
-            var relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
-            if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
-                .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
-            var destination = Path.Combine(frameworkBuild, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(path, destination, true);
+            var baseBuild = Path.Combine(certifiedLibrary!, ".lake/build");
+            var frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
+            foreach (var path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
+                if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
+                    .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
+                var destination = Path.Combine(frameworkBuild, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(path, destination, true);
+            }
         }
         // Give Lake a real generated-module target before building consumer imports.
         if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))

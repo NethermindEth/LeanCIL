@@ -225,3 +225,10 @@ elaborated statement is `Not` applied to a contract's `Holds` is, as reported by
 the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
+
+## Editor workspace
+
+`leancil workspace <assembly> <method> --profile <profile> --proof <file>`
+creates a source workspace for Lake and the Lean language server. See
+[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for package
+requirements, stale-input rejection and the separate certification step.
