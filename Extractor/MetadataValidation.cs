@@ -274,7 +274,12 @@ internal static class MetadataValidation
                     if (imports is null)
                         throw Call("External managed dependency", reference, method, instruction,
                             $"Next: supply --import {ScopeName(reference.DeclaringType.Scope)}.leancil.contracts.");
-                    imports.Admit(reference, instruction, profile);
+                    try { imports.Admit(reference, instruction, profile); }
+                    catch (InvalidDataException error) when (Rejections.Of(error) is null)
+                    {
+                        throw Call("Rejected external call", reference, method, instruction,
+                            $"Callee scope: {ScopeName(reference.DeclaringType.Scope)}\n  {error.Message}", error);
+                    }
                     return;
                 }
                 if (reference is GenericInstanceMethod generic)

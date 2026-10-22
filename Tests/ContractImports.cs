@@ -230,6 +230,9 @@ void RejectUnrelatedTheorem(string proof, params string[] options)
 string unrelated = Path.Combine(directory, "Unrelated.lean");
 File.WriteAllText(unrelated, "namespace ExampleProof\ntheorem correctness : True := by trivial\nend ExampleProof\n");
 RejectUnrelatedTheorem(unrelated);
+contract["interfaceModules"]![0]!["name"] = "ConsumerImportedContract";
+Save();
+Run(Command());
 string package = Path.Combine(directory, "UnrelatedConsumer");
 Directory.CreateDirectory(Path.Combine(package, "Client"));
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
@@ -241,6 +244,8 @@ File.Copy(unrelated, consumerProof, true);
 Run(["lake", "update"], package);
 RejectUnrelatedTheorem(consumerProof, "--proof-root", package);
 Console.WriteLine("PASS ordinary and consumer import audits reject unrelated theorems without verification reports");
+Reset();
+Run(Command());
 File.AppendAllText(Path.Combine(output, "ImportFixture.lean"), "\n");
 Reject([.. cli, "check", output], "Stale or mismatched contract interface source");
 Run(Command());

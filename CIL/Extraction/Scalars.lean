@@ -21,7 +21,7 @@ def scalarType : TypeExpr → ScalarKind
 
 private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .native]
 
-private def homeCompatible (value home : ScalarKind) : Bool :=
+private def storageCompatible (value home : ScalarKind) : Bool :=
   value == home || value ∈ [.word64, .native] && home ∈ [.word64, .native]
 
 private def scalarBinary : Nat → Bool
@@ -230,6 +230,22 @@ private def callResult (site : CallSite) : ScalarKind :=
   | .managed _ => scalarType site.returnType
   | .external identity => externalResult site identity
 
+private def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
+  let runtime := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+  opcode == 115 && site.name == ".ctor" && site.hasThis && !site.returnsValue &&
+    site.typeArguments.isEmpty && site.parameterCount == 2 && site.returnType == .void &&
+    site.declaringType == .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte") &&
+    site.parameterTypes == [.pointer .void, .atom runtime "System.Int32"] &&
+    site.target == .external (runtime ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)")
+
+private def spanCreateMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
+  let modeled := match instruction.operand with
+    | .call site => byteSpanConstructor instruction.opcode site
+    | _ => false
+  match emitted with
+  | .memory .spanCreate => modeled
+  | _ => !modeled
+
 private def argumentKind (raw : RawMethod) (index : Nat) : Option ScalarKind :=
   if raw.hasThis && index == 0 then some .reference
   else scalarType <$> raw.parameters[index - (if raw.hasThis then 1 else 0)]?
@@ -273,18 +289,18 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let index ← localIndex instruction
     let type ← raw.locals[index]?
     let value :: tail := stack | none
-    if homeCompatible value (scalarType type) then return tail else none
+    if storageCompatible value (scalarType type) then return tail else none
   if let some (.store index) := argumentOperation instruction then
     let expected ← argumentKind raw index
     let value :: tail := stack | none
-    if homeCompatible value expected then return tail else none
+    if storageCompatible value expected then return tail else none
   if opcode == 37 then
     let value :: tail := stack | none
     return value :: value :: tail
   if opcode == 40 || opcode == 115 then
     let .call site := instruction.operand | none
-    let expected := site.parameterTypes.reverse.map scalarType ++
-      (if opcode == 40 && site.hasThis then [.reference] else [])
+    let expected := if byteSpanConstructor opcode site then [.word32, .reference] else
+      site.parameterTypes.reverse.map scalarType ++ (if opcode == 40 && site.hasThis then [.reference] else [])
     let pops := expected.length
     if !callParametersMatch site || pops > stack.length || stack.take pops != expected ||
         site.returnsValue != (site.returnType != .void) then none else
@@ -293,7 +309,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     if raw.returnType == .void then
       if stack.isEmpty then return [] else none
     else match stack with
-      | [value] => if value == scalarType raw.returnType then return [] else none
+      | [value] => if storageCompatible value (scalarType raw.returnType) then return [] else none
       | _ => none
   let (pops, pushes) ← rawStackEffect opcode
   if pops > stack.length then none else
@@ -318,7 +334,7 @@ private def checkScalarSite (raw : RawMethod) (features : FeatureCertificate) (c
   | (_, _), none, none, .unsupported _ => true
   | (instruction, pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
-      (!scalarCovered instruction.opcode || scalarOpMatches instruction stack emitted) &&
+      spanCreateMatches instruction emitted && (!scalarCovered instruction.opcode || scalarOpMatches instruction stack emitted) &&
       (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack, featureSuccessors pc instruction feature with
       | some after, some successors =>
