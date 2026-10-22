@@ -789,14 +789,14 @@ unsafe def main (args : List String) : IO Unit := do
             throw new InvalidDataException("Editor workspaces cannot receive certified framework artifacts.");
         if (purpose == ConsumerSessionPurpose.Verification)
         {
-            var baseBuild = Path.Combine(certifiedLibrary!, ".lake/build");
-            var frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
-            foreach (var path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
+            string baseBuild = Path.Combine(certifiedLibrary!, ".lake/build");
+            string frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
+            foreach (string path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
             {
-                var relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
+                string relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
                 if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
                     .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
-                var destination = Path.Combine(frameworkBuild, relative);
+                string destination = Path.Combine(frameworkBuild, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                 File.Copy(path, destination, true);
             }
