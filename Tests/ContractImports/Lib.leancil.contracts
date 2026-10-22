@@ -28,6 +28,7 @@
     "theorem": "PublishedLibrary.certification",
     "statement": "PublishedLibrary.addOne.Holds PublishedLibrary.program 0",
     "statementDigest": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+    "staticIdentities": [],
     "implementationSha256": "IMPLEMENTATION",
     "interfaceDigest": "INTERFACE",
     "closureDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"

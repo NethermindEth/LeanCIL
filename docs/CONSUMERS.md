@@ -258,9 +258,22 @@ not exportable. Contract predicates and their reachable definitions determine th
 closure digest; the name alone does not determine it.
 
 Version 1 supports public or protected static, non-virtual, non-generic exports
-without imports or static sites. It also rejects recorded static-value and
+without imports. RVA static sites are supported. Each certification records the
+exact scoped static identities, and the producer checks their set against the
+generated program in Lean. It rejects recorded static-value and
 initialization assumptions because this sidecar version does not transport them.
 This restriction does not weaken the extractor's admission or profile rules.
+
+Static identities are stable across separate extractions and body-only rebuilds.
+They use the full assembly identity and full field name. `StaticWorldValid`
+describes the fields in its descriptor list and permits other loaded immutable
+fields in the same valid registry. Its `append`, `left`, `right` and `mono` lemmas
+support worlds over the same memory. Append requires disjoint field identities.
+`StaticIdentitiesAbsent` lets an exported first-use contract name only its public
+identity list. It does not describe a field that was already loaded; that case
+needs a content predicate. `linkChecked` in `CIL.Safety.StaticLinking` rejects
+conflicting descriptors and names both fields. The raw `link` API remains a pure
+construction without that check.
 
 The default output is `<assembly-simple-name>.leancil.contracts` next to the DLL.
 Use `--output path.leancil.contracts` to select another path. Publication is atomic

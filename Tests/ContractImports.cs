@@ -341,7 +341,20 @@ File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"), true);
 string consumerProof = Path.Combine(package, "Proof.lean");
 File.Copy(unrelated, consumerProof, true);
 Run(["lake", "update"], package);
-RejectUnrelatedTheorem(consumerProof, "--proof-root", package);
+string consumerTrace = Path.Combine(directory, "unrelated-consumer-trace-" + Guid.NewGuid().ToString("N"));
+string? previousConsumerTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", consumerTrace);
+    RejectUnrelatedTheorem(consumerProof, "--proof-root", package, "--fresh");
+}
+finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousConsumerTrace); }
+JsonElement[] consumerStages = Directory.EnumerateFiles(consumerTrace, "*.jsonl").SelectMany(File.ReadLines)
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+if (!consumerStages.Any(stage => stage.GetProperty("stage").GetString() == "Checking consumer contract interfaces and import assumptions" &&
+    new[] { "+ExtractedImports:olean", "+ConsumerImportedContract:olean" }.All(target =>
+        stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == target))))
+    throw new InvalidOperationException("The caller audit did not build all import modules omitted by the unrelated proof.");
 Console.WriteLine("PASS ordinary and consumer import audits reject unrelated theorems without verification reports");
 Reset();
 Run(Command());

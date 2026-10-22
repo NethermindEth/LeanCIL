@@ -51,7 +51,9 @@ overrides can be supplied again for an explicit recheck.
   `parameterCount`, `hasThis`, `returnsValue`, `visibility`, `contractConstant`,
   `closureDigest`, `profiles`, and `kind` (`method` or `outcome`).
 - `certifications`: records with `identity`, `profile`, `implementationSha256`,
-  `interfaceDigest`, `closureDigest`, `theorem`, `statement`, and `statementDigest`. The selected record must bind the
+  `interfaceDigest`, `closureDigest`, `theorem`, `statement`, `statementDigest`,
+  and `staticIdentities`. Each static entry has a decimal-string `identity`,
+  `assemblyIdentity`, and `fieldName`. The selected record must bind the
   selected export, profile, DLL and interface.
 - `dependencies`: an empty array in version 1.
 - `fullVerificationLocator`: optional provenance metadata. This importer does not
@@ -63,6 +65,12 @@ protected, non-P/Invoke, and non-generic. Instance, constructor, function pointe
 and virtual call sites are rejected. Import signatures must use supported
 parameter and result types with matching assembly-scoped type identities.
 Profiles must name an exact built-in profile; custom profiles are not admitted.
+For an implementation DLL, the selected export must satisfy the closed v1
+producer's admission rules without external initialization assumptions. Its
+reachable static identity set must match the selected certification exactly.
+This checks metadata and serialization; it does not verify the imported theorem.
+Static identities from App and all selected imports are checked together before
+output. A collision reports both scoped field names.
 
 The framework manifest lists `CIL.lean`, all `CIL/**/*.lean`, and `lean-toolchain`
 in ordinal relative-path order. Paths use `/`. Each line is `path=sha256(bytes)`.
@@ -140,3 +148,11 @@ be regenerated to acquire these records.
 
 Run `dotnet run --file scripts/Test.cs -- --suite imports` for the Lib/App
 fixture, conditional caller proof, stale DLL/source checks and rejecting cases.
+
+For transitive imports, each dependency node must have its own independently
+pinned implementation and interface digest. The graph rejects cycles before
+method validation. Each library implementation is checked against its declared
+direct dependencies with separate call slots. Validation compares its actual
+static identity set with its certification record. A supplied library does not
+authorize an undeclared dependency. Application slots contain only calls made
+by the selected application methods.

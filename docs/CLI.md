@@ -243,6 +243,10 @@ library implementation proof source, artifact or full bundle is required.
 
 The sidecar export adds `kind` (`method` or `outcome`). Each selected certification
 record requires `theorem`, `statement` and `statementDigest`. The driver checks
+its required `staticIdentities` list against the selected implementation's
+reachable static fields. Each entry contains `identity`, `assemblyIdentity` and
+`fieldName`. The producer kernel-checks this list against its generated program.
+The driver also checks
 the actual exported contract type and canonical closure. `statementDigest` is the
 publisher's digest of its canonical certification type, not a hash of its pretty
 printed statement. The consumer records this provenance without obtaining the
@@ -253,6 +257,13 @@ A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to
 certification theorem/statement/digest, and deployment obligation. CLI output
 prints the accepted certification and obligation. The caller theorem remains
 conditional on those imported contracts.
+
+`--force-full-verify` freshly checks the selected library implementations and
+discharges those imports in a concrete linked CIL theorem. Repeat
+`--full-artifact Lib=directory` to select relocated copies of the published
+source bundles. Missing or invalid bundles fail without fallback. See
+[Independent imported-library verification](FULL_VERIFICATION.md) for the
+supported source format, checks and remaining trust boundaries.
 
 Reference-only extraction is an authoring input. Verification checks its caller
 proof, then exits with status 1 and an authoring-only diagnostic. It does not

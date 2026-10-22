@@ -2,6 +2,9 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 
+using System.Numerics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -23,7 +26,7 @@ string Project(string name, params string[] references)
 string bRoot = Project("B");
 string aRoot = Project("A", "B");
 string appRoot = Project("App", "A", "B");
-File.WriteAllText(Path.Combine(bRoot, "Library.cs"), "namespace ImportFixture; public static class LibraryB { public static ulong AddOne(ulong value) => value + 1; }\n");
+File.WriteAllText(Path.Combine(bRoot, "Library.cs"), "namespace ImportFixture; public static class LibraryB { public const ulong CertificateMarker = 17; public static ulong AddOne(ulong value) => value + 1; }\n");
 File.WriteAllText(Path.Combine(aRoot, "Library.cs"), "namespace ImportFixture; public static class LibraryA { public static ulong AddOne(ulong value) => LibraryB.AddOne(value); }\n");
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => LibraryA.AddOne(value); public static ulong Direct(ulong value) => LibraryB.AddOne(value); }\n");
 Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
@@ -164,6 +167,31 @@ wrong["dependencies"]![0]!["interfaceDigest"] = new string('0', 64);
 Save(aSidecar, wrong);
 Reject("Contract dependency interface digest mismatch: " + originalB["assemblyIdentity"]!.GetValue<string>());
 Save(aSidecar, originalA);
+JsonObject undeclared = originalA.DeepClone().AsObject();
+undeclared["dependencies"] = new JsonArray();
+Save(aSidecar, undeclared);
+Reject("Undeclared contract dependency: " + originalB["assemblyIdentity"]!.GetValue<string>());
+Save(aSidecar, originalA);
+string markerAssembly = originalB["assemblyIdentity"]!.GetValue<string>();
+string markerField = "System.UInt64 ImportFixture.LibraryB::CertificateMarker";
+using MemoryStream encodedMarker = new();
+using (BinaryWriter writer = new(encodedMarker, Encoding.UTF8, leaveOpen: true))
+    foreach (string part in new[] { markerAssembly, markerField })
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(part);
+        writer.Write(bytes.Length);
+        writer.Write(bytes);
+    }
+string markerIdentity = new BigInteger(SHA256.HashData(encodedMarker.ToArray()), isUnsigned: true, isBigEndian: true)
+    .ToString(System.Globalization.CultureInfo.InvariantCulture);
+JsonObject falseStatics = originalB.DeepClone().AsObject();
+falseStatics["certifications"]![0]!["staticIdentities"] = new JsonArray(new JsonObject
+{
+    ["identity"] = markerIdentity, ["assemblyIdentity"] = markerAssembly, ["fieldName"] = markerField
+});
+Save(bSidecar, falseStatics);
+Reject("Contract import static identities differ from the selected implementation.");
+Save(bSidecar, originalB);
 JsonObject cycle = originalB.DeepClone().AsObject();
 cycle["dependencies"] = new JsonArray(new JsonObject
 {

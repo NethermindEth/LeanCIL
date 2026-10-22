@@ -31,6 +31,10 @@ partial class Program : IDisposable
     readonly Dictionary<string, SortedDictionary<string, string>> supportSourceKeys = new(StringComparer.Ordinal);
 
     bool referenceOnlyAuthoring;
+    bool forceFullVerification { get; init; }
+    sealed record FullImportResult(string Theorem, string Audit, PublishedImport[] Imports, Action Recheck);
+    Func<string, string, string, string, FullImportResult>? fullImportAudit;
+    Action? fullInputRecheck;
     bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
@@ -1044,25 +1048,27 @@ unsafe def main (args : List String) : IO Unit := do
     static string SemanticExtractionIdentity(string output)
     {
         JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+        JsonElement[] graph = identity.TryGetProperty("importGraph", out JsonElement graphValue) ? graphValue.EnumerateArray().ToArray() : [];
+        JsonElement[] imports = identity.TryGetProperty("imports", out JsonElement importValue) ? importValue.EnumerateArray().ToArray() : [];
         return ContentKey(JsonSerializer.Serialize(new
         {
             assembly = identity.GetProperty("assemblySha256"), generated = identity.GetProperty("generatedSha256"),
             profile = identity.GetProperty("profile"), interfaces = ImportSources(output),
-            dependencyGraph = ImportGraph(output).Any(node => node.GetProperty("dependencies").GetArrayLength() > 0)
-                ? ImportGraph(output) : [],
-            imports = ImportedBindings(output).Select(import => new
+            dependencyGraph = graph.Any(node => node.GetProperty("dependencies").GetArrayLength() > 0) ? graph : [],
+            imports = imports.Select(import => new
             {
                 slot = import.GetProperty("slot"), identity = import.GetProperty("identity"),
                 profile = import.GetProperty("profile"), interfaceDigest = import.GetProperty("interfaceDigest"),
                 closureDigest = import.GetProperty("closureDigest"), constant = import.GetProperty("contractConstant"),
-                kind = import.GetProperty("contractKind")
+                kind = import.GetProperty("contractKind"), staticIdentities = import.GetProperty("staticIdentities")
             })
         }));
     }
 
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
-        string certificationStatementDigest, string deploymentObligation);
+        string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation,
+        string? sourceBundleDigest = null);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1070,6 +1076,7 @@ unsafe def main (args : List String) : IO Unit := do
             import.GetProperty("implementationSha256").GetString()!, import.GetProperty("interfaceDigest").GetString()!,
             "published-certification", import.GetProperty("certificationTheorem").GetString()!,
             import.GetProperty("certificationStatement").GetString()!, import.GetProperty("certificationStatementDigest").GetString()!,
+            import.GetProperty("staticIdentities"),
             "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.")).ToArray()
         : [];
 
@@ -1092,7 +1099,7 @@ unsafe def main (args : List String) : IO Unit := do
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
         string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
-        DeploymentDependency[]? contractDependencies = null);
+        DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null);
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -1200,6 +1207,7 @@ unsafe def main (args : List String) : IO Unit := do
         string audit;
         string extractionAudit = "";
         string[] axioms;
+        FullImportResult? fullResult = null;
 
         try
         {
@@ -1318,7 +1326,7 @@ unsafe def main (args : List String) : IO Unit := do
             }
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             if (extractionPublication is not null) PublishSuccess(extractedKey, extractionPublication);
-
+            fullResult = fullImportAudit?.Invoke(output, fresh, "Proof", leanPath);
             // Bind the report only after confirming inputs stayed unchanged.
             stage?.Invoke("extraction integrity");
             Run(existingArtifacts ? ["dotnet", ExtractorPath, "check", output] : Extract("check", assembly, identity, entry, output, profile));
@@ -1330,9 +1338,11 @@ unsafe def main (args : List String) : IO Unit := do
             var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
             RequireImplementationImports(output);
+            fullResult?.Recheck();
+            fullInputRecheck?.Invoke();
             var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-                staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: PublishedImports(extraction),
-                contractDependencies: DeploymentDependencies(extraction));
+                staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: fullResult?.Imports ?? PublishedImports(extraction),
+                contractDependencies: DeploymentDependencies(extraction), compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 

@@ -8,7 +8,7 @@ namespace Nethermind.LeanCIL;
 
 internal static class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory]\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
@@ -197,6 +197,8 @@ internal static class Program
             using ImportResolution imports = new(importSources);
             stage = "metadata and CIL validation";
             MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports);
+            StaticIdentityRecord[] staticIdentities = LeanEmitter.StaticIdentities(methods, profile);
+            imports.ValidateStatics(staticIdentities);
             string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             if (recorded is { } prior)
             {
@@ -232,6 +234,7 @@ internal static class Program
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
                 assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile, initializedTypes, staticValues,
+                staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),

@@ -10,12 +10,17 @@ internal sealed class ImportResolution : IDisposable
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
         string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
         string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind,
-        string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly);
+        string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly,
+        StaticIdentityRecord[] StaticIdentities);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     internal sealed record Node(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest,
         string SidecarPath, string ImplementationPath, string ExpectedInterfaceDigest, bool IsReferenceAssembly,
         ContractDependency[] Dependencies);
     readonly List<Library> libraries = [];
+    readonly Dictionary<(string Identity, string Profile), int> implementationState = [];
+    readonly HashSet<string>? allowedDependencies;
+    readonly string? validatingAssembly;
+    readonly bool ownsLibraries = true;
     readonly List<Binding> bindings = [];
     readonly Dictionary<Instruction, int> sites = [];
     internal IReadOnlyList<Binding> Bindings => bindings;
@@ -82,6 +87,16 @@ internal sealed class ImportResolution : IDisposable
         catch { Dispose(); throw; }
     }
 
+    ImportResolution(List<Library> libraries, Dictionary<(string Identity, string Profile), int> implementationState,
+        ContractInterface contract)
+    {
+        this.libraries = libraries;
+        this.implementationState = implementationState;
+        allowedDependencies = contract.Dependencies.Select(dependency => dependency.AssemblyIdentity).ToHashSet(StringComparer.Ordinal);
+        validatingAssembly = contract.AssemblyIdentity;
+        ownsLibraries = false;
+    }
+
     internal static bool External(MethodReference reference, ModuleDefinition module) =>
         reference.DeclaringType.Scope is AssemblyNameReference scope && scope.FullName != module.Assembly.Name.FullName;
 
@@ -92,6 +107,8 @@ internal sealed class ImportResolution : IDisposable
         if (reference is GenericInstanceMethod || reference.HasGenericParameters || reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters)
             throw new InvalidDataException("Generic contract imports are not supported in version 1.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
+        if (allowedDependencies is not null && !allowedDependencies.Contains(assembly))
+            throw new InvalidDataException("Undeclared contract dependency: " + assembly + " required by " + validatingAssembly);
         Library? library = libraries.SingleOrDefault(candidate => candidate.Interface.AssemblyIdentity == assembly);
         if (library is null)
             throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Next: supply --import {reference.DeclaringType.Scope.Name}.leancil.contracts and --import-sha256 {reference.DeclaringType.Scope.Name}=<hex> and --import-interface-sha256 {reference.DeclaringType.Scope.Name}=<hex>.");
@@ -126,6 +143,9 @@ internal sealed class ImportResolution : IDisposable
         if (certification.ImplementationSha256 != library.Interface.ImplementationSha256 ||
             certification.InterfaceDigest != library.Interface.InterfaceDigest || certification.ClosureDigest != export.ClosureDigest)
             throw new InvalidDataException("Contract import certification binding mismatch.");
+        StaticIdentity.ValidateFields(certification.StaticIdentities, library.Module);
+        if (!library.Interface.IsReferenceAssembly)
+            ValidateImplementation(library, export, certification, profile);
         int slot = bindings.FindIndex(binding => binding.Identity == identity);
         if (slot < 0)
         {
@@ -133,10 +153,40 @@ internal sealed class ImportResolution : IDisposable
             bindings.Add(new(slot, identity, Path.GetFullPath(library.Source.ImplementationPath), library.Interface.ImplementationSha256,
                 "contract", Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
                 export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest, export.Kind,
-                certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly));
+                certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly,
+                certification.StaticIdentities));
         }
         sites[instruction] = slot;
     }
+
+    void ValidateImplementation(Library library, ContractExport export, ContractCertification certification, FeatureProfile profile)
+    {
+        (string Identity, string Profile) key = (export.Identity, profile.Name);
+        int state = implementationState.GetValueOrDefault(key);
+        if (state == 2) return;
+        if (state == 1) throw new InvalidDataException("Recursive contract implementation validation: " + export.Identity);
+        implementationState[key] = 1;
+        try
+        {
+            using ImportResolution imports = new(libraries, implementationState, library.Interface);
+            MethodDefinition[] implementation = MetadataValidation.Validate(library.Module, library.Interface.AssemblyIdentity,
+                export.Signature, profile, imports: imports);
+            StaticIdentityRecord[] actualStatics = LeanEmitter.StaticIdentities(implementation, profile);
+            StaticIdentityRecord[] certifiedStatics = certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal).ToArray();
+            if (!actualStatics.SequenceEqual(certifiedStatics))
+                throw new InvalidDataException("Contract import static identities differ from the selected implementation.");
+            imports.ValidateStatics(actualStatics);
+            implementationState[key] = 2;
+        }
+        catch
+        {
+            implementationState.Remove(key);
+            throw;
+        }
+    }
+
+    internal void ValidateStatics(IEnumerable<StaticIdentityRecord> application) =>
+        StaticIdentity.Validate(application.Concat(bindings.SelectMany(binding => binding.StaticIdentities)));
 
     static string TypeIdentity(TypeReference type) => type switch
     {
@@ -183,6 +233,7 @@ internal sealed class ImportResolution : IDisposable
 
     public void Dispose()
     {
+        if (!ownsLibraries) return;
         foreach (Library library in libraries) library.Module.Dispose();
         libraries.Clear();
     }

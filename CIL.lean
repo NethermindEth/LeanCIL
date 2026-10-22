@@ -154,3 +154,5 @@ import CIL.Safety.MemoryEquivalence
 import CIL.Safety.FrameEquivalence
 import CIL.Safety.ExecutionEquivalence
 import CIL.Interface.Closure
+import CIL.Safety.StaticLinking
+import CIL.Interface.FullTransfer

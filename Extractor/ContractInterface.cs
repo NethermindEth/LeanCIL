@@ -10,7 +10,8 @@ internal sealed record InterfaceModule(string Name, string Source);
 internal sealed record ContractExport(string Identity, string Signature, int ParameterCount, bool HasThis,
     bool ReturnsValue, string Visibility, string ContractConstant, string ClosureDigest, string[] Profiles, string Kind);
 internal sealed record ContractCertification(string Identity, string Profile, string ImplementationSha256,
-    string InterfaceDigest, string ClosureDigest, string Theorem, string Statement, string StatementDigest);
+    string InterfaceDigest, string ClosureDigest, string Theorem, string Statement, string StatementDigest,
+    StaticIdentityRecord[] StaticIdentities);
 internal sealed record ContractDependency(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest);
 internal sealed record ContractInterface(int Schema, int SemanticsVersion, int FormatVersion, string FrameworkKey,
     string AssemblyIdentity, Guid Mvid, string TargetFramework, string ImplementationSha256, bool IsReferenceAssembly,
@@ -55,7 +56,11 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
         foreach (JsonElement export in document.RootElement.GetProperty("exports").EnumerateArray())
             Require(export, "identity", "signature", "parameterCount", "hasThis", "returnsValue", "visibility", "contractConstant", "closureDigest", "profiles", "kind");
         foreach (JsonElement record in document.RootElement.GetProperty("certifications").EnumerateArray())
-            Require(record, "identity", "profile", "implementationSha256", "interfaceDigest", "closureDigest", "theorem", "statement", "statementDigest");
+        {
+            Require(record, "identity", "profile", "implementationSha256", "interfaceDigest", "closureDigest", "theorem", "statement", "statementDigest", "staticIdentities");
+            foreach (JsonElement identity in record.GetProperty("staticIdentities").EnumerateArray())
+                Require(identity, "identity", "assemblyIdentity", "fieldName");
+        }
         foreach (JsonElement dependency in document.RootElement.GetProperty("dependencies").EnumerateArray())
             Require(dependency, "assemblyIdentity", "implementationSha256", "interfaceDigest");
         ContractInterface value = document.RootElement.Deserialize<ContractInterface>(Json)
@@ -87,9 +92,11 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
             throw new InvalidDataException("Invalid or duplicate contract export.");
         if (value.Certifications.Any(record => record is null || !Digest(record.ImplementationSha256) ||
             !Digest(record.InterfaceDigest) || !Digest(record.ClosureDigest) || !Constant(record.Theorem) ||
-            string.IsNullOrWhiteSpace(record.Statement) || !Digest(record.StatementDigest)) ||
+            string.IsNullOrWhiteSpace(record.Statement) || !Digest(record.StatementDigest) || record.StaticIdentities is null ||
+            record.StaticIdentities.Distinct().Count() != record.StaticIdentities.Length) ||
             value.Certifications.Select(record => (record.Identity, record.Profile)).Distinct().Count() != value.Certifications.Length)
             throw new InvalidDataException("Invalid or duplicate contract certification.");
+        foreach (ContractCertification certification in value.Certifications) StaticIdentity.Validate(certification.StaticIdentities);
         if (value.ComputeInterfaceDigest() != value.InterfaceDigest)
             throw new InvalidDataException("Contract interface digest mismatch.");
         return value;

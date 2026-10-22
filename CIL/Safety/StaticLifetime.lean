@@ -34,12 +34,19 @@ theorem leaveFrame_preserves_static_world (descriptors : List CIL.StaticDescript
     (world : StaticWorldValid descriptors m) : StaticWorldValid descriptors (leaveFrame frame m) := by
   have retained := expireAll_retained_fields frame.owned m
   refine ⟨world.1, world.2.1, ?_, ?_⟩
-  · rw [show (leaveFrame frame m).staticBindings = m.staticBindings from retained.2.2.1]
-    exact world.2.2.1
-  · intro binding member
+  · constructor
+    · rw [show (leaveFrame frame m).staticBindings = m.staticBindings from retained.2.2.1]
+      exact world.2.2.1.1
+    · intro binding member
+      rw [show (leaveFrame frame m).staticBindings = m.staticBindings from retained.2.2.1] at member
+      obtain ⟨a, present, live, kind⟩ := world.2.2.1.2 binding member
+      have absent := frame_does_not_own_immutable _ _ owns _ _ present kind
+      refine ⟨a, ?_, live, kind⟩
+      simpa [leaveFrame, expireAll_allocations, absent] using present
+  · intro descriptor selected binding member key
     rw [show (leaveFrame frame m).staticBindings = m.staticBindings from retained.2.2.1] at member
-    obtain ⟨descriptor, selected, key, valid⟩ := world.2.2.2 binding member
-    exact ⟨descriptor, selected, key, leaveFrame_preserves_static_binding _ _ owns _ _ valid⟩
+    exact leaveFrame_preserves_static_binding _ _ owns _ _
+      (world.2.2.2 descriptor selected binding member key)
 
 #print axioms leaveFrame_preserves_static_world
 end CIL.Safety

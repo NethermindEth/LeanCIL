@@ -6,7 +6,8 @@ partial class Program
 {
     sealed record PreparedContractExport(ContractExportRequest Request, string Proof, string Profile,
         string Identity, string Signature, int ParameterCount, bool ReturnsValue, string Visibility,
-        bool Conditional, ContractDependency[] Dependencies, InterfaceModule[] ImportedInterfaces);
+        bool Conditional, ContractDependency[] Dependencies, InterfaceModule[] ImportedInterfaces,
+        StaticIdentityRecord[] StaticIdentities);
     sealed record ExportClosure(string Contract, string Kind, string Digest, string Canonical);
     sealed record CheckedContractExport(PreparedContractExport Export, ExportClosure Closure,
         string StatementDigest, string Statement, string AuditSource, string AuthorModule);
@@ -146,6 +147,7 @@ partial class Program
         string pdb = Path.ChangeExtension(manifest.Assembly, ".pdb");
         inputs["pdb:" + pdb] = File.Exists(pdb) ? Sha(pdb) : "absent";
         foreach (ContractSource source in manifest.Interface) inputs["interface:" + source.Source] = Sha(source.Source);
+        HashSet<string> dependencyPaths = new(StringComparer.Ordinal);
         foreach (ContractExportRequest export in manifest.Exports)
         {
             foreach (string file in new[] { "identity.json", "verification.json", "Extracted.lean" })
@@ -156,9 +158,10 @@ partial class Program
                     foreach (string field in new[] { "sidecarPath", "implementationPath" })
                     {
                         string path = node.GetProperty(field).GetString()!;
-                        inputs["dependency:" + path] = Sha(path);
+                        dependencyPaths.Add(path);
                     }
         }
+        foreach (string path in dependencyPaths) inputs["dependency:" + path] = Sha(path);
         return inputs;
     }
 
@@ -186,6 +189,10 @@ partial class Program
             throw new InvalidDataException("Export artifact proofRoot differs from the producer manifest.");
         string proof = Path.GetFullPath(settings.proof, request.Artifact);
         Within(manifest.ProofRoot, Path.GetRelativePath(manifest.ProofRoot, proof));
+        StaticIdentityRecord[] statics = identity.GetProperty("staticIdentities").Deserialize<StaticIdentityRecord[]>(ContractInterface.Json)
+            ?? throw new InvalidDataException("Missing export static identities.");
+        StaticIdentity.Validate(statics);
+        StaticIdentity.ValidateFields(statics, module);
         JsonElement[] imports = identity.TryGetProperty("imports", out JsonElement imported) ? imported.EnumerateArray().ToArray() : [];
         ContractDependency[] dependencies = imports.Select(binding => new ContractDependency(
             binding.GetProperty("identity").GetString()!.Split("::", 2)[0],
@@ -195,7 +202,7 @@ partial class Program
             .Select(pair => new InterfaceModule(pair.Key, pair.Value)).ToArray();
         return new(request, proof, profile.Name, module.Assembly.Name.FullName + "::" + method.FullName, method.FullName,
             method.Parameters.Count, method.ReturnType.MetadataType != MetadataType.Void, method.IsPublic ? "public" : "protected",
-            imports.Length != 0, dependencies, importedInterfaces);
+            imports.Length != 0, dependencies, importedInterfaces, statics);
     }
 
     static InterfaceModule[] MergeContractInterfaces(InterfaceModule[] own, IEnumerable<InterfaceModule> imported)
@@ -235,6 +242,8 @@ theorem LeanCILExportAudit.closed : _root_.CIL.Safety.Closed _root_.Extracted.pr
   _root_.CIL.Safety.Closed.of_check (by decide +kernel)
 theorem LeanCILExportAudit.noImports : _root_.Extracted.imports = [] := rfl
 """;
+        string statics = "[" + string.Join(", ", export.StaticIdentities.Select(identity =>
+            $"({identity.Identity}, {JsonSerializer.Serialize(identity.AssemblyIdentity)}, {JsonSerializer.Serialize(identity.FieldName)})")) + "]";
         return $$"""
 import Lean
 import CIL.Safety.Linking
@@ -254,8 +263,11 @@ run_cmd liftTermElabM do
 theorem LeanCILExportAudit.certified : {{statement}} :=
   _root_.{{export.Request.Theorem}}
 {{closure}}
-theorem LeanCILExportAudit.noStaticSites :
-    _root_.Extracted.program.all (fun body => body.staticSites.isEmpty) = true := by decide +kernel
+theorem LeanCILExportAudit.staticIdentities :
+    let actual : List (Nat × String × String) := _root_.Extracted.program.flatMap fun body =>
+      body.staticSites.map fun site => (site.2.identity, site.2.assemblyIdentity, site.2.fieldName)
+    let expected : List (Nat × String × String) := {{statics}}
+    actual.all (fun identity => expected.contains identity) && expected.all (fun identity => actual.contains identity) = true := by decide +kernel
 """;
     }
 
@@ -385,7 +397,8 @@ run_cmd liftTermElabM do
             Certifications = exports.OrderBy(result => result.Export.Identity, StringComparer.Ordinal)
                 .ThenBy(result => result.Export.Profile, StringComparer.Ordinal)
                 .Select(result => new ContractCertification(result.Export.Identity, result.Export.Profile, sidecar.ImplementationSha256,
-                    sidecar.InterfaceDigest, result.Closure.Digest, ExportTheorem, result.Statement, result.StatementDigest)).ToArray()
+                    sidecar.InterfaceDigest, result.Closure.Digest, ExportTheorem, result.Statement, result.StatementDigest,
+                    result.Export.StaticIdentities)).ToArray()
         };
 
     static void PublishContractSidecar(string output, byte[] bytes)
