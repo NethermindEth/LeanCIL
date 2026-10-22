@@ -41,6 +41,7 @@ import CIL.Safety.AggregateLocals
 import CIL.Safety.ValueBitCasts
 import CIL.Safety.ByteEncoding
 import CIL.Safety.ByteRoundTrip
+import CIL.Safety.BufferContents
 import CIL.Safety.CallComposition
 import CIL.Safety.Embedding.Outcomes
 import CIL.Safety.Embedding.Simulation
@@ -132,6 +133,7 @@ import CIL.SymbolicExecution
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.LoopAutomation
 import CIL.Safety.LoopContract
+import CIL.Safety.LoopOutcome
 import CIL.Types
 import CIL.VectorMemory
 import CIL.VectorMemoryLemmas
