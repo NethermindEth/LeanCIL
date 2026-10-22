@@ -840,7 +840,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
           if let some (.thmInfo info) := (<- Lean.getEnv).find? `{{theorem}} then
             if let .app (.const `Not _) claim := info.type.consumeMData then
               if let .const name _ := claim.getAppFn.consumeMData then
-                if name == `CIL.Safety.MethodContract.Holds || name == `CIL.Safety.OutcomeContract.Holds then
+                if name == `CIL.Safety.MethodContract.Holds || name == `CIL.Safety.OutcomeContract.Holds ||
+                    name == `CIL.Safety.OutcomeContract.HoldsCLR then
                   let some ranges <- Lean.findDeclarationRanges? `{{theorem}} | throwError "Missing refutation location"
                   IO.println s!"LeanCIL refutes: {name} at {ranges.selectionRange.pos.line}:{ranges.selectionRange.pos.column}"
 

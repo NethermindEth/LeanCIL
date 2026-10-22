@@ -86,6 +86,7 @@ import CIL.Safety.MemoryBelow
 import CIL.Safety.MemoryLemmas
 import CIL.Safety.MethodContract
 import CIL.Safety.OutcomeContract
+import CIL.Safety.RuntimeExceptions
 import CIL.Safety.Imports
 import CIL.Safety.Linking
 import CIL.Safety.StepFlow
