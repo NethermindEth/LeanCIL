@@ -135,9 +135,10 @@ string Rebundle(string proofSource, bool staleClosure = false)
     return destination;
 }
 
-void RejectCallerMutation(bool consumer, bool sourceOnly)
+void RejectCallerMutation(bool consumer, bool sourceOnly, bool shadow = false, bool originalRootShadow = false)
 {
-    string suffix = (consumer ? "consumer" : "ordinary") + (sourceOnly ? "-source" : "-artifact");
+    string suffix = (consumer ? "consumer" : "ordinary") +
+        (originalRootShadow ? "-original-root-shadow" : shadow ? "-shadow" : sourceOnly ? "-source" : "-artifact");
     string callerContext = Path.Combine(root, suffix + "-caller.json");
     string mutationMarker = Path.Combine(root, suffix + "-mutation.json");
     string attackCaller = Path.Combine(callerPackage, "FullMutationCaller.lean");
@@ -159,6 +160,9 @@ run_cmd do
     string callerSource = "import Lean\n" + originalCaller + recordContext;
     File.WriteAllText(attackCaller, callerSource);
     using Program paths = new();
+    string weakCaller = "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness : " +
+        "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun _ => True) := by\n" +
+        "  intro linked links imported\n  trivial\nend ExampleProof\n";
     string mutateCaller = $$"""
 
 open Lean Elab Command in
@@ -167,8 +171,29 @@ run_cmd do
   let source := System.FilePath.mk (<- IO.ofExcept <| context.getObjValAs? String "source")
   let folder := source.parent.getD "."
   let original <- IO.FS.readFile source
-  let target := {{(sourceOnly ? "source" : "folder / " + JsonSerializer.Serialize(consumer ? ".lake/build/lib/lean/LeanCILProof.olean" : "Proof.olean"))}}
-  if {{(sourceOnly ? "true" : "false")}} then
+  let callerArtifact := folder / {{JsonSerializer.Serialize(consumer ? ".lake/build/lib/lean/LeanCILProof.olean" : "Proof.olean")}}
+  let originalArtifact <- IO.FS.readBinFile callerArtifact
+  let target <-
+    if {{(originalRootShadow ? "true" : "false")}} then
+      pure ((callerArtifact.parent.getD ".") / "LeanCILFullExpected0.olean")
+    else if {{(shadow ? "true" : "false")}} then do
+      let candidates := (<- IO.FS.readDir folder).filter (fun entry => entry.fileName.startsWith "full-imports-")
+      unless candidates.size == 1 do throwError "Expected exactly one producer staging directory"
+      let some entry := candidates[0]? | throwError "Missing producer staging directory"
+      pure (entry.path / {{JsonSerializer.Serialize(consumer ? "LeanCILProof.olean" : "Proof.olean")}})
+    else pure {{(sourceOnly ? "source" : "callerArtifact")}}
+  if {{(shadow ? "true" : "false")}} then
+    let shadowSource := (target.parent.getD ".") / {{JsonSerializer.Serialize(originalRootShadow ? "LeanCILFullExpected0.lean" : consumer ? "LeanCILProof.lean" : "Proof.lean")}}
+    IO.FS.writeFile shadowSource {{JsonSerializer.Serialize(weakCaller)}}
+    let search <- IO.ofExcept <| context.getObjValAs? String "leanPath"
+    let cwd := System.FilePath.mk (<- IO.ofExcept <| context.getObjValAs? String "cwd")
+    let compiled <- IO.Process.output {
+      cmd := {{JsonSerializer.Serialize(paths.LeanExecutable)}}
+      args := #["--root=" ++ (target.parent.getD ".").toString, "-o", target.toString, shadowSource.toString]
+      cwd := some cwd
+      env := #[("LEAN_PATH", some search), ("LEAN_SYSROOT", some {{JsonSerializer.Serialize(paths.Toolchain)}})] }
+    unless compiled.exitCode == 0 do throwError "Caller shadow compile failed: {compiled.stdout} {compiled.stderr}"
+  else if {{(sourceOnly ? "true" : "false")}} then
     IO.FS.writeFile source (original ++ "\n")
   else
     let before <- IO.FS.readBinFile target
@@ -187,7 +212,8 @@ run_cmd do
     finally
       IO.FS.writeFile source original
   IO.FS.writeFile {{JsonSerializer.Serialize(mutationMarker)}} (Json.mkObj [
-    ("target", toJson target.toString), ("sourceRestored", toJson ((<- IO.FS.readFile source) == original))]).compress
+    ("target", toJson target.toString), ("sourceRestored", toJson ((<- IO.FS.readFile source) == original)),
+    ("originalArtifactUnchanged", toJson ((<- IO.FS.readBinFile callerArtifact) == originalArtifact))]).compress
 """;
     try
     {
@@ -200,10 +226,13 @@ run_cmd do
             throw new InvalidOperationException("Producer mutation did not execute during fresh verification: " + rejected.Output);
         JsonElement mutation = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(mutationMarker));
         string target = mutation.GetProperty("target").GetString()!;
-        string diagnostic = sourceOnly ? "Sources changed during full import audit"
+        string diagnostic = originalRootShadow ? "Unexpected full-verification caller artifact: " + target
+            : shadow ? "Unexpected producer staging module: " + (consumer ? "LeanCILProof" : "Proof")
+            : sourceOnly ? "Sources changed during full import audit"
             : "Full-verification source or compiled artifact changed: " + target;
         if (rejected.Code != 1 || !rejected.Output.Contains(diagnostic, StringComparison.Ordinal) ||
             mutation.GetProperty("sourceRestored").GetBoolean() == sourceOnly ||
+            mutation.GetProperty("originalArtifactUnchanged").GetBoolean() != (sourceOnly || shadow) ||
             File.Exists(Path.Combine(attackArtifact, "verified.json")) ||
             Directory.Exists(cache) && Directory.EnumerateFiles(cache, "receipt.json", SearchOption.AllDirectories).Any())
             throw new InvalidOperationException("Producer changed an already checked caller without its exact integrity rejection: " + rejected.Output);
@@ -224,6 +253,9 @@ run_cmd do
 RejectCallerMutation(consumer: true, sourceOnly: false);
 RejectCallerMutation(consumer: false, sourceOnly: false);
 RejectCallerMutation(consumer: true, sourceOnly: true);
+RejectCallerMutation(consumer: true, sourceOnly: false, shadow: true);
+RejectCallerMutation(consumer: false, sourceOnly: false, shadow: true);
+RejectCallerMutation(consumer: true, sourceOnly: false, shadow: true, originalRootShadow: true);
 try
 {
     Rebundle(File.ReadAllText(producerProof), staleClosure: true);

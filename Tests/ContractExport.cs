@@ -53,11 +53,11 @@ open CIL.Safety
 theorem correctness : CIL.Safety.MethodContract.Holds ImportFixture.addOne Extracted.program 0 := by
   rintro value memory formed
   dsimp only [ImportFixture.addOne, MethodContract.Returns]
-  refine Exists.intro 12 (Exists.intro memory (Exists.intro _
-    (And.intro ?execution (And.intro (Confined.refl _ memory) ?returns))))
-  case returns => exact Exists.intro (value + 1) (And.intro rfl rfl)
+  refine ⟨12, memory, [.scalar (.i64 (value + 1))], ?execution,
+    Confined.refl _ memory, value + 1, rfl, ?post⟩
+  case post => simp only [CIL.importedPost]
   case execution =>
-    cil_checked_steps
+    cil_checked_steps []
     all_goals bv_omega
 theorem unrelated : True := True.intro
 def proofDefinition : CIL.Safety.MethodContract.Holds ImportFixture.addOne Extracted.program 0 := correctness

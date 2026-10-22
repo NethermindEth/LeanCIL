@@ -36,7 +36,14 @@ partial class Program
     FullImportResult VerifyFullImports(string output, string callerSession, string callerModule, string callerTheorem,
         string callerLeanPath, IReadOnlyDictionary<string, string> overrides)
     {
-        SortedDictionary<string, string> acceptedCaller = FullArtifacts(callerLeanPath);
+        string originalLeanPath = string.Join(Path.PathSeparator, callerLeanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => Path.GetFullPath(path, callerSession)).Append(Path.Combine(Toolchain, "lib/lean"))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal));
+        SortedDictionary<string, string> acceptedCaller = FullModuleArtifacts(originalLeanPath);
+        SortedDictionary<string, string> originalModules = FullModulePaths(originalLeanPath);
+        string originalClaim = CaptureFullCallerClaim(callerSession, callerModule, callerTheorem, originalLeanPath);
+        CheckFullResolution(callerSession, originalLeanPath, originalModules);
+        RequireFullArtifacts(acceptedCaller);
         JsonElement[] bindings = ImportedBindings(output).OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
         if (bindings.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         for (int index = 0; index < bindings.Length; index++)
@@ -45,7 +52,7 @@ partial class Program
         string staging = Path.Combine(callerSession, "full-imports-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
         SortedDictionary<string, string> original = new(StringComparer.Ordinal);
-        List<(string Directory, string Digest)> bundles = [];
+        Dictionary<string, string> bundles = new(StringComparer.Ordinal);
         List<FullLibrary> libraries = [];
         HashSet<string> usedOverrides = new(StringComparer.Ordinal);
         void Original(string path) => original[path] = Sha(path);
@@ -87,50 +94,91 @@ partial class Program
             if (Path.GetFileName(Path.TrimEndingDirectorySeparator(bundle)) != digest)
                 throw new InvalidDataException("Full-verification source bundle override has the wrong content identity.");
             ContractBundleManifest inventory = ContractSourceBundle.Validate(bundle, digest);
-            bundles.Add((bundle, digest));
+            if (bundles.TryGetValue(bundle, out string? previousDigest) && previousDigest != digest)
+                throw new InvalidDataException("Full-verification source bundle path has conflicting content identities: " + bundle);
+            bundles.TryAdd(bundle, digest);
             int slot = binding.GetProperty("slot").GetInt32();
             libraries.Add(CheckFullLibrary(binding, contract, export, certification, inventory, bundle, digest,
                 Path.Combine(staging, "library-" + slot), RecheckOriginal));
             RequireFullArtifacts(acceptedCaller);
+            RequireFullModuleArtifactSet(originalLeanPath, acceptedCaller);
+            RequireFullModulePaths(originalLeanPath, originalModules);
+            RequireEmptyProducerModules(staging);
         }
         if (overrides.Keys.Any(name => !usedOverrides.Contains(name)))
             throw new InvalidDataException("Unused --full-artifact override; supply the imported assembly simple name.");
         RecheckOriginal();
-        string fullLeanPath = staging + Path.PathSeparator + callerLeanPath;
+        string compositionDirectory = Path.Combine(callerSession, "full-composition-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(compositionDirectory);
+        string fullLeanPath = originalLeanPath + Path.PathSeparator + compositionDirectory;
+        HashSet<string> generatedModules = new(StringComparer.Ordinal);
+        SortedDictionary<string, string> generatedArtifacts = new(StringComparer.Ordinal);
+        void RecheckResolution()
+        {
+            RequireFullArtifacts(acceptedCaller);
+            RequireFullModuleArtifactSet(originalLeanPath, acceptedCaller);
+            RequireFullModulePaths(originalLeanPath, originalModules);
+            RequireEmptyProducerModules(staging);
+            RequireFullArtifacts(generatedArtifacts);
+            SortedDictionary<string, string> generated = FullModulePaths(compositionDirectory);
+            foreach ((string name, string path) in generated)
+                if (!generatedModules.Contains(name) || originalModules.ContainsKey(name))
+                    throw new InvalidDataException("Unexpected full-verification composition module: " + name + " at " + path);
+            foreach (string path in FullModuleArtifactPaths(compositionDirectory))
+                if (!generatedModules.Contains(ModuleName(Path.GetRelativePath(compositionDirectory, path).Replace('\\', '/'))))
+                    throw new InvalidDataException("Unexpected full-verification composition artifact: " + path);
+        }
+        foreach (string name in libraries.SelectMany(library => new[] { library.ExpectedModule, library.Module }).Append("LeanCILFullComposition"))
+            if (originalModules.ContainsKey(name)) throw new InvalidDataException("Full-verification generated module collides with an existing module: " + name);
         string checker = Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
         foreach (FullLibrary library in libraries)
         {
-            string expected = Path.Combine(staging, library.ExpectedModule + ".lean");
+            string expected = Path.Combine(compositionDirectory, library.ExpectedModule + ".lean");
             File.WriteAllText(expected, NamespacedExtraction(library.GeneratedSource, library.ExpectedModule));
-            string transferred = Path.Combine(staging, library.Module + ".lean");
+            string transferred = Path.Combine(compositionDirectory, library.Module + ".lean");
             File.WriteAllText(transferred, "import " + callerModule + "\n" + library.TransferSource);
             foreach (string name in new[] { library.ExpectedModule, library.Module })
-                Run([LeanExecutable, "--root=" + staging, "-o", Path.Combine(staging, name + ".olean"), Path.Combine(staging, name + ".lean")],
+            {
+                RecheckResolution();
+                Run([LeanExecutable, "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, name + ".olean"), Path.Combine(compositionDirectory, name + ".lean")],
                     callerSession, fullLeanPath, progress: "Rechecking full-verification program and author kernel terms: " + name);
+                generatedModules.Add(name);
+                RecheckResolution();
+                generatedArtifacts = FullArtifacts(compositionDirectory);
+            }
             RecheckOriginal();
-            RequireFullArtifacts(acceptedCaller);
+            RecheckResolution();
             Run([checker, library.ExpectedModule, library.Module], callerSession, fullLeanPath,
                 progress: "Independent kernel replay of transferred library declarations");
             RequireFullArtifacts(acceptedCaller);
         }
         string composition = "LeanCILFullComposition";
-        string compositionPath = Path.Combine(staging, composition + ".lean");
-        File.WriteAllText(compositionPath, FullCompositionSource(callerModule, callerTheorem, libraries));
-        Run([LeanExecutable, "--root=" + staging, "-o", Path.Combine(staging, composition + ".olean"), compositionPath],
+        string compositionPath = Path.Combine(compositionDirectory, composition + ".lean");
+        File.WriteAllText(compositionPath, FullCompositionSource(callerModule, callerTheorem, originalClaim, libraries));
+        RecheckResolution();
+        CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
+        Run([LeanExecutable, "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, composition + ".olean"), compositionPath],
             callerSession, fullLeanPath, progress: "Checking concrete library relocation and caller composition");
+        generatedModules.Add(composition);
+        RecheckResolution();
+        generatedArtifacts = FullArtifacts(compositionDirectory);
+        CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
         RecheckOriginal();
         RequireFullArtifacts(acceptedCaller);
-        SortedDictionary<string, string> acceptedFull = FullFiles(staging);
+        SortedDictionary<string, string> acceptedFull = new(FullFiles(staging).Concat(FullFiles(compositionDirectory))
+            .ToDictionary(pair => pair.Key, pair => pair.Value), StringComparer.Ordinal);
         Run([checker, composition], callerSession, fullLeanPath, progress: "Independent kernel replay of the composed caller theorem");
         RequireFullArtifacts(acceptedFull);
-        string auditPath = Path.Combine(staging, "CompositionAudit.lean");
+        string auditPath = Path.Combine(compositionDirectory, "CompositionAudit.lean");
         File.WriteAllText(auditPath, "import " + composition + "\n#check LeanCILFullComposition.certified\n#print axioms LeanCILFullComposition.certified\n");
         string audit = Run([LeanExecutable, auditPath], callerSession, fullLeanPath, progress: "Auditing the independently composed theorem");
         AuditedAxioms(audit, "LeanCILFullComposition.certified");
         RequireFullArtifacts(acceptedFull);
         RequireFullArtifacts(acceptedCaller);
+        RecheckResolution();
         RecheckOriginal();
-        SortedDictionary<string, string> finalFull = FullFiles(staging);
+        SortedDictionary<string, string> finalFull = new(FullFiles(staging).Concat(FullFiles(compositionDirectory))
+            .ToDictionary(pair => pair.Key, pair => pair.Value), StringComparer.Ordinal);
         PublishedImport[] imported = PublishedImports(JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json"))))
             .Select(import => import with
             {
@@ -142,6 +190,7 @@ partial class Program
             RecheckOriginal();
             RequireFullArtifacts(acceptedCaller);
             RequireFullArtifacts(finalFull);
+            RecheckResolution();
         });
     }
 
@@ -340,9 +389,108 @@ run_cmd do
             if (!File.Exists(path) || Sha(path) != digest) throw new InvalidDataException("Full-verification source or compiled artifact changed: " + path);
     }
 
-    static string FullCompositionSource(string callerModule, string callerTheorem, IReadOnlyList<FullLibrary> libraries)
+    static SortedDictionary<string, string> FullModulePaths(string leanPath)
     {
-        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\n");
+        SortedDictionary<string, string> modules = new(StringComparer.Ordinal);
+        foreach (string root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal))
+        {
+            if (!Directory.Exists(root)) continue;
+            foreach (string path in Directory.EnumerateFiles(root, "*.olean", SearchOption.AllDirectories))
+            {
+                string name = ModuleName(Path.GetRelativePath(root, path).Replace('\\', '/'));
+                if (!ContractInterface.Constant(name)) continue;
+                string absolute = Path.GetFullPath(path);
+                if (modules.TryGetValue(name, out string? previous) && previous != absolute)
+                    throw new InvalidDataException("Ambiguous full-verification module: " + name);
+                modules[name] = absolute;
+            }
+        }
+        return modules;
+    }
+
+    static IEnumerable<string> FullModuleArtifactPaths(string leanPath)
+    {
+        foreach (string root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal))
+            if (Directory.Exists(root))
+                foreach (string path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                    .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal)))
+                    if (ContractInterface.Constant(ModuleName(Path.GetRelativePath(root, path).Replace('\\', '/'))))
+                        yield return Path.GetFullPath(path);
+    }
+
+    static SortedDictionary<string, string> FullModuleArtifacts(string leanPath) =>
+        new(FullModuleArtifactPaths(leanPath).Distinct(StringComparer.Ordinal).ToDictionary(path => path, Sha), StringComparer.Ordinal);
+
+    static void RequireFullModuleArtifactSet(string leanPath, SortedDictionary<string, string> expected)
+    {
+        foreach (string path in FullModuleArtifactPaths(leanPath))
+            if (!expected.ContainsKey(path)) throw new InvalidDataException("Unexpected full-verification caller artifact: " + path);
+    }
+
+    static void RequireFullModulePaths(string leanPath, SortedDictionary<string, string> expected)
+    {
+        SortedDictionary<string, string> current = FullModulePaths(leanPath);
+        foreach ((string name, string path) in current)
+            if (!expected.TryGetValue(name, out string? previous) || previous != path)
+                throw new InvalidDataException("Full-verification module resolution changed: " + name);
+        if (current.Count != expected.Count) throw new InvalidDataException("Full-verification module resolution lost a checked module.");
+    }
+
+    static void RequireEmptyProducerModules(string staging)
+    {
+        string? path = FullModuleArtifactPaths(staging).FirstOrDefault();
+        if (path is not null)
+            throw new InvalidDataException("Unexpected producer staging module: " + ModuleName(Path.GetRelativePath(staging, path).Replace('\\', '/')));
+    }
+
+    void CheckFullResolution(string directory, string leanPath, SortedDictionary<string, string> modules)
+    {
+        string manifest = Path.Combine(directory, "full-module-resolution.json");
+        File.WriteAllText(manifest, JsonSerializer.Serialize(modules.Select(pair => new { name = pair.Key, path = pair.Value })));
+        string probe = Path.Combine(directory, "FullModuleResolution.lean");
+        File.WriteAllText(probe, $$"""
+import Lean
+private structure ExpectedResolution where
+  name : String
+  path : String
+  deriving Lean.FromJson
+run_cmd do
+  let expected : Array ExpectedResolution <- IO.ofExcept <|
+    (Lean.Json.parse (<- IO.FS.readFile {{JsonSerializer.Serialize(manifest)}})).bind Lean.fromJson?
+  for item in expected do
+    let path <- Lean.findOLean item.name.toName
+    unless path.toString == item.path do throwError "Full-verification resolved module path changed: {item.name}"
+""");
+        Run([LeanExecutable, probe], directory, leanPath, environment: LeanEnvironment,
+            progress: "Checking actual full-verification module resolution");
+    }
+
+    string CaptureFullCallerClaim(string session, string module, string theorem, string leanPath)
+    {
+        string probe = Path.Combine(session, "FullOriginalCallerClaim.lean");
+        File.WriteAllText(probe, "import " + module + "\nimport CIL.Interface.Closure\n" + FullClaimSelector(theorem) + """
+open Lean Meta Elab Command in
+run_cmd liftTermElabM do
+  let expression <- Lean.Elab.Term.elabTerm (<- `(fullCallerClaim)) none
+  let reduced <- withTransparency .all (whnf (<- instantiateMVars expression))
+  let canonical <- match _root_.CIL.Interface.canonicalExpression reduced with
+    | .ok value => pure value
+    | .error message => throwError "{message}"
+  IO.println (Json.mkObj [("kind", toJson "full-caller-claim"), ("canonical", toJson canonical)]).compress
+""");
+        string output = Run([LeanExecutable, probe], session, leanPath, environment: LeanEnvironment,
+            progress: "Binding the original checked caller claim");
+        return OneExportRecord(output, "kind", "full-caller-claim").GetProperty("canonical").GetString()!;
+    }
+
+    static string FullClaimSelector(string theorem) =>
+        "private def selectFullCallerClaim {claim : _root_.CIL.Program -> Prop} " +
+        "(_given : _root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold claim) : _root_.CIL.Program -> Prop := claim\n" +
+        "private def fullCallerClaim : _root_.CIL.Program -> Prop := selectFullCallerClaim _root_." + theorem + "\n";
+
+    static string FullCompositionSource(string callerModule, string callerTheorem, string originalClaim, IReadOnlyList<FullLibrary> libraries)
+    {
+        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Interface.Closure\n");
         foreach (FullLibrary library in libraries) source.AppendLine("import " + library.Module).AppendLine("import " + library.ExpectedModule);
         source.AppendLine("namespace LeanCILFullComposition\nopen CIL.Safety");
         foreach (FullLibrary library in libraries)
@@ -368,10 +516,21 @@ run_cmd do
                 "(link Extracted.program libraries) (linkSlot Extracted.program libraries " + library.Slot + ") := link_relocates _ _ (by decide)");
         source.AppendLine("theorem bridge (linked : CIL.Program) (met : Imports Extracted.program specifications linked) : Extracted.ImportsHold linked := by\n  exact " +
             Conjunction(libraries.Select(library => "met " + library.Slot + " (by decide)").ToArray()));
-        source.AppendLine("def discharge {claim : CIL.Program -> Prop} (given : HoldsGiven Extracted.program Extracted.ImportsHold claim) :\n    claim (link Extracted.program libraries) :=\n  composed (given.mono bridge) rfl");
+        source.AppendLine("def discharge {claim : CIL.Program -> Prop} (callerProof : HoldsGiven Extracted.program Extracted.ImportsHold claim) :\n    claim (link Extracted.program libraries) :=\n  composed (callerProof.mono bridge) rfl");
         source.AppendLine(FiniteLibraryProof(libraries.Count, "closed", false));
         source.AppendLine(FiniteLibraryProof(libraries.Count, "holds", true));
-        source.AppendLine("theorem certified : _ := discharge _root_." + callerTheorem);
+        source.AppendLine(FullClaimSelector(callerTheorem));
+        source.AppendLine($$"""
+open Lean Meta Elab Command in
+run_cmd liftTermElabM do
+  let expression <- Lean.Elab.Term.elabTerm (<- `(fullCallerClaim)) none
+  let reduced <- withTransparency .all (whnf (<- instantiateMVars expression))
+  let canonical <- match _root_.CIL.Interface.canonicalExpression reduced with
+    | .ok value => pure value
+    | .error message => throwError "{message}"
+  unless canonical == {{JsonSerializer.Serialize(originalClaim)}} do throwError "Full-verification caller claim changed during composition"
+""");
+        source.AppendLine("theorem certified : fullCallerClaim (link Extracted.program libraries) := discharge _root_." + callerTheorem);
         source.AppendLine("end LeanCILFullComposition");
         return source.ToString();
     }
