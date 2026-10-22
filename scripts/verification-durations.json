@@ -5,6 +5,7 @@
     "arguments": 163,
     "bits": 534,
     "blocks": 128,
+    "callers": 240,
     "checked": 217,
     "cli": 310,
     "constructors": 130,

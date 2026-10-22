@@ -27,6 +27,9 @@ name = "Tests.StructuralLabels"
 name = "Tests.DebugNames"
 
 [[lean_lib]]
+name = "Tests.MethodContract"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]
