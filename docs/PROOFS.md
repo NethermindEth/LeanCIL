@@ -87,7 +87,9 @@ read authority change only inside the footprint (a write grants read access to
 what it wrote). `Confined.trans`, `Confined.widen`, `Confined.write`, `Confined.read_eq`
 and `Confined.access_write` compose and consume it. A callee with locals writes its own
 frame too: list those slots in the footprint while executing, then drop them with
-`Confined.forget_fresh` and cover frame entry and teardown with `Confined.then_below`. The contract fixes no profile:
+`Confined.forget_fresh` and cover frame entry and teardown with `Confined.then_below`.
+`Outside.nil` and `Outside.cons` are simp rules, so `simpa using ⟨hr, hq⟩` closes a
+word footprint from per-word `OutsideWord` facts; `Outside.word` builds it as a term. The contract fixes no profile:
 the program does, so a cross-profile contract is a theorem quantified over the
 per-profile extractions.
 

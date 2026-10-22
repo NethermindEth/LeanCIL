@@ -171,6 +171,22 @@ theorem WordsDisjoint.outside {r q : Reference} (disjoint : WordsDisjoint r q) :
   · exact Or.inr (Or.inr (by simp only; omega))
   · exact Or.inr (Or.inl (by simp only; omega))
 
+/-- Every byte is outside the empty footprint. -/
+@[simp] theorem Outside.nil (id offset : Nat) : Outside [] id offset :=
+  fun _ member => nomatch member
+
+/-- A byte is outside a footprint iff it misses the head interval and is outside the rest. -/
+@[simp] theorem Outside.cons {entry : Reference × Nat} {rest : List (Reference × Nat)} {id offset : Nat} :
+    Outside (entry :: rest) id offset ↔
+      (id ≠ entry.1.allocation ∨ offset < entry.1.offset ∨ entry.1.offset + entry.2 ≤ offset) ∧
+        Outside rest id offset :=
+  List.forall_mem_cons
+
+/-- A byte outside the word at `r` and outside `rest` is outside `(r, 8) :: rest`. -/
+theorem Outside.word {r : Reference} {rest : List (Reference × Nat)} {id offset : Nat}
+    (word : OutsideWord r id offset) (outside : Outside rest id offset) : Outside ((r, 8) :: rest) id offset :=
+  Outside.cons.mpr ⟨word, outside⟩
+
 /-- A typed method contract. `pre` carries formation, authority and the permitted
     aliasing; `footprint` bounds the bytes of earlier memory the method may change.
     `post` speaks of an `Output` that `results` encodes; by default the returned values. -/
@@ -303,6 +319,9 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
 #print axioms Confined.then_below
 #print axioms Confined.write
 #print axioms Confined.read_eq
+#print axioms Outside.nil
+#print axioms Outside.cons
+#print axioms Outside.word
 #print axioms run_call_of_contract
 #print axioms call_frame_invariants
 #print axioms run_call_of_contract_formed
