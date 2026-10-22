@@ -269,6 +269,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
           apply ValuesValid.cons
           · first
             | rfl
+            | exact True.intro
             | exact bitcastValue_numeric (by assumption)
             | exact loadSnapshot_numeric (by assumption)
             | exact retained.head

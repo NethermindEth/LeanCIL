@@ -96,6 +96,8 @@ inductive MemoryOp where
   | staticValue (bytes : List (BitVec 8))
   /-- A span of `width`-byte elements over a whole static field; indexing is bounds checked. -/
   | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
+  /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
+  | nullRef | isNullRef
   deriving Repr
 
 /-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
@@ -131,6 +133,9 @@ def evalMemory (op : MemoryOp) (stack : List Value) (m : Memory) :
   | .bitcastByteBool, .i8 bits :: rest =>
     return (m, .i32 (bits.zeroExtend 32) :: rest)
   | .skipInit, .object _ :: rest | .skipInit, .ref _ :: rest => return (m, rest)
+  | .nullRef, _ => return (m, .nullRef :: stack)
+  | .isNullRef, .nullRef :: rest => return (m, .i32 1 :: rest)
+  | .isNullRef, .object _ :: rest | .isNullRef, .ref _ :: rest => return (m, .i32 0 :: rest)
   | .createSpan width, .ref (.static bytes 0) :: rest =>
     if 0 < width ∧ bytes.length % width = 0 then
       return (m, .span (.static bytes 0) (bytes.length / width) :: rest)

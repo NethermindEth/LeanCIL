@@ -28,13 +28,18 @@ internal static class UnsafeModels
             reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr";
         var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Void;
-        if (!sizeOf && !add && !skipInit) return null;
+        var nullRef = reference.Name == "NullRef" && reference.Parameters.Count == 0 && Reference(reference.ReturnType);
+        var isNullRef = reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
+            Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Boolean;
+        if (!sizeOf && !add && !skipInit && !nullRef && !isNullRef) return null;
 
         if (element is ByReferenceType || element is PointerType || element is GenericParameter)
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
         MetadataValidation.Type(element, reference.Module);
         RuntimeModels.ValidateSignature(reference);
         if (skipInit) return ".skipInit";
+        if (nullRef) return ".memory .nullRef";
+        if (isNullRef) return ".memory .isNullRef";
         var width = element is GenericInstanceType vector && RuntimeModels.SupportedType(vector)
             ? vector.ElementType.FullName switch
             {

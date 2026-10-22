@@ -133,6 +133,17 @@ initialization flags and access permissions. It does not initialize the output;
 reads still require initialized bytes. Extraction evidence checks the exact
 runtime call identity and its translation to `skipInit`.
 
+`Unsafe.NullRef<T>()` and `Unsafe.IsNullRef<T>(ref readonly T)` admit the same
+storage types. `NullRef` pushes the model's null managed reference, which a
+byref local or argument can hold like any other reference. `IsNullRef` returns
+1 for it and 0 for every other reference, live or not, without accessing memory.
+Every load, store, copy, initialization, field or lane access of one or more
+bytes through null faults with `nullDereference`, the model's
+`NullReferenceException`, and no address is formed from it; zero-length block
+operations access nothing, as above. Extraction evidence binds each call to its operation in
+both directions, as for `SkipInit`. `ldnull` remains unsupported: this is a null
+byref, not a null object reference.
+
 The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and byte-span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references remains unsupported.
 
 The checked model supports `Unsafe.BitCast<TFrom,TTo>` between equal-size validated unmanaged aggregates and `Vector128`/`Vector256` values with `uint` or `ulong` elements, in both directions and under the scalar profile. Byte snapshots retain initialization flags through the cast, local and parameter homes, and value loads/stores. Partially initialized results remain snapshots; numeric reads and vector arithmetic cannot consume their unknown bytes. The pure model does not implement this value-cast operation.

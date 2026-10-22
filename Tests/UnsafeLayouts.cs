@@ -116,6 +116,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
 
 Console.WriteLine($"PASS {cases} layout-based Unsafe checks");
 Run(["dotnet", "run", "--file", "Tests/SkipInitialization.cs"], streamOutput: true, progress: "SkipInit checks");
+Run(["dotnet", "run", "--file", "Tests/NullReferences.cs"], streamOutput: true, progress: "Null reference checks");
 Run(["dotnet", "run", "--file", "Tests/UnsafeReferences.cs"], streamOutput: true, progress: "Unsafe byref reinterpretation checks");
 Run(["dotnet", "run", "--file", "Tests/ValueBitCasts.cs"], streamOutput: true, progress: "Value BitCast checks");
 Run(["dotnet", "run", "--file", "Tests/StaticSpans.cs"], streamOutput: true, progress: "Static byte span checks");

@@ -191,6 +191,10 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memor
       return (m, .reference (.address result) :: rest)
     else .error (.thrown "System.IndexOutOfRangeException")
   | .spanLength, .span _ length :: rest => return (m, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
+  | .nullRef, _ => return (m, .reference .null :: stack)
+  -- A pure comparison: no access, so a live, expired or end reference all answer false.
+  | .isNullRef, .reference r :: rest =>
+    return (m, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
   | .staticAddress _, _ | .staticValue _, _ | .createSpan _, _ | .spanCreate, _ =>
     .error (.unsupported "Extraction-bound static/span allocation metadata")
   | _, _ => .error .invalidState
@@ -277,6 +281,11 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (← checkedAt (.address address) width
       (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
+  -- Field and lane accesses through null fault like `referenceAt`, before any offset is formed.
+  | .fieldAt .., .reference .null :: _ | .fieldAddress _, .reference .null :: _
+  | .lane _, .reference .null :: _ | .laneAddress _, .reference .null :: _
+  | .setFieldAt .., .scalar _ :: .reference .null :: _ | .setLane _, .scalar _ :: .reference .null :: _ =>
+    .error (.memory .nullDereference .null 0)
   | .memory operation, _ => memoryInstruction operation stack m
   | .const32 bits, _ => return (m, .scalar (.i32 bits) :: stack)
   | .const64 bits, _ => return (m, .scalar (.i64 bits) :: stack)
