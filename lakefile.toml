@@ -33,6 +33,9 @@ name = "Tests.MethodContract"
 name = "Tests.OutcomeContract"
 
 [[lean_lib]]
+name = "Tests.Imports"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]
