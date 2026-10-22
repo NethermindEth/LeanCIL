@@ -26,7 +26,7 @@ def linkChecked (app : CIL.Program) (libraries : List Library) : Except String C
 theorem linkChecked_sound {app : CIL.Program} {libraries : List Library} {linked : CIL.Program}
     (checked : linkChecked app libraries = .ok linked) :
     linked = link app libraries ∧ StaticDescriptorsCompatible (programStaticDescriptors linked) := by
-  unfold linkChecked at checked
+  dsimp only [linkChecked] at checked
   split at checked
   next compatible =>
     cases checked
@@ -46,12 +46,16 @@ theorem StaticDescriptorsCompatible.identities {descriptors : List CIL.StaticDes
   | cons descriptor rest ih =>
     obtain ⟨head, tail⟩ := List.pairwise_cons.mp compatible
     intro left leftMember right rightMember same
-    rcases List.mem_cons.mp leftMember with rfl | leftMember <;>
-      rcases List.mem_cons.mp rightMember with rfl | rightMember
-    · rfl
-    · exact head right rightMember same
-    · exact (head left leftMember same.symm).symm
-    · exact ih tail left leftMember right rightMember same
+    rcases List.mem_cons.mp leftMember with equalLeft | leftMember
+    · subst left
+      rcases List.mem_cons.mp rightMember with equalRight | rightMember
+      · subst right
+        rfl
+      · exact head right rightMember same
+    · rcases List.mem_cons.mp rightMember with equalRight | rightMember
+      · subst right
+        exact (head left leftMember same.symm).symm
+      · exact ih tail left leftMember right rightMember same
 
 #print axioms linkChecked_sound
 #print axioms linkChecked_links
