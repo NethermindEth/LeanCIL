@@ -31,6 +31,10 @@ partial class Program : IDisposable
     readonly Dictionary<string, SortedDictionary<string, string>> supportSourceKeys = new(StringComparer.Ordinal);
 
     bool referenceOnlyAuthoring;
+    bool forceFullVerification { get; init; }
+    sealed record FullImportResult(string Theorem, string Audit, PublishedImport[] Imports, Action Recheck);
+    Func<string, string, string, string, FullImportResult>? fullImportAudit;
+    Action? fullInputRecheck;
     bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
@@ -1024,7 +1028,7 @@ unsafe def main (args : List String) : IO Unit := do
 
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
-        string certificationStatementDigest, string deploymentObligation);
+        string certificationStatementDigest, string deploymentObligation, string? sourceBundleDigest = null);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1053,7 +1057,8 @@ unsafe def main (args : List String) : IO Unit := do
         string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
-        string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null);
+        string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
+        string? compositionTheorem = null, string? compositionAudit = null);
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -1161,6 +1166,7 @@ unsafe def main (args : List String) : IO Unit := do
         string audit;
         string extractionAudit = "";
         string[] axioms;
+        FullImportResult? fullResult = null;
 
         try
         {
@@ -1271,28 +1277,31 @@ unsafe def main (args : List String) : IO Unit := do
                 PublishSuccess(proofKey, publication);
             }
             if (extractionPublication is not null) PublishSuccess(extractedKey, extractionPublication);
+            fullResult = fullImportAudit?.Invoke(output, fresh, "Proof", leanPath);
+            // Bind the report only after confirming inputs stayed unchanged.
+            stage?.Invoke("extraction integrity");
+            Run(existingArtifacts ? ["dotnet", ExtractorPath, "check", output] : Extract("check", assembly, identity, entry, output, profile));
+
+            if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
+                throw new InvalidOperationException("Inputs changed during verification");
+
+            var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+            var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
+                ? assumptions.Deserialize<string[]>() : [];
+            RequireImplementationImports(output);
+            fullResult?.Recheck();
+            fullInputRecheck?.Invoke();
+            var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
+                staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: fullResult?.Imports ?? PublishedImports(extraction),
+                compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
+            File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
+
+            return report;
         }
         finally
         {
             Directory.Delete(fresh, true);
         }
-
-        // Bind the report only after confirming inputs stayed unchanged.
-        stage?.Invoke("extraction integrity");
-        Run(existingArtifacts ? ["dotnet", ExtractorPath, "check", output] : Extract("check", assembly, identity, entry, output, profile));
-
-        if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
-            throw new InvalidOperationException("Inputs changed during verification");
-
-        var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
-        var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
-            ? assumptions.Deserialize<string[]>() : [];
-        RequireImplementationImports(output);
-        var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-            staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: PublishedImports(extraction));
-        File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
-
-        return report;
     }
 
     void IDisposable.Dispose()

@@ -140,6 +140,8 @@ JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAll
 if (initialCaller.GetProperty("schema").GetInt32() != 4)
     throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
+Run(["dotnet", "run", "--file", "Tests/FullImportVerification.cs", "--", app, library, sidecar, publishedBundle,
+    callerPackage, callerProof, package, proof], streamOutput: true, progress: "Independent full imported-library verification");
 
 JsonObject two = ProducerManifest();
 JsonObject invalid = two["exports"]![0]!.DeepClone().AsObject();
