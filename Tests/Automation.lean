@@ -145,17 +145,19 @@ theorem scalar_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame
     ∃ stack, step body .bxor 0 args frame [.scalar (.i64 right), .scalar (.i64 left)] memory =
       .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.i64 (left ^^^ right))] := by
   refine ⟨?_, ?_, ?_⟩
+  rotate_left
   · cil_checked_step [unrelated]
   · rfl
 
 open CIL.Safety in
 theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
-    (memory : Memory) (bytes : List (BitVec 8)) (value : CIL.V256)
+    (memory : Memory) (bytes : List (BitVec 8)) (value : BitVec 256)
     (casted : bitcastValue (.aggregate 32) .vector256 (.aggregate bytes) = .ok (.v256 value)) :
     ∃ stack, step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame
       [.scalar (.aggregate bytes)] memory = .ok (.next 1 stack frame memory) ∧
       stack = [.scalar (.v256 value)] := by
   refine ⟨?_, ?_, ?_⟩
+  rotate_left
   · cil_checked_step [staticInstruction, memoryInstruction, casted]
   · rfl
 
@@ -163,7 +165,7 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
     CIL.evalIntrinsic (.avx2 .permute4x64)
       [.v256 (CIL.Vector.pack256 a b c d), .i32 (BitVec.ofNat 32 27)] =
       some (.v256 (CIL.Vector.pack256 d c b a)) := by
-  change some (.v256 (CIL.Vector.permute4x64 (CIL.Vector.pack256 a b c d) 27)) = _
+  change some (CIL.Value.v256 (CIL.Vector.permute4x64 (CIL.Vector.pack256 a b c d) 27)) = _
   simp [CIL.Vector.permute4x64]
 
 @[cil_code] def permuteStoreMethod : CIL.Method := {
