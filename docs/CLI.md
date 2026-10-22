@@ -249,3 +249,8 @@ conditional on those imported contracts.
 Reference-only extraction is an authoring input. Verification checks its caller
 proof, then exits with status 1 and an authoring-only diagnostic. It does not
 write `verified.json` or publish a successful proof receipt.
+
+Contract imports also require `--import-interface-sha256 Lib=<digest>` from an
+accepted publisher channel. This independently pins the interface descriptor
+and all executable Lean source bytes before compilation. See
+[CONTRACT-INTERFACES.md](CONTRACT-INTERFACES.md) for the source trust boundary.

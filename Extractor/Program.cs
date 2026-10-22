@@ -8,7 +8,7 @@ namespace Nethermind.LeanCIL;
 
 internal static class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory]\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory]\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
 
     static int Main(string[] args)
     {
@@ -59,10 +59,11 @@ internal static class Program
             List<string> importPaths = [];
             Dictionary<string, string> implementationPaths = new(StringComparer.Ordinal);
             Dictionary<string, string> importHashes = new(StringComparer.Ordinal);
+            Dictionary<string, string> interfaceHashes = new(StringComparer.Ordinal);
             var initializedTypes = new SortedSet<string>(StringComparer.Ordinal);
             for (var index = 1; index < args.Length; index++)
             {
-                if (args[index] is "--import" or "--import-implementation" or "--import-sha256")
+                if (args[index] is "--import" or "--import-implementation" or "--import-sha256" or "--import-interface-sha256")
                 {
                     string option = args[index];
                     if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
@@ -73,7 +74,8 @@ internal static class Program
                         int separator = args[index].IndexOf('=');
                         if (separator < 1 || separator == args[index].Length - 1)
                             throw new ArgumentException(option + " requires Lib=<value>.");
-                        Dictionary<string, string> selected = option == "--import-sha256" ? importHashes : implementationPaths;
+                        Dictionary<string, string> selected = option == "--import-sha256" ? importHashes :
+                            option == "--import-interface-sha256" ? interfaceHashes : implementationPaths;
                         if (!selected.TryAdd(args[index][..separator], args[index][(separator + 1)..]))
                             throw new ArgumentException("Duplicate " + option + " assembly.");
                     }
@@ -146,7 +148,10 @@ internal static class Program
                     string name = AssemblyNameReference.Parse(binding.GetProperty("identity").GetString()!.Split("::", 2)[0]).Name;
                     string implementation = implementationPaths.GetValueOrDefault(name) ?? binding.GetProperty("implementationPath").GetString()!;
                     string expected = importHashes.GetValueOrDefault(name) ?? binding.GetProperty("implementationSha256").GetString()!;
-                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected));
+                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
+                        (binding.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
+                            throw new InvalidDataException("Import extraction has no independent interface digest; extract again with --import-interface-sha256."));
+                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
                 }
             foreach (AssemblyNameReference reference in module.AssemblyReferences)
             {
@@ -162,7 +167,7 @@ internal static class Program
                 string adjacent = Path.Combine(Path.GetDirectoryName(sidecar)!, name + ".dll");
                 string implementation = implementationPaths.GetValueOrDefault(name) ?? (File.Exists(adjacent) ? adjacent :
                     Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, name + ".dll"));
-                importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? ""));
+                importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
             }
             using ImportResolution imports = new(importSources);
             stage = "metadata and CIL validation";

@@ -841,7 +841,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
           if let some (.thmInfo info) := (<- Lean.getEnv).find? `{{theorem}} then
             if let .app (.const `Not _) claim := info.type.consumeMData then
               if let .const name _ := claim.getAppFn.consumeMData then
-                if name == `CIL.Safety.MethodContract.Holds || name == `CIL.Safety.OutcomeContract.Holds then
+                if name == `CIL.Safety.MethodContract.Holds || name == `CIL.Safety.OutcomeContract.Holds ||
+                    name == `CIL.Safety.OutcomeContract.HoldsCLR then
                   let some ranges <- Lean.findDeclarationRanges? `{{theorem}} | throwError "Missing refutation location"
                   IO.println s!"LeanCIL refutes: {name} at {ranges.selectionRange.pos.line}:{ranges.selectionRange.pos.column}"
 
@@ -1044,7 +1045,8 @@ unsafe def main (args : List String) : IO Unit := do
 
     static string[] ContractImportAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("imports", out JsonElement imports) ? imports.EnumerateArray().Select(import =>
-            import.GetProperty("contractConstant").GetString() + ".Holds linked " +
+            "_root_.CIL.Safety." + (import.GetProperty("contractKind").GetString() == "method" ? "MethodContract" : "OutcomeContract") +
+            ".Holds _root_." + import.GetProperty("contractConstant").GetString() + " linked " +
             (extraction.GetProperty("methods").GetArrayLength() + import.GetProperty("slot").GetInt32())).ToArray() : [];
 
     sealed record Report(int schema, string assemblySha256, string identitySha256, string theorem, string[] axioms,
@@ -1101,9 +1103,9 @@ unsafe def main (args : List String) : IO Unit := do
         stage?.Invoke("Lean library build");
         var before = Inputs(proof, settings);
         var session = Library(before);
-        HashSet<string> interfaceSourceNames = ImportSources(output).Keys.ToHashSet(StringComparer.Ordinal);
+        HashSet<string> importSourceNames = existingArtifacts ? ImportSources(output).Keys.ToHashSet(StringComparer.Ordinal) : [];
         var support = Regex.Matches(File.ReadAllText(proof), @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
-            .Select(m => m.Groups[1].Value).Where(n => !interfaceSourceNames.Contains(n) && n is not ("Extracted" or "ExtractedSymbols") && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
+            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
         if (support.Length > 0)
         {
@@ -1223,14 +1225,15 @@ unsafe def main (args : List String) : IO Unit := do
                 Run(["lean", "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source], leanPath: leanPath,
                     progress: "Checking contract interface: " + module);
             }
-            CheckContractInterfaces(output, fresh, importModules, leanPath);
             if (importModules.Contains("ExtractedImports", StringComparer.Ordinal))
             {
                 string assumptionsSource = Path.Combine(fresh, "ExtractedImports.lean");
                 Run([LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(assumptionsSource, ".olean"), assumptionsSource],
                     leanPath: leanPath, progress: "Checking App import assumptions");
-                Run([checker, "ExtractedImports"], leanPath: leanPath, progress: "Kernel replay of App import assumptions");
             }
+            CheckContractInterfaces(output, fresh, importModules, leanPath);
+            if (importModules.Contains("ExtractedImports", StringComparer.Ordinal))
+                Run([checker, "ExtractedImports"], leanPath: leanPath, progress: "Kernel replay of App import assumptions");
             if (symbols)
                 Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), Path.Combine(fresh, "ExtractedSymbols.lean")],
                     leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);

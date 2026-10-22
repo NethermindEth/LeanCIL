@@ -19,11 +19,12 @@ string library = Path.Combine(directory, "ImportFixture.Lib.dll");
 string sidecar = Path.Combine(directory, "ImportFixture.Lib.leancil.contracts");
 string output = Path.Combine(directory, "extraction");
 string expectedHash = "";
+string expectedInterfaceHash = "";
 JsonObject contract = null!;
 string[] cli = ["dotnet", ExtractorPath];
 string[] Command(string method = "Entry", bool includeImport = true, params string[] extra) =>
     [.. cli, "extract", app, "ImportFixture.Application::" + method + "(ulong)", output,
-        .. includeImport ? new[] { "--import", sidecar, "--import-sha256", "ImportFixture.Lib=" + expectedHash } : [], .. extra];
+        .. includeImport ? new[] { "--import", sidecar, "--import-sha256", "ImportFixture.Lib=" + expectedHash, "--import-interface-sha256", "ImportFixture.Lib=" + expectedInterfaceHash } : [], .. extra];
 
 void Reject(string[] command, string diagnostic)
 {
@@ -40,13 +41,14 @@ string InterfaceDigest(JsonObject value)
     return ContentKey(descriptor.ToJsonString());
 }
 
-void Save(bool bind = true)
+void Save(bool bind = true, bool updatePin = true)
 {
     if (bind)
     {
         contract["interfaceDigest"] = InterfaceDigest(contract);
         contract["certifications"]![0]!["interfaceDigest"] = contract["interfaceDigest"]!.DeepClone();
     }
+    if (updatePin) expectedInterfaceHash = contract["interfaceDigest"]!.GetValue<string>();
     File.WriteAllText(sidecar, contract.ToJsonString());
 }
 
@@ -109,7 +111,17 @@ File.Delete(sidecar);
 Reject(Command(includeImport: false), "Next: supply --import");
 Save();
 Reject([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", output, "--import", sidecar], "independently supplied SHA-256");
-Run(Command(includeImport: false, extra: ["--import-sha256", "ImportFixture.Lib=" + expectedHash]));
+Run(Command(includeImport: false, extra: ["--import-sha256", "ImportFixture.Lib=" + expectedHash, "--import-interface-sha256", "ImportFixture.Lib=" + expectedInterfaceHash]));
+string marker = Path.Combine(directory, "interface-code-executed");
+File.Delete(marker);
+contract["interfaceModules"]![0]!["source"] = contract["interfaceModules"]![0]!["source"]!.GetValue<string>() +
+    "\nrun_cmd Lean.Elab.Command.liftIO <| IO.FS.writeFile " + JsonSerializer.Serialize(marker) + " \"executed\"\n";
+Save(updatePin: false);
+Reject(Command(), "Import interface SHA-256 mismatch");
+if (File.Exists(marker)) throw new InvalidOperationException("Unpinned interface executed before rejection.");
+Reset();
+Reject([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", output, "--import", sidecar,
+    "--import-sha256", "ImportFixture.Lib=" + expectedHash], "independently supplied interface digest");
 string alternate = Path.Combine(directory, "alternate-implementation.dll");
 File.Copy(library, alternate, true);
 Run(Command(extra: ["--import-implementation", "ImportFixture.Lib=" + alternate]));
@@ -120,7 +132,7 @@ JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(
 string generated = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (identity.GetProperty("schema").GetInt32() != 3 || identity.GetProperty("imports").GetArrayLength() != 1 ||
     !generated.Contains(".call 1 1", StringComparison.Ordinal) || generated.Contains(expectedHash, StringComparison.Ordinal) ||
-    !File.ReadAllText(Path.Combine(output, "ExtractedImports.lean")).Contains("@CIL.Safety.MethodContract.Holds _ _ ImportFixture.addOne linked 1", StringComparison.Ordinal))
+    !File.ReadAllText(Path.Combine(output, "ExtractedImports.lean")).Contains("@_root_.CIL.Safety.MethodContract.Holds _ _ _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Import slot, conditional contract or implementation-independent extraction missing.");
 string deletedProofs = Path.Combine(directory, "deleted-library-proofs");
 Directory.CreateDirectory(deletedProofs);
@@ -150,7 +162,7 @@ if (stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argume
         stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "ImportFixture")) ||
     stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "extract")))
     throw new InvalidOperationException("Fresh caller verification obtained library proofs, extracted Lib or replayed its contract module.");
-if (!verified.Contains("Conditional verification: assumes ImportFixture.addOne.Holds linked 1", StringComparison.Ordinal))
+if (!verified.Contains("Conditional verification: assumes _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
@@ -170,6 +182,72 @@ Save();
 Run(Command());
 Run([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"]);
 Console.WriteLine("PASS interface modules compile in parsed dependency order with public imports and nested comments");
+Reset();
+contract["interfaceModules"]![0]!["source"] = """
+import CIL.Safety.Imports
+namespace Fake
+ def contract : Nat := 0
+ def contract.Holds (_linked : CIL.Program) (_slot : Nat) : Prop := True
+end Fake
+""";
+contract["exports"]![0]!["contractConstant"] = "Fake.contract";
+Save();
+Run(Command());
+string fakeCaller = Path.Combine(directory, "FakeCaller.lean");
+File.WriteAllText(fakeCaller, """
+import ExtractedImports
+namespace ExampleProof
+ theorem correctness : CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun _ => True) := by
+   intro linked links imported
+   trivial
+end ExampleProof
+""");
+(int Code, string Output, string Stdout, string Stderr) fakeResult = Execute([.. cli, "verify", output, "--proof", fakeCaller]);
+if (fakeResult.Code != 1 || !fakeResult.Output.Contains("Application type mismatch", StringComparison.Ordinal) ||
+    !fakeResult.Output.Contains("ExtractedImports.lean", StringComparison.Ordinal) || File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("Fake field-notation Holds did not fail canonical contract typing or left a verification report: " + fakeResult.Output);
+Console.WriteLine("PASS generated import assumptions reject a fake contract with a user-defined Holds predicate");
+Reset();
+contract["interfaceModules"]![0]!["source"] = originalInterface + """
+
+namespace Fake
+ def contract : Nat := 0
+end Fake
+namespace Extracted.Fake
+ def contract : _root_.CIL.Safety.MethodContract _root_.CIL.W64 _root_.CIL.W64 := _root_.ImportFixture.addOne
+end Extracted.Fake
+""";
+contract["exports"]![0]!["contractConstant"] = "Fake.contract";
+Save();
+Run(Command());
+fakeResult = Execute([.. cli, "verify", output, "--proof", fakeCaller]);
+if (fakeResult.Code != 1 || !fakeResult.Output.Contains("Application type mismatch", StringComparison.Ordinal) ||
+    !fakeResult.Output.Contains("ExtractedImports.lean", StringComparison.Ordinal) || File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("An Extracted namespace constant replaced the selected root contract: " + fakeResult.Output);
+Reset();
+contract["interfaceModules"]![0]!["source"] = originalInterface + """
+
+namespace Extracted.CIL.Safety.MethodContract
+ def Holds {I O : Type} (_contract : _root_.CIL.Safety.MethodContract I O)
+     (_program : _root_.CIL.Program) (_slot : Nat) : Prop := True
+end Extracted.CIL.Safety.MethodContract
+""";
+Save();
+Run(Command());
+string shadowCaller = Path.Combine(directory, "ShadowCaller.lean");
+File.WriteAllText(shadowCaller, """
+import ExtractedImports
+example (linked : _root_.CIL.Program) :
+    _root_.Extracted.ImportsHold linked =
+      _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1 := by rfl
+namespace ExampleProof
+ theorem correctness : _root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun _ => True) := by
+   intro linked links imported
+   trivial
+end ExampleProof
+""");
+Run([.. cli, "verify", output, "--proof", shadowCaller]);
+Console.WriteLine("PASS generated import assumptions bind root framework predicates and root contract constants");
 Reset();
 Run(Command());
 
@@ -204,6 +282,7 @@ Reject([.. cli, "check", output], "expected " + expectedHash + ", actual ");
 
 foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Action<JsonObject>)[]
 {
+    ("Unsupported contract export kind", value => value["exports"]![0]!["kind"] = "unrecognized"),
     ("Unsupported contract interface format", value => value["formatVersion"] = 2),
     ("Unsupported contract interface format", value => value["semanticsVersion"] = 2),
     ("framework key mismatch", value => value["frameworkKey"] = new string('0', 64)),
@@ -226,7 +305,8 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
     ("certification binding mismatch", value => value["certifications"]![0]!["closureDigest"] = new string('0', 64)),
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "CIL.Types"),
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "../Escape"),
-    ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "Bad;axiom")
+    ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "Bad;axiom"),
+    ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "_root_.ImportFixture.addOne")
 })
 {
     Reset();

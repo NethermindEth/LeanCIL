@@ -8,7 +8,8 @@ the caller program. The imported method has no body in the unlinked program.
 leancil extract App.dll 'App::Entry(ulong)' extracted scalar \
   --import Lib.leancil.contracts \
   --import-implementation Lib=/path/to/Lib.dll \
-  --import-sha256 Lib=<independently-supplied-sha256>
+  --import-sha256 Lib=<independently-supplied-sha256> \
+  --import-interface-sha256 Lib=<independently-supplied-interface-digest>
 leancil check extracted
 ```
 
@@ -18,6 +19,14 @@ application. Explicit implementation paths override discovery. A separate
 `--import-sha256` is required on extraction. A hash found in the same sidecar
 cannot serve as that independent input. A supplied digest establishes byte
 identity; it does not establish authenticity or prove the implementation.
+
+An independent `--import-interface-sha256` is also required before staging or
+compiling the interface. It pins the canonical interface descriptor, including
+every Lean source byte. Obtain it through your accepted publisher channel.
+Interface sources can execute Lean metaprograms and IO with verifier permissions.
+Accepting their digest accepts execution of those exact sources. A digest is
+neither a sandbox nor independent publisher authentication. Rechecks enforce
+the recorded independent interface pin before compilation.
 
 `check` reopens recorded sidecars and implementations. It recomputes their hashes,
 metadata, generated CIL, import slots and interface sources. It reports both the
@@ -89,12 +98,17 @@ return arity. The implementation hash is absent from `Extracted.lean`.
 `ExtractedImports.lean` imports the declared interface sources and defines:
 
 ```
-def Extracted.ImportsHold (linked : CIL.Program) : Prop :=
-  @CIL.Safety.MethodContract.Holds _ _ Library.Contract linked <absolute-slot>
+def Extracted.ImportsHold (linked : _root_.CIL.Program) : Prop :=
+  @_root_.CIL.Safety.MethodContract.Holds _ _ _root_.Library.Contract linked <absolute-slot>
 ```
 
-Several slots form a conjunction. Each named contract must elaborate against the
-actual linked program and its absolute slot. No body, axiom, summary or
+Several slots form a conjunction. The selected kind uses the fully qualified
+framework `MethodContract.Holds` or `OutcomeContract.Holds` predicate. Both the
+framework predicate and selected contract use `_root_` qualification, so an
+`Extracted` namespace declaration cannot replace either one. Lean checks
+that the named value has that actual framework contract type. A user-defined
+`Contract.Holds` predicate cannot replace this check. Each contract applies to
+the actual linked program and its absolute slot. No body, axiom, summary or
 implementation proof is generated for an import.
 
 The caller theorem must have the conditional form:
