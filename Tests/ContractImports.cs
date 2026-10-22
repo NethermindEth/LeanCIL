@@ -469,7 +469,7 @@ contract["interfaceModules"]![0]!["source"] = interfaceSource + "\naxiom unpubli
 Save();
 Run(Command());
 Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "contract interface");
-Reject([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"], "Axiom in contract interface: unpublishedAssumption");
+Reject([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"], "Unapproved transitive axiom in contract interface: unpublishedAssumption");
 if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Consumer unused-axiom rejection left a verification report.");
 Reset();
 contract["isReferenceAssembly"] = true;
