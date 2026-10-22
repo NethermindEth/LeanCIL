@@ -18,7 +18,11 @@ theorem vector256_bytes_roundtrip (bytes : List (BitVec 8)) (length : bytes.leng
 
 theorem vector512_bytes_roundtrip (bytes : List (BitVec 8)) (length : bytes.length = 64) :
     numberBytes (BitVec.ofNat 512 (byteNumber bytes)).toNat 64 = bytes := by
-  have bound : byteNumber bytes < 2^512 := by simpa [length] using byteNumber_lt bytes
+  have power : (256 : Nat)^64 = 2^512 := by
+    change (2^8)^64 = 2^(8 * 64)
+    exact (Nat.pow_mul 2 8 64).symm
+  have bound := byteNumber_lt bytes
+  rw [length, power] at bound
   simp only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt bound]
   simpa [length] using numberBytes_byteNumber bytes
 

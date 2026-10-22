@@ -2,6 +2,7 @@ import CIL.Extraction.Scalars
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.DivisionIntrinsics
+import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 
 namespace CIL.Extraction
@@ -63,12 +64,13 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
   DivisionIntrinsicsValid item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
+  VectorInitializationsValid item.closed item.reachable method ∧
   ScalarFlowValid item.closed item.featureStates item.scalarStates method.code
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Option Method) : Prop :=

@@ -31,8 +31,9 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     ResultEquivalent FrameActionEquivalent (step body op pc args frame stack m)
       (step body op pc args frame stack n) := by
   unfold CIL.Safety.step
+  dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress]
-  all_goals repeat first
+  all_goals repeat' first
     | exact .error _
     | exact .ok (.next same _ _ _)
     | exact .ok (.call same _ _ _)

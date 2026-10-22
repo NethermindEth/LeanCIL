@@ -22,7 +22,7 @@ theorem step_newVector256 {body : CIL.Method} {pc callee : Nat}
     allocate_initialized256 memory frame.activation (BitVec.ofNat 256 0) wellFormed
   refine ⟨temporary, updated, ?_, loaded, writable, preserved,
     (allocateHome_fresh _ _ _ _ _ home).2.1⟩
-  simp [step, checked, localWidth, home, stored,
+  simp [step, observerCount, unspecifiedOperands, checked, localWidth, home, stored,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_newVector256
@@ -47,7 +47,7 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
       (by simp) wellFormed
   refine ⟨temporary, updated, ?_, loaded, writable, preserved, fresh⟩
   have nonzero : size ≠ 0 := by intro h; have := congrArg Fin.val h; simp at this; omega
-  simp [step, nonzero, checked, home, Nat.not_lt_of_ge (Nat.le_add_right arguments.length rest.length),
+  simp [step, observerCount, unspecifiedOperands, nonzero, checked, home, Nat.not_lt_of_ge (Nat.le_add_right arguments.length rest.length),
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
   simp only [Nat.reducePow, BitVec.ofNat_eq_ofNat] at stored

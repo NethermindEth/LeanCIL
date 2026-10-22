@@ -192,4 +192,50 @@ example : DivisionIntrinsicsValid (raw {
     typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := true, returnType := .atom runtimeScope "System.Int32", parameterTypes := [vectorType "256"] }) [true]
     (body [.intrinsic (.avx512DQ .moveMask64) 1]) := by decide +kernel
 
+
+private def initBody (type : TypeExpr) : RawMethod :=
+  { raw call0 with code := [⟨0, 65045, .type type⟩] }
+
+example : VectorInitializationsValid (initBody (vectorType "128")) [true]
+    (body [.initAggregate 16]) := by decide +kernel
+example : VectorInitializationsValid (initBody (vectorType "256")) [true]
+    (body [.initAggregate 32]) := by decide +kernel
+example : VectorInitializationsValid (initBody (vectorType "512")) [true]
+    (body [.initAggregate 64]) := by decide +kernel
+example : VectorInitializationsValid (initBody (vectorType "512")) [true]
+    { body [.initAggregate 64] with profile := .scalar } := by decide +kernel
+example : VectorInitializationsValid (initBody (vectorType "256")) [true]
+    { body [.initAggregate 32] with profile := { architecture := .arm64 } } := by decide +kernel
+example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
+    (body [.initAggregate 32]) := by decide +kernel
+example : ¬ VectorInitializationsValid (initBody (vectorType "256")) [true]
+    (body [.initAggregate 16]) := by decide +kernel
+example : ¬ VectorInitializationsValid (initBody (vectorType "512")) [true]
+    (body [.initAggregate 32]) := by decide +kernel
+example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
+    (body [.nop]) := by decide +kernel
+example : ¬ VectorInitializationsValid
+    { initBody (vectorType "128") with code := [⟨0, 113, .type (vectorType "128")⟩] } [true]
+    (body [.initAggregate 16]) := by decide +kernel
+example : ¬ VectorInitializationsValid (initBody (.atom runtimeScope "System.UInt64")) [true]
+    (body [.initAggregate 16]) := by decide +kernel
+example : ¬ VectorInitializationsValid
+    (initBody (.apply (.constructor "forged" "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.UInt64")))
+    [true] (body [.initAggregate 16]) := by decide +kernel
+example : ¬ VectorInitializationsValid
+    (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom "forged" "System.UInt64")))
+    [true] (body [.initAggregate 16]) := by decide +kernel
+example : ¬ VectorInitializationsValid
+    (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Int64")))
+    [true] (body [.initAggregate 16]) := by decide +kernel
+example : ¬ VectorInitializationsValid
+    (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector64`1") (.atom runtimeScope "System.UInt64")))
+    [true] (body [.initAggregate 16]) := by decide +kernel
+example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
+    { body [.initAggregate 16] with profile := { nativeWidth := 32 } } := by decide +kernel
+example : ¬ VectorInitializationsValid (initBody (vectorType "128")) []
+    (body [.initAggregate 16]) := by decide +kernel
+example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
+    (body []) := by decide +kernel
+
 end Tests.DivisionIntrinsics

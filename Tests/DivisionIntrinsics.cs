@@ -4,6 +4,7 @@
 #:include ../scripts/Verification.cs
 
 using System.Reflection;
+using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using Mono.Cecil;
 
@@ -63,3 +64,45 @@ if (rejected.Code == 0 || File.Exists(Path.Combine(rejectedEncoding, "Extracted.
     !rejected.Output.Contains("Unsupported vector type encoding", StringComparison.Ordinal))
     throw new InvalidOperationException("Malformed Vector512 signature was not rejected by the raw metadata check: " + rejected.Output);
 Console.WriteLine("PASS malformed Vector512 signature rejection");
+
+foreach ((string name, int width, object initial) in new (string, int, object)[]
+{
+    ("Init128", 16, Vector128.Create(ulong.MaxValue)),
+    ("Init256", 32, Vector256.Create(ulong.MaxValue)),
+    ("Init512", 64, Vector512.Create(ulong.MaxValue))
+})
+{
+    string output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    string proof = Path.Combine(output, "Proof.lean");
+    File.WriteAllText(proof, $$"""
+import Extracted
+import Examples.Support
+namespace ExampleProof
+private def memory (size : Nat) : CIL.Safety.Memory := {
+  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨size, 1, []⟩, true, [size]⟩ else none
+  cells := fun _ _ => ⟨255, true⟩
+  views := [⟨0, 0, size, true, true⟩]
+  nextIdentity := 1 }
+theorem correctness :
+    (CIL.Safety.invoke Extracted.program 16 0 [Examples.reference] (memory {{width}})).map
+      (fun result => ((List.range {{width}}).map (fun offset => result.1.cells 0 offset), result.2)) =
+      .ok (List.replicate {{width}} (⟨0, true⟩ : CIL.Safety.Cell), []) ∧
+    (CIL.Safety.invoke Extracted.program 16 0 [Examples.reference] (memory {{width - 1}})).map Prod.snd =
+      .error ⟨0, 1, .memory .outsideAllocation (.address ⟨0, 0⟩) {{width}}⟩ := by
+  exact ⟨rfl, rfl⟩
+end ExampleProof
+""");
+    verification.Verify(assembly, "Examples", selectors[name], proof, output);
+    object[] arguments = [initial];
+    runtime.GetMethod(name)!.Invoke(null, arguments);
+    bool zero = arguments[0] switch
+    {
+        Vector128<ulong> vector => vector.Equals(Vector128<ulong>.Zero),
+        Vector256<ulong> vector => vector.Equals(Vector256<ulong>.Zero),
+        Vector512<ulong> vector => vector.Equals(Vector512<ulong>.Zero),
+        _ => false
+    };
+    if (!zero) throw new InvalidOperationException("Runtime vector initialization did not clear every lane: " + name);
+    Console.WriteLine("PASS vector initialization, exact zero bytes and bounds: " + name);
+}

@@ -34,4 +34,7 @@ public static class DivisionIntrinsics
     public static ulong UnsafeLow(ulong value) => Vector128.CreateScalarUnsafe(value).GetElement(0);
     public static ulong UnsafeHigh(ulong value) => Vector128.CreateScalarUnsafe(value).GetElement(1);
     public static bool UnsafeEquals(ulong value) => Vector128.CreateScalarUnsafe(value) == Vector128.CreateScalarUnsafe(value);
+    public static void Init128(ref Vector128<ulong> value) => value = default;
+    public static void Init256(ref Vector256<ulong> value) => value = default;
+    public static void Init512(ref Vector512<ulong> value) => value = default;
 }
