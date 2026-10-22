@@ -433,7 +433,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output, ConsumerDependency[]? bundled = null)
     {
         var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var dependencies = bundled ?? ConsumerDependencies(root);
+        ConsumerDependency[] dependencies = bundled ?? ConsumerDependencies(root);
         foreach (var directory in new[] { root }.Concat(dependencies.Select(d => d.Directory)))
             foreach (var path in ConsumerSources(directory, output)) inputs["consumer:" + path] = Sha(path);
         foreach (var dependency in dependencies) inputs["revision:" + dependency.Name] = dependency.Revision;
@@ -994,7 +994,7 @@ unsafe def main (args : List String) : IO Unit := do
             if (members.Length == 0) return;
             try
             {
-                var common = Common(ConsumerSnapshot(root, excluded, fullBundleDependencies));
+                SortedDictionary<string, string> common = Common(ConsumerSnapshot(root, excluded, fullBundleDependencies));
                 foreach (var i in members)
                     if (!Same(before[i], BoundRequestInputs(i, common)) ||
                         identities[i] != Sha(Path.Combine(outputs[i], "identity.json")) ||
@@ -1088,7 +1088,7 @@ unsafe def main (args : List String) : IO Unit := do
         var ordered = groups.Values.Select(group => group.ToArray())
             .OrderByDescending(group => group.Count(i => !requests[i].ExpectRejection)).ToArray();
         var sources = ConsumerSourceHashes(snapshot, root);
-        var exporting = !forceFullVerification && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
+        bool exporting = !forceFullVerification && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
         var export = new ConsumerSupportExport();
         string supportKey = "";
         string[] relativeImportDirectories = [];

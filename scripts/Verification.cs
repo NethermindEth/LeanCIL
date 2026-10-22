@@ -33,8 +33,8 @@ partial class Program : IDisposable
     bool referenceOnlyAuthoring;
     bool forceFullVerification { get; init; }
     sealed record FullImportResult(string Theorem, string Audit, PublishedImport[] Imports, Action Recheck);
-    Func<string, string, string, string, FullImportResult>? fullImportAudit;
-    Action? fullInputRecheck;
+    Func<string, string, string, string, FullImportResult>? fullImportAudit { get; set; }
+    Action? fullInputRecheck { get; set; }
     bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
