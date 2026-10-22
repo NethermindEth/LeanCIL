@@ -51,6 +51,24 @@ elab_rules : tactic
     let all := lemmas.getElems ++ facts.getElems ++ normalised
     withMainContext <| evalTactic (← `(tactic| simp $config:optConfig [$[$all:term],*]))
 
+/-- Run `tactic` once, failing with `message` when it does not apply, then repeat it. -/
+macro "cil_steps_from " message:str tactic:tacticSeq : tactic =>
+  `(tactic| ((first | $tactic | fail $message); repeat $tactic))
+
+/-- Close a method or instruction lookup by evaluation for an extraction, else from a lookup hypothesis,
+    else by rewriting feature tests in a profile-dependent body with the supplied facts. -/
+syntax "cil_lookup" "[" term,* "]" : tactic
+
+-- Reducible `assumption` keeps a failed candidate lookup from unfolding every hypothesis.
+macro_rules
+  | `(tactic| cil_lookup [$facts:term,*]) =>
+  `(tactic| first
+    | (simp only [cil_code, Nat.reduceAdd]; rfl)
+    | rfl
+    | with_reducible assumption
+    | (simp only [cil_code, Nat.reduceAdd, $[$facts:term],*]; done)
+    | (simp only [cil_code, Nat.reduceAdd, $[$facts:term],*]; rfl))
+
 /-- Close definitional steps before using instruction equations or the dispatcher. -/
 macro "cil_checked_step " "[" facts:term,* "]" : tactic => do
   -- With facts, reflexivity can assign a symbolic branch target before its
@@ -82,24 +100,24 @@ macro_rules
   `(tactic| (
     try (conv => lhs; arg 2; cil_reduce_fuel)
     try (cil_strict apply CIL.Safety.invoke_of_run
-         · simp only [cil_code, Nat.reduceAdd]; rfl
+         · cil_lookup [$[$facts:term],*]
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
-    repeat first
+    cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" first
     | (cil_strict refine CIL.Safety.run_return (op := .ret _)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_lookup [$[$facts:term],*])
+        (by cil_lookup [$[$facts:term],*])
         (by cil_checked_step [$[$facts:term],*])
         (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)))
     -- Elaborate each intermediate-state proof before creating the continuation
     -- goal, so reference/frame metavariables remain assignable by the step facts.
     | (cil_strict refine Eq.trans (CIL.Safety.run_next
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_lookup [$[$facts:term],*])
+        (by cil_lookup [$[$facts:term],*])
         (by cil_checked_step [$[$facts:term],*])) ?_)
     | (cil_strict apply CIL.Safety.run_call_of_invoke
-       · simp only [cil_code, Nat.reduceAdd]; rfl
-       · simp only [cil_code, Nat.reduceAdd]; rfl
+       · cil_lookup [$[$facts:term],*]
+       · cil_lookup [$[$facts:term],*]
        · cil_checked_step [$[$facts:term],*]
        · solve | cil_checked_steps [$[$facts:term],*]
        · solve | cil_checked_steps [$[$facts:term],*])

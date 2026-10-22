@@ -307,17 +307,17 @@ macro_rules
   `(tactic| (
     try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
     try (cil_strict refine CIL.Safety.raises_of_run
-           (by simp only [cil_code, Nat.reduceAdd]; rfl)
+           (by cil_lookup [$[$facts:term],*])
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
-    repeat first
+    cil_steps_from "cil_raise_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" first
     | (cil_strict exact CIL.Safety.run_throw_raises
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_lookup [$[$facts:term],*])
+        (by cil_lookup [$[$facts:term],*])
         (by simp [CIL.Safety.step, $[$facts:term],*]))
     | (cil_strict refine CIL.Safety.run_next_raises
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_lookup [$[$facts:term],*])
+        (by cil_lookup [$[$facts:term],*])
         (by cil_checked_step [$[$facts:term],*]) ?_)))
 
 /-- At a `bind_call` site, continue past a callee whose contract names no exception for this
@@ -329,10 +329,10 @@ macro_rules
   | `(tactic| cil_outcome_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| first
     | refine CIL.Safety.run_call_raises_after_outcome $holds $input
-        (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+        (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
         (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_
     | refine CIL.Safety.run_call_of_outcome $holds $input
-        (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+        (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
         (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_)
 
 /-- `cil_outcome_call` through the `_formed` theorems: leaves the precondition, the caller
@@ -343,10 +343,10 @@ macro_rules
   | `(tactic| cil_formed_outcome_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| first
     | refine CIL.Safety.run_call_raises_after_outcome_formed $holds $input
-        (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+        (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
         (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_ ?_
     | refine CIL.Safety.run_call_of_outcome_formed $holds $input
-        (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+        (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
         (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_ ?_)
 
 /-- At a `bind_call` site, propagate the exception the callee's contract names for this
@@ -357,7 +357,7 @@ macro_rules
   | `(tactic| cil_outcome_raise $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_raises_of_contract $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl)
       (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_ ?_))
 

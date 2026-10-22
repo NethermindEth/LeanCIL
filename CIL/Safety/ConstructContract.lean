@@ -163,8 +163,8 @@ macro_rules
   | `(tactic| cil_contract_construct $holds $constructs $input [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_newAggregate_of_contract $holds $constructs $input
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
       (by decide) ?_ (by simp)
       (by first | rfl | (simp [CIL.Safety.checkedValue, CIL.Safety.numericValue, $[$facts:term],*] <;>
         (repeat constructor) <;> rfl))
