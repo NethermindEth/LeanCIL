@@ -46,8 +46,7 @@ theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract In
     (encoded : arguments = c.args input) (permitted : c.pre input updated) (formed : memory.WellFormed)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       LoopTerminates program method args post ⟨pc + 1, frame, values ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
@@ -63,8 +62,8 @@ macro "cil_loop_advance" "[" facts:term,* "]" : tactic =>
   `(tactic| repeat first
     | (simp only [$[$facts:term],*])
     | (apply CIL.Safety.loop_terminates_next
-       · first | (simp only [cil_code]; rfl) | rfl
-       · first | (simp only [cil_code]; rfl) | rfl
+       · cil_lookup [$[$facts:term],*]
+       · cil_lookup [$[$facts:term],*]
        · cil_checked_step [CIL.truth, $[$facts:term],*]))
 
 /-- Apply a contract at the fetched loop call or a `bind_call` site; leaves `pre`, then the continuation. -/
@@ -74,13 +73,13 @@ macro_rules
   | `(tactic| cil_loop_call $holds $input [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.loop_terminates_call $holds $input
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
   | `(tactic| cil_loop_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.loop_terminates_call $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
 
 end CIL.Safety
