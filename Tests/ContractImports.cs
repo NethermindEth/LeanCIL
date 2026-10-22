@@ -106,6 +106,45 @@ if (!verified.Contains("Conditional verification: assumes ImportFixture.addOne.H
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 if (report.GetProperty("contractImports").GetArrayLength() != 1)
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
+
+string originalInterface = contract["interfaceModules"]![0]!["source"]!.GetValue<string>();
+contract["interfaceModules"]![0]!["source"] = "module\n  public /- outer /- nested -/ -/ import ZContractBase\n\npublic section\n" +
+    originalInterface.Replace("import CIL.Safety.MethodContract\n", "", StringComparison.Ordinal);
+contract["interfaceModules"]!.AsArray().Add(new JsonObject
+{
+    ["module"] = "ZContractBase",
+    ["source"] = "module\npublic import CIL.Safety.MethodContract\n\npublic section\n"
+});
+Save();
+Run(Command());
+Run([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"]);
+Console.WriteLine("PASS interface modules compile in parsed dependency order with public imports and nested comments");
+Reset();
+Run(Command());
+
+void RejectUnrelatedTheorem(string proof, params string[] options)
+{
+    (int Code, string Output, string Stdout, string Stderr) result = Execute([.. cli, "verify", output, "--proof", proof, .. options]);
+    string[] diagnostics = ["Application type mismatch", "LeanCILImportAudit.requireConditional", "HoldsGiven"];
+    if (result.Code != 1 || diagnostics.Any(diagnostic => !result.Output.Contains(diagnostic, StringComparison.Ordinal)) ||
+        File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException("Unrelated theorem did not fail the imported-claim audit or left a verification report: " + result.Output);
+}
+
+string unrelated = Path.Combine(directory, "Unrelated.lean");
+File.WriteAllText(unrelated, "namespace ExampleProof\ntheorem correctness : True := by trivial\nend ExampleProof\n");
+RejectUnrelatedTheorem(unrelated);
+string package = Path.Combine(directory, "UnrelatedConsumer");
+Directory.CreateDirectory(Path.Combine(package, "Client"));
+string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
+File.WriteAllText(Path.Combine(package, "lakefile.toml"),
+    $"name = \"unrelated_import_consumer\"\n[[require]]\nname = \"leancil\"\ngit = {JsonSerializer.Serialize(Root.Replace('\\', '/'))}\nrev = \"{revision}\"\n[[lean_lib]]\nname = \"Client\"\n");
+File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"), true);
+string consumerProof = Path.Combine(package, "Proof.lean");
+File.Copy(unrelated, consumerProof, true);
+Run(["lake", "update"], package);
+RejectUnrelatedTheorem(consumerProof, "--proof-root", package);
+Console.WriteLine("PASS ordinary and consumer import audits reject unrelated theorems without verification reports");
 File.AppendAllText(Path.Combine(output, "ImportFixture.lean"), "\n");
 Reject([.. cli, "check", output], "Stale or mismatched contract interface source");
 Run(Command());

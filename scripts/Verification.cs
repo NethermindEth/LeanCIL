@@ -878,17 +878,54 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         return sources;
     }
 
-    static string[] StageImportSources(string output, string destination)
+    Dictionary<string, string[]> ContractModuleImports(string destination, SortedDictionary<string, string> sources)
+    {
+        string probe = Path.Combine(destination, "LeanCILHeader" + Guid.NewGuid().ToString("N") + ".lean");
+        string input = probe + ".json";
+        try
+        {
+            File.WriteAllText(probe, """
+import Lean
+open Lean Parser
+unsafe def main (args : List String) : IO Unit := do
+  let [input] := args | throw (IO.userError "Expected interface source manifest")
+  let sources : Array String <- IO.ofExcept <| (Lean.Json.parse (<- IO.FS.readFile input)).bind Lean.fromJson?
+  for source in sources do
+    let (header, _, messages) <- Parser.parseHeader (Parser.mkInputContext source input)
+    if messages.hasErrors then
+      throw (IO.userError "Invalid contract interface import header")
+    let `(Module.header| $[module]? $[prelude]? $imports*) := header
+      | throw (IO.userError "Invalid contract interface header")
+    let mut names : Array Lean.Json := #[]
+    for imported in imports do
+      let `(Module.import| $[public]? $[meta]? import $[all]? $name) := imported
+        | throw (IO.userError "Invalid contract interface import")
+      names := names.push (Lean.Json.str name.getId.toString)
+    IO.println (Lean.Json.arr names).compress
+""");
+            File.WriteAllText(input, JsonSerializer.Serialize(sources.Values));
+            string result = Run([LeanExecutable, "--run", probe, input], destination, environment: LeanEnvironment);
+            string[] lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length != sources.Count) throw new InvalidDataException("Incomplete contract interface import graph.");
+            return sources.Keys.Zip(lines).ToDictionary(pair => pair.First,
+                pair => JsonSerializer.Deserialize<string[]>(pair.Second) ?? throw new InvalidDataException("Invalid contract import graph."), StringComparer.Ordinal);
+        }
+        finally { File.Delete(probe); File.Delete(input); }
+    }
+
+    string[] StageImportSources(string output, string destination)
     {
         SortedDictionary<string, string> sources = ImportSources(output);
+        if (sources.Count == 0) return [];
+        Dictionary<string, string[]> dependencies = ContractModuleImports(destination, sources);
         List<string> ordered = [];
         HashSet<string> active = new(StringComparer.Ordinal);
         void Stage(string module)
         {
             if (ordered.Contains(module, StringComparer.Ordinal)) return;
             if (!active.Add(module)) throw new InvalidDataException("Cyclic contract interface module imports: " + module);
-            foreach (Match dependency in Regex.Matches(sources[module], @"(?m)^import\s+([A-Za-z_][A-Za-z0-9_.]*)"))
-                if (sources.ContainsKey(dependency.Groups[1].Value)) Stage(dependency.Groups[1].Value);
+            foreach (string dependency in dependencies[module])
+                if (sources.ContainsKey(dependency)) Stage(dependency);
             string path = Path.Combine(destination, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
             if (File.Exists(path)) throw new InvalidDataException("Contract interface module shadows an existing source: " + module);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
