@@ -28,7 +28,7 @@ theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsi
     (args stack : List Value) (frame : Frame) (memory : Memory) :
     step body (.intrinsic operation argc) pc args frame stack memory =
       .error (.unsupported "Intrinsic unavailable in target profile") := by
-  simp [step, disabled]
+  simp [step, disabled, observerCount, unspecifiedOperands]
 
 theorem checked_avx2_enabled :
     step { scalarBody with profile := { avx2 := true } } (.intrinsic (.avx2 .add64) 2)
@@ -119,9 +119,11 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
   refine ⟨result, ?_, ?_⟩
   · cases hw : checkedAt (.address reference) 4 (write memory reference (numberBytes bits.toNat 4) 1) <;>
       simp_all [instruction, storeLocal, localNumber, referenceAt, localWidth, ordinaryAccessAlignment,
+        observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
   · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
       simp_all [instruction, loadValue, localResult, dereference, ordinaryAccessAlignment,
+        observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem switch_unsigned_default :
@@ -182,7 +184,7 @@ theorem aggregate_roundtrip {memory : Memory} {reference : Reference}
         .ok (.bytes (.aggregate size) reference, result) ∧
       loadLocal result (.bytes (.aggregate size) reference) = .ok (.scalar (.aggregate bytes)) := by
   apply store_load_numeric_local (.aggregate size) (.aggregate bytes) (byteNumber bytes)
-  · simp [localNumber, length]
+  · simp [localNumber, length, CIL.Value.hasUnspecified]
   · exact ready
 
 #print axioms aggregate_roundtrip

@@ -36,7 +36,7 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
     let supplied ← facts.filterM fun fact => return !(← isLocal fact)
     let mut normalised : Array Term := #[]
     if !locals.isEmpty then
-      let normaliser ← `(tactic| simp $config:optConfig [CIL.fin_val_three, CIL.fin_mk_ofNat,
+      let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat,
         $[$supplied:term],*])
       let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
       for fact in locals do
@@ -73,7 +73,7 @@ open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_fact_simp $config:optConfig [$lemmas:term,*] [$facts:term,*]) => do
     let prepared ← normaliseStepFacts config facts.getElems
-    let all := lemmas.getElems ++ #[← `(term| CIL.fin_val_three), ← `(term| CIL.fin_mk_ofNat)] ++ prepared
+    let all := lemmas.getElems ++ #[← `(term| cil_guard), ← `(term| CIL.fin_val_three), ← `(term| CIL.fin_mk_ofNat)] ++ prepared
     withMainContext <| evalTactic (← `(tactic| simp $config:optConfig [$[$all:term],*]))
 
 /-- Run `tactic` once, failing with `message` when it does not apply, then repeat it. -/
@@ -101,27 +101,28 @@ macro "cil_stack_cleanup" : tactic =>
 
 macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| first
-    | (simp only [cil_step, CIL.Safety.instructionStep]
-       try simp [CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
+    | (simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
+       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
          Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl))
     | (fail_if_success simp only [cil_step]
-       simp [CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+       simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
         CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
         $[$facts:term],*] <;> (repeat constructor) <;> rfl))
 
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    simp only [cil_step, CIL.Intrinsic.available, List.length_cons, List.length_nil,
+    simp only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
       Nat.reduceAdd, Nat.reduceLT, Bool.not_true, Bool.not_false, Bool.false_eq_true,
       ite_false, ite_true, List.take_succ_cons, List.take_zero, List.take_nil,
       List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append, List.append_nil,
       List.drop_succ_cons, List.drop_zero, List.drop_nil, CIL.Safety.scalars,
       CIL.Safety.numericValue, Bind.bind, Except.bind, Pure.pure, Except.pure,
       BitVec.ofInt_ofNat, cil_eval, $[$facts:term],*]
-    all_goals simp only [CIL.Safety.checkedIntrinsic, cil_eval, $[$facts:term],*,
-      CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
+    all_goals simp only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval, $[$facts:term],*,
+      List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
+      Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
       Bind.bind, Except.bind, Pure.pure, Except.pure]
     all_goals (first | rfl | cil_checked_step_equations [$[$facts:term],*])))
 

@@ -313,7 +313,7 @@ macro_rules
     | (cil_strict exact CIL.Safety.run_throw_raises
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
-        (by simp [CIL.Safety.step, $[$facts:term],*]))
+        (by cil_checked_step_normalized [$[$facts:term],*]))
     | (cil_strict refine CIL.Safety.run_next_raises
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])

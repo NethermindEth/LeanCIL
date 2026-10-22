@@ -91,7 +91,8 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   rw [length] at readback
   have store : storeValue m (.address res) (.i64 (x - ~~~y - 1#64)) = .ok stored := by
     rw [show x - ~~~y - 1#64 = x + y by bv_omega]
-    simp only [storeValue, referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
+      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
@@ -99,6 +100,7 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have lb := load_word64_of_read readB
   refine ⟨12, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
+    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 """;

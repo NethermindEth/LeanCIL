@@ -32,9 +32,12 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     string proof = Path.Combine(output, "Proof.lean");
     string word = wide ? "i32" : "i64";
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+        (wide ? "private theorem ok_of_toOption {error value : Type} {result : Except error value} {expected : value}\n" +
+            "    (observed : result.toOption = some expected) : result = .ok expected := by\n" +
+            "  cases result <;> simp_all [Except.toOption]\n" : "") +
         "theorem correctness : (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 " + left +
         "), .scalar (.i64 " + right + ")] Examples.empty).map Prod.snd = .ok [.scalar (." + word + " " + expected +
-        ")] := by decide +kernel\nend ExampleProof\n");
+        ")] := by " + (wide ? "\n  apply ok_of_toOption\n  decide +kernel" : "rfl") + "\nend ExampleProof\n");
     verification.Verify(assembly, "Examples", selectors[name], proof, output,
         profile: wide ? "x64-avx512dqvl" : "x64-avx2-bmi2");
     if (wide ? Avx512DQ.IsSupported && Avx512F.IsSupported : Avx2.IsSupported)
