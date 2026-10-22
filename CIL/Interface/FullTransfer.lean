@@ -36,22 +36,22 @@ private def exprSource (environment : Environment) (shared : Std.HashSet Name) (
   | .fvar _ => throw "Full verification cannot transfer free variables"
   | .mvar _ => throw "Full verification cannot transfer metavariables"
   | .sort level => return "(Lean.Expr.sort " ++ (<- levelSource level) ++ ")"
-  | .const name levels => return "(Lean.Expr.const " ++ nameSource (<- mapped environment shared targetNamespace name) ++ " " ++
-      listSource (<- levels.mapM levelSource) ++ ")"
-  | .app fn argument => return "(Lean.Expr.app " ++ (<- exprSource environment shared targetNamespace fn) ++ " " ++
-      (<- exprSource environment shared targetNamespace argument) ++ ")"
-  | .lam name type body info => return "(Lean.Expr.lam " ++ nameSource name ++ " " ++
-      (<- exprSource environment shared targetNamespace type) ++ " " ++ (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")"
-  | .forallE name type body info => return "(Lean.Expr.forallE " ++ nameSource name ++ " " ++
-      (<- exprSource environment shared targetNamespace type) ++ " " ++ (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")"
-  | .letE name type value body nondep => return "(Lean.Expr.letE " ++ nameSource name ++ " " ++
+  | .const name levels => return ("(Lean.Expr.const " ++ nameSource (<- mapped environment shared targetNamespace name) ++ " " ++
+      listSource (<- levels.mapM levelSource) ++ ")")
+  | .app fn argument => return ("(Lean.Expr.app " ++ (<- exprSource environment shared targetNamespace fn) ++ " " ++
+      (<- exprSource environment shared targetNamespace argument) ++ ")")
+  | .lam name type body info => return ("(Lean.Expr.lam " ++ nameSource name ++ " " ++
+      (<- exprSource environment shared targetNamespace type) ++ " " ++ (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")")
+  | .forallE name type body info => return ("(Lean.Expr.forallE " ++ nameSource name ++ " " ++
+      (<- exprSource environment shared targetNamespace type) ++ " " ++ (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")")
+  | .letE name type value body nondep => return ("(Lean.Expr.letE " ++ nameSource name ++ " " ++
       (<- exprSource environment shared targetNamespace type) ++ " " ++ (<- exprSource environment shared targetNamespace value) ++ " " ++
-      (<- exprSource environment shared targetNamespace body) ++ " " ++ toString nondep ++ ")"
+      (<- exprSource environment shared targetNamespace body) ++ " " ++ toString nondep ++ ")")
   | .lit (.natVal value) => pure ("(Lean.Expr.lit (Lean.Literal.natVal " ++ toString value ++ "))")
   | .lit (.strVal value) => pure ("(Lean.Expr.lit (Lean.Literal.strVal " ++ quoted value ++ "))")
   | .mdata _ value => exprSource environment shared targetNamespace value
-  | .proj type index value => return "(Lean.Expr.proj " ++ nameSource (<- mapped environment shared targetNamespace type) ++ " " ++
-      toString index ++ " " ++ (<- exprSource environment shared targetNamespace value) ++ ")"
+  | .proj type index value => return ("(Lean.Expr.proj " ++ nameSource (<- mapped environment shared targetNamespace type) ++ " " ++
+      toString index ++ " " ++ (<- exprSource environment shared targetNamespace value) ++ ")")
 
 private def dependencies : Expr -> List Name
   | .const name _ => [name]
@@ -103,7 +103,8 @@ private partial def visit (environment : Environment) (shared : Std.HashSet Name
   if state.visited.contains name then return state
   let some info := environment.find? name | throw ("Missing full-verification declaration: " ++ name.toString)
   if shared.contains (CIL.Interface.definingModule environment name) then
-    return { state with visited := state.visited.insert name,
+    return { state with
+      visited := state.visited.insert name
       imports := state.imports.insert (CIL.Interface.definingModule environment name) }
   if state.active.contains name then throw ("Cyclic full-verification declaration: " ++ name.toString)
   let body <- value info

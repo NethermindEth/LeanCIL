@@ -36,6 +36,7 @@ partial class Program
     FullImportResult VerifyFullImports(string output, string callerSession, string callerModule, string callerTheorem,
         string callerLeanPath, IReadOnlyDictionary<string, string> overrides)
     {
+        SortedDictionary<string, string> acceptedCaller = FullArtifacts(callerLeanPath);
         JsonElement[] bindings = ImportedBindings(output).OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
         if (bindings.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         for (int index = 0; index < bindings.Length; index++)
@@ -90,11 +91,11 @@ partial class Program
             int slot = binding.GetProperty("slot").GetInt32();
             libraries.Add(CheckFullLibrary(binding, contract, export, certification, inventory, bundle, digest,
                 Path.Combine(staging, "library-" + slot), RecheckOriginal));
+            RequireFullArtifacts(acceptedCaller);
         }
         if (overrides.Keys.Any(name => !usedOverrides.Contains(name)))
             throw new InvalidDataException("Unused --full-artifact override; supply the imported assembly simple name.");
         RecheckOriginal();
-        SortedDictionary<string, string> acceptedCaller = FullArtifacts(callerLeanPath);
         string fullLeanPath = staging + Path.PathSeparator + callerLeanPath;
         string checker = Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
         foreach (FullLibrary library in libraries)
@@ -196,6 +197,10 @@ partial class Program
         string implementation = binding.GetProperty("implementationPath").GetString()!;
         Run(["dotnet", ExtractorPath, "extract", implementation, export.Signature, artifact, certification.Profile],
             progress: "Fresh extraction of the current imported library DLL");
+        JsonElement regenerated = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
+        foreach (string property in new[] { "initializedTypes", "staticValues", "staticIdentities" })
+            if (regenerated.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
+                throw new InvalidDataException("Full verification version 1 rejects static or initialization state: " + property);
         File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(new VerificationSettings(1,
             Path.GetRelativePath(artifact, proof), author, Path.GetRelativePath(artifact, consumer)), Json));
         ContractExportRequest exportRequest = new(export.Signature, artifact, export.ContractConstant, author);
@@ -291,10 +296,12 @@ partial class Program
 import {{proofModule}}
 import ExtractionAudit
 import CIL.Interface.FullTransfer
+private theorem LeanCILFullCapture.noStaticSites :
+    _root_.Extracted.program.all (fun body => body.staticSites.isEmpty) = true := by decide +kernel
 run_cmd do
   let shared : Array Lean.Name := ({{JsonSerializer.Serialize(shared)}} : List String).toArray.map String.toName
   let roots : Array Lean.Name := #[`LeanCILExportAudit.certified, `LeanCILExportAudit.closed,
-    `LeanCILExportAudit.noImports, `LeanCILExportAudit.noStaticSites, `ExtractionAudit.valid]
+    `LeanCILExportAudit.noImports, ``LeanCILFullCapture.noStaticSites, `ExtractionAudit.valid]
   let source <- match CIL.Interface.FullTransfer.capture (<- Lean.getEnv) shared `{{destination}} roots with
     | .ok source => pure source
     | .error message => throwError "{message}"

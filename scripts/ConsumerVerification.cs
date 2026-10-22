@@ -1349,17 +1349,19 @@ unsafe def main (args : List String) : IO Unit := do
             Recheck(proceeding);
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
-            if (proceeding.Any(i => requests[i].ExportAudit is not null))
+            bool contractExportAudit = proceeding.Any(i => requests[i].ExportAudit is not null);
+            if (contractExportAudit || fullImportAudit is not null)
             {
+                string auditKind = contractExportAudit ? "contract export audit" : "full import audit";
                 if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
-                    throw new InvalidOperationException("Sources changed during contract export audit");
+                    throw new InvalidOperationException("Sources changed during " + auditKind);
                 Dictionary<string, SortedDictionary<string, string>> exportArtifacts = importDirectories.Where(Directory.Exists)
                     .SelectMany(directory => Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
                         .Select(path => (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
                     .OrderBy(pair => pair.Name, StringComparer.Ordinal)
                     .ToDictionary(pair => pair.Name, pair => ConsumerModuleParts(pair.Path));
                 if (checkedArtifacts != JsonSerializer.Serialize(exportArtifacts))
-                    throw new InvalidOperationException("Compiled artifacts changed during contract export audit");
+                    throw new InvalidOperationException("Compiled artifacts changed during " + auditKind);
             }
             // Publish only after the complete declaration replay, exact theorem
             // audit, extraction recheck and source-stability checks succeeded.

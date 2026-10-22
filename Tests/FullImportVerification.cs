@@ -134,6 +134,96 @@ string Rebundle(string proofSource, bool staleClosure = false)
     ExtractApp();
     return destination;
 }
+
+void RejectCallerMutation(bool consumer, bool sourceOnly)
+{
+    string suffix = (consumer ? "consumer" : "ordinary") + (sourceOnly ? "-source" : "-artifact");
+    string callerContext = Path.Combine(root, suffix + "-caller.json");
+    string mutationMarker = Path.Combine(root, suffix + "-mutation.json");
+    string attackCaller = Path.Combine(callerPackage, "FullMutationCaller.lean");
+    string attackArtifact = Path.Combine(root, "MutationApp-" + suffix);
+    string cache = Path.Combine(root, "mutation-cache-" + suffix);
+    string? previousCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+    string originalProducer = File.ReadAllText(producerProof);
+    string recordContext = $$"""
+
+open Lean Elab Command in
+run_cmd do
+  let source <- IO.FS.realPath (System.FilePath.mk (<- getFileName))
+  let cwd <- IO.currentDir
+  let search <- IO.getEnv "LEAN_PATH"
+  IO.FS.writeFile {{JsonSerializer.Serialize(callerContext)}} (Json.mkObj [
+    ("source", toJson source.toString), ("cwd", toJson cwd.toString),
+    ("leanPath", toJson (search.getD ""))]).compress
+""";
+    string callerSource = "import Lean\n" + originalCaller + recordContext;
+    File.WriteAllText(attackCaller, callerSource);
+    using Program paths = new();
+    string mutateCaller = $$"""
+
+open Lean Elab Command in
+run_cmd do
+  let context <- IO.ofExcept <| Json.parse (<- IO.FS.readFile {{JsonSerializer.Serialize(callerContext)}})
+  let source := System.FilePath.mk (<- IO.ofExcept <| context.getObjValAs? String "source")
+  let folder := source.parent.getD "."
+  let original <- IO.FS.readFile source
+  let target := {{(sourceOnly ? "source" : "folder / " + JsonSerializer.Serialize(consumer ? ".lake/build/lib/lean/LeanCILProof.olean" : "Proof.olean"))}}
+  if {{(sourceOnly ? "true" : "false")}} then
+    IO.FS.writeFile source (original ++ "\n")
+  else
+    let before <- IO.FS.readBinFile target
+    try
+      IO.FS.writeFile source (original ++ "\ntheorem FullCallerSubstitutionMarker : True := True.intro\n")
+      let cwd := System.FilePath.mk (<- IO.ofExcept <| context.getObjValAs? String "cwd")
+      let search <- IO.ofExcept <| context.getObjValAs? String "leanPath"
+      let compiled <- IO.Process.output {
+        cmd := {{JsonSerializer.Serialize(paths.LeanExecutable)}}
+        args := #["--root=" ++ folder.toString, "-o", target.toString, source.toString]
+        cwd := some cwd
+        env := #[("LEAN_PATH", some search), ("LEAN_SYSROOT", some {{JsonSerializer.Serialize(paths.Toolchain)}})] }
+      unless compiled.exitCode == 0 do
+        throwError "Caller substitution compile failed: {compiled.stdout} {compiled.stderr}"
+      if (<- IO.FS.readBinFile target) == before then throwError "Caller artifact did not change"
+    finally
+      IO.FS.writeFile source original
+  IO.FS.writeFile {{JsonSerializer.Serialize(mutationMarker)}} (Json.mkObj [
+    ("target", toJson target.toString), ("sourceRestored", toJson ((<- IO.FS.readFile source) == original))]).compress
+""";
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", cache);
+        Rebundle("import Lean\n" + originalProducer + mutateCaller);
+        ExtractApp(attackArtifact);
+        (int Code, string Output, string Stdout, string Stderr) rejected = Execute([.. cli, "verify", attackArtifact,
+            "--proof", attackCaller, "--force-full-verify", .. consumer ? new[] { "--proof-root", callerPackage } : []]);
+        if (!File.Exists(mutationMarker))
+            throw new InvalidOperationException("Producer mutation did not execute during fresh verification: " + rejected.Output);
+        JsonElement mutation = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(mutationMarker));
+        string target = mutation.GetProperty("target").GetString()!;
+        string diagnostic = sourceOnly ? "Sources changed during full import audit"
+            : "Full-verification source or compiled artifact changed: " + target;
+        if (rejected.Code != 1 || !rejected.Output.Contains(diagnostic, StringComparison.Ordinal) ||
+            mutation.GetProperty("sourceRestored").GetBoolean() == sourceOnly ||
+            File.Exists(Path.Combine(attackArtifact, "verified.json")) ||
+            Directory.Exists(cache) && Directory.EnumerateFiles(cache, "receipt.json", SearchOption.AllDirectories).Any())
+            throw new InvalidOperationException("Producer changed an already checked caller without its exact integrity rejection: " + rejected.Output);
+        if (File.ReadAllText(attackCaller) != callerSource || File.ReadAllText(caller) != originalCaller ||
+            File.ReadAllText(producerProof) != originalProducer)
+            throw new InvalidOperationException("Producer caller-substitution test changed original proof sources.");
+        Console.WriteLine("PASS producer " + suffix + " mutation rejects after actual execution without a report or receipt");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", previousCache);
+        File.Delete(attackCaller);
+        File.WriteAllText(sidecar, originalSidecar);
+        ExtractApp();
+    }
+}
+
+RejectCallerMutation(consumer: true, sourceOnly: false);
+RejectCallerMutation(consumer: false, sourceOnly: false);
+RejectCallerMutation(consumer: true, sourceOnly: true);
 try
 {
     Rebundle(File.ReadAllText(producerProof), staleClosure: true);
