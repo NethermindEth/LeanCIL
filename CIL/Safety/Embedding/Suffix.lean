@@ -22,9 +22,12 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     (targets : ∀ op ∈ expected.code.drop lower, ∀ target ∈ op.targets, lower ≤ target)
     (statics : ∀ pc, lower ≤ pc → staticAt actual (pc - lower + start) = staticAt expected pc) :
     BodyRefines expected actual (suffixRename lower start) := by
-  refine ⟨congrArg Method.profile metadata, congrArg Method.returnsValue metadata,
-    congrArg Method.locals metadata, congrArg Method.localKinds metadata,
-    congrArg Method.vectorArgs metadata, congrArg Method.parameterHomes metadata, descriptors, ?_, ?_⟩
+  refine ⟨by simpa only using congrArg Method.profile metadata,
+    by simpa only using congrArg Method.returnsValue metadata,
+    by simpa only using congrArg Method.locals metadata,
+    by simpa only using congrArg Method.localKinds metadata,
+    by simpa only using congrArg Method.vectorArgs metadata,
+    by simpa only using congrArg Method.parameterHomes metadata, descriptors, ?_, ?_⟩
   · by_cases zero : lower = 0
     · simp [suffixRename, zero, entry zero]
     · simp [suffixRename, show 0 < lower by omega]
@@ -45,10 +48,10 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     rw [List.getElem?_drop, List.getElem?_map, fetched, Option.map_some,
       Nat.add_comm start (pc - lower), relabeled] at code
     refine ⟨?_, ?_, fun _ => ?_⟩
-    · simpa only [suffixRename, if_neg (Nat.not_lt.mpr after)] using code
-    · simpa only [suffixRename, if_neg (Nat.not_lt.mpr after)] using statics pc after
-    · simp only [suffixRename, if_neg (Nat.not_lt.mpr after),
-        if_neg (show ¬pc + 1 < lower by omega)]
+    · simpa only [suffixRename, ite_eq_right (Nat.not_lt.mpr after)] using code
+    · simpa only [suffixRename, ite_eq_right (Nat.not_lt.mpr after)] using statics pc after
+    · simp only [suffixRename, ite_eq_right (Nat.not_lt.mpr after),
+        ite_eq_right (show ¬pc + 1 < lower by omega)]
       omega
 
 end CIL.Embedding
