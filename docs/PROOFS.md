@@ -124,13 +124,15 @@ def percentContract : OutcomeContract CIL.W64 where
 
 `cil_raise_steps [facts]` steps a `Raises` goal to its `.throw`;
 `cil_outcome_call holds input at site [facts]` continues after a call the
-callee's contract says returns, and `cil_outcome_raise holds input at site [facts]`
-closes a `Raises` goal by propagating the exception the callee's contract names.
+callee's contract says returns, whether the caller then returns or raises, and
+`cil_outcome_raise holds input at site [facts]` closes a `Raises` goal by
+propagating the exception the callee's contract names.
 `MethodContract.Holds.outcomes` lifts a normal-only contract, and
 `invoke_unique` ties a computed fault to the contract's existential one.
 
-`Tests/OutcomeContract.lean` proves both outcomes of a caller from its callee's
-contract. `Tests/OutcomeContract.cs` verifies those proofs against the compiled
+`Tests/OutcomeContract.lean` proves every outcome of a two-level chain from the
+callees' contracts: `Strict` propagates `Percent`'s exception, returns, or raises
+its own after `Percent` returns, and `Root` reads all three off `Strict`'s contract. `Tests/OutcomeContract.cs` verifies those proofs against the compiled
 build, and refutes the callee's contract with concrete runs on builds with an
 off-by-one threshold or a different exception type.
 
@@ -236,6 +238,12 @@ methods named Pick:
   [3] System.UInt64 Examples.Overloads::Pick(System.UInt64)
   [4] System.UInt32 Examples.Overloads::Pick(System.UInt32)
 ```
+
+When a helper's name is not stable, bind it by call shape instead:
+`bind_callee left leftBody := call 2 from rootBody [1]` binds the second call in
+`rootBody` with two arguments, and emits the same theorems with the signature read
+from the table. Without `[k]` there must be exactly one such call; otherwise the
+error lists each site's pc and callee.
 
 The signature is the Cecil full name, matched exactly. Resolution only locates
 an index; the body is still bound by the kernel and the extraction certificate.

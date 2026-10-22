@@ -78,6 +78,41 @@ it calls:
 #guard_msgs in
 bind_callee pick pickBody := "System.UInt64 Examples.Overloads::Pick(System.UInt64)" from rootBody
 
+-- Call shape locates helpers whose names change; `[k]` orders calls of the same arity.
+bind_callee second secondBody := call 2 from rootBody [1]
+example : second = left ∧ secondBody = leftBody := ⟨rfl, rfl⟩
+example : rootBody.code[4]? = some (.call second 2) := second.call
+example : Extracted.signatures[second]? = some "System.UInt64 Examples.Identity::Left(System.UInt64,System.UInt64)" := second.signature
+
+run_cmd do
+  for name in [``second.signature, ``second.found, ``second.call] do
+    let some (.thmInfo info) := (← Lean.getEnv).find? name | throwError "missing {name}"
+    unless info.value.isAppOf ``Eq.refl || info.value.isAppOf ``rfl do throwError "{name} is not rfl: {info.value}"
+
+/--
+error: rootBody makes 2 calls with 2 arguments; select one with [i]:
+  [0] pc 2: System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64)
+  [1] pc 4: System.UInt64 Examples.Identity::Left(System.UInt64,System.UInt64)
+-/
+#guard_msgs in
+bind_callee either eitherBody := call 2 from rootBody
+
+/--
+error: rootBody makes 2 calls with 2 arguments; [2] is out of range:
+  [0] pc 2: System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64)
+  [1] pc 4: System.UInt64 Examples.Identity::Left(System.UInt64,System.UInt64)
+-/
+#guard_msgs in
+bind_callee third thirdBody := call 2 from rootBody [2]
+
+/--
+error: rootBody makes no call with 1 arguments; it calls:
+  pc 2: System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64) with 2
+  pc 4: System.UInt64 Examples.Identity::Left(System.UInt64,System.UInt64) with 2
+-/
+#guard_msgs in
+bind_callee unary unaryBody := call 1 from rootBody
+
 -- Duplicate signatures are reported with every index, never resolved to the first match.
 def duplicated : List String := [Extracted.method1Signature, Extracted.method2Signature, Extracted.method1Signature]
 

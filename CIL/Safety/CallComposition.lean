@@ -4,15 +4,16 @@ import CIL.Safety.LiveValues
 namespace CIL.Safety
 
 /-- Compose an independently checked invocation with the actual caller step.
-    The invocation includes child setup and teardown; no helper body is assumed. -/
+    The invocation includes child setup and teardown; no helper body is assumed, and the
+    caller's later outcome, normal or faulting, carries over unchanged. -/
 theorem run_call_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest returned values : List Value}
-    {frame : Frame} {memory updated childResult result : Memory}
+    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest returned : List Value}
+    {frame : Frame} {memory updated childResult : Memory} {outcome : Except LocatedFault (Memory × List Value)}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (child : invoke program fuel callee arguments updated = .ok (childResult, returned))
-    (continuation : run program fuel method (pc + 1) args frame (returned ++ rest) childResult = .ok (result, values)) :
-    run program (fuel + 1) method pc args frame stack memory = .ok (result, values) := by
+    (continuation : run program fuel method (pc + 1) args frame (returned ++ rest) childResult = outcome) :
+    run program (fuel + 1) method pc args frame stack memory = outcome := by
   cases hb : program[callee]? with
   | none => simp [invoke, hb] at child
   | some childBody =>

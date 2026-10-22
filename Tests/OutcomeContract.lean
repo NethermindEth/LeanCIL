@@ -3,20 +3,24 @@ import CIL.StructuralLabels
 import CIL.Safety.OutcomeContract
 
 /-! A synthetic extraction with the bodies the C# fixture compiles to:
-    `Percent(v) => v <= 100 ? v : throw new ArgumentOutOfRangeException(...)`, `Root(v) => Percent(v) + 1`. -/
+    `Percent(v) => v <= 100 ? v : throw new ArgumentOutOfRangeException(...)`,
+    `Strict(v) => Percent(v) == 0 ? throw new ArgumentException(...) : v`, `Root(v) => Strict(v) + 1`. -/
 namespace Extracted
 
 open CIL
 
 def method0Signature : String := "System.UInt64 Outcomes.Calls::Root(System.UInt64)"
-def method1Signature : String := "System.UInt64 Outcomes.Calls::Percent(System.UInt64)"
+def method1Signature : String := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)"
+def method2Signature : String := "System.UInt64 Outcomes.Calls::Percent(System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
+  [.arg 0, .call 2 1, .brzero 5, .arg 0, .ret, .nop, .nop, .throw "System.ArgumentException"] }
+@[cil_code] def method2 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .const32 (BitVec.ofInt 32 100), .convI8, .bleu 7, .nop, .nop,
     .throw "System.ArgumentOutOfRangeException", .arg 0, .ret] }
-@[cil_code] def program : Program := [method0, method1]
-def signatures : List String := [method0Signature, method1Signature]
+@[cil_code] def program : Program := [method0, method1, method2]
+def signatures : List String := [method0Signature, method1Signature, method2Signature]
 
 end Extracted
 
@@ -25,8 +29,10 @@ namespace Tests.OutcomeContract
 open CIL.Safety
 
 bind_method root rootBody := "System.UInt64 Outcomes.Calls::Root(System.UInt64)"
-bind_callee percent percentBody := "System.UInt64 Outcomes.Calls::Percent(System.UInt64)" from rootBody
-bind_call percentSite := percent from rootBody
+bind_callee strict strictBody := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)" from rootBody
+bind_callee percent percentBody := "System.UInt64 Outcomes.Calls::Percent(System.UInt64)" from strictBody
+bind_call strictSite := strict from rootBody
+bind_call percentSite := percent from strictBody
 
 def percentContract : OutcomeContract CIL.W64 where
   args v := [.scalar (.i64 v)]
@@ -35,12 +41,23 @@ def percentContract : OutcomeContract CIL.W64 where
   post v _ _ values := values = [.scalar (.i64 v)]
   raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
 
+def strictRaises (v : CIL.W64) : Option String :=
+  if v ≤ 100 then if v = 0 then some "System.ArgumentException" else none
+  else some "System.ArgumentOutOfRangeException"
+
+def strictContract : OutcomeContract CIL.W64 where
+  args v := [.scalar (.i64 v)]
+  pre _ _ := True
+  footprint _ := []
+  post v _ _ values := values = [.scalar (.i64 v)]
+  raises v _ := strictRaises v
+
 def rootContract : OutcomeContract CIL.W64 where
   args v := [.scalar (.i64 v)]
   pre _ _ := True
   footprint _ := []
   post v _ _ values := values = [.scalar (.i64 (v + 1))]
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := strictRaises v
 
 theorem percent_holds : percentContract.Holds Extracted.program percent := by
   rintro v m -
@@ -53,26 +70,58 @@ theorem percent_holds : percentContract.Holds Extracted.program percent := by
     simp only [percentContract, within, ite_false]
     cil_raise_steps [bound]
 
-/-- Both outcomes come from the callee's contract at its call site; its body is not unfolded. -/
-theorem root_holds (percentHolds : percentContract.Holds Extracted.program percent) :
-    rootContract.Holds Extracted.program root := by
+/-- All three outcomes come from `Percent`'s contract; its body is not unfolded. Zero returns
+    from the callee and then raises in this caller. -/
+theorem strict_holds (percentHolds : percentContract.Holds Extracted.program percent) :
+    strictContract.Holds Extracted.program strict := by
   rintro v m -
   by_cases within : v ≤ 100
-  · simp only [rootContract, within, ite_true]
-    cil_contract_steps []
-    cil_outcome_call percentHolds v at percentSite []
-    · trivial
-    · simp only [percentContract, within, ite_true]
-    rintro m1 _ - confined rfl
-    cil_contract_steps []
-    exact ⟨confined, rfl⟩
-  · simp only [rootContract, within, ite_false]
+  · by_cases zero : v = 0
+    · subst zero
+      simp only [strictContract, strictRaises, within, ↓reduceIte]
+      cil_raise_steps []
+      cil_outcome_call percentHolds 0 at percentSite []
+      · trivial
+      · simp only [percentContract, within, ite_true]
+      rintro m1 _ - - rfl
+      have truth : CIL.truth (.i64 0#64) = some false := rfl
+      cil_raise_steps [truth]
+    · simp only [strictContract, strictRaises, within, zero, ite_true, ite_false]
+      cil_contract_steps []
+      cil_outcome_call percentHolds v at percentSite []
+      · trivial
+      · simp only [percentContract, within, ite_true]
+      rintro m1 _ - confined rfl
+      have truth : CIL.truth (.i64 v) = some true := by simp [CIL.truth]; exact zero
+      cil_contract_steps [truth]
+      exact ⟨confined, rfl⟩
+  · simp only [strictContract, strictRaises, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise percentHolds v at percentSite []
     · trivial
     · simp only [percentContract, within, ite_false]
 
-theorem root_correct : rootContract.Holds Extracted.program root := root_holds percent_holds
+/-- `Root` reads `Strict`'s outcome off its contract without restating when it raises. -/
+theorem root_holds (strictHolds : strictContract.Holds Extracted.program strict) :
+    rootContract.Holds Extracted.program root := by
+  rintro v m -
+  dsimp only [rootContract]
+  cases raised : strictRaises v with
+  | some exception =>
+    cil_raise_steps []
+    cil_outcome_raise strictHolds v at strictSite []
+    · trivial
+    · exact raised
+  | none =>
+    cil_contract_steps []
+    cil_outcome_call strictHolds v at strictSite []
+    · trivial
+    · exact raised
+    rintro m1 _ - confined rfl
+    cil_contract_steps []
+    exact ⟨confined, rfl⟩
+
+theorem root_correct : rootContract.Holds Extracted.program root := root_holds (strict_holds percent_holds)
 
 #print axioms root_correct
 

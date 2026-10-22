@@ -159,7 +159,30 @@ theorem run_call_of_outcome {Input : Type} {c : OutcomeContract Input} {program 
     ⟨parentFuel, resumed⟩
   exact ⟨fuel, result, returned, composed, finished⟩
 
+/-- Continue after a callee whose contract names no exception into a caller path that raises. -/
+theorem run_call_raises_after_outcome {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+    {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {exception : String}
+    (holds : c.Holds program callee) (input : Input)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (encoded : arguments = c.args input) (permitted : c.pre input updated) (normal : c.raises input updated = none)
+    (continuation : ∀ final values,
+      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
+      Confined (c.footprint input) updated final → c.post input updated final values →
+      RunRaises program method (pc + 1) args frame (values ++ rest) final exception) :
+    RunRaises program method pc args frame stack memory exception := by
+  subst encoded
+  obtain ⟨childFuel, final, values, invoked, confined, satisfied⟩ := holds.returning permitted normal
+  obtain ⟨parentFuel, fault, resumed, thrown⟩ := continuation final values ⟨childFuel, invoked⟩ confined satisfied
+  have child := invoke_mono program childFuel parentFuel callee _ updated (.ok (final, values)) trivial invoked
+  have parent := run_mono program parentFuel childFuel method (pc + 1) args frame _ final (.error fault)
+    (by simp [Settled, thrown]) resumed
+  rw [Nat.add_comm parentFuel childFuel] at parent
+  exact ⟨childFuel + parentFuel + 1, fault, run_call_of_invoke methodFound instructionFound stepped child parent, thrown⟩
+
 #print axioms run_call_error
+#print axioms run_call_raises_after_outcome
 #print axioms run_call_raises_of_contract
 #print axioms run_call_of_outcome
 #print axioms invoke_unique
@@ -187,15 +210,19 @@ macro_rules
         (by cil_checked_step [$[$facts:term],*]) ?_)))
 
 /-- At a `bind_call` site, continue past a callee whose contract names no exception for this
-    input, leaving the precondition, the `raises` equation and the continuation. -/
+    input, in a returning or a raising caller goal, leaving the precondition, the `raises`
+    equation and the continuation. -/
 syntax "cil_outcome_call" term:max term:max " at " ident "[" term,* "]" : tactic
 
 macro_rules
   | `(tactic| cil_outcome_call $holds $input at $site:ident [$facts:term,*]) =>
-  `(tactic| (
-    refine CIL.Safety.run_call_of_outcome $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
+  `(tactic| first
+    | refine CIL.Safety.run_call_raises_after_outcome $holds $input
+        (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+        (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_
+    | refine CIL.Safety.run_call_of_outcome $holds $input
+        (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+        (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_)
 
 /-- At a `bind_call` site, propagate the exception the callee's contract names for this
     input, leaving the precondition and the `raises` equation. -/
