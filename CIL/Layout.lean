@@ -18,7 +18,7 @@ structure AggregateLayout where
 def AggregateLayout.Valid (layout : AggregateLayout) : Prop :=
   0 < layout.size ∧ layout.size < 2^64 ∧
   ∀ field ∈ layout.fields,
-    (if field.aggregate then 0 < field.width else field.width ∈ [1, 2, 4, 8]) ∧
+    (if field.aggregate then 0 < field.width else field.width ∈ [1, 2, 4, 8, 16, 32]) ∧
     field.offset + field.width ≤ layout.size
 
 instance aggregateLayoutDecidable (layout : AggregateLayout) : Decidable layout.Valid :=
