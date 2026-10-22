@@ -68,28 +68,34 @@ theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : L
 
 /-- Compose actual fetched instructions until the requested invariant state.
     Fuel is inferred from the path, including NOPs and unconditional branches. -/
-macro "cil_loop_steps" "[" facts:term,* "]" : tactic =>
-  `(tactic| repeat first
-    | (simp only [$[$facts:term],*])
-    | exact CIL.Safety.loop_reaches_refl
-    | (apply CIL.Safety.loop_reaches_next
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step [CIL.truth, $[$facts:term],*]))
+syntax "cil_loop_steps" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| cil_loop_steps [$facts:term,*]) => cilWithNormalisedFacts facts.getElems fun facts prepared =>
+    `(tactic| repeat first
+      | (simp only [$[$facts:term],*])
+      | exact CIL.Safety.loop_reaches_refl
+      | (apply CIL.Safety.loop_reaches_next
+         · cil_lookup [$[$facts:term],*]
+         · cil_lookup [$[$facts:term],*]
+         · cil_checked_step_normalized [$[$prepared:term],*]))
 
 /-- Establish an exit path and its postcondition without choosing a fuel bound. -/
-macro "cil_loop_finish" "[" facts:term,* "]" : tactic =>
-  `(tactic| repeat first
-    | (simp only [$[$facts:term],*])
-    | (apply CIL.Safety.loop_terminates_return (op := .ret _)
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step [CIL.truth, $[$facts:term],*]
-       · rfl
-       · simp [$[$facts:term],*])
-    | (apply CIL.Safety.loop_terminates_next
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step [CIL.truth, $[$facts:term],*]))
+syntax "cil_loop_finish" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| cil_loop_finish [$facts:term,*]) => cilWithNormalisedFacts facts.getElems fun facts prepared =>
+    `(tactic| repeat first
+      | (simp only [$[$facts:term],*])
+      | (apply CIL.Safety.loop_terminates_return (op := .ret _)
+         · cil_lookup [$[$facts:term],*]
+         · cil_lookup [$[$facts:term],*]
+         · cil_checked_step_normalized [$[$prepared:term],*]
+         · rfl
+         · simp [$[$facts:term],*])
+      | (apply CIL.Safety.loop_terminates_next
+         · cil_lookup [$[$facts:term],*]
+         · cil_lookup [$[$facts:term],*]
+         · cil_checked_step_normalized [$[$prepared:term],*]))
 
 end CIL.Safety

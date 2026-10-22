@@ -158,6 +158,14 @@ elab_rules : tactic
 syntax "cil_checked_step" "[" term,* "]" : tactic
 
 open Lean Elab Tactic in
+/-- Normalise `CIL.truth` and `facts` once for a stepping loop, then build its tactic from the raw and
+    normalised facts; per-step normalisation would re-simp every local fact on every instruction. -/
+def cilWithNormalisedFacts (facts : Array Term) (body : Array Term → Array Term → TacticM Syntax) : TacticM Unit :=
+  withMainContext do
+    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) (#[← `(CIL.truth)] ++ facts)
+    withMainContext <| evalTactic (← body facts prepared)
+
+open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_step [$facts:term,*]) => do
     let config ← `(Lean.Parser.Tactic.optConfig|)
