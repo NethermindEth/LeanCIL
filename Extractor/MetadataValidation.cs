@@ -98,15 +98,16 @@ internal static class MetadataValidation
         var alignment = 1;
         foreach (var field in type.Fields.Where(f => !f.IsStatic))
         {
-            if (field.FieldType is TypeSpecification && VectorWidth(field.FieldType) is null)
+            int? vectorWidth = VectorWidth(field.FieldType);
+            if (field.FieldType is TypeSpecification && vectorWidth is null)
                 throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
             var nested = IsAggregate(field.FieldType, module)
                 ? AggregateLayout(field.FieldType, module, architecture, active, layouts) : null;
-            int width = nested?.Size ?? VectorWidth(field.FieldType) ?? PrimitiveWidth(field.FieldType);
-            if (VectorWidth(field.FieldType) == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
+            int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(field.FieldType);
+            if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
                 throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
             if (nested is null) RuntimeModels.ValidateTypeIdentity(field.FieldType, module, architecture);
-            int naturalAlignment = VectorWidth(field.FieldType) == 32 && architecture == "arm64" ? 16 : width;
+            int naturalAlignment = vectorWidth == 32 && architecture == "arm64" ? 16 : width;
             int fieldAlignment = Math.Min(pack, nested?.Alignment ?? naturalAlignment);
             alignment = Math.Max(alignment, fieldAlignment);
             var offset = type.IsExplicitLayout ? field.Offset : (end + fieldAlignment - 1) / fieldAlignment * fieldAlignment;
