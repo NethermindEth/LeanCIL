@@ -72,6 +72,7 @@ string closureDigest = ContentKey(closureRecord.GetProperty("canonical").GetStri
 
 void Reset()
 {
+    Directory.CreateDirectory(output);
     File.Delete(Path.Combine(output, "verification.json"));
     File.Copy(originalApp, app, true);
     File.Copy(originalLibrary, library, true);
