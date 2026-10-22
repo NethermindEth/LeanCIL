@@ -10,31 +10,31 @@ inductive UnsafeHelper where
   | skipInit | nullRef | isNullRef
   deriving DecidableEq, Repr
 
-private def unsafeTarget (signature : String) : MethodId :=
-  .external (runtimeScope ++ "::" ++ signature)
+/-- A static `Unsafe` helper with one admitted non-reference type argument and exact signature. -/
+private def unsafeSite (layouts : List RawLayout) (site : CallSite) (signature : String) : Bool :=
+  site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" && !site.hasThis &&
+    site.target == .external (runtimeScope ++ "::" ++ signature) &&
+    match site.typeArguments with
+    | [type] => match typeStorage layouts type with
+      | some .reference | none => false
+      | some _ => true
+    | _ => false
 
 /-- Recognize the external helper from raw metadata, independently of translation. -/
 def unsafeHelper (layouts : List RawLayout) (instruction : RawInstruction) : Option UnsafeHelper :=
   match instruction.opcode, instruction.operand with
   | 0x28, .call site =>
-    if site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" && !site.hasThis &&
-        match site.typeArguments with
-        | [type] => match typeStorage layouts type with
-          | some .reference | none => false
-          | some _ => true
-        | _ => false then
-      match site.name, site.parameterCount, site.returnsValue with
-      | "SkipInit", 1, false =>
-        if site.target == unsafeTarget "System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(!!0&)"
-        then some .skipInit else none
-      | "NullRef", 0, true =>
-        if site.target == unsafeTarget "!!0& System.Runtime.CompilerServices.Unsafe::NullRef()"
-        then some .nullRef else none
-      | "IsNullRef", 1, true =>
-        if site.target == unsafeTarget "System.Boolean System.Runtime.CompilerServices.Unsafe::IsNullRef(!!0&)"
-        then some .isNullRef else none
-      | _, _, _ => none
-    else none
+    match site.name, site.parameterCount, site.returnsValue with
+    | "SkipInit", 1, false =>
+      if unsafeSite layouts site "System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(!!0&)"
+      then some .skipInit else none
+    | "NullRef", 0, true =>
+      if unsafeSite layouts site "!!0& System.Runtime.CompilerServices.Unsafe::NullRef()"
+      then some .nullRef else none
+    | "IsNullRef", 1, true =>
+      if unsafeSite layouts site "System.Boolean System.Runtime.CompilerServices.Unsafe::IsNullRef(!!0&)"
+      then some .isNullRef else none
+    | _, _, _ => none
   | _, _ => none
 
 def emittedUnsafeHelper : Op → Option UnsafeHelper

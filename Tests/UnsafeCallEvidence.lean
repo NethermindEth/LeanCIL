@@ -26,45 +26,45 @@ private def raw (site : CallSite) : RawMethod := {
   maxStack := 1, genericParameters := [], code := [⟨0, 0x28, .call site⟩] }
 private def nonCall : RawMethod := { raw call with code := [⟨0, 0x26, .none⟩] }
 
-example : UnsafeCallsValid [] (raw call) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw call) [true] [.pop] := by decide
-example : ¬ UnsafeCallsValid [] (raw { call with name := "Other" }) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw { call with target := .external "forged" }) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw { call with declaringType := .atom "forged" "System.Runtime.CompilerServices.Unsafe" }) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw { call with hasThis := true }) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw { call with parameterCount := 2 }) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw { call with returnsValue := true }) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw { call with typeArguments := [.byref word] }) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw { call with typeArguments := [] }) [true] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw call) [] [.skipInit] := by decide
-example : ¬ UnsafeCallsValid [] (raw call) [true] [] := by decide
+example : UnsafeCallsValid [] (raw call) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw call) [true] [.pop] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with name := "Other" }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with target := .external "forged" }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with declaringType := .atom "forged" "System.Runtime.CompilerServices.Unsafe" }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with hasThis := true }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with parameterCount := 2 }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with returnsValue := true }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with typeArguments := [.byref word] }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with typeArguments := [] }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw call) [] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw call) [true] [] := by decide +kernel
 
 -- `NullRef` must push the null reference: no other operation with its stack effect.
-example : UnsafeCallsValid [] (raw nullCall) [true] [.memory .nullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.const32 0] := by decide
-example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory (.staticAddress [])] := by decide
-example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory .isNullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { nullCall with target := .external "forged" }) [true] [.memory .nullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { nullCall with parameterCount := 1 }) [true] [.memory .nullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { nullCall with returnsValue := false }) [true] [.memory .nullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { nullCall with hasThis := true }) [true] [.memory .nullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { nullCall with typeArguments := [.byref word] }) [true] [.memory .nullRef] := by decide
+example : UnsafeCallsValid [] (raw nullCall) [true] [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.const32 0] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory (.staticAddress [])] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory .isNullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { nullCall with target := .external "forged" }) [true] [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { nullCall with parameterCount := 1 }) [true] [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { nullCall with returnsValue := false }) [true] [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { nullCall with hasThis := true }) [true] [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { nullCall with typeArguments := [.byref word] }) [true] [.memory .nullRef] := by decide +kernel
 
 -- `IsNullRef` must test for null: a constant or a reinterpretation cannot stand in for it.
-example : UnsafeCallsValid [] (raw testCall) [true] [.memory .isNullRef] := by decide
+example : UnsafeCallsValid [] (raw testCall) [true] [.memory .isNullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw testCall) [true] [.memory .asRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw testCall) [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { testCall with name := "NullRef" }) [true] [.memory .isNullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { testCall with target := .external "forged" }) [true] [.memory .isNullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { testCall with parameterCount := 2 }) [true] [.memory .isNullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { testCall with returnsValue := false }) [true] [.memory .isNullRef] := by decide
-example : ¬ UnsafeCallsValid [] (raw { testCall with typeArguments := [word, word] }) [true] [.memory .isNullRef] := by decide
+example : ¬ UnsafeCallsValid [] (raw { testCall with name := "NullRef" }) [true] [.memory .isNullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { testCall with target := .external "forged" }) [true] [.memory .isNullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { testCall with parameterCount := 2 }) [true] [.memory .isNullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { testCall with returnsValue := false }) [true] [.memory .isNullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { testCall with typeArguments := [word, word] }) [true] [.memory .isNullRef] := by decide +kernel
 
 -- A helper operation cannot replace an unrelated instruction.
-example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .nullRef] := by decide
-example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .isNullRef] := by decide
-example : UnsafeCallsValid [] nonCall [true] [.pop] := by decide
+example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .isNullRef] := by decide +kernel
+example : UnsafeCallsValid [] nonCall [true] [.pop] := by decide +kernel
 -- Unreachable sites are emitted as unsupported placeholders and are not bound.
-example : UnsafeCallsValid [] (raw nullCall) [false] [.unsupported "excluded"] := by decide
+example : UnsafeCallsValid [] (raw nullCall) [false] [.unsupported "excluded"] := by decide +kernel
 
 end Tests.UnsafeCallEvidence

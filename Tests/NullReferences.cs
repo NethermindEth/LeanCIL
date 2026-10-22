@@ -90,7 +90,8 @@ foreach (var (name, helper, forgery) in new[]
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, extracted.Replace(helper, forgery));
     var result = Execute(["lake", "env", "lean", mutated]);
-    if (result.Code == 0 || !result.Output.Contains("Extraction.UnsafeCallsValid rawLayouts method0Closed"))
+    if (result.Code == 0 || !result.Output.Contains("Extraction.UnsafeCallsValid rawLayouts method0Closed") ||
+        !result.Output.Contains("is false") || result.Output.Contains("FeatureFlowValid"))
         throw new InvalidOperationException($"Forged {helper} was accepted for {name}\n{result.Output}");
     Console.WriteLine($"PASS {name}: forged {helper} rejected by the call binding");
 }
