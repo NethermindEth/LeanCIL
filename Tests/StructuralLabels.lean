@@ -23,6 +23,12 @@ namespace Tests.StructuralLabels
 
 open CIL
 
+/-- `n` nops, a call to method 1 and a back edge to the call's argument, as one list literal. -/
+macro "long_code% " n:num : term => do
+  let nops ← (List.range n.getNat).toArray.mapM fun _ => `(Op.nop)
+  let tail ← #[`(Op.arg 0), `(Op.call 1 1), `(Op.branch $(Lean.quote n.getNat))].mapM id
+  `([$(nops ++ tail),*])
+
 bind_method root rootBody := "System.UInt32 Labels.Calls::Root(System.UInt32)"
 
 -- Two loops: an unselected label is an error listing both, never the first.
@@ -86,5 +92,18 @@ bind_call either := step from rootBody
 -- `relabel` and `targets` agree, so loop detection sees every branch `cil_embed` maps.
 example : (Op.switch [3, 0, 7]).targets = [3, 0, 7] ∧ (Op.nativeBinary (.blt 2)).targets = [2] ∧ (Op.call 1 1).targets = [] :=
   ⟨rfl, rfl, rfl⟩
+
+-- Extracted bodies run to thousands of ops; labels past the default recursion depth still bind.
+def longBody : Method :=
+  { code := long_code% 800, locals := [], returnsValue := false }
+
+bind_callee late lateBody := call 1 from longBody
+bind_call lateCall := late from longBody
+bind_loop tail := longBody
+
+example : lateCall = 801 ∧ tail = 800 ∧ tail.latch = 802 ∧ lateBody = stepBody := ⟨rfl, rfl, rfl, rfl⟩
+example : longBody.code[lateCall]? = some (.call late 1) := lateCall.call
+example := late.call
+example := tail.backEdge
 
 end Tests.StructuralLabels

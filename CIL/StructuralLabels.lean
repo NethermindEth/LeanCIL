@@ -54,7 +54,7 @@ elab_rules : command
     let latchName := mkIdent (head.getId ++ `latch)
     elabCommand (← `(@[cil_code] def $head : Nat := $(quote pc)))
     elabCommand (← `(@[cil_code] def $latchName : Nat := $(quote latch)))
-    elabCommand (← `(theorem $(mkIdent (head.getId ++ `backEdge)) :
+    elabAtPc latch (← `(theorem $(mkIdent (head.getId ++ `backEdge)) :
       ($body).code[$latchName]?.map (fun op => op.targets.contains $head) = some true ∧ $head ≤ $latchName :=
       ⟨rfl, by decide⟩))
 
@@ -70,7 +70,7 @@ elab_rules : command
       let table ← strings (mkConst (← visible `Extracted.signatures))
       callSite parent method (table[method]?.getD s!"method {method}") (occurrence.map (·.getNat))
     elabCommand (← `(@[cil_code] def $site : Nat := $(quote pc)))
-    elabCommand (← `(@[cil_code] theorem $(mkIdent (site.getId ++ `call)) :
+    elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (site.getId ++ `call)) :
       ($parent).code[$site]? = some (CIL.Op.call $callee $(quote argc)) := rfl))
 
 end CIL.StructuralLabels

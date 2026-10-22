@@ -77,6 +77,11 @@ def choose (subject : MessageData) (candidates : Array String) (occurrence : Opt
   | some k => if k < candidates.size then return k else throwError "{subject}; [{k}] is out of range:\n{listing}"
   | none => if candidates.size == 1 then return 0 else throwError "{subject}; select one with [i]:\n{listing}"
 
+/-- Elaborates `fact`, a `code[pc]? = ...` fact proved by `rfl`; unfolding the index
+needs recursion depth linear in `pc`, beyond the default for long extracted bodies. -/
+def elabAtPc (pc : Nat) (fact : Command) : CommandElabM Unit := do
+  elabCommand (← `(command| set_option maxRecDepth $(Syntax.mkNumLit (toString (512 + 4 * pc))) in $fact))
+
 def emit (index body : Ident) (signature : StrLit) (method : Nat) : CommandElabM Unit := do
   let extracted := mkIdent (.str `Extracted s!"method{method}")
   let signatures := mkIdent `Extracted.signatures
@@ -126,7 +131,7 @@ elab_rules : command
       return (method, ← callSite parent method signature.getString (occurrence.map (·.getNat)))
     emit index body signature method
     let (pc, argc) := site
-    elabCommand (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
+    elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc)) := rfl))
 
 /-- `bind_callee index body := call argc from parent` binds the method `parent` calls with
@@ -150,7 +155,7 @@ elab_rules : command
       let (pc, callee, _) := shaped[chosen]!
       return (callee, pc, table[callee]?.getD "")
     emit index body (Syntax.mkStrLit signature) method
-    elabCommand (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
+    elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc.getNat)) := rfl))
 
 end CIL.MethodIdentity
