@@ -112,7 +112,7 @@ contract["interfaceModules"]![0]!["source"] = "module\n  public /- outer /- nest
     originalInterface.Replace("import CIL.Safety.MethodContract\n", "", StringComparison.Ordinal);
 contract["interfaceModules"]!.AsArray().Add(new JsonObject
 {
-    ["module"] = "ZContractBase",
+    ["name"] = "ZContractBase",
     ["source"] = "module\npublic import CIL.Safety.MethodContract\n\npublic section\n"
 });
 Save();
