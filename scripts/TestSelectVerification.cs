@@ -41,7 +41,7 @@ Test("measured schedule reduces estimated tail without skipping jobs", () =>
         for (var i = 0; i < workers; i++) available.Enqueue(0, 0);
         foreach (var name in order)
         {
-            var end = available.Dequeue() + durations[name];
+            var end = available.Dequeue() + durations.GetValueOrDefault(name, durations.Values.Max() + 1);
             available.Enqueue(end, end);
         }
         return available.UnorderedItems.Max(item => item.Element);
