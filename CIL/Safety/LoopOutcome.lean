@@ -94,8 +94,7 @@ theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Inpu
     (normal : c.raises input updated = none)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       LoopOutcome program method args post raises ⟨pc + 1, frame, values ++ rest, final⟩) :
     LoopOutcome program method args post raises ⟨pc, frame, stack, memory⟩ :=
@@ -193,8 +192,8 @@ macro "cil_loop_outcome_advance" "[" facts:term,* "]" : tactic =>
   `(tactic| repeat first
     | (simp only [$[$facts:term],*])
     | (apply CIL.Safety.loop_outcome_next
-       · first | (simp only [cil_code]; rfl) | rfl
-       · first | (simp only [cil_code]; rfl) | rfl
+       · cil_lookup [$[$facts:term],*]
+       · cil_lookup [$[$facts:term],*]
        · cil_checked_step [CIL.truth, $[$facts:term],*]))
 
 /-- Continue past a returning callee at a `bind_call` site; leaves `pre`, the `raises` equation, then the continuation. -/
@@ -204,7 +203,7 @@ macro_rules
   | `(tactic| cil_loop_outcome_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.loop_outcome_call $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
 
 /-- Exit with the exception the callee's contract names at a `bind_call` site; leaves `pre` and the `raises` equation. -/
@@ -214,7 +213,7 @@ macro_rules
   | `(tactic| cil_loop_outcome_raise $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.loop_outcome_call_raises $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl)
       (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_ ?_))
 

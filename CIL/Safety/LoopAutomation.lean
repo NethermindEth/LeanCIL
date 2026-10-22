@@ -73,8 +73,8 @@ macro "cil_loop_steps" "[" facts:term,* "]" : tactic =>
     | (simp only [$[$facts:term],*])
     | exact CIL.Safety.loop_reaches_refl
     | (apply CIL.Safety.loop_reaches_next
-       · first | (simp only [cil_code]; rfl) | rfl
-       · first | (simp only [cil_code]; rfl) | rfl
+       · cil_lookup [$[$facts:term],*]
+       · cil_lookup [$[$facts:term],*]
        · cil_checked_step [CIL.truth, $[$facts:term],*]))
 
 /-- Establish an exit path and its postcondition without choosing a fuel bound. -/
@@ -82,14 +82,14 @@ macro "cil_loop_finish" "[" facts:term,* "]" : tactic =>
   `(tactic| repeat first
     | (simp only [$[$facts:term],*])
     | (apply CIL.Safety.loop_terminates_return (op := .ret _)
-       · first | (simp only [cil_code]; rfl) | rfl
-       · first | (simp only [cil_code]; rfl) | rfl
+       · cil_lookup [$[$facts:term],*]
+       · cil_lookup [$[$facts:term],*]
        · cil_checked_step [CIL.truth, $[$facts:term],*]
        · rfl
        · simp [$[$facts:term],*])
     | (apply CIL.Safety.loop_terminates_next
-       · first | (simp only [cil_code]; rfl) | rfl
-       · first | (simp only [cil_code]; rfl) | rfl
+       · cil_lookup [$[$facts:term],*]
+       · cil_lookup [$[$facts:term],*]
        · cil_checked_step [CIL.truth, $[$facts:term],*]))
 
 end CIL.Safety
