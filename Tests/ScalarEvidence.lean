@@ -1,4 +1,5 @@
 import CIL.Extraction.Translation
+import CIL.Safety.Frames
 
 namespace Tests.ScalarEvidence
 open CIL CIL.Extraction
@@ -238,6 +239,96 @@ example : scalarTransfer addRaw (i 40 (.call { site with declaringType := .apply
 example : scalarTransfer addRaw (i 40 (.call { site with declaringType := .apply (.constructor "Scope" "Owner`1") intType, target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)", parameterCount := 1, parameterTypes := [word], returnType := intType })) [.word64] = none := by decide +kernel
 example : scalarTransfer addRaw (i 40 (.call { site with declaringType := .aggregate "Scope::Owner`2<System.Int32,System.UInt64>" 0, target := .external "Scope::!1 Owner`2<System.Int32,System.UInt64>::M(!0,!1)", parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64] := by decide +kernel
 example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(Container`2<System.Int32,System.UInt64>,System.Int32)", parameterTypes := [.aggregate "Scope::Container`2<System.Int32,System.UInt64>" 0, intType] })) [.word32, .other] = some [.word64] := by decide +kernel
+
+private def faultLocalRaw := { raw [i 2, i 10, i 6, i 42] [word] with locals := [intType], returnType := intType }
+private def faultLocalFeatures : FeatureCertificate :=
+  ([[], [none], [], [none]] : List (List (Option W32))).map fun stack => some ⟨stack, [none]⟩
+private def faultLocalStates : ScalarCertificate := [some [], some [.word64], some [], some [.word32]]
+private def faultLocalEvidence : MethodEvidence := {
+  original := faultLocalRaw, arguments := [], closed := faultLocalRaw,
+  parameterInput := { arguments := [.field .unsigned64], locals := [.field .signed32], code := [.load 0, .other, .other, .other] },
+  reachable := List.replicate 4 true, featureStates := faultLocalFeatures, scalarStates := faultLocalStates, layoutUses := [] }
+private def faultLocalMethod : Method := {
+  locals := [.i32 0], localKinds := [.word32], returnsValue := true,
+  code := [.arg 0, .setLocal 0, .local 0, .ret] }
+example : TranslationValid [] #[] [faultLocalEvidence] [] [faultLocalMethod] := by decide +kernel
+example : scalarTransfer faultLocalRaw (i 10) [.word64] = none := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.setLocal 0) = true := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.native] (.setLocal 0) = true := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.other] (.setLocal 0) = false := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.reference] (.setLocal 0) = false := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.setLocal 1) = false := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.word64] .pop = false := by decide
+example : scalarStoreFault { faultLocalRaw with locals := [] } (i 10) [.word64] (.setLocal 0) = false := by decide
+example : ¬ ScalarFlowValid faultLocalRaw faultLocalFeatures faultLocalStates
+    (faultLocalMethod.code.set 1 (.setLocal 1)) := by decide
+example : ¬ TranslationValid [] #[] [faultLocalEvidence] []
+    [{ faultLocalMethod with code := faultLocalMethod.code.set 1 .pop }] := by decide
+example (memory : Safety.Memory) (reference : Safety.Reference) (bits : W64) :
+    Safety.storeLocal memory (.bytes .word32 reference) (.scalar (.i64 bits)) = .error .invalidState := rfl
+example (memory : Safety.Memory) (reference : Safety.Reference) (kind : NarrowKind) (bits : W64) :
+    Safety.storeLocal memory (.bytes (.narrow kind) reference) (.scalar (.i64 bits)) = .error .invalidState := rfl
+
+private def nativeHomeRaw := raw [i 3, i 16 (.argument 0), i 2, i 110, i 42] [nativeType, word]
+private def nativeHomeFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1, unknown 1]
+private def nativeHomeStates : ScalarCertificate := [some [], some [.word64], some [], some [.native], some [.word64]]
+private def nativeHomeEvidence : MethodEvidence := {
+  original := nativeHomeRaw, arguments := [], closed := nativeHomeRaw,
+  parameterInput := { arguments := [.field .nativeInt, .field .unsigned64], locals := [], code := [.load 1, .store 0, .load 0, .other, .other] },
+  reachable := List.replicate 5 true, featureStates := nativeHomeFeatures, scalarStates := nativeHomeStates, layoutUses := [] }
+private def nativeHomeMethod : Method := {
+  locals := [], parameterHomes := [(0, .word64)], returnsValue := true,
+  code := [.arg 1, .setLocal 0, .local 0, .convU8, .ret] }
+example : TranslationValid [] #[] [nativeHomeEvidence] [] [nativeHomeMethod] := by decide +kernel
+example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.word64] = some [] := by decide
+example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.other] = none := by decide
+example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.word32] = none := by decide
+example : ¬ ScalarFlowValid nativeHomeRaw nativeHomeFeatures
+    (nativeHomeStates.set 1 (some [.other])) nativeHomeMethod.code := by decide
+
+private def tupleType : TypeExpr := .aggregate
+  (runtime ++ "::System.ValueTuple`2<System.UInt64,System.UInt64>") 0
+private def tupleSite : CallSite := {
+  declaringType := .atom "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" "System.Runtime.Intrinsics.X86.X86Base/X64",
+  name := "DivRem", target := .external
+    "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.ValueTuple`2<System.UInt64,System.UInt64> System.Runtime.Intrinsics.X86.X86Base/X64::DivRem(System.UInt64,System.UInt64,System.UInt64)",
+  typeArguments := [], parameterCount := 3, parameterTypes := [word, word, word],
+  hasThis := false, returnsValue := true, returnType := tupleType }
+private def tupleRaw := { raw [i 2, i 3, i 4, i 40 (.call tupleSite), i 42] [word, word, word] with
+  returnType := tupleType, maxStack := 3 }
+example : ScalarFlowValid tupleRaw [unknown 0, unknown 1, unknown 2, unknown 3, unknown 1]
+    [some [], some [.word64], some [.word64, .word64], some [.word64, .word64, .word64], some [.other]]
+    [.arg 0, .arg 1, .arg 2, .intrinsic (.x86Base .divRem64) 3, .ret] := by decide +kernel
+example : scalarTransfer tupleRaw (i 40 (.call { tupleSite with parameterTypes := [word, intType, word] }))
+    [.word64, .word32, .word64] = none := by decide +kernel
+
+private def tupleFieldRaw := raw [i 2, i 123 (.field tupleType 0 word false), i 42] [.byref tupleType]
+example : ScalarFlowValid tupleFieldRaw [unknown 0, unknown 1, unknown 1]
+    [some [], some [.reference], some [.word64]] [.arg 0, .fieldAt 0 8, .ret] := by decide +kernel
+example : ¬ ScalarFlowValid tupleFieldRaw [unknown 0, unknown 1, unknown 1]
+    [some [], some [.reference], some [.other]] [.arg 0, .fieldAt 0 8, .ret] := by decide +kernel
+
+private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.UInt32")
+private def spanSite : CallSite := {
+  declaringType := spanType, name := "get_Item", target := .external
+    (runtime ++ "::!0& modreq(System.Runtime.InteropServices.InAttribute) System.ReadOnlySpan`1<System.UInt32>::get_Item(System.Int32)"),
+  typeArguments := [], parameterCount := 1, parameterTypes := [intType], hasThis := true, returnsValue := true,
+  returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)" }
+private def spanRaw := { raw [i 2, i 3, i 40 (.call spanSite), i 113 (.type intType), i 42] [.byref spanType, intType] with returnType := intType }
+example : ScalarFlowValid spanRaw [unknown 0, unknown 1, unknown 2, unknown 1, unknown 1]
+    [some [], some [.reference], some [.word32, .reference], some [.other], some [.word32]]
+    [.arg 0, .arg 1, .memory (.spanItem 4), .loadScalar 4, .ret] := by decide +kernel
+example : scalarTransfer spanRaw (i 40 (.call { spanSite with parameterTypes := [word] }))
+    [.word64, .reference] = none := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(garbage(System.Int32)", parameterCount := 1, parameterTypes := [intType] }))
+    [.word32] = none := by decide +kernel
+
+example : scalarTransfer addRaw (i 40 (.call { site with
+    target := .external "Scope::System.UInt64 Owner::M(Container\u0394)", parameterCount := 1,
+    parameterTypes := [.aggregate "Scope::Container\u0394" 0] })) [.other] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with
+    target := .external "Scope::System.UInt64 Owner::M(Container\u0394)", parameterCount := 1,
+    parameterTypes := [.aggregate "Scope::Container\u03a9" 0] })) [.other] = none := by decide +kernel
 
 private def joinRaw := { raw [i 2, i 45 (.target 4), i 22, i 43 (.target 5), i 22, i 42] [intType] with returnType := intType }
 private def joinFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, state [some 0], unknown 0, unknown 1]

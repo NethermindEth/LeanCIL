@@ -20,6 +20,15 @@ internal static class NativeOperands
         _ => Kind.Other
     };
 
+    static TypeReference FieldType(FieldReference field)
+    {
+        if (!ValueTuples.Is(field.DeclaringType)) return field.FieldType;
+        FieldDefinition definition = field.Resolve();
+        MetadataValidation.InstanceField? actual = MetadataValidation.Fields(field.DeclaringType)
+            .FirstOrDefault(candidate => candidate.Definition == definition);
+        return actual?.Type ?? throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
+    }
+
     static bool Binary(Code code) => code is Code.Add or Code.Sub or Code.Mul or Code.Div or Code.Div_Un or
         Code.Rem or Code.Rem_Un or Code.And or Code.Or or Code.Xor or Code.Ceq or Code.Clt or Code.Clt_Un or
         Code.Cgt or Code.Cgt_Un or Code.Add_Ovf or Code.Add_Ovf_Un or Code.Sub_Ovf or Code.Sub_Ovf_Un or
@@ -132,7 +141,7 @@ internal static class NativeOperands
                             MethodArguments.Index(method, (ParameterDefinition)instruction.Operand))),
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
                             Type(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType),
-                        Code.Ldfld or Code.Ldsfld => Type(((FieldReference)instruction.Operand).FieldType),
+                        Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj => Type((TypeReference)instruction.Operand),
                         Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S or
                             Code.Ldflda or Code.Ldsflda => Kind.Reference,
