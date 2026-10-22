@@ -50,7 +50,7 @@ def RelocatesInto (lib linked : CIL.Program) (f : Nat → Nat) : Prop :=
   ∀ i (bound : i < lib.length), linked[f i]? = some (lib[i].relocate f)
 
 /-- A fault at `method` is reported at `f method`, with the same pc and fault. -/
-def LocatedFault.relocate (f : Nat → Nat) (fault : LocatedFault) : LocatedFault :=
+def LocatedFault.relocateMethod (f : Nat → Nat) (fault : LocatedFault) : LocatedFault :=
   ⟨f fault.method, fault.instruction, fault.fault⟩
 
 /-- Renames the method a call or construction enters. -/
@@ -127,9 +127,9 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
     (relocates : RelocatesInto lib linked f) (fuel method pc : Nat) (args : List Value) (frame : Frame)
     (stack : List Value) (memory : Memory) (bound : method < lib.length) :
     run linked fuel (f method) pc args frame stack memory =
-      (run lib fuel method pc args frame stack memory).mapError (LocatedFault.relocate f) := by
+      (run lib fuel method pc args frame stack memory).mapError (LocatedFault.relocateMethod f) := by
   induction fuel generalizing method pc args frame stack memory with
-  | zero => simp only [run, Except.mapError, LocatedFault.relocate]
+  | zero => simp only [run, Except.mapError, LocatedFault.relocateMethod]
   | succ fuel ih =>
     have found : lib[method]? = some lib[method] := List.getElem?_eq_getElem bound
     have moved := relocates method bound
@@ -137,14 +137,14 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
     cases ho : body.code[pc]? with
     | none =>
       have lo : (body.relocate f).code[pc]? = none := by rw [Method.relocate_code, ho]; rfl
-      simp only [run, found, moved, ho, lo, Except.mapError, LocatedFault.relocate]
+      simp only [run, found, moved, ho, lo, Except.mapError, LocatedFault.relocateMethod]
     | some op =>
       have lo : (body.relocate f).code[pc]? = some (op.relocate f) := by rw [Method.relocate_code, ho]; rfl
       have ls := step_relocate f body op pc args frame stack memory
       cases hs : step body op pc args frame stack memory with
       | error fault =>
         simp only [run, found, moved, ho, lo, ls, hs, Except.map, Bind.bind, Except.bind, Except.mapError,
-          LocatedFault.relocate]
+          LocatedFault.relocateMethod]
       | ok action =>
         cases action with
         | next target values nextFrame updated =>
@@ -192,7 +192,7 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
               obtain ⟨final, values⟩ := result
               simp only [Except.mapError]
               cases !values.isEmpty with
-              | true => simp only [↓reduceIte, LocatedFault.relocate]
+              | true => simp only [↓reduceIte, LocatedFault.relocateMethod]
               | false =>
                 simp only [Bool.false_eq_true, ↓reduceIte]
                 cases loadLocal final (.bytes kind temporary) with
@@ -204,7 +204,7 @@ theorem invoke_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : C
     (relocates : RelocatesInto lib linked f) (fuel method : Nat) (args : List Value) (memory : Memory)
     (bound : method < lib.length) :
     invoke linked fuel (f method) args memory =
-      (invoke lib fuel method args memory).mapError (LocatedFault.relocate f) := by
+      (invoke lib fuel method args memory).mapError (LocatedFault.relocateMethod f) := by
   have found : lib[method]? = some lib[method] := List.getElem?_eq_getElem bound
   have moved := relocates method bound
   generalize lib[method] = body at found moved
@@ -235,7 +235,7 @@ theorem Raises.relocate {lib linked : CIL.Program} {f : Nat → Nat} {method : N
     Raises linked (f method) args memory exception := by
   obtain ⟨fuel, fault, invoked, thrown⟩ := raised
   have bound := invoke_bound (fun located same => by cases same; rw [thrown]; exact nofun) invoked
-  refine ⟨fuel, fault.relocate f, ?_, thrown⟩
+  refine ⟨fuel, fault.relocateMethod f, ?_, thrown⟩
   rw [invoke_relocate closed relocates fuel method args memory bound, invoked]
   rfl
 
