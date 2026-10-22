@@ -284,7 +284,7 @@ unsafe def main (args : List String) : IO Unit := do
                         changed |= invalid.Add(name);
             } while (changed);
             result.UnionWith(manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" &&
-                !name.StartsWith("CIL.", StringComparison.Ordinal) && name is not ("Extracted" or "ExtractionAudit") &&
+                !name.StartsWith("CIL.", StringComparison.Ordinal) && name is not ("Extracted" or "ExtractedSymbols" or "ExtractionAudit") &&
                 !name.StartsWith("LeanCILProof", StringComparison.Ordinal)));
         }
         return result;
@@ -464,6 +464,30 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         inputs["proof:" + proof] = Sha(proof);
         if (settings is not null) inputs["settings:" + settings] = Sha(settings);
         return inputs;
+    }
+
+    static readonly Regex ConsumerImport = new(@"^[ \t]*(?:(?:public|meta)[ \t]+)*import[ \t]+(?:all[ \t]+)?([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline);
+
+    // Read from source text before any build, so the proof key can bind PDB names; Lean's
+    // compiled import headers confirm it after the build. Ambiguous module paths all count.
+    static bool ConsumerImportsSymbols(string proof, SortedDictionary<string, string> snapshot, string root)
+    {
+        var sources = snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal) && key.EndsWith(".lean", StringComparison.Ordinal))
+            .Select(key => (Path: key["consumer:".Length..], Relative: "/" + Path.GetRelativePath(root, key["consumer:".Length..]).Replace('\\', '/'))).ToArray();
+        var pending = new Queue<string>([proof]);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (pending.TryDequeue(out var path))
+        {
+            if (!seen.Add(path)) continue;
+            foreach (Match import in ConsumerImport.Matches(File.ReadAllText(path)))
+            {
+                if (import.Groups[1].Value == "ExtractedSymbols") return true;
+                var module = "/" + import.Groups[1].Value.Replace('.', '/') + ".lean";
+                foreach (var source in sources.Where(source => source.Relative.EndsWith(module, StringComparison.Ordinal)))
+                    pending.Enqueue(source.Path);
+            }
+        }
+        return false;
     }
 
     static void AddConsumerLibrary(string directory, string name)
@@ -733,7 +757,7 @@ unsafe def main (args : List String) : IO Unit := do
 
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
         SortedDictionary<string, string> snapshot, string certifiedLibrary, string extraction,
-        IReadOnlyList<(string Module, string Proof, string Output)> proofs)
+        IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols)
     {
         foreach (var dependency in dependencies)
         {
@@ -770,10 +794,6 @@ unsafe def main (args : List String) : IO Unit := do
         // Give Lake a real generated-module target before building consumer imports.
         if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
             throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");
-        // Cached support and replay sets are keyed on Extracted alone, so PDB symbols are not offered here yet.
-        if (snapshot.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal) && k.EndsWith(".lean", StringComparison.Ordinal))
-            .Any(k => ImportsSymbols(File.ReadAllText(k["consumer:".Length..]))))
-            throw new InvalidDataException("Consumer packages cannot import ExtractedSymbols; verify that proof with leancil verify instead.");
         File.Copy(Path.Combine(extraction, "Extracted.lean"), Path.Combine(frameworkCopy, "Extracted.lean"));
         var generated = Sha(Path.Combine(frameworkCopy, "Extracted.lean"));
         foreach (var output in proofs.Select(proof => proof.Output).Distinct())
@@ -781,6 +801,17 @@ unsafe def main (args : List String) : IO Unit := do
                 .GetProperty("generatedSha256").GetString())
                 throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
         AddConsumerLibrary(frameworkCopy, "Extracted");
+        var symbolsPath = Path.Combine(frameworkCopy, "ExtractedSymbols.lean");
+        // Declared only when a proof imports it: symbol-free workspaces, and so their support keys, stay unchanged.
+        if (symbols is not null)
+        {
+            if (File.Exists(symbolsPath) || File.Exists(Path.Combine(session, "ExtractedSymbols.lean")) ||
+                snapshot.Keys.Any(k => k.StartsWith("consumer:", StringComparison.Ordinal) && Path.GetFileName(k) == "ExtractedSymbols.lean"))
+                throw new InvalidDataException("ExtractedSymbols is reserved for the PDB names of the selected extraction.");
+            File.Copy(Path.Combine(extraction, "Symbols.lean"), symbolsPath);
+            if (Sha(symbolsPath) != symbols) throw new InvalidDataException("PDB names changed during consumer snapshot.");
+            AddConsumerLibrary(frameworkCopy, "ExtractedSymbols");
+        }
         var extractionAuditPath = Path.Combine(frameworkCopy, "ExtractionAudit.lean");
         if (File.Exists(extractionAuditPath)) throw new InvalidDataException("ExtractionAudit is reserved for the certificate audit.");
         File.WriteAllText(extractionAuditPath, ExtractionAuditSource);
@@ -789,6 +820,7 @@ unsafe def main (args : List String) : IO Unit := do
             .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
             .Append(Path.Combine(frameworkCopy, "Extracted.lean"))
             .Append(extractionAuditPath).ToList();
+        if (symbols is not null) copied.Add(symbolsPath);
         foreach (var (module, proof, _) in proofs)
         {
             if (File.Exists(Path.Combine(session, module + ".lean")))
@@ -848,6 +880,8 @@ unsafe def main (args : List String) : IO Unit := do
         var all = Enumerable.Range(0, requests.Count).ToArray();
         var identities = new string[requests.Count];
         var proofKeys = new string[requests.Count];
+        // Symbols.lean hash for requests whose proofs import ExtractedSymbols, else null.
+        var symbols = new string?[requests.Count];
         var outputs = requests.Select(request => Path.GetFullPath(request.Output)).ToArray();
         var proofs = new string[requests.Count];
         foreach (var i in all)
@@ -897,6 +931,16 @@ unsafe def main (args : List String) : IO Unit := do
                     before[i] = RequestInputs(common, proofs[i], requests[i].Settings);
                     if (!before[i].ContainsKey("consumer:" + proofs[i]))
                         throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
+                    if (ConsumerImportsSymbols(proofs[i], snapshot, root))
+                    {
+                        var path = Path.Combine(outputs[i], "Symbols.lean");
+                        if (!File.Exists(path))
+                        {
+                            Stage([i], "extraction integrity");
+                            throw new InvalidOperationException(MissingSymbols(outputs[i]));
+                        }
+                        symbols[i] = Sha(path);
+                    }
                 }
                 catch (Exception error) { Fail([i], error); }
         }
@@ -915,7 +959,9 @@ unsafe def main (args : List String) : IO Unit := do
                 var common = Common(ConsumerSnapshot(root, excluded));
                 foreach (var i in members)
                     if (!Same(before[i], RequestInputs(common, proofs[i], requests[i].Settings)) ||
-                        identities[i] != Sha(Path.Combine(outputs[i], "identity.json")))
+                        identities[i] != Sha(Path.Combine(outputs[i], "identity.json")) ||
+                        (symbols[i] is not null && (!File.Exists(Path.Combine(outputs[i], "Symbols.lean")) ||
+                            symbols[i] != Sha(Path.Combine(outputs[i], "Symbols.lean")))))
                         Fail([i], new InvalidOperationException("Inputs changed during consumer verification"));
             }
             catch (Exception error) { Fail(members, error); }
@@ -950,7 +996,9 @@ unsafe def main (args : List String) : IO Unit := do
             try
             {
                 identities[i] = Sha(Path.Combine(outputs[i], "identity.json"));
-                proofKeys[i] = ConsumerCacheKey("proof", before[i], identities[i] + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly));
+                // PDB names bind only proofs that import them; identity.json does not cover the PDB.
+                proofKeys[i] = ConsumerCacheKey("proof", before[i], identities[i] + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
+                    (symbols[i] is null ? "" : "\n" + symbols[i]));
                 if (requests[i].ExpectRejection) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
@@ -984,7 +1032,7 @@ unsafe def main (args : List String) : IO Unit := do
         foreach (var i in Pending(all))
             try
             {
-                var key = Sha(Path.Combine(outputs[i], "Extracted.lean"));
+                var key = Sha(Path.Combine(outputs[i], "Extracted.lean")) + (symbols[i] is null ? "" : "\n" + symbols[i]);
                 if (!groups.TryGetValue(key, out var members)) groups[key] = members = [];
                 members.Add(i);
             }
@@ -1006,8 +1054,10 @@ unsafe def main (args : List String) : IO Unit := do
         {
             var bound = WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean")));
             var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
+            // Groups share one Symbols.lean hash or none.
+            var symbolHash = symbols[members[0]];
             var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, outputs[members[0]],
-                members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray());
+                members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash);
             var frameworkCopy = prepared.FrameworkCopy;
             string[] initialImportDirectories;
             if (!first && relativeImportDirectories.Length > 0)
@@ -1164,10 +1214,11 @@ unsafe def main (args : List String) : IO Unit := do
             var checkedArtifacts = JsonSerializer.Serialize(currentArtifacts.OrderBy(pair => pair.Key, StringComparer.Ordinal)
                 .ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)));
             var portableSupport = ImportedConsumerSupport(session, trusted, currentArtifacts);
-            var graph = members.Length > 1 || share || UseSuccessCache || exporting || restoredArtifacts.Count > 0
+            var graph = members.Length > 1 || share || UseSuccessCache || exporting || restoredArtifacts.Count > 0 || symbolHash is not null
                 ? ConsumerModuleImports(session, currentArtifacts) : null;
-            // Cached support was checked against another Extracted, so its importers are always replayed.
-            var extractionDependent = graph is null ? new HashSet<string>(StringComparer.Ordinal) : DependentModules(graph, ["Extracted"]);
+            // Cached support was checked against another Extracted or PDB, so its importers are always replayed.
+            var extractionDependent = graph is null ? new HashSet<string>(StringComparer.Ordinal)
+                : DependentModules(graph, ["Extracted", "ExtractedSymbols"]);
             var failures = ReplayConsumerModules(session, discovered.Where(module => !baseUnchanged ||
                 extractionDependent.Contains(module.Name) ||
                 (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name), leanPath);
@@ -1180,6 +1231,9 @@ unsafe def main (args : List String) : IO Unit := do
                 if (rejected.Length > 0)
                     Fail([i], new InvalidOperationException("Kernel replay rejected " + string.Join(", ", rejected) + ":\n" +
                         string.Join("\n", rejected.Select(name => failures[name]))));
+                // An import the source scan missed would leave PDB names out of the proof key.
+                else if (symbols[i] is null && closure is not null && closure.Contains("ExtractedSymbols"))
+                    Fail([i], new InvalidDataException("The proof imports ExtractedSymbols in a form the verifier does not recognise; use a plain `import ExtractedSymbols`."));
             }
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
@@ -1222,10 +1276,12 @@ unsafe def main (args : List String) : IO Unit := do
             // audit, extraction recheck and source-stability checks succeeded.
             if (failures.Count == 0 && graph is not null)
             {
-                var dependent = DependentModules(graph, ["Extracted", "ExtractionAudit", .. names]);
+                var dependent = DependentModules(graph, ["Extracted", "ExtractedSymbols", "ExtractionAudit", .. names]);
                 // Extraction-dependent modules are recorded too, bound to this Extracted; export uses only the others.
+                // Records bind no PDB names, so importers of ExtractedSymbols stay unbound and are never cached.
                 var excluded = DependentModules(graph, ["ExtractionAudit", .. names]);
                 excluded.Add("Extracted");
+                excluded.Add("ExtractedSymbols");
                 var collected = UseSuccessCache || share || exporting
                     ? CollectConsumerSupport(session, currentArtifacts, graph, excluded, extractionDependent, bound) : null;
                 try
