@@ -66,7 +66,7 @@ elab_rules : command
     let (pc, argc) ← liftTermElabM do
       let some method ← (evalNat (← whnf (← elabTermEnsuringType callee (some (mkConst ``Nat))))).run
         | throwError "{callee} is not a closed method index"
-      let table ← strings (mkConst `Extracted.signatures)
+      let table ← strings (mkConst (← visible `Extracted.signatures))
       callSite parent method (table[method]?.getD s!"method {method}") (occurrence.map (·.getNat))
     elabCommand (← `(@[cil_code] def $site : Nat := $(quote pc)))
     elabCommand (← `(@[cil_code] theorem $(mkIdent (site.getId ++ `call)) :

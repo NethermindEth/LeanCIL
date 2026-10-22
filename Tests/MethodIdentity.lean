@@ -91,3 +91,20 @@ error: 2 extracted methods have signature
 run_meta discard <| CIL.MethodIdentity.resolveIn ``duplicated Extracted.method1Signature
 
 end Tests.MethodIdentity
+
+/-! Batch verification places each extraction in its own namespace; the innermost table wins. -/
+namespace BatchCase0.Extracted
+
+def method0Signature : String := "System.Void Examples.Batch::Only()"
+def method0 : CIL.Method := { code := [.ret], locals := [], returnsValue := false }
+def program : CIL.Program := [method0]
+def signatures : List String := [method0Signature]
+
+end BatchCase0.Extracted
+
+namespace BatchCase0
+
+bind_method only onlyBody := "System.Void Examples.Batch::Only()"
+example : only = 0 ∧ onlyBody = Extracted.method0 := ⟨rfl, rfl⟩
+
+end BatchCase0
