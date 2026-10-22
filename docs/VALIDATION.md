@@ -126,6 +126,12 @@ assertion permits only `propext` and `Quot.sound`. The same module checks both
 paths of a symbolic branch using a supplied truth hypothesis, and verifies that
 failed candidate summaries do not escape their transaction.
 
+`Tests.StoreFacts` checks symbolic carry and borrow stores whose write facts
+state `a + b + c`, `a - b - c` and the flag words in source form, through both
+`cil_checked_steps` and `cil_contract_steps`. A wrong stored value, address or
+source memory leaves the run stuck at that store, with the exact unsolved goal
+asserted.
+
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
 bodies with mapped program counters; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
@@ -163,7 +169,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
