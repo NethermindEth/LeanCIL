@@ -129,4 +129,28 @@ elab_rules : command
     elabCommand (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc)) := rfl))
 
+/-- `bind_callee index body := call argc from parent` binds the method `parent` calls with
+`argc` arguments, for helpers whose names are not stable; `[k]` selects one of several such
+calls. It emits the same theorems as the signature form, with the signature from the table. -/
+syntax (name := bindCalleeShape) "bind_callee " ident ppSpace ident " := " &"call " num " from " term:max (" [" num "]")? : command
+
+elab_rules : command
+  | `(bind_callee $index $body := call $argc from $parent $[[$occurrence]]?) => do
+    let (method, pc, signature) ← liftTermElabM do
+      let sites ← calls (← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method))))
+      let table ← strings (mkConst (← visible `Extracted.signatures))
+      let describe := fun ((pc, callee, count) : Nat × Nat × Nat) => s!"pc {pc}: {table[callee]?.getD "?"} with {count}"
+      let shaped := sites.filter (·.2.2 == argc.getNat)
+      if shaped.isEmpty then
+        throwError "{parent} makes no call with {argc.getNat} arguments; it calls:
+{"
+".intercalate (sites.toList.map fun s => "  " ++ describe s)}"
+      let chosen ← choose m!"{parent} makes {shaped.size} calls with {argc.getNat} arguments"
+        (shaped.map fun (pc, callee, _) => s!"pc {pc}: {table[callee]?.getD "?"}") (occurrence.map (·.getNat))
+      let (pc, callee, _) := shaped[chosen]!
+      return (callee, pc, table[callee]?.getD "")
+    emit index body (Syntax.mkStrLit signature) method
+    elabCommand (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
+      ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc.getNat)) := rfl))
+
 end CIL.MethodIdentity

@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 
 // One proof file, unedited, must verify against two builds whose extraction numbering differs:
 // the second declares the helpers in the other order and adds a helper that renumbers both.
+// A shape-bound proof must also survive a third build that renames both helpers.
 using var verification = new Program();
 var root = At("artifacts/MethodIdentity");
 const string Selector = "Calls::Root(ulong,ulong)";
@@ -33,6 +34,11 @@ var reordered = Build("Reordered",
     "public static ulong Right(ulong x, ulong y) => x ^ y; " +
     "public static ulong Left(ulong x, ulong y) => x - y; " +
     "public static ulong Root(ulong x, ulong y) => Right(x, y) + Bias(Left(x, y));");
+var renamed = Build("Renamed",
+    "public static ulong Bias(ulong x) => x; " +
+    "public static ulong Exclusive(ulong x, ulong y) => x ^ y; " +
+    "public static ulong Difference(ulong x, ulong y) => x - y; " +
+    "public static ulong Root(ulong x, ulong y) => Exclusive(x, y) + Bias(Difference(x, y));");
 
 Dictionary<string, int> Indices(string assembly, string name)
 {
@@ -80,6 +86,29 @@ foreach (var (name, assembly) in new[] { ("Original", original), ("Reordered", r
     verification.Verify(assembly, "Identity", Selector, named, Path.Combine(root, name + "-Named"));
     Console.WriteLine($"PASS {name}: signature-bound proof verifies unedited");
 }
+
+// Calls with two arguments, in call order: the inserted one-argument helper is not a candidate.
+var shaped = Proof("Shaped", """
+    bind_method parent parentBody := "System.UInt64 Identity.Calls::Root(System.UInt64,System.UInt64)"
+    bind_callee right rightBody := call 2 from parentBody [0]
+    bind_callee left leftBody := call 2 from parentBody [1]
+    """, "left", "right", "parent");
+foreach (var (name, assembly) in new[] { ("Original", original), ("Reordered", reordered), ("Renamed", renamed) })
+{
+    verification.Verify(assembly, "Identity", Selector, shaped, Path.Combine(root, name + "-Shaped"));
+    Console.WriteLine($"PASS {name}: shape-bound proof verifies unedited");
+}
+var unnamed = false;
+try
+{
+    verification.Verify(renamed, "Identity", Selector, named, Path.Combine(root, "Renamed-Named"));
+}
+catch (InvalidOperationException error) when (error.Message.Contains("no extracted method has signature"))
+{
+    unnamed = true;
+}
+if (!unnamed) throw new InvalidOperationException("A signature-bound proof survived renaming; the renamed build does not exercise shape binding.");
+Console.WriteLine("PASS signatures break on renaming; call shape does not");
 
 // The positional proof that held for the original build must fail once helpers are renumbered.
 var numbered = Proof("Numbered", "", before[Left].ToString(), before[Right].ToString(), "0");
