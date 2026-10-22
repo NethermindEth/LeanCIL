@@ -145,6 +145,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 | --- | --- |
 | `leancil list` | List canonical method signatures to copy into `extract` |
 | `leancil extract` | Validate a method and its reachable calls and generate `Extracted.lean` |
+| `leancil blockers` | Report what blocks extraction for listed method and profile pairs, without proofs |
 | `leancil check` | Regenerate the extraction in memory and compare it with the saved files |
 | `leancil verify` | Check, kernel-replay and audit a proof, then write `verified.json` |
 | `leancil verify-batch` | Verify many requests against one consumer snapshot |

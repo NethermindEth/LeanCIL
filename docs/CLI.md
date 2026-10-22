@@ -63,6 +63,40 @@ rejects conflicting explicit assumptions. Verification binds the manifest hash
 and prints the initialization preconditions with the theorem. Re-extract older
 artifacts to include the new manifest field.
 
+## Report extraction blockers
+
+`leancil blockers` runs admission, the validation `extract` performs, over an explicit list of
+method and profile pairs, and reports everything that blocks each one instead of stopping at the
+first failure. It writes no extraction artifacts and checks no proofs:
+
+```sh
+leancil blockers assembly.dll --manifest blockers-manifest.json [--output blockers.json]
+```
+
+```json
+{
+  "initializedTypes": ["Namespace.Type"],
+  "entries": [
+    { "signature": "Type::Method(ulong)", "profile": "scalar" },
+    { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-bmi2.json" }
+  ]
+}
+```
+
+`profile` is a profile name or `@file`, resolved against the manifest's directory;
+`initializedTypes` applies `--assume-initialized` to every entry. The report goes to
+`--output`, by default `blockers.json` next to the manifest, and a short summary goes to standard
+output. Each entry is `admitted` (extraction would succeed), `blocked`, or `notChecked` with the
+reason: a selector that matches no method or several, an unknown profile, or an assembly or
+assumption that fails before any method is checked. Each blocker is one unsupported construct
+(instruction, call, type or layout). It lists every site, with method, IL offset, instruction and
+the PDB source location when one is present, and every affected entry with the call chains from
+it to those sites. Only code reachable under the entry's profile is checked, so a branch excluded
+by a constant `IsSupported` is never reported. A method whose metadata or control flow cannot be
+analysed is reported once, without the callees behind it. Admission is not verification: an admitted entry
+still needs a proof. The command exits with `0` whenever the report is written, whatever the
+entries' status.
+
 ## Check
 
 Check that the generated files still match the assembly and extraction settings:
