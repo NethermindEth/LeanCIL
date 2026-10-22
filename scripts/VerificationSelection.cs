@@ -48,7 +48,7 @@ internal static class VerificationSelection
             "Examples/Verify.cs", "Examples/Hardware/Hardware.cs", "scripts/Verify.cs",
             "Tests/LibraryCache.cs", "Tests/InitializedTypes.cs", "Tests/ConsumerVerification.cs",
             "Tests/MethodSelectors.cs", "Tests/MetadataMutator.cs", "Tests/Semantics.lean",
-            "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean", "Tests/StructuralLabels.lean", "Tests/DebugNames.lean", "Tests/MethodContract.lean", "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean", "Tests/ConfinedFootprints.lean", "Tests/ContractConsequence.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
+            "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean", "Tests/StructuralLabels.lean", "Tests/DebugNames.lean", "Tests/MethodContract.lean", "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/Imports.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean", "Tests/ConfinedFootprints.lean", "Tests/ContractConsequence.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
             "Tests/VerificationReuse.cs"
         };
         inputs["core"].UnionWith(new[] { "Add", "Choose", "Calls", "Alias", "Struct", "StructCopy", "LargeStruct",

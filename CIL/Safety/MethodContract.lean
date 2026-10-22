@@ -52,25 +52,6 @@ theorem Confined.widen {small large : List (Reference × Nat)} {before after : M
   ⟨framed.grows, framed.allocations, fun id bound offset outside => framed.cells id bound offset (narrow outside),
     framed.writable, fun id bound offset outside => framed.readable id bound offset (narrow outside)⟩
 
-/-- A footprint entry may grow to an enclosing interval of the same allocation. -/
-theorem Confined.cover {footprint : List (Reference × Nat)} {before after : Memory} {inner outer : Reference}
-    {width bound : Nat} (framed : Confined ((inner, width) :: footprint) before after)
-    (same : inner.allocation = outer.allocation) (start : outer.offset ≤ inner.offset)
-    (finish : inner.offset + width ≤ outer.offset + bound) :
-    Confined ((outer, bound) :: footprint) before after :=
-  have narrow : ∀ {id offset}, Outside ((outer, bound) :: footprint) id offset →
-      Outside ((inner, width) :: footprint) id offset := fun outside entry member =>
-    (List.mem_cons.mp member).elim
-      (fun own => by
-        subst own
-        rcases outside _ List.mem_cons_self with different | low | high
-        · exact Or.inl (same ▸ different)
-        · exact Or.inr (Or.inl (by simp only at low ⊢; omega))
-        · exact Or.inr (Or.inr (by simp only at high ⊢; omega)))
-      (fun other => outside entry (List.mem_cons_of_mem _ other))
-  ⟨framed.grows, framed.allocations, fun id bound offset outside => framed.cells id bound offset (narrow outside),
-    framed.writable, fun id bound offset outside => framed.readable id bound offset (narrow outside)⟩
-
 theorem Confined.ofMemoryBelow {footprint : List (Reference × Nat)} {before after : Memory} {watermark : Nat}
     (preserved : MemoryBelow watermark before after) (covers : before.nextIdentity ≤ watermark)
     (grows : before.nextIdentity ≤ after.nextIdentity) : Confined footprint before after :=
@@ -445,7 +426,6 @@ theorem MethodContract.Holds.weaken {Input Output : Type} {internal exported : M
 #print axioms Within.trans
 #print axioms MethodContract.Refines.trans
 #print axioms MethodContract.Holds.weaken
-#print axioms Confined.cover
 #print axioms Confined.forget_fresh
 #print axioms Confined.then_below
 #print axioms Confined.write

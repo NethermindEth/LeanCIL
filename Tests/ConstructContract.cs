@@ -75,9 +75,9 @@ theorem pair_holds : pairContract.Holds Extracted.program pair := by
   rw [length] at high2 low2
   have readback := read_append (left := 8) (right := 8) ((ready1.after_write w2).access) low2 high2
   have c1 : Confined [(⟨id, offset⟩, 16)] m m1 :=
-    (Confined.write w1 (List.mem_singleton_self _)).cover rfl (by simp) (by simp [length])
+    Confined.write_within w1 ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩
   have c2 : Confined [(⟨id, offset⟩, 16)] m1 m2 :=
-    (Confined.write w2 (List.mem_singleton_self _)).cover rfl (by simp) (by simp [length])
+    Confined.write_within w2 ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩
   refine ⟨8, m2, [], ?_, c1.trans c2, (), rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     f0, f1, a1, a2, w1, w2, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -132,7 +132,7 @@ theorem word_holds : wordContract.Holds Extracted.program word := by
   have covered : ∀ {a b : Memory} {start : Nat} {bytes : List (BitVec 8)},
       write a { allocation := id, offset := offset + start } bytes 1 = .ok b → start + bytes.length ≤ 32 →
       Confined [(⟨id, offset⟩, 32)] a b :=
-    fun written inside => (Confined.write written (List.mem_singleton_self _)).cover rfl (by simp) (by simp; omega)
+    fun written inside => Confined.write_within written ⟨_, List.mem_singleton_self _, rfl, by simp, by simp; omega⟩
   refine ⟨14, m4, [], ?_, (covered w1 (by simp [length])).trans ((covered w2 (by simp [length])).trans
     ((covered w3 (by simp [length])).trans (covered (start := 0) w4 (by simp [length])))), (), rfl, ?_⟩
   · cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,

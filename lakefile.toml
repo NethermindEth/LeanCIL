@@ -42,6 +42,9 @@ name = "Tests.ContractConsequence"
 name = "Tests.ConstructContract"
 
 [[lean_lib]]
+name = "Tests.Imports"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]
