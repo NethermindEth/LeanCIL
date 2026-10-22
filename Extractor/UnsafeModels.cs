@@ -5,9 +5,9 @@ namespace Nethermind.LeanCIL;
 // Generic runtime helpers share the same validated managed layout as CIL storage.
 internal static class UnsafeModels
 {
-    internal static string? Translate(MethodReference reference)
+    internal static string? Translate(MethodReference reference, string architecture = "scalar")
     {
-        if (ReinterpretReference(reference) is { } cast) return cast;
+        if (ReinterpretReference(reference, architecture) is { } cast) return cast;
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
@@ -35,8 +35,8 @@ internal static class UnsafeModels
 
         if (element is ByReferenceType || element is PointerType || element is GenericParameter)
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
-        MetadataValidation.Type(element, reference.Module);
-        RuntimeModels.ValidateSignature(reference);
+        MetadataValidation.Type(element, reference.Module, architecture: architecture);
+        RuntimeModels.ValidateSignature(reference, architecture);
         if (skipInit) return ".skipInit";
         if (nullRef) return ".memory .nullRef";
         if (isNullRef) return ".memory .isNullRef";
@@ -48,7 +48,7 @@ internal static class UnsafeModels
                 "System.Runtime.Intrinsics.Vector512`1" => 64,
                 _ => throw new InvalidDataException($"Unsupported Unsafe element layout: {element.FullName}")
             }
-            : MetadataValidation.FieldSize(element, reference.Module);
+            : MetadataValidation.FieldSize(element, reference.Module, architecture);
 
         if (sizeOf) return $".const32 {width}";
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
@@ -57,7 +57,7 @@ internal static class UnsafeModels
 
     // A byref reinterpretation changes only its static type, never the allocation,
     // offset, initialized bytes or access bounds used by checked memory operations.
-    private static string? ReinterpretReference(MethodReference reference)
+    private static string? ReinterpretReference(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
@@ -77,9 +77,9 @@ internal static class UnsafeModels
         {
             if (type is ByReferenceType or PointerType or GenericParameter)
                 throw new InvalidDataException($"Unsupported Unsafe reference element: {type.FullName}");
-            MetadataValidation.Type(type, reference.Module);
+            MetadataValidation.Type(type, reference.Module, architecture: architecture);
         }
-        RuntimeModels.ValidateSignature(reference);
+        RuntimeModels.ValidateSignature(reference, architecture);
         return ".memory .asRef";
     }
 }

@@ -291,8 +291,17 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
         | 2 => .ok (.i32 (if signed then (BitVec.ofNat 16 number).signExtend 32 else BitVec.ofNat 32 number))
         | 4 => .ok (.i32 (BitVec.ofNat 32 number))
         | 8 => .ok (.i64 (BitVec.ofNat 64 number))
+        | 16 => .ok (.v128 (BitVec.ofNat 128 number))
+        | 32 => .ok (.v256 (BitVec.ofNat 256 number))
         | _ => .error (.unsupported "Aggregate field width")
       return (m, .scalar value :: rest)
+  | .fieldAt offset width _, .scalar (.snapshot (.aggregate size) bytes) :: rest =>
+    if bytes.length != size || offset + width > size then .error .invalidState else
+      if width = 16 || width = 32 then
+        let value ← bitcastValue (.aggregate width) (if width = 16 then .vector128 else .vector256)
+          (.snapshot (.aggregate width) ((bytes.drop offset).take width))
+        return (m, .scalar value :: rest)
+      else .error (.unsupported "Snapshot field width")
   | .aggregateFieldAt offset size, .scalar (.aggregate bytes) :: rest =>
     if offset + size > bytes.length then .error .invalidState else
       return (m, .scalar (.aggregate ((bytes.drop offset).take size)) :: rest)
@@ -309,6 +318,14 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .fieldAt offset width signed, .reference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (m, .scalar (← loadValue m (.address address) width signed) :: rest)
+  | .setFieldAt offset 16, .scalar value :: .reference (.address r) :: rest =>
+    let some bytes := valueSnapshot .vector128 value | .error .invalidState
+    let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+    return (← checkedAt (.address address) 16 (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
+  | .setFieldAt offset 32, .scalar value :: .reference (.address r) :: rest =>
+    let some bytes := valueSnapshot .vector256 value | .error .invalidState
+    let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+    return (← checkedAt (.address address) 32 (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
   | .setFieldAt offset width, .scalar value :: .reference (.address r) :: rest =>
     let number ← match width, value with
       | 1, .i32 bits => .ok bits.toNat

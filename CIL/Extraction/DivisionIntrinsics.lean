@@ -20,6 +20,27 @@ private def divisionSignatures : List (String × String × String × Intrinsic �
   ("System.Runtime.Intrinsics.X86.Avx2", "ShiftRightLogical", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)", .avx2 .shr64, 2),
   ("System.Runtime.Intrinsics.X86.Avx512DQ", "MoveMask", "System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(System.Runtime.Intrinsics.Vector256`1<System.UInt64>)", .avx512DQ .moveMask64, 1)]
 
+private def scalarScope := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+
+private def divisionVector (width : String) : TypeExpr :=
+  .apply (.constructor intrinsicScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
+    (.atom scalarScope "System.UInt64")
+
+private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
+  | .avx2 .band | .avx2 .bor | .avx2 .bxor | .avx2 .andNot =>
+    some (divisionVector "256", [divisionVector "256", divisionVector "256"])
+  | .avx2 .shl64Count | .avx2 .shr64Count =>
+    some (divisionVector "256", [divisionVector "256", divisionVector "128"])
+  | .avx2 .shl64 | .avx2 .shr64 =>
+    some (divisionVector "256", [divisionVector "256", .atom scalarScope "System.Byte"])
+  | .avx512 .ltu512 | .avx512 .gtu512 =>
+    some (divisionVector "512", [divisionVector "512", divisionVector "512"])
+  | .avx512DQ .moveMask512 => some (.atom scalarScope "System.Int32", [divisionVector "512"])
+  | .avx512DQ .moveMask64 => some (.atom scalarScope "System.Int32", [divisionVector "256"])
+  | .vector .combine256 => some (divisionVector "512", [divisionVector "256", divisionVector "256"])
+  | .vector .createScalarUnsafe64 => some (divisionVector "128", [.atom scalarScope "System.UInt64"])
+  | _ => none
+
 def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat) := do
   if instruction.opcode != 40 then none else
   let .call site := instruction.operand | none
@@ -30,6 +51,8 @@ def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat)
   let _ := owner
   let _ := name
   let _ := signature
+  let (returnType, parameterTypes) ← divisionCallTypes intrinsic
+  if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
   return (intrinsic, arity)
 
 private def divisionCallFamily (instruction : RawInstruction) : Bool :=

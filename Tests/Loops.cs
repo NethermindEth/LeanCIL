@@ -253,8 +253,6 @@ theorem bump_holds : bumpContract.Holds Extracted.program bump := by
   · subst same
     simp only [bumpContract, ite_true]
     cil_raise_steps []
-    simp only [ne_eq, not_true_eq_false, ite_false, Nat.reduceAdd]
-    cil_raise_steps []
   · simp only [bumpContract, same, ite_false]
     refine ⟨8, m, _, ?_, Confined.refl _ m, count - 4294967295#32, rfl, by bv_omega⟩
     cil_checked_steps [same]

@@ -44,3 +44,22 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     }
     Console.WriteLine("PASS compiled division intrinsic: " + name);
 }
+
+string rejectedEncoding = Path.Combine(root, "Reject-Vector512Encoding");
+Directory.CreateDirectory(rejectedEncoding);
+string malformedAssembly = Path.Combine(rejectedEncoding, "Examples.dll");
+using (ModuleDefinition module = ModuleDefinition.ReadModule(assembly))
+{
+    MethodDefinition less = module.GetType("Examples.DivisionIntrinsics").Methods.Single(method => method.Name == "Less");
+    MethodReference combine = less.Body.Instructions.Select(instruction => instruction.Operand).OfType<MethodReference>()
+        .First(method => method.DeclaringType.FullName == "System.Runtime.Intrinsics.Vector512");
+    ((GenericInstanceType)combine.ReturnType).IsValueType = false;
+    module.Write(malformedAssembly);
+}
+File.Delete(Path.Combine(rejectedEncoding, "Extracted.lean"));
+(int Code, string Output, string Stdout, string Stderr) rejected = Execute(
+    Extract("extract", malformedAssembly, "Examples", selectors["Less"], rejectedEncoding, "x64-avx512dqvl"));
+if (rejected.Code == 0 || File.Exists(Path.Combine(rejectedEncoding, "Extracted.lean")) ||
+    !rejected.Output.Contains("Unsupported vector type encoding", StringComparison.Ordinal))
+    throw new InvalidOperationException("Malformed Vector512 signature was not rejected by the raw metadata check: " + rejected.Output);
+Console.WriteLine("PASS malformed Vector512 signature rejection");

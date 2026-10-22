@@ -7,7 +7,9 @@ namespace Nethermind.LeanCIL;
 // share 64-bit storage, but only metadata-proven native/int32 mixtures may widen.
 internal static class NativeOperands
 {
-    enum Kind { Other, Word32, Word64, Native, Reference }
+    internal enum Kind { Other, Word32, Word64, Native, Reference }
+
+    internal sealed record Certificate(HashSet<Instruction> Mixed, Dictionary<Instruction, Kind[]> Incoming);
 
     static Kind Type(TypeReference type) => type is ByReferenceType ? Kind.Reference : EnumTypes.Storage(type).MetadataType switch
     {
@@ -18,6 +20,15 @@ internal static class NativeOperands
         _ => Kind.Other
     };
 
+    static TypeReference FieldType(FieldReference field)
+    {
+        if (!ValueTuples.Is(field.DeclaringType)) return field.FieldType;
+        FieldDefinition definition = field.Resolve();
+        MetadataValidation.InstanceField? actual = MetadataValidation.Fields(field.DeclaringType)
+            .FirstOrDefault(candidate => candidate.Definition == definition);
+        return actual?.Type ?? throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
+    }
+
     static bool Binary(Code code) => code is Code.Add or Code.Sub or Code.Mul or Code.Div or Code.Div_Un or
         Code.Rem or Code.Rem_Un or Code.And or Code.Or or Code.Xor or Code.Ceq or Code.Clt or Code.Clt_Un or
         Code.Cgt or Code.Cgt_Un or Code.Add_Ovf or Code.Add_Ovf_Un or Code.Sub_Ovf or Code.Sub_Ovf_Un or
@@ -26,8 +37,11 @@ internal static class NativeOperands
         Code.Blt or Code.Blt_S or Code.Blt_Un or Code.Blt_Un_S or Code.Ble or Code.Ble_S or Code.Ble_Un or Code.Ble_Un_S;
 
     internal static HashSet<Instruction> Analyze(MethodDefinition method, FeatureProfile profile)
+        => Certify(method, profile).Mixed;
+
+    internal static Certificate Certify(MethodDefinition method, FeatureProfile profile)
     {
-        var reachable = Reachability.Analyze(method, profile);
+        HashSet<Instruction> reachable = Reachability.Analyze(method, profile);
         var incoming = new Dictionary<Instruction, Kind[]> { [method.Body.Instructions[0]] = [] };
         var mixed = new HashSet<Instruction>();
         var pending = new Queue<Instruction>();
@@ -86,7 +100,7 @@ internal static class NativeOperands
                 var callee = (MethodReference)instruction.Operand;
                 for (var index = 0; index < callee.Parameters.Count + (code == Code.Call && callee.HasThis ? 1 : 0); index++) Pop();
                 if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)
-                    stack.Add(code == Code.Newobj ? Kind.Other : Type(callee.ReturnType));
+                    stack.Add(code == Code.Newobj ? Kind.Other : Type(CallReturnType.Resolve(callee)));
             }
             else if (code == Code.Ret)
             {
@@ -127,7 +141,7 @@ internal static class NativeOperands
                             MethodArguments.Index(method, (ParameterDefinition)instruction.Operand))),
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
                             Type(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType),
-                        Code.Ldfld or Code.Ldsfld => Type(((FieldReference)instruction.Operand).FieldType),
+                        Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj => Type((TypeReference)instruction.Operand),
                         Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S or
                             Code.Ldflda or Code.Ldsflda => Kind.Reference,
@@ -135,6 +149,7 @@ internal static class NativeOperands
                             Code.Conv_Ovf_U or Code.Conv_Ovf_U_Un => Kind.Native,
                         Code.Ldc_I8 or Code.Ldind_I8 or Code.Conv_I8 or Code.Conv_U8 or Code.Conv_Ovf_I8 or
                             Code.Conv_Ovf_I8_Un or Code.Conv_Ovf_U8 or Code.Conv_Ovf_U8_Un => Kind.Word64,
+                        Code.Ldtoken => Kind.Other,
                         Code.Neg or Code.Not => popped[0],
                         Code.Shl or Code.Shr or Code.Shr_Un => popped[1],
                         // All remaining supported pushi encodings produce int32 (constants,
@@ -166,6 +181,6 @@ internal static class NativeOperands
             if (instruction.OpCode.FlowControl is not (FlowControl.Return or FlowControl.Branch or FlowControl.Throw))
                 Successor(instruction.Next);
         }
-        return mixed;
+        return new Certificate(mixed, incoming);
     }
 }

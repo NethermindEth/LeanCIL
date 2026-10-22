@@ -50,8 +50,8 @@ internal static class InstructionTranslation
         {
             var f = (FieldReference)i.Operand;
             FieldDefinition resolved = f.Resolve() ?? throw new InvalidDataException("Unresolved field");
-            MetadataValidation.Layout(f.DeclaringType, m.Module);
-            RuntimeModels.ValidateTypeIdentity(f.FieldType, m.Module);
+            MetadataValidation.Layout(f.DeclaringType, m.Module, profile.Architecture);
+            RuntimeModels.ValidateTypeIdentity(f.FieldType, m.Module, profile.Architecture);
             var tuple = ValueTuples.Is(f.DeclaringType);
             var field = tuple ? MetadataValidation.Fields(f.DeclaringType).SingleOrDefault(candidate =>
                 candidate.Definition == resolved && f.FieldType is GenericParameter parameter &&
@@ -60,8 +60,8 @@ internal static class InstructionTranslation
                 throw new InvalidDataException($"Unsupported field {f.FullName}");
             var fieldType = field?.Type ?? resolved.FieldType;
             var aggregate = MetadataValidation.IsAggregate(fieldType, m.Module);
-            int width = MetadataValidation.FieldSize(fieldType, m.Module);
-            var offset = MetadataValidation.FieldOffset(tuple ? f.DeclaringType : resolved.DeclaringType, resolved, m.Module);
+            int width = MetadataValidation.FieldSize(fieldType, m.Module, profile.Architecture);
+            int offset = MetadataValidation.FieldOffset(tuple ? f.DeclaringType : resolved.DeclaringType, resolved, m.Module, profile.Architecture);
             if (aggregate && op != "fieldAddr")
                 return $".{(op == "field" ? "aggregateFieldAt" : "setAggregateFieldAt")} {offset} {width}";
             return op == "fieldAddr" ? $".fieldAddress {offset}" :
@@ -69,7 +69,7 @@ internal static class InstructionTranslation
                 (op == "field" && EnumTypes.Storage(fieldType).FullName is "System.SByte" or "System.Int16" ? " true" : "");
         }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj && i.Operand is TypeReference operandType)
-            RuntimeModels.ValidateTypeIdentity(operandType, m.Module);
+            RuntimeModels.ValidateTypeIdentity(operandType, m.Module, profile.Architecture);
         if (i.OpCode.Code is Code.Call or Code.Newobj)
         {
             var r = (MethodReference)i.Operand;
@@ -79,7 +79,7 @@ internal static class InstructionTranslation
             if (index > methodIndex)
             {
                 if (i.OpCode.Code == Code.Newobj)
-                    return $".newAggregate {index} {resolved.Parameters.Count} {MetadataValidation.Layout(resolved.DeclaringType, m.Module)}";
+                    return $".newAggregate {index} {resolved.Parameters.Count} {MetadataValidation.Layout(resolved.DeclaringType, m.Module, profile.Architecture)}";
                 return $".call {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
             }
             throw new InvalidDataException($"Unsupported or unresolved call: {r.FullName} [{r.DeclaringType.Scope.Name}]");
@@ -112,8 +112,8 @@ internal static class InstructionTranslation
             Code.Div => ".divide true false", Code.Div_Un => ".divide false false",
             Code.Rem => ".divide true true", Code.Rem_Un => ".divide false true",
             Code.Switch => ".switch [" + string.Join(", ", ((Instruction[])i.Operand).Select(m.Body.Instructions.IndexOf)) + "]",
-            Code.Sizeof => $".const32 {TypeWidth((TypeReference)i.Operand, m.Module)}",
-            Code.Cpobj => $".copyObject {CopyWidth((TypeReference)i.Operand, m.Module)}",
+            Code.Sizeof => $".const32 {TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture)}",
+            Code.Cpobj => $".copyObject {CopyWidth((TypeReference)i.Operand, m.Module, profile.Architecture)}",
             Code.Ldind_I1 => ".loadScalar 1 true", Code.Ldind_U1 => ".loadScalar 1",
             Code.Ldind_I2 => ".loadScalar 2 true", Code.Ldind_U2 => ".loadScalar 2",
             Code.Ldind_I4 or Code.Ldind_U4 => ".loadScalar 4",
@@ -124,12 +124,12 @@ internal static class InstructionTranslation
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",
             Code.Ble_Un or Code.Ble_Un_S => $".bleu {Target()}",
-            Code.Ldsfld => $".memory (.staticValue {StaticData.LeanBytes(StaticValues.Resolve((FieldReference)i.Operand, m.Module).Bytes)})",
+            Code.Ldsfld => $".memory (.staticValue {StaticData.LeanBytes(StaticValues.Resolve((FieldReference)i.Operand, m.Module, profile.Architecture).Bytes)})",
             Code.Stsfld => throw new InvalidDataException($"Unsupported static field store: {i}\n  Static fields are written only by their static constructor, which is never extracted."),
             Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference => $".memory (.staticAddress {StaticData.LeanBytes(StaticData.Validate((FieldReference)i.Operand, m.Module))})",
-            Code.Ldobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".loadAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",
-            Code.Initobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".initAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",
-            Code.Stobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".storeAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",
+            Code.Ldobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".loadAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module, profile.Architecture)}",
+            Code.Initobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".initAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module, profile.Architecture)}",
+            Code.Stobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".storeAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module, profile.Architecture)}",
             Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .load128",
             Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .load256",
             Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".memory .load512",
@@ -177,15 +177,15 @@ internal static class InstructionTranslation
         };
     }
 
-    static int TypeWidth(TypeReference type, ModuleDefinition module) => MetadataValidation.IsAggregate(type, module)
-        ? MetadataValidation.Layout(type, module)
+    static int TypeWidth(TypeReference type, ModuleDefinition module, string architecture) => MetadataValidation.IsAggregate(type, module)
+        ? MetadataValidation.Layout(type, module, architecture)
         : MetadataValidation.PrimitiveWidth(type);
 
-    static int CopyWidth(TypeReference type, ModuleDefinition module) => type.FullName switch
+    static int CopyWidth(TypeReference type, ModuleDefinition module, string architecture) => type.FullName switch
     {
         "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
         "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
         "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => 64,
-        _ => TypeWidth(type, module)
+        _ => TypeWidth(type, module, architecture)
     };
 }

@@ -5,7 +5,7 @@ namespace Nethermind.LeanCIL;
 // Value reinterpretation is distinct from Unsafe.As<TFrom,TTo>'s byref identity.
 internal static class ValueBitCasts
 {
-    internal static string? Translate(MethodReference reference)
+    internal static string? Translate(MethodReference reference, string architecture = "scalar")
     {
         if (reference.Name != "BitCast" || reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
@@ -22,11 +22,11 @@ internal static class ValueBitCasts
 
         (string Shape, int Width)? Shape(TypeReference type)
         {
-            MetadataValidation.Type(type, reference.Module);
-            RuntimeModels.ValidateTypeIdentity(type, reference.Module);
+            MetadataValidation.Type(type, reference.Module, architecture: architecture);
+            RuntimeModels.ValidateTypeIdentity(type, reference.Module, architecture);
             if (MetadataValidation.IsAggregate(type, reference.Module))
             {
-                var width = MetadataValidation.Layout(type, reference.Module);
+                int width = MetadataValidation.Layout(type, reference.Module, architecture);
                 return ($"(.aggregate {width})", width);
             }
             if (type is GenericInstanceType vector && vector.GenericArguments.Count == 1 &&
@@ -48,7 +48,7 @@ internal static class ValueBitCasts
         var target = Shape(generic.GenericArguments[1]);
         if (source is null || target is null || source.Value.Width != target.Value.Width)
             throw new InvalidDataException($"Unsupported Unsafe.BitCast value layouts: {reference.FullName}");
-        RuntimeModels.ValidateSignature(reference);
+        RuntimeModels.ValidateSignature(reference, architecture);
         return $".memory (.bitcastValue {source.Value.Shape} {target.Value.Shape})";
     }
 }
