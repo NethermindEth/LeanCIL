@@ -191,7 +191,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memor
       return (m, .reference (.address result) :: rest)
     else .error (.thrown "System.IndexOutOfRangeException")
   | .spanLength, .span _ length :: rest => return (m, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
-  | .staticAddress _, _ | .createSpan _, _ | .spanCreate, _ =>
+  | .staticAddress _, _ | .staticValue _, _ | .createSpan _, _ | .spanCreate, _ =>
     .error (.unsupported "Extraction-bound static/span allocation metadata")
   | _, _ => .error .invalidState
 

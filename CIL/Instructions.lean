@@ -101,10 +101,18 @@ inductive Op where
   | unsupported (description : String)
   deriving Repr
 
+/-- The call `method arguments` whose result a static constructor stores in a readonly field. -/
+structure StaticInitializer where
+  method : Nat
+  arguments : List Value
+  deriving DecidableEq, Repr
+
 structure StaticDescriptor where
   identity : Nat
   fieldName : String
   bytes : List (BitVec 8)
+  /-- `some` for a value fixed by its static constructor, `none` for RVA data. -/
+  initializer : Option StaticInitializer := none
   deriving DecidableEq, Repr
 
 structure Method where

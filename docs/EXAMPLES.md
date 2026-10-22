@@ -20,6 +20,7 @@
 - A separate `Examples.Hardware` assembly, built from the file-based library `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
 - `StaticSpans` reads a 16-byte `ReadOnlySpan<byte>` lookup table; out-of-bounds reads, writes and tampered RVA bytes are checked.
+- `StaticValues` loads `Word256.Zero`, `One` and `MinValue`, fixed by `UInt256`-shaped implicit conversions in the static constructor, proves their limbs and stores them through an out parameter; `MaxValue`, writes and stores outside the static constructor are rejected.
 - `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the first element, and faults with `System.IndexOutOfRangeException` out of range.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify caller memory and prove it unchanged. `Struct` quantifies well-formed caller memory and proves `MemoryBelow` preservation of the caller's storage. Other examples may require `Examples.empty` or `Examples.caller`; argument quantification alone does not imply arbitrary caller memory. The allocating generic instance wrapper retains a separate fixed-memory check in `GenericInstance.lean`.
