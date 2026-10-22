@@ -50,7 +50,7 @@ private def alignUp (size alignment : Nat) : Nat :=
 private def autoSequential (previous : Array ComputedLayout) (raw : RawLayout) : Bool :=
   !raw.explicit && raw.packing ≤ 0 && raw.declaredSize ≤ 0 &&
   match raw.fields.mapM (fun field => do
-      if field.offset.isSome || field.type == .vector128 || field.type == .vector256 then none else
+      if field.offset.isSome || field.type == FieldType.vector128 || field.type == FieldType.vector256 then none else
         let (width, _, aggregate) ← fieldStorage previous .scalar field.type
         if aggregate then none else some width) with
   | some (width :: widths) => widths.all (· == width)
