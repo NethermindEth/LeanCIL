@@ -1179,6 +1179,10 @@ unsafe def main (args : List String) : IO Unit := do
                 progress: "Checking consumer extraction certificate");
             AuditedAxioms(extractionAudit, "ExtractionAudit.valid");
             Stage(members, "proof checking");
+            string[] importModules = ImportSources(outputs[members[0]]).Keys.ToArray();
+            if (importModules.Length > 0)
+                Run(["lake", "build", .. importModules.Select(module => "+" + module + ":olean")], frameworkCopy,
+                    progress: "Checking consumer contract interfaces and import assumptions");
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
             var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies");
             var buildFailure = build.Code == 0 ? null
