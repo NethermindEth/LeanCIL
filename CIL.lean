@@ -41,6 +41,7 @@ import CIL.Safety.AggregateLocals
 import CIL.Safety.ValueBitCasts
 import CIL.Safety.ByteEncoding
 import CIL.Safety.ByteRoundTrip
+import CIL.Safety.BufferContents
 import CIL.Safety.CallComposition
 import CIL.Safety.Embedding.Outcomes
 import CIL.Safety.Embedding.Simulation

@@ -152,6 +152,33 @@ against a build whose helpers are reimplemented and renumbered, and refutes
 each contract with a concrete run on builds with an arithmetic or an aliasing
 bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
 
+## Describe buffer contents
+
+`CIL.Safety.BufferContents` states what a contiguous run of integer elements
+holds, over the checked memory model. `Contents m base width xs` says element `i`
+of `xs : List (BitVec (8 * width))` reads back at `base.element width i` (offset
+`base.offset + width * i`, same allocation) as `numberBytes x.toNat width`, with
+the byte alignment scalar loads and stores use; `Contents.load_word` turns an
+8-byte element into the `loadValue` result. Contents grant no write authority:
+`Writable m base width start count` is write authority alone, and
+`Filled m base width xs room` is an initialized prefix followed by `room`
+writable elements that need not be readable. An empty `Contents` asserts
+nothing. `Contents.read` joins the elements into one checked read only given that
+read's `access`, so a zero-width read keeps its formation check and elements
+separated by a reference slot do not join; `Contents.of_read` splits a checked
+read through `read_slice_bytes`. `take`, `drop` and `append` move between
+adjacent subranges. `Contents.write_element` and `Contents.write_run` update one
+element or a run; `Contents.after_write_apart` and `Contents.after_confined` keep
+contents `Apart` from a write or every footprint entry, including disjoint slices
+of one allocation; `Filled.push` extends the prefix by one element write without
+reading the room. `Filled.fill` and `Contents.transform` prove fill and in-place
+map loops of any length (`writeElements`, `transformElements`) as sequence
+properties confined to the buffer; `add_element` steps `Unsafe.Add` to an element, and the
+[buffer fill proof](../Examples/Proofs/FillWords.lean) carries `Filled` as the invariant
+of a compiled loop. `Tests/BufferContents.lean` checks unchanged
+neighbouring bytes and sibling slices, and refutes uninitialized, past-end,
+overlapping, unjoined and stale claims.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes

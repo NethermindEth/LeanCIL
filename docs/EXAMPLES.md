@@ -36,6 +36,8 @@ The loop suite checks the unchanged universal proof after inserting NOPs and rea
 
 [The counted-loop proof](../Examples/Proofs/CountCalls.lean) shows that `Loops.CountCalls` returns its input for every `uint`, counting iterations while a `Decrement` helper lowers the remaining count. Each iteration crosses the call through `decrementContract` with `loop_terminates_induction` and `cil_loop_call`; `Returns` gives the new count and `Confined` keeps both locals. The suite verifies the unchanged loop proof against a build whose helper computes `value + 0xFFFFFFFF`, re-proving only the helper contract, and rejects builds that discard the helper result or count twice. Against the correct build, measuring by the count instead of the remaining value fails the decrease obligation, and the non-inductive invariant `count + remaining = value + count * remaining` fails only its preservation.
 
+[The buffer fill proof](../Examples/Proofs/FillWords.lean) shows that `Loops.FillWords`, which stores `value` through `Unsafe.Add(ref destination, i)` for each `i < count`, leaves `Contents final destination 8 (List.replicate count value)` for every nonnegative `int` count and is `Confined` to those `8 * count` bytes. It assumes only write authority over the words (`Writable`), never readable or initialized contents, and its invariant is `Filled`: the first `i` words filled, the rest still only writable. The suite compares the runtime result for four counts, checking that both neighbouring words are unchanged, and rejects builds that shift every store by one word or skip every other word.
+
 ```sh
 leancil extract Examples/Assembly/bin/Examples.dll "Loops::Countdown(uint)" artifacts/Countdown
 leancil verify artifacts/Countdown --proof Examples/Proofs/Countdown.lean

@@ -32,6 +32,12 @@ public static class Loops
 
     public static uint Decrement(uint value) => unchecked(value - 1);
 
+    public static void FillWords(ref ulong destination, ulong value, int count)
+    {
+        for (int i = 0; i < count; i++)
+            System.Runtime.CompilerServices.Unsafe.Add(ref destination, i) = value;
+    }
+
     public static uint CountCalls(uint value)
     {
         uint remaining = value;
