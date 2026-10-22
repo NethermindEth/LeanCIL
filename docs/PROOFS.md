@@ -85,7 +85,9 @@ depend on a callee's step count. `Confined footprint before after` is the memory
 guarantee: earlier allocations and write authority are unchanged, and bytes and
 read authority change only inside the footprint (a write grants read access to
 what it wrote). `Confined.trans`, `Confined.widen`, `Confined.write`, `Confined.read_eq`
-and `Confined.access_write` compose and consume it. The contract fixes no profile:
+and `Confined.access_write` compose and consume it. A callee with locals writes its own
+frame too: list those slots in the footprint while executing, then drop them with
+`Confined.forget_fresh` and cover frame entry and teardown with `Confined.then_below`. The contract fixes no profile:
 the program does, so a cross-profile contract is a theorem quantified over the
 per-profile extractions.
 

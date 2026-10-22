@@ -3,6 +3,7 @@ import CIL.StructuralLabels
 import CIL.Safety.MethodContract
 import CIL.Safety.WordMemory
 import CIL.Safety.WordFootprint
+import CIL.Safety.ReturnMemory
 
 /-! A synthetic extraction with the bodies the C# fixture compiles to:
     `Root(ref r, in b) { AddTo(in r, in b, out r); r = Mix(r, b); }`. -/
@@ -143,7 +144,23 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds mix_holds add_holds
 
+-- A callee's writes to its own frame and the frame's teardown leave only its footprint changed.
+theorem frame_confined (m entered home stored final : Memory) (frame : Frame) (slot out : Reference)
+    (slotBytes outBytes : List (BitVec 8))
+    (enter : MemoryBelow m.nextIdentity m entered) (grows : m.nextIdentity ≤ entered.nextIdentity)
+    (fresh : m.nextIdentity ≤ slot.allocation) (owned : ∀ id ∈ frame.owned, m.nextIdentity ≤ id)
+    (wroteSlot : write entered slot slotBytes 1 = .ok home) (wroteOut : write home out outBytes 1 = .ok stored)
+    (left : leaveFrame frame stored = final) :
+    Confined [(out, outBytes.length)] m final := by
+  have body : Confined ([(slot, slotBytes.length)] ++ [(out, outBytes.length)]) m stored :=
+    ((Confined.refl _ m).then_below enter grows).trans
+      ((Confined.write wroteSlot (by simp)).trans (Confined.write wroteOut (by simp)))
+  subst left
+  exact (body.forget_fresh (by simpa using fresh)).then_below
+    (leaveFrame_preserves_memory_below frame stored _ owned) (Nat.le_of_eq (leaveFrame_nextIdentity frame stored).symm)
+
 #print axioms root_holds
 #print axioms root_correct
+#print axioms frame_confined
 
 end Tests.MethodContract
