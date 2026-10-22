@@ -124,13 +124,15 @@ def percentContract : OutcomeContract CIL.W64 where
 
 `cil_raise_steps [facts]` steps a `Raises` goal to its `.throw`;
 `cil_outcome_call holds input at site [facts]` continues after a call the
-callee's contract says returns, and `cil_outcome_raise holds input at site [facts]`
-closes a `Raises` goal by propagating the exception the callee's contract names.
+callee's contract says returns, whether the caller then returns or raises, and
+`cil_outcome_raise holds input at site [facts]` closes a `Raises` goal by
+propagating the exception the callee's contract names.
 `MethodContract.Holds.outcomes` lifts a normal-only contract, and
 `invoke_unique` ties a computed fault to the contract's existential one.
 
-`Tests/OutcomeContract.lean` proves both outcomes of a caller from its callee's
-contract. `Tests/OutcomeContract.cs` verifies those proofs against the compiled
+`Tests/OutcomeContract.lean` proves every outcome of a two-level chain from the
+callees' contracts: `Strict` propagates `Percent`'s exception, returns, or raises
+its own after `Percent` returns, and `Root` reads all three off `Strict`'s contract. `Tests/OutcomeContract.cs` verifies those proofs against the compiled
 build, and refutes the callee's contract with concrete runs on builds with an
 off-by-one threshold or a different exception type.
 

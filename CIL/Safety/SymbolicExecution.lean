@@ -9,12 +9,15 @@ elab "cil_reduce_fuel" : conv => do
   changeLhs (← Meta.reduce (← getLhs))
 
 -- Failed candidate proofs must backtrack, rather than be recovered as admitted
--- terms. Intermediate call results are inferred by the checked child execution.
+-- terms. Only the candidate's own errors count, so an earlier failed tactic cannot reject it.
 open Lean Elab Tactic in
 elab "cil_strict " tactic:tactic : tactic =>
   Meta.withAssignableSyntheticOpaque <| Term.withoutErrToSorry <| withoutRecover do
+    let errors := fun (log : MessageLog) =>
+      log.reportedPlusUnreported.foldl (fun count m => if m.severity matches .error then count + 1 else count) 0
+    let earlier := errors (← Core.getMessageLog)
     evalTactic tactic
-    if ← MonadLog.hasErrors then throwError "Checked step candidate failed"
+    if errors (← Core.getMessageLog) > earlier then throwError "Checked step candidate failed"
 
 /-- Close definitional steps before using instruction equations or the dispatcher. -/
 macro "cil_checked_step " "[" facts:term,* "]" : tactic => do
