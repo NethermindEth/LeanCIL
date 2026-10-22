@@ -456,7 +456,13 @@ macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
     | (cil_strict refine CIL.Safety.run_next_exists (post := _)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by cil_checked_step [$[$facts:term],*]) ?_)
+        (by
+          run_tac do
+            let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
+            let operation := (target.getArg! 1).getArg! 1
+            if operation.isAppOf ``CIL.Op.ret then
+              throwError "Return requires run_return_exists"
+          cil_checked_step [$[$facts:term],*]) ?_)
     | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
