@@ -93,7 +93,13 @@ word footprint from per-word `OutsideWord` facts; `Outside.word` builds it as a 
 `Within inner outer` states that an interval lies inside another of the same allocation:
 `Confined.widen_within` widens a footprint to one whose entries enclose it, and
 `Confined.write_within` confines a write that lies inside one entry, so four limb writes
-satisfy a contract that declares one 32-byte output. Entries may overlap. The contract fixes no profile:
+satisfy a contract that declares one 32-byte output. Entries may overlap.
+`Apart r width entry` states that two intervals share no byte, in different allocations
+or at disjoint offsets of one. `Confined.read_apart` keeps a checked read of older memory
+apart from every entry, taking the allocation's age from `WellFormed`;
+`Confined.cells_apart` keeps every byte of an allocation no entry names, and
+`WordSnapshots.after_confined` (`CIL.Safety.ConfinedSnapshots`) keeps remembered words.
+A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
 the program does, so a cross-profile contract is a theorem quantified over the
 per-profile extractions.
 
