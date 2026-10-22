@@ -123,16 +123,38 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
   have loaded : read result reference 8 1 = .ok (numberBytes (17#64).toNat 8) := by
     simpa [descriptor, Extracted.method0, numberBytes] using valid.2.choose_spec.2.2.2.2
   have load := load_word64_of_read loaded
-  have referenceValid := staticReference_reference_valid _ _ _ _ resolved
   have addressed : staticInstruction Extracted.method0 0 (.staticAddress descriptor.bytes) [] memory =
       .ok (result, [.reference (.address reference)]) := by
-    simp [descriptor, Extracted.method0, staticInstruction, resolved, checkedAt, Except.mapError,
-      Bind.bind, Except.bind, Pure.pure, Except.pure]
+    change (do
+      let (updated, address) ← staticReference descriptor memory
+      pure (updated, [CIL.Safety.Value.reference (.address address)]) :
+      ExecutionResult (CIL.Safety.Memory × List CIL.Safety.Value)) = _
+    rw [resolved]
+    rfl
+  let frame : Frame := { activation := memory.nextIdentity, locals := [], owned := [] }
+  have first : step Extracted.method0 (.memory (.staticAddress descriptor.bytes)) 0 [] frame [] memory =
+      .ok (.next 1 [.reference (.address reference)] frame result) := by
+    rw [step_memory_eq, addressed]
+    rfl
+  have second : step Extracted.method0 .load64 1 [] frame [.reference (.address reference)] result =
+      .ok (.next 2 [.scalar (.i64 17)] frame result) := by
+    rw [step_load64_eq]
+    simp only [instructionStep, instruction, load, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    rfl
+  have returned : step Extracted.method0 .ret 2 [] frame [.scalar (.i64 17)] result =
+      .ok (.returned [.scalar (.i64 17)] result) := rfl
+  have executed : run Extracted.program 8 0 0 [] frame [] memory = .ok (result, [.scalar (.i64 17)]) :=
+    (run_next (program := Extracted.program) (fuel := 7) (method := 0) (pc := 0)
+      (by rfl) (by rfl) first).trans
+      ((run_next (program := Extracted.program) (fuel := 6) (method := 0) (pc := 1)
+        (by rfl) (by rfl) second).trans
+        (run_return (program := Extracted.program) (fuel := 5) (method := 0) (pc := 2)
+          (by rfl) (by rfl) returned (by rfl)))
   refine ⟨8, result, [.scalar (.i64 17)], ?_,
     Confined.ofMemoryBelow (staticReference_preserves_memory_below _ _ _ _ resolved)
       (Nat.le_refl _) (staticReference_extends_allocations _ _ _ _ resolved).next,
     17, rfl, rfl⟩
-  cil_checked_steps [addressed, load, referenceValid]
+  exact invoke_of_run (body := Extracted.method0) (by rfl) (by rfl) (by rfl) executed
 end LibraryProof
 """);
 File.WriteAllText(Path.Combine(libArtifact, "verification.json"), JsonSerializer.Serialize(new
