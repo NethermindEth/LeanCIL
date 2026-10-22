@@ -1,5 +1,6 @@
 import CIL.Safety.RegionRun
 import CIL.Safety.Embedding.Simulation
+import CIL.Safety.Embedding.Suffix
 
 /-! A suffix run moves to a body whose prefix is a call instead of inline code. -/
 namespace Tests.RegionRun
@@ -58,6 +59,62 @@ example : regionClosedCheck [caller, helper] [(0, 2)] = false := by decide
 /-- A whole method of straight-line code is closed. -/
 example : regionClosedCheck [{ caller with code := [.const32 0, .const32 1, .ret] }] [(0, 0)] = true := by decide
 
+def longSuffix : List Op :=
+  List.replicate 96 .nop ++ [.brzero 102, .switch [3, 102], .nativeBinary (.bge 102), .ret]
+
+def longExpected (profile : CIL.FeatureProfile) : Method :=
+  { code := [.arg 0, .const32 6, .shr] ++ longSuffix, locals := [], returnsValue := true, profile := profile }
+
+def longMasked (profile : CIL.FeatureProfile) : Method :=
+  { longExpected profile with code := List.replicate 3 (.unsupported "Outside the region") ++ longSuffix }
+
+def longActual (profile : CIL.FeatureProfile) (callee : Nat) : Method :=
+  { longExpected profile with code := [.arg 0, .call callee 1] ++
+      longSuffix.map (Op.relabel (fun pc => pc - 3 + 2)) }
+
+theorem longSuffix_length : longSuffix.length = 100 := by simp [longSuffix]
+
+theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
+    CIL.Embedding.BodyRefines (longMasked profile) (longActual profile callee)
+      (CIL.Embedding.suffixRename 3 2) := by
+  apply CIL.Embedding.BodyRefines.of_relocated_suffix
+  · rfl
+  · rfl
+  · omega
+  · intro pc op before found
+    have lookup : (longMasked profile).code[pc]? = some (.unsupported "Outside the region") := by
+      simp only [longMasked]
+      rw [List.getElem?_append_left (by simpa using before)]
+      simp [List.getElem?_replicate, before]
+    rw [lookup] at found
+    cases found
+    rfl
+  · simp [longActual, longMasked]
+  · simp only [longMasked, List.drop_append, List.length_replicate, Nat.sub_self, List.drop_zero,
+      List.drop_replicate, List.replicate_zero, List.nil_append]
+    intro op member target inside
+    simp only [longSuffix, List.mem_append, List.mem_replicate, List.mem_cons, List.mem_singleton,
+      List.not_mem_nil, or_false] at member
+    rcases member with ⟨_, rfl⟩ | rfl | rfl | rfl | rfl <;> simp_all [Op.targets]
+  · intro pc after
+    rfl
+
+theorem longSuffix_moves (profile : CIL.FeatureProfile) (callee fuel : Nat) (args stack : List Value)
+    (frame : Frame) (m : Memory) (result : Memory × List Value)
+    (ran : run [longExpected profile] fuel 0 3 args frame stack m = .ok result) :
+    run [longActual profile callee] fuel 0 2 args frame stack m = .ok result := by
+  have closed : RegionClosed [longExpected profile] suffix := RegionClosed.of_check (by decide)
+  have agrees : AgreesOn [longExpected profile] [longMasked profile] suffix :=
+    AgreesOn.set (program := [longExpected profile]) (index := 0) rfl (longMasked profile).code fun _ inside =>
+      code_agrees_of_drop (lower := 3) (by simp [longMasked, longExpected])
+        (by simpa [suffix, inStarts] using inside)
+  rw [← run_congr_region closed agrees _ _ _ _ _ _ _ (by decide)] at ran
+  exact run_refines ((ProgramRefines.refl [longActual profile callee]).set_body (index := 0) rfl
+    (longSuffix_refines profile callee)) fuel 0 3 args frame stack m result ran
+
+#print axioms CIL.Embedding.BodyRefines.of_relocated_suffix
+#print axioms longSuffix_refines
+#print axioms longSuffix_moves
 #print axioms run_congr_region
 #print axioms RegionClosed.of_check
 #print axioms AgreesOn.set

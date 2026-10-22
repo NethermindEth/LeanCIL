@@ -416,6 +416,22 @@ makes it dead for `Embeds`, so `run_refines` carries the suffix run on to a body
 with a different prefix; `Tests/RegionRun.lean` moves a suffix after inline code
 to the same suffix after a helper call, one pc earlier.
 
+For a long suffix, import `CIL.Safety.Embedding.Suffix` and use
+`CIL.Embedding.BodyRefines.of_relocated_suffix`. It uses one list equality:
+`actual.code.drop start = (expected.code.drop lower).map (Op.relabel (fun pc => pc - lower + start))`.
+The expected prefix must contain only dead instructions. All branch targets in
+the suffix must be at least `lower`. The constructor also requires equal method
+metadata, equal static descriptor lists, and equal static lookups at each moved
+pc. If `lower = 0`, `start` must also be zero to preserve method entry.
+
+The resulting map, `suffixRename lower start`, sends prefix pcs to zero and
+suffix pcs to `pc - lower + start`. Pass the proof to `ProgramRefines.set_body`
+and then `run_refines`. This avoids evaluating `sites` and `pick` for each
+instruction. `Tests/RegionRun.lean` combines it with `run_congr_region` for a
+100-instruction suffix with a symbolic feature profile and callee index. The
+test includes conditional, switch, and wrapped native branch targets and uses
+the default heartbeat limit.
+
 ## Link separately extracted libraries
 
 A library extracted on its own calls its helpers by its own method indices.
