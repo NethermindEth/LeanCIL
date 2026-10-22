@@ -17,7 +17,7 @@ internal static class RuntimeModels
         return name is "System.UInt32" or "System.Byte" or "System.UIntPtr" or "System.IntPtr" or
             "System.RuntimeFieldHandle" || Spans.Width(type) is not null ||
             (type is ByReferenceType byRef && SupportedType(byRef.ElementType)) ||
-            new[] { 128, 256 }.Any(width => new[] { "System.UInt64", "System.Int64", "System.UInt32", "System.Int32", "System.Byte", "System.Double", "System.Single" }
+            new[] { 128, 256, 512 }.Any(width => new[] { "System.UInt64", "System.Int64", "System.UInt32", "System.Int32", "System.Byte", "System.Double", "System.Single" }
                 .Any(element => name == Vector(width, element)));
     }
 
@@ -50,7 +50,7 @@ internal static class RuntimeModels
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char" or
             "System.UInt32" or "System.Int32" or "System.Byte" or "System.Boolean" or "System.Double" or "System.Single" or
             "System.IntPtr" or "System.UIntPtr" or "System.ReadOnlySpan`1" or "System.RuntimeFieldHandle" or
-            "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1" or "System.ValueTuple`2";
+            "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1" or "System.Runtime.Intrinsics.Vector512`1" or "System.ValueTuple`2";
         var expectedScope = type.FullName == "System.Buffers.Binary.BinaryPrimitives" ? "System.Memory" :
             type.FullName.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal) ? "System.Runtime.Intrinsics" : "System.Runtime";
         bool valid = type.IsValueType == expectedValueType && ExactScope(type.Scope, expectedScope) &&
@@ -196,6 +196,28 @@ internal static class RuntimeModels
                 throw new InvalidDataException($"Reachable intrinsic lacks {feature}: {signature}");
             return $".intrinsic ({intrinsic}) {argc}";
         }
+        if (signature == "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::And(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)")
+            return Finish(".avx2 .band", 2, Feature.Avx2);
+        if (signature == "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::Or(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)")
+            return Finish(".avx2 .bor", 2, Feature.Avx2);
+        if (signature == "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::Xor(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)")
+            return Finish(".avx2 .bxor", 2, Feature.Avx2);
+        if (signature == "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::AndNot(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)")
+            return Finish(".avx2 .andNot", 2, Feature.Avx2);
+        if (signature == "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)")
+            return Finish(".avx2 .shl64Count", 2, Feature.Avx2);
+        if (signature == "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)")
+            return Finish(".avx2 .shr64Count", 2, Feature.Avx2);
+        if (signature == "System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx512F::CompareLessThan(System.Runtime.Intrinsics.Vector512`1<System.UInt64>,System.Runtime.Intrinsics.Vector512`1<System.UInt64>)")
+            return Finish(".avx512 .ltu512", 2, Feature.Avx512F);
+        if (signature == "System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx512F::CompareGreaterThan(System.Runtime.Intrinsics.Vector512`1<System.UInt64>,System.Runtime.Intrinsics.Vector512`1<System.UInt64>)")
+            return Finish(".avx512 .gtu512", 2, Feature.Avx512F);
+        if (signature == "System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(System.Runtime.Intrinsics.Vector512`1<System.UInt64>)")
+            return Finish(".avx512DQ .moveMask512", 1, Feature.Avx512DQ);
+        if (signature == "System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.Vector512::Create(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)")
+            return Finish(".vector .combine256", 2);
+        if (signature == "System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)")
+            return Finish(".vector .createScalarUnsafe64", 1);
         foreach (int width in new[] { 128, 256 })
         {
             string ulongVector = Vector(width, "System.UInt64");

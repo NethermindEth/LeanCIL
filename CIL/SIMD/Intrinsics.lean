@@ -21,6 +21,8 @@ inductive VectorIntrinsic where
   | create64 (width : Nat) | extract64 (width : Nat) | ashr64 (width : Nat)
   | createScalar32 (width : Nat) | createScalar64 (width : Nat)
   | extractMSB64 (width : Nat) | sum64 (width : Nat) | mul64 (width : Nat)
+  | createScalarUnsafe64
+  | combine256
   | byteToBool
   deriving DecidableEq, Repr
 
@@ -32,9 +34,10 @@ inductive SSEIntrinsic where
   deriving DecidableEq, Repr
 inductive AVX2Intrinsic where
   | permute4x64 | blend32 | add64 | eq64 | signedgt64 | multiplyEven32 | shr64 | shl64
+  | band | bor | bxor | andNot | shr64Count | shl64Count
   deriving DecidableEq, Repr
 inductive AVX512Intrinsic where
-  | alignRight64 | ternaryLogic | ltu64 | gtu64 | geu64
+  | alignRight64 | ternaryLogic | ltu64 | gtu64 | geu64 | ltu512 | gtu512
   deriving DecidableEq, Repr
 inductive AVXIntrinsic where
   | moveMask64 | testZ64 | moveMask32 | blend32
@@ -49,7 +52,7 @@ inductive ArmBaseIntrinsic where
   | multiplyHigh64
   deriving DecidableEq, Repr
 inductive AVX512DQIntrinsic where
-  | moveMask64 | mul64
+  | moveMask64 | mul64 | moveMask512
   deriving DecidableEq, Repr
 inductive X86BaseIntrinsic where
   | divRem64
@@ -77,11 +80,13 @@ private def binaryVector (width : Nat) (f : {n : Nat} → BitVec n → BitVec n 
     : List Value → Option Value
   | [.v128 a, .v128 b] => if width == 128 then some (.v128 (f a b)) else none
   | [.v256 a, .v256 b] => if width == 256 then some (.v256 (f a b)) else none
+  | [.v512 a, .v512 b] => if width == 512 then some (.v512 (f a b)) else none
   | _ => none
 
 private def binaryLanes (width : Nat) (f : W64 → W64 → W64) : List Value → Option Value
   | [.v128 a, .v128 b] => if width == 128 then some (.v128 (Vector.zip128 f a b)) else none
   | [.v256 a, .v256 b] => if width == 256 then some (.v256 (Vector.zip256 f a b)) else none
+  | [.v512 a, .v512 b] => if width == 512 then some (.v512 (Vector.zip512 f a b)) else none
   | _ => none
 
 private def immediate (v : Value) : Option (BitVec 8) :=
@@ -117,6 +122,10 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .vector (.create64 256), [.i64 a] => some (.v256 (Vector.pack256 a a a a))
   | .vector (.createScalar32 128), [.i32 a] => some (.v128 (a.zeroExtend 128))
   | .vector (.createScalar32 256), [.i32 a] => some (.v256 (a.zeroExtend 256))
+  | .vector .createScalarUnsafe64, [.i64 low] => some (.v128Low64 low)
+  | .vector (.reinterpret 128), [.v128Low64 low] => some (.v128Low64 low)
+  | .vector (.extract64 128), [.v128Low64 low, .i32 index] =>
+    if index.toNat == 0 then some (.i64 low) else none
   | .vector (.createScalar64 128), [.i64 a] => some (.v128 (a.zeroExtend 128))
   | .vector (.createScalar64 256), [.i64 a] => some (.v256 (a.zeroExtend 256))
   | .vector (.extractMSB64 128), [.v128 a] =>
@@ -143,6 +152,24 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .sse .alignBytes, [.v128 a, .v128 b, i] =>
     let c ← immediate i
     some (.v128 (Vector.ssseAlignBytes a b c.toNat))
+  | .vector .combine256, [.v256 lower, .v256 upper] => some (.v512 (upper ++ lower))
+  | .avx2 .band, [.v256 a, .v256 b] => some (.v256 (a &&& b))
+  | .avx2 .bor, [.v256 a, .v256 b] => some (.v256 (a ||| b))
+  | .avx2 .bxor, [.v256 a, .v256 b] => some (.v256 (a ^^^ b))
+  | .avx2 .andNot, [.v256 a, .v256 b] => some (.v256 ((~~~a) &&& b))
+  | .avx2 .shl64Count, [.v256 value, .v128Low64 low] =>
+    some (.v256 (Vector.shiftLeftCount64 value low))
+  | .avx2 .shr64Count, [.v256 value, .v128Low64 low] =>
+    some (.v256 (Vector.shiftRightCount64 value low))
+  | .avx2 .shl64Count, [.v256 value, .v128 count] =>
+    some (.v256 (Vector.shiftLeftCount64 value (Vector.lane64 count 0)))
+  | .avx2 .shr64Count, [.v256 value, .v128 count] =>
+    some (.v256 (Vector.shiftRightCount64 value (Vector.lane64 count 0)))
+  | .avx512 .ltu512, [.v512 left, .v512 right] =>
+    some (.v512 (Vector.zip512 (fun x y => Vector.mask64 (x.ult y)) left right))
+  | .avx512 .gtu512, [.v512 left, .v512 right] =>
+    some (.v512 (Vector.zip512 (fun x y => Vector.mask64 (y.ult x)) left right))
+  | .avx512DQ .moveMask512, [.v512 value] => some (.i32 (Vector.moveMask512 value))
   | .avx2 .permute4x64, [.v256 a, i] =>
     let c ← immediate i
     some (.v256 (Vector.permute4x64 a c))

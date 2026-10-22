@@ -45,6 +45,7 @@ internal static class UnsafeModels
             {
                 "System.Runtime.Intrinsics.Vector128`1" => 16,
                 "System.Runtime.Intrinsics.Vector256`1" => 32,
+                "System.Runtime.Intrinsics.Vector512`1" => 64,
                 _ => throw new InvalidDataException($"Unsupported Unsafe element layout: {element.FullName}")
             }
             : MetadataValidation.FieldSize(element, reference.Module);

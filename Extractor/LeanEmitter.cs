@@ -30,6 +30,7 @@ internal static class LeanEmitter
             "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" => ".word64",
             string s when s.StartsWith("System.Runtime.Intrinsics.Vector128`1<", StringComparison.Ordinal) => ".vector128",
             string s when s.StartsWith("System.Runtime.Intrinsics.Vector256`1<", StringComparison.Ordinal) => ".vector256",
+            string s when s.StartsWith("System.Runtime.Intrinsics.Vector512`1<", StringComparison.Ordinal) => ".vector512",
             _ => throw new InvalidDataException($"Unsupported local: {type.FullName}")
         };
     }
@@ -40,7 +41,7 @@ internal static class LeanEmitter
     {
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
         string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
-        ".vector128" => ".v128 0", ".vector256" => ".v256 0",
+        ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module)} 0)"
     };
     internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule)
@@ -90,6 +91,12 @@ internal static class LeanEmitter
             var parameterIndices = ParameterStorage.Analyze(m, profile);
             var parameters = string.Join(", ", parameterIndices.Select(index => $"({index}, {Kind(MethodArguments.Type(m, index), m.Module)})"));
             string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module) : ".unmodeled"));
+            HashSet<int> addressedLocals = m.Body.Instructions
+                .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
+                .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
+            string opaqueLocals = string.Join(", ", m.Body.Variables
+                .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
+                    !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index));
             string kinds = string.Join(", ", m.Body.Variables.Select(v => Kind(v.VariableType, m.Module)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
@@ -110,7 +117,7 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], parameterHomes := [{parameters}], staticSites := [{sites}], code := [");
+            lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], parameterHomes := [{parameters}], staticSites := [{sites}], code := [");
             List<string> ops = [];
             foreach (Instruction i in m.Body.Instructions)
                 ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices) : ".unsupported \"Unreachable under selected profile\"");
@@ -119,6 +126,7 @@ internal static class LeanEmitter
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n);
             FeatureEvidence.Emit(lean, m, n, profile);
+            lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : method{n}.opaqueVectorLocals = [{opaqueLocals}] := rfl");
             lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : method{n}.parameterHomes = [{parameters}] := rfl");
             for (int pc = 0; pc < ops.Count; pc++)
                 lean.AppendLine($"@[cil_code ↓] theorem method{n}_instruction{pc} : method{n}.code[{pc}]? = some ({ops[pc]} : Op) := rfl");
@@ -143,8 +151,10 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
             lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_unsafe_validated : Extraction.UnsafeCallsValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
+            lean.AppendLine($"theorem method{n}_division_validated : Extraction.DivisionIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
-            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated⟩");
+            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_division_validated, method{n}_opaque_validated⟩");
         }
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
         lean.AppendLine("  apply Extraction.translation_of_methods layouts_validated statics_validated");

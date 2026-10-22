@@ -132,6 +132,9 @@ internal static class InstructionTranslation
             Code.Stobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) => $".storeAggregate {MetadataValidation.Layout((TypeReference)i.Operand, m.Module)}",
             Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .load128",
             Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .load256",
+            Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".memory .load512",
+            Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".memory .store512",
+            Code.Initobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".initAggregate 64",
             Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .store128",
             Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .store256",
             Code.Ldobj => $".loadScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}" +
@@ -182,6 +185,7 @@ internal static class InstructionTranslation
     {
         "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
         "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
+        "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => 64,
         _ => TypeWidth(type, module)
     };
 }

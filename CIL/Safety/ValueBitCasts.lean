@@ -16,6 +16,12 @@ theorem vector256_bytes_roundtrip (bytes : List (BitVec 8)) (length : bytes.leng
   simp only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt bound]
   simpa [length] using numberBytes_byteNumber bytes
 
+theorem vector512_bytes_roundtrip (bytes : List (BitVec 8)) (length : bytes.length = 64) :
+    numberBytes (BitVec.ofNat 512 (byteNumber bytes)).toNat 64 = bytes := by
+  have bound : byteNumber bytes < 2^512 := by simpa [length] using byteNumber_lt bytes
+  simp only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt bound]
+  simpa [length] using numberBytes_byteNumber bytes
+
 theorem initialized_snapshot_bytes (bytes : List (BitVec 8 × Bool))
     (initialized : bytes.all Prod.snd = true) :
     (bytes.map Prod.fst).map (fun b => (b, true)) = bytes := by
@@ -46,14 +52,19 @@ theorem valueSnapshot_snapshotValue (shape : CIL.SnapshotShape) (bytes : List (B
     | vector256 =>
       simp only [valueSnapshot, ↓reduceIte]
       rw [vector256_bytes_roundtrip _ (by simpa [CIL.SnapshotShape.width] using length), same]
+    | vector512 =>
+      simp only [valueSnapshot, ↓reduceIte]
+      rw [vector512_bytes_roundtrip _ (by simpa [CIL.SnapshotShape.width] using length), same]
   · simp [valueSnapshot, length]
 
 theorem bitcastValue_preserves_snapshot (source target : CIL.SnapshotShape) (input : CIL.Value)
     (bytes : List (BitVec 8 × Bool)) (sizes : source.width = target.width)
     (snapshot : valueSnapshot source input = some bytes) :
     ∃ output, bitcastValue source target input = .ok output ∧ valueSnapshot target output = some bytes := by
+  have known : input.hasUnspecified = false := by
+    cases input <;> simp_all [CIL.Value.hasUnspecified, valueSnapshot]
   refine ⟨snapshotValue target bytes, ?_, ?_⟩
-  · simp [bitcastValue, sizes, snapshot, Pure.pure, Except.pure]
+  · simp [bitcastValue, known, sizes, snapshot, Pure.pure, Except.pure]
   · exact valueSnapshot_snapshotValue target bytes ((valueSnapshot_length snapshot).trans sizes)
 
 /-- Snapshot stores preserve each byte's initialization flag, rather than
@@ -99,6 +110,7 @@ theorem writeSnapshot_readback (m result : Memory) (r : Reference)
 
 #print axioms vector128_bytes_roundtrip
 #print axioms vector256_bytes_roundtrip
+#print axioms vector512_bytes_roundtrip
 #print axioms valueSnapshot_snapshotValue
 #print axioms bitcastValue_preserves_snapshot
 #print axioms writeSnapshot_cell

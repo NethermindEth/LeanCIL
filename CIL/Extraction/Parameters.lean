@@ -6,7 +6,7 @@ namespace CIL.Extraction
 /-- Metadata storage types, before native widths and aggregate sizes are lowered. -/
 inductive StorageType where
   | field (type : FieldType)
-  | reference | vector128 | vector256
+  | reference | vector128 | vector256 | vector512
   deriving DecidableEq, Repr
 
 /-- One entry per original instruction, including instructions pruned by the profile. -/
@@ -27,6 +27,7 @@ def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalK
   | .reference => some .reference
   | .vector128 => some .vector128
   | .vector256 => some .vector256
+  | .vector512 => some .vector512
   | .field .signed8 => some (.narrow .signed8)
   | .field .unsigned8 | .field .boolean => some (.narrow .unsigned8)
   | .field .signed16 => some (.narrow .signed16)
