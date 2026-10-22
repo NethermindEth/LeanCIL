@@ -47,7 +47,8 @@ theorem root_composed : rootContract.Holds linked root :=
     (fun j bound _ => by cases j with | zero => exact add_holds | succ => simp at bound)
 
 def relocatedCompletion : CIL.Program :=
-  { code := [.ret] } :: linked.map (CIL.Method.relocate (fun index => index + 1))
+  { code := [.ret], locals := [], returnsValue := false } ::
+    linked.map (CIL.Method.relocate (fun index => index + 1))
 
 theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1) := by
   have imported : Tests.Imports.Calls.importsAdd linked :=
@@ -118,7 +119,8 @@ theorem root_composed : rootContract.Holds linked root :=
     (fun j bound _ => by cases j with | zero => exact percent_holds | succ => simp at bound)
 
 def relocatedCompletion : CIL.Program :=
-  { code := [.ret] } :: linked.map (CIL.Method.relocate (fun index => index + 1))
+  { code := [.ret], locals := [], returnsValue := false } ::
+    linked.map (CIL.Method.relocate (fun index => index + 1))
 
 theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1) := by
   have imported : Tests.Imports.Outcomes.importsPercent linked :=
