@@ -103,9 +103,7 @@ theorem root_holds (percentHolds : percentBounded.Holds Extracted.program percen
     dsimp only [percentBounded, percentExact]
     cil_contract_steps []
     refine ⟨confined, _, rfl, ?_⟩
-    have one : BitVec.signExtend 64 (1 : BitVec 32) = (1 : CIL.W64) := by decide
     dsimp only [percentBounded] at bound ⊢
-    rw [one]
     bv_omega
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds percent_bounded

@@ -9,5 +9,6 @@
     <!-- Verification fixtures do not require public API documentation. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 </Project>
