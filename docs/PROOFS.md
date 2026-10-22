@@ -77,6 +77,37 @@ reimplemented helper and requires it to reject a discarded helper result and a
 broken count. On the correct build, a nondecreasing measure and an invariant that
 holds at entry and exit but is not preserved each fail at exactly that obligation.
 
+A loop whose helper has an `OutcomeContract` composes both of its outcomes
+([LoopOutcome](../CIL/Safety/LoopOutcome.lean)). `LoopOutcome post raises state`
+is `LoopTerminates post state` when `raises` is `none` (`loop_outcome_none`) and
+`RunRaises` of exactly that exception otherwise (`loop_outcome_some`), so the
+proof fixes which outcome the loop reaches before stepping it, typically as a
+function of the inputs that the invariant ties to each head state.
+`loop_outcome_induction` mirrors `loop_terminates_induction`: only a continuing
+iteration needs an invariant state of smaller measure. Step with
+`cil_loop_outcome_advance [facts]` and continue past a callee whose contract
+returns with `cil_loop_outcome_call holds input at site [facts]`
+(`loop_outcome_call`, or `loop_outcome_call_formed`), which leaves the
+precondition, the `raises` equation and the continuation in either outcome.
+Once `raises` is rewritten to the callee's exception, exit with
+`cil_loop_outcome_raise holds input at site [facts]` (`loop_outcome_call_raises`);
+that exit has no invariant or measure obligation. `loop_outcome_throw` exits at
+the loop's own `throw`, and `loop_outcome_next` and `loop_reaches_outcome`
+compose paths in either outcome. `ensures_outcome_of_loop` lifts the head outcome
+through frame setup to `EnsuresOutcome pre post raises`, which names the outcome
+of every permitted input; with `raises` constantly `none` it is `Ensures`
+(`ensures_outcome_none`). `loop_outcome_some_refuted` refutes an expected
+exception from any settled run that does not throw it.
+
+The [outcome loop proof](../Examples/Proofs/CountUntil.lean) propagates its
+helper's exception after earlier successful calls. The loop suite reuses it
+unedited for a reimplemented helper and rejects a helper that raises another
+type; on the correct build, a nondecreasing measure, a non-inductive invariant
+and a wrong specified exception each fail at that obligation.
+`Tests/LoopOutcome.lean` derives the normal-only rules as the `none` instances
+and proves that unsupported execution, invalid state and fuel exhaustion never
+satisfy an expected loop exception.
+
 ## Compose calls through contracts
 
 A caller proof that steps into its callee breaks whenever the callee is
@@ -151,6 +182,33 @@ either callee. `Tests/MethodContract.cs` verifies that caller proof unedited
 against a build whose helpers are reimplemented and renumbered, and refutes
 each contract with a concrete run on builds with an arithmetic or an aliasing
 bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
+
+## Describe buffer contents
+
+`CIL.Safety.BufferContents` states what a contiguous run of integer elements
+holds, over the checked memory model. `Contents m base width xs` says element `i`
+of `xs : List (BitVec (8 * width))` reads back at `base.element width i` (offset
+`base.offset + width * i`, same allocation) as `numberBytes x.toNat width`, with
+the byte alignment scalar loads and stores use; `Contents.load_word` turns an
+8-byte element into the `loadValue` result. Contents grant no write authority:
+`Writable m base width start count` is write authority alone, and
+`Filled m base width xs room` is an initialized prefix followed by `room`
+writable elements that need not be readable. An empty `Contents` asserts
+nothing. `Contents.read` joins the elements into one checked read only given that
+read's `access`, so a zero-width read keeps its formation check and elements
+separated by a reference slot do not join; `Contents.of_read` splits a checked
+read through `read_slice_bytes`. `take`, `drop` and `append` move between
+adjacent subranges. `Contents.write_element` and `Contents.write_run` update one
+element or a run; `Contents.after_write_apart` and `Contents.after_confined` keep
+contents `Apart` from a write or every footprint entry, including disjoint slices
+of one allocation; `Filled.push` extends the prefix by one element write without
+reading the room. `Filled.fill` and `Contents.transform` prove fill and in-place
+map loops of any length (`writeElements`, `transformElements`) as sequence
+properties confined to the buffer; `add_element` steps `Unsafe.Add` to an element, and the
+[buffer fill proof](../Examples/Proofs/FillWords.lean) carries `Filled` as the invariant
+of a compiled loop. `Tests/BufferContents.lean` checks unchanged
+neighbouring bytes and sibling slices, and refutes uninitialized, past-end,
+overlapping, unjoined and stale claims.
 
 ## Construct structs through contracts
 

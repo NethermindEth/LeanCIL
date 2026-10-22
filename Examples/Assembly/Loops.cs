@@ -1,3 +1,5 @@
+using System;
+
 namespace Examples;
 
 public static class Loops
@@ -32,6 +34,12 @@ public static class Loops
 
     public static uint Decrement(uint value) => unchecked(value - 1);
 
+    public static void FillWords(ref ulong destination, ulong value, int count)
+    {
+        for (int i = 0; i < count; i++)
+            System.Runtime.CompilerServices.Unsafe.Add(ref destination, i) = value;
+    }
+
     public static uint CountCalls(uint value)
     {
         uint remaining = value;
@@ -40,6 +48,22 @@ public static class Loops
         {
             remaining = Decrement(remaining);
             count = unchecked(count + 1);
+        }
+        return count;
+    }
+
+    public static uint Bump(uint count, uint limit) =>
+        count == limit ? throw new InvalidOperationException() : unchecked(count + 1);
+
+    // Returns its input when it is at most limit; otherwise Bump throws after limit iterations.
+    public static uint CountUntil(uint value, uint limit)
+    {
+        uint remaining = value;
+        uint count = 0;
+        while (remaining != 0)
+        {
+            count = Bump(count, limit);
+            remaining = unchecked(remaining - 1);
         }
         return count;
     }

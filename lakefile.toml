@@ -33,10 +33,16 @@ name = "Tests.MethodContract"
 name = "Tests.OutcomeContract"
 
 [[lean_lib]]
+name = "Tests.LoopOutcome"
+
+[[lean_lib]]
 name = "Tests.ConfinedFootprints"
 
 [[lean_lib]]
 name = "Tests.ContractConsequence"
+
+[[lean_lib]]
+name = "Tests.BufferContents"
 
 [[lean_lib]]
 name = "Tests.ConstructContract"
