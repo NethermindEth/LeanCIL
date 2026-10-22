@@ -33,7 +33,9 @@ internal static class LeanEmitter
             _ => throw new InvalidDataException($"Unsupported local: {type.FullName}")
         };
     }
-    static bool StaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
+    static bool StaticSite(Instruction i) => i.OpCode.Code is Code.Ldsflda or Code.Ldsfld || (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
+    static FieldDefinition StaticField(Instruction i, ModuleDefinition module) => i.OpCode.Code == Code.Ldsfld
+        ? StaticValues.Resolve((FieldReference)i.Operand, module).Field : StaticData.Validate((FieldReference)i.Operand, module);
     internal static string Initial(TypeReference type, ModuleDefinition module) => Kind(type, module) switch
     {
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
@@ -48,7 +50,7 @@ internal static class LeanEmitter
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
         FieldDefinition[] data = methods.SelectMany(m => Reachability.Analyze(m, profile))
             .Where(StaticSite)
-            .Select(i => StaticData.Validate((FieldReference)i.Operand, methods[0].Module)).Distinct().ToArray();
+            .Select(i => StaticField(i, methods[0].Module)).Distinct().ToArray();
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
             .Concat(m.HasThis ? [m.DeclaringType] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
@@ -92,6 +94,13 @@ internal static class LeanEmitter
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
                 {
+                    if (s.i.OpCode.Code == Code.Ldsfld)
+                    {
+                        var value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module);
+                        var initializer = Array.IndexOf(methods, value.Initializer);
+                        if (initializer < 0) throw new InvalidDataException($"Missing static initializer: {value.Initializer.FullName}");
+                        return $"({s.pc}, {{ identity := {Array.IndexOf(data, value.Field)}, fieldName := {JsonSerializer.Serialize(value.Field.FullName)}, bytes := {StaticData.LeanBytes(value.Bytes)}, initializer := some {{ method := {initializer}, arguments := [{string.Join(", ", value.Arguments)}] }} }})";
+                    }
                     FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
                     return $"({s.pc}, {{ identity := {Array.IndexOf(data, f)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)} }})";
                 }));
@@ -127,6 +136,7 @@ internal static class LeanEmitter
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
         lean.AppendLine("def importSignatures : List String := []");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
+        lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
         lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, layoutUses := method{n}LayoutUses }}")) + "]");
         for (int n = 0; n < methods.Length; n++)
         {
@@ -137,7 +147,7 @@ internal static class LeanEmitter
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_skipInit_validated⟩");
         }
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
-        lean.AppendLine("  apply Extraction.translation_of_methods layouts_validated");
+        lean.AppendLine("  apply Extraction.translation_of_methods layouts_validated statics_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");

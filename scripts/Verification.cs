@@ -862,7 +862,11 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     sealed record Report(int schema, string assemblySha256, string identitySha256, string theorem, string[] axioms,
         string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
         string? extractionAudit = null, string[]? initializedTypes = null,
-        string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null);
+        string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
+        string[]? staticValues = null);
+
+    static string[] StaticValueAssumptions(JsonElement extraction) =>
+        extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
@@ -1074,7 +1078,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
         var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
             ? assumptions.Deserialize<string[]>() : [];
-        var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes);
+        var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
+            staticValues: StaticValueAssumptions(extraction));
         File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
         return report;
