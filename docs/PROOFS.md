@@ -402,6 +402,20 @@ continuing instruction or at one of `op.targets`. `step_callee`: only `.call`,
 imports only the step simulation, so a consumer reasoning about reachable pcs
 does not compile the import and linking layers.
 
+## Move a run that starts inside a region
+
+Embedding relates whole bodies. When only a suffix is shared, `CIL.Safety.RegionRun`
+cuts the rest away first. `RegionClosed program region` says fallthroughs, targets
+and callee entries of region instructions stay in the region; `regionClosedCheck`
+decides it for a region listed as `(method, lower)` suffixes (`inStarts`).
+`AgreesOn program other region` says `other` has the same methods and metadata and
+the same instruction at every region pc; `AgreesOn.set` and `code_agrees_of_drop`
+build it for one replaced body. Then `run_congr_region` gives equal runs from any
+region pc, faults included. Masking the code outside the region with `.unsupported`
+makes it dead for `Embeds`, so `run_refines` carries the suffix run on to a body
+with a different prefix; `Tests/RegionRun.lean` moves a suffix after inline code
+to the same suffix after a helper call, one pc earlier.
+
 ## Link separately extracted libraries
 
 A library extracted on its own calls its helpers by its own method indices.

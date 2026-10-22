@@ -89,6 +89,7 @@ import CIL.Safety.OutcomeContract
 import CIL.Safety.Imports
 import CIL.Safety.Linking
 import CIL.Safety.StepFlow
+import CIL.Safety.RegionRun
 import CIL.Safety.NegationReturn
 import CIL.Safety.NumericHomes
 import CIL.Safety.NumericLocalLoad
