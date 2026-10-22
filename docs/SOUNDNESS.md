@@ -199,3 +199,12 @@ All underlying bit patterns are admitted, including values without a named const
 Integer logarithms use Lean's natural-number `log2`, including zero mapping to zero. Rounding up constructs the power of two determined by the leading-zero count of the wrapping predecessor; truncation gives zero for zero input and overflow. Power-of-two checks require a single set bit and, for signed operands, a clear sign bit. Native overloads use the admitted 64-bit target. Byte-sized endian reversal preserves the low byte with the declared signed or unsigned extension.
 
 The trust boundary includes correspondence between these definitions and the selected .NET 10 `BitOperations` and `BinaryPrimitives` overloads. Exact signature/scope validation and boundary/runtime comparison tests support that correspondence; they do not verify CoreCLR or a JIT. See the [BitOperations API](https://learn.microsoft.com/en-us/dotnet/api/system.numerics.bitoperations?view=net-10.0) and [ReverseEndianness API](https://learn.microsoft.com/en-us/dotnet/api/system.buffers.binary.binaryprimitives.reverseendianness?view=net-10.0).
+
+## Exception documentation lint
+
+`lint-exceptions` is a diagnostic experiment. Its potential model sites are
+structural observations, not proved exception behavior. XML declarations and
+prose are untrusted. A documented exception absent from this limited model is
+not evidence that the runtime cannot raise it. Lint does not check proof terms,
+alter preconditions or issue a verification receipt. The selected XML bytes
+are recorded but are not independently bound to the DLL build.
