@@ -58,4 +58,33 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 
 /-- info: 'Tests.Automation.checked_arithmetic' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms checked_arithmetic
+/-- A reusable body, bound to an extraction only through a lookup hypothesis. -/
+def wordBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := [.arg 0, .bnot, .arg 1, .bnot, .bor, .bnot, .ret] }
+
+theorem word_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (wordBody profile)) (memory : CIL.Safety.Memory) (a b : BitVec 64) :
+    CIL.Safety.invoke program 10 index [.scalar (.i64 a), .scalar (.i64 b)] memory =
+      .ok (memory, [.scalar (.i64 (~~~(~~~a ||| ~~~b)))]) := by
+  cil_checked_steps
+
+/-- A profile-dependent body: its instructions are fetched only once the feature test is decided. -/
+@[cil_code] def featureBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := if profile.avx2 then [.arg 1, .ret] else [.arg 0, .ret] }
+
+theorem feature_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (scalar : profile.avx2 = false) (found : program[index]? = some (featureBody profile))
+    (memory : CIL.Safety.Memory) (a b : CIL.W32) :
+    CIL.Safety.invoke program 3 index [.scalar (.i32 a), .scalar (.i32 b)] memory = .ok (memory, [.scalar (.i32 a)]) := by
+  cil_checked_steps [scalar]
+
+-- Without the lookup hypothesis no instruction can be fetched, and the tactic says so instead of doing nothing.
+example (program : CIL.Program) (index : Nat) (memory : CIL.Safety.Memory) (a b : BitVec 64) (stop : False) :
+    CIL.Safety.invoke program 10 index [.scalar (.i64 a), .scalar (.i64 b)] memory =
+      .ok (memory, [.scalar (.i64 (~~~(~~~a ||| ~~~b)))]) := by
+  fail_if_success cil_checked_steps
+  exact stop.elim
+
+/-- info: 'Tests.Automation.word_checked' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms word_checked
 end Tests.Automation

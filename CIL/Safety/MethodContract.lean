@@ -453,18 +453,18 @@ macro_rules
     -- A contract continuation resumes at `pc + 1` on `values ++ rest` with projected inputs.
     try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
     try (cil_strict refine CIL.Safety.invoke_exists_of_run
-           (by simp only [cil_code, Nat.reduceAdd]; rfl)
+           (by cil_lookup [$[$facts:term],*])
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
-    repeat first
+    cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" first
     | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_lookup [$[$facts:term],*])
+        (by cil_lookup [$[$facts:term],*])
         (by cil_checked_step [$[$facts:term],*])
         (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
     | (cil_strict refine CIL.Safety.run_next_exists (post := _)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_lookup [$[$facts:term],*])
+        (by cil_lookup [$[$facts:term],*])
         (by cil_checked_step [$[$facts:term],*]) ?_)))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
@@ -476,14 +476,14 @@ macro_rules
   | `(tactic| cil_contract_call $holds $input [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_contract $holds $input
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
   | `(tactic| cil_contract_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     -- The site fixes the body, so the lookup may close during simplification.
     refine CIL.Safety.run_call_of_contract $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
 
 /-- `cil_contract_call` through `run_call_of_contract_formed`: leaves the precondition,
@@ -494,13 +494,13 @@ macro_rules
   | `(tactic| cil_formed_call $holds $input [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_contract_formed $holds $input
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
-      (by simp only [cil_code, Nat.reduceAdd]; rfl)
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
   | `(tactic| cil_formed_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_contract_formed $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
 
 end CIL.Safety

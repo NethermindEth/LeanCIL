@@ -193,8 +193,8 @@ macro "cil_loop_outcome_advance" "[" facts:term,* "]" : tactic =>
   `(tactic| repeat first
     | (simp only [$[$facts:term],*])
     | (apply CIL.Safety.loop_outcome_next
-       · first | (simp only [cil_code]; rfl) | rfl
-       · first | (simp only [cil_code]; rfl) | rfl
+       · cil_lookup [$[$facts:term],*]
+       · cil_lookup [$[$facts:term],*]
        · cil_checked_step [CIL.truth, $[$facts:term],*]))
 
 /-- Continue past a returning callee at a `bind_call` site; leaves `pre`, the `raises` equation, then the continuation. -/
@@ -204,7 +204,7 @@ macro_rules
   | `(tactic| cil_loop_outcome_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.loop_outcome_call $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
 
 /-- Exit with the exception the callee's contract names at a `bind_call` site; leaves `pre` and the `raises` equation. -/
@@ -214,7 +214,7 @@ macro_rules
   | `(tactic| cil_loop_outcome_raise $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.loop_outcome_call_raises $holds $input
-      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl)
       (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_ ?_))
 

@@ -47,6 +47,15 @@ for argument loads, returns or supported scalar conditional branches, then
 uses simplification. Operations outside those equations retain the dispatcher
 fallback.
 
+Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
+by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
+hypothesis such as `found : program[index]? = some (body profile)`, or by
+rewriting feature tests in a profile-dependent body with the facts. A proof
+stated over an abstract `program` therefore steps exactly like one over
+`Extracted.program`. `cil_checked_steps`, `cil_contract_steps` and
+`cil_raise_steps` fail when they cannot take a first step, instead of returning
+the goal unchanged.
+
 For steps depending on hypotheses, use `cil_checked_steps [truth, stored]`
 with the relevant proved facts. A nonempty fact list skips the initial `rfl`:
 otherwise a symbolic branch can succeed by assigning an unresolved conditional
