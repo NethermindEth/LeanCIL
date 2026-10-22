@@ -56,7 +56,8 @@ internal static class StaticValues
         if (stores.Length != 1)
             throw Unsupported(field, $"The static constructor stores it {stores.Length} times; exactly one store is admitted.");
         var store = stores[0];
-        if (code.Take(store).Any(i => i.OpCode.FlowControl is not (FlowControl.Next or FlowControl.Call or FlowControl.Meta)))
+        // `jmp` has call flow but never returns, so only returning calls may precede the store.
+        if (code.Take(store).Any(i => i.OpCode.FlowControl is not (FlowControl.Next or FlowControl.Call or FlowControl.Meta) || i.OpCode.Code == Code.Jmp))
             throw Unsupported(field, "Control flow precedes its store, so the store is not unconditional.");
         foreach (var branch in code.Where(i => i.Operand is Instruction or Instruction[]))
             if ((branch.Operand is Instruction target ? new[] { target } : (Instruction[])branch.Operand).Any(t => code.IndexOf(t) <= store))

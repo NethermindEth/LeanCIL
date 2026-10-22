@@ -5,7 +5,6 @@
 
 using System.Reflection;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -135,6 +134,13 @@ var mutations = new Dictionary<string, Action<ModuleDefinition>>
         var il = code.GetILProcessor();
         il.InsertBefore(code.Instructions[^1], il.Create(OpCodes.Ldsfld, (FieldReference)store.Operand));
         il.InsertBefore(code.Instructions[^1], il.Create(OpCodes.Stsfld, (FieldReference)store.Operand));
+    },
+    // `jmp` leaves the static constructor, so its stores never run.
+    ["jump"] = module =>
+    {
+        var code = module.GetType(word).Methods.Single(m => m.Name == ".cctor").Body;
+        var target = module.GetType("Examples.StaticValues").Methods.Single(m => m.Name == "Overwrite");
+        code.GetILProcessor().InsertBefore(code.Instructions[0], Instruction.Create(OpCodes.Jmp, target));
     }
 };
 foreach (var (name, mutate) in mutations)
@@ -151,6 +157,7 @@ foreach (var (name, mutate) in mutations)
         Reject(dll, "StaticValues::Zero()", "store-outside-constructor", $"Unsupported static field store: IL_0006: stsfld {word} {word}::One");
         Reject(dll, "StaticValues::One()", "stored-outside-constructor", "It is also stored outside its static constructor, in Examples.Word256 Examples.StaticValues::Zero()");
     }
-    else Reject(dll, "StaticValues::One()", "stored-twice", "stores it 2 times");
+    else if (name == "twice") Reject(dll, "StaticValues::One()", "stored-twice", "stores it 2 times");
+    else Reject(dll, "StaticValues::One()", "jump-before-store", "Control flow precedes its store");
 }
 Console.WriteLine("PASS static readonly values, runtime limbs, changed initializers, forged certificates and write rejection");
