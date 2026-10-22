@@ -10,7 +10,7 @@ partial class Program
     sealed record BatchRequest(string output, string proof, string theorem, string? expect = null);
     sealed record BatchManifest(int schema, string proofRoot, BatchRequest[] requests);
     sealed record BatchResult(string output, string proof, string theorem, string expect, string status, string stage,
-        string? error, string[]? axioms, string? libraryBuild);
+        string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure);
 
     const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
 
@@ -80,6 +80,7 @@ partial class Program
                 {
                     Directory.CreateDirectory(outputs[i]);
                     File.Delete(Path.Combine(outputs[i], "verified.json"));
+                    FailureReports.Delete(outputs[i]);
                     File.WriteAllText(settingsPath, JsonSerializer.Serialize(new VerificationSettings(1,
                         Path.GetRelativePath(outputs[i], proofs[i]).Replace('\\', '/'), request.theorem,
                         Path.GetRelativePath(outputs[i], proofRoot).Replace('\\', '/')), Json) + "\n");
@@ -144,9 +145,19 @@ partial class Program
             var passed = Print(i, outcome);
             var status = passed ? expect : "failed";
             if (!passed) failed++;
+            // A verified refutation is a certificate and a failed contract; any other pass leaves no failure.
+            var failure = outcome.Error is { } error ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
+                : outcome.Report is { } report ? FailureReports.Refuted(report.theoremAudit, request.theorem, proofs[i], outputs[i], proofRoot)
+                : FailureReports.Classify(outcome.Stage, outcome.Detail ?? "Verification produced no result.", outcome.Hidden,
+                    request.theorem, proofs[i], outputs[i], proofRoot);
+            if (lastForOutput.Contains(i))
+            {
+                if (failure is null) FailureReports.Delete(outputs[i]);
+                else FailureReports.Write(outputs[i], failure);
+            }
             results.Add(new(outputs[i], proofs[i], request.theorem, expect, status, outcome.Stage,
                 passed ? null : (outcome.Error?.Message ?? "Verification produced no result."),
-                outcome.Report?.axioms, outcome.Report?.libraryBuild));
+                outcome.Report?.axioms, outcome.Report?.libraryBuild, failure));
         }
         if (resultsPath is not null)
         {
@@ -221,6 +232,7 @@ partial class Program
             }
 
             File.Delete(reportPath);
+            FailureReports.Delete(output);
             proof ??= Path.Combine(output, "Proof.lean");
             theorem ??= "ExampleProof.correctness";
             if (!Regex.IsMatch(theorem, @"\A[A-Za-z_][A-Za-z0-9_.]*\z"))
@@ -253,6 +265,13 @@ partial class Program
                     Console.WriteLine($"  Caller assumption: {name.GetString()} initialization completed successfully before invocation.");
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
+            var refuted = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
+            if (refuted is not null)
+            {
+                FailureReports.Write(output, refuted);
+                Console.WriteLine($"  Refutes: the contract (theorem at {CliPaths.Display(proof)}:{refuted.line}:{refuted.column})");
+                Console.WriteLine($"  Failure: {CliPaths.Display(Path.Combine(output, FailureReports.FileName))}");
+            }
             Console.WriteLine($"  Settings: {CliPaths.Display(settingsPath)}");
             Console.WriteLine($"  Report: {CliPaths.Display(reportPath)}");
             Console.WriteLine("  Statement:");
@@ -263,6 +282,8 @@ partial class Program
         catch (Exception error)
         {
             File.Delete(reportPath);
+            FailureReports.Write(output, FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
+                proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot));
             throw new CliFailure(stage, error);
         }
     }

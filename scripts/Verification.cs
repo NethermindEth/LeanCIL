@@ -832,6 +832,19 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         #print axioms ExtractionAudit.valid
         """;
 
+    // Follows the axiom report, so the displayed statement stays the first audit line. Prints the name's
+    // location for a theorem stating `Not (contract.Holds ...)`; the failure report reads only this marker.
+    static string RefutationAudit(string theorem) => $$"""
+        run_cmd do
+          if let some (.thmInfo info) := (<- Lean.getEnv).find? `{{theorem}} then
+            if let .app (.const `Not _) claim := info.type.consumeMData then
+              if let .const name _ := claim.getAppFn.consumeMData then
+                if name == `CIL.Safety.MethodContract.Holds || name == `CIL.Safety.OutcomeContract.Holds then
+                  let some ranges <- Lean.findDeclarationRanges? `{{theorem}} | throwError "Missing refutation location"
+                  IO.println s!"LeanCIL refutes: {name} at {ranges.selectionRange.pos.line}:{ranges.selectionRange.pos.column}"
+
+        """;
+
     static string[] AuditedAxioms(string audit, string theorem)
     {
         var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
@@ -958,7 +971,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             File.Copy(proof, Path.Combine(fresh, "Proof.lean"));
             var symbols = ImportsSymbols(File.ReadAllText(proof));
             if (symbols) File.Copy(SymbolsFor(output), Path.Combine(fresh, "ExtractedSymbols.lean"));
-            File.WriteAllText(Path.Combine(fresh, "Audit.lean"), $"import Proof\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
+            File.WriteAllText(Path.Combine(fresh, "Audit.lean"), $"import Proof\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + RefutationAudit(theorem));
             File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
 

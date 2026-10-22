@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "contracts" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "outcomes" or "scaling" or "excluded"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|outcomes|scaling|excluded]")
+    ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "outcomes" or "scaling" or "excluded"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|outcomes|scaling|excluded]")
 };
 
 using var verification = new Program();
@@ -29,6 +29,7 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["nested"] = ("Tests/NestedStructs.cs", "nested struct layout, snapshots, copies and metadata validation"),
     ["enums"] = ("Tests/Enums.cs", "integer enum storage, flags, runtime comparisons and metadata validation"),
     ["cli"] = ("Tests/CliVerification.cs", "CLI proof verification and incorrect implementation rejection"),
+    ["failures"] = ("Tests/FailureReporting.cs", "failure reports that classify and locate each failed obligation"),
     ["integer"] = ("Tests/IntegerOpcodes.cs", "integer opcode encodings, boundary cases and universal negation proofs"),
     ["narrow"] = ("Tests/NarrowIntegers.cs", "narrow integer conversions, storage, method boundaries and rejection proofs"),
     ["primitive"] = ("Tests/PrimitiveOperations.cs", "primitive memory, switch, sizeof and rejection proofs"),

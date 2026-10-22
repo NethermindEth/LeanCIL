@@ -130,3 +130,60 @@ When proof checking fails, the report leads with `Lean errors (N):`: each
 its full message block, omitting axiom reports, traces and warnings. Long
 messages are truncated in this summary only; the unmodified Lake output follows
 under `Details:` (and in the `LEANCIL_TRACE_DIRECTORY` transcripts when set).
+
+## Failure reports
+
+A failed `verify` writes `failed.json` next to where `verified.json` would go and
+removes any `verified.json`; a later successful verification removes
+`failed.json`. `verify-batch` writes the same report into each failing request's
+output (for the last request of an output, as with `verified.json`) and as the
+`failure` field of each `--results` entry (`null` when there is none).
+
+```json
+{
+  "schema": 1,
+  "kind": "unsolved-goal",
+  "resource": null,
+  "stage": "proof checking",
+  "theorem": "ExampleProof.correctness",
+  "module": "Proofs.Mix",
+  "proof": "/work/package/Proofs/Mix.lean",
+  "output": "/work/artifacts/Mix",
+  "method": { "entry": "System.UInt64 Calls::Mix(System.UInt64,System.UInt64)", "assembly": "Contracts, Version=1.0.0.0, ...", "assemblySha256": "..." },
+  "file": "/work/package/Proofs/Mix.lean",
+  "line": 12,
+  "column": 3,
+  "diagnostics": [
+    { "kind": "unsolved-goal", "resource": null, "module": "Proofs.Mix", "file": "/work/package/Proofs/Mix.lean", "line": 12, "column": 3, "message": "unsolved goals\n..." }
+  ],
+  "message": "Command failed (1): lake build ...",
+  "rerun": ["leancil", "verify", "/work/artifacts/Mix", "--proof", "/work/package/Proofs/Mix.lean", "--theorem", "ExampleProof.correctness", "--proof-root", "/work/package"]
+}
+```
+
+`kind` is one of:
+
+| Kind | Meaning |
+|------|---------|
+| `unsupported-extraction` | `check` rejected the method in metadata and CIL validation, or Lean rejected the extraction certificate |
+| `stale-input` | The assembly, extraction artifacts or proof inputs changed after extraction or during verification |
+| `elaboration-error` | A Lean error other than an unsolved goal or a resource limit |
+| `unsolved-goal` | A Lean `unsolved goals` error |
+| `resource-limit` | Heartbeats (`(deterministic) timeout`, `(kernel) deterministic timeout`) or recursion depth; `resource` names which |
+| `replay-or-audit-rejected` | Kernel replay or the theorem and axiom audit rejected the proof |
+| `refutation` | The theorem verified and states `Not (contract.Holds ...)` for a `MethodContract` or `OutcomeContract` |
+| `invalid-request` | The proof or theorem selection is invalid |
+| `unclassified` | Anything else, such as a missing tool; read `message` |
+
+The request's `kind`, `file`, `line` and `column` are those of the first Lean
+error; `diagnostics` lists every error of the request's own modules with its
+message block. Lines are 1-based and columns 0-based, as Lean prints them.
+Locations in workspace or temporary copies are mapped back to the selected
+proof, the artifact's `Extracted.lean` or the consumer package. `message` is the
+original output, unmodified; `rerun` reruns just that request. Classification
+uses only the stage, LeanCIL's own messages and Lean's error prefixes above.
+An unsolved goal is never a refutation: only a verified theorem whose
+elaborated statement is `Not` applied to a contract's `Holds` is, as reported by
+the theorem audit. A verified refutation keeps its `verified.json`, the
+certificate of the refutation, and also writes `failed.json` with kind
+`refutation`, located at the theorem's name.
