@@ -1230,7 +1230,8 @@ unsafe def main (args : List String) : IO Unit := do
                 var rejected = failures.Keys.Where(name => closure is null || closure.Contains(name)).Order(StringComparer.Ordinal).ToArray();
                 if (rejected.Length > 0)
                     Fail([i], new InvalidOperationException("Kernel replay rejected " + string.Join(", ", rejected) + ":\n" +
-                        string.Join("\n", rejected.Select(name => failures[name]))));            }
+                        string.Join("\n", rejected.Select(name => failures[name]))));
+            }
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
             Stage(proceeding, "theorem audit");
