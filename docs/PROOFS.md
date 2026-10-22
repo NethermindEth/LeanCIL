@@ -369,8 +369,12 @@ example {fuel : Nat} {args : List CIL.Safety.Value} {m : CIL.Safety.Memory} {r :
 
 `bound.certificate` transports an `InvocationCertificate` and
 `bound.descriptors` the program's static descriptor list; `ProgramRefines.set`
-composes several bound methods. The transfer is for successful checked
-execution only. The pc map is computed outside the kernel and then checked by
+composes several bound methods. Named exceptions transfer too:
+`bound.raises` transports `Raises`, `bound.holds` an `OutcomeContract.Holds`
+with both clauses (from `CIL.Safety.Embedding.Outcomes`), and
+`Embeds.invoke_raise` states the actual fault, whose pc is the one the map
+assigns in the throwing method. Other faults, including fuel exhaustion and
+`.unsupported`, do not transfer. The pc map is computed outside the kernel and then checked by
 it, so a wrong map is rejected, not trusted. A changed reachable instruction or
 an inserted live one is reported by expected and actual pc:
 
@@ -387,4 +391,5 @@ expected pc 1 maps to actual pc 1
 The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for
 1,414 instructions. See [docs/SOUNDNESS.md](SOUNDNESS.md#method-body-embedding)
 for the exact conditions and limits; `Tests/MethodEmbedding.lean` covers both
-outcomes.
+outcomes, and `Tests/OutcomeEmbedding.lean` transfers a raising helper and its
+caller across an inserted dead block, with the relocated throw pc.

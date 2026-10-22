@@ -125,7 +125,9 @@ paths of a symbolic branch using a supplied truth hypothesis, and verifies that
 failed candidate summaries do not escape their transaction.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
-bodies with mapped program counters. `Tests.AggregateSetup` and `Tests.Semantics`
+bodies with mapped program counters; `Tests.OutcomeEmbedding` checks transport of
+named exceptions and outcome contracts, the relocated fault pc, and that changed
+throws, unsupported execution and fuel exhaustion do not transfer. `Tests.AggregateSetup` and `Tests.Semantics`
 cover frame setup and interpreter behavior. The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, feature selection, infinite-loop fuel
@@ -138,7 +140,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.OutcomeContract
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.OutcomeContract
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

@@ -39,6 +39,9 @@ name = "Tests.MulScalarFixture"
 name = "Tests.MethodEmbedding"
 
 [[lean_lib]]
+name = "Tests.OutcomeEmbedding"
+
+[[lean_lib]]
 name = "Tests.ExtractionLayout"
 
 [[lean_lib]]
