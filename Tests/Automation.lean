@@ -78,7 +78,7 @@ theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.F
       throwError "Expected the checked return equation"
   change (Except.ok (CIL.Safety.leaveFrame frame memory,
     [.scalar (.i32 (CIL.NarrowKind.extend .unsigned8 (if left ^^^ right = 0 then 1 else 0)))]) :
-    CIL.Safety.ExecutionResult (CIL.Safety.Memory × List CIL.Safety.Value)) = _
+    Except CIL.Safety.LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) = _
   simp only [scalarDifference, CIL.NarrowKind.extend]
   split <;> rfl
 
