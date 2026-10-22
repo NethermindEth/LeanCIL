@@ -176,7 +176,7 @@ as an uninitialized read. A contract may take that zero readback as a
 precondition. `run_construct_of_contract` and `run_construct_of_contract_formed`
 take the construct step equation instead, like `run_call_of_contract`; they
 cover aggregate storage only. `read_append` joins adjacent field reads into the
-full readback, and `Confined.cover` widens a field write's footprint to the
+full readback, and `Confined.write_within` confines a field write to the
 whole struct.
 
 `Tests/ConstructContract.lean` proves a caller that constructs a 16-byte and a
