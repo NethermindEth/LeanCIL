@@ -29,7 +29,7 @@ Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")]);
 var start = extracted.IndexOf("theorem translation_valid :", StringComparison.Ordinal);
 var end = extracted.IndexOf("@[cil_code] theorem lookup0", start, StringComparison.Ordinal);
 var old = Path.Combine(directory, "Monolithic.lean");
-File.WriteAllText(old, extracted[..start] + "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence program := by decide\n" + extracted[end..]);
+File.WriteAllText(old, extracted[..start] + "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by decide\n" + extracted[end..]);
 var monolithic = Execute(["lake", "env", "lean", old]);
 if (monolithic.Code == 0 || !monolithic.Output.Contains("maximum number of heartbeats"))
     throw new InvalidOperationException("Fixture no longer demonstrates the original default-budget failure: " + monolithic.Output);
@@ -46,7 +46,7 @@ File.WriteAllText(proof, """
 import Extracted
 namespace ExampleProof
 theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-    Extracted.methodEvidence Extracted.program := Extracted.translation_valid
+    Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
 end ExampleProof
 """);
 Run(["lake", "update"], consumer);

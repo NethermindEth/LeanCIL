@@ -304,6 +304,15 @@ exception is not `invalidState`. `HoldsGiven.discharge` instantiates the claim
 for a concrete linked program whose import meets its contract, and
 `HoldsGiven.closed` states a claim that needs no import.
 
+In an extraction, `bind_import addTo := "System.Void Lib.Adder::AddTo(...)"` resolves
+the signature through `Extracted.importSignatures` and defines `addTo` as
+`Extracted.program.length + j`, with `addTo.slot`, `addTo.signature` and
+`addTo.unlinked` (`Extracted.program[addTo]? = none`) checked by `rfl`; `bind_call`
+then names its call site. The certificate accepts a call there only when
+`Extracted.imports` has a slot with the site's identity and arity (see
+[SOUNDNESS](SOUNDNESS.md)); the extractor does not resolve imports yet, so
+`Extracted.imports` and `Extracted.importSignatures` are empty.
+
 `Tests/Imports.lean` proves `Root` against an imported `AddTo` while reusing the
 closed `Mix` proof, discharges it for one appended implementation, shows the
 unlinked program faults at the import's call so its contract holds only
@@ -462,6 +471,8 @@ error lists each site's pc and callee.
 
 The signature is the Cecil full name, matched exactly. Resolution only locates
 an index; the body is still bound by the kernel and the extraction certificate.
+`bind_import` reports a missing import signature the same way, listing imports
+with the same name or every import, and says when the extraction has no imports.
 `Tests/MethodIdentity.lean` covers the diagnostics, and `Tests/MethodIdentity.cs`
 verifies one unedited proof against two builds with different numbering.
 
