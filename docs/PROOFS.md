@@ -339,6 +339,7 @@ theorem root_composed : rootContract.Holds (link Extracted.program [addLib]) roo
     closed proved
 ```
 
+Here `closed` and `proved` are each library's `Closed` and `Holds` facts.
 `Imports app specs` names one `Relocatable` property per slot, so libraries may
 export contracts of different types. Each library exports only its index-0
 method. Static identities are not renamed: two linked libraries that use the
