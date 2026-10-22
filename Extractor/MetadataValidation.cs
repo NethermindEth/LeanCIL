@@ -130,8 +130,12 @@ internal static class MetadataValidation
         RuntimeModels.ValidateTypeIdentity(type, module);
     }
 
+    internal sealed record Blocked(MethodDefinition Method, Instruction? At, Exception Error, MethodDefinition[] Chain);
+
+    // With `blocked`, failures after entry selection are recorded and the walk continues past them;
+    // without it, the first failure throws. Either way only profile-reachable code is checked.
     internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
-        IReadOnlyCollection<string>? initializedTypes = null)
+        IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null)
     {
         profile.Validate();
         initializedTypes ??= [];
@@ -148,8 +152,28 @@ internal static class MetadataValidation
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
         MethodDefinition entry = MethodSelector.Resolve(module, entrySignature);
         var specializations = new MethodSpecialization(module);
+        // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
         List<MethodDefinition> ordered = [];
+        List<MethodDefinition> path = [];
+        Dictionary<MethodDefinition, MethodDefinition[]> chains = [];
+        // Call sites already reported, or whose callee was not analysed, have no translation to check.
+        HashSet<Instruction> skipped = [];
+        bool Check(MethodDefinition method, Instruction? at, Action check, bool named = false)
+        {
+            if (blocked is null)
+            {
+                if (named) InMethod(method, () => { check(); return 0; });
+                else check();
+                return true;
+            }
+            try { check(); return true; }
+            catch (Exception error)
+            {
+                blocked.Add(new(method, at, error, chains[method]));
+                return false;
+            }
+        }
         void Visit(MethodDefinition method)
         {
             if (state.TryGetValue(method, out int visited))
@@ -157,44 +181,58 @@ internal static class MetadataValidation
                 if (visited == 1) throw new InvalidDataException($"Recursive managed dependency: {method.FullName}");
                 return;
             }
-            if (method.Module != module || method.IsStatic == method.HasThis || method.ExplicitThis ||
-                (!method.IsStatic && !IsAggregate(method.DeclaringType, module)) ||
-                method.CallingConvention != MethodCallingConvention.Default || !method.HasBody ||
-                method.IsPInvokeImpl ||
-                (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
-                    MethodImplAttributes.Synchronized | MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0 ||
-                method.HasGenericParameters || method.DeclaringType.HasGenericParameters ||
-                method.Body.Instructions.Count == 0 || method.Body.ExceptionHandlers.Count != 0 ||
-                (method.IsConstructor && method.IsStatic) ||
-                (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
-                    !initializedTypes.Contains(method.DeclaringType.FullName, StringComparer.Ordinal)))
-                throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
-            var reachable = InMethod(method, () =>
+            path.Add(method);
+            chains[method] = [.. path];
+            try { Walk(method); }
+            finally { path.RemoveAt(path.Count - 1); }
+        }
+        void Walk(MethodDefinition method)
+        {
+            state[method] = 3;
+            if (!Check(method, null, () =>
+            {
+                if (method.Module != module || method.IsStatic == method.HasThis || method.ExplicitThis ||
+                    (!method.IsStatic && !IsAggregate(method.DeclaringType, module)) ||
+                    method.CallingConvention != MethodCallingConvention.Default || !method.HasBody ||
+                    method.IsPInvokeImpl ||
+                    (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
+                        MethodImplAttributes.Synchronized | MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0 ||
+                    method.HasGenericParameters || method.DeclaringType.HasGenericParameters ||
+                    method.Body.Instructions.Count == 0 || method.Body.ExceptionHandlers.Count != 0 ||
+                    (method.IsConstructor && method.IsStatic) ||
+                    (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
+                        !initializedTypes.Contains(method.DeclaringType.FullName, StringComparer.Ordinal)))
+                    throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
+            })) return;
+            Check(method, null, () =>
             {
                 if (method.HasThis) Layout(method.DeclaringType, module);
                 if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
                 Type(method.ReturnType, module, returns: true);
-                foreach (ParameterDefinition parameter in method.Parameters) Type(parameter.ParameterType, module);
-                var spans = Spans.Analyze(method);
+            }, named: true);
+            foreach (ParameterDefinition parameter in method.Parameters)
+                Check(method, null, () => Type(parameter.ParameterType, module), named: true);
+            Spans.Analysis? spans = null;
+            if (Check(method, null, () => spans = Spans.Analyze(method), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
-                    Type(local.VariableType, module, span: spans.Locals.Contains(local.Index));
-                return Reachability.Analyze(method, profile);
-            });
+                    Check(method, null, () => Type(local.VariableType, module, span: spans!.Locals.Contains(local.Index)), named: true);
+            HashSet<Instruction> reachable = [];
+            TypeTests.Analysis? typeTests = null;
+            Throws.Analysis? throws = null;
+            if (!Check(method, null, () => reachable = Reachability.Analyze(method, profile), named: true) ||
+                !Check(method, null, () => (typeTests, throws) = (TypeTests.Analyze(method), Throws.Analyze(method))))
+                return;
             state[method] = 1;
             void Enter(MethodDefinition callee, MethodReference reference, Instruction instruction)
             {
                 if (state.GetValueOrDefault(callee) == 1)
                     throw Call("Recursive managed dependency", reference, method, instruction);
                 Visit(callee);
+                if (state[callee] == 3) skipped.Add(instruction);
             }
-            var typeTests = TypeTests.Analyze(method);
-            var throws = Throws.Analyze(method);
-            foreach (Instruction instruction in reachable)
+            void CallSite(Instruction instruction, MethodReference reference)
             {
-                if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
-                    typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction) || throws.Operands.Contains(instruction) ||
-                    InstructionTranslation.RuntimeModel(reference, profile) is not null) continue;
                 if (reference is GenericInstanceMethod generic)
                 {
                     if (instruction.OpCode.Code != Code.Call)
@@ -207,7 +245,7 @@ internal static class MetadataValidation
                     }
                     instruction.Operand = specialized;
                     Enter(specialized, reference, instruction);
-                    continue;
+                    return;
                 }
                 if (reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default)
                     throw Call("Unsupported call signature", reference, method, instruction,
@@ -233,24 +271,38 @@ internal static class MetadataValidation
                         "newobj must construct a reference-free struct declared in this assembly");
                 Enter(callee, reference, instruction);
             }
+            foreach (Instruction instruction in reachable)
+            {
+                if (instruction.OpCode.Code is not (Code.Call or Code.Newobj) || instruction.Operand is not MethodReference reference ||
+                    typeTests!.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction) || throws!.Operands.Contains(instruction))
+                    continue;
+                if (!Check(method, instruction, () =>
+                    {
+                        if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
+                    }))
+                    skipped.Add(instruction);
+            }
             state[method] = 2;
             ordered.Add(method);
         }
         Visit(entry);
         ordered.Reverse();
         // Validate translation before producing any artifact.
-        for (int i = 0; i < ordered.Count; i++)
+        var methods = ordered.ToArray();
+        for (int i = 0; i < methods.Length; i++)
         {
             var index = i;
-            InMethod(ordered[index], () =>
-            {
-                var nativeOperands = NativeOperands.Analyze(ordered[index], profile);
-                var parameterHomes = ParameterStorage.Analyze(ordered[index], profile);
-                foreach (Instruction instruction in Reachability.Analyze(ordered[index], profile))
-                    InstructionTranslation.Translate(instruction, ordered[index], ordered.ToArray(), index, profile, nativeOperands, parameterHomes);
-                return 0;
-            });
+            var method = methods[index];
+            HashSet<Instruction>? nativeOperands = null;
+            int[]? parameterHomes = null;
+            if (!Check(method, null, () => (nativeOperands, parameterHomes) =
+                (NativeOperands.Analyze(method, profile), ParameterStorage.Analyze(method, profile)), named: true))
+                continue;
+            foreach (Instruction instruction in Reachability.Analyze(method, profile))
+                if (!skipped.Contains(instruction))
+                    Check(method, instruction, () =>
+                        InstructionTranslation.Translate(instruction, method, methods, index, profile, nativeOperands, parameterHomes), named: true);
         }
-        return ordered.ToArray();
+        return methods;
     }
 }
