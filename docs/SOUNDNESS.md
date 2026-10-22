@@ -2,6 +2,17 @@
 
 ## What is defined and proved
 
+`CIL.Safety.RuntimeExceptions` adds a fixed naming view of checked execution
+faults. `RaisesCLR` and `OutcomeContract.HoldsCLR` name `.thrown exception`
+directly, arithmetic overflow as `System.OverflowException`, and integer
+divide-by-zero as `System.DivideByZeroException`. They require an actual checked
+invocation with that fault. All remaining faults, including invalid operands,
+bounds failures, unsupported instructions, invalid state and fuel exhaustion,
+map to no named exception. The mapping does not change the interpreter,
+`.thrown`, `Raises`, or existing outcome-contract proofs. Handler execution
+remains unsupported. The admitted runtime correspondence assumption still
+applies; a mapping theorem does not prove a CLR implementation correct.
+
 Intraprocedural cycles are admitted by a worklist analysis. Constant facts at a control-flow join can only weaken to unknown; changed facts revisit successors until a fixed point is reached. Stack heights and tracked stack types must agree at backedges as at other joins. This validation is part of the trusted extractor, not a proof of termination. Recursive managed call graphs remain rejected.
 
 `CIL.Safety.loop_terminates` proves successful finite checked execution from a supplied invariant, a natural-number measure that strictly decreases, and kernel-checked execution segments. Each segment relates the actual interpreter before and after an iteration for every continuation fuel budget. Exit cases must prove the postcondition and successful return; `ensures_of_loop` includes checked frame setup and yields the existing `Ensures` specification. `loop_terminates_induction` instead assumes termination at every invariant state of smaller measure, so an iteration may cross a call through a proved `MethodContract` whose fuel stays existential. `loop_outcome_induction` states the same rule for `LoopOutcome`, which fixes one outcome for the loop: normal return, or exactly `.thrown exception` through `RunRaises`, so unsupported instructions, invalid state and fuel exhaustion never discharge an expected exception. Only continuing iterations carry invariant and measure obligations, and `ensures_outcome_of_loop` lifts the result through frame setup to `EnsuresOutcome`. Neither extraction nor finite fuel exhaustion proves termination. The countdown example proves this for all 32-bit unsigned inputs from its stated empty caller memory; it makes no runtime performance claim for large iteration counts.
