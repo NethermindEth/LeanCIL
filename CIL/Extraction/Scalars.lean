@@ -21,6 +21,9 @@ def scalarType : TypeExpr → ScalarKind
 
 private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .native]
 
+private def homeCompatible (value home : ScalarKind) : Bool :=
+  value == home || value ∈ [.word64, .native] && home ∈ [.word64, .native]
+
 private def scalarBinary : Nat → Bool
   | 88 | 89 | 90 | 91 | 92 | 93 | 94 | 95 | 96 | 97 | 214 | 215 | 216 | 217 | 218 | 219
   | 65025 | 65026 | 65027 | 65028 | 65029 => true
@@ -106,81 +109,98 @@ private def resultKind (opcode : Nat) : ScalarKind :=
   if opcode ∈ [211, 212, 213, 138, 139, 224] then .native
   else if opcode ∈ [106, 110, 133, 137, 185, 186] then .word64 else .word32
 
-private def splitTextChars (separator : List Char) : Nat → List Char → List Char → List (List Char)
+private def signatureBytes (text : String) : List UInt8 := text.toByteArray.data.toList
+
+private def splitTextBytes (separator : List UInt8) : Nat → List UInt8 → List UInt8 → List (List UInt8)
   | 0, current, tail => [current.reverse ++ tail]
   | _ + 1, current, [] => [current.reverse]
   | remaining + 1, current, text@(c :: tail) =>
     if separator.isPrefixOf text then
-      current.reverse :: splitTextChars separator remaining [] (text.drop separator.length)
-    else splitTextChars separator remaining (c :: current) tail
+      current.reverse :: splitTextBytes separator remaining [] (text.drop separator.length)
+    else splitTextBytes separator remaining (c :: current) tail
 
-private def splitText (text separator : String) : List String :=
-  if separator.toList.isEmpty then [text]
-  else (splitTextChars separator.toList (text.toList.length + 1) [] text.toList).map String.ofList
+private def splitBytes (text separator : List UInt8) : List (List UInt8) :=
+  splitTextBytes separator (text.length + 1) [] text
 
-private def replaceTextChars (pattern replacement : List Char) : Nat → List Char → List Char
+private def replaceTextBytes (pattern replacement : List UInt8) : Nat → List UInt8 → List UInt8
   | 0, text => text
   | _ + 1, [] => []
   | remaining + 1, text@(c :: tail) =>
     if pattern.isPrefixOf text then
-      replacement ++ replaceTextChars pattern replacement remaining (text.drop pattern.length)
-    else c :: replaceTextChars pattern replacement remaining tail
+      replacement ++ replaceTextBytes pattern replacement remaining (text.drop pattern.length)
+    else c :: replaceTextBytes pattern replacement remaining tail
 
-private def replaceText (text pattern replacement : String) : String :=
-  if pattern.toList.isEmpty then text
-  else String.ofList (replaceTextChars pattern.toList replacement.toList (text.toList.length + 1) text.toList)
+private def replaceBytes (text pattern replacement : List UInt8) : List UInt8 :=
+  replaceTextBytes pattern replacement (text.length + 1) text
 
-private def scalarTypeName : TypeExpr → Option String
-  | .void => some "System.Void"
-  | .atom _ name | .constructor _ name => some name
-  | .aggregate identity _ | .enum identity _ => (splitText identity "::")[1]?
-  | .parameter index => some ("!!" ++ toString index)
-  | .byref element => (· ++ "&") <$> scalarTypeName element
-  | .pointer element => (· ++ "*") <$> scalarTypeName element
+private def joinBytes (separator : List UInt8) : List (List UInt8) → List UInt8
+  | [] => []
+  | [text] => text
+  | text :: tail => text ++ separator ++ joinBytes separator tail
+
+private def scalarTypeBytes : TypeExpr → Option (List UInt8)
+  | .void => some (signatureBytes "System.Void")
+  | .atom _ name | .constructor _ name => some (signatureBytes name)
+  | .aggregate identity _ | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
+  | .parameter index => some (signatureBytes ("!!" ++ toString index))
+  | .byref element => (· ++ [38]) <$> scalarTypeBytes element
+  | .pointer element => (· ++ [42]) <$> scalarTypeBytes element
   | .apply constructor argument => do
-    let name ← scalarTypeName constructor
-    let element ← scalarTypeName argument
-    return if name.endsWith ">" then (name.dropEnd 1).toString ++ "," ++ element ++ ">"
-      else name ++ "<" ++ element ++ ">"
+    let name ← scalarTypeBytes constructor
+    let element ← scalarTypeBytes argument
+    return if name.reverse.head? == some 62 then name.take (name.length - 1) ++ [44] ++ element ++ [62]
+      else name ++ [60] ++ element ++ [62]
 
-private def parameterTokens (depth : Nat) (current : List Char) : List Char → Option (List String)
-  | [] => if depth != 0 then none else if current.isEmpty then some [] else some [String.ofList current.reverse]
-  | ',' :: [] => none
-  | ',' :: tail =>
+private def parameterTokens (depth : Nat) (current : List UInt8) : List UInt8 → Option (List (List UInt8))
+  | [] => if depth != 0 then none else if current.isEmpty then some [] else some [current.reverse]
+  | 44 :: [] => none
+  | 44 :: tail =>
     if depth == 0 then
-      if current.isEmpty then none else (String.ofList current.reverse :: ·) <$> parameterTokens 0 [] tail
-    else parameterTokens depth (',' :: current) tail
-  | '<' :: tail => parameterTokens (depth + 1) ('<' :: current) tail
-  | '>' :: tail => if depth == 0 then none else parameterTokens (depth - 1) ('>' :: current) tail
+      if current.isEmpty then none else (current.reverse :: ·) <$> parameterTokens 0 [] tail
+    else parameterTokens depth (44 :: current) tail
+  | 60 :: tail => parameterTokens (depth + 1) (60 :: current) tail
+  | 62 :: tail => if depth == 0 then none else parameterTokens (depth - 1) (62 :: current) tail
   | c :: tail => parameterTokens depth (c :: current) tail
 
-private def parameterTypeMatches (token : String) (type : TypeExpr) : Bool :=
-  if scalarTypeName type == some token then true
+private def parameterTypeMatches (token : List UInt8) (type : TypeExpr) : Bool :=
+  if scalarTypeBytes type == some token then true
   else match type with
-    | .byref element => token.startsWith "!" && !token.startsWith "!!" && token.endsWith "&" && scalarType element == .other
-    | .pointer element => token.startsWith "!" && !token.startsWith "!!" && token.endsWith "*" && scalarType element == .other
-    | _ => token.startsWith "!" && !token.startsWith "!!" && scalarType type == .other
+    | .byref element => [33].isPrefixOf token && ![33, 33].isPrefixOf token &&
+        token.reverse.head? == some 38 && scalarType element == .other
+    | .pointer element => [33].isPrefixOf token && ![33, 33].isPrefixOf token &&
+        token.reverse.head? == some 42 && scalarType element == .other
+    | _ => [33].isPrefixOf token && ![33, 33].isPrefixOf token && scalarType type == .other
 
-private def normalizeExternalIdentity (site : CallSite) (identity : String) : Option String := do
+private def normalizeExternalIdentity (site : CallSite) (identity : String) : Option (List UInt8) := do
   let normalized ← site.typeArguments.zipIdx.reverse.foldlM (fun text (type, index) => do
-    let name ← scalarTypeName type
-    return replaceText text ("!!" ++ toString index) name) identity
-  let owner ← scalarTypeName site.declaringType
-  match splitText owner "<" with
+    let name ← scalarTypeBytes type
+    return replaceBytes text (signatureBytes ("!!" ++ toString index)) name) (signatureBytes identity)
+  let owner ← scalarTypeBytes site.declaringType
+  match splitBytes owner [60] with
   | [] | [_] => return normalized
   | _ :: tail =>
-    let suffix := String.intercalate "<" tail
-    if !suffix.endsWith ">" then none else
-      let arguments ← parameterTokens 0 [] (suffix.dropEnd 1).toString.toList
+    let suffix := joinBytes [60] tail
+    if suffix.reverse.head? != some 62 then none else
+      let arguments ← parameterTokens 0 [] (suffix.take (suffix.length - 1))
       return arguments.zipIdx.reverse.foldl (fun text (name, index) =>
-        replaceText text ("!" ++ toString index) name) normalized
+        replaceBytes text (signatureBytes ("!" ++ toString index)) name) normalized
+
+private def balancedParentheses : Nat → List UInt8 → Bool
+  | depth, [] => depth == 0
+  | depth, 40 :: tail => balancedParentheses (depth + 1) tail
+  | 0, 41 :: _ => false
+  | depth + 1, 41 :: tail => balancedParentheses depth tail
+  | depth, _ :: tail => balancedParentheses depth tail
 
 private def externalParametersMatch (site : CallSite) (identity : String) : Bool :=
   ((do
     let normalized ← normalizeExternalIdentity site identity
-    let [_, tail] := splitText normalized "(" | none
-    if !tail.endsWith ")" then none else
-      let tokens ← parameterTokens 0 [] (tail.dropEnd 1).toString.toList
+    if !balancedParentheses 0 normalized then none else
+    let head :: rest := splitBytes normalized [40] | none
+    let _ := head
+    let tail ← rest.getLast?
+    if tail.reverse.head? != some 41 then none else
+      let tokens ← parameterTokens 0 [] (tail.take (tail.length - 1))
       return tokens.length == site.parameterTypes.length &&
         (tokens.zip site.parameterTypes).all fun (token, type) => parameterTypeMatches token type) : Option Bool).getD false
 
@@ -190,17 +210,18 @@ private def callParametersMatch (site : CallSite) : Bool :=
     | .external identity => externalParametersMatch site identity
 
 private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
+  if scalarType site.returnType == .other then .other else
   match normalizeExternalIdentity site identity with
   | none => .other
   | some normalized =>
-    let signature := (splitText normalized "::")[1]?.getD ""
+    let signature := (splitBytes normalized [58, 58])[1]?.getD []
     match site.returnType with
-    | .atom _ name => if signature.startsWith (name ++ " ") then scalarType site.returnType else .other
+    | .atom _ name => if (signatureBytes name ++ [32]).isPrefixOf signature then scalarType site.returnType else .other
     | .byref _ =>
-      if ((splitText signature " ")[0]?.getD "").endsWith "&" then .reference else .other
+      if ((splitBytes signature [32])[0]?.getD []).reverse.head? == some 38 then .reference else .other
     | .enum identity _ =>
-      let name := (splitText identity "::")[1]?.getD ""
-      if name != "" && signature.startsWith (name ++ " ") then scalarType site.returnType else .other
+      let name := (splitBytes (signatureBytes identity) [58, 58])[1]?.getD []
+      if !name.isEmpty && (name ++ [32]).isPrefixOf signature then scalarType site.returnType else .other
     | _ => .other
 
 private def callResult (site : CallSite) : ScalarKind :=
@@ -251,11 +272,11 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let index ← localIndex instruction
     let type ← raw.locals[index]?
     let value :: tail := stack | none
-    if value == scalarType type then return tail else none
+    if homeCompatible value (scalarType type) then return tail else none
   if let some (.store index) := argumentOperation instruction then
     let expected ← argumentKind raw index
     let value :: tail := stack | none
-    if value == expected then return tail else none
+    if homeCompatible value expected then return tail else none
   if opcode == 37 then
     let value :: tail := stack | none
     return value :: value :: tail
@@ -279,18 +300,31 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     else if pushes == 1 then return (← pushedKind raw instruction) :: stack.drop pops
     else none
 
+def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
+    (stack : List ScalarKind) (emitted : Op) : Bool :=
+  ((do
+    if instruction.opcode ∉ [10, 11, 12, 13, 19, 65038] then none else
+    let index ← localIndex instruction
+    let type ← raw.locals[index]?
+    let value :: _ := stack | none
+    return scalarType type == .word32 && value ∈ [.word64, .native] &&
+      match emitted with
+      | .setLocal actual _ => actual == index
+      | _ => false) : Option Bool).getD false
+
 private def checkScalarSite (raw : RawMethod) (features : FeatureCertificate) (certificate : ScalarCertificate) :
     RawInstruction × Nat → Option FeatureState → Option (List ScalarKind) → Op → Bool
   | (_, _), none, none, .unsupported _ => true
   | (instruction, pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (!scalarCovered instruction.opcode || scalarOpMatches instruction stack emitted) &&
+      (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack, featureSuccessors pc instruction feature with
       | some after, some successors =>
         successors.all fun target => match features[target]? with
           | some (some _) => certificate[target]? == some (some after)
           | _ => false
-      | _, _ => false
+      | _, _ => false)
   | _, _, _, _ => false
 
 def ScalarFlowValid (raw : RawMethod) (features : FeatureCertificate)

@@ -175,6 +175,11 @@ The wrong-addition fixture has a finite execution witness plus a uniqueness theo
 
 ## Argument storage
 
+The scalar certificate permits interchange between `word64` and `native` only at a metadata-bound 64-bit local or argument home. Both have the checked interpreter representation `i64` on the validated 64-bit target. This storage rule does not permit a mixed native/int64 arithmetic operation, int32 widening, or recovery of numeric width from `other`.
+
+A raw `stloc` into a validated int32 or narrow integer home with a known `word64` or `native` input is an explicit terminal `invalidState` case. The checked home store rejects every such `i64` input. The certificate therefore requires no successful successor from that store; it does not convert the value or treat later instructions as a successful execution. The rule requires the exact emitted local index. Unknown values, references and missing or different homes cannot use this exception. All covered arithmetic and conversion encodings still require their exact checks, including after the terminal store.
+
+
 Assigned or addressed parameters receive private frame-owned storage with the declared physical type. Argument loads, assignment and address-taking share that storage; ordinary by-value calls copy values into the callee's home. A byref parameter is a private reference slot: assigning it changes that slot, while writing through it affects the referenced allocation. Addresses of byref slots are explicitly rejected because nested managed-reference storage is outside the model.
 
 Narrow stores truncate and typed loads extend, following the [starg rules](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.starg). The [ldarga operation](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.ldarga) uses the existing allocation-relative reference and access checks. All owned parameter homes expire at return, and returned references are checked after expiration. The original argument list remains available for untouched parameters; extraction redirects every load of a materialized parameter to its home. This mapping and the validated storage metadata are part of the extractor trust boundary.
