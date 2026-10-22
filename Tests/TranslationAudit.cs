@@ -37,3 +37,7 @@ Audit("valid", baseline, true);
 Audit("missing-certificate", declaration.Replace(baseline, ""), false);
 Audit("unrelated-true", declaration.Replace(baseline, "theorem translation_valid : True := True.intro"), false);
 Audit("definition-instead-of-theorem", baseline.Replace("theorem translation_valid", "def translation_valid"), false);
+// A certificate over another import table does not certify the emitted `Extracted.imports`.
+Audit("other-import-table", declaration.Replace(baseline,
+    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence [⟨\"forged\", \"\", 0, false, false⟩] program := " +
+    "by decide +kernel\n"), false);

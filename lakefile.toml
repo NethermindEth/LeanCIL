@@ -51,6 +51,9 @@ name = "Tests.ConstructContract"
 name = "Tests.Imports"
 
 [[lean_lib]]
+name = "Tests.Linking"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]
@@ -103,3 +106,6 @@ name = "Tests.StaticValueEvidence"
 
 [[lean_lib]]
 name = "Tests.InterpreterEquations"
+
+[[lean_lib]]
+name = "Tests.ImportEvidence"

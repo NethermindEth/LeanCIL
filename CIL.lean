@@ -4,6 +4,7 @@ import CIL.Embedding.Basic
 import CIL.Embedding.BaseStep
 import CIL.Embedding.Tactic
 import CIL.Features
+import CIL.Imports
 import CIL.Instructions
 import CIL.Layout
 import CIL.Memory
@@ -86,6 +87,7 @@ import CIL.Safety.MemoryLemmas
 import CIL.Safety.MethodContract
 import CIL.Safety.OutcomeContract
 import CIL.Safety.Imports
+import CIL.Safety.Linking
 import CIL.Safety.NegationReturn
 import CIL.Safety.NumericHomes
 import CIL.Safety.NumericLocalLoad

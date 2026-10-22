@@ -126,12 +126,16 @@ internal static class LeanEmitter
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (m.ReturnType.FullName == "System.Void" ? "false" : "true") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
         }
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
+        // Import slots follow the program; external calls are not resolved to slots yet, so the table is empty.
+        lean.AppendLine("def imports : List ImportSlot := []");
         for (int n = 0; n < methods.Length; n++)
-            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods method{n}Closed method{n}Reachable method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods imports method{n}Closed method{n}Reachable method{n} := {Decide}");
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them.
         lean.AppendLine("def signatures : List String := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}Signature")) + "]");
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
+        lean.AppendLine("def importSignatures : List String := []");
+        lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
         lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, layoutUses := method{n}LayoutUses }}")) + "]");
         for (int n = 0; n < methods.Length; n++)
@@ -139,10 +143,10 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
             lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_skipInit_validated : Extraction.SkipInitValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
-            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence methodEvidence[{n}] method{n} :=");
+            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_skipInit_validated⟩");
         }
-        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence program := by");
+        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
         lean.AppendLine("  apply Extraction.translation_of_methods layouts_validated statics_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");

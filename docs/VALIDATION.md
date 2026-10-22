@@ -104,7 +104,7 @@ F# validation: 324 comparisons with actual .NET execution passed for addition, u
 
 The core and universal-contract suites cover checked execution and memory preservation. Choose and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect compiled implementation. Countdown validation covers original instructions, inserted NOPs and reordered blocks, and rejects wrong results and nontermination.
 
-Extraction evidence validation passed 74 Lean regressions, 34 compiled certificate fixtures, 29 generated-evidence mutation rejections, and mandatory-certificate positive/negative checks. All six CLI checks passed, including kernel replay of imported helpers and rejection of unchecked direct/transitive proofs. These tests do not establish full raw-CIL/runtime correspondence.
+Extraction evidence validation passed 74 Lean regressions, 34 compiled certificate fixtures, 29 generated-evidence mutation rejections, and mandatory-certificate positive/negative checks. All six CLI checks passed, including kernel replay of imported helpers and rejection of unchecked direct/transitive proofs. `Tests/ImportEvidence.lean` accepts an external call into a matching import slot and rejects a forged identity, parameter count, receiver or result shape, a wrong emitted argument count, a slot index inside the program or past the table, constructor and generic sites, and managed or non-call sites reaching the import range; the certificate audit also rejects a certificate over a different import table. These tests do not establish full raw-CIL/runtime correspondence.
 
 The native extraction suite passed 2,511 runtime comparisons and kernel proofs, its universal addition contract, 60 ambiguous mixed unsigned-branch rejections and five metadata/profile rejections. Separate pinned .NET 10.0.0 probes on x64 and ARM64 each passed 3,600 admitted cases; 500 rejected cases retain 38 historical model divergences. Full JIT optimization produced identical per-case results. See [native evidence](evidence/native/README.md) for exact provenance and reproduction commands.
 
@@ -163,7 +163,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

@@ -48,7 +48,7 @@ internal static class VerificationSelection
             "Examples/Verify.cs", "Examples/Hardware/Hardware.cs", "scripts/Verify.cs",
             "Tests/LibraryCache.cs", "Tests/InitializedTypes.cs", "Tests/ConsumerVerification.cs",
             "Tests/MethodSelectors.cs", "Tests/MetadataMutator.cs", "Tests/Semantics.lean",
-            "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean", "Tests/StructuralLabels.lean", "Tests/DebugNames.lean", "Tests/MethodContract.lean", "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/Imports.lean", "Tests/LoopOutcome.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean", "Tests/ConfinedFootprints.lean", "Tests/ContractConsequence.lean", "Tests/BufferContents.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
+            "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean", "Tests/StructuralLabels.lean", "Tests/DebugNames.lean", "Tests/MethodContract.lean", "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/Imports.lean", "Tests/LoopOutcome.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean", "Tests/ConfinedFootprints.lean", "Tests/ContractConsequence.lean", "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
             "Tests/VerificationReuse.cs"
         };
         inputs["core"].UnionWith(new[] { "Add", "Choose", "Calls", "Alias", "Struct", "StructCopy", "LargeStruct",
@@ -56,7 +56,7 @@ internal static class VerificationSelection
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
             "Throws", "SpanTables", "StaticValues", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "TypeTestEvidence",
-            "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage" }.Select(name => $"Tests/{name}.lean"));
+            "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence" }.Select(name => $"Tests/{name}.lean"));
         inputs["unsafe"].Add("Tests/SkipInitialization.cs");
 
         // Follow literal source paths, file-based includes and Lean imports.
