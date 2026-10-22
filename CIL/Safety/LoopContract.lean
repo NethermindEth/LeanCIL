@@ -46,8 +46,7 @@ theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract In
     (encoded : arguments = c.args input) (permitted : c.pre input updated) (formed : memory.WellFormed)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       LoopTerminates program method args post ⟨pc + 1, frame, values ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=

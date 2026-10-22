@@ -7,7 +7,7 @@ import CIL.Safety.MemoryLemmas
 import CIL.Safety.AccessSlices
 import CIL.Safety.WordFootprint
 import CIL.Safety.ExecutionInvariants
-import CIL.Safety.ExecutionStaticWorld
+import CIL.Safety.FrameInvariants
 
 namespace CIL.Safety
 
@@ -312,8 +312,7 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (formed : memory.WellFormed) (invoked : invoke program fuel callee arguments updated = .ok (final, values)) :
-    final.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) memory →
-      StaticWorldValid (programStaticDescriptors program) final) := by
+    FrameInvariants program memory final := by
   have called : ProgramStep program method pc args frame stack memory (.call callee arguments rest updated) :=
     ⟨body, op, methodFound, instructionFound, stepped⟩
   have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed called
@@ -331,8 +330,7 @@ theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract In
     (encoded : arguments = c.args input) (permitted : c.pre input updated) (formed : memory.WellFormed)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧

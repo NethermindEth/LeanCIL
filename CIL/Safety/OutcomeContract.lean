@@ -192,8 +192,7 @@ theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract In
     (normal : c.raises input updated = none)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
@@ -216,8 +215,7 @@ theorem run_call_raises_after_outcome_formed {Input Output : Type} {c : OutcomeC
     (normal : c.raises input updated = none)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
-      (StaticWorldValid (programStaticDescriptors program) memory →
-        StaticWorldValid (programStaticDescriptors program) final) →
+      StaticWorldPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       RunRaises program method (pc + 1) args frame (values ++ rest) final exception) :
     RunRaises program method pc args frame stack memory exception :=
