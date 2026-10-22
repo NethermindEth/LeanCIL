@@ -102,6 +102,38 @@ against a build whose helpers are reimplemented and renumbered, and refutes
 each contract with a concrete run on builds with an arithmetic or an aliasing
 bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
 
+## Name exceptional outcomes
+
+An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds
+`raises : Input → Memory → Option String` to a `MethodContract`: where it is
+`some exception` the method must end in exactly `.thrown exception` (`Raises`),
+and elsewhere the normal clause applies. Fuel exhaustion, unsupported
+instructions and memory faults never satisfy `Raises`, so a contract cannot
+be met by getting stuck. Memory after a throw is not observable to the caller,
+so `Raises` states none; runtime exceptions count only where the semantics
+models them as `.thrown`.
+
+```lean
+def percentContract : OutcomeContract CIL.W64 where
+  args v := [.scalar (.i64 v)]
+  pre _ _ := True
+  footprint _ := []
+  post v _ _ values := values = [.scalar (.i64 v)]
+  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+```
+
+`cil_raise_steps [facts]` steps a `Raises` goal to its `.throw`;
+`cil_outcome_call holds input at site [facts]` continues after a call the
+callee's contract says returns, and `cil_outcome_raise holds input at site [facts]`
+closes a `Raises` goal by propagating the exception the callee's contract names.
+`MethodContract.Holds.outcomes` lifts a normal-only contract, and
+`invoke_unique` ties a computed fault to the contract's existential one.
+
+`Tests/OutcomeContract.lean` proves both outcomes of a caller from its callee's
+contract. `Tests/OutcomeContract.cs` verifies those proofs against the compiled
+build, and refutes the callee's contract with concrete runs on builds with an
+off-by-one threshold or a different exception type.
+
 ## Reuse framework contracts
 
 When extending generic safety proofs, reuse the facts established by the shared
