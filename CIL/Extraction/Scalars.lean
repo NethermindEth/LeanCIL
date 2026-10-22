@@ -171,10 +171,10 @@ private def parameterTypeMatches (token : List UInt8) (type : TypeExpr) : Bool :
         token.reverse.head? == some 42 && scalarType element == .other
     | _ => [33].isPrefixOf token && ![33, 33].isPrefixOf token && scalarType type == .other
 
-private def normalizeExternalIdentity (site : CallSite) (identity : String) : Option (List UInt8) := do
+private def normalizeExternalIdentity (site : CallSite) (identity : List UInt8) : Option (List UInt8) := do
   let normalized ← site.typeArguments.zipIdx.reverse.foldlM (fun text (type, index) => do
     let name ← scalarTypeBytes type
-    return replaceBytes text (signatureBytes ("!!" ++ toString index)) name) (signatureBytes identity)
+    return replaceBytes text (signatureBytes ("!!" ++ toString index)) name) identity
   let owner ← scalarTypeBytes site.declaringType
   match splitBytes owner [60] with
   | [] | [_] => return normalized
@@ -194,12 +194,13 @@ private def balancedParentheses : Nat → List UInt8 → Bool
 
 private def externalParametersMatch (site : CallSite) (identity : String) : Bool :=
   ((do
-    let normalized ← normalizeExternalIdentity site identity
-    if !balancedParentheses 0 normalized then none else
-    let head :: rest := splitBytes normalized [40] | none
+    let original := identity.toByteArray.data.toList
+    if !balancedParentheses 0 original then none else
+    let head :: rest := splitBytes original [40] | none
     let _ := head
-    let tail ← rest.getLast?
-    if tail.reverse.head? != some 41 then none else
+    let rawTail ← rest.getLast?
+    let tail ← normalizeExternalIdentity site rawTail
+    if !balancedParentheses 1 tail || tail.reverse.head? != some 41 then none else
       let tokens ← parameterTokens 0 [] (tail.take (tail.length - 1))
       return tokens.length == site.parameterTypes.length &&
         (tokens.zip site.parameterTypes).all fun (token, type) => parameterTypeMatches token type) : Option Bool).getD false
@@ -211,7 +212,7 @@ private def callParametersMatch (site : CallSite) : Bool :=
 
 private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
   if scalarType site.returnType == .other then .other else
-  match normalizeExternalIdentity site identity with
+  match normalizeExternalIdentity site identity.toByteArray.data.toList with
   | none => .other
   | some normalized =>
     let signature := (splitBytes normalized [58, 58])[1]?.getD []
