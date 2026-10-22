@@ -445,27 +445,47 @@ theorem MethodContract.Holds.weaken {Input Output : Type} {internal exported : M
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
     leaving each `.call` for `cil_contract_call` and the postcondition at each return. -/
-syntax "cil_contract_steps" "[" term,* "]" : tactic
-
-macro_rules
-  | `(tactic| cil_contract_steps [$facts:term,*]) =>
+macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    -- A contract continuation resumes at `pc + 1` on `values ++ rest` with projected inputs.
     try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
     try (cil_strict refine CIL.Safety.invoke_exists_of_run
            (by simp only [cil_code, Nat.reduceAdd]; rfl)
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
-           (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
-    repeat first
+           (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
+
+macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
+  `(tactic| (first
+    | (cil_strict refine CIL.Safety.run_next_exists (post := _)
+        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_checked_step [$[$facts:term],*]) ?_)
     | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by cil_checked_step [$[$facts:term],*])
-        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
-    | (cil_strict refine CIL.Safety.run_next_exists (post := _)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by simp only [cil_code, Nat.reduceAdd]; rfl)
-        (by cil_checked_step [$[$facts:term],*]) ?_)))
+        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
+
+macro "cil_contract_steps" "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+    cil_contract_prepare [$[$facts:term],*]
+    repeat cil_contract_step [$[$facts:term],*]))
+
+macro "cil_contract_steps" count:num "[" facts:term,* "]" : tactic => do
+  let mut steps ← `(tactic| skip)
+  for _ in [:count.getNat] do
+    steps ← `(tactic| try (cil_contract_step [$[$facts:term],*]; $steps:tactic))
+  `(tactic| (
+    cil_contract_prepare [$[$facts:term],*]
+    $steps:tactic))
+
+macro "cil_contract_steps" "[" facts:term,* "]" " until " continuation:term : tactic =>
+  `(tactic| (first
+    | (cil_strict exact $continuation)
+    | (
+      cil_contract_prepare [$[$facts:term],*]
+      repeat first
+      | (cil_strict exact $continuation)
+      | cil_contract_step [$[$facts:term],*])))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
     site: leaves the precondition, then the continuation over the callee's final memory,

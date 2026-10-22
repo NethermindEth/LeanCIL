@@ -170,6 +170,11 @@ the contract at a `bind_call` site (or the fetched call without `at`), leaving t
 callee's final memory, values, invocation, frame and `Returns`. Destructure
 `Returns` as `⟨out, rfl, post⟩` and unfold the contract (`dsimp only [mixContract]`)
 so the stack holds the encoded output.
+Use `cil_contract_steps n [facts]` to take at most `n` instruction steps and
+leave the remaining goal for a continuation. With `n = 0`, no instruction is
+executed. `cil_contract_steps [facts] until continuation` tries the continuation
+before each step, including at the initial goal. It stops when the continuation
+closes the goal or no instruction can be stepped.
 `cil_formed_call` (`run_call_of_contract_formed`) also takes the caller memory's
 `WellFormed` and hands the continuation the callee's `final.WellFormed` and
 static-world preservation, so contracts need not restate either; `cil_formed_outcome_call`
