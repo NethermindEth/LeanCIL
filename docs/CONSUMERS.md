@@ -268,7 +268,8 @@ and a failed command preserves an existing sidecar unchanged. The old sidecar
 still binds the old DLL hash and cannot certify a changed implementation. A
 body-only rebuild can retain the same public interface and contract closure
 digests while its implementation hash and certification change. Consumers still
-check the selected deployment bytes.
+check the selected deployment bytes and independently pin the interface with
+`--import-interface-sha256 Lib=<digest>`.
 
 `--bundle directory` also writes an immutable content-addressed source bundle.
 Its inventory binds the original producer inputs, complete consumer/dependency
@@ -283,3 +284,37 @@ a separate workflow.
 Run `dotnet run --file scripts/Test.cs -- --suite exports` for the producer/App
 round trip, unchanged caller after a library rebuild, rejecting exports and
 source-only bundle checks.
+
+## Published contract imports
+
+A consumer can verify a caller against an imported contract without the library's
+implementation proof package. Supply the contract sidecar and independently
+obtained implementation SHA-256 during extraction, as described in
+[Contract interfaces](CONTRACT-INTERFACES.md). Only the interface source modules
+are supplied to the consumer. The full-verification locator is not fetched.
+
+The interface stage compiles those sources, rejects undeclared dependencies and
+forbidden declarations, and checks each canonical exported-constant closure.
+It binds definition values, theorem types, inductive constructors and recursor
+computation rules. A postcondition helper cannot change behind an unchanged name
+and retain its old closure digest. Framework and toolchain stopping uses the
+constant's defining module, not its namespace.
+
+The App theorem must retain `HoldsGiven Extracted.program Extracted.ImportsHold
+claim`. Its imported conditions use the canonical `MethodContract.Holds` or
+`OutcomeContract.Holds` predicates at their absolute slots. The implementation
+proofs are not elaborated or replayed. The unchanged axiom audit applies to the
+caller theorem; imports are explicit hypotheses.
+
+Schema-4 reports identify these imports as `published-certification`. They record
+the accepted certification theorem and statement, current implementation digest,
+interface digest and deployment obligation. The publisher's certification is an
+explicit trust input. A digest does not prove that certification. Deployment must
+provide the exact implementation and satisfy the imported contracts.
+
+Proof reuse keys bind interface/closure digests, interface source bytes and
+`ExtractedImports`, independently of library implementation hashes and provenance.
+Each cache hit still checks current DLL/sidecar/profile identities and writes a
+new report with current deployment records. `--fresh` bypasses proof reuse.
+Reference-only input can check a caller proof for authoring, but exits with status
+1 and produces neither `verified.json` nor a successful proof receipt.

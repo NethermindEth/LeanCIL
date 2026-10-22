@@ -90,7 +90,8 @@ partial class Program
             ContractExport[] exports = verified.GroupBy(result => result.Export.Identity).OrderBy(group => group.Key, StringComparer.Ordinal)
                 .Select(group => new ContractExport(group.Key, group.First().Export.Signature, group.First().Export.ParameterCount,
                     false, group.First().Export.ReturnsValue, group.First().Export.Visibility, group.First().Export.Request.Contract,
-                    group.First().Closure.Digest, group.Select(result => result.Export.Profile).Order(StringComparer.Ordinal).ToArray())).ToArray();
+                    group.First().Closure.Digest, group.Select(result => result.Export.Profile).Order(StringComparer.Ordinal).ToArray(),
+                    group.First().Closure.Kind)).ToArray();
             string target = module.Assembly.CustomAttributes.Single(attribute => attribute.AttributeType.FullName ==
                 "System.Runtime.Versioning.TargetFrameworkAttribute").ConstructorArguments.Single().Value as string
                 ?? throw new InvalidDataException("Missing target framework.");
@@ -169,8 +170,8 @@ partial class Program
     {
         string holds = kind switch
         {
-            "method" => "CIL.Safety.MethodContract.Holds",
-            "outcome" => "CIL.Safety.OutcomeContract.Holds",
+            "method" => "_root_.CIL.Safety.MethodContract.Holds",
+            "outcome" => "_root_.CIL.Safety.OutcomeContract.Holds",
             _ => throw new InvalidDataException("Export constant is not a MethodContract or OutcomeContract.")
         };
         return $$"""
@@ -187,15 +188,15 @@ run_cmd liftTermElabM do
     throwError "Export must have the canonical contract type"
   let .thmInfo author <- getConstInfo `{{export.Request.Theorem}} | throwError "Expected an export theorem"
   unless author.levelParams.isEmpty do throwError "Export theorem must have a closed statement"
-  let expected <- Lean.Elab.Term.elabType (<- `({{holds}} {{export.Request.Contract}} Extracted.program 0))
+  let expected <- Lean.Elab.Term.elabType (<- `({{holds}} _root_.{{export.Request.Contract}} _root_.Extracted.program 0))
   unless <- isDefEq author.type expected do throwError "Export theorem does not have the exact canonical Holds statement"
-theorem LeanCILExportAudit.certified : {{holds}} {{export.Request.Contract}} Extracted.program 0 :=
-  {{export.Request.Theorem}}
-theorem LeanCILExportAudit.closed : CIL.Safety.Closed Extracted.program :=
-  CIL.Safety.Closed.of_check (by decide +kernel)
-theorem LeanCILExportAudit.noImports : Extracted.imports = [] := rfl
+theorem LeanCILExportAudit.certified : {{holds}} _root_.{{export.Request.Contract}} _root_.Extracted.program 0 :=
+  _root_.{{export.Request.Theorem}}
+theorem LeanCILExportAudit.closed : _root_.CIL.Safety.Closed _root_.Extracted.program :=
+  _root_.CIL.Safety.Closed.of_check (by decide +kernel)
+theorem LeanCILExportAudit.noImports : _root_.Extracted.imports = [] := rfl
 theorem LeanCILExportAudit.noStaticSites :
-    Extracted.program.all (fun body => body.staticSites.isEmpty) = true := by decide +kernel
+    _root_.Extracted.program.all (fun body => body.staticSites.isEmpty) = true := by decide +kernel
 """;
     }
 

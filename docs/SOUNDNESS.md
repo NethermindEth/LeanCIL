@@ -2,6 +2,17 @@
 
 ## What is defined and proved
 
+`CIL.Safety.RuntimeExceptions` adds a fixed naming view of checked execution
+faults. `RaisesCLR` and `OutcomeContract.HoldsCLR` name `.thrown exception`
+directly, arithmetic overflow as `System.OverflowException`, and integer
+divide-by-zero as `System.DivideByZeroException`. They require an actual checked
+invocation with that fault. All remaining faults, including invalid operands,
+bounds failures, unsupported instructions, invalid state and fuel exhaustion,
+map to no named exception. The mapping does not change the interpreter,
+`.thrown`, `Raises`, or existing outcome-contract proofs. Handler execution
+remains unsupported. The admitted runtime correspondence assumption still
+applies; a mapping theorem does not prove a CLR implementation correct.
+
 Intraprocedural cycles are admitted by a worklist analysis. Constant facts at a control-flow join can only weaken to unknown; changed facts revisit successors until a fixed point is reached. Stack heights and tracked stack types must agree at backedges as at other joins. This validation is part of the trusted extractor, not a proof of termination. Recursive managed call graphs remain rejected.
 
 `CIL.Safety.loop_terminates` proves successful finite checked execution from a supplied invariant, a natural-number measure that strictly decreases, and kernel-checked execution segments. Each segment relates the actual interpreter before and after an iteration for every continuation fuel budget. Exit cases must prove the postcondition and successful return; `ensures_of_loop` includes checked frame setup and yields the existing `Ensures` specification. `loop_terminates_induction` instead assumes termination at every invariant state of smaller measure, so an iteration may cross a call through a proved `MethodContract` whose fuel stays existential. `loop_outcome_induction` states the same rule for `LoopOutcome`, which fixes one outcome for the loop: normal return, or exactly `.thrown exception` through `RunRaises`, so unsupported instructions, invalid state and fuel exhaustion never discharge an expected exception. Only continuing iterations carry invariant and measure obligations, and `ensures_outcome_of_loop` lifts the result through frame setup to `EnsuresOutcome`. Neither extraction nor finite fuel exhaustion proves termination. The countdown example proves this for all 32-bit unsigned inputs from its stated empty caller memory; it makes no runtime performance claim for large iteration counts.
@@ -199,3 +210,34 @@ All underlying bit patterns are admitted, including values without a named const
 Integer logarithms use Lean's natural-number `log2`, including zero mapping to zero. Rounding up constructs the power of two determined by the leading-zero count of the wrapping predecessor; truncation gives zero for zero input and overflow. Power-of-two checks require a single set bit and, for signed operands, a clear sign bit. Native overloads use the admitted 64-bit target. Byte-sized endian reversal preserves the low byte with the declared signed or unsigned extension.
 
 The trust boundary includes correspondence between these definitions and the selected .NET 10 `BitOperations` and `BinaryPrimitives` overloads. Exact signature/scope validation and boundary/runtime comparison tests support that correspondence; they do not verify CoreCLR or a JIT. See the [BitOperations API](https://learn.microsoft.com/en-us/dotnet/api/system.numerics.bitoperations?view=net-10.0) and [ReverseEndianness API](https://learn.microsoft.com/en-us/dotnet/api/system.buffers.binary.binaryprimitives.reverseendianness?view=net-10.0).
+
+## Caller proofs and published library contracts
+
+An imported library contract is a hypothesis of the caller theorem. The theorem
+has the form `forall linked, Links Extracted.program linked ->
+Extracted.ImportsHold linked -> claim linked`. Generated import conditions use
+fully qualified canonical contract predicates. The library's implementation
+proofs and full-verification bundle are not needed for this caller check.
+
+The consumer audits the supplied interface sources and their canonical contract
+closures. The closure representation includes definition values, theorem and
+inductive types, constructor metadata and computational recursor metadata/rules.
+It removes binder names and expression metadata, uses de Bruijn indices, and
+normalizes universe binders. Imported framework/toolchain module identity defines
+the stop boundary. Custom axioms, sorry, unsafe/partial declarations, unbound
+variables and missing opaque values are rejected. The ordinary caller theorem
+axiom allowlist and kernel replay policy are unchanged.
+
+The implementation-to-contract assertion is accepted from published certification,
+as schema-4 reports state. This is separate from the kernel-checked caller
+reasoning. Sidecar/DLL hashes establish identity; they do not authenticate a
+publisher or prove a library implementation theorem. The supplied certification
+theorem, statement and statement digest are provenance records here. Full
+implementation verification is a separate producer operation.
+
+Deployment must bind the exact implementation bytes, method/signature/profile
+and a library implementation satisfying the published contracts. A false or
+unsatisfiable published contract can make the caller theorem vacuous. Retaining
+`Links` and `ImportsHold` exposes this condition; it does not prove satisfiability.
+A successful report must be read with that deployment obligation. Reference-only
+authoring checks do not produce a deployment certificate.

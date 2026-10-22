@@ -111,7 +111,11 @@ string interfaceDigest = first["interfaceDigest"]!.GetValue<string>();
 string closureDigest = first["exports"]![0]!["closureDigest"]!.GetValue<string>();
 string implementation = Sha(library);
 string firstSidecar = Sha(sidecar);
-if (first["implementationSha256"]!.GetValue<string>() != implementation || first["certifications"]!.AsArray().Count != 1)
+if (first["implementationSha256"]!.GetValue<string>() != implementation || first["certifications"]!.AsArray().Count != 1 ||
+    first["exports"]![0]!["kind"]!.GetValue<string>() != "method" ||
+    first["certifications"]![0]!["theorem"]!.GetValue<string>() != "LeanCILExportAudit.certified" ||
+    string.IsNullOrWhiteSpace(first["certifications"]![0]!["statement"]!.GetValue<string>()) ||
+    !System.Text.RegularExpressions.Regex.IsMatch(first["certifications"]![0]!["statementDigest"]!.GetValue<string>(), @"\A[0-9a-f]{64}\z"))
     throw new InvalidOperationException("Export did not bind the actual implementation and complete certification.");
 string publishedBundle = first["fullVerificationLocator"]!.GetValue<string>();
 JsonObject inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(publishedBundle, "bundle.json")))!.AsObject();
@@ -126,7 +130,8 @@ if (!inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("consumer/.l
 string CallerVerify()
 {
     Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", callerArtifact, "--import", sidecar,
-        "--import-implementation", "ImportFixture.Lib=" + library, "--import-sha256", "ImportFixture.Lib=" + Sha(library)]);
+        "--import-implementation", "ImportFixture.Lib=" + library, "--import-sha256", "ImportFixture.Lib=" + Sha(library),
+        "--import-interface-sha256", "ImportFixture.Lib=" + interfaceDigest]);
     return Run([.. cli, "verify", callerArtifact, "--proof", callerProof, "--proof-root", callerPackage]);
 }
 

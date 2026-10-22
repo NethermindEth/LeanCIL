@@ -22,7 +22,7 @@ void Verified(params string[] options)
         throw new InvalidOperationException("CLI proof failed: " + result.Output);
 
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-    if (report.GetProperty("schema").GetInt32() != 3 ||
+    if (report.GetProperty("schema").GetInt32() != 4 ||
         !report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid"))
         throw new InvalidOperationException("Missing mandatory extraction certificate audit in report.");
 

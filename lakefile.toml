@@ -33,6 +33,9 @@ name = "Tests.MethodContract"
 name = "Tests.OutcomeContract"
 
 [[lean_lib]]
+name = "Tests.RuntimeExceptions"
+
+[[lean_lib]]
 name = "Tests.LoopOutcome"
 
 [[lean_lib]]
@@ -118,3 +121,6 @@ name = "Tests.InterpreterEquations"
 
 [[lean_lib]]
 name = "Tests.ImportEvidence"
+
+[[lean_lib]]
+name = "Tests.ContractClosure"
