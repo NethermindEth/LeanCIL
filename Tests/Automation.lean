@@ -58,4 +58,38 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 
 /-- info: 'Tests.Automation.checked_arithmetic' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms checked_arithmetic
+
+@[cil_code] def narrowEqualityMethod : CIL.Method := {
+  code := [.arg 0, .arg 1, .bxor, .const32 0, .eq, .ret (some .unsigned8)]
+  locals := [], returnsValue := true }
+
+def scalarDifference (left right : CIL.W32) : CIL.W32 := left ^^^ right
+
+theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (left right : CIL.W32) :
+    CIL.Safety.run [narrowEqualityMethod] 6 0 0
+      [.scalar (.i32 left), .scalar (.i32 right)] frame [] memory =
+      .ok (CIL.Safety.leaveFrame frame memory,
+        [.scalar (.i32 (if scalarDifference left right = 0 then 1 else 0))]) := by
+  cil_checked_steps
+  run_tac do
+    let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
+    unless (target.getArg! 1).isAppOf ``Except.ok do
+      throwError "Expected the checked return equation"
+  change (Except.ok (CIL.Safety.leaveFrame frame memory,
+    [.scalar (.i32 (CIL.NarrowKind.extend .unsigned8 (if left ^^^ right = 0 then 1 else 0)))]) :
+    CIL.Safety.ExecutionResult (CIL.Safety.Memory × List CIL.Safety.Value)) = _
+  simp only [scalarDifference, CIL.NarrowKind.extend]
+  split <;> rfl
+
+#print axioms checked_narrow_return
+
+theorem checked_plain_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (value : CIL.W32) :
+    CIL.Safety.run [branchMethod] 1 0 3
+      [] frame [.scalar (.i32 value)] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps
+
+#print axioms checked_plain_return
 end Tests.Automation

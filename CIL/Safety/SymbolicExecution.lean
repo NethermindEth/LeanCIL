@@ -86,11 +86,12 @@ macro_rules
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
     repeat first
-    | (cil_strict refine CIL.Safety.run_return (op := .ret _)
+    | (cil_strict refine Eq.trans (CIL.Safety.run_return (op := .ret _)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by simp only [cil_code, Nat.reduceAdd]; rfl)
         (by cil_checked_step [$[$facts:term],*])
-        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)))
+        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
+       try with_reducible rfl)
     -- Elaborate each intermediate-state proof before creating the continuation
     -- goal, so reference/frame metavariables remain assignable by the step facts.
     | (cil_strict refine Eq.trans (CIL.Safety.run_next
