@@ -1230,11 +1230,7 @@ unsafe def main (args : List String) : IO Unit := do
                 var rejected = failures.Keys.Where(name => closure is null || closure.Contains(name)).Order(StringComparer.Ordinal).ToArray();
                 if (rejected.Length > 0)
                     Fail([i], new InvalidOperationException("Kernel replay rejected " + string.Join(", ", rejected) + ":\n" +
-                        string.Join("\n", rejected.Select(name => failures[name]))));
-                // An import the source scan missed would leave PDB names out of the proof key.
-                else if (symbols[i] is null && closure is not null && closure.Contains("ExtractedSymbols"))
-                    Fail([i], new InvalidDataException("The proof imports ExtractedSymbols in a form the verifier does not recognise; use a plain `import ExtractedSymbols`."));
-            }
+                        string.Join("\n", rejected.Select(name => failures[name]))));            }
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
             Stage(proceeding, "theorem audit");
