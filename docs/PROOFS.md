@@ -204,7 +204,8 @@ facts once at entry. All later steps reuse these copies, including nested
 checked calls. The original hypotheses stay in the local context.
 
 When a local fact starts with `∀ index : Fin n`, preparation instantiates every
-index for a concrete `n`. Any later binders, such as a stack suffix `rest`, stay
+index for a concrete `n` up to 64. Larger or symbolic domains keep their original
+quantified fact without eager enumeration. Any later binders, such as a stack suffix `rest`, stay
 quantified. This lets one four-limb field-load fact rewrite offsets 0, 8, 16,
 and 24. Preparation and stepping also normalize Fin constructor indices and
 the projection of the literal `3`. For example, a fact `words 1 = 0` applies to

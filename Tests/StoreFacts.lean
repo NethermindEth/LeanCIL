@@ -93,6 +93,15 @@ formedCarry : form m carry = Except.ok carry
 formedCarry1 : form m1 carry = Except.ok carry
 sumWrite : write m sum (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m1
 carryWrite : write m1 carry (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m2
+formedSum✝ : form m sum = Except.ok sum
+formedCarry✝ : form m carry = Except.ok carry
+formedCarry1✝ : form m1 carry = Except.ok carry
+sumWrite✝ :
+  write m sum (numberBytes ((BitVec.toNat a + BitVec.toNat b + BitVec.toNat c) % 18446744073709551616) 8) 1 =
+    Except.ok m1
+carryWrite✝ :
+  write m1 carry (numberBytes ((BitVec.toNat a + BitVec.toNat b + BitVec.toNat c) % 18446744073709551616) 8) 1 =
+    Except.ok m2
 ⊢ run carryProgram 3 0 16 (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
       [Value.scalar (CIL.Value.i64 (BitVec.setWidth 64 (if a + b + c < a then 1#32 else 0#32))),
         Value.reference (ManagedReference.address carry)]
@@ -120,6 +129,11 @@ m m1 : Memory
 formedSum : form m sum = Except.ok sum
 formedCarry : form m carry = Except.ok carry
 sumWrite : write m carry (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m1
+formedSum✝ : form m sum = Except.ok sum
+formedCarry✝ : form m carry = Except.ok carry
+sumWrite✝ :
+  write m carry (numberBytes ((BitVec.toNat a + BitVec.toNat b + BitVec.toNat c) % 18446744073709551616) 8) 1 =
+    Except.ok m1
 ⊢ run carryProgram 13 0 6 (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
       [Value.scalar (CIL.Value.i64 (a + b + c)), Value.reference (ManagedReference.address sum)] m =
     Except.ok (m1, [])
@@ -142,6 +156,11 @@ m m1 m2 : Memory
 formedSum : form m sum = Except.ok sum
 formedCarry : form m carry = Except.ok carry
 sumWrite : write m1 sum (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m2
+formedSum✝ : form m sum = Except.ok sum
+formedCarry✝ : form m carry = Except.ok carry
+sumWrite✝ :
+  write m1 sum (numberBytes ((BitVec.toNat a + BitVec.toNat b + BitVec.toNat c) % 18446744073709551616) 8) 1 =
+    Except.ok m2
 ⊢ run carryProgram 13 0 6 (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
       [Value.scalar (CIL.Value.i64 (a + b + c)), Value.reference (ManagedReference.address sum)] m =
     Except.ok (m2, [])
@@ -171,18 +190,18 @@ elab "fact_normalizations " expected:num " in " body:tacticSeq : tactic => do
 @[cil_code] def twentySevenProgram : CIL.Program := [twentySeven]
 
 theorem normalize_once (words : Nat → Nat) (memory : Memory)
-    (h0 : words 0 = 0) (h1 : words 1 = 0) (h2 : words 2 = 0) (h3 : words 3 = 0)
-    (h4 : words 4 = 0) (h5 : words 5 = 0) (h6 : words 6 = 0) (h7 : words 7 = 0)
-    (h8 : words 8 = 0) (h9 : words 9 = 0) (h10 : words 10 = 0) (h11 : words 11 = 0) :
+    (_h0 : words 0 = 0) (_h1 : words 1 = 0) (_h2 : words 2 = 0) (_h3 : words 3 = 0)
+    (_h4 : words 4 = 0) (_h5 : words 5 = 0) (_h6 : words 6 = 0) (_h7 : words 7 = 0)
+    (_h8 : words 8 = 0) (_h9 : words 9 = 0) (_h10 : words 10 = 0) (_h11 : words 11 = 0) :
     invoke twentySevenProgram 27 0 [] memory = .ok (memory, []) := by
   fact_normalizations 12 in
-    cil_checked_steps [h0, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11]
+    cil_checked_steps [_h0, _h1, _h2, _h3, _h4, _h5, _h6, _h7, _h8, _h9, _h10, _h11]
 
-theorem contract_normalize_once (words : Nat → Nat) (memory : Memory) (zero : words 0 = 0) :
+theorem contract_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : words 0 = 0) :
     ∃ fuel final values, invoke twentySevenProgram fuel 0 [] memory = .ok (final, values) ∧
       final = memory ∧ values = [] := by
   fact_normalizations 1 in
-    cil_contract_steps [zero]
+    cil_contract_steps [_zero]
   exact ⟨rfl, rfl⟩
 
 @[cil_code] def twentySevenRaises : CIL.Method :=
@@ -190,10 +209,28 @@ theorem contract_normalize_once (words : Nat → Nat) (memory : Memory) (zero : 
 
 @[cil_code] def twentySevenRaisesProgram : CIL.Program := [twentySevenRaises]
 
-theorem raise_normalize_once (words : Nat → Nat) (memory : Memory) (zero : words 0 = 0) :
+theorem raise_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : words 0 = 0) :
     Raises twentySevenRaisesProgram 0 [] memory "Test.Exception" := by
   fact_normalizations 1 in
-    cil_raise_steps [zero]
+    cil_raise_steps [_zero]
+
+@[cil_code] def normalizationCallee : CIL.Method :=
+  { code := [.nop, .ret], locals := [], returnsValue := false }
+
+@[cil_code] def normalizationCaller : CIL.Method :=
+  { code := [.call 1 0, .ret], locals := [], returnsValue := false }
+
+@[cil_code] def normalizationCallProgram : CIL.Program := [normalizationCaller, normalizationCallee]
+
+theorem call_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : words 0 = 0) :
+    invoke normalizationCallProgram 3 0 [] memory = .ok (memory, []) := by
+  fact_normalizations 1 in
+    cil_checked_steps [_zero]
+
+set_option maxHeartbeats 10000 in
+theorem large_indexed_fact (words : Fin 65536 → Nat) (all : ∀ index, words index = 0) :
+    words 32768 = 0 := by
+  cil_fact_simp [] [all]
 
 @[cil_code] def fourLimb : CIL.Method :=
   { code := [.arg 0, .fieldAt 0 8, .arg 0, .fieldAt 8 8, .arg 0, .fieldAt 16 8,
@@ -228,6 +265,8 @@ theorem constructor_index_branch (memory : Memory) (left : Reference) (words : F
 #print axioms normalize_once
 #print axioms contract_normalize_once
 #print axioms raise_normalize_once
+#print axioms call_normalize_once
+#print axioms large_indexed_fact
 #print axioms indexed_fields
 #print axioms constructor_index_branch
 

@@ -49,11 +49,12 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
           let domain ← whnf domain
           if domain.isAppOfArity ``Fin 1 then
             if let some size ← getNatValue? domain.appArg! then
-              for index in [:size] do
-                let numeral : Term := ⟨Syntax.mkNumLit (toString index)⟩
-                let bound : Term := ⟨Syntax.mkNumLit (toString size)⟩
-                let value ← Term.elabTerm (← `(term| ($numeral : Fin $bound))) (some domain)
-                instances := instances.push (mkApp decl.toExpr value)
+              if size <= 64 then
+                for index in [:size] do
+                  let numeral : Term := ⟨Syntax.mkNumLit (toString index)⟩
+                  let bound : Term := ⟨Syntax.mkNumLit (toString size)⟩
+                  let value ← Term.elabTerm (← `(term| ($numeral : Fin $bound))) (some domain)
+                  instances := instances.push (mkApp decl.toExpr value)
         for instanceProof in instances do
           let type ← inferType instanceProof
           let (result, _) ← simp type ctx simprocs
