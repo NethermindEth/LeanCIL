@@ -29,4 +29,18 @@ public static class Loops
         }
         return remaining;
     }
+
+    public static uint Decrement(uint value) => unchecked(value - 1);
+
+    public static uint CountCalls(uint value)
+    {
+        uint remaining = value;
+        uint count = 0;
+        while (remaining != 0)
+        {
+            remaining = Decrement(remaining);
+            count = unchecked(count + 1);
+        }
+        return count;
+    }
 }

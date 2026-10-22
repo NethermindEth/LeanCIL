@@ -61,6 +61,22 @@ proves an exit path and its postcondition. Supply an invariant and decreasing
 measure to the loop termination theorem; these tactics do not infer termination.
 See the [countdown proof](../Examples/Proofs/Countdown.lean).
 
+A loop body that calls a helper composes through the helper's `MethodContract`
+([LoopContract](../CIL/Safety/LoopContract.lean)). `LoopSegment` fixes one cost for
+every continuation budget, which a contract's existential fuel cannot supply, so
+`loop_terminates_induction` asks each iteration for `LoopTerminates` at its own
+state while assuming it at every invariant state of smaller measure. Step to the
+call with `cil_loop_advance [facts]`, apply the contract with
+`cil_loop_call holds input at site [facts]` (`loop_terminates_call`, or
+`loop_terminates_call_formed` for `WellFormed` and the static world), re-establish
+the invariant from `Returns` and `Confined` in the continuation, reach the next
+head with `cil_loop_steps`, and close with `loop_reaches_terminates` and the
+assumption. The [counted-loop proof](../Examples/Proofs/CountCalls.lean) never
+unfolds the helper or names its fuel; the loop suite reuses it unedited for a
+reimplemented helper and requires it to reject a discarded helper result and a
+broken count. On the correct build, a nondecreasing measure and an invariant that
+holds at entry and exit but is not preserved each fail at exactly that obligation.
+
 ## Compose calls through contracts
 
 A caller proof that steps into its callee breaks whenever the callee is
