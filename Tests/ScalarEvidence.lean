@@ -286,6 +286,50 @@ example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.word32] = none := 
 example : ¬ ScalarFlowValid nativeHomeRaw nativeHomeFeatures
     (nativeHomeStates.set 1 (some [.other])) nativeHomeMethod.code := by decide
 
+private def nativeReturnRaw := raw [i 2, i 77, i 42] [.byref word]
+private def nativeReturnFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
+private def nativeReturnStates : ScalarCertificate := [some [], some [.reference], some [.native]]
+private def nativeReturnEvidence : MethodEvidence := {
+  original := nativeReturnRaw, arguments := [], closed := nativeReturnRaw,
+  parameterInput := { arguments := [.reference], locals := [], code := [.load 0, .other, .other] },
+  reachable := List.replicate 3 true, featureStates := nativeReturnFeatures, scalarStates := nativeReturnStates, layoutUses := [] }
+private def nativeReturnMethod : Method := { locals := [], returnsValue := true, code := [.arg 0, .loadScalar 8, .ret] }
+example : TranslationValid [] #[] [nativeReturnEvidence] [] [nativeReturnMethod] := by decide +kernel
+example : scalarTransfer nativeReturnRaw (i 42) [.native] = some [] := by decide
+example : scalarTransfer { nativeReturnRaw with returnType := nativeType } (i 42) [.word64] = some [] := by decide
+example : scalarTransfer nativeReturnRaw (i 42) [.other] = none := by decide
+example : scalarTransfer nativeReturnRaw (i 42) [.word32] = none := by decide
+example : scalarTransfer nativeReturnRaw (i 42) [.native, .word64] = none := by decide
+example : ¬ ScalarFlowValid { nativeReturnRaw with returnType := intType }
+    nativeReturnFeatures nativeReturnStates nativeReturnMethod.code := by decide
+
+private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte")
+private def byteSpanSite : CallSite := {
+  declaringType := byteSpanType, name := ".ctor", target := .external
+    (runtime ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)"),
+  typeArguments := [], parameterCount := 2, parameterTypes := [.pointer .void, intType],
+  hasThis := true, returnsValue := false, returnType := .void }
+private def byteSpanRaw := { raw [i 2, i 31 (.integer 16), i 115 (.call byteSpanSite), i 42] [.byref word] with returnType := byteSpanType }
+private def byteSpanFeatures : FeatureCertificate := [unknown 0, unknown 1, state [some 16, none], unknown 1]
+private def byteSpanStates : ScalarCertificate := [some [], some [.reference], some [.word32, .reference], some [.other]]
+private def byteSpanCode : List Op := [.arg 0, .const32 16, .memory .spanCreate, .ret]
+example : ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates byteSpanCode := by decide +kernel
+example : ¬ ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates
+    (byteSpanCode.set 2 (.memory (.spanItem 1))) := by decide +kernel
+example : scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .reference] = some [.other] := by decide +kernel
+example : scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .other] = none := by decide +kernel
+example : scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .native] = none := by decide +kernel
+example : scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with target := .external "forged" }))
+    [.word32, .reference] = none := by decide +kernel
+example : scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with name := "Other" }))
+    [.word32, .reference] = none := by decide +kernel
+example : scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with declaringType := .atom runtime "Other" }))
+    [.word32, .reference] = none := by decide +kernel
+example : scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with parameterTypes := [.pointer word, intType] }))
+    [.word32, .reference] = none := by decide +kernel
+example : scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite))
+    [.word32, .reference, .reference] = none := by decide +kernel
+
 private def tupleType : TypeExpr := .aggregate
   (runtime ++ "::System.ValueTuple`2<System.UInt64,System.UInt64>") 0
 private def tupleSite : CallSite := {
