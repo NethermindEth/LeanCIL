@@ -239,6 +239,13 @@ the stop boundary. Custom axioms, sorry, unsafe/partial declarations, unbound
 variables and missing opaque values are rejected. The ordinary caller theorem
 axiom allowlist and kernel replay policy are unchanged.
 
+Every supplied interface module is independently kernel-replayed before its
+compiled artifacts enter the accepted snapshot. Published certification does not
+exempt interface declarations from this check. Compilation and an axiom audit
+alone cannot detect an unchecked declaration inserted by an elaborator. This
+replay checks interface source declarations; it does not require a library's
+implementation proof or a full-verification bundle.
+
 The implementation-to-contract assertion is accepted from published certification,
 as schema-4 reports state. This is separate from the kernel-checked caller
 reasoning. Sidecar/DLL hashes establish identity; they do not authenticate a
