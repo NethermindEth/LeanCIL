@@ -6,6 +6,7 @@ namespace CIL.Extraction
 inductive FieldType where
   | signed8 | unsigned8 | boolean | signed16 | unsigned16 | character
   | signed32 | unsigned32 | signed64 | unsigned64 | nativeInt | nativeUInt
+  | vector128 | vector256
   | aggregate (index : Nat)
   deriving DecidableEq, Repr
 
@@ -35,6 +36,8 @@ private def fieldStorage (previous : Array ComputedLayout) : FieldType → Optio
   | .signed16 | .unsigned16 | .character => some (2, 2, false)
   | .signed32 | .unsigned32 => some (4, 4, false)
   | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => some (8, 8, false)
+  | .vector128 => some (16, 16, false)
+  | .vector256 => some (32, 32, false)
   | .aggregate index => do
     let child ← previous[index]?
     return (child.layout.size, child.alignment, true)
@@ -46,7 +49,7 @@ private def alignUp (size alignment : Nat) : Nat :=
 private def autoSequential (previous : Array ComputedLayout) (raw : RawLayout) : Bool :=
   !raw.explicit && raw.packing ≤ 0 && raw.declaredSize ≤ 0 &&
   match raw.fields.mapM (fun field => do
-      if field.offset.isSome then none else
+      if field.offset.isSome || field.type == .vector128 || field.type == .vector256 then none else
         let (width, _, aggregate) ← fieldStorage previous field.type
         if aggregate then none else some width) with
   | some (width :: widths) => widths.all (· == width)
@@ -61,13 +64,14 @@ def computeLayout (previous : Array ComputedLayout) (raw : RawLayout) : Option C
   else
     let pack := if raw.packing ≤ 0 then 8 else raw.packing.toNat
     let (size, alignment, fields) ← raw.fields.foldlM (init := (0, 1, ([] : List FieldLayout))) fun (size, alignment, fields) field => do
-      let (width, natural, aggregate) ← fieldStorage previous field.type
-      let aligned := min pack natural
-      if aligned = 0 then none else do
-        let offset ← if raw.explicit then field.offset else
-          if field.offset.isSome then none else some (alignUp size aligned)
-        if offset + width > 65536 || (raw.explicit && offset + width > raw.declaredSize.toNat) then none else
-          return (max size (offset + width), max alignment aligned, fields ++ [⟨offset, width, aggregate⟩])
+      if field.type == .vector256 && pack > 16 then none else do
+        let (width, natural, aggregate) ← fieldStorage previous field.type
+        let aligned := min pack natural
+        if aligned = 0 then none else do
+          let offset ← if raw.explicit then field.offset else
+            if field.offset.isSome then none else some (alignUp size aligned)
+          if offset + width > 65536 || (raw.explicit && offset + width > raw.declaredSize.toNat) then none else
+            return (max size (offset + width), max alignment aligned, fields ++ [⟨offset, width, aggregate⟩])
     let finalSize := max 1 (if raw.declaredSize > 0 then max size raw.declaredSize.toNat else alignUp size alignment)
     if finalSize > 65536 then none else
       return ⟨⟨finalSize, fields⟩, alignment⟩

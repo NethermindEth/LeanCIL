@@ -42,6 +42,13 @@ internal static class MetadataValidation
         _ => throw new InvalidDataException($"Unsupported field type: {type.FullName}")
     };
 
+    internal static int? VectorWidth(TypeReference type) => type is GenericInstanceType ? type.FullName switch
+    {
+        "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
+        "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
+        _ => null
+    } : null;
+
     internal sealed record AggregateInfo(int Size, int Alignment, IReadOnlyDictionary<string, int> Offsets);
 
     // Type is the field's type as seen from the owner, after substituting a tuple's type arguments.
@@ -54,7 +61,7 @@ internal static class MetadataValidation
     internal static int Layout(TypeReference reference, ModuleDefinition module) => AggregateLayout(reference, module).Size;
 
     internal static int FieldSize(TypeReference type, ModuleDefinition module) =>
-        IsAggregate(type, module) ? Layout(type, module) : PrimitiveWidth(type);
+        IsAggregate(type, module) ? Layout(type, module) : VectorWidth(type) ?? PrimitiveWidth(type);
 
     internal static int FieldOffset(TypeReference owner, FieldDefinition field, ModuleDefinition module) =>
         AggregateLayout(owner, module).Offsets[field.FullName];
@@ -90,11 +97,13 @@ internal static class MetadataValidation
         var alignment = 1;
         foreach (var field in type.Fields.Where(f => !f.IsStatic))
         {
-            if (field.FieldType is TypeSpecification)
+            if (field.FieldType is TypeSpecification && VectorWidth(field.FieldType) is null)
                 throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
             var nested = IsAggregate(field.FieldType, module)
                 ? AggregateLayout(field.FieldType, module, active, layouts) : null;
-            var width = nested?.Size ?? PrimitiveWidth(field.FieldType);
+            int width = nested?.Size ?? VectorWidth(field.FieldType) ?? PrimitiveWidth(field.FieldType);
+            if (VectorWidth(field.FieldType) == 32 && pack > 16)
+                throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
             if (nested is null) RuntimeModels.ValidateTypeIdentity(field.FieldType, module);
             var fieldAlignment = Math.Min(pack, nested?.Alignment ?? width);
             alignment = Math.Max(alignment, fieldAlignment);

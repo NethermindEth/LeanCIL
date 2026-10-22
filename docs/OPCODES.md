@@ -183,3 +183,21 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 `System.Math.BigMul(ulong, ulong, out ulong)` returns the high 64 bits of the unsigned product and writes the low 64 bits through the checked output reference. The destination must be live, in bounds and writable; its previous bytes need not be initialized. `CIL.Safety.bigMul64_succeeds` exposes the exact result, low-word readback, allocation preservation and preservation of cells outside the output's eight bytes.
 
 Native-width overloads use the validated 64-bit target. The 128-bit, span, generic-math and other helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.
+
+### Vector fields
+
+Instance fields support `Vector128<ulong>` and `Vector256<ulong>`, matching the
+vector types admitted by `ldobj` and `stobj`. The owner must have a validated,
+reference-free sequential or explicit layout. Other vector element types and
+widths in fields are rejected. Auto-layout tuples do not admit vector fields.
+`Vector256<ulong>` fields require an effective packing limit of at most 16 bytes.
+Higher packing limits have different managed alignment on x64 and ARM64.
+
+Field widths come from the vector type. Raw layout evidence keeps vector storage
+separate from integer and nested aggregate storage. Lean recomputes each field
+offset and checks each field instruction against that evidence.
+
+Field reads and writes use the ordinary byte-aligned access rule. A packed field
+does not require vector-width alignment. Checked accesses retain allocation
+bounds and initialization masks. `Unsafe.As` can expose these fields through an
+admitted struct reference without changing its address or access bounds.
