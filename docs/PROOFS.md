@@ -391,6 +391,17 @@ vacuously, and composes an imported raising `Percent` through both outcomes of
 implementation are not part of this rule; relocating a library into the slot is
 described next.
 
+## Read control flow off one step
+
+`CIL.Safety.StepFlow` says where a successful `step` can go without unfolding it.
+`step_next_target`: an action that stays in the frame resumes at `pc + 1` of a
+continuing instruction or at one of `op.targets`. `step_callee`: only `.call`,
+`.newVector256` and `.newAggregate` enter a method, the one they name
+(`Op.callees`). `step_call_action` and `step_newVector256_action` /
+`step_newAggregate_action` separate a call from a construction. The module
+imports only the step simulation, so a consumer reasoning about reachable pcs
+does not compile the import and linking layers.
+
 ## Link separately extracted libraries
 
 A library extracted on its own calls its helpers by its own method indices.
