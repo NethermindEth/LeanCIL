@@ -190,7 +190,7 @@ elaborators are executable code, so use this mode with packages you trust.
 | Execution | `CIL.Semantics`, `CIL.ExecutionLemmas` | Functional byte-memory interpreter, calls, finite fuel, result uniqueness |
 | Memory safety | `CIL.Safety.Memory`, `CIL.Safety.Execution` | Allocation-aware interpreter, access checks, initialization, permissions and lifetime |
 | Proofs | `CIL.Safety.ExecutionTrace`, `CIL.Safety.ExecutionInvariants`, `CIL.Safety.Certificate`, `CIL.Verification` | Shared execution traces and instruction contracts, invariants, invocation certificates and total-correctness specifications |
-| Automation | `CIL.Safety.SymbolicExecution`, `CIL.Safety.LoopAutomation`, `CIL.SymbolicExecution` | Checked instruction composition, loop segments, definitional reduction and transactional proved summaries |
+| Automation | `CIL.Safety.SymbolicExecution`, `CIL.Safety.LoopAutomation`, `CIL.Safety.LoopContract`, `CIL.SymbolicExecution` | Checked instruction composition, loop segments, loop calls through method contracts, definitional reduction and transactional proved summaries |
 | Runtime features | `CIL.Features`, `CIL.SIMD.*`, `CIL.ProfileEquivalence` | Fixed capability profiles, supported SIMD semantics, justified profile equivalence |
 | Extraction | `Extractor/` | Metadata validation, managed-call reachability, CIL translation and Lean generation |
 | Verification | `leancil verify` | Source-keyed library cache, explicit fresh builds, kernel replay, theorem audit and assembly/source identity binding |

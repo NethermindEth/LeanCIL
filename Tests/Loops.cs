@@ -6,6 +6,7 @@
 using System.Reflection;
 using System.Buffers.Binary;
 using System.Reflection.PortableExecutable;
+using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -81,6 +82,111 @@ foreach (var variant in new[] { "Nops", "Reordered", "Stuttering" })
         verification.Verify(dll, "Examples", "Loops::Countdown(uint)", contract, output, existingArtifacts: true);
         Console.WriteLine($"PASS unchanged universal contract after {variant}");
     }
+}
+
+// A loop that calls a helper is proved from the helper's contract alone. Reimplementing the
+// helper re-proves only that contract; the loop proof is reused byte for byte.
+const string CountCalls = "Loops::CountCalls(uint)";
+var countProof = File.ReadAllText(At("Examples/Proofs/CountCalls.lean"));
+var helperStart = countProof.IndexOf("theorem decrement_holds", StringComparison.Ordinal);
+var helperEnd = helperStart < 0 ? -1 : countProof.IndexOf("private def frame", helperStart, StringComparison.Ordinal);
+var loopStart = countProof.IndexOf("theorem terminates", StringComparison.Ordinal);
+if (helperEnd < 0 || loopStart < helperEnd)
+    throw new InvalidDataException("Examples/Proofs/CountCalls.lean has no helper section before its loop proof");
+var loopLine = countProof[..loopStart].Count(c => c == '\n') + 1;
+verification.Verify(assembly, "Examples", CountCalls, At("Examples/Proofs/CountCalls.lean"), Path.Combine(root, "CountCalls"));
+Console.WriteLine("PASS counted loop returns its iteration count for every uint through the helper contract");
+
+string CountVariant(string name, Action<MethodDefinition, MethodDefinition> mutate)
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var type = module.GetType("Examples.Loops");
+        mutate(type.Methods.Single(m => m.Name == "CountCalls"), type.Methods.Single(m => m.Name == "Decrement"));
+        module.Write(dll);
+    }
+    Run(Extract("extract", dll, "Examples", CountCalls, output));
+    return dll;
+}
+
+uint Invoke(string dll, string name, uint input) =>
+    (uint)Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Loops")!.GetMethod(name)!.Invoke(null, [input])!;
+
+var replacedCount = CountVariant("CountCallsReplaced", (_, helper) =>
+{
+    var il = helper.Body.GetILProcessor();
+    helper.Body.Instructions.Clear();
+    il.Append(Instruction.Create(OpCodes.Ldarg_0));
+    il.Append(Instruction.Create(OpCodes.Ldc_I4_M1));
+    il.Append(Instruction.Create(OpCodes.Add));
+    il.Append(Instruction.Create(OpCodes.Ret));
+});
+if (Invoke(replacedCount, "Decrement", 0) != uint.MaxValue || Invoke(replacedCount, "CountCalls", 7) != 7)
+    throw new InvalidOperationException("The reimplemented helper changed the runtime results");
+const string ReplacedHelper = """
+theorem decrement_holds : decrementContract.Holds Extracted.program decrement := by
+  rintro x m -
+  dsimp only [decrementContract]
+  refine ⟨8, m, _, ?_, Confined.refl _ m, x + 4294967295#32, rfl, by bv_omega⟩
+  cil_checked_steps
+
+
+""";
+var replacedProof = Path.Combine(root, "CountCallsReplaced", "CountCalls.lean");
+File.WriteAllText(replacedProof, countProof[..helperStart] + ReplacedHelper + countProof[helperEnd..]);
+verification.Verify(replacedCount, "Examples", CountCalls, replacedProof, Path.Combine(root, "CountCallsReplaced"), existingArtifacts: true);
+Console.WriteLine("PASS unchanged loop proof after reimplementing the helper and re-proving only its contract");
+
+// Both builds keep the helper, so the unchanged proof must fail inside the loop proof:
+// a discarded helper result never decreases the measure; counting twice breaks the invariant.
+foreach (var (name, opcode, replacement) in new[] { ("CountCallsDiscarded", OpCodes.Stloc_0, OpCodes.Pop), ("CountCallsOvercount", OpCodes.Ldc_I4_1, OpCodes.Ldc_I4_2) })
+{
+    var dll = CountVariant(name, (caller, _) => caller.Body.Instructions.Single(i => i.OpCode == opcode &&
+        (opcode != OpCodes.Stloc_0 || i.Previous.OpCode == OpCodes.Call)).OpCode = replacement);
+    if (name == "CountCallsOvercount" && Invoke(dll, "CountCalls", 3) != 6)
+        throw new InvalidOperationException("The overcounting fixture did not change the result");
+    var lines = RejectedLines(dll, At("Examples/Proofs/CountCalls.lean"), name, existingArtifacts: true);
+    if (lines.Length == 0 || lines.Any(line => line < loopLine))
+        throw new InvalidOperationException($"{name} was not rejected by the loop proof: lines {string.Join(", ", lines)}");
+    Console.WriteLine($"PASS unchanged loop proof rejects {name}");
+}
+
+// On the correct build, the rule itself must refuse a nondecreasing measure and an invariant
+// that holds at entry and exit but is not preserved, each at exactly that obligation.
+int LineOf(string text) => countProof.IndexOf(text, StringComparison.Ordinal) is var at and >= 0
+    ? countProof[..at].Count(c => c == '\n') + 1
+    : throw new InvalidDataException("Examples/Proofs/CountCalls.lean has no line containing: " + text);
+foreach (var (name, original, mutated, obligation) in new[]
+{
+    ("CountCallsCountMeasure", "(fun s => s.1.toNat)", "(fun s => s.2.1.toNat)", "show (x - 1).toNat < x.toNat"),
+    ("CountCallsProductInvariant", "state.2.1 + state.1 = value", "state.2.1 + state.1 = value + state.2.1 * state.1",
+        "show count + 1 + (x - 1) = value")
+})
+{
+    if (countProof.Split(original).Length != 2) throw new InvalidDataException("Ambiguous proof mutation: " + original);
+    Directory.CreateDirectory(Path.Combine(root, name));
+    var proof = Path.Combine(root, name, "CountCalls.lean");
+    File.WriteAllText(proof, countProof.Replace(original, mutated));
+    var lines = RejectedLines(assembly, proof, name, existingArtifacts: false);
+    if (lines.Length == 0 || lines.Any(line => line != LineOf(obligation)))
+        throw new InvalidOperationException($"{name} was not rejected at line {LineOf(obligation)}: lines {string.Join(", ", lines)}");
+    Console.WriteLine($"PASS loop rule rejects {name} at its obligation");
+}
+
+int[] RejectedLines(string dll, string proof, string name, bool existingArtifacts)
+{
+    string? failure = null;
+    try { verification.Verify(dll, "Examples", CountCalls, proof, Path.Combine(root, name), existingArtifacts: existingArtifacts); }
+    catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
+    {
+        failure = error.Message;
+    }
+    if (failure is null || File.Exists(Path.Combine(root, name, "verified.json")))
+        throw new InvalidOperationException($"{name} passed verification");
+    return Regex.Matches(failure, @"Proof\.lean:(\d+):\d+: error").Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
 }
 
 void Prove(string dll, string selector, string name, string source)
