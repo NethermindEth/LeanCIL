@@ -50,14 +50,14 @@ example : ¬ DivisionIntrinsicsValid (raw call3) [true] (body [.intrinsic (.avx2
 example : ¬ DivisionIntrinsicsValid (raw { call3 with hasThis := true }) [true] (body [.intrinsic (.avx2 .andNot) 2]) := by decide +kernel
 example : ¬ DivisionIntrinsicsValid (raw { call3 with target := .external "forged" }) [true] (body [.intrinsic (.avx2 .andNot) 2]) := by decide +kernel
 private def call4 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "ShiftLeftLogical",
+  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "ShiftLeftLogical"
   target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", vectorType "128"] }
 example : DivisionIntrinsicsValid (raw call4) [true] (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
 example : ¬ DivisionIntrinsicsValid (raw call4) [true] (body [.intrinsic (.avx2 .shl64Count) 3]) := by decide +kernel
 example : ¬ DivisionIntrinsicsValid (raw { call4 with hasThis := true }) [true] (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
 example : ¬ DivisionIntrinsicsValid (raw { call4 with target := .external "forged" }) [true] (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
 private def call5 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "ShiftRightLogical",
+  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "ShiftRightLogical"
   target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", vectorType "128"] }
 example : DivisionIntrinsicsValid (raw call5) [true] (body [.intrinsic (.avx2 .shr64Count) 2]) := by decide +kernel
 example : ¬ DivisionIntrinsicsValid (raw call5) [true] (body [.intrinsic (.avx2 .shr64Count) 3]) := by decide +kernel
@@ -78,7 +78,7 @@ example : ¬ DivisionIntrinsicsValid (raw call7) [true] (body [.intrinsic (.avx5
 example : ¬ DivisionIntrinsicsValid (raw { call7 with hasThis := true }) [true] (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
 example : ¬ DivisionIntrinsicsValid (raw { call7 with target := .external "forged" }) [true] (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
 private def call8 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := "MoveMask",
+  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := "MoveMask"
   target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"), typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := true, returnType := .atom runtimeScope "System.Int32", parameterTypes := [vectorType "512"] }
 example : DivisionIntrinsicsValid (raw call8) [true] (body [.intrinsic (.avx512DQ .moveMask512) 1]) := by decide +kernel
 example : ¬ DivisionIntrinsicsValid (raw call8) [true] (body [.intrinsic (.avx512DQ .moveMask512) 2]) := by decide +kernel
@@ -171,17 +171,23 @@ example : evalIntrinsic (.avx512 .ltu512)
     [.v512 (Vector.pack512 9223372036854775808 1 0 0 0 0 0 0),
      .v512 (Vector.pack512 1 1 0 0 0 0 0 0)] = some (.v512 0) := by decide +kernel
 
-example : DivisionIntrinsicsValid (raw { declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "ShiftLeftLogical",
+example : DivisionIntrinsicsValid (raw {
+    declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2"
+    name := "ShiftLeftLogical"
     target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)"),
     typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", .atom runtimeScope "System.Byte"] }) [true]
     (body [.intrinsic (.avx2 .shl64) 2]) := by decide +kernel
 
-example : DivisionIntrinsicsValid (raw { declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "ShiftRightLogical",
+example : DivisionIntrinsicsValid (raw {
+    declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2"
+    name := "ShiftRightLogical"
     target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)"),
     typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", .atom runtimeScope "System.Byte"] }) [true]
     (body [.intrinsic (.avx2 .shr64) 2]) := by decide +kernel
 
-example : DivisionIntrinsicsValid (raw { declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := "MoveMask",
+example : DivisionIntrinsicsValid (raw {
+    declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ"
+    name := "MoveMask"
     target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
     typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := true, returnType := .atom runtimeScope "System.Int32", parameterTypes := [vectorType "256"] }) [true]
     (body [.intrinsic (.avx512DQ .moveMask64) 1]) := by decide +kernel
