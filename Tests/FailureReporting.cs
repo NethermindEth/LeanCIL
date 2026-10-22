@@ -48,11 +48,12 @@ bind_method root rootBody := "System.Void Contracts.Calls::Root(System.UInt64&,S
 bind_callee mix mixBody := "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)" from rootBody
 bind_callee addTo addBody := "System.Void Contracts.Calls::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)" from rootBody
 
-def mixContract : MethodContract (CIL.W64 × CIL.W64) where
+def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
   args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+  results v := [.scalar (.i64 v)]
   pre _ _ := True
   footprint _ := []
-  post input _ _ values := values = [.scalar (.i64 (input.1 * 3 + input.2))]
+  post input _ _ v := v = input.1 * 3 + input.2
 
 structure AddInput where
   a : Reference
@@ -76,7 +77,7 @@ const string MixHolds = """
 theorem correctness : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   dsimp only [mixContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, rfl⟩
+  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 """;
 const string AddHolds = """
@@ -94,7 +95,7 @@ theorem correctness : addContract.Holds Extracted.program addTo := by
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), rfl, readback⟩
+  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 """;
@@ -104,10 +105,12 @@ def empty : Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, 
 /-- This build returns `Mix(0, 0) = 1`; the contract requires `0 * 3 + 0`. -/
 theorem correctness : ¬ mixContract.Holds Extracted.program mix := by
   intro holds
-  obtain ⟨_, final, values, ran, -, wrong⟩ := holds (0, 0) empty trivial
+  obtain ⟨_, final, values, ran, -, out, encoded, wrong⟩ := holds (0, 0) empty trivial
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 mix
     (mixContract.args (0, 0)) empty = .ok _))
-  simp [mixContract] at wrong
+  simp only [mixContract] at encoded wrong
+  subst wrong
+  simp at encoded
 """;
 File.WriteAllText(Path.Combine(package, "Client", "Contracts.lean"), Contracts);
 string Proof(string name, string body)
