@@ -3,7 +3,6 @@
 #:include ../scripts/Verification.cs
 
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 // Admission report: shared blockers are deduplicated with every chain, excluded branches stay silent.
 var directory = At("artifacts/Blockers");
@@ -73,41 +72,48 @@ Require(entries[0].GetProperty("method").GetString() == "System.UInt64 Fixture::
     entries[0].GetProperty("reachableMethods").GetInt32() == 1, "Admitted entry lost its resolved method");
 
 
-// Validation continues past the first construct; each one in Helper is a single blocker shared by both entry points.
+// Validation continues past the first construct, and each construct is one blocker however many sites and entries reach it.
 const string helper = "System.Int32 Fixture::Helper(System.Int32)";
-var shared = blockers.Where(b => b.GetProperty("method").GetString() == helper).ToArray();
-Require(shared.Select(b => Regex.Replace(b.GetProperty("instruction").GetString()!, @"\AIL_[0-9a-f]{4}: ", "")).Order(StringComparer.Ordinal)
-    .SequenceEqual(["ldlen", "newarr System.Int32"]), $"Expected one deduplicated Helper blocker per construct; found {shared.Length}");
-Require(Ids(1).Order(StringComparer.Ordinal).SequenceEqual(shared.Select(b => b.GetProperty("id").GetString()!).Order(StringComparer.Ordinal)) &&
+const string excluded = "System.UInt64 Fixture::Excluded(System.UInt64,System.UInt64)";
+JsonElement Blocker(string construct) => blockers.Single(b => b.GetProperty("construct").GetString() == construct);
+string[] Reached(JsonElement blocker) => blocker.GetProperty("entries").EnumerateArray()
+    .Select(e => e.GetProperty("profile").GetString() + " " + string.Join(" -> ", e.GetProperty("chains").EnumerateArray().Single().EnumerateArray().Select(m => m.GetString())))
+    .Order(StringComparer.Ordinal).ToArray();
+string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
+Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)
+    .SequenceEqual(["Unsupported instruction: ldlen", "Unsupported instruction: newarr System.Int32", "Unsupported instruction: newarr System.Int64"]),
+    "Expected one blocker per unsupported construct");
+var allocation = Blocker("Unsupported instruction: newarr System.Int32");
+var length = Blocker("Unsupported instruction: ldlen");
+Require(Reached(allocation).SequenceEqual([
+    $"scalar System.Int32 Fixture::First(System.Int32) -> {helper}",
+    $"scalar System.Int32 Fixture::Second(System.Int32) -> {helper}"]), "Wrong call chains: " + string.Join("; ", Reached(allocation)));
+Require(Reached(length).SequenceEqual([
+    $"scalar System.Int32 Fixture::First(System.Int32) -> {helper}",
+    $"scalar System.Int32 Fixture::Second(System.Int32) -> {helper}",
+    $"x64-avx2 {excluded}"]), "ldlen not shared across methods and profiles: " + string.Join("; ", Reached(length)));
+Require(length.GetProperty("sites").EnumerateArray().Select(s => s.GetProperty("method").GetString()).Order(StringComparer.Ordinal)
+    .SequenceEqual([helper, excluded]), "ldlen sites not kept per method");
+Require(Ids(1).Order(StringComparer.Ordinal).SequenceEqual(new[] { Id(allocation), Id(length) }.Order(StringComparer.Ordinal)) &&
     Ids(1).SequenceEqual(Ids(2)), "Entries do not share the Helper blockers");
-foreach (var blocker in shared)
-{
-    var chains = blocker.GetProperty("entries").EnumerateArray()
-        .Select(e => string.Join(" -> ", e.GetProperty("chain").EnumerateArray().Select(m => m.GetString()))).Order(StringComparer.Ordinal).ToArray();
-    Require(chains.SequenceEqual([
-        $"System.Int32 Fixture::First(System.Int32) -> {helper}",
-        $"System.Int32 Fixture::Second(System.Int32) -> {helper}"]), "Wrong call chains: " + string.Join("; ", chains));
-}
 
 // The exact instruction, its offset and the PDB location name the construct.
-var allocation = shared.Single(b => b.GetProperty("instruction").GetString()!.Contains("newarr"));
-var instruction = allocation.GetProperty("instruction").GetString()!;
-Require(instruction.StartsWith($"IL_{allocation.GetProperty("ilOffset").GetInt32():x4}: newarr System.Int32", StringComparison.Ordinal) &&
-    allocation.GetProperty("message").GetString() == "Unsupported instruction: " + instruction, "Wrong blocking instruction: " + instruction);
-Require(allocation.GetProperty("source").GetString()!.StartsWith($"Fixture.cs:{LineOf("new int[x]")}:", StringComparison.Ordinal),
-    "Wrong source location: " + allocation.GetProperty("source"));
+var site = allocation.GetProperty("sites").EnumerateArray().Single();
+var instruction = site.GetProperty("instruction").GetString()!;
+Require(site.GetProperty("method").GetString() == helper &&
+    instruction == $"IL_{site.GetProperty("ilOffset").GetInt32():x4}: newarr System.Int32" &&
+    site.GetProperty("message").GetString() == "Unsupported instruction: " + instruction, "Wrong blocking instruction: " + instruction);
+Require(site.GetProperty("source").GetString()!.StartsWith($"Fixture.cs:{LineOf("new int[x]")}:", StringComparison.Ordinal),
+    "Wrong source location: " + site.GetProperty("source"));
 
 // The AVX2 branch is folded away under scalar and reported only where the profile makes it live.
 Require(Ids(3).Length == 0, "Excluded branch reported under the scalar profile");
-var live = blockers.Where(b => Ids(4).Contains(b.GetProperty("id").GetString())).ToArray();
-Require(live.Length == 2 && live.All(b => b.GetProperty("method").GetString() == "System.UInt64 Fixture::Excluded(System.UInt64,System.UInt64)" &&
-    b.GetProperty("source").GetString()!.StartsWith($"Fixture.cs:{LineOf("Avx2.IsSupported")}:", StringComparison.Ordinal) &&
-    b.GetProperty("entries").EnumerateArray().Single().GetProperty("profile").GetString() == "x64-avx2") &&
-    live.Any(b => b.GetProperty("instruction").GetString()!.EndsWith("newarr System.Int64", StringComparison.Ordinal)),
+var live = Blocker("Unsupported instruction: newarr System.Int64");
+var liveSite = live.GetProperty("sites").EnumerateArray().Single();
+Require(Ids(4).Order(StringComparer.Ordinal).SequenceEqual(new[] { Id(live), Id(length) }.Order(StringComparer.Ordinal)) &&
+    Reached(live).SequenceEqual([$"x64-avx2 {excluded}"]) && liveSite.GetProperty("method").GetString() == excluded &&
+    liveSite.GetProperty("source").GetString()!.StartsWith($"Fixture.cs:{LineOf("Avx2.IsSupported")}:", StringComparison.Ordinal),
     "Live AVX2 branch not reported");
-Require(blockers.Length == 4, $"Expected exactly four distinct blockers; found {blockers.Length}");
-
-
 Require(entries[5].GetProperty("reason").GetString()!.Contains("No method matches selector"), "Bad signature lacks its reason");
 Require(entries[6].GetProperty("reason").GetString()!.Contains("Unknown execution profile"), "Bad profile lacks its reason");
 Require(summary.Contains("2 admitted, 3 blocked, 2 not checked") && summary.Contains("nothing here is proved") &&

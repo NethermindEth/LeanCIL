@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
@@ -12,11 +13,18 @@ internal static class Blockers
     const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']";
     const string Disclaimer = "Admission only: admitted entries are extractable under their profile; nothing here is proved.";
 
-    sealed record Site(string Signature, string Profile, string[] Chain);
+    sealed record Site(string Method, int? IlOffset, string? Instruction, string? Source, string Message);
 
-    sealed record Finding(string Method, int? IlOffset, string? Instruction, string? Source, string Message)
+    sealed record Reach(string Signature, string Profile)
+    {
+        internal List<string[]> Chains { get; } = [];
+    }
+
+    // One unsupported construct, wherever it occurs and whichever entries reach it.
+    sealed record Finding(string Construct)
     {
         internal List<Site> Sites { get; } = [];
+        internal List<Reach> Entries { get; } = [];
         internal string Id { get; set; } = "";
     }
 
@@ -135,23 +143,30 @@ internal static class Blockers
             var entryFindings = new List<Finding>();
             foreach (var failure in blocked)
             {
-                int? offset = failure.At?.Offset ?? (Regex.Match(failure.Error.Message, @"\bIL_([0-9a-f]{4,})\b") is { Success: true } label
+                var message = failure.Error.Message;
+                int? offset = failure.At?.Offset ?? (Regex.Match(message, @"\bIL_([0-9a-f]{4,})\b") is { Success: true } label
                     ? Convert.ToInt32(label.Groups[1].Value, 16) : null);
-                var key = $"{failure.Method.FullName}\n{offset}\n{failure.Error.Message}";
-                if (!findings.TryGetValue(key, out var finding))
-                    findings[key] = finding = new(failure.Method.FullName, offset, failure.At?.ToString(),
-                        offset is int at ? Symbols.Location(failure.Method, at, Path.GetFileName) : null, failure.Error.Message);
-                if (!finding.Sites.Any(s => s.Signature == failure.Chain[0].FullName && s.Profile == profileName))
-                    finding.Sites.Add(new(failure.Chain[0].FullName, profileName, failure.Chain.Select(m => m.FullName).ToArray()));
+                // The construct is the diagnostic without its site, so every occurrence shares one blocker.
+                var construct = Regex.Replace(message.Split('\n')[0], @"\bIL_[0-9a-f]{4,}: ", "");
+                if (!findings.TryGetValue(construct, out var finding)) findings[construct] = finding = new(construct);
+                var site = new Site(failure.Method.FullName, offset, failure.At?.ToString(),
+                    offset is int at ? Symbols.Location(failure.Method, at, Path.GetFileName) : null, message);
+                if (!finding.Sites.Contains(site)) finding.Sites.Add(site);
+                var entryPoint = failure.Chain[0].FullName;
+                var reach = finding.Entries.FirstOrDefault(r => r.Signature == entryPoint && r.Profile == profileName);
+                if (reach is null) finding.Entries.Add(reach = new(entryPoint, profileName));
+                var chain = failure.Chain.Select(m => m.FullName).ToArray();
+                if (!reach.Chains.Any(c => c.SequenceEqual(chain))) reach.Chains.Add(chain);
                 if (!entryFindings.Contains(finding)) entryFindings.Add(finding);
             }
             outcomes.Add(new(signature, profileName, "blocked", blocked[0].Chain[0].FullName, null, null, entryFindings));
         }
 
-        // The most widely shared blockers lead; identifiers follow that order.
-        var ordered = findings.Values.OrderByDescending(f => f.Sites.Count).ThenBy(f => f.Method, StringComparer.Ordinal)
-            .ThenBy(f => f.IlOffset ?? -1).ThenBy(f => f.Message, StringComparer.Ordinal).ToArray();
+        // The most widely reached blockers lead; identifiers follow that order.
+        var ordered = findings.Values.OrderByDescending(f => f.Entries.Count).ThenByDescending(f => f.Sites.Count)
+            .ThenBy(f => f.Construct, StringComparer.Ordinal).ToArray();
         for (var i = 0; i < ordered.Length; i++) ordered[i].Id = $"B{i + 1}";
+        foreach (var outcome in outcomes) outcome.Findings.Sort((a, b) => Array.IndexOf(ordered, a).CompareTo(Array.IndexOf(ordered, b)));
 
         var report = JsonSerializer.Serialize(new
         {
@@ -177,10 +192,11 @@ internal static class Blockers
             }),
             blockers = ordered.Select(f => new
             {
-                id = f.Id, method = f.Method, ilOffset = f.IlOffset, instruction = f.Instruction, source = f.Source, message = f.Message,
-                entries = f.Sites.Select(s => new { signature = s.Signature, profile = s.Profile, chain = s.Chain })
+                id = f.Id, construct = f.Construct,
+                sites = f.Sites.Select(s => new { method = s.Method, ilOffset = s.IlOffset, instruction = s.Instruction, source = s.Source, message = s.Message }),
+                entries = f.Entries.Select(r => new { signature = r.Signature, profile = r.Profile, chains = r.Chains })
             })
-        }, new JsonSerializerOptions { WriteIndented = true });
+        }, new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         File.WriteAllText(outputPath, report + "\n", new UTF8Encoding(false));
         Console.Write(Summary(identity, outcomes, ordered, outputPath));
@@ -190,38 +206,38 @@ internal static class Blockers
     static string Summary(string identity, List<Outcome> outcomes, Finding[] findings, string outputPath)
     {
         static string Line(string text) => text.Split('\n')[0];
+        static string Profile(string? profile) => profile is null ? "no profile" : profile.StartsWith('@') ? "@" + Path.GetFileName(profile[1..]) : profile;
+        static string Count(int count, string one, string many) => $"{count} {(count == 1 ? one : many)}";
         var text = new StringBuilder();
-        text.AppendLine($"Admission of {outcomes.Count} entr{(outcomes.Count == 1 ? "y" : "ies")} in {identity}: " +
+        text.AppendLine($"Admission of {Count(outcomes.Count, "entry", "entries")} in {identity}: " +
             $"{outcomes.Count(o => o.Status == "admitted")} admitted, {outcomes.Count(o => o.Status == "blocked")} blocked, " +
             $"{outcomes.Count(o => o.Status == "notChecked")} not checked");
         foreach (var outcome in outcomes)
             text.AppendLine($"  {outcome.Status switch { "admitted" => "admitted   ", "blocked" => "blocked    ", _ => "not checked" }} " +
-                $"{outcome.Method ?? outcome.Signature ?? "(no signature)"} [{outcome.Profile ?? "no profile"}]" +
-                (outcome.Status == "admitted" ? $" ({outcome.ReachableMethods} reachable method{(outcome.ReachableMethods == 1 ? "" : "s")})" :
-                 outcome.Status == "blocked" ? ": " + string.Join(", ", outcome.Findings.Select(f => f.Id)) : ": " + Line(outcome.Reason!)));
+                $"{(outcome.Method is { } method ? Short(method) : outcome.Signature ?? "(no signature)")} [{Profile(outcome.Profile)}]" +
+                (outcome.Status == "admitted" ? $" ({Count(outcome.ReachableMethods!.Value, "reachable method", "reachable methods")})" :
+                 outcome.Status == "blocked" ? ": " + string.Join(", ", outcome.Findings.Select(f => f.Id)) :
+                 ": " + Line(outcome.Reason!)));
         if (findings.Length > 0) text.AppendLine($"Blockers ({findings.Length} distinct):");
         foreach (var finding in findings)
         {
-            text.AppendLine($"  {finding.Id} {Line(finding.Message)}");
-            text.AppendLine($"     in {finding.Method}" + (finding.IlOffset is int offset ? $" at IL_{offset:x4}" : "") +
-                (finding.Source is null ? "" : $" ({finding.Source})"));
-            var profiles = finding.Sites.Select(s => s.Profile).Distinct().ToArray();
-            var chains = finding.Sites.Select(s => string.Join(" -> ", s.Chain.Select(Short))).Distinct().ToArray();
-            text.AppendLine($"     {finding.Sites.Count} entr{(finding.Sites.Count == 1 ? "y" : "ies")}; profiles: {string.Join(", ", profiles)}");
+            text.AppendLine($"  {finding.Id} {finding.Construct}");
+            text.AppendLine($"     {Count(finding.Entries.Count, "entry", "entries")}, {Count(finding.Sites.Count, "site", "sites")}; profiles: " +
+                string.Join(", ", finding.Entries.Select(r => Profile(r.Profile)).Distinct()));
+            foreach (var site in finding.Sites.Take(3))
+                text.AppendLine($"     at {Short(site.Method)}" + (site.IlOffset is int offset ? $" IL_{offset:x4}" : "") +
+                    (site.Source is null ? "" : $" ({site.Source})"));
+            if (finding.Sites.Count > 3) text.AppendLine($"     and {Count(finding.Sites.Count - 3, "more site", "more sites")}");
+            var chains = finding.Entries.SelectMany(r => r.Chains).Select(c => string.Join(" -> ", c.Select(Short))).Distinct().ToArray();
             foreach (var chain in chains.Take(3)) text.AppendLine("     via " + chain);
-            if (chains.Length > 3) text.AppendLine($"     and {chains.Length - 3} more call chains");
+            if (chains.Length > 3) text.AppendLine($"     and {Count(chains.Length - 3, "more call chain", "more call chains")}");
         }
         text.AppendLine("Report: " + CliPaths.Display(outputPath));
         text.AppendLine(Disclaimer);
         return text.ToString();
     }
 
-    // `Type::Method(parameters)` without the return type or namespace, for readable chains.
-    static string Short(string signature)
-    {
-        var name = signature[(signature.IndexOf(' ') + 1)..];
-        var separator = name.IndexOf("::", StringComparison.Ordinal);
-        var type = name[..separator];
-        return type[(type.LastIndexOf('.') + 1)..] + name[separator..];
-    }
+    // `Type::Method(parameters)` without the return type or namespaces, for readable chains.
+    static string Short(string signature) =>
+        Regex.Replace(signature[(signature.IndexOf(' ') + 1)..], @"\b(?:[A-Za-z_]\w*\.)+(?=[A-Za-z_])", "");
 }
