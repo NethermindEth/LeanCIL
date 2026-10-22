@@ -18,6 +18,7 @@ string app = Path.Combine(directory, "ImportFixture.App.dll");
 string library = Path.Combine(directory, "ImportFixture.Lib.dll");
 string sidecar = Path.Combine(directory, "ImportFixture.Lib.leancil.contracts");
 string output = Path.Combine(directory, "extraction");
+const string interfaceModule = "PublishedImportContract";
 string expectedHash = "";
 string expectedInterfaceHash = "";
 JsonObject contract = null!;
@@ -29,7 +30,7 @@ string[] Command(string method = "Entry", bool includeImport = true, params stri
 void Reject(string[] command, string diagnostic)
 {
     (int Code, string Output, string Stdout, string Stderr) result = Execute(command);
-    if (result.Code == 0 || !result.Output.Contains(diagnostic, StringComparison.Ordinal))
+    if (result.Code != 1 || !result.Output.Contains(diagnostic, StringComparison.Ordinal))
         throw new InvalidOperationException("Expected " + diagnostic + ": " + result.Output);
 }
 
@@ -58,12 +59,12 @@ Run(["lake", "build", "Tests.ContractClosure"], streamOutput: true, progress: "C
 string interfaceProbe = Path.Combine(directory, "interface-probe");
 Directory.CreateDirectory(interfaceProbe);
 string interfaceSource = File.ReadAllText(Path.Combine(fixture, "ImportFixture.lean"));
-File.WriteAllText(Path.Combine(interfaceProbe, "ImportFixture.lean"), interfaceSource);
+File.WriteAllText(Path.Combine(interfaceProbe, interfaceModule + ".lean"), interfaceSource);
 string interfaceLeanPath = interfaceProbe + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean");
-Run([interfaceVerification.LeanExecutable, "--root=" + interfaceProbe, "-o", Path.Combine(interfaceProbe, "ImportFixture.olean"),
-    Path.Combine(interfaceProbe, "ImportFixture.lean")], leanPath: interfaceLeanPath);
+Run([interfaceVerification.LeanExecutable, "--root=" + interfaceProbe, "-o", Path.Combine(interfaceProbe, interfaceModule + ".olean"),
+    Path.Combine(interfaceProbe, interfaceModule + ".lean")], leanPath: interfaceLeanPath);
 string closureProbe = Path.Combine(interfaceProbe, "Closure.lean");
-File.WriteAllText(closureProbe, "import CIL.Interface.Closure\nimport ImportFixture\n#leancil_contract_closure ImportFixture.addOne\n");
+File.WriteAllText(closureProbe, "import CIL.Interface.Closure\nimport " + interfaceModule + "\n#leancil_contract_closure ImportFixture.addOne\n");
 string closureOutput = Run([interfaceVerification.LeanExecutable, closureProbe], leanPath: interfaceLeanPath);
 string closureLine = closureOutput.Split('\n').Single(line => line.Contains("\"canonical\"", StringComparison.Ordinal));
 JsonElement closureRecord = JsonSerializer.Deserialize<JsonElement>(closureLine[closureLine.IndexOf('{')..]);
@@ -84,6 +85,7 @@ void Reset()
     contract["assemblyIdentity"] = module.Assembly.Name.FullName;
     contract["mvid"] = module.Mvid.ToString();
     contract["implementationSha256"] = expectedHash;
+    contract["interfaceModules"]![0]!["name"] = interfaceModule;
     contract["interfaceModules"]![0]!["source"] = interfaceSource;
     contract["exports"]![0]!["closureDigest"] = closureDigest;
     contract["certifications"]![0]!["closureDigest"] = closureDigest;
@@ -158,10 +160,11 @@ JsonElement[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(Fil
     .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
 if (stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argument =>
         argument.GetString()!.StartsWith(deletedProofs, StringComparison.Ordinal))) ||
-    stages.Any(stage => stage.GetProperty("stage").GetString()!.Contains("Kernel replay", StringComparison.Ordinal) &&
-        stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "ImportFixture")) ||
     stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "extract")))
-    throw new InvalidOperationException("Fresh caller verification obtained library proofs, extracted Lib or replayed its contract module.");
+    throw new InvalidOperationException("Fresh caller verification obtained library implementation proofs or extracted Lib.");
+if (!stages.Any(stage => stage.GetProperty("stage").GetString()!.Contains("Kernel replay", StringComparison.Ordinal) &&
+    stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == interfaceModule)))
+    throw new InvalidOperationException("Fresh caller verification did not independently replay the published interface declarations.");
 if (!verified.Contains("Conditional verification: assumes _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
@@ -170,18 +173,81 @@ if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contract
     !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
 
+string replacementInterface = interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal);
+string SubstitutionProof(string sourceFolder, string artifactPath, string markerPath)
+{
+    string replacementCommand = """
+open Lean Elab Command in
+run_cmd do
+  let folder := SOURCE_FOLDER
+  let source := folder / INTERFACE_SOURCE
+  let artifact := folder / ARTIFACT_PATH
+  let original ← IO.FS.readFile source
+  try
+    IO.FS.writeFile source REPLACEMENT_SOURCE
+    let compiled ← IO.Process.output {
+      cmd := LEAN_EXECUTABLE
+      args := #["--root=" ++ folder.toString, "-o", artifact.toString, source.toString] }
+    if compiled.exitCode != 0 then
+      throwError "Interface substitution compile failed: {compiled.stdout} {compiled.stderr}"
+  finally
+    IO.FS.writeFile source original
+  IO.FS.writeFile SUBSTITUTION_MARKER "replaced"
+
+""".Replace("REPLACEMENT_SOURCE", JsonSerializer.Serialize(replacementInterface), StringComparison.Ordinal)
+    .Replace("LEAN_EXECUTABLE", JsonSerializer.Serialize(interfaceVerification.LeanExecutable), StringComparison.Ordinal)
+    .Replace("SUBSTITUTION_MARKER", JsonSerializer.Serialize(markerPath), StringComparison.Ordinal)
+    .Replace("SOURCE_FOLDER", sourceFolder, StringComparison.Ordinal)
+    .Replace("ARTIFACT_PATH", JsonSerializer.Serialize(artifactPath), StringComparison.Ordinal)
+    .Replace("INTERFACE_SOURCE", JsonSerializer.Serialize(interfaceModule + ".lean"), StringComparison.Ordinal);
+    return "import Lean\n" + File.ReadAllText(Path.Combine(fixture, "Caller.lean"))
+        .Replace("namespace ExampleProof", replacementCommand + "namespace ExampleProof", StringComparison.Ordinal);
+}
+void RejectSubstitution(string proofPath, string sourceFolder, string artifactPath, params string[] options)
+{
+    string substitutionMarker = Path.Combine(directory, "interface-substitution-" + Guid.NewGuid().ToString("N"));
+    string originalProof = SubstitutionProof(sourceFolder, artifactPath, substitutionMarker);
+    File.WriteAllText(proofPath, originalProof);
+    (int Code, string Output, string Stdout, string Stderr) substitution = Execute([.. cli, "verify", output, "--proof", proofPath, "--fresh", .. options]);
+    if (substitution.Code != 1 || !substitution.Output.Contains("Published contract interface artifacts changed after their closure audit", StringComparison.Ordinal) ||
+        !File.Exists(substitutionMarker) || File.Exists(Path.Combine(output, "verified.json")) ||
+        File.ReadAllText(Path.Combine(output, interfaceModule + ".lean")) != interfaceSource || File.ReadAllText(proofPath) != originalProof)
+        throw new InvalidOperationException("An elaborator replaced audited interface artifacts without rejection, or changed original sources: " + substitution.Output);
+}
+RejectSubstitution(Path.Combine(directory, "SubstitutedInterface.lean"),
+    "(System.FilePath.mk (← getFileName)).parent.getD \".\"", interfaceModule + ".olean");
+Console.WriteLine("PASS single-file verification rejects elaborator substitution of audited interface artifacts with unchanged sources");
+
 string originalInterface = contract["interfaceModules"]![0]!["source"]!.GetValue<string>();
-contract["interfaceModules"]![0]!["source"] = "module\n  public /- outer /- nested -/ -/ import ZContractBase\n\npublic section\n" +
-    originalInterface.Replace("import CIL.Safety.MethodContract\n", "", StringComparison.Ordinal);
+contract["interfaceModules"]![0]!["source"] = "  /- outer /- nested -/ -/ import ZContractBase\n" +
+    originalInterface + "\nexample : ZContractHeader.token = 7 := rfl\n";
 contract["interfaceModules"]!.AsArray().Add(new JsonObject
 {
     ["name"] = "ZContractBase",
-    ["source"] = "module\npublic import CIL.Safety.MethodContract\n\npublic section\n"
+    ["source"] = """
+module
+  public /- outer /- nested -/ -/ import ZContractData
+  public meta /- outer /- nested -/ -/ import ZContractMeta
+
+public section
+def ZContractHeader.token : Nat := ZContractHeader.data
+meta def ZContractHeader.metaToken : Nat := ZContractHeader.metaData
+"""
+});
+contract["interfaceModules"]!.AsArray().Add(new JsonObject
+{
+    ["name"] = "ZContractData",
+    ["source"] = "module\npublic section\ndef ZContractHeader.data : Nat := 7\n"
+});
+contract["interfaceModules"]!.AsArray().Add(new JsonObject
+{
+    ["name"] = "ZContractMeta",
+    ["source"] = "module\npublic section\nmeta def ZContractHeader.metaData : Nat := 3\n"
 });
 Save();
 Run(Command());
 Run([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"]);
-Console.WriteLine("PASS interface modules compile in parsed dependency order with public imports and nested comments");
+Console.WriteLine("PASS interface modules compile in parsed dependency order with public/meta imports and nested comments");
 Reset();
 contract["interfaceModules"]![0]!["source"] = """
 import CIL.Safety.Imports
@@ -263,6 +329,9 @@ void RejectUnrelatedTheorem(string proof, params string[] options)
 string unrelated = Path.Combine(directory, "Unrelated.lean");
 File.WriteAllText(unrelated, "namespace ExampleProof\ntheorem correctness : True := by trivial\nend ExampleProof\n");
 RejectUnrelatedTheorem(unrelated);
+contract["interfaceModules"]![0]!["name"] = "ConsumerImportedContract";
+Save();
+Run(Command());
 string package = Path.Combine(directory, "UnrelatedConsumer");
 Directory.CreateDirectory(Path.Combine(package, "Client"));
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
@@ -274,7 +343,52 @@ File.Copy(unrelated, consumerProof, true);
 Run(["lake", "update"], package);
 RejectUnrelatedTheorem(consumerProof, "--proof-root", package);
 Console.WriteLine("PASS ordinary and consumer import audits reject unrelated theorems without verification reports");
-File.AppendAllText(Path.Combine(output, "ImportFixture.lean"), "\n");
+Reset();
+Run(Command());
+File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
+Run([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"]);
+RejectSubstitution(consumerProof,
+    "((System.FilePath.mk (← getFileName)).parent.getD \".\") / \".lake\" / \"packages\" / \"leancil\"",
+    ".lake/build/lib/lean/" + interfaceModule + ".olean", "--proof-root", package);
+File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
+Console.WriteLine("PASS consumer verification rejects post-audit interface artifact substitution with unchanged original sources");
+
+foreach (bool consumer in new[] { false, true })
+{
+    Reset();
+    string uncheckedMarker = Path.Combine(directory, "unchecked-interface-" + Guid.NewGuid().ToString("N"));
+    contract["interfaceModules"]![0]!["source"] = "import Lean\n" + interfaceSource + """
+
+set_option debug.skipKernelTC true in
+run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl <| .thmDecl {
+  name := `UncheckedInterface.falsehood, levelParams := [],
+  type := Lean.mkConst ``False, value := Lean.mkConst ``True.intro }
+run_cmd Lean.Elab.Command.liftIO <| IO.FS.writeFile UNCHECKED_MARKER "inserted"
+""".Replace("UNCHECKED_MARKER", JsonSerializer.Serialize(uncheckedMarker), StringComparison.Ordinal);
+    Save();
+    Run(Command());
+    string uncheckedProof = consumer ? consumerProof : Path.Combine(directory, "UncheckedInterfaceProof.lean");
+    File.WriteAllText(uncheckedProof, """
+import ExtractedImports
+namespace ExampleProof
+theorem correctness : CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun _ => False) := by
+  intro linked links imported
+  exact UncheckedInterface.falsehood
+end ExampleProof
+""");
+    (int Code, string Output, string Stdout, string Stderr) uncheckedResult = Execute([.. cli, "verify", output,
+        "--proof", uncheckedProof, "--fresh",
+        .. consumer ? new[] { "--proof-root", package } : []]);
+    if (uncheckedResult.Code != 1 || !uncheckedResult.Output.Contains("(kernel) declaration type mismatch", StringComparison.Ordinal) ||
+        !uncheckedResult.Output.Contains("UncheckedInterface.falsehood", StringComparison.Ordinal) ||
+        !File.Exists(uncheckedMarker) || File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException("Independent interface replay did not reject the elaborated unchecked declaration: " + uncheckedResult.Output);
+}
+File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
+Console.WriteLine("PASS ordinary and consumer interface replay reject unchecked falsehoods without reports");
+Reset();
+Run(Command());
+File.AppendAllText(Path.Combine(output, interfaceModule + ".lean"), "\n");
 Reject([.. cli, "check", output], "Stale or mismatched contract interface source");
 Run(Command());
 File.AppendAllText(library, "rebuilt");
@@ -356,11 +470,15 @@ Save();
 Run(Command());
 Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "canonical closure digest mismatch");
 if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Changed contract left a verification report.");
+Reject([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"], "canonical closure digest mismatch");
+if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Consumer closure rejection left a verification report.");
 Reset();
 contract["interfaceModules"]![0]!["source"] = interfaceSource + "\naxiom unpublishedAssumption : True\n";
 Save();
 Run(Command());
 Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "contract interface");
+Reject([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"], "Unapproved transitive axiom in contract interface: unpublishedAssumption");
+if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Consumer unused-axiom rejection left a verification report.");
 Reset();
 contract["isReferenceAssembly"] = true;
 Save();

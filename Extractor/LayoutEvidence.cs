@@ -7,7 +7,7 @@ namespace Nethermind.LeanCIL;
 
 // Raw metadata is serialized separately from computed sizes/offsets. Lean recomputes
 // those values and checks their uses in the emitted method rather than trusting them.
-internal sealed class LayoutEvidence(TypeReference[] types)
+internal sealed class LayoutEvidence(TypeReference[] types, string architecture = "scalar")
 {
     readonly TypeReference[] rawTypes = Topological(types);
 
@@ -41,6 +41,7 @@ internal sealed class LayoutEvidence(TypeReference[] types)
             if (index < 0) throw new InvalidDataException("Missing raw aggregate metadata: " + type.FullName);
             return $".aggregate {index}";
         }
+        if (MetadataValidation.VectorWidth(type) is int width) return width == 16 ? ".vector128" : ".vector256";
         return EnumTypes.Storage(type).FullName switch
         {
             "System.SByte" => ".signed8", "System.Byte" => ".unsigned8", "System.Boolean" => ".boolean",
@@ -66,8 +67,8 @@ internal sealed class LayoutEvidence(TypeReference[] types)
         })));
         lean.AppendLine("]");
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +
-            string.Join(", ", rawTypes.Select(type => $"⟨layout{Array.FindIndex(types, entry => entry.FullName == type.FullName)}, {MetadataValidation.AggregateLayout(type, type.Module).Alignment}⟩")) + "]");
-        lean.AppendLine("theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts := " + LeanEmitter.Decide);
+            string.Join(", ", rawTypes.Select(type => $"⟨layout{Array.FindIndex(types, entry => entry.FullName == type.FullName)}, {MetadataValidation.AggregateLayout(type, type.Module, architecture).Alignment}⟩")) + "]");
+        lean.AppendLine($"theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts .{architecture} := " + LeanEmitter.Decide);
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number, HashSet<Instruction> reachable,

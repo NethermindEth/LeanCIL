@@ -127,3 +127,9 @@ name = "Tests.ImportEvidence"
 
 [[lean_lib]]
 name = "Tests.ContractClosure"
+
+[[lean_lib]]
+name = "Tests.ScalarEvidence"
+
+[[lean_lib]]
+name = "Tests.VectorFields"

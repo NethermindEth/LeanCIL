@@ -24,12 +24,12 @@ internal static class RuntimeModels
     internal static bool HasRuntimeValueTypeBase(TypeDefinition type) =>
         type.BaseType is { FullName: "System.ValueType" } parent && ExactScope(parent.Scope, "System.Runtime");
 
-    internal static void ValidateTypeIdentity(TypeReference type, ModuleDefinition module)
+    internal static void ValidateTypeIdentity(TypeReference type, ModuleDefinition module, string architecture = "scalar")
     {
         if (type.Scope == module && type.IsValueType && type is not TypeSpecification)
         {
             if (EnumTypes.IsEnum(type)) EnumTypes.Storage(type);
-            else MetadataValidation.Layout(type, module);
+            else MetadataValidation.Layout(type, module, architecture);
             return;
         }
         if (type is GenericParameter) return;
@@ -37,13 +37,13 @@ internal static class RuntimeModels
         {
             if (generic.IsValueType != generic.ElementType.IsValueType)
                 throw new InvalidDataException($"Unsupported type identity: {generic.FullName} (generic value-type encoding)");
-            ValidateTypeIdentity(generic.ElementType, module);
-            foreach (TypeReference argument in generic.GenericArguments) ValidateTypeIdentity(argument, module);
+            ValidateTypeIdentity(generic.ElementType, module, architecture);
+            foreach (TypeReference argument in generic.GenericArguments) ValidateTypeIdentity(argument, module, architecture);
             return;
         }
         if (type is TypeSpecification specification)
         {
-            ValidateTypeIdentity(specification.ElementType, module);
+            ValidateTypeIdentity(specification.ElementType, module, architecture);
             return;
         }
         bool expectedValueType = type.FullName is "System.UInt64" or "System.Int64" or
@@ -58,14 +58,14 @@ internal static class RuntimeModels
         if (!valid) throw new InvalidDataException($"Unsupported type identity: {type.FullName} [{type.Scope}]");
     }
 
-    internal static void ValidateSignature(MethodReference reference)
+    internal static void ValidateSignature(MethodReference reference, string architecture = "scalar")
     {
-        ValidateTypeIdentity(reference.DeclaringType, reference.Module);
-        ValidateTypeIdentity(reference.ReturnType, reference.Module);
+        ValidateTypeIdentity(reference.DeclaringType, reference.Module, architecture);
+        ValidateTypeIdentity(reference.ReturnType, reference.Module, architecture);
         foreach (ParameterDefinition parameter in reference.Parameters)
-            ValidateTypeIdentity(parameter.ParameterType, reference.Module);
+            ValidateTypeIdentity(parameter.ParameterType, reference.Module, architecture);
         if (reference is GenericInstanceMethod generic)
-            foreach (TypeReference argument in generic.GenericArguments) ValidateTypeIdentity(argument, reference.Module);
+            foreach (TypeReference argument in generic.GenericArguments) ValidateTypeIdentity(argument, reference.Module, architecture);
     }
 
     internal static string? Translate(MethodReference reference, FeatureProfile profile)
@@ -78,13 +78,13 @@ internal static class RuntimeModels
             throw new InvalidDataException($"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
         string? op = scope switch
         {
-            "System.Runtime" => Scalar(reference) ?? ValueBitCasts.Translate(reference) ?? UnsafeModels.Translate(reference) ?? Runtime(reference.FullName),
+            "System.Runtime" => Scalar(reference) ?? ValueBitCasts.Translate(reference, profile.Architecture) ?? UnsafeModels.Translate(reference, profile.Architecture) ?? Runtime(reference.FullName),
             "System.Memory" => Scalar(reference),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
-        if (op is not null) ValidateSignature(reference);
-        if (op == DivRem) ValueTuples.RequireWordPair(reference.ReturnType, reference.Module);
+        if (op is not null) ValidateSignature(reference, profile.Architecture);
+        if (op == DivRem) ValueTuples.RequireWordPair(reference.ReturnType, reference.Module, profile.Architecture);
         return op;
     }
 

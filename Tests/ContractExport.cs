@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -140,6 +142,7 @@ JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAll
 if (initialCaller.GetProperty("schema").GetInt32() != 4)
     throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
+RejectPostAuditMutations(library, artifact, package, proof, contractSource, sidecar);
 
 JsonObject two = ProducerManifest();
 JsonObject invalid = two["exports"]![0]!.DeepClone().AsObject();
@@ -176,6 +179,78 @@ if (!File.ReadAllText(Path.Combine(callerArtifact, "verified.json")).Contains(Sh
 Console.WriteLine("PASS a new library body retains interface/closure identities, unchanged caller proof, cache reuse and new deployment hash");
 
 string prior = Sha(sidecar);
+string publishedOnly = Path.Combine(root, "PublishedOnly.lean");
+string originalContractSource = File.ReadAllText(contractSource);
+File.WriteAllText(publishedOnly, originalContractSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
+if (File.ReadAllText(publishedOnly) == originalContractSource)
+    throw new InvalidOperationException("Precondition: the independent published contract must differ from the producer contract.");
+JsonObject differentPublication = ProducerManifest();
+differentPublication["interface"]![0]!["source"] = publishedOnly;
+RejectExport(differentPublication, "Export contract differs from its published interface closure", prior);
+if (File.ReadAllText(contractSource) != originalContractSource)
+    throw new InvalidOperationException("The independent closure mismatch fixture changed the producer proof interface.");
+Console.WriteLine("PASS different valid published and proof contract closures cannot replace a published sidecar");
 File.WriteAllText(contractSource, File.ReadAllText(contractSource).Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
 RejectExport(ProducerManifest(), "unsolved goals", prior);
 Console.WriteLine("PASS a failing library contract cannot replace a published sidecar");
+
+partial class Program
+{
+    static void RejectPostAuditMutations(string assembly, string output, string package, string proof,
+        string publishedSource, string sidecar)
+    {
+        const string auditSource = """
+import Lean
+import CIL.Safety.Linking
+import CIL.Interface.Closure
+open Lean Meta Elab Command in
+run_cmd liftTermElabM do
+  let .thmInfo author <- getConstInfo `LibProof.correctness | throwError "Expected an export theorem"
+  unless author.levelParams.isEmpty do throwError "Export theorem must have a closed statement"
+  let expected <- Lean.Elab.Term.elabType (<- `(@_root_.CIL.Safety.MethodContract.Holds _ _
+    _root_.ImportFixture.addOne _root_.Extracted.program 0))
+  unless <- isDefEq author.type expected do throwError "Export theorem does not have the exact canonical Holds statement"
+theorem LeanCILExportAudit.certified : @_root_.CIL.Safety.MethodContract.Holds _ _
+    _root_.ImportFixture.addOne _root_.Extracted.program 0 := _root_.LibProof.correctness
+theorem LeanCILExportAudit.closed : _root_.CIL.Safety.Closed _root_.Extracted.program :=
+  _root_.CIL.Safety.Closed.of_check (by decide +kernel)
+theorem LeanCILExportAudit.noImports : _root_.Extracted.imports = [] := rfl
+theorem LeanCILExportAudit.noStaticSites :
+    _root_.Extracted.program.all (fun body => body.staticSites.isEmpty) = true := by decide +kernel
+""";
+        Dictionary<string, string> original = new[] { proof, publishedSource, sidecar }
+            .ToDictionary(path => path, Sha, StringComparer.Ordinal);
+        foreach (bool compiled in new[] { false, true })
+        {
+            using Program verification = new() { freshLibrary = true };
+            bool callbackRan = false;
+            ConsumerExportAudit audit = new(auditSource, (session, module, leanPath) =>
+            {
+                string target;
+                if (compiled)
+                {
+                    string relative = module.Replace('.', Path.DirectorySeparatorChar) + ".olean";
+                    string[] artifacts = leanPath.Split(Path.PathSeparator).Select(directory => Path.Combine(directory, relative))
+                        .Where(File.Exists).Distinct(StringComparer.Ordinal).ToArray();
+                    if (artifacts.Length != 1)
+                        throw new InvalidOperationException("Expected exactly one checked export wrapper artifact.");
+                    target = artifacts[0];
+                }
+                else target = Within(session, Path.GetRelativePath(package, proof));
+                if (!File.Exists(target)) throw new InvalidOperationException("Missing checked export mutation target: " + target);
+                File.AppendAllText(target, "\npost-audit-mutation\n");
+                callbackRan = true;
+            });
+            ConsumerRequest request = new(assembly, output, proof, "LeanCILExportAudit.certified", null, ExportAudit: audit);
+            ConsumerOutcome outcome = verification.VerifyConsumerRequests(package, [request], null, batch: false)[0];
+            string expected = compiled ? "Compiled artifacts changed during contract export audit"
+                : "Sources changed during contract export audit";
+            if (!callbackRan || outcome.Report is not null || outcome.Error?.Message != expected ||
+                File.Exists(Path.Combine(output, "verified.json")))
+                throw new InvalidOperationException("Post-callback export mutation did not fail its exact integrity guard: " + outcome.Error);
+            if (original.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
+                throw new InvalidOperationException("Post-callback export mutation changed original proof, published source or sidecar bytes.");
+            Console.WriteLine("PASS post-callback export " + (compiled ? "compiled artifact" : "source") + " mutation rejects without a report");
+        }
+    }
+}

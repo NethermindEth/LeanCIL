@@ -8,7 +8,9 @@ namespace Nethermind.LeanCIL;
 
 internal static class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory]\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory]\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
+
+    internal static int CheckExtraction(string output) => Main(["check", output]);
 
     static int Main(string[] args)
     {
@@ -35,6 +37,11 @@ internal static class Program
                     Console.WriteLine(signature);
                 Console.WriteLine("Discovery only: listing does not establish support. Use extract to validate the method and its reachable dependencies.");
                 return 0;
+            }
+            if (args[0] == "lint-exceptions")
+            {
+                stage = "exception documentation lint";
+                return ExceptionLint.Run(args[1..]);
             }
             if (args[0] == "blockers")
             {
@@ -141,6 +148,8 @@ internal static class Program
                 : FeatureProfile.Select(positional.Count == 4 ? positional[3] : "scalar");
             stage = "assembly loading";
             byte[] assembly = File.ReadAllBytes(assemblyPath);
+            stage = "metadata and CIL validation";
+            VectorSignatures.Validate(assembly);
             using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
             var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
@@ -194,7 +203,7 @@ internal static class Program
             string source = LeanEmitter.Emit(methods, profile, originalModule, imports);
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
                 .Where(i => i.OpCode.Code == Code.Ldsfld)
-                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module).Field.FullName), StringComparer.Ordinal);
+                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";

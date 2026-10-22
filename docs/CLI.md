@@ -266,3 +266,25 @@ Contract imports also require `--import-interface-sha256 Lib=<digest>` from an
 accepted publisher channel. This independently pins the interface descriptor
 and all executable Lean source bytes before compilation. See
 [CONTRACT-INTERFACES.md](CONTRACT-INTERFACES.md) for the source trust boundary.
+
+## Exception documentation lint experiment
+
+Run `leancil lint-exceptions artifacts/Method --documentation Assembly.xml`
+after extraction. The command checks the extraction again, then writes
+`artifacts/Method/exception-lint.json`. It does not verify a theorem or write
+`verified.json`. Drift is diagnostic and does not change the command exit code.
+Malformed documentation or stale extraction fails and removes an old lint report.
+
+The report keeps potential modeled sites and XML declarations separate. It
+compares the selected entry's declarations with its profile-reachable method
+closure. It includes folded throws, integer divide/overflow, signed Abs, X86
+DivRem and span indexing faults. Clamp invalid bounds remain a model fault;
+this experiment does not map them to a CLR exception. Memory faults, invalid
+states, unsupported operations and fuel exhaustion have no CLR name here.
+This is a conservative site analysis. It does not prove feasibility under a
+contract, exception conditions, or complete runtime behavior.
+
+XML must contain the selected compiler member ID and matching assembly name.
+Unresolved cref, include and inheritdoc need expansion first. The supplied XML
+hash identifies bytes; it does not prove that they came from the DLL build.
+No documentation text becomes evidence or a contract premise.
