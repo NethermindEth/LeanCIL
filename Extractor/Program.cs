@@ -109,6 +109,7 @@ internal static class Program
             stage = "assembly loading";
             byte[] assembly = File.ReadAllBytes(assemblyPath);
             using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+            var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "metadata and CIL validation";
             MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes);
@@ -145,6 +146,8 @@ internal static class Program
                         fields = t.Fields.Where(f => !f.IsStatic).Select(f => new { name = f.Name, offset = f.Offset, type = f.FieldType.FullName }) })
             }, new JsonSerializerOptions { WriteIndented = true });
             string leanPath = Path.Combine(output, "Extracted.lean");
+            string symbolPath = Path.Combine(output, "Symbols.lean");
+            string? symbolSource = symbols is null ? null : Symbols.Emit(methods, symbols);
             if (args[0] == "check")
             {
                 stage = "extraction integrity";
@@ -152,6 +155,8 @@ internal static class Program
                     throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(leanPath)} differs from regenerated CIL.");
                 if (File.ReadAllText(identityPath) != manifest)
                     throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(identityPath)} differs from regenerated assembly, extractor or configuration metadata.");
+                if (symbolSource is not null && File.Exists(symbolPath) && File.ReadAllText(symbolPath) != symbolSource)
+                    throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(symbolPath)} differs from the regenerated PDB names and locations.");
                 Console.WriteLine("Valid: extraction artifacts match the assembly and recorded settings.");
                 Console.WriteLine($"  Assembly: {assemblyIdentity}");
                 Console.WriteLine($"  DLL: {CliPaths.Display(assemblyPath)}");
@@ -161,14 +166,20 @@ internal static class Program
                 Console.WriteLine($"  CIL: {CliPaths.Display(leanPath)}");
                 Console.WriteLine($"  Manifest: {CliPaths.Display(identityPath)}");
                 Console.WriteLine("  Matched: assembly identity and SHA-256, extractor SHA-256, configuration, metadata and regenerated CIL.");
+                if (File.Exists(symbolPath))
+                    Console.WriteLine(symbolSource is null ? "  Symbols: not checked (no matching PDB)" : "  Symbols: matched the PDB");
             }
             else
             {
                 Directory.CreateDirectory(output);
                 File.WriteAllText(leanPath, source, new UTF8Encoding(false));
                 File.WriteAllText(identityPath, manifest, new UTF8Encoding(false));
+                // Symbols from an earlier build must not outlive its PDB.
+                if (symbolSource is null) File.Delete(symbolPath);
+                else File.WriteAllText(symbolPath, symbolSource, new UTF8Encoding(false));
                 Console.WriteLine($"Extracted {methods.Length} reachable method{(methods.Length == 1 ? "" : "s")} into {CliPaths.Display(leanPath)}");
             }
+            if (symbolNotice is not null) Console.WriteLine("  " + symbolNotice);
             foreach (var name in initializedTypes)
                 Console.WriteLine($"  Caller assumption: {name} initialization completed successfully before invocation.");
         }

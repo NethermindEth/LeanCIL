@@ -798,6 +798,12 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         At("Extractor/bin/Nethermind.LeanCIL.dll");
 #endif
 
+    // Proofs opt in to PDB names and locations with `import ExtractedSymbols`.
+    static bool ImportsSymbols(string proof) => Regex.IsMatch(proof, @"^import[ \t]+ExtractedSymbols[ \t]*\r?$", RegexOptions.Multiline);
+
+    static string SymbolsFor(string output) => Path.Combine(output, "Symbols.lean") is var path && File.Exists(path) ? path
+        : throw new InvalidOperationException("The proof imports ExtractedSymbols, but extraction found no matching portable PDB; build the assembly with its .pdb next to it or remove the import.");
+
     static string[] Extract(string mode, string assembly, string? identity, string entry, string output, string profile = "scalar") =>
         ["dotnet", ExtractorPath, mode, assembly, entry, output, profile,
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
@@ -880,7 +886,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         var before = Inputs(proof, settings);
         var session = Library(before);
         var support = Regex.Matches(File.ReadAllText(proof), @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
-            .Select(m => m.Groups[1].Value).Where(n => n != "Extracted" && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
+            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
         if (support.Length > 0)
         {
@@ -941,6 +947,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         {
             File.Copy(Path.Combine(output, "Extracted.lean"), Path.Combine(fresh, "Extracted.lean"));
             File.Copy(proof, Path.Combine(fresh, "Proof.lean"));
+            var symbols = ImportsSymbols(File.ReadAllText(proof));
+            if (symbols) File.Copy(SymbolsFor(output), Path.Combine(fresh, "ExtractedSymbols.lean"));
             File.WriteAllText(Path.Combine(fresh, "Audit.lean"), $"import Proof\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n");
             File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
@@ -991,7 +999,11 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                 File.WriteAllText(Path.Combine(publication, "extraction-audit.txt"), extractionAudit);
                 extractionPublication = publication;
             }
-            var proofKey = ContentKey("theorem-audit-v1\n" + extractedKey + "\n" + Sha(Path.Combine(fresh, "Proof.lean")) + "\n" + theorem);
+            if (symbols)
+                Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), Path.Combine(fresh, "ExtractedSymbols.lean")],
+                    leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);
+            var proofKey = ContentKey("theorem-audit-v1\n" + extractedKey + "\n" + Sha(Path.Combine(fresh, "Proof.lean")) + "\n" +
+                (symbols ? Sha(Path.Combine(fresh, "ExtractedSymbols.lean")) + "\n" : "") + theorem);
             if (RestoreSuccess(proofKey, fresh))
             {
                 if (extractionPublication is not null)
@@ -1010,7 +1022,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                 Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "Proof.olean"), Path.Combine(fresh, "Proof.lean")],
                     leanPath: leanPath, progress: "Checking Proof: " + entry);
                 stage?.Invoke("kernel replay");
-                Run([checker, .. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"], "Proof"],
+                Run([checker, .. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"], .. symbols ? ["ExtractedSymbols"] : Array.Empty<string>(), "Proof"],
                     leanPath: leanPath, progress: "Kernel replay: " + entry);
                 stage?.Invoke("theorem audit");
                 audit = Run(["lean", "--root=" + fresh, Path.Combine(fresh, "Audit.lean")], leanPath: leanPath);

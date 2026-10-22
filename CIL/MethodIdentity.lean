@@ -1,6 +1,7 @@
 import Lean
 import CIL.Instructions
 import CIL.SymbolicExecution
+import CIL.DebugNames
 
 /-!
 Signature-based method identity. Extraction numbers methods by their position in the
@@ -14,6 +15,7 @@ checks, so a name only locates a method; the body is still bound by `cil_body` o
 namespace CIL.MethodIdentity
 
 open Lean Meta Elab Term Command
+open CIL.DebugNames (visible)
 
 /-- The string literals of a closed `List String`, reduced one cell at a time. -/
 partial def strings (list : Expr) (found : Array String := #[]) : MetaM (Array String) := do
@@ -27,14 +29,6 @@ partial def strings (list : Expr) (found : Array String := #[]) : MetaM (Array S
 /-- The method name between the last `::` and `(`; used only to rank candidates. -/
 def methodName (signature : String) : String :=
   (((signature.splitOn "::").getLastD signature).splitOn "(").headD ""
-
-/-- The constant `name` refers to here, preferring the innermost namespace: batch
-verification places each extraction in its own namespace. -/
-def visible (name : Name) : MetaM Name := do
-  let found := (← resolveGlobalName name).filter (·.2.isEmpty) |>.map (·.1)
-  let some innermost := found.foldl (fun best n => if best.all (·.getNumParts < n.getNumParts) then some n else best) none
-    | throwError "{name} is not in scope; import the extraction"
-  return innermost
 
 /-- The index of the method whose signature in `table` is exactly `signature`. -/
 def resolveIn (tableName : Name) (signature : String) : MetaM Nat := do

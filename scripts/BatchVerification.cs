@@ -56,7 +56,7 @@ partial class Program
             return Regex.Replace(source, @"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", match =>
             {
                 var module = match.Groups[1].Value;
-                if (module != "Extracted") imports.Add(module);
+                if (module is not ("Extracted" or "ExtractedSymbols")) imports.Add(module);
                 return "";
             }, RegexOptions.Multiline);
         }
@@ -69,7 +69,9 @@ partial class Program
             hashes[i] = Sha(Path.Combine(request.Output, "identity.json"));
             bodies.AppendLine($"namespace BatchCase{i}");
             bodies.AppendLine(Body(File.ReadAllText(Path.Combine(request.Output, "Extracted.lean"))));
-            bodies.AppendLine(Body(File.ReadAllText(request.Proof)));
+            var proofSource = File.ReadAllText(request.Proof);
+            if (ImportsSymbols(proofSource)) bodies.AppendLine(File.ReadAllText(SymbolsFor(request.Output)));
+            bodies.AppendLine(Body(proofSource));
             bodies.AppendLine($"end BatchCase{i}");
         }
         var support = imports.Where(n => n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();

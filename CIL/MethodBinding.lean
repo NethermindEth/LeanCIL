@@ -1,5 +1,6 @@
 import Lean
 import CIL.Instructions
+import CIL.DebugNames
 
 /-!
 `cil_body` proves a method-body binding such as
@@ -76,7 +77,11 @@ private unsafe def describeUnsafe (goal : Expr) : MetaM MessageData := do
   | (some left, some right) =>
     match methodDifferences left right with
     | [] => return header ++ m!"both sides evaluate to the same method; rfl failed for another reason"
-    | lines => return header ++ m!"{"\n".intercalate lines}"
+    | lines =>
+      let source <- match program, firstDifference left.code right.code 0 with
+        | some (_, index), some (pc, _) => CIL.DebugNames.sourceLine index pc
+        | _, _ => pure ""
+      return header ++ m!"{"\n".intercalate lines}{source}"
   | (none, none) => return header ++ m!"both sides evaluate to none"
   | (none, some _) =>
     let count <- match program with

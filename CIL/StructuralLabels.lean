@@ -13,6 +13,7 @@ namespace CIL.StructuralLabels
 
 open Lean Meta Elab Term Command
 open CIL.MethodIdentity
+open CIL.DebugNames (visible)
 
 /-- The literals of a closed `List Nat`, reduced one cell at a time. -/
 partial def nats (list : Expr) (found : Array Nat := #[]) : MetaM (Array Nat) := do
