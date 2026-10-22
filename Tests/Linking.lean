@@ -52,11 +52,16 @@ def relocatedCompletion : CIL.Program :=
 
 theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1) := by
   have imported : Tests.Imports.Calls.importsAdd linked :=
-    add_holds.relocate addLib_closed (link_relocates _ _ (j := 0) (by decide))
+    add_holds.relocate (f := linkSlot Tests.Imports.Calls.Extracted.program [addLib] 0)
+      addLib_closed (link_relocates Tests.Imports.Calls.Extracted.program [addLib] (j := 0) (by decide))
   apply MethodContract.relocateGiven (f := fun index => index + 1)
     root_given (link_links _ _) imported (Closed.of_check (by decide))
   intro index bound
-  simp [relocatedCompletion, List.getElem?_eq_getElem bound]
+  have found : linked[index]? = some (linked[index]'bound) := List.getElem?_eq_getElem bound
+  change (linked.map (CIL.Method.relocate (fun index => index + 1)))[index]? =
+    some ((linked[index]'bound).relocate (fun index => index + 1))
+  rw [List.getElem?_map, found]
+  rfl
 
 #print axioms add_holds
 #print axioms root_composed
@@ -124,11 +129,16 @@ def relocatedCompletion : CIL.Program :=
 
 theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1) := by
   have imported : Tests.Imports.Outcomes.importsPercent linked :=
-    percent_holds.relocate percentLib_closed (link_relocates _ _ (j := 0) (by decide))
+    percent_holds.relocate (f := linkSlot Tests.Imports.Outcomes.Extracted.program [percentLib] 0)
+      percentLib_closed (link_relocates Tests.Imports.Outcomes.Extracted.program [percentLib] (j := 0) (by decide))
   apply OutcomeContract.relocateGiven (f := fun index => index + 1)
     root_given (link_links _ _) imported (Closed.of_check (by decide))
   intro index bound
-  simp [relocatedCompletion, List.getElem?_eq_getElem bound]
+  have found : linked[index]? = some (linked[index]'bound) := List.getElem?_eq_getElem bound
+  change (linked.map (CIL.Method.relocate (fun index => index + 1)))[index]? =
+    some ((linked[index]'bound).relocate (fun index => index + 1))
+  rw [List.getElem?_map, found]
+  rfl
 
 /-- The relocated helper's exception reaches `Root` through two relocated calls. -/
 example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "System.ArgumentOutOfRangeException" :=
