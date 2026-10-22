@@ -1,5 +1,12 @@
 # Consumer packages and batch verification
 
+Contract imports can use SDK deps/NuGet runtime asset selection and retained
+assembly metadata. See [contract discovery](CONTRACT-INTERFACES.md#runtime-asset-and-metadata-discovery)
+for TFM/RID selection, package roots, and optional descriptor resources. The success
+report identifies the exact selected implementation. Reference assets only locate
+interfaces. Independent pins, caller audits, kernel replay, and deployment
+obligations still apply. Changed discovery inputs reject cached and fresh reports.
+
 The [README](../README.md#consumer-packages-and-batches) shows the commands. This page states what
 consumer and batch verification check, what they reuse, and how support is shared across machines.
 

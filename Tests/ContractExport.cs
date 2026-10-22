@@ -145,6 +145,8 @@ JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAll
 if (initialCaller.GetProperty("schema").GetInt32() != 4)
     throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
+Run(["dotnet", "run", "--file", "Tests/ContractDiscovery.cs", "--", sidecar, callerProof, callerPackage, package, proof, contractSource],
+    streamOutput: true, progress: "Contract discovery through SDK assets and carriers");
 RejectPostAuditMutations(library, artifact, package, proof, contractSource, sidecar);
 Run(["dotnet", "run", "--file", "Tests/FullImportVerification.cs", "--", app, library, sidecar, publishedBundle,
     callerPackage, callerProof, package, proof], streamOutput: true, progress: "Independent full imported-library verification");

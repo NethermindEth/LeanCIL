@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -40,11 +41,37 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
         return Hash(Encoding.UTF8.GetBytes(manifest));
     }
 
-    internal string ComputeInterfaceDigest() => Hash(JsonSerializer.SerializeToUtf8Bytes(new
+    // One versioned descriptor API serves sidecars and embedded carriers. Future
+    // format revisions must extend this projection and its strict reader together.
+    internal byte[] DescriptorBytes() => JsonSerializer.SerializeToUtf8Bytes(new
     {
         Schema, SemanticsVersion, FormatVersion, FrameworkKey, AssemblyIdentity, TargetFramework,
         InterfaceModules, Exports, Dependencies
-    }, Json));
+    }, Json);
+
+    internal string ComputeInterfaceDigest() => Hash(DescriptorBytes());
+
+    internal static void ValidateDescriptor(byte[] bytes, ContractInterface contract)
+    {
+        using JsonDocument embedded = JsonDocument.Parse(bytes);
+        ValidateProperties(embedded.RootElement);
+        using JsonDocument expected = JsonDocument.Parse(contract.DescriptorBytes());
+        string[] actualFields = embedded.RootElement.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
+        string[] expectedFields = expected.RootElement.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
+        if (!actualFields.SequenceEqual(expectedFields, StringComparer.Ordinal))
+            throw new InvalidDataException("Embedded contract descriptor fields differ from the supported format.");
+        // The sidecar already passed the full versioned reader. Require the
+        // complete same JSON structure and typed values without hashing the
+        // framework a second time for this alternative carrier.
+        JsonObject combined = JsonNode.Parse(JsonSerializer.Serialize(contract, Json))!.AsObject();
+        foreach (JsonProperty property in embedded.RootElement.EnumerateObject())
+            combined[property.Name] = JsonNode.Parse(property.Value.GetRawText());
+        ContractInterface supplied = combined.Deserialize<ContractInterface>(Json)
+            ?? throw new InvalidDataException("Missing embedded contract descriptor.");
+        if (!JsonElement.DeepEquals(embedded.RootElement, expected.RootElement) ||
+            !supplied.DescriptorBytes().AsSpan().SequenceEqual(contract.DescriptorBytes()))
+            throw new InvalidDataException("Embedded and sidecar contract interface digests differ.");
+    }
 
     internal static ContractInterface Read(byte[] bytes)
     {

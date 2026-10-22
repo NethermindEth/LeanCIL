@@ -35,6 +35,58 @@ overrides can be supplied again for an explicit recheck.
 
 ## Sidecar schema 1
 
+### Runtime asset and metadata discovery
+
+`extract` reads an adjacent `App.deps.json` when present. Use `--import-deps file`
+to select another file and `--import-assets obj/project.assets.json` to supply
+the SDK's NuGet asset selection. `--import-package-root directory` adds an explicit
+package-cache root; assets `packageFolders` also supply roots. No restore or network
+request runs during extraction. Existing explicit implementation paths take priority.
+Asset selection examines only requested automatic imports. Unrelated runtime
+assets do not make a local method or an explicit implementation override require
+a RID. Actual automatic imports still require an unambiguous compatible selection.
+
+Only the selected `net10.0` runtime assets are implementations. Compile/ref assets
+can advertise contracts, but cannot supply runtime certification. Select a RID with
+`--runtime-identifier linux-x64`, or use the RID recorded in deps `runtimeTarget`.
+An x64/arm64 feature profile must agree with that RID. Scalar does not mean x64.
+Without a RID, only unambiguous portable runtime assets are accepted. Discovery
+does not infer OS or architecture from the host. RID fallback uses only the declared
+manifest graph. Ambiguous, conflicting, missing, or escaping asset paths fail.
+
+The metadata attribute `Nethermind.LeanCIL.LeanCilContractsAttribute(string digest)`
+can advertise the interface digest. It has assembly-only, nonrepeatable usage.
+Its source declaration can travel with a publisher's API without a runtime verifier
+dependency. The reader does not instantiate attributes. Discovery checks adjacent
+`Lib.leancil.contracts` and `contracts/<digest>.leancil.contracts` in the application,
+selected implementation, and selected package directories. A reference attribute
+can locate the latter without retaining an embedded resource. Ref-only discovery
+cannot publish an implementation-bound report or success receipt.
+
+The independent implementation and interface pins remain required. An advertised
+digest is a locator and consistency check; it is not an independent pin.
+
+### Optional embedded descriptor
+
+`leancil interface-descriptor Lib.leancil.contracts descriptor.json` writes the
+canonical logical descriptor through the same versioned API that computes the
+sidecar digest. It produces no certification. Embed those bytes as the managed
+resource `LeanCIL.Contracts.Interface` before the library build is finalized.
+Then extract and certify the final DLL. The resource excludes MVID, implementation
+hash, certification records, and full-verification locator. The complete external
+schema-1 sidecar still binds those final DLL bytes; embedded-only certification is
+not supported. Signing or changing the DLL after certification invalidates its hash.
+
+When both carriers are present, strict descriptor parsing and canonical digest
+comparison must agree. The verifier does not modify the input DLL. Normal Roslyn
+reference assembly emission need not retain the resource; keep the metadata attribute.
+
+`identity.json` records the exact selected implementation, TFM/RID, carrier, package
+asset, and discovery input hashes. Reports name the selected implementation path
+and hash. `check` retains that selection and rejects changed discovery manifests or
+reference metadata. The same provenance check runs on reuse and before normal,
+consumer, and full-mode report publication, including transitive graph nodes.
+
 `Tests/ContractImports/Lib.leancil.contracts` is a hand-written template. The
 `imports` test suite fills its build-specific hashes and MVID. Required fields:
 

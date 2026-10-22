@@ -6,16 +6,18 @@ namespace Nethermind.LeanCIL;
 
 internal sealed class ImportResolution : IDisposable
 {
-    internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256, string ExpectedInterfaceDigest);
+    internal sealed record Snapshot(byte[] Sidecar, byte[] Implementation, ContractInterface Interface);
+    internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256, string ExpectedInterfaceDigest,
+        Snapshot? Bytes = null, ContractDiscoveryProvenance? Discovery = null);
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
         string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
         string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind,
         string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly,
-        StaticIdentityRecord[] StaticIdentities);
+        StaticIdentityRecord[] StaticIdentities, ContractDiscoveryProvenance? Discovery);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     internal sealed record Node(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest,
         string SidecarPath, string ImplementationPath, string ExpectedInterfaceDigest, bool IsReferenceAssembly,
-        ContractDependency[] Dependencies);
+        ContractDependency[] Dependencies, ContractDiscoveryProvenance? Discovery);
     readonly List<Library> libraries = [];
     readonly Dictionary<(string Identity, string Profile), int> implementationState = [];
     readonly HashSet<string>? allowedDependencies;
@@ -28,7 +30,7 @@ internal sealed class ImportResolution : IDisposable
         .Select(library => new Node(library.Interface.AssemblyIdentity, library.Interface.ImplementationSha256,
             library.Interface.InterfaceDigest, Path.GetFullPath(library.Source.SidecarPath),
             Path.GetFullPath(library.Source.ImplementationPath), library.Source.ExpectedInterfaceDigest,
-            library.Interface.IsReferenceAssembly, library.Interface.Dependencies)).ToArray();
+            library.Interface.IsReferenceAssembly, library.Interface.Dependencies, library.Source.Discovery)).ToArray();
 
     internal ImportResolution(IEnumerable<Source> sources)
     {
@@ -36,9 +38,10 @@ internal sealed class ImportResolution : IDisposable
         {
             foreach (Source source in sources)
             {
-                byte[] sidecar = File.ReadAllBytes(source.SidecarPath);
-                ContractInterface contract = ContractInterface.Read(sidecar);
-                byte[] implementation = File.ReadAllBytes(source.ImplementationPath);
+                if (source.Discovery is not null) ContractDiscoveryInputs.Validate(source.Discovery);
+                byte[] sidecar = source.Bytes?.Sidecar ?? File.ReadAllBytes(source.SidecarPath);
+                ContractInterface contract = source.Bytes?.Interface ?? ContractInterface.Read(sidecar);
+                byte[] implementation = source.Bytes?.Implementation ?? File.ReadAllBytes(source.ImplementationPath);
                 string actual = ContractInterface.Hash(implementation);
                 if (!ContractInterface.Digest(source.ExpectedSha256))
                     throw new InvalidDataException("Import requires an independently supplied SHA-256: --import-sha256 Lib=<hex>.");
@@ -53,6 +56,14 @@ internal sealed class ImportResolution : IDisposable
                 ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(implementation));
                 try
                 {
+                    string? advertised = ContractDiscovery.AttributeDigest(module);
+                    if (advertised is not null && advertised != source.ExpectedInterfaceDigest)
+                        throw new InvalidDataException("Contract attribute differs from independent interface digest.");
+                    bool embedded = ContractDiscovery.ValidateResource(module, contract);
+                    Source accepted = source.Discovery is null ? source : source with
+                    {
+                        Discovery = source.Discovery with { Carrier = embedded ? "embedded-and-sidecar" : "sidecar" }
+                    };
                     bool referenceAssembly = module.Assembly.CustomAttributes.Any(attribute =>
                         attribute.AttributeType.FullName == "System.Runtime.CompilerServices.ReferenceAssemblyAttribute");
                     if (referenceAssembly && !contract.IsReferenceAssembly)
@@ -77,7 +88,7 @@ internal sealed class ImportResolution : IDisposable
                     }
                     if (libraries.Any(library => library.Module.Assembly.Name.Name == module.Assembly.Name.Name))
                         throw new InvalidDataException("Ambiguous import assembly simple name: " + module.Assembly.Name.Name);
-                    libraries.Add(new(source, contract, ContractInterface.Hash(sidecar), module));
+                    libraries.Add(new(accepted, contract, ContractInterface.Hash(sidecar), module));
                 }
                 catch { module.Dispose(); throw; }
             }
@@ -154,7 +165,7 @@ internal sealed class ImportResolution : IDisposable
                 "contract", Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
                 export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest, export.Kind,
                 certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly,
-                certification.StaticIdentities));
+                certification.StaticIdentities, library.Source.Discovery));
         }
         sites[instruction] = slot;
     }

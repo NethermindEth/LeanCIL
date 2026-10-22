@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 partial class Program : IDisposable
@@ -1041,6 +1042,7 @@ unsafe def main (args : List String) : IO Unit := do
 
     static void RequireImplementationImports(string output)
     {
+        ContractDiscoveryInputs.ValidateOutput(output);
         if (ReferenceOnlyImports(output))
             throw new InvalidDataException("Reference-only contract input: caller proof checked for authoring only; no verification report or success receipt is certified.");
     }
@@ -1068,7 +1070,8 @@ unsafe def main (args : List String) : IO Unit := do
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
         string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation,
-        string? sourceBundleDigest = null);
+        string? sourceBundleDigest = null, string? implementationPath = null,
+        ContractDiscoveryProvenance? discovery = null);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1077,7 +1080,8 @@ unsafe def main (args : List String) : IO Unit := do
             "published-certification", import.GetProperty("certificationTheorem").GetString()!,
             import.GetProperty("certificationStatement").GetString()!, import.GetProperty("certificationStatementDigest").GetString()!,
             import.GetProperty("staticIdentities"),
-            "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.")).ToArray()
+            "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.",
+            implementationPath: import.GetProperty("implementationPath").GetString(), discovery: ContractDiscoveryInputs.Read(import))).ToArray()
         : [];
 
     static string ImportAuditHeader(string output) => ImportSources(output).ContainsKey("ExtractedImports") ? "import ExtractedImports\n" : "";
@@ -1358,5 +1362,60 @@ unsafe def main (args : List String) : IO Unit := do
     {
         if (library is not null && Directory.Exists(library))
             Directory.Delete(library, true);
+    }
+}
+
+// Shared by extractor admission and every report/cache publication boundary.
+// Discovery files locate inputs; their hashes never replace independent pins.
+internal sealed record DiscoveryFile([property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("sha256")] string Sha256);
+internal sealed record ContractDiscoveryProvenance([property: JsonPropertyName("targetFramework")] string TargetFramework,
+    [property: JsonPropertyName("runtimeIdentifier")] string? RuntimeIdentifier,
+    [property: JsonPropertyName("library")] string? Library,
+    [property: JsonPropertyName("assetPath")] string? AssetPath,
+    [property: JsonPropertyName("carrier")] string Carrier,
+    [property: JsonPropertyName("inputs")] DiscoveryFile[] Inputs);
+
+internal static class ContractDiscoveryInputs
+{
+    static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
+
+    internal static ContractDiscoveryProvenance? Read(JsonElement record) =>
+        record.TryGetProperty("discovery", out JsonElement discovery) && discovery.ValueKind != JsonValueKind.Null
+            ? discovery.Deserialize<ContractDiscoveryProvenance>(Json) ?? throw new InvalidDataException("Missing discovery provenance.") : null;
+
+    internal static void Validate(ContractDiscoveryProvenance provenance)
+        => Validate(provenance, new Dictionary<string, string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal));
+
+    static void Validate(ContractDiscoveryProvenance provenance, Dictionary<string, string> checkedInputs)
+    {
+        if (provenance.TargetFramework != "net10.0" || provenance.Inputs is null ||
+            provenance.Carrier is not ("sidecar" or "embedded-and-sidecar"))
+            throw new InvalidDataException("Invalid contract discovery provenance.");
+        foreach (DiscoveryFile input in provenance.Inputs)
+        {
+            if (input is null || !System.IO.Path.IsPathFullyQualified(input.Path) || input.Sha256 is null ||
+                !Regex.IsMatch(input.Sha256, @"\A[0-9a-f]{64}\z"))
+                throw new InvalidDataException("Stale contract discovery input: " + input?.Path);
+            string path = System.IO.Path.GetFullPath(input.Path);
+            if (checkedInputs.TryGetValue(path, out string? prior))
+            {
+                if (prior != input.Sha256) throw new InvalidDataException("Conflicting contract discovery input hashes: " + path);
+                continue;
+            }
+            if (!File.Exists(path) || Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))) != input.Sha256)
+                throw new InvalidDataException("Stale contract discovery input: " + path);
+            checkedInputs.Add(path, input.Sha256);
+        }
+    }
+
+    internal static void ValidateOutput(string output)
+    {
+        using JsonDocument identity = JsonDocument.Parse(File.ReadAllBytes(System.IO.Path.Combine(output, "identity.json")));
+        Dictionary<string, string> checkedInputs = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (string field in new[] { "imports", "importGraph" })
+            if (identity.RootElement.TryGetProperty(field, out JsonElement records))
+                foreach (JsonElement record in records.EnumerateArray())
+                    if (Read(record) is { } provenance) Validate(provenance, checkedInputs);
     }
 }

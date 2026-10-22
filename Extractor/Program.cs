@@ -10,13 +10,15 @@ internal static class Program
 {
     const string Usage = "Usage: leancil list assembly.dll\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
 
+    const string DiscoveryUsage = "\nDiscovery: [--import-deps app.deps.json] [--import-assets project.assets.json] [--runtime-identifier RID] [--import-package-root directory]...\n       leancil interface-descriptor Lib.leancil.contracts descriptor.json";
+
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
     static int Main(string[] args)
     {
         if (args.Length == 0 || args is ["--help"] or ["-h"])
         {
-            Console.WriteLine(Usage);
+            Console.WriteLine(Usage + DiscoveryUsage);
             return 0;
         }
 
@@ -24,6 +26,17 @@ internal static class Program
         var stage = "arguments";
         try
         {
+            if (args[0] == "interface-descriptor")
+            {
+                if (args.Length != 3) throw new ArgumentException("Usage: leancil interface-descriptor Lib.leancil.contracts descriptor.json");
+                stage = "interface descriptor";
+                ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(args[1]));
+                string destination = Path.GetFullPath(args[2]);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.WriteAllBytes(destination, contract.DescriptorBytes());
+                Console.WriteLine("Descriptor only: " + contract.InterfaceDigest + "; no implementation certification is produced.");
+                return 0;
+            }
             if (args[0] == "list")
             {
                 if (args.Length != 2)
@@ -73,6 +86,10 @@ internal static class Program
             Dictionary<string, string> implementationPaths = new(StringComparer.Ordinal);
             Dictionary<string, string> importHashes = new(StringComparer.Ordinal);
             Dictionary<string, string> interfaceHashes = new(StringComparer.Ordinal);
+            string? discoveryDeps = null;
+            string? discoveryAssets = null;
+            string? discoveryRid = null;
+            List<string> discoveryRoots = [];
             var initializedTypes = new SortedSet<string>(StringComparer.Ordinal);
             for (var index = 1; index < args.Length; index++)
             {
@@ -92,6 +109,17 @@ internal static class Program
                         if (!selected.TryAdd(args[index][..separator], args[index][(separator + 1)..]))
                             throw new ArgumentException("Duplicate " + option + " assembly.");
                     }
+                }
+                else if (args[index] is "--import-deps" or "--import-assets" or "--runtime-identifier" or "--import-package-root")
+                {
+                    string option = args[index];
+                    if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
+                        throw new ArgumentException(option + " requires a value.");
+                    if (option == "--import-package-root") discoveryRoots.Add(Path.GetFullPath(args[index]));
+                    else if (option == "--import-deps" && discoveryDeps is null) discoveryDeps = Path.GetFullPath(args[index]);
+                    else if (option == "--import-assets" && discoveryAssets is null) discoveryAssets = Path.GetFullPath(args[index]);
+                    else if (option == "--runtime-identifier" && discoveryRid is null) discoveryRid = args[index];
+                    else throw new ArgumentException("Duplicate " + option + " option.");
                 }
                 else if (args[index] == "--assume-initialized")
                 {
@@ -154,6 +182,16 @@ internal static class Program
             var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
+            if (recorded is not null)
+            {
+                if (discoveryDeps is not null || discoveryAssets is not null || discoveryRid is not null || discoveryRoots.Count > 0)
+                    throw new ArgumentException("Discovery selection is recorded; extract again to change its inputs.");
+                ContractDiscoveryInputs.ValidateOutput(output);
+            }
+            HashSet<string> automaticImports = new(importHashes.Keys.Union(interfaceHashes.Keys, StringComparer.Ordinal)
+                .Except(implementationPaths.Keys, StringComparer.Ordinal), StringComparer.Ordinal);
+            Lazy<ContractDiscovery>? discovery = recorded is null ? new(() =>
+                new(assemblyPath, profile, discoveryDeps, discoveryAssets, discoveryRid, discoveryRoots, automaticImports)) : null;
             List<ImportResolution.Source> importSources = [];
             if (recorded is { } recordedGraph && recordedGraph.TryGetProperty("importGraph", out JsonElement graphNodes))
                 foreach (JsonElement node in graphNodes.EnumerateArray())
@@ -163,7 +201,8 @@ internal static class Program
                     string implementation = implementationPaths.GetValueOrDefault(name) ?? node.GetProperty("implementationPath").GetString()!;
                     string expected = importHashes.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
                     string expectedInterface = interfaceHashes.GetValueOrDefault(name) ?? node.GetProperty("expectedInterfaceDigest").GetString()!;
-                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
+                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface,
+                        Discovery: ContractDiscoveryInputs.Read(node)));
                 }
             if (recorded is { } recordedImports && recordedImports.TryGetProperty("imports", out JsonElement importRecords))
                 foreach (JsonElement binding in importRecords.EnumerateArray())
@@ -176,23 +215,37 @@ internal static class Program
                     string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
                         (binding.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import extraction has no independent interface digest; extract again with --import-interface-sha256."));
-                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
+                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface,
+                        Discovery: ContractDiscoveryInputs.Read(binding)));
                 }
-            foreach (AssemblyNameReference reference in module.AssemblyReferences)
+            foreach (AssemblyNameReference reference in recorded is null ? module.AssemblyReferences : [])
             {
                 string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
                 if (File.Exists(discovered) && !importPaths.Contains(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
                     importPaths.Add(discovered);
             }
+            if (discovery is not null)
+                foreach (string name in importHashes.Keys.Union(interfaceHashes.Keys, StringComparer.Ordinal))
+                {
+                    if (importPaths.Any(path => Path.GetFileName(path) == name + ".leancil.contracts")) continue;
+                    string? located = discovery.Value.FindSidecar(name, implementationPaths.GetValueOrDefault(name), interfaceHashes.GetValueOrDefault(name) ?? "");
+                    if (located is not null && !importPaths.Contains(located, StringComparer.Ordinal)) importPaths.Add(located);
+                }
             foreach (string sidecar in importPaths.Distinct(StringComparer.Ordinal))
             {
                 if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
-                ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecar));
+                ContractInterface contract = discovery is not null ? discovery.Value.Sidecar(sidecar) : ContractInterface.Read(File.ReadAllBytes(sidecar));
                 string name = AssemblyNameReference.Parse(contract.AssemblyIdentity).Name;
-                string adjacent = Path.Combine(Path.GetDirectoryName(sidecar)!, name + ".dll");
-                string implementation = implementationPaths.GetValueOrDefault(name) ?? (File.Exists(adjacent) ? adjacent :
-                    Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, name + ".dll"));
-                importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
+                if (discovery is not null)
+                    importSources.Add(discovery.Value.Source(sidecar, implementationPaths.GetValueOrDefault(name),
+                        importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
+                else
+                {
+                    string adjacent = Path.Combine(Path.GetDirectoryName(sidecar)!, name + ".dll");
+                    string implementation = implementationPaths.GetValueOrDefault(name) ?? (File.Exists(adjacent) ? adjacent :
+                        Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, name + ".dll"));
+                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
+                }
             }
             using ImportResolution imports = new(importSources);
             stage = "metadata and CIL validation";

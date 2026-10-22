@@ -10,6 +10,7 @@ partial class Program
 
     void PreflightFullImports(string output, IReadOnlyDictionary<string, string> overrides)
     {
+        ContractDiscoveryInputs.ValidateOutput(output);
         JsonElement[] imports = ImportedBindings(output);
         if (imports.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         HashSet<string> used = new(StringComparer.Ordinal);
@@ -58,6 +59,7 @@ partial class Program
         void Original(string path) => original[path] = Sha(path);
         void RecheckOriginal()
         {
+            ContractDiscoveryInputs.ValidateOutput(output);
             foreach ((string path, string digest) in original)
                 if (!File.Exists(path) || Sha(path) != digest) throw new InvalidDataException("Full-verification input changed: " + path);
             foreach ((string directory, string digest) in bundles) ContractSourceBundle.Validate(directory, digest);

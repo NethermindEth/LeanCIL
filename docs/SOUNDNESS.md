@@ -1,5 +1,14 @@
 # Soundness boundary
 
+Contract discovery is an untrusted location-selection phase. deps.json, NuGet
+assets, retained LeanCilContracts metadata, and embedded descriptors do not prove
+the imported contracts or authenticate a publisher. Admission hashes and inspects
+one shared snapshot of the selected runtime DLL. Independent implementation and
+interface pins remain mandatory. Embedded descriptors exclude final-DLL hash and
+certification metadata; the external sidecar binds the final resource-bearing DLL.
+The same provenance checker rejects changed selection inputs on recheck, reuse,
+and final report publication. A reference DLL alone cannot complete certification.
+
 ## What is defined and proved
 
 `CIL.Safety.RuntimeExceptions` adds a fixed naming view of checked execution
