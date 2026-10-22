@@ -19,11 +19,12 @@ string library = Path.Combine(directory, "ImportFixture.Lib.dll");
 string sidecar = Path.Combine(directory, "ImportFixture.Lib.leancil.contracts");
 string output = Path.Combine(directory, "extraction");
 string expectedHash = "";
+string expectedInterfaceHash = "";
 JsonObject contract = null!;
 string[] cli = ["dotnet", ExtractorPath];
 string[] Command(string method = "Entry", bool includeImport = true, params string[] extra) =>
     [.. cli, "extract", app, "ImportFixture.Application::" + method + "(ulong)", output,
-        .. includeImport ? new[] { "--import", sidecar, "--import-sha256", "ImportFixture.Lib=" + expectedHash } : [], .. extra];
+        .. includeImport ? new[] { "--import", sidecar, "--import-sha256", "ImportFixture.Lib=" + expectedHash, "--import-interface-sha256", "ImportFixture.Lib=" + expectedInterfaceHash } : [], .. extra];
 
 void Reject(string[] command, string diagnostic)
 {
@@ -40,13 +41,14 @@ string InterfaceDigest(JsonObject value)
     return ContentKey(descriptor.ToJsonString());
 }
 
-void Save(bool bind = true)
+void Save(bool bind = true, bool updatePin = true)
 {
     if (bind)
     {
         contract["interfaceDigest"] = InterfaceDigest(contract);
         contract["certifications"]![0]!["interfaceDigest"] = contract["interfaceDigest"]!.DeepClone();
     }
+    if (updatePin) expectedInterfaceHash = contract["interfaceDigest"]!.GetValue<string>();
     File.WriteAllText(sidecar, contract.ToJsonString());
 }
 
@@ -87,7 +89,17 @@ File.Delete(sidecar);
 Reject(Command(includeImport: false), "Next: supply --import");
 Save();
 Reject([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", output, "--import", sidecar], "independently supplied SHA-256");
-Run(Command(includeImport: false, extra: ["--import-sha256", "ImportFixture.Lib=" + expectedHash]));
+Run(Command(includeImport: false, extra: ["--import-sha256", "ImportFixture.Lib=" + expectedHash, "--import-interface-sha256", "ImportFixture.Lib=" + expectedInterfaceHash]));
+string marker = Path.Combine(directory, "interface-code-executed");
+File.Delete(marker);
+contract["interfaceModules"]![0]!["source"] = contract["interfaceModules"]![0]!["source"]!.GetValue<string>() +
+    "\nrun_cmd Lean.Elab.Command.liftIO <| IO.FS.writeFile " + JsonSerializer.Serialize(marker) + " \"executed\"\n";
+Save(updatePin: false);
+Reject(Command(), "Import interface SHA-256 mismatch");
+if (File.Exists(marker)) throw new InvalidOperationException("Unpinned interface executed before rejection.");
+Reset();
+Reject([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", output, "--import", sidecar,
+    "--import-sha256", "ImportFixture.Lib=" + expectedHash], "independently supplied interface digest");
 string alternate = Path.Combine(directory, "alternate-implementation.dll");
 File.Copy(library, alternate, true);
 Run(Command(extra: ["--import-implementation", "ImportFixture.Lib=" + alternate]));

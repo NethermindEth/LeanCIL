@@ -1004,8 +1004,9 @@ unsafe def main (args : List String) : IO Unit := do
         stage?.Invoke("Lean library build");
         var before = Inputs(proof, settings);
         var session = Library(before);
+        HashSet<string> importSourceNames = existingArtifacts ? ImportSources(output).Keys.ToHashSet(StringComparer.Ordinal) : [];
         var support = Regex.Matches(File.ReadAllText(proof), @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
-            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
+            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
         if (support.Length > 0)
         {

@@ -8,7 +8,8 @@ the caller program. The imported method has no body in the unlinked program.
 leancil extract App.dll 'App::Entry(ulong)' extracted scalar \
   --import Lib.leancil.contracts \
   --import-implementation Lib=/path/to/Lib.dll \
-  --import-sha256 Lib=<independently-supplied-sha256>
+  --import-sha256 Lib=<independently-supplied-sha256> \
+  --import-interface-sha256 Lib=<independently-supplied-interface-digest>
 leancil check extracted
 ```
 
@@ -18,6 +19,14 @@ application. Explicit implementation paths override discovery. A separate
 `--import-sha256` is required on extraction. A hash found in the same sidecar
 cannot serve as that independent input. A supplied digest establishes byte
 identity; it does not establish authenticity or prove the implementation.
+
+An independent `--import-interface-sha256` is also required before staging or
+compiling the interface. It pins the canonical interface descriptor, including
+every Lean source byte. Obtain it through your accepted publisher channel.
+Interface sources can execute Lean metaprograms and IO with verifier permissions.
+Accepting their digest accepts execution of those exact sources. A digest is
+neither a sandbox nor independent publisher authentication. Rechecks enforce
+the recorded independent interface pin before compilation.
 
 `check` reopens recorded sidecars and implementations. It recomputes their hashes,
 metadata, generated CIL, import slots and interface sources. It reports both the

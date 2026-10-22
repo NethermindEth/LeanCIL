@@ -225,3 +225,8 @@ elaborated statement is `Not` applied to a contract's `Holds` is, as reported by
 the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
+
+Contract imports also require `--import-interface-sha256 Lib=<digest>` from an
+accepted publisher channel. This independently pins the interface descriptor
+and all executable Lean source bytes before compilation. See
+[CONTRACT-INTERFACES.md](CONTRACT-INTERFACES.md) for the source trust boundary.
