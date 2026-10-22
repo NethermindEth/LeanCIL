@@ -37,33 +37,30 @@ def scalarCovered (opcode : Nat) : Bool :=
   (21 <= opcode && opcode <= 33) || scalarBinary opcode || conversion opcode ||
     opcode ∈ [98, 99, 100, 101, 102]
 
-private def scalarEncoding : Nat → Option Op
-  | 88 => some .add | 89 => some .sub | 90 => some .mul
-  | 91 => some (.divide true false) | 92 => some (.divide false false)
-  | 93 => some (.divide true true) | 94 => some (.divide false true)
-  | 95 => some .band | 96 => some .bor | 97 => some .bxor
-  | 98 => some .shl | 99 => some .shr | 100 => some .shrUn
-  | 101 => some .neg | 102 => some .bnot
-  | 103 => some .convI1 | 104 => some .convI2 | 105 => some .convI4 | 106 => some .convI8
-  | 109 => some .convU4 | 110 => some .convU8
-  | 130 => some (.checkedConvert 8 true true) | 131 => some (.checkedConvert 16 true true)
-  | 132 => some (.checkedConvert 32 true true) | 133 => some (.checkedConvert 64 true true)
-  | 134 => some (.checkedConvert 8 false true) | 135 => some (.checkedConvert 16 false true)
-  | 136 => some (.checkedConvert 32 false true) | 137 => some (.checkedConvert 64 false true)
-  | 138 => some (.checkedConvert 64 true true) | 139 => some (.checkedConvert 64 false true)
-  | 179 => some (.checkedConvert 8 true false) | 180 => some (.checkedConvert 8 false false)
-  | 181 => some (.checkedConvert 16 true false) | 182 => some (.checkedConvert 16 false false)
-  | 183 => some (.checkedConvert 32 true false) | 184 => some (.checkedConvert 32 false false)
-  | 185 => some (.checkedConvert 64 true false) | 186 => some (.checkedConvert 64 false false)
-  | 209 => some .convU2 | 210 => some .convU1 | 211 => some .convI8
-  | 212 => some (.checkedConvert 64 true false) | 213 => some (.checkedConvert 64 false false)
-  | 214 => some (.checkedArithmetic .add true) | 215 => some (.checkedArithmetic .add false)
-  | 216 => some (.checkedArithmetic .mul true) | 217 => some (.checkedArithmetic .mul false)
-  | 218 => some (.checkedArithmetic .sub true) | 219 => some (.checkedArithmetic .sub false)
-  | 224 => some .convU
-  | 65025 => some .eq | 65026 => some .gt | 65027 => some .gtu
-  | 65028 => some .lt | 65029 => some .ltu
-  | _ => none
+private def scalarEncodingMatches (opcode : Nat) (emitted : Op) : Bool :=
+  match opcode, emitted with
+  | 88, .add | 89, .sub | 90, .mul => true
+  | 91, .divide true false | 92, .divide false false
+  | 93, .divide true true | 94, .divide false true => true
+  | 95, .band | 96, .bor | 97, .bxor | 98, .shl | 99, .shr | 100, .shrUn
+  | 101, .neg | 102, .bnot => true
+  | 103, .convI1 | 104, .convI2 | 105, .convI4 | 106, .convI8 | 109, .convU4 | 110, .convU8 => true
+  | 130, .checkedConvert 8 true true | 131, .checkedConvert 16 true true
+  | 132, .checkedConvert 32 true true | 133, .checkedConvert 64 true true
+  | 134, .checkedConvert 8 false true | 135, .checkedConvert 16 false true
+  | 136, .checkedConvert 32 false true | 137, .checkedConvert 64 false true
+  | 138, .checkedConvert 64 true true | 139, .checkedConvert 64 false true
+  | 179, .checkedConvert 8 true false | 180, .checkedConvert 8 false false
+  | 181, .checkedConvert 16 true false | 182, .checkedConvert 16 false false
+  | 183, .checkedConvert 32 true false | 184, .checkedConvert 32 false false
+  | 185, .checkedConvert 64 true false | 186, .checkedConvert 64 false false => true
+  | 209, .convU2 | 210, .convU1 | 211, .convI8 | 224, .convU => true
+  | 212, .checkedConvert 64 true false | 213, .checkedConvert 64 false false => true
+  | 214, .checkedArithmetic .add true | 215, .checkedArithmetic .add false
+  | 216, .checkedArithmetic .mul true | 217, .checkedArithmetic .mul false
+  | 218, .checkedArithmetic .sub true | 219, .checkedArithmetic .sub false => true
+  | 65025, .eq | 65026, .gt | 65027, .gtu | 65028, .lt | 65029, .ltu => true
+  | _, _ => false
 
 private def mixedNative (left right : ScalarKind) : Bool :=
   (left == .native && right == .word32) || (left == .word32 && right == .native)
@@ -85,42 +82,126 @@ private def literal (instruction : RawInstruction) : Option Op :=
   | _, _ => none
 
 def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Op) : Bool :=
-  if 21 <= instruction.opcode && instruction.opcode <= 33 then literal instruction == some emitted
+  if 21 <= instruction.opcode && instruction.opcode <= 33 then
+    match literal instruction, emitted with
+    | some (.const32 expected), .const32 actual => expected == actual
+    | some (.const64 expected), .const64 actual => expected == actual
+    | _, _ => false
   else if instruction.operand != .none then false
-  else match scalarEncoding instruction.opcode with
-    | none => false
-    | some operation =>
-      if scalarBinary instruction.opcode then match stack with
-        | right :: left :: _ => compatibleBinary left right &&
-            emitted == (if mixedNative left right then .nativeBinary operation else operation)
-        | _ => false
-      else if instruction.opcode ∈ [98, 99, 100] then match stack with
-        | right :: left :: _ => numeric left && right ∈ [.word32, .native] && emitted == operation
-        | _ => false
-      else match stack with
-        | value :: _ => numeric value && emitted == operation
-        | _ => false
+  else if scalarBinary instruction.opcode then match stack with
+    | right :: left :: _ => compatibleBinary left right &&
+        match mixedNative left right, emitted with
+        | true, .nativeBinary operation => scalarEncodingMatches instruction.opcode operation
+        | false, operation => scalarEncodingMatches instruction.opcode operation
+        | _, _ => false
+    | _ => false
+  else if instruction.opcode ∈ [98, 99, 100] then match stack with
+    | right :: left :: _ => numeric left && right ∈ [.word32, .native] && scalarEncodingMatches instruction.opcode emitted
+    | _ => false
+  else match stack with
+    | value :: _ => numeric value && scalarEncodingMatches instruction.opcode emitted
+    | _ => false
 
 private def resultKind (opcode : Nat) : ScalarKind :=
   if opcode ∈ [211, 212, 213, 138, 139, 224] then .native
   else if opcode ∈ [106, 110, 133, 137, 185, 186] then .word64 else .word32
 
+private def splitTextChars (separator : List Char) : Nat → List Char → List Char → List (List Char)
+  | 0, current, tail => [current.reverse ++ tail]
+  | _ + 1, current, [] => [current.reverse]
+  | remaining + 1, current, text@(c :: tail) =>
+    if separator.isPrefixOf text then
+      current.reverse :: splitTextChars separator remaining [] (text.drop separator.length)
+    else splitTextChars separator remaining (c :: current) tail
+
+private def splitText (text separator : String) : List String :=
+  if separator.toList.isEmpty then [text]
+  else (splitTextChars separator.toList (text.toList.length + 1) [] text.toList).map String.ofList
+
+private def replaceTextChars (pattern replacement : List Char) : Nat → List Char → List Char
+  | 0, text => text
+  | _ + 1, [] => []
+  | remaining + 1, text@(c :: tail) =>
+    if pattern.isPrefixOf text then
+      replacement ++ replaceTextChars pattern replacement remaining (text.drop pattern.length)
+    else c :: replaceTextChars pattern replacement remaining tail
+
+private def replaceText (text pattern replacement : String) : String :=
+  if pattern.toList.isEmpty then text
+  else String.ofList (replaceTextChars pattern.toList replacement.toList (text.toList.length + 1) text.toList)
+
+private def scalarTypeName : TypeExpr → Option String
+  | .void => some "System.Void"
+  | .atom _ name | .constructor _ name => some name
+  | .aggregate identity _ | .enum identity _ => (splitText identity "::")[1]?
+  | .parameter index => some ("!!" ++ toString index)
+  | .byref element => (· ++ "&") <$> scalarTypeName element
+  | .pointer element => (· ++ "*") <$> scalarTypeName element
+  | .apply constructor argument => do
+    let name ← scalarTypeName constructor
+    let element ← scalarTypeName argument
+    return if name.endsWith ">" then (name.dropEnd 1).toString ++ "," ++ element ++ ">"
+      else name ++ "<" ++ element ++ ">"
+
+private def parameterTokens (depth : Nat) (current : List Char) : List Char → Option (List String)
+  | [] => if depth != 0 then none else if current.isEmpty then some [] else some [String.ofList current.reverse]
+  | ',' :: [] => none
+  | ',' :: tail =>
+    if depth == 0 then
+      if current.isEmpty then none else (String.ofList current.reverse :: ·) <$> parameterTokens 0 [] tail
+    else parameterTokens depth (',' :: current) tail
+  | '<' :: tail => parameterTokens (depth + 1) ('<' :: current) tail
+  | '>' :: tail => if depth == 0 then none else parameterTokens (depth - 1) ('>' :: current) tail
+  | c :: tail => parameterTokens depth (c :: current) tail
+
+private def parameterTypeMatches (token : String) (type : TypeExpr) : Bool :=
+  if scalarTypeName type == some token then true
+  else match type with
+    | .byref element => token.startsWith "!" && !token.startsWith "!!" && token.endsWith "&" && scalarType element == .other
+    | .pointer element => token.startsWith "!" && !token.startsWith "!!" && token.endsWith "*" && scalarType element == .other
+    | _ => token.startsWith "!" && !token.startsWith "!!" && scalarType type == .other
+
+private def normalizeExternalIdentity (site : CallSite) (identity : String) : Option String := do
+  let normalized ← site.typeArguments.zipIdx.reverse.foldlM (fun text (type, index) => do
+    let name ← scalarTypeName type
+    return replaceText text ("!!" ++ toString index) name) identity
+  let owner ← scalarTypeName site.declaringType
+  match splitText owner "<" with
+  | [] | [_] => return normalized
+  | _ :: tail =>
+    let suffix := String.intercalate "<" tail
+    if !suffix.endsWith ">" then none else
+      let arguments ← parameterTokens 0 [] (suffix.dropEnd 1).toString.toList
+      return arguments.zipIdx.reverse.foldl (fun text (name, index) =>
+        replaceText text ("!" ++ toString index) name) normalized
+
+private def externalParametersMatch (site : CallSite) (identity : String) : Bool :=
+  ((do
+    let normalized ← normalizeExternalIdentity site identity
+    let [_, tail] := splitText normalized "(" | none
+    if !tail.endsWith ")" then none else
+      let tokens ← parameterTokens 0 [] (tail.dropEnd 1).toString.toList
+      return tokens.length == site.parameterTypes.length &&
+        (tokens.zip site.parameterTypes).all fun (token, type) => parameterTypeMatches token type) : Option Bool).getD false
+
+private def callParametersMatch (site : CallSite) : Bool :=
+  site.parameterCount == site.parameterTypes.length && match site.target with
+    | .managed _ => true
+    | .external identity => externalParametersMatch site identity
+
 private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
-  let signature := (identity.splitOn "::")[1]?.getD ""
-  let token := (signature.splitOn " ")[0]?.getD ""
-  if token.startsWith "!!" && !token.endsWith "&" then
-    let index := ((token.splitOn "!!")[1]?.getD "").toNat?
-    match index with
-    | some index => if site.typeArguments[index]? == some site.returnType then scalarType site.returnType else .other
-    | none => .other
-  else match site.returnType with
-  | .atom _ name => if signature.startsWith (name ++ " ") then scalarType site.returnType else .other
-  | .byref _ =>
-    if ((signature.splitOn " ")[0]?.getD "").endsWith "&" then .reference else .other
-  | .enum identity _ =>
-    let name := (identity.splitOn "::")[1]?.getD ""
-    if name != "" && signature.startsWith (name ++ " ") then scalarType site.returnType else .other
-  | _ => .other
+  match normalizeExternalIdentity site identity with
+  | none => .other
+  | some normalized =>
+    let signature := (splitText normalized "::")[1]?.getD ""
+    match site.returnType with
+    | .atom _ name => if signature.startsWith (name ++ " ") then scalarType site.returnType else .other
+    | .byref _ =>
+      if ((splitText signature " ")[0]?.getD "").endsWith "&" then .reference else .other
+    | .enum identity _ =>
+      let name := (splitText identity "::")[1]?.getD ""
+      if name != "" && signature.startsWith (name ++ " ") then scalarType site.returnType else .other
+    | _ => .other
 
 private def callResult (site : CallSite) : ScalarKind :=
   match site.target with
@@ -145,9 +226,9 @@ private def pushedKind (raw : RawMethod) (instruction : RawInstruction) : Option
       let .type type := instruction.operand | none
       return scalarType type
     else if instruction.opcode == 77 then some .native
-    else if instruction.opcode == 33 || instruction.opcode == 76 then some .word64
-    else if instruction.opcode ∈ [20, 34, 35, 114, 208, 65030] then some .other
-    else some .word32
+    else if instruction.opcode == 76 then some .word64
+    else if instruction.opcode ∈ [70, 71, 72, 73, 74, 75, 65052] then some .word32
+    else some .other
 
 def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     (stack : List ScalarKind) : Option (List ScalarKind) := do
@@ -166,17 +247,32 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let value :: tail := stack | none
     if !numeric value then none else
       return (if conversion opcode then resultKind opcode else value) :: tail
+  if opcode ∈ [10, 11, 12, 13, 19, 65038] then
+    let index ← localIndex instruction
+    let type ← raw.locals[index]?
+    let value :: tail := stack | none
+    if value == scalarType type then return tail else none
+  if let some (.store index) := argumentOperation instruction then
+    let expected ← argumentKind raw index
+    let value :: tail := stack | none
+    if value == expected then return tail else none
   if opcode == 37 then
     let value :: tail := stack | none
     return value :: value :: tail
   if opcode == 40 || opcode == 115 then
     let .call site := instruction.operand | none
-    let pops := site.parameterCount + (if opcode == 40 && site.hasThis then 1 else 0)
-    if pops > stack.length then none else
+    let expected := site.parameterTypes.reverse.map scalarType ++
+      (if opcode == 40 && site.hasThis then [.reference] else [])
+    let pops := expected.length
+    if !callParametersMatch site || pops > stack.length || stack.take pops != expected ||
+        site.returnsValue != (site.returnType != .void) then none else
       return (if opcode == 115 then [ScalarKind.other] else if site.returnsValue then [callResult site] else []) ++ stack.drop pops
   if opcode == 42 then
-    let pops := if raw.returnType == .void then 0 else 1
-    if pops > stack.length then none else return stack.drop pops
+    if raw.returnType == .void then
+      if stack.isEmpty then return [] else none
+    else match stack with
+      | [value] => if value == scalarType raw.returnType then return [] else none
+      | _ => none
   let (pops, pushes) ← rawStackEffect opcode
   if pops > stack.length then none else
     if pushes == 0 then return stack.drop pops

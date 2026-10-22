@@ -4,19 +4,22 @@ namespace Nethermind.LeanCIL;
 
 internal static class CallReturnType
 {
-    internal static TypeReference Resolve(MethodReference method)
-    {
-        if (method is not GenericInstanceMethod generic) return method.ReturnType;
-        return Substitute(method.ReturnType, generic);
-    }
+    internal static TypeReference Resolve(MethodReference method) => Substitute(method.ReturnType, method);
 
-    static TypeReference Substitute(TypeReference type, GenericInstanceMethod method)
+    internal static IEnumerable<TypeReference> Parameters(MethodReference method) =>
+        method.Parameters.Select(parameter => Substitute(parameter.ParameterType, method));
+
+    static TypeReference Substitute(TypeReference type, MethodReference method)
     {
-        if (type is GenericParameter { Type: GenericParameterType.Method } parameter)
+        if (type is GenericParameter parameter)
         {
-            if ((uint)parameter.Position >= (uint)method.GenericArguments.Count)
-                throw new InvalidDataException("Invalid call return type parameter");
-            return method.GenericArguments[parameter.Position];
+            IList<TypeReference>? arguments = parameter.Type == GenericParameterType.Method
+                ? (method as GenericInstanceMethod)?.GenericArguments
+                : (method.DeclaringType as GenericInstanceType)?.GenericArguments;
+            if (arguments is null) return type;
+            if ((uint)parameter.Position >= (uint)arguments.Count)
+                throw new InvalidDataException("Invalid call signature type parameter");
+            return arguments[parameter.Position];
         }
         if (type is ByReferenceType byRef) return new ByReferenceType(Substitute(byRef.ElementType, method));
         if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType, method));

@@ -25,8 +25,8 @@ private def arithmetic : List (Nat × Op) := [
   (219, .checkedArithmetic .sub false), (65025, .eq), (65026, .gt), (65027, .gtu),
   (65028, .lt), (65029, .ltu)]
 example : arithmetic.all (fun (opcode, operation) => scalarOpMatches (i opcode) [.word32, .word32] operation) = true := by decide
-example : arithmetic.all (fun (opcode, operation) =>
-    !scalarOpMatches (i opcode) [.word32, .word32] (if operation == .add then .sub else .add)) = true := by decide
+example : arithmetic.all (fun (opcode, _operation) =>
+    !scalarOpMatches (i opcode) [.word32, .word32] (if opcode == 88 then .sub else .add)) = true := by decide
 example : scalarOpMatches (i 101) [.word64] .neg = true := by decide
 example : scalarOpMatches (i 102) [.word64] .bnot = true := by decide
 example : scalarOpMatches (i 101) [.word64] .bnot = false := by decide
@@ -122,7 +122,63 @@ example : ¬ TranslationValid [] #[] [convertEvidence] []
 example : ¬ TranslationValid [] #[] [convertEvidence] []
     [{ convertMethod with code := [.arg 0, .convI8, .ret] }] := by decide
 
-private def mixedRaw := raw [i 2, i 3, i 88, i 42] [nativeType, intType]
+private def floatRaw (opcode : Nat) := raw [i 23, i opcode, i 106, i 42] []
+private def floatFeatures : FeatureCertificate := [unknown 0, state [some 1], unknown 1, unknown 1]
+private def floatStates : ScalarCertificate := [some [], some [.word32], some [.word32], some [.word64]]
+private def floatEvidence (opcode : Nat) : MethodEvidence := {
+  original := floatRaw opcode, arguments := [], closed := floatRaw opcode,
+  parameterInput := { arguments := [], locals := [], code := List.replicate 4 .other },
+  reachable := List.replicate 4 true, featureStates := floatFeatures, scalarStates := floatStates, layoutUses := [] }
+private def floatMethod : Method := { locals := [], returnsValue := true, code := [.const32 1, .neg, .convI8, .ret] }
+example : FeatureFlowValid (floatRaw 107) .scalar floatFeatures (List.replicate 4 true) floatMethod.code := by decide
+example : FeatureFlowValid (floatRaw 108) .scalar floatFeatures (List.replicate 4 true) floatMethod.code := by decide
+example : scalarTransfer (floatRaw 107) (i 107) [.word32] = some [.other] := by decide
+example : scalarTransfer (floatRaw 108) (i 108) [.word32] = some [.other] := by decide
+example : ¬ TranslationValid [] #[] [floatEvidence 107] [] [floatMethod] := by decide
+example : ¬ TranslationValid [] #[] [floatEvidence 108] [] [floatMethod] := by decide
+example : ¬ ScalarFlowValid (floatRaw 107) floatFeatures (floatStates.set 2 (some [.other])) floatMethod.code := by decide
+example : ¬ ScalarFlowValid (floatRaw 108) floatFeatures (floatStates.set 2 (some [.other])) floatMethod.code := by decide
+example : scalarTransfer addRaw (i 80) [.reference] = some [.other] := by decide
+example : scalarTransfer addRaw (i 150) [.word32, .reference] = some [.other] := by decide
+example : scalarTransfer addRaw (i 154) [.word32, .reference] = some [.other] := by decide
+
+example : scalarTransfer { addRaw with locals := [intType] } (i 10) [.other] = none := by decide
+example : scalarTransfer { addRaw with locals := [intType] } (i 10) [.word64] = none := by decide
+example : scalarTransfer { addRaw with locals := [intType] } (i 10) [.word32] = some [] := by decide
+example : scalarTransfer { addRaw with parameters := [intType] } (i 16 (.argument 0)) [.other] = none := by decide
+example : scalarTransfer { addRaw with parameters := [intType] } (i 16 (.argument 0)) [.word32] = some [] := by decide
+example : scalarTransfer addRaw (i 42) [.other] = none := by decide
+example : scalarTransfer addRaw (i 42) [.word32] = none := by decide
+example : scalarTransfer addRaw (i 42) [.word64, .word64] = none := by decide
+example : scalarTransfer addRaw (i 42) [.word64] = some [] := by decide
+
+private def localRaw := { raw [i 23, i 107, i 10, i 6, i 106, i 42] [] with locals := [intType] }
+private def localFeatures : FeatureCertificate :=
+  ([[], [some 1], [none], [], [none], [none]] : List (List (Option W32))).map fun stack => some ⟨stack, [none]⟩
+private def localStates : ScalarCertificate := [some [], some [.word32], some [.other], some [], some [.word32], some [.word64]]
+private def localEvidence : MethodEvidence := {
+  original := localRaw, arguments := [], closed := localRaw,
+  parameterInput := { arguments := [], locals := [.field .signed32], code := List.replicate 6 .other },
+  reachable := List.replicate 6 true, featureStates := localFeatures, scalarStates := localStates, layoutUses := [] }
+private def localMethod : Method := {
+  locals := [.i32 0], localKinds := [.word32], returnsValue := true,
+  code := [.const32 1, .neg, .setLocal 0, .local 0, .convI8, .ret] }
+example : FeatureFlowValid localRaw .scalar localFeatures (List.replicate 6 true) localMethod.code := by decide
+example : ¬ TranslationValid [] #[] [localEvidence] [] [localMethod] := by decide
+
+private def argumentRaw := raw [i 23, i 108, i 16 (.argument 0), i 2, i 106, i 42] [intType]
+private def argumentFeatures : FeatureCertificate := [unknown 0, state [some 1], unknown 1, unknown 0, unknown 1, unknown 1]
+private def argumentEvidence : MethodEvidence := {
+  original := argumentRaw, arguments := [], closed := argumentRaw,
+  parameterInput := { arguments := [.field .signed32], locals := [], code := [.other, .other, .store 0, .load 0, .other, .other] },
+  reachable := List.replicate 6 true, featureStates := argumentFeatures, scalarStates := localStates, layoutUses := [] }
+private def argumentMethod : Method := {
+  locals := [], parameterHomes := [(0, .word32)], returnsValue := true,
+  code := [.const32 1, .neg, .setLocal 0, .local 0, .convI8, .ret] }
+example : FeatureFlowValid argumentRaw .scalar argumentFeatures (List.replicate 6 true) argumentMethod.code := by decide
+example : ¬ TranslationValid [] #[] [argumentEvidence] [] [argumentMethod] := by decide
+
+private def mixedRaw := { raw [i 2, i 3, i 88, i 42] [nativeType, intType] with returnType := nativeType }
 private def mixedStates : ScalarCertificate := [some [], some [.native], some [.word32, .native], some [.native]]
 private def mixedCode : List Op := [.arg 0, .arg 1, .nativeBinary .add, .ret]
 example : ScalarFlowValid mixedRaw addFeatures mixedStates mixedCode := by decide
@@ -131,17 +187,35 @@ example : ¬ ScalarFlowValid addRaw addFeatures addStates (addCode.set 2 (.nativ
 example : ¬ ScalarFlowValid { mixedRaw with parameters := [nativeType, word] } addFeatures mixedStates mixedCode := by decide
 
 private def site : CallSite := {
-  target := .managed 1, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := word }
+  target := .managed 1, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := word, parameterTypes := [word, word] }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call { site with returnType := intType })) true (.call 0 2) = false := by decide
 example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] [] (i 40 (.call site)) true (.call 0 2) = false := by decide
-example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0, returnType := word })) [] = some [.other] := by decide
-example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M()", parameterCount := 0 })) [] = some [.word64] := by decide
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0, parameterTypes := [], returnType := word })) [] = some [.other] := by decide +kernel
+theorem external_call_validated : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M()", parameterCount := 0, parameterTypes := [] })) [] = some [.word64] := by decide +kernel
 
-example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::!!0 Owner::M()", parameterCount := 0, typeArguments := [word] })) [] = some [.word64] := by decide
-example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::!!0 Owner::M()", parameterCount := 0, typeArguments := [intType] })) [] = some [.other] := by decide
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::!!0 Owner::M()", parameterCount := 0, parameterTypes := [], typeArguments := [word] })) [] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::!!0 Owner::M()", parameterCount := 0, parameterTypes := [], typeArguments := [intType] })) [] = some [.other] := by decide +kernel
 
-private def joinRaw := raw [i 2, i 45 (.target 4), i 22, i 43 (.target 5), i 22, i 42] [intType]
+example : validateManagedCall [⟨[], addRaw⟩] []
+    (i 40 (.call { site with parameterTypes := [intType, word] })) true (.call 0 2) = false := by decide
+example : scalarTransfer addRaw (i 40 (.call site)) [.word64, .word64] = some [.word64] := by decide
+example : scalarTransfer addRaw (i 40 (.call site)) [.other, .word64] = none := by decide
+example : scalarTransfer addRaw (i 40 (.call { site with parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with parameterTypes := [intType, word] })) [.word32, .word64] = none := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with hasThis := true, parameterTypes := [intType, word] })) [.word64, .word32, .reference] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with hasThis := true, parameterTypes := [intType, word] })) [.word64, .word32, .other] = none := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(System.Int32)", parameterCount := 1, parameterTypes := [intType] })) [.word32] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(System.Int32)", parameterCount := 1, parameterTypes := [word] })) [.word64] = none := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(!!0)", typeArguments := [intType], parameterCount := 1, parameterTypes := [intType] })) [.word32] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(!!0)", typeArguments := [intType], parameterCount := 1, parameterTypes := [word] })) [.word64] = none := by decide +kernel
+
+example : scalarTransfer addRaw (i 40 (.call { site with declaringType := .apply (.constructor "Scope" "Owner`1") intType, target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)", parameterCount := 1, parameterTypes := [intType], returnType := intType })) [.word32] = some [.word32] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with declaringType := .apply (.constructor "Scope" "Owner`1") intType, target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)", parameterCount := 1, parameterTypes := [word], returnType := intType })) [.word64] = none := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with declaringType := .aggregate "Scope::Owner`2<System.Int32,System.UInt64>" 0, target := .external "Scope::!1 Owner`2<System.Int32,System.UInt64>::M(!0,!1)", parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(Container`2<System.Int32,System.UInt64>,System.Int32)", parameterTypes := [.aggregate "Scope::Container`2<System.Int32,System.UInt64>" 0, intType] })) [.word32, .other] = some [.word64] := by decide +kernel
+
+private def joinRaw := { raw [i 2, i 45 (.target 4), i 22, i 43 (.target 5), i 22, i 42] [intType] with returnType := intType }
 private def joinFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, state [some 0], unknown 0, unknown 1]
 private def joinStates : ScalarCertificate := [some [], some [.word32], some [], some [.word32], some [], some [.word32]]
 private def joinCode : List Op := [.arg 0, .brnonzero 4, .const32 0, .branch 5, .const32 0, .ret]
@@ -164,5 +238,7 @@ example : ¬ ScalarFlowValid { loopRaw with code := [i 22, i 0, i 43 (.target 0)
 example (valid : ScalarFlowValid addRaw addFeatures addStates addCode) :
     scalarOpMatches (i 88) [.word64, .word64] .add = true :=
   valid.instruction_checked (pc := 2) rfl rfl rfl rfl (by decide)
+
+#print axioms external_call_validated
 
 end Tests.ScalarEvidence
