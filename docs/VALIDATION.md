@@ -140,6 +140,13 @@ contracts, and proves that an unjustified stronger postcondition, a weaker
 precondition, a smaller footprint and a changed exception type each fail both the
 refinement premises and the derived contract on a concrete input.
 
+`Tests.ConfinedFootprints` checks footprint coverage and preservation through
+`Confined`. `Tests.BufferContents` checks typed buffer contents: fills and
+in-place transforms of any length, unchanged neighbouring bytes and sibling
+slices of one allocation, a producer that extends its prefix while its room
+stays unreadable, empty buffers at invalid and sentinel positions, and rejection
+of uninitialized, past-end, overlapping, unjoined and stale contents.
+
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
 naming `CIL.step.eq_def` elaborates.
@@ -147,7 +154,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.ContractConsequence
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
