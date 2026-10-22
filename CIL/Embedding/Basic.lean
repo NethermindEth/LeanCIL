@@ -21,6 +21,21 @@ def Op.relabel (r : Nat → Nat) : Op → Op
   | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t) | .bne t => .bne (r t)
   | op => op
 
+/-- Every code target of an instruction, in operand order. -/
+def Op.targets : Op → List Nat
+  | .nativeBinary op => op.targets
+  | .bgt t | .ble t | .bleu t | .branch t | .brzero t | .brnonzero t
+  | .bltu t | .bgeu t | .bgtu t | .bge t | .blt t | .beq t | .bne t => [t]
+  | .switch ts => ts
+  | _ => []
+
+-- Together these fail if a branch constructor is added to one of `relabel` and `targets` only.
+theorem Op.targets_relabel (r : Nat → Nat) (op : Op) : (op.relabel r).targets = op.targets.map r := by
+  induction op <;> simp_all [Op.relabel, Op.targets]
+
+theorem Op.relabel_of_targets_nil (r : Nat → Nat) (op : Op) (none : op.targets = []) : op.relabel r = op := by
+  induction op <;> simp_all [Op.relabel, Op.targets]
+
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Op.continues : Op → Bool
   | .branch _ | .ret _ | .throw _ | .unsupported _ => false

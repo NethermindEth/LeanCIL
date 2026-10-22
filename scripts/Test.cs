@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "contracts" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity]")
+    ["--suite", "all" or "core" or "contracts" or "cli" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels]")
 };
 
 using var verification = new Program();
@@ -40,7 +40,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["copy"] = ("Tests/TypedCopy.cs", "typed copies, aliases, byte snapshots and rejection proofs"),
     ["arguments"] = ("Tests/Arguments.cs", "argument assignment, addressing, aliases and lifetime proofs"),
     ["native"] = ("Tests/NativeIntegers.cs", "native integer storage, arithmetic and runtime comparisons"),
-    ["identity"] = ("Tests/MethodIdentity.cs", "signature-bound methods that survive extraction renumbering")
+    ["identity"] = ("Tests/MethodIdentity.cs", "signature-bound methods that survive extraction renumbering"),
+    ["labels"] = ("Tests/StructuralLabels.cs", "loop-head and call-site labels that survive inserted statements")
 };
 
 void Passed(string name)
@@ -160,8 +161,8 @@ Passed("external consumer proof package and transitive source identity");
 Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
-Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
-Passed("library, semantic, method-body binding, embedding, shared equation and method identity tests");
+Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
+Passed("library, semantic, method-body binding, embedding, shared equation, method identity and structural label tests");
 
 // Verify each extracted method and immediately check its artifact identity.
 foreach (var (name, signature) in signatures)
