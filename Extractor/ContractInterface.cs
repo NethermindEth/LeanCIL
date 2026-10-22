@@ -10,7 +10,7 @@ internal sealed record InterfaceModule(string Name, string Source);
 internal sealed record ContractExport(string Identity, string Signature, int ParameterCount, bool HasThis,
     bool ReturnsValue, string Visibility, string ContractConstant, string ClosureDigest, string[] Profiles);
 internal sealed record ContractCertification(string Identity, string Profile, string ImplementationSha256,
-    string InterfaceDigest, string ClosureDigest);
+    string InterfaceDigest, string ClosureDigest, string Theorem, string Statement, string StatementDigest);
 internal sealed record ContractInterface(int Schema, int SemanticsVersion, int FormatVersion, string FrameworkKey,
     string AssemblyIdentity, Guid Mvid, string TargetFramework, string ImplementationSha256, bool IsReferenceAssembly,
     InterfaceModule[] InterfaceModules, string InterfaceDigest, ContractExport[] Exports,
@@ -54,7 +54,7 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
         foreach (JsonElement export in document.RootElement.GetProperty("exports").EnumerateArray())
             Require(export, "identity", "signature", "parameterCount", "hasThis", "returnsValue", "visibility", "contractConstant", "closureDigest", "profiles");
         foreach (JsonElement record in document.RootElement.GetProperty("certifications").EnumerateArray())
-            Require(record, "identity", "profile", "implementationSha256", "interfaceDigest", "closureDigest");
+            Require(record, "identity", "profile", "implementationSha256", "interfaceDigest", "closureDigest", "theorem", "statement", "statementDigest");
         ContractInterface value = document.RootElement.Deserialize<ContractInterface>(Json)
             ?? throw new InvalidDataException("Missing contract interface.");
         if (value.Schema != 1 || value.SemanticsVersion != 1 || value.FormatVersion != 1)
@@ -78,7 +78,8 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
             value.Exports.Select(export => export.Identity).Distinct(StringComparer.Ordinal).Count() != value.Exports.Length)
             throw new InvalidDataException("Invalid or duplicate contract export.");
         if (value.Certifications.Any(record => record is null || !Digest(record.ImplementationSha256) ||
-            !Digest(record.InterfaceDigest) || !Digest(record.ClosureDigest)) ||
+            !Digest(record.InterfaceDigest) || !Digest(record.ClosureDigest) || !Constant(record.Theorem) ||
+            string.IsNullOrWhiteSpace(record.Statement) || !Digest(record.StatementDigest)) ||
             value.Certifications.Select(record => (record.Identity, record.Profile)).Distinct().Count() != value.Certifications.Length)
             throw new InvalidDataException("Invalid or duplicate contract certification.");
         if (value.ComputeInterfaceDigest() != value.InterfaceDigest)

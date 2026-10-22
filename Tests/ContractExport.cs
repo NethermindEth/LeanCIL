@@ -1,0 +1,176 @@
+#!/usr/bin/env dotnet
+#:property PublishAot=false
+#:include ../scripts/Verification.cs
+
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+string[] cli = ["dotnet", ExtractorPath];
+string root = At("artifacts/ContractExport-" + Guid.NewGuid().ToString("N"));
+string libraryRoot = Path.Combine(root, "Lib");
+string appRoot = Path.Combine(root, "App");
+string package = Path.Combine(root, "Package");
+string callerPackage = Path.Combine(root, "CallerPackage");
+string artifact = Path.Combine(root, "ExportArtifact");
+string secondArtifact = Path.Combine(root, "SecondExportArtifact");
+string callerArtifact = Path.Combine(root, "CallerArtifact");
+string bundle = Path.Combine(root, "Bundles");
+string manifestPath = Path.Combine(root, "export.json");
+Directory.CreateDirectory(libraryRoot);
+Directory.CreateDirectory(appRoot);
+Directory.CreateDirectory(package);
+Directory.CreateDirectory(callerPackage);
+File.WriteAllText(Path.Combine(libraryRoot, "Lib.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>
+""");
+File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
+""");
+string librarySource = Path.Combine(libraryRoot, "Library.cs");
+File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; }\n");
+File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => Library.AddOne(value); }\n");
+Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
+string library = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.dll");
+string app = Path.Combine(appRoot, "bin", "ImportFixture.App.dll");
+string sidecar = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.leancil.contracts");
+string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
+File.WriteAllText(Path.Combine(package, "lakefile.toml"),
+    "name = \"producer\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
+    "\nrev = \"" + revision + "\"\n[[lean_lib]]\nname = \"PublishedArithmetic\"\n[[lean_lib]]\nname = \"LibProof\"\n");
+File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
+string contractSource = Path.Combine(package, "PublishedArithmetic.lean");
+File.Copy(At("Tests/ContractImports/ImportFixture.lean"), contractSource);
+string proof = Path.Combine(package, "LibProof.lean");
+File.WriteAllText(proof, """
+import Extracted
+import PublishedArithmetic
+import CIL.Safety.SymbolicExecution
+
+namespace LibProof
+open CIL.Safety
+theorem correctness : CIL.Safety.MethodContract.Holds ImportFixture.addOne Extracted.program 0 := by
+  rintro value memory formed
+  dsimp only [ImportFixture.addOne, MethodContract.Returns]
+  refine Exists.intro 12 (Exists.intro memory (Exists.intro _
+    (And.intro ?execution (And.intro (Confined.refl _ memory) ?returns))))
+  case returns => exact Exists.intro (value + 1) (And.intro rfl rfl)
+  case execution =>
+    cil_checked_steps
+    all_goals bv_omega
+theorem unrelated : True := True.intro
+def proofDefinition : CIL.Safety.MethodContract.Holds ImportFixture.addOne Extracted.program 0 := correctness
+end LibProof
+""");
+Run(["lake", "update"], package);
+File.WriteAllText(Path.Combine(callerPackage, "lakefile.toml"),
+    "name = \"consumer\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
+    "\nrev = \"" + revision + "\"\n[[lean_lib]]\nname = \"Caller\"\n");
+File.Copy(At("lean-toolchain"), Path.Combine(callerPackage, "lean-toolchain"));
+string callerProof = Path.Combine(callerPackage, "Caller.lean");
+File.Copy(At("Tests/ContractImports/Caller.lean"), callerProof);
+Run(["lake", "update"], callerPackage);
+
+void ExtractLibrary()
+{
+    Run([.. cli, "extract", library, "ImportFixture.Library::AddOne(ulong)", artifact]);
+    File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1, proof = Path.GetRelativePath(artifact, proof).Replace('\\', '/'), theorem = "LibProof.correctness",
+        proofRoot = Path.GetRelativePath(artifact, package).Replace('\\', '/')
+    }));
+}
+
+JsonObject ProducerManifest(string theorem = "LibProof.correctness") => JsonSerializer.SerializeToNode(new
+{
+    schema = 1, assembly = library, proofRoot = package,
+    @interface = new[] { new { module = "PublishedArithmetic", source = contractSource } },
+    exports = new[] { new { method = "ImportFixture.Library::AddOne(ulong)", artifact, contract = "ImportFixture.addOne", theorem } }
+})!.AsObject();
+
+void Export(JsonObject manifest)
+{
+    File.WriteAllText(manifestPath, manifest.ToJsonString());
+    Run([.. cli, "export-contracts", manifestPath, "--output", sidecar, "--bundle", bundle]);
+}
+
+void RejectExport(JsonObject manifest, string marker, string? previous)
+{
+    File.WriteAllText(manifestPath, manifest.ToJsonString());
+    (int Code, string Output, string Stdout, string Stderr) result = Execute([.. cli, "export-contracts", manifestPath, "--output", sidecar]);
+    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal) ||
+        (previous is null ? File.Exists(sidecar) : !File.Exists(sidecar) || Sha(sidecar) != previous))
+        throw new InvalidOperationException("Failed export changed/published a sidecar: " + result.Output);
+}
+
+ExtractLibrary();
+RejectExport(ProducerManifest("LibProof.unrelated"), "exact canonical Holds statement", null);
+RejectExport(ProducerManifest("LibProof.proofDefinition"), "Expected an export theorem", null);
+Export(ProducerManifest());
+JsonObject first = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
+string interfaceDigest = first["interfaceDigest"]!.GetValue<string>();
+string closureDigest = first["exports"]![0]!["closureDigest"]!.GetValue<string>();
+string implementation = Sha(library);
+string firstSidecar = Sha(sidecar);
+if (first["implementationSha256"]!.GetValue<string>() != implementation || first["certifications"]!.AsArray().Count != 1)
+    throw new InvalidOperationException("Export did not bind the actual implementation and complete certification.");
+string publishedBundle = first["fullVerificationLocator"]!.GetValue<string>();
+JsonObject inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(publishedBundle, "bundle.json")))!.AsObject();
+foreach (string path in Directory.EnumerateFiles(publishedBundle, "*", SearchOption.AllDirectories))
+    if (Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal) || Path.GetExtension(path) is ".dll" or ".ilean" or ".c" or ".o")
+        throw new InvalidOperationException("Source bundle contained compiled output: " + path);
+if (!inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("consumer/.lake/packages/leancil/", StringComparison.Ordinal)) ||
+    !inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("framework/CIL/", StringComparison.Ordinal)) ||
+    !inventory["files"]!.AsObject().ContainsKey("exports/0/ExportAudit.lean"))
+    throw new InvalidOperationException("Source bundle omitted its dependency/framework/audit source closure.");
+
+string CallerVerify()
+{
+    Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", callerArtifact, "--import", sidecar,
+        "--import-implementation", "ImportFixture.Lib=" + library, "--import-sha256", "ImportFixture.Lib=" + Sha(library)]);
+    return Run([.. cli, "verify", callerArtifact, "--proof", callerProof, "--proof-root", callerPackage]);
+}
+
+CallerVerify();
+JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")));
+if (initialCaller.GetProperty("schema").GetInt32() != 4)
+    throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
+Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
+
+JsonObject two = ProducerManifest();
+JsonObject invalid = two["exports"]![0]!.DeepClone().AsObject();
+invalid["theorem"] = "LibProof.unrelated";
+two["exports"]!.AsArray().Add(invalid);
+RejectExport(two, "Duplicate contract export method/profile pair", firstSidecar);
+
+Run([.. cli, "extract", library, "ImportFixture.Library::AddSame(ulong)", secondArtifact]);
+File.WriteAllText(Path.Combine(secondArtifact, "verification.json"), JsonSerializer.Serialize(new
+{
+    schema = 1, proof = Path.GetRelativePath(secondArtifact, proof).Replace('\\', '/'), theorem = "LibProof.correctness",
+    proofRoot = Path.GetRelativePath(secondArtifact, package).Replace('\\', '/')
+}));
+invalid["method"] = "ImportFixture.Library::AddSame(ulong)";
+invalid["artifact"] = secondArtifact;
+RejectExport(two, "exact canonical Holds statement", firstSidecar);
+Console.WriteLine("PASS a later invalid export cannot publish a partial sidecar");
+
+File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => unchecked(value - ulong.MaxValue); public static ulong AddSame(ulong value) => value + 1; }\n");
+Run(["dotnet", "build", Path.Combine(libraryRoot, "Lib.csproj"), "-c", "Release"]);
+if (Sha(library) == implementation) throw new InvalidOperationException("Precondition: the second library implementation must differ.");
+ExtractLibrary();
+Export(ProducerManifest());
+JsonObject second = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
+if (second["interfaceDigest"]!.GetValue<string>() != interfaceDigest || second["exports"]![0]!["closureDigest"]!.GetValue<string>() != closureDigest ||
+    second["implementationSha256"]!.GetValue<string>() == implementation)
+    throw new InvalidOperationException("A body-only rebuild changed the public contract identity or retained the old DLL hash.");
+CallerVerify();
+JsonElement reused = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")));
+if (reused.GetProperty("libraryBuild").GetString() != "consumer-proof-cache")
+    throw new InvalidOperationException("An unchanged consumer proof did not reuse its interface-bound proof result.");
+if (!File.ReadAllText(Path.Combine(callerArtifact, "verified.json")).Contains(Sha(library), StringComparison.Ordinal))
+    throw new InvalidOperationException("Reused caller report did not bind the new implementation hash.");
+Console.WriteLine("PASS a new library body retains interface/closure identities, unchanged caller proof, cache reuse and new deployment hash");
+
+string prior = Sha(sidecar);
+File.WriteAllText(contractSource, File.ReadAllText(contractSource).Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
+RejectExport(ProducerManifest(), "unsolved goals", prior);
+Console.WriteLine("PASS a failing library contract cannot replace a published sidecar");

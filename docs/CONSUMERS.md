@@ -211,3 +211,75 @@ Place handwritten proofs outside them.
 `Extracted.lean` is reserved for the selected artifact; do not keep another copy
 among consumer sources. Lake configuration and Lean elaborators are executable
 code, so use this mode with packages you trust.
+
+## Publishing verified contracts
+
+A library producer runs `leancil export-contracts manifest.json`. The command
+checks every selected export with fresh ordinary verification, an exact canonical
+contract theorem, extraction-certificate audit and independent kernel replay. It
+publishes a sidecar only after every export and the final input checks succeed.
+
+```json
+{
+  "schema": 1,
+  "assembly": "bin/Lib.dll",
+  "proofRoot": "proofs",
+  "interface": [{ "module": "Lib.Contracts", "source": "proofs/Lib/Contracts.lean" }],
+  "exports": [{
+    "method": "Lib.Library::AddOne(ulong)",
+    "artifact": "artifacts/AddOne",
+    "contract": "Lib.Contracts.addOne",
+    "theorem": "Lib.Proof.addOne_correct"
+  }]
+}
+```
+
+Paths are relative to the manifest. Each artifact must already contain an
+extraction identity and `verification.json` naming the author's proof source.
+The recorded method must be the export entry, its DLL must match `assembly`, and
+its execution profile must be an exact built-in profile. The consumer package
+under `proofRoot` must have resolved pinned dependencies. One method may list
+several artifact entries for different profiles; duplicate method/profile pairs
+fail. Unknown and duplicate JSON properties are rejected.
+
+The contract constant must have type `CIL.Safety.MethodContract` or
+`CIL.Safety.OutcomeContract`. The named author declaration must be a theorem with
+the exact canonical `Holds` proposition for the extracted program at entry zero.
+An unrelated theorem, a proof definition, user-defined field notation or extra
+assumptions do not establish this guarantee. The generated ExportAudit module
+imports the exact author proof copy in the same fresh verification session.
+
+Published interface modules must check with only the declared interface sources
+and the bundled framework/toolchain. They cannot require private implementation
+proofs or an `Extracted` module. Canonical contract closures are checked both in
+this isolated interface and in the actual proof environment. Their exact results
+must agree. Custom axioms, sorry and valueless opaque interface declarations are
+not exportable. Contract predicates and their reachable definitions determine the
+closure digest; the name alone does not determine it.
+
+Version 1 supports public or protected static, non-virtual, non-generic exports
+without imports or static sites. It also rejects recorded static-value and
+initialization assumptions because this sidecar version does not transport them.
+This restriction does not weaken the extractor's admission or profile rules.
+
+The default output is `<assembly-simple-name>.leancil.contracts` next to the DLL.
+Use `--output path.leancil.contracts` to select another path. Publication is atomic
+and a failed command preserves an existing sidecar unchanged. The old sidecar
+still binds the old DLL hash and cannot certify a changed implementation. A
+body-only rebuild can retain the same public interface and contract closure
+digests while its implementation hash and certification change. Consumers still
+check the selected deployment bytes.
+
+`--bundle directory` also writes an immutable content-addressed source bundle.
+Its inventory binds the original producer inputs, complete consumer/dependency
+source closure, exact bundled framework sources, generated extraction and audit
+sources, and checked export statement metadata. It contains no compiled DLL,
+`.olean`, local receipt or build cache. The selected implementation DLL remains a
+separate input. The bundle publishes before the sidecar, and its source locator
+is recorded in the sidecar. A source bundle is not proof certification and is not
+accepted as a trusted cache. Independent verification of a published library is
+a separate workflow.
+
+Run `dotnet run --file scripts/Test.cs -- --suite exports` for the producer/App
+round trip, unchanged caller after a library rebuild, rejecting exports and
+source-only bundle checks.

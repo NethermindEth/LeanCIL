@@ -225,3 +225,11 @@ elaborated statement is `Not` applied to a contract's `Holds` is, as reported by
 the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
+
+## Export contracts
+
+`leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]`
+checks a library's selected contracts and writes their bound sidecar. See
+[Publishing verified contracts](CONSUMERS.md#publishing-verified-contracts) for
+the manifest, exact theorem guarantee, version-1 restrictions and source bundle.
+All exports must pass before the sidecar is published.
