@@ -224,12 +224,12 @@ partial class Program
             : holds + " _root_." + export.Request.Contract + " _root_.Extracted.program 0";
         string closure = export.Conditional ? $$"""
 theorem LeanCILExportAudit.relocated {completion target : _root_.CIL.Program} {f : Nat -> Nat}
-    (prefix : _root_.CIL.Safety.Links _root_.Extracted.program completion)
+    (linkedPrefix : _root_.CIL.Safety.Links _root_.Extracted.program completion)
     (met : _root_.Extracted.ImportsHold completion) (closed : _root_.CIL.Safety.Closed completion)
     (relocates : _root_.CIL.Safety.RelocatesInto completion target f) :
     {{holds}} _root_.{{export.Request.Contract}} target (f 0) :=
   _root_.CIL.Safety.{{(kind == "method" ? "MethodContract" : "OutcomeContract")}}.relocateGiven
-    LeanCILExportAudit.certified prefix met closed relocates
+    LeanCILExportAudit.certified linkedPrefix met closed relocates
 """ : """
 theorem LeanCILExportAudit.closed : _root_.CIL.Safety.Closed _root_.Extracted.program :=
   _root_.CIL.Safety.Closed.of_check (by decide +kernel)
