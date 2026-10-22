@@ -24,7 +24,7 @@ string profile = RuntimeInformation.ProcessArchitecture switch
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
 Dictionary<string, string> selectors = metadata.GetType("Examples.VectorFields").Methods
     .ToDictionary(method => method.Name, method => method.FullName);
-Run(["lake", "env", "lean", "Tests/VectorFields.lean"]);
+Run(["lake", "build", "+Tests.VectorFields:olean"]);
 
 int Size(Type type)
 {
