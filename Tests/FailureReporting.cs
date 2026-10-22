@@ -240,18 +240,17 @@ for (var i = 0; i < cases.Length; i++)
     if (cases[i].Name != "Refuted" && File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException($"{cases[i].Name}: a failure left the stale certificate");
 }
-var arithmeticBug = results[0].GetProperty("failure");
-Located("arithmetic bug", arithmeticBug, Text(arithmeticBug, "kind") == "unsolved-goal" ? "unsolved-goal" : "elaboration-error", unsolved);
+Located("arithmetic bug", results[0].GetProperty("failure"), "unsolved-goal", unsolved);
 Located("heartbeat limit", results[1].GetProperty("failure"), "resource-limit", heartbeat, "heartbeats");
-var aliased = results[4].GetProperty("failure");
-Located("aliasing precondition", aliased, Text(aliased, "kind") == "unsolved-goal" ? "unsolved-goal" : "elaboration-error", added);
-Console.WriteLine($"PASS an arithmetic bug ({Text(arithmeticBug, "kind")}), an unproved aliasing precondition ({Text(aliased, "kind")}) and a heartbeat limit are located in the user's proofs");
+Located("aliasing precondition", results[4].GetProperty("failure"), "unsolved-goal", added);
+Console.WriteLine("PASS an arithmetic bug and an unproved aliasing precondition are unsolved goals, and a heartbeat limit a resource limit, located in the user's proofs");
 
 var refutation = results[2].GetProperty("failure");
 var (refutedLine, _) = Lines(refuted);
 if (Text(refutation, "kind") != "refutation" || Text(refutation, "file") != refuted || Number(refutation, "line") != refutedLine ||
     Number(refutation, "column") != "theorem ".Length || !File.Exists(Path.Combine(outputs["Refuted"], "verified.json")) ||
-    results.Where((_, i) => i != 2).Any(item => Text(item.GetProperty("failure"), "kind") is "refutation"))
+    results.Where((_, i) => i != 2).Any(item => item.GetProperty("failure") is { ValueKind: JsonValueKind.Object } other &&
+        Text(other, "kind") == "refutation"))
     throw new InvalidOperationException("Only the verified refutation may be reported as one:\n" + refutation);
 Console.WriteLine("PASS only the verified refutation is reported as a disproved contract, at its theorem, beside its certificate");
 
