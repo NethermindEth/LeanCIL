@@ -513,7 +513,7 @@ run_cmd liftTermElabM do
         source.AppendLine("theorem app_prefix : Links Extracted.program (link Extracted.program libraries) := link_links _ _");
         foreach (FullLibrary library in libraries)
             source.AppendLine("theorem relocation" + library.Slot + " : RelocatesInto library" + library.Slot + ".program " +
-                "(link Extracted.program libraries) (linkSlot Extracted.program libraries " + library.Slot + ") := link_relocates _ _ (by decide)");
+                "(link Extracted.program libraries) (linkSlot Extracted.program libraries " + library.Slot + ") := link_relocates Extracted.program libraries (j := " + library.Slot + ") (by decide)");
         source.AppendLine("theorem bridge (linked : CIL.Program) (met : Imports Extracted.program specifications linked) : Extracted.ImportsHold linked := by\n  exact " +
             Conjunction(libraries.Select(library => "met " + library.Slot + " (by decide)").ToArray()));
         source.AppendLine("def discharge {claim : CIL.Program -> Prop} (callerProof : HoldsGiven Extracted.program Extracted.ImportsHold claim) :\n    claim (link Extracted.program libraries) :=\n  composed (callerProof.mono bridge) rfl");
