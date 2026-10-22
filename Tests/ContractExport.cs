@@ -53,11 +53,14 @@ open CIL.Safety
 theorem correctness : CIL.Safety.MethodContract.Holds ImportFixture.addOne Extracted.program 0 := by
   rintro value memory formed
   dsimp only [ImportFixture.addOne, MethodContract.Returns]
+  have subtractMax : value - 18446744073709551615#64 = value + 1 := by
+    rw [BitVec.sub_eq_add_neg]
+    rfl
   refine ⟨12, memory, [.scalar (.i64 (value + 1))], ?execution,
     Confined.refl _ memory, value + 1, rfl, ?post⟩
   case post => simp only [CIL.importedPost]
   case execution =>
-    cil_checked_steps []
+    cil_checked_steps [subtractMax]
     all_goals bv_omega
 theorem unrelated : True := True.intro
 def proofDefinition : CIL.Safety.MethodContract.Holds ImportFixture.addOne Extracted.program 0 := correctness
