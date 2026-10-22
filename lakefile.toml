@@ -57,6 +57,9 @@ name = "Tests.Linking"
 name = "Tests.StepFlow"
 
 [[lean_lib]]
+name = "Tests.RegionRun"
+
+[[lean_lib]]
 name = "Tests.StoreFacts"
 
 [[lean_lib]]
