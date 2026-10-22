@@ -1,3 +1,5 @@
+using System;
+
 namespace Examples;
 
 public static class Loops
@@ -40,6 +42,22 @@ public static class Loops
         {
             remaining = Decrement(remaining);
             count = unchecked(count + 1);
+        }
+        return count;
+    }
+
+    public static uint Bump(uint count, uint limit) =>
+        count == limit ? throw new InvalidOperationException() : unchecked(count + 1);
+
+    // Returns its input when it is at most limit; otherwise Bump throws after limit iterations.
+    public static uint CountUntil(uint value, uint limit)
+    {
+        uint remaining = value;
+        uint count = 0;
+        while (remaining != 0)
+        {
+            count = Bump(count, limit);
+            remaining = unchecked(remaining - 1);
         }
         return count;
     }

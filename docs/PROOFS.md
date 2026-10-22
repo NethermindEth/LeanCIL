@@ -77,6 +77,37 @@ reimplemented helper and requires it to reject a discarded helper result and a
 broken count. On the correct build, a nondecreasing measure and an invariant that
 holds at entry and exit but is not preserved each fail at exactly that obligation.
 
+A loop whose helper has an `OutcomeContract` composes both of its outcomes
+([LoopOutcome](../CIL/Safety/LoopOutcome.lean)). `LoopOutcome post raises state`
+is `LoopTerminates post state` when `raises` is `none` (`loop_outcome_none`) and
+`RunRaises` of exactly that exception otherwise (`loop_outcome_some`), so the
+proof fixes which outcome the loop reaches before stepping it, typically as a
+function of the inputs that the invariant ties to each head state.
+`loop_outcome_induction` mirrors `loop_terminates_induction`: only a continuing
+iteration needs an invariant state of smaller measure. Step with
+`cil_loop_outcome_advance [facts]` and continue past a callee whose contract
+returns with `cil_loop_outcome_call holds input at site [facts]`
+(`loop_outcome_call`, or `loop_outcome_call_formed`), which leaves the
+precondition, the `raises` equation and the continuation in either outcome.
+Once `raises` is rewritten to the callee's exception, exit with
+`cil_loop_outcome_raise holds input at site [facts]` (`loop_outcome_call_raises`);
+that exit has no invariant or measure obligation. `loop_outcome_throw` exits at
+the loop's own `throw`, and `loop_outcome_next` and `loop_reaches_outcome`
+compose paths in either outcome. `ensures_outcome_of_loop` lifts the head outcome
+through frame setup to `EnsuresOutcome pre post raises`, which names the outcome
+of every permitted input; with `raises` constantly `none` it is `Ensures`
+(`ensures_outcome_none`). `loop_outcome_some_refuted` refutes an expected
+exception from any settled run that does not throw it.
+
+The [outcome loop proof](../Examples/Proofs/CountUntil.lean) propagates its
+helper's exception after earlier successful calls. The loop suite reuses it
+unedited for a reimplemented helper and rejects a helper that raises another
+type; on the correct build, a nondecreasing measure, a non-inductive invariant
+and a wrong specified exception each fail at that obligation.
+`Tests/LoopOutcome.lean` derives the normal-only rules as the `none` instances
+and proves that unsupported execution, invalid state and fuel exhaustion never
+satisfy an expected loop exception.
+
 ## Compose calls through contracts
 
 A caller proof that steps into its callee breaks whenever the callee is
