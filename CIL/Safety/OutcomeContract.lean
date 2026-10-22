@@ -1,0 +1,212 @@
+import CIL.Safety.MethodContract
+
+namespace CIL.Safety
+
+/-- Exactly a thrown `exception`: fuel exhaustion, unsupported instructions and other
+    faults never satisfy it. With no handlers, memory after a throw is unobservable. -/
+def Raises (program : CIL.Program) (method : Nat) (args : List Value) (memory : Memory) (exception : String) : Prop :=
+  ∃ fuel fault, invoke program fuel method args memory = .error fault ∧ fault.fault = .thrown exception
+
+def RunRaises (program : CIL.Program) (method pc : Nat) (args : List Value) (frame : Frame)
+    (stack : List Value) (memory : Memory) (exception : String) : Prop :=
+  ∃ fuel fault, run program fuel method pc args frame stack memory = .error fault ∧ fault.fault = .thrown exception
+
+/-- A method contract that also names the exception each input raises; `none` is normal return. -/
+structure OutcomeContract (Input : Type) extends MethodContract Input where
+  raises : Input → Memory → Option String
+
+def OutcomeContract.Holds {Input : Type} (c : OutcomeContract Input) (program : CIL.Program) (method : Nat) : Prop :=
+  ∀ input initial, c.pre input initial →
+    match c.raises input initial with
+    | some exception => Raises program method (c.args input) initial exception
+    | none => ∃ fuel final values, invoke program fuel method (c.args input) initial = .ok (final, values) ∧
+        Confined (c.footprint input) initial final ∧ c.post input initial final values
+
+theorem OutcomeContract.Holds.raising {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+    {method : Nat} {input : Input} {initial : Memory} {exception : String}
+    (holds : c.Holds program method) (permitted : c.pre input initial) (raised : c.raises input initial = some exception) :
+    Raises program method (c.args input) initial exception := by
+  have outcome := holds input initial permitted
+  rw [raised] at outcome
+  exact outcome
+
+theorem OutcomeContract.Holds.returning {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+    {method : Nat} {input : Input} {initial : Memory}
+    (holds : c.Holds program method) (permitted : c.pre input initial) (normal : c.raises input initial = none) :
+    ∃ fuel final values, invoke program fuel method (c.args input) initial = .ok (final, values) ∧
+      Confined (c.footprint input) initial final ∧ c.post input initial final values := by
+  have outcome := holds input initial permitted
+  rw [normal] at outcome
+  exact outcome
+
+/-- A normal-return contract is the outcome contract that never raises. -/
+theorem MethodContract.Holds.outcomes {Input : Type} {c : MethodContract Input} {program : CIL.Program}
+    {method : Nat} (holds : c.Holds program method) :
+    ({ c with raises := fun _ _ => none } : OutcomeContract Input).Holds program method :=
+  holds
+
+theorem OutcomeContract.Holds.normal {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+    {method : Nat} (holds : c.Holds program method) (never : ∀ input initial, c.pre input initial → c.raises input initial = none) :
+    c.toMethodContract.Holds program method :=
+  fun input initial permitted => holds.returning permitted (never input initial permitted)
+
+/-- Successful or raised invocations agree at every fuel, so a computed run refutes a contract. -/
+theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : List Value} {memory : Memory}
+    {first second : Except LocatedFault (Memory × List Value)} (firstSettled : Settled first) (secondSettled : Settled second)
+    (one : invoke program left method args memory = first) (other : invoke program right method args memory = second) :
+    first = second := by
+  have up := invoke_mono program left right method args memory first firstSettled one
+  have down := invoke_mono program right left method args memory second secondSettled other
+  rw [Nat.add_comm] at down
+  exact up.symm.trans down
+
+/-- A callee fault reaches the caller unchanged; only frame-entry faults are relocated to the call. -/
+theorem run_call_error {program : CIL.Program} {fuel method pc callee : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {fault : LocatedFault}
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (checked : arguments.mapM (checkedValue updated) = .ok arguments)
+    (child : invoke program fuel callee arguments updated = .error fault) :
+    ∃ located, run program (fuel + 1) method pc args frame stack memory = .error located ∧
+      located.fault = fault.fault := by
+  cases hb : program[callee]? with
+  | none =>
+    simp only [invoke, hb] at child
+    cases child
+    exact ⟨⟨method, pc, .invalidState⟩, by
+      simp only [run, methodFound, instructionFound, stepped, hb, Except.mapError, Bind.bind, Except.bind], rfl⟩
+  | some childBody =>
+    cases he : enterFrame childBody arguments updated with
+    | error entry =>
+      simp only [invoke, hb, checked, he, Except.mapError, Bind.bind, Except.bind] at child
+      cases child
+      exact ⟨⟨method, pc, entry⟩, by simp only [run, methodFound, instructionFound, stepped, hb, he, Except.mapError,
+        Bind.bind, Except.bind], rfl⟩
+    | ok entered =>
+      obtain ⟨childFrame, childMemory⟩ := entered
+      simp only [invoke, hb, checked, he, Except.mapError, Bind.bind, Except.bind] at child
+      exact ⟨fault, by simp only [run, methodFound, instructionFound, stepped, hb, he, child,
+        Except.mapError, Bind.bind, Except.bind], rfl⟩
+
+theorem raises_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
+    {args : List Value} {frame : Frame} {memory entered : Memory} {exception : String}
+    (found : program[method]? = some body)
+    (checked : args.mapM (checkedValue memory) = .ok args)
+    (setup : enterFrame body args memory = .ok (frame, entered))
+    (raised : RunRaises program method 0 args frame [] entered exception) :
+    Raises program method args memory exception := by
+  obtain ⟨fuel, fault, ran, thrown⟩ := raised
+  refine ⟨fuel, fault, ?_, thrown⟩
+  simp only [invoke, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  exact ran
+
+theorem run_next_raises {program : CIL.Program} {method pc target : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {frame nextFrame : Frame} {memory updated : Memory} {exception : String}
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.next target values nextFrame updated))
+    (continuation : RunRaises program method target args nextFrame values updated exception) :
+    RunRaises program method pc args frame stack memory exception := by
+  obtain ⟨fuel, fault, ran, thrown⟩ := continuation
+  exact ⟨fuel + 1, fault, (run_next methodFound instructionFound stepped).trans ran, thrown⟩
+
+theorem run_throw_raises {program : CIL.Program} {method pc : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack : List Value} {frame : Frame} {memory : Memory} {exception : String}
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .error (.thrown exception)) :
+    RunRaises program method pc args frame stack memory exception :=
+  ⟨1, ⟨method, pc, .thrown exception⟩, by
+    simp only [run, methodFound, instructionFound, stepped, Except.mapError, Bind.bind, Except.bind], rfl⟩
+
+/-- Propagate the exception a callee's contract names for this input. -/
+theorem run_call_raises_of_contract {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+    {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {exception : String}
+    (holds : c.Holds program callee) (input : Input)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (encoded : arguments = c.args input)
+    (checked : arguments.mapM (checkedValue updated) = .ok arguments)
+    (permitted : c.pre input updated) (raised : c.raises input updated = some exception) :
+    RunRaises program method pc args frame stack memory exception := by
+  subst encoded
+  obtain ⟨fuel, fault, invoked, thrown⟩ := holds.raising permitted raised
+  obtain ⟨located, ran, same⟩ := run_call_error methodFound instructionFound stepped checked invoked
+  exact ⟨fuel + 1, located, ran, same.trans thrown⟩
+
+/-- Continue after a callee whose contract names no exception for this input. -/
+theorem run_call_of_outcome {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+    {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
+    (holds : c.Holds program callee) (input : Input)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (encoded : arguments = c.args input) (permitted : c.pre input updated) (normal : c.raises input updated = none)
+    (continuation : ∀ final values,
+      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
+      Confined (c.footprint input) updated final → c.post input updated final values →
+      ∃ fuel result returned,
+        run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
+        post result returned) :
+    ∃ fuel result returned,
+      run program fuel method pc args frame stack memory = .ok (result, returned) ∧ post result returned := by
+  subst encoded
+  obtain ⟨childFuel, final, values, invoked, confined, satisfied⟩ := holds.returning permitted normal
+  obtain ⟨parentFuel, result, returned, resumed, finished⟩ :=
+    continuation final values ⟨childFuel, invoked⟩ confined satisfied
+  obtain ⟨fuel, composed⟩ := run_call_exists methodFound instructionFound stepped ⟨childFuel, invoked⟩
+    ⟨parentFuel, resumed⟩
+  exact ⟨fuel, result, returned, composed, finished⟩
+
+#print axioms run_call_error
+#print axioms run_call_raises_of_contract
+#print axioms run_call_of_outcome
+#print axioms invoke_unique
+
+/-- Step a `Raises` or `RunRaises` goal through checked instructions to a `throw`,
+    leaving each `.call` for `cil_outcome_raise`. -/
+syntax "cil_raise_steps" "[" term,* "]" : tactic
+
+macro_rules
+  | `(tactic| cil_raise_steps [$facts:term,*]) =>
+  `(tactic| (
+    try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
+    try (cil_strict refine CIL.Safety.raises_of_run
+           (by simp only [cil_code, Nat.reduceAdd]; rfl)
+           (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
+           (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
+    repeat first
+    | (cil_strict exact CIL.Safety.run_throw_raises
+        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by simp [CIL.Safety.step, $[$facts:term],*]))
+    | (cil_strict refine CIL.Safety.run_next_raises
+        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by simp only [cil_code, Nat.reduceAdd]; rfl)
+        (by cil_checked_step [$[$facts:term],*]) ?_)))
+
+/-- At a `bind_call` site, continue past a callee whose contract names no exception for this
+    input, leaving the precondition, the `raises` equation and the continuation. -/
+syntax "cil_outcome_call" term:max term:max " at " ident "[" term,* "]" : tactic
+
+macro_rules
+  | `(tactic| cil_outcome_call $holds $input at $site:ident [$facts:term,*]) =>
+  `(tactic| (
+    refine CIL.Safety.run_call_of_outcome $holds $input
+      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
+
+/-- At a `bind_call` site, propagate the exception the callee's contract names for this
+    input, leaving the precondition and the `raises` equation. -/
+syntax "cil_outcome_raise" term:max term:max " at " ident "[" term,* "]" : tactic
+
+macro_rules
+  | `(tactic| cil_outcome_raise $holds $input at $site:ident [$facts:term,*]) =>
+  `(tactic| (
+    refine CIL.Safety.run_call_raises_of_contract $holds $input
+      (by first | rfl | (simp only [cil_code, Nat.reduceAdd] <;> rfl)) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl)
+      (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_ ?_))
+
+end CIL.Safety

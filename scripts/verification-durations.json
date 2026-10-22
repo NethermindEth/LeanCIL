@@ -6,6 +6,7 @@
     "bits": 534,
     "blocks": 128,
     "callers": 240,
+    "outcomes": 130,
     "checked": 217,
     "cli": 310,
     "constructors": 130,
