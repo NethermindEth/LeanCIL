@@ -57,7 +57,7 @@ internal static class VerificationSelection
             "Throws", "SpanTables", "StaticValues", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "TypeTestEvidence",
             "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence" }.Select(name => $"Tests/{name}.lean"));
-        inputs["imports"].UnionWith(["Tests/ContractImports/Lib.leancil.contracts", "Tests/ContractImports/ImportFixture.lean", "Tests/ContractImports/Caller.lean",
+        inputs["imports"].UnionWith(["Tests/ContractClosure.lean", "Tests/ContractImports/Lib.leancil.contracts", "Tests/ContractImports/ImportFixture.lean", "Tests/ContractImports/Caller.lean",
             "Tests/ContractImports/Lib/Lib.csproj", "Tests/ContractImports/Lib/Library.cs", "Tests/ContractImports/App/App.csproj", "Tests/ContractImports/App/Application.cs"]);
         inputs["unsafe"].UnionWith(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
 

@@ -124,8 +124,8 @@ partial class Program
                 var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
-                reports[i] = new Report(3, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, audit, before[i],
-                    libraryKey, libraryBuild, audit, initializedTypes, Sha(source), theorem, staticValues: StaticValueAssumptions(extraction));
+                reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, audit, before[i],
+                    libraryKey, libraryBuild, audit, initializedTypes, Sha(source), theorem, staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction));
             }
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)

@@ -19,11 +19,15 @@
     "visibility": "public",
     "contractConstant": "ImportFixture.addOne",
     "closureDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "profiles": ["scalar"]
+    "profiles": ["scalar"],
+    "kind": "method"
   }],
   "certifications": [{
     "identity": "ImportFixture.Lib, Version=0.1.0.0, Culture=neutral, PublicKeyToken=null::System.UInt64 ImportFixture.Library::AddOne(System.UInt64)",
     "profile": "scalar",
+    "theorem": "PublishedLibrary.certification",
+    "statement": "PublishedLibrary.addOne.Holds PublishedLibrary.program 0",
+    "statementDigest": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
     "implementationSha256": "IMPLEMENTATION",
     "interfaceDigest": "INTERFACE",
     "closureDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"

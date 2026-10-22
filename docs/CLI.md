@@ -225,3 +225,27 @@ elaborated statement is `Not` applied to a contract's `Holds` is, as reported by
 the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
+
+## Verify with imported contracts
+
+After import-aware extraction, `leancil verify output --proof Caller.lean` checks
+the caller under the published contracts. `--proof-root` uses the same interface
+audit for a consumer package. `--fresh` can use an empty `LEANCIL_CACHE_DIR`; no
+library implementation proof source, artifact or full bundle is required.
+
+The sidecar export adds `kind` (`method` or `outcome`). Each selected certification
+record requires `theorem`, `statement` and `statementDigest`. The driver checks
+the actual exported contract type and canonical closure. `statementDigest` is the
+publisher's digest of its canonical certification type, not a hash of its pretty
+printed statement. The consumer records this provenance without obtaining the
+implementation proof. See [Contract interfaces](CONTRACT-INTERFACES.md).
+
+A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to
+`published-certification`, the implementation SHA-256, interface digest,
+certification theorem/statement/digest, and deployment obligation. CLI output
+prints the accepted certification and obligation. The caller theorem remains
+conditional on those imported contracts.
+
+Reference-only extraction is an authoring input. Verification checks its caller
+proof, then exits with status 1 and an authoring-only diagnostic. It does not
+write `verified.json` or publish a successful proof receipt.

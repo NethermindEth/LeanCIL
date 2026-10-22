@@ -50,8 +50,26 @@ void Save(bool bind = true)
     File.WriteAllText(sidecar, contract.ToJsonString());
 }
 
+using Program interfaceVerification = new();
+string interfaceLibrary = interfaceVerification.Library(Inputs(At("CIL.lean")));
+Run(["lake", "build", "Tests.ContractClosure"], streamOutput: true, progress: "Canonical contract closure tests");
+string interfaceProbe = Path.Combine(directory, "interface-probe");
+Directory.CreateDirectory(interfaceProbe);
+string interfaceSource = File.ReadAllText(Path.Combine(fixture, "ImportFixture.lean"));
+File.WriteAllText(Path.Combine(interfaceProbe, "ImportFixture.lean"), interfaceSource);
+string interfaceLeanPath = interfaceProbe + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean");
+Run([interfaceVerification.LeanExecutable, "--root=" + interfaceProbe, "-o", Path.Combine(interfaceProbe, "ImportFixture.olean"),
+    Path.Combine(interfaceProbe, "ImportFixture.lean")], leanPath: interfaceLeanPath);
+string closureProbe = Path.Combine(interfaceProbe, "Closure.lean");
+File.WriteAllText(closureProbe, "import CIL.Interface.Closure\nimport ImportFixture\n#leancil_contract_closure ImportFixture.addOne\n");
+string closureOutput = Run([interfaceVerification.LeanExecutable, closureProbe], leanPath: interfaceLeanPath);
+string closureLine = closureOutput.Split('\n').Single(line => line.Contains("\"canonical\"", StringComparison.Ordinal));
+JsonElement closureRecord = JsonSerializer.Deserialize<JsonElement>(closureLine[closureLine.IndexOf('{')..]);
+string closureDigest = ContentKey(closureRecord.GetProperty("canonical").GetString()!);
+
 void Reset()
 {
+    File.Delete(Path.Combine(output, "verification.json"));
     File.Copy(originalApp, app, true);
     File.Copy(originalLibrary, library, true);
     expectedHash = Sha(library);
@@ -64,7 +82,11 @@ void Reset()
     contract["assemblyIdentity"] = module.Assembly.Name.FullName;
     contract["mvid"] = module.Mvid.ToString();
     contract["implementationSha256"] = expectedHash;
-    contract["interfaceModules"]![0]!["source"] = File.ReadAllText(Path.Combine(fixture, "ImportFixture.lean"));
+    contract["interfaceModules"]![0]!["source"] = interfaceSource;
+    contract["exports"]![0]!["closureDigest"] = closureDigest;
+    contract["certifications"]![0]!["closureDigest"] = closureDigest;
+    contract["certifications"]![0]!["statementDigest"] = ContentKey("published canonical certification statement fixture");
+    contract["fullVerificationLocator"] = Path.Combine(directory, "deleted-library-proofs");
     contract["exports"]![0]!["identity"] = module.Assembly.Name.FullName + "::System.UInt64 ImportFixture.Library::AddOne(System.UInt64)";
     contract["certifications"]![0]!["identity"] = contract["exports"]![0]!["identity"]!.DeepClone();
     contract["certifications"]![0]!["implementationSha256"] = expectedHash;
@@ -98,13 +120,42 @@ JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(
 string generated = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (identity.GetProperty("schema").GetInt32() != 3 || identity.GetProperty("imports").GetArrayLength() != 1 ||
     !generated.Contains(".call 1 1", StringComparison.Ordinal) || generated.Contains(expectedHash, StringComparison.Ordinal) ||
-    !File.ReadAllText(Path.Combine(output, "ExtractedImports.lean")).Contains("ImportFixture.addOne.Holds linked 1", StringComparison.Ordinal))
+    !File.ReadAllText(Path.Combine(output, "ExtractedImports.lean")).Contains("@CIL.Safety.MethodContract.Holds _ _ ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Import slot, conditional contract or implementation-independent extraction missing.");
-string verified = Run([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")]);
+string deletedProofs = Path.Combine(directory, "deleted-library-proofs");
+Directory.CreateDirectory(deletedProofs);
+File.WriteAllText(Path.Combine(deletedProofs, "LibraryProof.lean"), "not supplied to the consumer");
+Directory.Delete(deletedProofs, true);
+string freshCache = Path.Combine(directory, "empty-cache-" + Guid.NewGuid().ToString("N"));
+string trace = Path.Combine(directory, "fresh-trace-" + Guid.NewGuid().ToString("N"));
+string? savedCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+string? savedTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+string verified;
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", freshCache);
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+    verified = Run([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"]);
+}
+finally
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", savedCache);
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", savedTrace);
+}
+JsonElement[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+if (stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argument =>
+        argument.GetString()!.StartsWith(deletedProofs, StringComparison.Ordinal))) ||
+    stages.Any(stage => stage.GetProperty("stage").GetString()!.Contains("Kernel replay", StringComparison.Ordinal) &&
+        stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "ImportFixture")) ||
+    stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "extract")))
+    throw new InvalidOperationException("Fresh caller verification obtained library proofs, extracted Lib or replayed its contract module.");
 if (!verified.Contains("Conditional verification: assumes ImportFixture.addOne.Holds linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-if (report.GetProperty("contractImports").GetArrayLength() != 1)
+if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
+    report.GetProperty("imports")[0].GetProperty("acceptedVia").GetString() != "published-certification" ||
+    !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
 
 string originalInterface = contract["interfaceModules"]![0]!["source"]!.GetValue<string>();
@@ -158,7 +209,6 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
     ("framework key mismatch", value => value["frameworkKey"] = new string('0', 64)),
     ("does not support dependencies", value => value["dependencies"] = new JsonArray("Other")),
     ("certified SHA-256 mismatch", value => value["implementationSha256"] = new string('0', 64)),
-    ("authoring-only", value => value["isReferenceAssembly"] = true),
     ("assembly identity mismatch", value =>
     {
         AssemblyNameReference identity = AssemblyNameReference.Parse(value["assemblyIdentity"]!.GetValue<string>());
@@ -220,4 +270,21 @@ contract["mvid"] = Guid.NewGuid().ToString();
 Save();
 if (contract["interfaceDigest"]!.GetValue<string>() != stableInterface)
     throw new InvalidOperationException("Implementation identity changed the interface digest.");
-Console.WriteLine("PASS implementation-bound contract interfaces, conditional caller proof, rejected metadata and stale imports");
+Reset();
+contract["interfaceModules"]![0]!["source"] = interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal);
+Save();
+Run(Command());
+Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "canonical closure digest mismatch");
+if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Changed contract left a verification report.");
+Reset();
+contract["interfaceModules"]![0]!["source"] = interfaceSource + "\naxiom unpublishedAssumption : True\n";
+Save();
+Run(Command());
+Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "contract interface");
+Reset();
+contract["isReferenceAssembly"] = true;
+Save();
+Run(Command());
+Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "caller proof checked for authoring only");
+if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Reference-only input produced a verification report.");
+Console.WriteLine("PASS canonical published contracts, fresh caller-only verification, reference authoring and import rejection paths");

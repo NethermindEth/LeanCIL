@@ -211,3 +211,37 @@ Place handwritten proofs outside them.
 `Extracted.lean` is reserved for the selected artifact; do not keep another copy
 among consumer sources. Lake configuration and Lean elaborators are executable
 code, so use this mode with packages you trust.
+
+## Published contract imports
+
+A consumer can verify a caller against an imported contract without the library's
+implementation proof package. Supply the contract sidecar and independently
+obtained implementation SHA-256 during extraction, as described in
+[Contract interfaces](CONTRACT-INTERFACES.md). Only the interface source modules
+are supplied to the consumer. The full-verification locator is not fetched.
+
+The interface stage compiles those sources, rejects undeclared dependencies and
+forbidden declarations, and checks each canonical exported-constant closure.
+It binds definition values, theorem types, inductive constructors and recursor
+computation rules. A postcondition helper cannot change behind an unchanged name
+and retain its old closure digest. Framework and toolchain stopping uses the
+constant's defining module, not its namespace.
+
+The App theorem must retain `HoldsGiven Extracted.program Extracted.ImportsHold
+claim`. Its imported conditions use the canonical `MethodContract.Holds` or
+`OutcomeContract.Holds` predicates at their absolute slots. The implementation
+proofs are not elaborated or replayed. The unchanged axiom audit applies to the
+caller theorem; imports are explicit hypotheses.
+
+Schema-4 reports identify these imports as `published-certification`. They record
+the accepted certification theorem and statement, current implementation digest,
+interface digest and deployment obligation. The publisher's certification is an
+explicit trust input. A digest does not prove that certification. Deployment must
+provide the exact implementation and satisfy the imported contracts.
+
+Proof reuse keys bind interface/closure digests, interface source bytes and
+`ExtractedImports`, independently of library implementation hashes and provenance.
+Each cache hit still checks current DLL/sidecar/profile identities and writes a
+new report with current deployment records. `--fresh` bypasses proof reuse.
+Reference-only input can check a caller proof for authoring, but exits with status
+1 and produces neither `verified.json` nor a successful proof receipt.

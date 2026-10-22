@@ -33,16 +33,16 @@ overrides can be supplied again for an explicit recheck.
 - `frameworkKey`: SHA-256 of the sorted framework source manifest described below.
 - `assemblyIdentity`, `mvid`, `targetFramework`, `implementationSha256`, and
   `isReferenceAssembly`: exact implementation metadata and bytes. Target framework
-  is `.NETCoreApp,Version=v10.0`. Reference assemblies are authoring-only.
+  is `.NETCoreApp,Version=v10.0`. Reference assemblies are authoring-only; caller proofs can be checked, but no successful verification report is published.
 - `interfaceModules`: module names and full Lean source strings. Names are plain
   dotted identifiers. Framework, toolchain, generated, example and test module
   roots are reserved. Duplicate modules and conflicting definitions are rejected.
 - `interfaceDigest`: the canonical descriptor digest described below.
 - `exports`: exact assembly-scoped method identity, Cecil full signature,
   `parameterCount`, `hasThis`, `returnsValue`, `visibility`, `contractConstant`,
-  `closureDigest`, and `profiles`.
+  `closureDigest`, `profiles`, and `kind` (`method` or `outcome`).
 - `certifications`: records with `identity`, `profile`, `implementationSha256`,
-  `interfaceDigest`, and `closureDigest`. The selected record must bind the
+  `interfaceDigest`, `closureDigest`, `theorem`, `statement`, and `statementDigest`. The selected record must bind the
   selected export, profile, DLL and interface.
 - `dependencies`: an empty array in version 1.
 - `fullVerificationLocator`: optional provenance metadata. This importer does not
@@ -71,10 +71,12 @@ full-verification locator. A rebuild can retain its interface digest when its
 source interface and assembly identity do not change. Every interface module
 source and every qualified contract name is included in this digest.
 
-`closureDigest` is checked for shape and equality with the selected certification
-record. It is provenance metadata here. This importer does not recompute or
-certify a library proof closure. A certification record does not supply a Lean
-proof of the implementation contract.
+`closureDigest` is recomputed from the canonical exported contract closure and
+must equal the selected certification record. This includes definition values,
+theorem/inductive types, constructor metadata and recursor computation rules.
+A certification record does not supply a Lean implementation proof. Its theorem,
+statement and canonical statement digest are publisher provenance accepted by
+the consumer, and are reported as such.
 
 ## Generated proof interface and guarantees
 
@@ -88,7 +90,7 @@ return arity. The implementation hash is absent from `Extracted.lean`.
 
 ```
 def Extracted.ImportsHold (linked : CIL.Program) : Prop :=
-  Library.Contract.Holds linked <absolute-slot>
+  @CIL.Safety.MethodContract.Holds _ _ Library.Contract linked <absolute-slot>
 ```
 
 Several slots form a conjunction. Each named contract must elaborate against the
@@ -111,7 +113,9 @@ can establish an unconditional application guarantee.
 The verifier stages the exact interface sources, includes them in proof cache
 identities, compiles them, and performs kernel replay. Consumer workspaces also
 reject source-name collisions and include their hashes in snapshot checks.
-Reports list `contractImports`; CLI output states the conditional assumptions.
+Schema-4 reports list `imports` accepted via `published-certification`, as well
+as `contractImports`; CLI output states the conditional assumptions and deployment
+obligations.
 Hashes and certification records never discharge those assumptions.
 
 `identity.json` schema 3 records each slot's identity, implementation path/hash,

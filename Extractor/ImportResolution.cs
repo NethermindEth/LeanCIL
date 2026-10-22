@@ -9,7 +9,8 @@ internal sealed class ImportResolution : IDisposable
     internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256);
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
         string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
-        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile);
+        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ContractKind, string CertificationTheorem, string CertificationStatement,
+        string CertificationStatementDigest, bool IsReferenceAssembly);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     readonly List<Library> libraries = [];
     readonly List<Binding> bindings = [];
@@ -35,9 +36,10 @@ internal sealed class ImportResolution : IDisposable
                 ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(implementation));
                 try
                 {
-                    if (contract.IsReferenceAssembly || module.Assembly.CustomAttributes.Any(attribute =>
-                        attribute.AttributeType.FullName == "System.Runtime.CompilerServices.ReferenceAssemblyAttribute"))
-                        throw new InvalidDataException("Reference assembly contract interfaces are authoring-only.");
+                    bool referenceAssembly = module.Assembly.CustomAttributes.Any(attribute =>
+                        attribute.AttributeType.FullName == "System.Runtime.CompilerServices.ReferenceAssemblyAttribute");
+                    if (referenceAssembly && !contract.IsReferenceAssembly)
+                        throw new InvalidDataException("Import reference assembly flag mismatch; reference assemblies are authoring-only.");
                     if (module.Assembly.Name.FullName != contract.AssemblyIdentity)
                         throw new InvalidDataException("Import assembly identity mismatch.");
                     if (module.Mvid != contract.Mvid)
@@ -107,7 +109,8 @@ internal sealed class ImportResolution : IDisposable
             slot = bindings.Count;
             bindings.Add(new(slot, identity, Path.GetFullPath(library.Source.ImplementationPath), library.Interface.ImplementationSha256,
                 "contract", Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
-                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name));
+                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, export.Kind, certification.Theorem, certification.Statement,
+                certification.StatementDigest, library.Interface.IsReferenceAssembly));
         }
         sites[instruction] = slot;
     }
@@ -150,7 +153,7 @@ internal sealed class ImportResolution : IDisposable
         foreach (string module in InterfaceModules().Keys) lean.AppendLine("import " + module);
         lean.AppendLine("\nnamespace Extracted\ndef ImportsHold (linked : CIL.Program) : Prop :=");
         lean.AppendLine(bindings.Count == 0 ? "  True" : "  " + string.Join(" \u2227\n  ", bindings.Select(binding =>
-            $"{binding.ContractConstant}.Holds linked {methodCount + binding.Slot}")));
+            $"@CIL.Safety.{(binding.ContractKind == "method" ? "MethodContract" : "OutcomeContract")}.Holds _ _ {binding.ContractConstant} linked {methodCount + binding.Slot}")));
         lean.AppendLine("end Extracted");
         return lean.ToString();
     }
