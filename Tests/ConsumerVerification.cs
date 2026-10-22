@@ -777,19 +777,3 @@ finally
     File.Delete(proofY);
     File.Delete(proofXY);
 }
-
-// Consumer caches and replay sets are keyed on Extracted alone, so PDB symbols are refused, not half-supported.
-var namedModule = Path.Combine(root, "Client", "Named.lean");
-var namedProof = Path.Combine(root, "NamedProof.lean");
-try
-{
-    File.WriteAllText(namedModule, "import Extracted\nimport ExtractedSymbols\n");
-    File.WriteAllText(namedProof, "import Client.Named\nnamespace ExampleProof\ntheorem correctness : True := trivial\nend ExampleProof\n");
-    Reject("Consumer packages cannot import ExtractedSymbols", "--proof", namedProof, "--proof-root", root);
-    Console.WriteLine("PASS consumer packages importing ExtractedSymbols are rejected with the reason");
-}
-finally
-{
-    File.Delete(namedModule);
-    File.Delete(namedProof);
-}

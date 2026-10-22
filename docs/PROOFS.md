@@ -300,8 +300,11 @@ A name used for one slot needs no `at`; a name the PDB gives two slots, such as
 until `at pc` picks the innermost scope containing it. Compiler temporaries and
 values the compiler keeps on the stack have no name and keep their index; a
 missing name lists the method's named locals. Importing `ExtractedSymbols`
-without a matching PDB fails verification with that reason. Consumer packages
-cannot import it yet; verify such proofs with `leancil verify`.
+without a matching PDB fails verification with that reason, naming the assembly
+and method. Consumer packages import it like `Extracted`, directly or through
+their own modules, in `leancil verify --proof-root` and `leancil verify-batch`.
+Only proofs whose imports reach it compile it, replay it and bind its hash into
+their cache key, so a PDB-only change rechecks them and no symbol-free proof.
 
 With the module imported, `cil_body` and `cil_embed` failures end with the
 nearest sequence point of the actual pc they report:
@@ -315,7 +318,8 @@ after the method whenever the PDB is present, imported or not. Source paths are
 relative to the directory the method documents share. Without a PDB every
 message is unchanged. `Tests/DebugNames.lean` covers scoping and both
 diagnostics, and `Tests/DebugNames.cs` checks byte-identical extraction, an
-unedited proof across an inserted local, and each message with and without a PDB.
+unedited proof across an inserted local, and each message with and without a PDB;
+`Tests/ConsumerSymbols.cs` covers consumer packages, batches and PDB-only changes.
 
 ### Bodies modulo dead code
 

@@ -799,10 +799,19 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
 #endif
 
     // Proofs opt in to PDB names and locations with `import ExtractedSymbols`.
-    static bool ImportsSymbols(string proof) => Regex.IsMatch(proof, @"^import[ \t]+ExtractedSymbols[ \t]*\r?$", RegexOptions.Multiline);
+    static bool ImportsSymbols(string proof) => Regex.IsMatch(proof,
+        @"^(?:(?:public|meta)[ \t]+)*import[ \t]+(?:all[ \t]+)?ExtractedSymbols[ \t]*\r?$", RegexOptions.Multiline);
 
     static string SymbolsFor(string output) => Path.Combine(output, "Symbols.lean") is var path && File.Exists(path) ? path
-        : throw new InvalidOperationException("The proof imports ExtractedSymbols, but extraction found no matching portable PDB; build the assembly with its .pdb next to it or remove the import.");
+        : throw new InvalidOperationException(MissingSymbols(output));
+
+    static string MissingSymbols(string output)
+    {
+        var identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+        return "The proof imports ExtractedSymbols, but extraction found no matching portable PDB; build the assembly with its .pdb next to it and extract again, or remove the import.\n" +
+            "  Assembly: " + Path.GetFullPath(identity.GetProperty("assemblyPath").GetString()!, output) + "\n" +
+            "  Method: " + identity.GetProperty("entry").GetString();
+    }
 
     static string[] Extract(string mode, string assembly, string? identity, string entry, string output, string profile = "scalar") =>
         ["dotnet", ExtractorPath, mode, assembly, entry, output, profile,
