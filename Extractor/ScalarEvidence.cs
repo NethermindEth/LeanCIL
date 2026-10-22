@@ -1,6 +1,5 @@
 using System.Text;
 using Mono.Cecil;
-using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
