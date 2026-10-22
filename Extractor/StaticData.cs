@@ -7,6 +7,8 @@ internal static class StaticData
     internal static FieldDefinition Validate(FieldReference reference, ModuleDefinition module)
     {
         FieldDefinition field = reference.Resolve() ?? throw new InvalidDataException($"Unresolved static data: {reference.FullName}");
+        if (field.IsStatic && field.IsInitOnly && (field.Attributes & FieldAttributes.HasFieldRVA) == 0)
+            throw new InvalidDataException($"Unsupported static field address: {reference.FullName}\n  A static readonly field set by its static constructor can be loaded with ldsfld, but its address is not admitted.");
         TypeDefinition layout = field.FieldType.Resolve() ?? throw new InvalidDataException("Unresolved static-data layout");
         if (reference.DeclaringType.Scope != module || reference.DeclaringType is TypeSpecification ||
             reference.DeclaringType.IsValueType != field.DeclaringType.IsValueType ||
@@ -26,6 +28,8 @@ internal static class StaticData
         return field;
     }
 
-    internal static string LeanBytes(FieldDefinition field) =>
-        "[" + string.Join(", ", field.InitialValue.Select(b => $"(BitVec.ofNat 8 {b})")) + "]";
+    internal static string LeanBytes(FieldDefinition field) => LeanBytes(field.InitialValue);
+
+    internal static string LeanBytes(byte[] bytes) =>
+        "[" + string.Join(", ", bytes.Select(b => $"(BitVec.ofNat 8 {b})")) + "]";
 }

@@ -102,4 +102,7 @@ name = "Tests.ThrowEvidence"
 name = "Tests.SpanEvidence"
 
 [[lean_lib]]
+name = "Tests.StaticValueEvidence"
+
+[[lean_lib]]
 name = "Tests.InterpreterEquations"

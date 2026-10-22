@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -130,16 +131,22 @@ internal static class Program
             stage = "metadata and CIL validation";
             using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly));
             string source = LeanEmitter.Emit(methods, profile, originalModule);
+            var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
+                .Where(i => i.OpCode.Code == Code.Ldsfld)
+                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module).Field.FullName), StringComparer.Ordinal);
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
+            if (staticValues.Count > 0)
+                source += "-- Caller assumption: these fields keep the values their static constructors stored.\n" +
+                    "def Extracted.staticValues : List String := " + JsonSerializer.Serialize(staticValues) + "\n";
             string manifest = JsonSerializer.Serialize(new
             {
                 schema = 2,
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
-                assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile, initializedTypes,
+                assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile, initializedTypes, staticValues,
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
@@ -187,6 +194,8 @@ internal static class Program
             if (symbolNotice is not null) Console.WriteLine("  " + symbolNotice);
             foreach (var name in initializedTypes)
                 Console.WriteLine($"  Caller assumption: {name} initialization completed successfully before invocation.");
+            foreach (var name in staticValues)
+                Console.WriteLine($"  Caller assumption: {name} keeps the value its static constructor stored.");
         }
         catch (Exception exception)
         {

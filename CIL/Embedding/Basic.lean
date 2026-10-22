@@ -78,7 +78,7 @@ def pick (code : List Op) : List Op → Nat → List Nat → List (Option Op)
       tail.head? :: pick code tail q qs
     else code[q]? :: pick code rest start qs
 
-/-- The static descriptor a `staticAddress` at `pc` resolves to. -/
+/-- The static descriptor a `staticAddress` or `staticValue` at `pc` resolves to. -/
 def staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
   (body.staticSites.find? (fun site => site.1 == pc)).map Prod.snd
 
