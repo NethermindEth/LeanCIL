@@ -70,6 +70,13 @@ def calls (method : Expr) : MetaM (Array (Nat × Nat × Nat)) := do
     | _ => break
   return found
 
+/-- The candidate selected by `[occurrence]`, or the only one; never the first of several. -/
+def choose (subject : MessageData) (candidates : Array String) (occurrence : Option Nat) : MetaM Nat := do
+  let listing := "\n".intercalate (candidates.toList.zipIdx.map fun (c, i) => s!"  [{i}] {c}")
+  match occurrence with
+  | some k => if k < candidates.size then return k else throwError "{subject}; [{k}] is out of range:\n{listing}"
+  | none => if candidates.size == 1 then return 0 else throwError "{subject}; select one with [i]:\n{listing}"
+
 def emit (index body : Ident) (signature : StrLit) (method : Nat) : CommandElabM Unit := do
   let extracted := mkIdent (.str `Extracted s!"method{method}")
   let signatures := mkIdent `Extracted.signatures
@@ -90,25 +97,35 @@ elab_rules : command
   | `(bind_method $index $body := $signature) => do
     emit index body signature (← liftTermElabM (resolve signature.getString))
 
+/-- The `(pc, argc)` of each call to `method` in `parent`, failing with what it does call. -/
+def callSites (parent : Term) (method : Nat) (callee : String) : TermElabM (Array (Nat × Nat)) := do
+  let sites ← calls (← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method))))
+  let found := sites.filterMap fun (pc, target, argc) => if target == method then some (pc, argc) else none
+  if found.isEmpty then
+    let table ← strings (mkConst `Extracted.signatures)
+    let called := sites.toList.map (·.2.1) |>.eraseDups
+    throwError "{parent} does not call\n  {callee}\nit calls:\n{"\n".intercalate (called.map fun i => s!"  [{i}] {table[i]?.getD "?"}")}"
+  return found
+
+/-- The call site chosen by `[occurrence]`, or the only one. -/
+def callSite (parent : Term) (method : Nat) (callee : String) (occurrence : Option Nat) : TermElabM (Nat × Nat) := do
+  let sites ← callSites parent method callee
+  let chosen ← choose m!"{parent} calls\n  {callee}\nat {sites.size} sites" (sites.map fun (pc, _) => s!"pc {pc}") occurrence
+  return sites[chosen]!
+
 /-- `bind_callee index body := "signature" from parent` binds as `bind_method` does and
 also requires `parent` to call that method; `index.call` states the instruction at its
-first call site. Expected bodies take `index` as a parameter, `.call index argc`, so a
-renumbered extraction never changes them. -/
-syntax (name := bindCallee) "bind_callee " ident ppSpace ident " := " str " from " term : command
+call site, and `[k]` selects one of several. Expected bodies take `index` as a parameter,
+`.call index argc`, so a renumbered extraction never changes them. -/
+syntax (name := bindCallee) "bind_callee " ident ppSpace ident " := " str " from " term:max (" [" num "]")? : command
 
 elab_rules : command
-  | `(bind_callee $index $body := $signature from $parent) => do
+  | `(bind_callee $index $body := $signature from $parent $[[$occurrence]]?) => do
     let (method, site) ← liftTermElabM do
       let method ← resolve signature.getString
-      let parentBody ← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method)))
-      let sites ← calls parentBody
-      let some site := sites.find? (·.2.1 == method) | do
-        let table ← strings (mkConst `Extracted.signatures)
-        let called := sites.toList.map (·.2.1) |>.eraseDups
-        throwError "{parent} does not call\n  {signature.getString}\nit calls:\n{"\n".intercalate (called.map fun i => s!"  [{i}] {table[i]?.getD "?"}")}"
-      return (method, site)
+      return (method, ← callSite parent method signature.getString (occurrence.map (·.getNat)))
     emit index body signature method
-    let (pc, _, argc) := site
+    let (pc, argc) := site
     elabCommand (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc)) := rfl))
 

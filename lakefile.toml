@@ -21,6 +21,9 @@ name = "Tests.MethodBinding"
 name = "Tests.MethodIdentity"
 
 [[lean_lib]]
+name = "Tests.StructuralLabels"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]

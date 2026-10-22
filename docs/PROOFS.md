@@ -149,8 +149,9 @@ theorem left_spec (x y : W64) (m : Memory) :
 `bind_method` defines `root` (the index), `rootBody` (the extracted body) and
 the `rfl` theorems `root.signature` and `root.found` (`@[cil_code]`).
 `bind_callee` also requires the parent to call that method and adds
-`left.call`, the instruction at its first call site; expected bodies take the
-index as a parameter, so `.call left 2` survives renumbering. `method_named "sig"`
+`left.call`, the instruction at its call site (`from rootBody [k]` selects one of
+several); expected bodies take the index as a parameter, so `.call left 2`
+survives renumbering. `method_named "sig"`
 is the bare index as a term. A missing signature lists the methods with the
 same name, or every method; a duplicate lists each index; a parent that does not
 call the method lists what it does call:
@@ -167,6 +168,38 @@ The signature is the Cecil full name, matched exactly. Resolution only locates
 an index; the body is still bound by the kernel and the extraction certificate.
 `Tests/MethodIdentity.lean` covers the diagnostics, and `Tests/MethodIdentity.cs`
 verifies one unedited proof against two builds with different numbering.
+
+### Loop heads and call sites
+
+Inside a method, name positions by structure instead of by pc, so a statement
+inserted elsewhere moves the label with the code (`CIL.StructuralLabels`):
+
+```lean
+import CIL.StructuralLabels
+
+bind_loop reduce := rootBody [1]     -- the second loop head in pc order
+bind_call after := step from rootBody [1]
+
+theorem body : (rootBody.code.drop reduce).take 4 = [.local 0, .const32 3, .sub, .setLocal 0] := rfl
+```
+
+A loop head is the target of a branch at the same or a later pc. `bind_loop`
+defines `reduce` and `reduce.latch`, the last pc branching back to it, and
+`reduce.backEdge` checks both. `bind_call` names a `.call` to a bound method
+and adds `after.call`. The `[k]` is needed only when there are several; without
+it every candidate is listed rather than the first one taken:
+
+```text
+rootBody has 2 loops; select one with [i]:
+  [0] head pc 3, back edge from pc 5
+  [1] head pc 6, back edge from pc 7
+```
+
+Labels read the compiled layout, so a compiler that rotates a loop moves its
+head; a cutpoint that must survive that, such as `Examples/Proofs/Countdown.lean`,
+keeps a unique-instruction predicate. `Tests/StructuralLabels.lean` covers the
+diagnostics, and `Tests/StructuralLabels.cs` verifies one unedited proof against
+a build with a statement inserted before both loops.
 
 ### Bodies modulo dead code
 
