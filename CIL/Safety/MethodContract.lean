@@ -471,10 +471,11 @@ macro "cil_contract_steps" "[" facts:term,* "]" : tactic =>
 open Lean Elab Tactic in
 elab "cil_contract_steps" count:num "[" facts:term,* "]" : tactic => do
   evalTactic (← `(tactic| cil_contract_prepare [$[$facts:term],*]))
+  let next ← `(tactic| cil_contract_step [$[$facts:term],*])
   for _ in [:count.getNat] do
     let saved ← saveState
     try
-      evalTactic (← `(tactic| cil_contract_step [$[$facts:term],*]))
+      evalTactic next
     catch _ =>
       saved.restore
       break
