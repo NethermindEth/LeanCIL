@@ -305,7 +305,8 @@ syntax "cil_raise_steps_normalized" "[" term,* "]" : tactic
 macro_rules
   | `(tactic| cil_raise_steps_normalized [$facts:term,*]) =>
   `(tactic| (
-    try dsimp only [List.nil_append, List.cons_append, Nat.reduceAdd]
+    try dsimp only [Nat.reduceAdd]
+    cil_stack_cleanup
     try (cil_strict refine CIL.Safety.raises_of_run
            (by cil_lookup [$[$facts:term],*])
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
@@ -318,7 +319,8 @@ macro_rules
     | (cil_strict refine CIL.Safety.run_next_raises
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step_normalized [$[$facts:term],*]) ?_)))
+        (by cil_checked_step_normalized [$[$facts:term],*]) ?_
+       cil_stack_cleanup)))
 
 syntax "cil_raise_steps" "[" term,* "]" : tactic
 

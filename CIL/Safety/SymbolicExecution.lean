@@ -94,16 +94,13 @@ macro_rules
     | (simp only [cil_code, Nat.reduceAdd, $[$facts:term],*]; done)
     | (simp only [cil_code, Nat.reduceAdd, $[$facts:term],*]; rfl))
 
-/-- Close definitional steps before using instruction equations or the dispatcher. -/
-macro "cil_checked_step_normalized " "[" facts:term,* "]" : tactic => do
-  -- With facts, reflexivity can assign a symbolic branch target before its
-  -- condition is rewritten, leaving the next instruction lookup stuck.
-  let reflexivity ← if facts.getElems.isEmpty then `(tactic| rfl) else `(tactic| fail)
-  `(tactic| (
-    try simp only [cil_code, Nat.reduceAdd]
-    first
-    | $reflexivity:tactic
-    -- An equation is an exact rewrite of `step`, so only an op without one falls back to unfolding the dispatcher.
+macro "cil_stack_cleanup" : tactic =>
+  `(tactic| try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
+    List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
+    List.nil_append, List.cons_append, List.append_nil])
+
+macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
+  `(tactic| first
     | (simp only [cil_step, CIL.Safety.instructionStep]
        try simp [CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
@@ -112,7 +109,49 @@ macro "cil_checked_step_normalized " "[" facts:term,* "]" : tactic => do
     | (fail_if_success simp only [cil_step]
        simp [CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
         CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
-        $[$facts:term],*] <;> (repeat constructor) <;> rfl)))
+        $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+
+macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+    simp only [cil_step, CIL.Intrinsic.available, List.length_cons, List.length_nil,
+      Nat.reduceAdd, Nat.reduceLT, Bool.not_true, Bool.not_false, Bool.false_eq_true,
+      ite_false, ite_true, List.take_succ_cons, List.take_zero, List.take_nil,
+      List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append, List.append_nil,
+      List.drop_succ_cons, List.drop_zero, List.drop_nil, CIL.Safety.scalars,
+      CIL.Safety.numericValue, Bind.bind, Except.bind, Pure.pure, Except.pure,
+      BitVec.ofInt_ofNat, cil_eval, $[$facts:term],*]
+    all_goals simp only [CIL.Safety.checkedIntrinsic, cil_eval, $[$facts:term],*,
+      CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+    all_goals (first | rfl | cil_checked_step_equations [$[$facts:term],*])))
+
+syntax "cil_checked_step_normalized" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
+    evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
+    if (← getGoals).isEmpty then return
+    let target ← instantiateMVars (← getMainTarget)
+    let some (_, lhs, _) := target.eq? | throwError "Expected a checked step equality"
+    let args := lhs.getAppArgs
+    let mut operation := Name.anonymous
+    if lhs.isAppOfArity ``CIL.Safety.step 7 then
+      let op ← withReducible <| whnf args[1]!
+      operation := op.getAppFn.constName?.getD Name.anonymous
+    let scalar := #[``CIL.Op.nop, ``CIL.Op.neg, ``CIL.Op.gt, ``CIL.Op.convI1,
+      ``CIL.Op.convI2, ``CIL.Op.convU2, ``CIL.Op.convI8, ``CIL.Op.convI4,
+      ``CIL.Op.convU1, ``CIL.Op.convU4, ``CIL.Op.convU8, ``CIL.Op.convU,
+      ``CIL.Op.bnot, ``CIL.Op.add, ``CIL.Op.sub, ``CIL.Op.mul, ``CIL.Op.band,
+      ``CIL.Op.bor, ``CIL.Op.bxor, ``CIL.Op.shl, ``CIL.Op.shr, ``CIL.Op.shrUn,
+      ``CIL.Op.lt, ``CIL.Op.ltu, ``CIL.Op.gtu, ``CIL.Op.eq].contains operation
+    let strategy ← if scalar then
+        `(tactic| first | rfl | cil_checked_step_equations [$facts:term,*])
+      else if operation == ``CIL.Op.intrinsic then
+        `(tactic| cil_checked_intrinsic [$facts:term,*])
+      else
+        `(tactic| cil_checked_step_equations [$facts:term,*])
+    evalTactic strategy
 
 syntax "cil_checked_step" "[" term,* "]" : tactic
 
@@ -135,6 +174,7 @@ macro_rules
          · cil_lookup [$[$facts:term],*]
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
+    cil_stack_cleanup
     cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" first
     | (cil_strict refine CIL.Safety.run_return (op := .ret _)
         (by cil_lookup [$[$facts:term],*])
@@ -146,7 +186,8 @@ macro_rules
     | (cil_strict refine Eq.trans (CIL.Safety.run_next
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step_normalized [$[$facts:term],*])) ?_)
+        (by cil_checked_step_normalized [$[$facts:term],*])) ?_
+       cil_stack_cleanup)
     | (cil_strict apply CIL.Safety.run_call_of_invoke
        · cil_lookup [$[$facts:term],*]
        · cil_lookup [$[$facts:term],*]

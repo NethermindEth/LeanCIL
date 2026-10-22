@@ -5,6 +5,7 @@ import CIL.ExecutionLemmas
 -- Registering a definition supplies its kernel-checked unfolding equations;
 -- it does not assign a behavioral contract to the method.
 register_simp_attr cil_code
+register_simp_attr cil_eval
 
 namespace CIL
 

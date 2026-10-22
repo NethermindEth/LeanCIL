@@ -1,4 +1,5 @@
 import CIL.Safety.SymbolicExecution
+import CIL.SIMD.VectorLemmas
 
 namespace Tests.Automation
 
@@ -138,4 +139,59 @@ example (body : CIL.Method) (args : List CIL.Safety.Value) (frame : CIL.Safety.F
 #guard_msgs in #print axioms leaf_checked
 /-- info: 'Tests.Automation.bound_checked' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms bound_checked
+open CIL.Safety in
+theorem scalar_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
+    (memory : Memory) (left right : CIL.W64) (word : Nat) (unrelated : word = 7) :
+    ∃ stack, step body .bxor 0 args frame [.scalar (.i64 right), .scalar (.i64 left)] memory =
+      .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.i64 (left ^^^ right))] := by
+  refine ⟨?_, ?_, ?_⟩
+  · cil_checked_step [unrelated]
+  · rfl
+
+open CIL.Safety in
+theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
+    (memory : Memory) (bytes : List (BitVec 8)) (value : CIL.V256)
+    (casted : bitcastValue (.aggregate 32) .vector256 (.aggregate bytes) = .ok (.v256 value)) :
+    ∃ stack, step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame
+      [.scalar (.aggregate bytes)] memory = .ok (.next 1 stack frame memory) ∧
+      stack = [.scalar (.v256 value)] := by
+  refine ⟨?_, ?_, ?_⟩
+  · cil_checked_step [staticInstruction, memoryInstruction, casted]
+  · rfl
+
+@[cil_eval] theorem eval_reverse256 (a b c d : CIL.W64) :
+    CIL.evalIntrinsic (.avx2 .permute4x64)
+      [.v256 (CIL.Vector.pack256 a b c d), .i32 (BitVec.ofNat 32 27)] =
+      some (.v256 (CIL.Vector.pack256 d c b a)) := by
+  change some (.v256 (CIL.Vector.permute4x64 (CIL.Vector.pack256 a b c d) 27)) = _
+  simp [CIL.Vector.permute4x64]
+
+@[cil_code] def permuteStoreMethod : CIL.Method := {
+  profile := { architecture := .x64, avx2 := true }
+  code := [.intrinsic (.avx2 .permute4x64) 2, .memory .store256, .ret]
+  locals := [], returnsValue := false }
+
+@[cil_code] def permuteStoreProgram : CIL.Program := [permuteStoreMethod]
+
+open CIL.Safety in
+theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory final : Memory)
+    (stored : ∀ rest, memoryInstruction .store256
+      (.scalar (.v256 (CIL.Vector.pack256 d c b a)) :: .reference (.address destination) :: rest) memory =
+      .ok (final, rest)) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 (CIL.Vector.pack256 a b c d)),
+        .reference (.address destination)] memory = .ok (final, []) := by
+  cil_checked_steps [staticInstruction, stored]
+
+open CIL.Safety in
+theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : Memory)
+    (value : Value) (fuel : Nat) :
+    run program fuel 0 0 [] frame (([value].reverse ++ []).drop 0) memory =
+      run program fuel 0 0 [] frame [value] memory := by
+  cil_stack_cleanup
+
+#print axioms scalar_fact_stack
+#print axioms bitcast_fact_stack
+#print axioms permute_then_store
+
 end Tests.Automation

@@ -270,4 +270,13 @@ theorem constructor_index_branch (memory : Memory) (left : Reference) (words : F
 #print axioms indexed_fields
 #print axioms constructor_index_branch
 
+theorem contract_literal_stack (memory : Memory) (value : CIL.W64) :
+    ∃ fuel final values,
+      run [({ code := [.ret], locals := [], returnsValue := true } : CIL.Method)]
+        fuel 0 0 [] { activation := 0, locals := [], owned := [] }
+        (([Value.scalar (.i64 value)].reverse ++ []).drop 0) memory = .ok (final, values) ∧
+      final = memory ∧ values = [.scalar (.i64 value)] := by
+  cil_contract_steps []
+  exact ⟨rfl, rfl⟩
+
 end Tests.StoreFacts
