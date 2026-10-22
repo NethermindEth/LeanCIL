@@ -92,7 +92,7 @@ macro_rules
         (by cil_checked_step [$[$facts:term],*])
         (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
        try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
-         List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend,
+         List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend, BitVec.isValue,
          Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
        try with_reducible rfl)
     -- Elaborate each intermediate-state proof before creating the continuation
