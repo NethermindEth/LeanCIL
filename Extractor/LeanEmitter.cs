@@ -147,7 +147,7 @@ internal static class LeanEmitter
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated⟩");
         }
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
-        lean.AppendLine("  apply Extraction.translation_of_methods layouts_validated statics_validated");
+        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");
