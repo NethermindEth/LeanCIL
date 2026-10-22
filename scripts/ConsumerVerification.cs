@@ -755,9 +755,12 @@ unsafe def main (args : List String) : IO Unit := do
 
     sealed record ConsumerSession(string FrameworkCopy, Dictionary<string, string> Copied);
 
+    enum ConsumerSessionPurpose { Verification, Editor }
+
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
-        SortedDictionary<string, string> snapshot, string certifiedLibrary, string extraction,
-        IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols)
+        SortedDictionary<string, string> snapshot, string? certifiedLibrary, string extraction,
+        IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
+        ConsumerSessionPurpose purpose = ConsumerSessionPurpose.Verification)
     {
         foreach (var dependency in dependencies)
         {
@@ -780,16 +783,23 @@ unsafe def main (args : List String) : IO Unit := do
         // certified bytes (including line endings) so Lake can reuse its traces.
         foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories).Append(At("CIL.lean")))
             File.Copy(path, Path.Combine(frameworkCopy, Path.GetRelativePath(Root, path)), true);
-        var baseBuild = Path.Combine(certifiedLibrary, ".lake/build");
-        var frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
-        foreach (var path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
+        if (purpose == ConsumerSessionPurpose.Verification && certifiedLibrary is null)
+            throw new InvalidDataException("Verification requires a certified framework library.");
+        if (purpose == ConsumerSessionPurpose.Editor && certifiedLibrary is not null)
+            throw new InvalidDataException("Editor workspaces cannot receive certified framework artifacts.");
+        if (purpose == ConsumerSessionPurpose.Verification)
         {
-            var relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
-            if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
-                .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
-            var destination = Path.Combine(frameworkBuild, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(path, destination, true);
+            string baseBuild = Path.Combine(certifiedLibrary!, ".lake/build");
+            string frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
+            foreach (string path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
+            {
+                string relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
+                if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
+                    .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
+                string destination = Path.Combine(frameworkBuild, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(path, destination, true);
+            }
         }
         // Give Lake a real generated-module target before building consumer imports.
         if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
@@ -801,6 +811,13 @@ unsafe def main (args : List String) : IO Unit := do
                 .GetProperty("generatedSha256").GetString())
                 throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
         AddConsumerLibrary(frameworkCopy, "Extracted");
+        SortedDictionary<string, string> importedSources = ImportSources(extraction);
+        foreach (string module in importedSources.Keys)
+            if (snapshot.Keys.Any(key => key.StartsWith("consumer:", StringComparison.Ordinal) &&
+                key.Replace('\\', '/').EndsWith("/" + module.Replace('.', '/') + ".lean", StringComparison.Ordinal)))
+                throw new InvalidDataException("Contract interface module shadows a consumer source: " + module);
+        string[] importModules = StageImportSources(extraction, frameworkCopy);
+        foreach (string module in importModules) AddConsumerLibrary(frameworkCopy, module);
         var symbolsPath = Path.Combine(frameworkCopy, "ExtractedSymbols.lean");
         // Declared only when a proof imports it: symbol-free workspaces, and so their support keys, stay unchanged.
         if (symbols is not null)
@@ -820,6 +837,7 @@ unsafe def main (args : List String) : IO Unit := do
             .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
             .Append(Path.Combine(frameworkCopy, "Extracted.lean"))
             .Append(extractionAuditPath).ToList();
+        copied.AddRange(importModules.Select(module => Path.Combine(frameworkCopy, module.Replace('.', Path.DirectorySeparatorChar) + ".lean")));
         if (symbols is not null) copied.Add(symbolsPath);
         foreach (var (module, proof, _) in proofs)
         {
@@ -1034,7 +1052,8 @@ unsafe def main (args : List String) : IO Unit := do
         foreach (var i in Pending(all))
             try
             {
-                var key = Sha(Path.Combine(outputs[i], "Extracted.lean")) + (symbols[i] is null ? "" : "\n" + symbols[i]);
+                var key = Sha(Path.Combine(outputs[i], "Extracted.lean")) + (symbols[i] is null ? "" : "\n" + symbols[i]) +
+                    "\n" + JsonSerializer.Serialize(ImportSources(outputs[i]));
                 if (!groups.TryGetValue(key, out var members)) groups[key] = members = [];
                 members.Add(i);
             }
@@ -1054,7 +1073,9 @@ unsafe def main (args : List String) : IO Unit := do
 
         void VerifyGroup(int[] members, string session, bool first, bool share)
         {
-            var bound = WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean")));
+            Dictionary<string, string> bound = new(WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean"))), StringComparer.Ordinal);
+            foreach ((string module, string source) in ImportSources(outputs[members[0]]))
+                bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
             var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
             // Groups share one Symbols.lean hash or none.
             var symbolHash = symbols[members[0]];
@@ -1115,6 +1136,10 @@ unsafe def main (args : List String) : IO Unit := do
                 progress: "Checking consumer extraction certificate");
             AuditedAxioms(extractionAudit, "ExtractionAudit.valid");
             Stage(members, "proof checking");
+            string[] importModules = ImportSources(outputs[members[0]]).Keys.ToArray();
+            if (importModules.Length > 0)
+                Run(["lake", "build", .. importModules.Select(module => "+" + module + ":olean")], frameworkCopy,
+                    progress: "Checking consumer contract interfaces and import assumptions");
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
             var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies");
             var buildFailure = build.Code == 0 ? null
@@ -1246,7 +1271,7 @@ unsafe def main (args : List String) : IO Unit := do
                     var theorem = requests[i].Theorem;
                     var module = names[Array.IndexOf(members, i)];
                     var auditPath = Path.Combine(session, "LeanCILAudit" + module["LeanCILProof".Length..] + ".lean");
-                    File.WriteAllText(auditPath, $"import {module}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + RefutationAudit(theorem));
+                    File.WriteAllText(auditPath, ImportAuditHeader(outputs[i]) + $"import {module}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + ImportClaimAudit(outputs[i], theorem) + RefutationAudit(theorem));
                     var audit = Run([LeanExecutable, auditPath], session, leanPath, environment: LeanEnvironment);
                     var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
                     if (matches.Count > 1 || (matches.Count == 0 && !audit.Contains($"'{theorem}' does not depend on any axioms")))
@@ -1320,7 +1345,7 @@ unsafe def main (args : List String) : IO Unit := do
                     audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
-                    staticValues: StaticValueAssumptions(extraction));
+                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction));
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));

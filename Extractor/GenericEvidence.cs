@@ -50,7 +50,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             : $".external {Quote(LayoutEvidence.Scope(definition.DeclaringType) + "::" + definition.FullName)}";
         var name = definition.DeclaringType.Scope is ModuleDefinition
             ? ((MethodDefinition)originalModule.LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
-        return $"{{ declaringType := {Type(definition.DeclaringType)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")} }}";
+        return $"{{ declaringType := {Type(definition.DeclaringType)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Type))} }}";
     }
 
     string Operand(MethodDefinition method, Instruction instruction)

@@ -12,8 +12,9 @@ internal static class InstructionTranslation
         return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);
     }
     internal static string Translate(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
-        FeatureProfile? profile = null, HashSet<Instruction>? nativeOperands = null, int[]? parameterHomes = null)
+        FeatureProfile? profile = null, HashSet<Instruction>? nativeOperands = null, int[]? parameterHomes = null, ImportResolution? imports = null)
     {
+        if (imports is not null && imports.TryTranslate(i, methods.Length, out string imported)) return imported;
         profile ??= FeatureProfile.Scalar;
         var translated = TranslateCore(i, m, methods, methodIndex, profile, parameterHomes ?? ParameterStorage.Analyze(m, profile));
         return (nativeOperands ?? NativeOperands.Analyze(m, profile)).Contains(i) ? $".nativeBinary ({translated})" : translated;

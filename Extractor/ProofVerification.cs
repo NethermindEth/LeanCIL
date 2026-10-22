@@ -266,6 +266,8 @@ partial class Program
             if (manifest.TryGetProperty("staticValues", out var staticValues))
                 foreach (var name in staticValues.EnumerateArray())
                     Console.WriteLine($"  Caller assumption: {name.GetString()} keeps the value its static constructor stored.");
+            foreach (string assumption in ContractImportAssumptions(manifest))
+                Console.WriteLine("  Conditional verification: assumes " + assumption + "; implementation contracts are not discharged by hashes or certification records.");
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
             var refuted = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);

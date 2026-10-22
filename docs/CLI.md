@@ -226,6 +226,11 @@ the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
 
+Contract imports also require `--import-interface-sha256 Lib=<digest>` from an
+accepted publisher channel. This independently pins the interface descriptor
+and all executable Lean source bytes before compilation. See
+[CONTRACT-INTERFACES.md](CONTRACT-INTERFACES.md) for the source trust boundary.
+
 ## Exception documentation lint experiment
 
 Run `leancil lint-exceptions artifacts/Method --documentation Assembly.xml`
@@ -247,3 +252,10 @@ XML must contain the selected compiler member ID and matching assembly name.
 Unresolved cref, include and inheritdoc need expansion first. The supplied XML
 hash identifies bytes; it does not prove that they came from the DLL build.
 No documentation text becomes evidence or a contract premise.
+
+## Editor workspace
+
+`leancil workspace <assembly> <method> --profile <profile> --proof <file>`
+creates a source workspace for Lake and the Lean language server. See
+[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for package
+requirements, stale-input rejection and the separate certification step.

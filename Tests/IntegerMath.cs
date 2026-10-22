@@ -174,11 +174,22 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
         }
         module.Write(dll);
     }
+    string diagnostic = mutation switch
+    {
+        "scope" => "Unresolved call: System.Int32 System.Math::Min(System.Int32,System.Int32)",
+        "version" => "Unsupported type identity: System.Int32 [System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+        "instance" => "Invalid evaluation stack during reachability",
+        "return" => "External managed dependency: System.Int64 System.Math::Min(System.Int32,System.Int32)",
+        "argument" => "External managed dependency: System.Int32 System.Math::Min(System.Int32,System.Int64)",
+        "generic" => "Generic contract imports are not supported in version 1.",
+        "unsupported" => "External managed dependency: System.Int32 System.Math::CopySign(System.Int32,System.Int32)",
+        _ => throw new InvalidOperationException("Unknown runtime mutation: " + mutation)
+    };
+    foreach (string artifact in new[] { "Extracted.lean", "identity.json", "verified.json" })
+        File.Delete(Path.Combine(output, artifact));
     var result = Execute(Extract("extract", dll, "Examples", "IntegerMath::MinInt32(int,int)", output));
-    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
-        !(result.Output.Contains("Unsupported") || result.Output.Contains("Unmodelled") ||
-          result.Output.Contains("Unresolved call") ||
-          mutation == "instance" && result.Output.Contains("Invalid evaluation stack during reachability")))
+    if (result.Code != 1 || !result.Output.Contains(diagnostic, StringComparison.Ordinal) ||
+        new[] { "Extracted.lean", "identity.json", "verified.json" }.Any(artifact => File.Exists(Path.Combine(output, artifact))))
         throw new InvalidOperationException("Incorrect runtime rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
