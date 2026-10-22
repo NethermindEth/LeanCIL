@@ -237,6 +237,12 @@ methods named Pick:
   [4] System.UInt32 Examples.Overloads::Pick(System.UInt32)
 ```
 
+When a helper's name is not stable, bind it by call shape instead:
+`bind_callee left leftBody := call 2 from rootBody [1]` binds the second call in
+`rootBody` with two arguments, and emits the same theorems with the signature read
+from the table. Without `[k]` there must be exactly one such call; otherwise the
+error lists each site's pc and callee.
+
 The signature is the Cecil full name, matched exactly. Resolution only locates
 an index; the body is still bound by the kernel and the extraction certificate.
 `Tests/MethodIdentity.lean` covers the diagnostics, and `Tests/MethodIdentity.cs`
