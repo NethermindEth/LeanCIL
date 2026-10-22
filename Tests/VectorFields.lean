@@ -39,28 +39,21 @@ example : instruction (.setFieldAt 4 32) [.scalar (.v256 0), Examples.reference]
 example : instruction (.setFieldAt 3 32) [.scalar (.v256 0), .reference .null] memory =
     .error (.memory .nullDereference .null 0) := by rfl
 
-example : computeLayouts [{ explicit := true, packing := 1, declaredSize := 35,
-    fields := [⟨.vector256, some 3⟩] }] =
+example : computeLayouts [{ explicit := true, packing := 1, declaredSize := 35, fields := [⟨.vector256, some 3⟩] }] =
     some #[⟨⟨35, [⟨3, 32, false⟩]⟩, 1⟩] := by decide
 
-example : computeLayouts [{ explicit := true, packing := 1, declaredSize := 34,
-    fields := [⟨.vector256, some 3⟩] }] = none := by decide
+example : computeLayouts [{ explicit := true, packing := 1, declaredSize := 34, fields := [⟨.vector256, some 3⟩] }] = none := by decide
 
-example : computeLayouts [{ explicit := false, auto := true, packing := 0, declaredSize := -1,
-    fields := [⟨.vector256, none⟩] }] = none := by decide
+example : computeLayouts [{ explicit := false, auto := true, packing := 0, declaredSize := -1, fields := [⟨.vector256, none⟩] }] = none := by decide
 
-example : computeLayouts [{ explicit := false, packing := 32, declaredSize := -1,
-    fields := [⟨.vector256, none⟩] }] = none := by decide
+example : computeLayouts [{ explicit := false, packing := 32, declaredSize := -1, fields := [⟨.vector256, none⟩] }] = none := by decide
 
-example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1,
-    fields := [⟨.vector256, none⟩] }] = none := by decide
+example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1, fields := [⟨.vector256, none⟩] }] = none := by decide
 
-example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1,
-    fields := [⟨.unsigned8, none⟩, ⟨.vector128, none⟩] }] =
+example : computeLayouts [{ explicit := false, packing := 0, declaredSize := -1, fields := [⟨.unsigned8, none⟩, ⟨.vector128, none⟩] }] =
     some #[⟨⟨32, [⟨0, 1, false⟩, ⟨16, 16, false⟩]⟩, 16⟩] := by decide
 
-def defaultVector256 : List RawLayout := [{ explicit := false, packing := 0, declaredSize := -1,
-  fields := [⟨.unsigned8, none⟩, ⟨.vector256, none⟩] }]
+def defaultVector256 : List RawLayout := [{ explicit := false, packing := 0, declaredSize := -1, fields := [⟨.unsigned8, none⟩, ⟨.vector256, none⟩] }]
 
 def x64Layout : Array ComputedLayout := #[⟨⟨64, [⟨0, 1, false⟩, ⟨32, 32, false⟩]⟩, 32⟩]
 def arm64Layout : Array ComputedLayout := #[⟨⟨48, [⟨0, 1, false⟩, ⟨16, 32, false⟩]⟩, 16⟩]
@@ -76,8 +69,16 @@ example : MethodLayoutsValid defaultVector256 x64Layout
 example : ¬ MethodLayoutsValid defaultVector256 x64Layout
     { profile := { architecture := .arm64 }, locals := [], returnsValue := true, code := [.fieldAt 32 32] } [.field 0 0 1 .load] := by decide
 
-def raw : List RawLayout := [{ identity := "VectorHolder", explicit := true, packing := 1,
-  declaredSize := 35, fields := [⟨.vector256, some 3⟩] }]
+def nestedVector256 : List RawLayout := defaultVector256 ++
+  [{ explicit := false, packing := 0, declaredSize := -1, fields := [⟨.unsigned8, none⟩, ⟨.aggregate 0, none⟩] }]
+
+example : computeLayouts nestedVector256 .x64 =
+    some (x64Layout.push ⟨⟨96, [⟨0, 1, false⟩, ⟨32, 64, true⟩]⟩, 32⟩) := by decide
+
+example : computeLayouts nestedVector256 .arm64 =
+    some (arm64Layout.push ⟨⟨64, [⟨0, 1, false⟩, ⟨16, 48, true⟩]⟩, 16⟩) := by decide
+
+def raw : List RawLayout := [{ identity := "VectorHolder", explicit := true, packing := 1, declaredSize := 35, fields := [⟨.vector256, some 3⟩] }]
 
 def vector (scope : String) : TypeExpr := .apply
   (.constructor scope "System.Runtime.Intrinsics.Vector256`1")

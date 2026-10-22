@@ -114,6 +114,14 @@ foreach ((string name, string holder, int width, bool write) in new[]
     }
 }
 
+int nestedSize = Size(owner.GetNestedType("Nested256")!);
+int runtimeNestedSize = (int)owner.GetMethod("NestedSize")!.Invoke(null, null)!;
+if (runtimeNestedSize != nestedSize)
+    throw new InvalidOperationException("Nested vector size differs from the independent sizeof measurement");
+Prove("NestedSize", [
+    $"(CIL.Safety.invoke Extracted.program 8 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.i32 {nestedSize})]",
+    $"Extracted.layout0.size = {nestedSize}"]);
+
 Type holder256 = owner.GetNestedType("Holder256")!;
 int addressOffset = Offset(holder256);
 int addressSize = Size(holder256);

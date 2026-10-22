@@ -12,6 +12,9 @@ public static class VectorFields
     [StructLayout(LayoutKind.Sequential)]
     public struct Holder256 { public byte Prefix; public Vector256<ulong> Value; }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Nested256 { public byte Prefix; public Holder256 Value; }
+
     [StructLayout(LayoutKind.Explicit, Pack = 1, Size = 35)]
     public struct Packed256 { [FieldOffset(3)] public Vector256<ulong> Value; }
 
@@ -42,5 +45,7 @@ public static class VectorFields
         vector.Value = value;
         return Unsafe.As<Words256, Vector256<ulong>>(ref holder);
     }
+    public static int NestedSize() => Unsafe.SizeOf<Nested256>();
+
     public static ref Vector256<ulong> Address256(ref Holder256 value) => ref value.Value;
 }
