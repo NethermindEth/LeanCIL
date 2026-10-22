@@ -91,10 +91,26 @@ frame too: list those slots in the footprint while executing, then drop them wit
 the program does, so a cross-profile contract is a theorem quantified over the
 per-profile extractions.
 
+A contract may also type its result: `MethodContract Input Output` adds
+`results : Output → List Value`, and `post` speaks of the `Output`. `Returns`
+requires the returned values to equal `results out` for some `out` satisfying
+`post`. Without `Output`, `results` is the identity and `post` sees the values:
+
+```lean
+def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
+  args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+  results v := [.scalar (.i64 v)]
+  pre _ _ := True
+  footprint _ := []
+  post input _ _ v := v = input.1 * 3 + input.2
+```
+
 In the caller, `cil_contract_steps [facts]` steps a `∃ fuel, run ...` goal up
 to each `.call` and return; `cil_contract_call holds input at site [facts]` applies
 the contract at a `bind_call` site (or the fetched call without `at`), leaving the precondition and then a continuation over the
-callee's final memory, values, invocation, frame and postcondition.
+callee's final memory, values, invocation, frame and `Returns`. Destructure
+`Returns` as `⟨out, rfl, post⟩` and unfold the contract (`dsimp only [mixContract]`)
+so the stack holds the encoded output.
 `cil_formed_call` (`run_call_of_contract_formed`) also takes the caller memory's
 `WellFormed` and hands the continuation the callee's `final.WellFormed` and
 static-world preservation, so contracts need not restate either; `cil_formed_outcome_call`
@@ -120,11 +136,12 @@ so `Raises` states none; runtime exceptions count only where the semantics
 models them as `.thrown`.
 
 ```lean
-def percentContract : OutcomeContract CIL.W64 where
+def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
+  results out := [.scalar (.i64 out)]
   pre _ _ := True
   footprint _ := []
-  post v _ _ values := values = [.scalar (.i64 v)]
+  post v _ _ out := out = v
   raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
 ```
 

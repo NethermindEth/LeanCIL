@@ -172,31 +172,39 @@ theorem WordsDisjoint.outside {r q : Reference} (disjoint : WordsDisjoint r q) :
   · exact Or.inr (Or.inl (by simp only; omega))
 
 /-- A typed method contract. `pre` carries formation, authority and the permitted
-    aliasing; `footprint` bounds the bytes of earlier memory the method may change. -/
-structure MethodContract (Input : Type) where
+    aliasing; `footprint` bounds the bytes of earlier memory the method may change.
+    `post` speaks of an `Output` that `results` encodes; by default the returned values. -/
+structure MethodContract (Input : Type) (Output : Type := List Value) where
   args : Input → List Value
+  results : Output → List Value := by exact fun values => values
   pre : Input → Memory → Prop
   footprint : Input → List (Reference × Nat)
-  post : Input → Memory → Memory → List Value → Prop
+  post : Input → Memory → Memory → Output → Prop
+
+/-- The returned values encode an output satisfying `post`. -/
+def MethodContract.Returns {Input Output : Type} (c : MethodContract Input Output) (input : Input)
+    (initial final : Memory) (values : List Value) : Prop :=
+  ∃ out, values = c.results out ∧ c.post input initial final out
 
 /-- Normal return within the footprint satisfying `post`, for every input meeting `pre`.
     Fuel stays existential, so callers never depend on the callee's step count. -/
-def MethodContract.Holds {Input : Type} (c : MethodContract Input) (program : CIL.Program) (method : Nat) : Prop :=
+def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output) (program : CIL.Program)
+    (method : Nat) : Prop :=
   ∀ input initial, c.pre input initial →
     ∃ fuel final values, invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Confined (c.footprint input) initial final ∧ c.post input initial final values
+      Confined (c.footprint input) initial final ∧ c.Returns input initial final values
 
 /-- A contract is `Ensures` at each input, with the footprint as part of the postcondition. -/
-theorem MethodContract.Holds.ensures {Input : Type} {c : MethodContract Input} {program : CIL.Program}
+theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract Input Output} {program : CIL.Program}
     {method : Nat} (holds : c.Holds program method) (input : Input) :
     Ensures program method (fun args m => args = c.args input ∧ c.pre input m)
-      (fun _ initial final values => Confined (c.footprint input) initial final ∧ c.post input initial final values) := by
+      (fun _ initial final values => Confined (c.footprint input) initial final ∧ c.Returns input initial final values) := by
   rintro args initial ⟨rfl, permitted⟩
   exact holds input initial permitted
 
 /-- Compose a fetched call through the callee's contract instead of its body. The
-    continuation also receives the checked invocation for facts outside the contract. -/
-theorem run_call_of_contract {Input : Type} {c : MethodContract Input} {program : CIL.Program}
+    continuation receives the typed output with its encoding and the checked invocation. -/
+theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Output} {program : CIL.Program}
     {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -205,7 +213,7 @@ theorem run_call_of_contract {Input : Type} {c : MethodContract Input} {program 
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.post input updated final values →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
         post result returned) :
@@ -237,7 +245,7 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
 
 /-- `run_call_of_contract` from a well-formed memory: the continuation also receives the
     callee's well-formed final memory and static-world preservation across the call. -/
-theorem run_call_of_contract_formed {Input : Type} {c : MethodContract Input} {program : CIL.Program}
+theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract Input Output} {program : CIL.Program}
     {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -248,7 +256,7 @@ theorem run_call_of_contract_formed {Input : Type} {c : MethodContract Input} {p
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
       (StaticWorldValid (programStaticDescriptors program) memory →
         StaticWorldValid (programStaticDescriptors program) final) →
-      Confined (c.footprint input) updated final → c.post input updated final values →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
         post result returned) :

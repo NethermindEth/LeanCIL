@@ -35,11 +35,12 @@ bind_callee addTo addBody := "System.Void Contracts.Calls::AddTo(System.UInt64&,
 bind_call addSite := addTo from rootBody
 bind_call mixSite := mix from rootBody
 
-def mixContract : MethodContract (CIL.W64 × CIL.W64) where
+def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
   args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+  results v := [.scalar (.i64 v)]
   pre _ m := m.WellFormed
   footprint _ := []
-  post input _ _ values := values = [.scalar (.i64 (input.1 * 3 + input.2))]
+  post input _ _ v := v = input.1 * 3 + input.2
 
 structure AddInput where
   a : Reference
@@ -74,7 +75,7 @@ def rootContract : MethodContract RootInput where
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   dsimp only [mixContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, rfl⟩
+  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 
 theorem add_holds : addContract.Holds Extracted.program addTo := by
@@ -91,7 +92,7 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), rfl, readback⟩
+  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
@@ -100,7 +101,7 @@ set_option maxHeartbeats 400000 in
 theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
     (addHolds : addContract.Holds Extracted.program addTo) : rootContract.Holds Extracted.program root := by
   rintro ⟨r, b, x, y⟩ m ⟨formed, readR, readB, writable, disjoint⟩
-  dsimp only [rootContract] at *
+  dsimp only [rootContract, MethodContract.Returns] at *
   have rOld := formed.access_bound writable
   have bOld := formed.access_bound (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
@@ -112,7 +113,7 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   · exact ⟨readR, readB, writable⟩
   · exact formed
   -- The call supplies `m1.WellFormed`, which `mixContract.pre` needs; `addContract.post` does not state it.
-  rintro m1 _ - formed1 - framed1 ⟨rfl, readR1⟩
+  rintro m1 _ - formed1 - framed1 ⟨_, rfl, rfl, readR1⟩
   have readB1 : read m1 b 8 1 = .ok (numberBytes y.toNat 8) :=
     (framed1.read_eq b bOld 8 1 disjoint.outside).trans readB
   have writable1 : access m1 r 8 1 true = .ok () := (framed1.access_write r rOld 8 1).trans writable
@@ -125,8 +126,8 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   cil_contract_call mixHolds (x + y, y) at mixSite [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
   · exact formed1
-  rintro m2 _ - framed2 rfl
-  dsimp only
+  rintro m2 _ - framed2 ⟨_, rfl, rfl⟩
+  dsimp only [mixContract]
   -- Simp would normalize the stored sum in the goal but not in `store`.
   generalize (x + y) * 3 + y = v
   have writable2 : access m2 r 8 1 true = .ok () :=
@@ -142,7 +143,8 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     staticInstruction, fr2, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   simp only [leaveFrame, List.foldl_nil]
-  exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))), trivial, readback⟩
+  exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))),
+    _, rfl, rfl, readback⟩
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds mix_holds add_holds
 

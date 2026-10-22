@@ -12,17 +12,17 @@ def RunRaises (program : CIL.Program) (method pc : Nat) (args : List Value) (fra
   ∃ fuel fault, run program fuel method pc args frame stack memory = .error fault ∧ fault.fault = .thrown exception
 
 /-- A method contract that also names the exception each input raises; `none` is normal return. -/
-structure OutcomeContract (Input : Type) extends MethodContract Input where
+structure OutcomeContract (Input : Type) (Output : Type := List Value) extends MethodContract Input Output where
   raises : Input → Memory → Option String
 
-def OutcomeContract.Holds {Input : Type} (c : OutcomeContract Input) (program : CIL.Program) (method : Nat) : Prop :=
+def OutcomeContract.Holds {Input Output : Type} (c : OutcomeContract Input Output) (program : CIL.Program) (method : Nat) : Prop :=
   ∀ input initial, c.pre input initial →
     match c.raises input initial with
     | some exception => Raises program method (c.args input) initial exception
     | none => ∃ fuel final values, invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-        Confined (c.footprint input) initial final ∧ c.post input initial final values
+        Confined (c.footprint input) initial final ∧ c.Returns input initial final values
 
-theorem OutcomeContract.Holds.raising {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+theorem OutcomeContract.Holds.raising {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
     {method : Nat} {input : Input} {initial : Memory} {exception : String}
     (holds : c.Holds program method) (permitted : c.pre input initial) (raised : c.raises input initial = some exception) :
     Raises program method (c.args input) initial exception := by
@@ -30,22 +30,22 @@ theorem OutcomeContract.Holds.raising {Input : Type} {c : OutcomeContract Input}
   rw [raised] at outcome
   exact outcome
 
-theorem OutcomeContract.Holds.returning {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+theorem OutcomeContract.Holds.returning {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
     {method : Nat} {input : Input} {initial : Memory}
     (holds : c.Holds program method) (permitted : c.pre input initial) (normal : c.raises input initial = none) :
     ∃ fuel final values, invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Confined (c.footprint input) initial final ∧ c.post input initial final values := by
+      Confined (c.footprint input) initial final ∧ c.Returns input initial final values := by
   have outcome := holds input initial permitted
   rw [normal] at outcome
   exact outcome
 
 /-- A normal-return contract is the outcome contract that never raises. -/
-theorem MethodContract.Holds.outcomes {Input : Type} {c : MethodContract Input} {program : CIL.Program}
+theorem MethodContract.Holds.outcomes {Input Output : Type} {c : MethodContract Input Output} {program : CIL.Program}
     {method : Nat} (holds : c.Holds program method) :
-    ({ c with raises := fun _ _ => none } : OutcomeContract Input).Holds program method :=
+    ({ c with raises := fun _ _ => none } : OutcomeContract Input Output).Holds program method :=
   holds
 
-theorem OutcomeContract.Holds.normal {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+theorem OutcomeContract.Holds.normal {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
     {method : Nat} (holds : c.Holds program method) (never : ∀ input initial, c.pre input initial → c.raises input initial = none) :
     c.toMethodContract.Holds program method :=
   fun input initial permitted => holds.returning permitted (never input initial permitted)
@@ -120,7 +120,7 @@ theorem run_throw_raises {program : CIL.Program} {method pc : Nat}
     simp only [run, methodFound, instructionFound, stepped, Except.mapError, Bind.bind, Except.bind], rfl⟩
 
 /-- Propagate the exception a callee's contract names for this input. -/
-theorem run_call_raises_of_contract {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+theorem run_call_raises_of_contract {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
     {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {exception : String}
     (holds : c.Holds program callee) (input : Input)
@@ -136,7 +136,7 @@ theorem run_call_raises_of_contract {Input : Type} {c : OutcomeContract Input} {
   exact ⟨fuel + 1, located, ran, same.trans thrown⟩
 
 /-- Continue after a callee whose contract names no exception for this input. -/
-theorem run_call_of_outcome {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+theorem run_call_of_outcome {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
     {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -145,7 +145,7 @@ theorem run_call_of_outcome {Input : Type} {c : OutcomeContract Input} {program 
     (encoded : arguments = c.args input) (permitted : c.pre input updated) (normal : c.raises input updated = none)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.post input updated final values →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
         post result returned) :
@@ -160,7 +160,7 @@ theorem run_call_of_outcome {Input : Type} {c : OutcomeContract Input} {program 
   exact ⟨fuel, result, returned, composed, finished⟩
 
 /-- Continue after a callee whose contract names no exception into a caller path that raises. -/
-theorem run_call_raises_after_outcome {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+theorem run_call_raises_after_outcome {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
     {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {exception : String}
     (holds : c.Holds program callee) (input : Input)
@@ -169,7 +169,7 @@ theorem run_call_raises_after_outcome {Input : Type} {c : OutcomeContract Input}
     (encoded : arguments = c.args input) (permitted : c.pre input updated) (normal : c.raises input updated = none)
     (continuation : ∀ final values,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.post input updated final values →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
       RunRaises program method (pc + 1) args frame (values ++ rest) final exception) :
     RunRaises program method pc args frame stack memory exception := by
   subst encoded
@@ -182,7 +182,7 @@ theorem run_call_raises_after_outcome {Input : Type} {c : OutcomeContract Input}
   exact ⟨childFuel + parentFuel + 1, fault, run_call_of_invoke methodFound instructionFound stepped child parent, thrown⟩
 
 /-- `run_call_of_outcome` from a well-formed memory, with both call invariants supplied. -/
-theorem run_call_of_outcome_formed {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
     {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -194,7 +194,7 @@ theorem run_call_of_outcome_formed {Input : Type} {c : OutcomeContract Input} {p
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
       (StaticWorldValid (programStaticDescriptors program) memory →
         StaticWorldValid (programStaticDescriptors program) final) →
-      Confined (c.footprint input) updated final → c.post input updated final values →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final = .ok (result, returned) ∧
         post result returned) :
@@ -206,7 +206,7 @@ theorem run_call_of_outcome_formed {Input : Type} {c : OutcomeContract Input} {p
       continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
 
 /-- `run_call_raises_after_outcome` from a well-formed memory, with both call invariants supplied. -/
-theorem run_call_raises_after_outcome_formed {Input : Type} {c : OutcomeContract Input} {program : CIL.Program}
+theorem run_call_raises_after_outcome_formed {Input Output : Type} {c : OutcomeContract Input Output} {program : CIL.Program}
     {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {exception : String}
     (holds : c.Holds program callee) (input : Input)
@@ -218,7 +218,7 @@ theorem run_call_raises_after_outcome_formed {Input : Type} {c : OutcomeContract
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) → final.WellFormed →
       (StaticWorldValid (programStaticDescriptors program) memory →
         StaticWorldValid (programStaticDescriptors program) final) →
-      Confined (c.footprint input) updated final → c.post input updated final values →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
       RunRaises program method (pc + 1) args frame (values ++ rest) final exception) :
     RunRaises program method pc args frame stack memory exception :=
   run_call_raises_after_outcome holds input methodFound instructionFound stepped encoded permitted normal
