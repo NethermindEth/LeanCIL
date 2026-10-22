@@ -178,6 +178,7 @@ def Intrinsic.requiredFeatures : Intrinsic → List Feature
   | .bmi1 _ => [.bmi1]
   | .bmi2 _ => [.bmi2]
   | .armBase64 _ => [.armBase64]
+  | .x86Base _ => [.x86Base64]
   | .avx512DQ .moveMask64 => [.avx512DQ]
   | .avx512DQ .mul64 => [.avx512DQ, .avx512DQVL, .avx512F, .avx512FVL]
 

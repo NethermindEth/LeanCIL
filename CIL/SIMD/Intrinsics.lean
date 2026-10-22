@@ -9,6 +9,7 @@ import CIL.SIMD.BMI1
 import CIL.SIMD.BMI2
 import CIL.SIMD.ArmBase
 import CIL.SIMD.AVX512DQ
+import CIL.SIMD.X86Base
 
 namespace CIL
 
@@ -50,6 +51,9 @@ inductive ArmBaseIntrinsic where
 inductive AVX512DQIntrinsic where
   | moveMask64 | mul64
   deriving DecidableEq, Repr
+inductive X86BaseIntrinsic where
+  | divRem64
+  deriving DecidableEq, Repr
 
 /-- ISA families are explicit; the common family contains portable bit-pattern operations. -/
 inductive Intrinsic where
@@ -64,6 +68,7 @@ inductive Intrinsic where
   | bmi2 (op : BMI2Intrinsic)
   | armBase64 (op : ArmBaseIntrinsic)
   | avx512DQ (op : AVX512DQIntrinsic)
+  | x86Base (op : X86BaseIntrinsic)
   deriving DecidableEq, Repr
 
 private def boolValue (p : Bool) : Value := .i32 (if p then 1 else 0)
@@ -177,6 +182,7 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .avx512DQ .mul64, [.v256 a, .v256 b] => some (.v256 (Vector.multiplyLow64 a b))
   | .bmi2 .multiplyHigh64, [.i64 a, .i64 b] => some (.i64 (X86.multiplyNoFlags64 a b))
   | .armBase64 .multiplyHigh64, [.i64 a, .i64 b] => some (.i64 (Arm.multiplyHigh64 a b))
+  | .x86Base .divRem64, xs => (X86.divRemValue xs).toOption
   | .avx .testZ64, [.v256 a, .v256 b] => some (boolValue ((a &&& b) == 0))
   | .bmi1 .bextr32, [.i32 a, start, length] =>
     let s ← immediate start

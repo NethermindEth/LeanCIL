@@ -4,7 +4,7 @@ namespace Tests.LayoutCoverage
 open CIL CIL.Extraction
 
 private def layouts : List RawLayout :=
-  [⟨"Packet", false, 0, 0, [⟨.unsigned64, none⟩]⟩]
+  [⟨"Packet", false, 0, 0, [⟨.unsigned64, none⟩], false⟩]
 private def packet : TypeExpr := .aggregate "Packet" 0
 private def word : TypeExpr := .atom
   "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" "System.UInt64"

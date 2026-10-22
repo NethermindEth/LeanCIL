@@ -128,16 +128,14 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   · exact formed1
   rintro m2 _ - framed2 ⟨_, rfl, rfl⟩
   dsimp only [mixContract]
-  -- Simp would normalize the stored sum in the goal but not in `store`.
-  generalize (x + y) * 3 + y = v
   have writable2 : access m2 r 8 1 true = .ok () :=
     (framed2.access_write r (Nat.lt_of_lt_of_le rOld framed1.grows) 8 1).trans writable1
-  have length : (numberBytes v.toNat 8).length = 8 := by simp [numberBytes]
-  obtain ⟨m3, wrote⟩ := write_succeeds (bytes := numberBytes v.toNat 8)
+  have length : (numberBytes ((x + y) * 3 + y).toNat 8).length = 8 := by simp [numberBytes]
+  obtain ⟨m3, wrote⟩ := write_succeeds (bytes := numberBytes ((x + y) * 3 + y).toNat 8)
     (by simpa only [length] using writable2)
   have readback := write_readback _ _ _ _ _ wrote
   rw [length] at readback
-  have store : storeValue m2 (.address r) (.i64 v) = .ok m3 := by
+  have store : storeValue m2 (.address r) (.i64 ((x + y) * 3 + y)) = .ok m3 := by
     simp only [storeValue, referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
   have fr2 := access_reference_valid _ _ _ _ _ writable2
   cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,

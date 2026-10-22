@@ -50,7 +50,7 @@ internal static class RuntimeModels
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char" or
             "System.UInt32" or "System.Int32" or "System.Byte" or "System.Boolean" or "System.Double" or "System.Single" or
             "System.IntPtr" or "System.UIntPtr" or "System.ReadOnlySpan`1" or "System.RuntimeFieldHandle" or
-            "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1";
+            "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1" or "System.ValueTuple`2";
         var expectedScope = type.FullName == "System.Buffers.Binary.BinaryPrimitives" ? "System.Memory" :
             type.FullName.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal) ? "System.Runtime.Intrinsics" : "System.Runtime";
         bool valid = type.IsValueType == expectedValueType && ExactScope(type.Scope, expectedScope) &&
@@ -84,8 +84,11 @@ internal static class RuntimeModels
             _ => null
         };
         if (op is not null) ValidateSignature(reference);
+        if (op == DivRem) ValueTuples.RequireWordPair(reference.ReturnType, reference.Module);
         return op;
     }
+
+    const string DivRem = ".intrinsic (.x86Base .divRem64) 3";
 
     // Match exact non-generic static signatures, including the defining assembly.
     private static string? Scalar(MethodReference reference)
@@ -276,6 +279,7 @@ internal static class RuntimeModels
             "System.UInt32 System.Runtime.Intrinsics.X86.Bmi1::BitFieldExtract(System.UInt32,System.Byte,System.Byte)" => Finish(".bmi1 .bextr32", 3, Feature.Bmi1),
             "System.UInt64 System.Runtime.Intrinsics.X86.Bmi2/X64::MultiplyNoFlags(System.UInt64,System.UInt64)" => Finish(".bmi2 .multiplyHigh64", 2, Feature.Bmi2),
             "System.UInt64 System.Runtime.Intrinsics.Arm.ArmBase/Arm64::MultiplyHigh(System.UInt64,System.UInt64)" => Finish(".armBase64 .multiplyHigh64", 2, Feature.ArmBase64),
+            "System.ValueTuple`2<System.UInt64,System.UInt64> System.Runtime.Intrinsics.X86.X86Base/X64::DivRem(System.UInt64,System.UInt64,System.UInt64)" => Finish(".x86Base .divRem64", 3, Feature.X86Base64),
             _ => null
         };
     }

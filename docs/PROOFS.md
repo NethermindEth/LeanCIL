@@ -173,9 +173,21 @@ so the stack holds the encoded output.
 `cil_formed_call` (`run_call_of_contract_formed`) also takes the caller memory's
 `WellFormed` and hands the continuation the callee's `final.WellFormed` and
 static-world preservation, so contracts need not restate either; `cil_formed_outcome_call`
-does the same for `cil_outcome_call`. Stated
-store facts must match the computed value syntactically: `generalize` a value
-the simplifier would rewrite, or state the fact in the computed form.
+does the same for `cil_outcome_call`.
+
+Store facts may name their values in source form, such as
+`write m r (numberBytes (a + b + c).toNat 8) 1 = .ok m'`. Each checked step
+simplifies the goal with the default simp set, its interpreter definitions and
+the facts; it also adds every local fact normalised by the default simp set and
+the supplied non-local facts, so both sides meet in the same form. Supply any
+definition the computed value is stated through, such as a carry or borrow
+word, among the facts. The original hypotheses stay in the proof context and in
+the simp set; a fact that still differs stops the steps at its instruction, with
+the hypothesis shown as stated. Hand-written stepping can use the same
+simplification, with an optional simp configuration, as
+`cil_fact_simp (config := ...) [definitions] [facts]`.
+[`Tests/StoreFacts.lean`](../Tests/StoreFacts.lean) checks carry and borrow
+stores and rejects a wrong value, address or memory state.
 
 `Tests/MethodContract.lean` proves a caller from two contracts without unfolding
 either callee. `Tests/MethodContract.cs` verifies that caller proof unedited

@@ -452,4 +452,28 @@ theorem division_managed_reference_rejected :
       (.divide false false) 0 [] ⟨0, [], [], []⟩
       [.scalar (.i32 2), .reference .null] Examples.empty).isOk = false := rfl
 
+
+-- DivRem: (upper:lower) / divisor with Item1 = quotient, Item2 = remainder; upper ≥ divisor faults.
+theorem divRem_boundary :
+    CIL.X86.divRem64 (BitVec.ofNat 64 (2 ^ 64 - 1)) 2 3 = .ok (BitVec.ofNat 64 (2 ^ 64 - 1), 2) := rfl
+theorem divRem_overflow : CIL.X86.divRem64 0 3 3 = .error .overflow := rfl
+theorem divRem_zero : CIL.X86.divRem64 7 0 0 = .error .divideByZero := rfl
+theorem divRem_operands : CIL.X86.divRemValue [.i64 1, .i32 0, .i64 3] = .error .invalidOperands := rfl
+
+def divRemMethod (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := [.intrinsic (.x86Base .divRem64) 3] }
+
+theorem divRem_checked_fault :
+    CIL.Safety.step (divRemMethod { architecture := .x64, x86Base64 := true }) (.intrinsic (.x86Base .divRem64) 3) 0 []
+      ⟨0, [], [], []⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Examples.empty =
+      .error (.arithmetic .overflow) := rfl
+
+theorem divRem_requires_x86Base :
+    CIL.Safety.step (divRemMethod CIL.FeatureProfile.scalar) (.intrinsic (.x86Base .divRem64) 3) 0 []
+      ⟨0, [], [], []⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Examples.empty =
+      .error (.unsupported "Intrinsic unavailable in target profile") := rfl
+
+theorem divRem_pure_fault :
+    CIL.evalIntrinsic (.x86Base .divRem64) [.i64 0, .i64 0, .i64 0] = none := rfl
+
 end Tests

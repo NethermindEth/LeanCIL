@@ -29,7 +29,8 @@ internal static class MetadataValidation
     }
 
     internal static bool IsAggregate(TypeReference type, ModuleDefinition module) =>
-        type is not TypeSpecification && type.Scope == module && type.IsValueType && !EnumTypes.IsEnum(type);
+        (type is not TypeSpecification && type.Scope == module && type.IsValueType && !EnumTypes.IsEnum(type)) ||
+        ValueTuples.Is(type);
 
     internal static int PrimitiveWidth(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -43,13 +44,20 @@ internal static class MetadataValidation
 
     internal sealed record AggregateInfo(int Size, int Alignment, IReadOnlyDictionary<string, int> Offsets);
 
+    // Type is the field's type as seen from the owner, after substituting a tuple's type arguments.
+    internal sealed record InstanceField(string Name, TypeReference Type, FieldDefinition Definition);
+
+    internal static InstanceField[] Fields(TypeReference owner) => ValueTuples.Is(owner) ? ValueTuples.Fields(owner) :
+        [.. (owner.Resolve() ?? throw new InvalidDataException("Unresolved aggregate")).Fields
+            .Where(field => !field.IsStatic).Select(field => new InstanceField(field.Name, field.FieldType, field))];
+
     internal static int Layout(TypeReference reference, ModuleDefinition module) => AggregateLayout(reference, module).Size;
 
     internal static int FieldSize(TypeReference type, ModuleDefinition module) =>
         IsAggregate(type, module) ? Layout(type, module) : PrimitiveWidth(type);
 
-    internal static int FieldOffset(FieldDefinition field, ModuleDefinition module) =>
-        AggregateLayout(field.DeclaringType, module).Offsets[field.FullName];
+    internal static int FieldOffset(TypeReference owner, FieldDefinition field, ModuleDefinition module) =>
+        AggregateLayout(owner, module).Offsets[field.FullName];
 
     // Managed layout for primitive, reference-free fields on the admitted 64-bit
     // CoreCLR targets. This is not interop marshalling layout (notably for bool).
@@ -59,6 +67,7 @@ internal static class MetadataValidation
     static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module,
         HashSet<string> active, Dictionary<string, AggregateInfo> layouts)
     {
+        if (ValueTuples.Is(reference)) return TupleLayout(reference, module);
         var type = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate");
         if (reference.Scope != module || type.Module != module || !reference.IsValueType ||
             !type.IsValueType || !RuntimeModels.HasRuntimeValueTypeBase(type) ||
@@ -107,6 +116,21 @@ internal static class MetadataValidation
         var result = new AggregateInfo(size, alignment, offsets);
         layouts.Add(type.FullName, result);
         return result;
+    }
+
+    // Equal-width primitive fields, where auto layout coincides with sequential placement.
+    static AggregateInfo TupleLayout(TypeReference reference, ModuleDefinition module)
+    {
+        RuntimeModels.ValidateTypeIdentity(reference, module);
+        var fields = ValueTuples.Fields(reference);
+        foreach (var field in fields)
+            if (field.Type is TypeSpecification || EnumTypes.IsEnum(field.Type) || IsAggregate(field.Type, module))
+                throw new InvalidDataException($"Unsupported field type: {field.Type.FullName}");
+        var width = PrimitiveWidth(fields[0].Type);
+        if (fields.Any(field => PrimitiveWidth(field.Type) != width))
+            throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName} (auto layout reorders fields of different widths)");
+        var offsets = fields.Select((field, index) => (field.Definition.FullName, index * width)).ToDictionary();
+        return new AggregateInfo(fields.Length * width, width, offsets);
     }
 
     internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, bool span = false)

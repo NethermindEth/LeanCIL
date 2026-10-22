@@ -19,6 +19,38 @@ elab "cil_strict " tactic:tactic : tactic =>
     evalTactic tactic
     if errors (← Core.getMessageLog) > earlier then throwError "Checked step candidate failed"
 
+/-- `simp config [lemmas, facts]`, adding each local fact normalised by the default simp set and the non-local facts. -/
+syntax "cil_fact_simp" Lean.Parser.Tactic.optConfig " [" term,* "]" " [" term,* "]" : tactic
+
+-- The goal's subterms reach simp-normal form before a hypothesis can rewrite them,
+-- so a fact stated in another form would never fire. Originals stay in the simp set.
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_fact_simp $config:optConfig [$lemmas:term,*] [$facts:term,*]) => withMainContext do
+    let isLocal (fact : Term) : TacticM Bool :=
+      return fact.raw.isIdent && ((← getLCtx).findFromUserName? fact.raw.getId).isSome
+    let locals ← facts.getElems.filterM isLocal
+    let supplied ← facts.getElems.filterM fun fact => return !(← isLocal fact)
+    let mut normalised : Array Term := #[]
+    if !locals.isEmpty then
+      let normaliser ← `(tactic| simp $config:optConfig [$[$supplied:term],*])
+      let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
+      for fact in locals do
+        let some decl := (← getLCtx).findFromUserName? fact.raw.getId | continue
+        let type ← instantiateMVars decl.type
+        unless ← isProp type do continue
+        let (result, _) ← simp type ctx simprocs
+        if result.expr.consumeMData.isConstOf ``True || result.expr == type then continue
+        let proof ← match result.proof? with
+          | some eq => mkEqMP eq decl.toExpr
+          | none => mkExpectedTypeHint decl.toExpr result.expr
+        let name ← mkFreshUserName decl.userName
+        let (_, goal) ← (← (← getMainGoal).assert name result.expr proof).intro1P
+        replaceMainGoal [goal]
+        normalised := normalised.push (mkIdent name)
+    let all := lemmas.getElems ++ facts.getElems ++ normalised
+    withMainContext <| evalTactic (← `(tactic| simp $config:optConfig [$[$all:term],*]))
+
 /-- Close definitional steps before using instruction equations or the dispatcher. -/
 macro "cil_checked_step " "[" facts:term,* "]" : tactic => do
   -- With facts, reflexivity can assign a symbolic branch target before its
@@ -37,9 +69,9 @@ macro "cil_checked_step " "[" facts:term,* "]" : tactic => do
       | rw [CIL.Safety.step_brnonzero_i32_eq]
       | rw [CIL.Safety.step_brnonzero_i64_eq]
       | skip
-      all_goals simp [CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
-        CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
-        $[$facts:term],*] <;> (repeat constructor) <;> rfl)))
+      all_goals cil_fact_simp [CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+        CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step]
+        [$[$facts:term],*] <;> (repeat constructor) <;> rfl)))
 
 /-- Execute checked instructions using extracted lookups and proved semantic facts.
     Unresolved memory and arithmetic conditions remain proof obligations. -/
