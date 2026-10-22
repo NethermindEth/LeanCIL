@@ -79,8 +79,8 @@ theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.F
   change (Except.ok (CIL.Safety.leaveFrame frame memory,
     [.scalar (.i32 (CIL.NarrowKind.extend .unsigned8 (if left ^^^ right = 0 then 1 else 0)))]) :
     Except CIL.Safety.LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) = _
-  simp only [scalarDifference, CIL.NarrowKind.extend]
-  split <;> rfl
+  by_cases same : left ^^^ right = 0 <;>
+    simp [scalarDifference, CIL.NarrowKind.extend, CIL.Safety.leaveFrame, same]
 
 #print axioms checked_narrow_return
 
