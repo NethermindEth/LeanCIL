@@ -161,6 +161,43 @@ its own after `Percent` returns, and `Root` reads all three off `Strict`'s contr
 build, and refutes the callee's contract with concrete runs on builds with an
 off-by-one threshold or a different exception type.
 
+## Compose through imported contracts
+
+A callee from another assembly has no body in the caller's extraction. Give it
+an import slot (`CIL.Safety.Imports`): slot `j` is method index
+`importIndex base j = base.length + j`, past every extracted method, so running
+the caller's program alone faults `invalidState` at the call (`run_call_unlinked`,
+`importIndex_unlinked`). Do not put a stub body there: a stub's contract is false,
+so a theorem assuming it proves nothing.
+
+Prove the caller over every program that links its own, assuming only the
+import's contract:
+
+```lean
+def importsAdd (linked : CIL.Program) : Prop := addContract.Holds linked (importIndex Extracted.program 0)
+
+theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => rootContract.Holds linked root)
+```
+
+`Links base linked` means `linked = base ++ rest`, so every extracted method
+keeps its index (`Links.refl`, `Links.trans`, `Links.found`). `HoldsGiven base
+imports claim` is `∀ linked, Links base linked → imports linked → claim linked`.
+Start the proof with `rintro linked ⟨rest, rfl⟩ addHolds`; the step and call
+tactics find methods in `Extracted.program ++ rest` unchanged. A helper proved
+on the extracted program alone transfers with `MethodContract.Holds.extend` or
+`OutcomeContract.Holds.extend`: `run_extend` shows a run that never faults
+`invalidState` gives the same result in any linked program, and a raised
+exception is not `invalidState`. `HoldsGiven.discharge` instantiates the claim
+for a concrete linked program whose import meets its contract, and
+`HoldsGiven.closed` states a claim that needs no import.
+
+`Tests/Imports.lean` proves `Root` against an imported `AddTo` while reusing the
+closed `Mix` proof, discharges it for one appended implementation, shows the
+unlinked program faults at the import's call so its contract holds only
+vacuously, and composes an imported raising `Percent` through both outcomes of
+`Strict` and `Root`. The relocation and identity checks that bind a slot to a
+certified library implementation are not part of this rule.
+
 ## Reuse framework contracts
 
 When extending generic safety proofs, reuse the facts established by the shared
