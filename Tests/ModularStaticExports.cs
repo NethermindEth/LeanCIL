@@ -114,14 +114,17 @@ import CIL.Safety.WordMemory
 import CIL.Safety.SymbolicExecution
 namespace LibraryProof
 open CIL.Safety
-private def descriptor : CIL.StaticDescriptor := (Extracted.method0.staticSites[0]!).2
+private def descriptor : CIL.StaticDescriptor := (Extracted.method0.staticSites[0]'(by decide)).2
 theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
   rintro input memory ⟨formed, registry, absent⟩
   have world : StaticWorldValid [descriptor] memory :=
     StaticWorldValid.of_absent _ _ (by decide) (by simp) registry (by simpa [descriptor, PublishedTable.identity, Extracted.method0] using absent)
   obtain ⟨result, reference, resolved, _, valid⟩ := staticReference_valid_result descriptor [descriptor] memory formed world (by simp)
+  have contents : descriptor.bytes = numberBytes (17#64).toNat 8 := by decide +kernel
   have loaded : read result reference 8 1 = .ok (numberBytes (17#64).toNat 8) := by
-    simpa [descriptor, Extracted.method0, numberBytes] using valid.2.choose_spec.2.2.2.2
+    have actual := valid.2.choose_spec.2.2.2.2
+    change read result reference 8 1 = .ok descriptor.bytes at actual
+    simpa only [contents] using actual
   have load := load_word64_of_read loaded
   have addressed : staticInstruction Extracted.method0 0 (.staticAddress descriptor.bytes) [] memory =
       .ok (result, [.reference (.address reference)]) := by
