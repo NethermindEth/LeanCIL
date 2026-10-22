@@ -106,3 +106,6 @@ name = "Tests.StaticValueEvidence"
 
 [[lean_lib]]
 name = "Tests.InterpreterEquations"
+
+[[lean_lib]]
+name = "Tests.ImportEvidence"

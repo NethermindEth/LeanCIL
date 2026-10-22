@@ -828,8 +828,9 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
           | _ => throwError "Expected extraction certificate theorem"
         theorem ExtractionAudit.valid :
             CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-              Extracted.methodEvidence Extracted.program := Extracted.translation_valid
+              Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
         #print axioms ExtractionAudit.valid
+        #print Extracted.imports
         """;
 
     // Follows the axiom report, so the displayed statement stays the first audit line. Prints the name's

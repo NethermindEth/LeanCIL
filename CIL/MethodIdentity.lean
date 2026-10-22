@@ -7,7 +7,8 @@ import CIL.DebugNames
 Signature-based method identity. Extraction numbers methods by their position in the
 reachable call graph, so a helper inserted anywhere renumbers unrelated methods.
 `method_named`, `bind_method` and `bind_callee` locate a method by its exact emitted
-signature in `Extracted.signatures` instead. Each emits `rfl` theorems that the kernel
+signature in `Extracted.signatures` instead, and `bind_import` locates an import slot by
+its signature in `Extracted.importSignatures`. Each emits `rfl` theorems that the kernel
 checks, so a name only locates a method; the body is still bound by `cil_body` or
 `cil_embed` and the extraction certificate.
 -/
@@ -30,18 +31,20 @@ partial def strings (list : Expr) (found : Array String := #[]) : MetaM (Array S
 def methodName (signature : String) : String :=
   (((signature.splitOn "::").getLastD signature).splitOn "(").headD ""
 
-/-- The index of the method whose signature in `table` is exactly `signature`. -/
-def resolveIn (tableName : Name) (signature : String) : MetaM Nat := do
+/-- The index of the entry whose signature in `table` is exactly `signature`; `noun` names entries in diagnostics. -/
+def resolveIn (tableName : Name) (signature : String) (noun : String := "extracted method")
+    (short : String := "method") : MetaM Nat := do
   let table ← strings (mkConst (← visible tableName))
   let indices := List.range table.size
   let listing (shown : List Nat) := "\n".intercalate (shown.map fun i => s!"  [{i}] {table[i]!}")
   match indices.filter (table[·]! == signature) with
   | [index] => return index
   | [] =>
+    if table.isEmpty then throwError "no {noun} has signature\n  {signature}\nthe extraction has no {noun}s"
     let named := indices.filter (methodName table[·]! == methodName signature)
-    let (label, shown) := if named.isEmpty then ("extracted methods", indices) else (s!"methods named {methodName signature}", named)
-    throwError "no extracted method has signature\n  {signature}\n{label}:\n{listing (shown.take 12)}"
-  | many => throwError "{many.length} extracted methods have signature\n  {signature}\n{listing many}"
+    let (label, shown) := if named.isEmpty then (s!"{noun}s", indices) else (s!"{short}s named {methodName signature}", named)
+    throwError "no {noun} has signature\n  {signature}\n{label}:\n{listing (shown.take 12)}"
+  | many => throwError "{many.length} {noun}s have signature\n  {signature}\n{listing many}"
 
 def resolve : String → MetaM Nat := resolveIn `Extracted.signatures
 
@@ -157,5 +160,28 @@ elab_rules : command
     emit index body (Syntax.mkStrLit signature) method
     elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc.getNat)) := rfl))
+
+/-- The number of cells in a closed list, reduced one cell at a time without normalizing its elements. -/
+partial def cells (list : Expr) (count : Nat := 0) : MetaM Nat := do
+  match (← whnf list).getAppFnArgs with
+  | (``List.cons, #[_, _, tail]) => cells tail (count + 1)
+  | (``List.nil, _) => return count
+  | _ => throwError "program is not a list literal"
+
+/-- `bind_import index := "signature"` defines `index` as import slot `j`, `Extracted.program.length + j`, by its exact signature. -/
+syntax (name := bindImport) "bind_import " ident " := " str : command
+
+elab_rules : command
+  | `(bind_import $index := $signature) => do
+    let (slot, length) ← liftTermElabM do
+      let slot ← resolveIn `Extracted.importSignatures signature.getString "imported method" "import"
+      return (slot, ← cells (mkConst (← visible `Extracted.program)))
+    let program := mkIdent `Extracted.program
+    elabCommand (← `(@[cil_code] def $index : Nat := $(quote (length + slot))))
+    elabCommand (← `(theorem $(mkIdent (index.getId ++ `slot)) :
+      $index = ($program).length + $(quote slot) := rfl))
+    elabCommand (← `(theorem $(mkIdent (index.getId ++ `signature)) :
+      $(mkIdent `Extracted.importSignatures)[$(quote slot)]? = some $signature := rfl))
+    elabCommand (← `(theorem $(mkIdent (index.getId ++ `unlinked)) : ($program)[$index]? = none := rfl))
 
 end CIL.MethodIdentity

@@ -1,4 +1,5 @@
 import CIL.Extraction.Parameters
+import CIL.Imports
 
 namespace CIL.Extraction
 
@@ -201,9 +202,19 @@ private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
     if opcode = 115 then some (target, count) else none
   | _ => none
 
+/-- An external site may call import slot `target - methods.length` only with its exact identity and arity. -/
+def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot) (opcode : Nat)
+    (site : CallSite) (identity : String) (target count : Nat) : Bool :=
+  opcode == 40 && methods.length ≤ target && site.typeArguments.isEmpty && match imports[target - methods.length]? with
+  | none => false
+  | some slot =>
+    slot.identity == identity && slot.parameterCount == site.parameterCount &&
+    slot.hasThis == site.hasThis && slot.returnsValue == site.returnsValue &&
+    count == site.parameterCount + (if site.hasThis then 1 else 0)
+
 /-- Every live managed call must select the independently instantiated definition
-with the exact substituted type arguments and signature. -/
-def validateManagedCall (methods : List SpecializedMethod) (raw : RawInstruction)
+with the exact substituted type arguments and signature; an external one, a matching import slot. -/
+def validateManagedCall (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawInstruction)
     (live : Bool) (emitted : Op) : Bool :=
   if !live then true else
   match raw.operand with
@@ -218,34 +229,76 @@ def validateManagedCall (methods : List SpecializedMethod) (raw : RawInstruction
           callee.closed.hasThis == site.hasThis &&
           (callee.closed.returnType != .void) == site.returnsValue &&
           count == site.parameterCount + (if raw.opcode == 40 && site.hasThis then 1 else 0)
-    | .external _ => match emitted with
-      | .call .. | .newAggregate .. | .newVector256 .. => false
+    | .external identity => match emitted with
+      | .call target count => validateImportCall methods imports raw.opcode site identity target count
+      | .newAggregate .. | .newVector256 .. => false
       | _ => true
   | _ => match emitted with
     | .call .. | .newAggregate .. | .newVector256 .. => false
     | _ => true
 
-def ManagedCallsValid (methods : List SpecializedMethod) (raw : RawMethod)
+def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) : Prop :=
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-  all3 (validateManagedCall methods) raw.code reachable emitted.code = true
+  all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true
 
-instance (methods : List SpecializedMethod) (raw : RawMethod) (reachable : List Bool)
-    (emitted : Method) : Decidable (ManagedCallsValid methods raw reachable emitted) :=
+instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool)
+    (emitted : Method) : Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
-theorem validated_managed_call {methods : List SpecializedMethod} {raw : RawMethod}
+theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot} {raw : RawMethod}
     {reachable : List Bool} {emitted : Method}
-    (valid : ManagedCallsValid methods raw reachable emitted) (pc : Fin raw.code.length) :
-    validateManagedCall methods raw.code[pc] reachable[pc.val]! (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
+    (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
+    validateManagedCall methods imports raw.code[pc] reachable[pc.val]! (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
   have live : pc.val < reachable.length := valid.1 ▸ pc.isLt
   have present : pc.val < emitted.code.length := valid.2.1 ▸ pc.isLt
   rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
   exact all3_at valid.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
     (List.getElem?_eq_getElem present)
 
+/-- An accepted live `call` past every extracted method is an external site calling a slot with its identity and arity. -/
+theorem validated_import_call {methods : List SpecializedMethod} {imports : List ImportSlot}
+    {raw : RawInstruction} {target count : Nat}
+    (valid : validateManagedCall methods imports raw true (.call target count) = true)
+    (outside : methods.length ≤ target) :
+    ∃ site identity slot, raw.operand = .call site ∧ site.target = .external identity ∧ raw.opcode = 40 ∧
+      site.typeArguments = [] ∧ imports[target - methods.length]? = some slot ∧ slot.identity = identity ∧
+      slot.parameterCount = site.parameterCount ∧ slot.hasThis = site.hasThis ∧
+      slot.returnsValue = site.returnsValue ∧ count = site.parameterCount + (if site.hasThis then 1 else 0) := by
+  obtain ⟨offset, opcode, operand⟩ := raw
+  cases operand with
+  | call site =>
+    obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue⟩ := site
+    cases method with
+    | managed token =>
+      have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside
+      simp only [validateManagedCall, managedCallTarget, Bool.not_true, Bool.false_eq_true, ite_false] at valid
+      by_cases call : opcode = 40 <;> simp [call, missing] at valid
+    | external identity =>
+      simp only [validateManagedCall, validateImportCall, Bool.not_true, Bool.false_eq_true, ite_false] at valid
+      cases found : imports[target - methods.length]? with
+      | none => simp [found] at valid
+      | some slot =>
+        simp [found] at valid
+        obtain ⟨⟨⟨opcode40, _⟩, generic⟩, ⟨⟨⟨same, arity⟩, receiver⟩, result⟩, argc⟩ := valid
+        exact ⟨_, identity, slot, rfl, rfl, opcode40, generic, rfl, same, arity, receiver, result, argc⟩
+  | _ => simp [validateManagedCall] at valid
+
+/-- Every accepted live `call` targets an extracted method or an existing import slot. -/
+theorem validated_call_bound {methods : List SpecializedMethod} {imports : List ImportSlot}
+    {raw : RawInstruction} {target count : Nat}
+    (valid : validateManagedCall methods imports raw true (.call target count) = true) :
+    target < methods.length + imports.length := by
+  by_cases inside : target < methods.length
+  · exact Nat.lt_add_right _ inside
+  · obtain ⟨_, _, _, _, _, _, _, found, _⟩ := validated_import_call valid (Nat.le_of_not_lt inside)
+    have := (List.getElem?_eq_some_iff.mp found).1
+    omega
+
 #print axioms validated_specialization
 #print axioms validated_closed_arguments
 #print axioms validated_managed_call
+#print axioms validated_import_call
+#print axioms validated_call_bound
 
 end CIL.Extraction
