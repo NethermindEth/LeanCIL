@@ -948,6 +948,28 @@ unsafe def main (args : List String) : IO Unit := do
         return ordered.ToArray();
     }
 
+    static SortedDictionary<string, string> ContractInterfaceArtifacts(string directory, string[] modules)
+    {
+        if (modules.Length == 0) return new(StringComparer.Ordinal);
+        HashSet<string> names = new(modules, StringComparer.Ordinal);
+        SortedDictionary<string, string> artifacts = new(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
+            .Select(path => (Relative: Path.GetRelativePath(directory, path).Replace('\\', '/'), Path: path))
+            .Where(artifact => names.Contains(ModuleName(artifact.Relative)))
+            .ToDictionary(artifact => artifact.Relative, artifact => Sha(artifact.Path)), StringComparer.Ordinal);
+        foreach (string module in modules)
+            if (!artifacts.ContainsKey(module.Replace('.', '/') + ".olean"))
+                throw new InvalidDataException("Published contract interface artifact is missing: " + module);
+        return artifacts;
+    }
+
+    static void RequireContractInterfaceArtifacts(string directory, string[] modules,
+        SortedDictionary<string, string> accepted)
+    {
+        if (!Same(accepted, ContractInterfaceArtifacts(directory, modules)))
+            throw new InvalidDataException("Published contract interface artifacts changed after their closure audit.");
+    }
+
     bool TrustedContractModule(string module) =>
         ((module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal)) && File.Exists(At(module.Replace('.', '/') + ".lean"))) ||
         File.Exists(Path.Combine(Toolchain, "lib/lean", module.Replace('.', '/') + ".olean"));
@@ -1238,16 +1260,20 @@ unsafe def main (args : List String) : IO Unit := do
                     leanPath: leanPath, progress: "Checking App import assumptions");
             }
             CheckContractInterfaces(output, fresh, importModules, leanPath);
-            if (importModules.Contains("ExtractedImports", StringComparer.Ordinal))
-                Run([checker, "ExtractedImports"], leanPath: leanPath, progress: "Kernel replay of App import assumptions");
+            if (importModules.Length > 0)
+                Run([checker, .. importModules], leanPath: leanPath, progress: "Kernel replay of published contract interfaces and App import assumptions");
+            SortedDictionary<string, string> acceptedInterfaceArtifacts = ContractInterfaceArtifacts(fresh, importModules);
             if (symbols)
                 Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), Path.Combine(fresh, "ExtractedSymbols.lean")],
                     leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);
+            RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             var proofKey = ContentKey("theorem-audit-v1\n" + extractedKey + "\n" + Sha(Path.Combine(fresh, "Proof.lean")) + "\n" +
                 (symbols ? Sha(Path.Combine(fresh, "ExtractedSymbols.lean")) + "\n" : "") +
-                SemanticExtractionIdentity(output) + "\n" + JsonSerializer.Serialize(ImportSources(output)) + "\n" + theorem);
+                SemanticExtractionIdentity(output) + "\n" + JsonSerializer.Serialize(ImportSources(output)) + "\n" +
+                JsonSerializer.Serialize(acceptedInterfaceArtifacts) + "\n" + theorem);
             if (RestoreSuccess(proofKey, fresh))
             {
+                RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
                 if (extractionPublication is not null)
                 {
                     stage?.Invoke("kernel replay");
@@ -1263,9 +1289,11 @@ unsafe def main (args : List String) : IO Unit := do
                 stage?.Invoke("proof checking");
                 Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "Proof.olean"), Path.Combine(fresh, "Proof.lean")],
                     leanPath: leanPath, progress: "Checking Proof: " + entry);
+                RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
                 stage?.Invoke("kernel replay");
                 Run([checker, .. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"], .. symbols ? ["ExtractedSymbols"] : Array.Empty<string>(), "Proof"],
                     leanPath: leanPath, progress: "Kernel replay: " + entry);
+                RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
                 stage?.Invoke("theorem audit");
                 audit = Run(["lean", "--root=" + fresh, Path.Combine(fresh, "Audit.lean")], leanPath: leanPath);
                 axioms = AuditedAxioms(audit, theorem);
@@ -1274,8 +1302,10 @@ unsafe def main (args : List String) : IO Unit := do
                 foreach (var path in Directory.EnumerateFiles(fresh).Where(path => Path.GetFileName(path).StartsWith("Proof.olean", StringComparison.Ordinal)))
                     File.Copy(path, Path.Combine(publication, Path.GetFileName(path)));
                 File.WriteAllText(Path.Combine(publication, "theorem-audit.txt"), audit);
+                RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
                 PublishSuccess(proofKey, publication);
             }
+            RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             if (extractionPublication is not null) PublishSuccess(extractedKey, extractionPublication);
             fullResult = fullImportAudit?.Invoke(output, fresh, "Proof", leanPath);
             // Bind the report only after confirming inputs stayed unchanged.
@@ -1294,6 +1324,7 @@ unsafe def main (args : List String) : IO Unit := do
             var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: fullResult?.Imports ?? PublishedImports(extraction),
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
+            RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
             return report;

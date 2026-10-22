@@ -178,6 +178,17 @@ if (!File.ReadAllText(Path.Combine(callerArtifact, "verified.json")).Contains(Sh
 Console.WriteLine("PASS a new library body retains interface/closure identities, unchanged caller proof, cache reuse and new deployment hash");
 
 string prior = Sha(sidecar);
+string publishedOnly = Path.Combine(root, "PublishedOnly.lean");
+string originalContractSource = File.ReadAllText(contractSource);
+File.WriteAllText(publishedOnly, originalContractSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
+if (File.ReadAllText(publishedOnly) == originalContractSource)
+    throw new InvalidOperationException("Precondition: the independent published contract must differ from the producer contract.");
+JsonObject differentPublication = ProducerManifest();
+differentPublication["interface"]![0]!["source"] = publishedOnly;
+RejectExport(differentPublication, "Export contract differs from its published interface closure", prior);
+if (File.ReadAllText(contractSource) != originalContractSource)
+    throw new InvalidOperationException("The independent closure mismatch fixture changed the producer proof interface.");
+Console.WriteLine("PASS different valid published and proof contract closures cannot replace a published sidecar");
 File.WriteAllText(contractSource, File.ReadAllText(contractSource).Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
 RejectExport(ProducerManifest(), "unsolved goals", prior);
 Console.WriteLine("PASS a failing library contract cannot replace a published sidecar");

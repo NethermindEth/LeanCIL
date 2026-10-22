@@ -88,6 +88,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
+    string expectedDiagnostic;
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
         var method = module.GetType("Examples.UnsafeLayouts").Methods.Single(m => m.Name == "Add14int");
@@ -105,11 +106,23 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
             case "scope": call.DeclaringType.Scope = module; break;
             case "version": ((AssemblyNameReference)call.DeclaringType.Scope).Version = new Version(9, 0, 0, 0); break;
         }
+        expectedDiagnostic = mutation switch
+        {
+            "class" => "Unsupported type: System.String",
+            "float" => "Unsupported type: System.Single",
+            "void" => "Unsupported type: System.Void",
+            "byref" => "Unsupported Unsafe element type: System.Int32&",
+            "pointer" => "Unsupported Unsafe element type: System.Int32*",
+            "arity" or "offset" or "return" => "Generic contract imports are not supported in version 1.",
+            "scope" => "Unsupported generic call: " + call.FullName,
+            "version" => "Unsupported aggregate layout: Examples.PackedLeaf",
+            _ => throw new InvalidOperationException("Unknown Unsafe rejection fixture: " + mutation)
+        };
         module.Write(dll);
     }
     var result = Execute(Extract("extract", dll, "Examples", "UnsafeLayouts::Add14int(Examples.PackedLeaf&,int)", output));
-    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
-        !(result.Output.Contains("Unsupported") || result.Output.Contains("Unmodelled") || result.Output.Contains("Unresolved")))
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")) ||
+        !result.Output.Contains(expectedDiagnostic, StringComparison.Ordinal))
         throw new InvalidOperationException("Incorrect Unsafe rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
@@ -120,3 +133,5 @@ Run(["dotnet", "run", "--file", "Tests/NullReferences.cs"], streamOutput: true, 
 Run(["dotnet", "run", "--file", "Tests/UnsafeReferences.cs"], streamOutput: true, progress: "Unsafe byref reinterpretation checks");
 Run(["dotnet", "run", "--file", "Tests/ValueBitCasts.cs"], streamOutput: true, progress: "Value BitCast checks");
 Run(["dotnet", "run", "--file", "Tests/StaticSpans.cs"], streamOutput: true, progress: "Static byte span checks");
+
+Run(["dotnet", "run", "--file", "Tests/VectorFields.cs"], streamOutput: true, progress: "Vector field checks");

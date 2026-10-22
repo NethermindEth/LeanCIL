@@ -1118,6 +1118,10 @@ unsafe def main (args : List String) : IO Unit := do
                     progress: "Compiling published contract interfaces");
                 string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
                 CheckContractInterfaces(outputs[members[0]], frameworkCopy, [.. interfaceModules, "ExtractedImports"], interfaceLeanPath);
+                Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
+                if (interfaceFailures.Count > 0)
+                    throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
+                        string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
             }
             Dictionary<string, string> acceptedInterfaceArtifacts = ModuleArtifacts(frameworkCopy)
                 .Where(pair => interfaceModules.Contains(ModuleName(pair.Key), StringComparer.Ordinal)).ToDictionary();
@@ -1286,9 +1290,9 @@ unsafe def main (args : List String) : IO Unit := do
             // Cached support was checked against another Extracted or PDB, so its importers are always replayed.
             var extractionDependent = graph is null ? new HashSet<string>(StringComparer.Ordinal)
                 : DependentModules(graph, ["Extracted", "ExtractedSymbols"]);
-            var failures = ReplayConsumerModules(session, discovered.Where(module => !interfaceModules.Contains(module.Name, StringComparer.Ordinal) &&
-                (!baseUnchanged || extractionDependent.Contains(module.Name) ||
-                (!module.Certified && !portableSupport.Contains(module.Name)))).Select(module => module.Name), leanPath);
+            var failures = ReplayConsumerModules(session, discovered.Where(module =>
+                !baseUnchanged || extractionDependent.Contains(module.Name) ||
+                (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name), leanPath);
             foreach (var i in proceeding)
             {
                 // A request depends only on its own proof's import closure and the extraction certificate.

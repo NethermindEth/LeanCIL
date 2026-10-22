@@ -42,6 +42,13 @@ internal static class MetadataValidation
         _ => throw new InvalidDataException($"Unsupported field type: {type.FullName}")
     };
 
+    internal static int? VectorWidth(TypeReference type) => type is GenericInstanceType ? type.FullName switch
+    {
+        "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
+        "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
+        _ => null
+    } : null;
+
     internal sealed record AggregateInfo(int Size, int Alignment, IReadOnlyDictionary<string, int> Offsets);
 
     // Type is the field's type as seen from the owner, after substituting a tuple's type arguments.
@@ -51,23 +58,24 @@ internal static class MetadataValidation
         [.. (owner.Resolve() ?? throw new InvalidDataException("Unresolved aggregate")).Fields
             .Where(field => !field.IsStatic).Select(field => new InstanceField(field.Name, field.FieldType, field))];
 
-    internal static int Layout(TypeReference reference, ModuleDefinition module) => AggregateLayout(reference, module).Size;
+    internal static int Layout(TypeReference reference, ModuleDefinition module, string architecture = "scalar") =>
+        AggregateLayout(reference, module, architecture).Size;
 
-    internal static int FieldSize(TypeReference type, ModuleDefinition module) =>
-        IsAggregate(type, module) ? Layout(type, module) : PrimitiveWidth(type);
+    internal static int FieldSize(TypeReference type, ModuleDefinition module, string architecture = "scalar") =>
+        IsAggregate(type, module) ? Layout(type, module, architecture) : VectorWidth(type) ?? PrimitiveWidth(type);
 
-    internal static int FieldOffset(TypeReference owner, FieldDefinition field, ModuleDefinition module) =>
-        AggregateLayout(owner, module).Offsets[field.FullName];
+    internal static int FieldOffset(TypeReference owner, FieldDefinition field, ModuleDefinition module, string architecture = "scalar") =>
+        AggregateLayout(owner, module, architecture).Offsets[field.FullName];
 
     // Managed layout for primitive, reference-free fields on the admitted 64-bit
     // CoreCLR targets. This is not interop marshalling layout (notably for bool).
-    internal static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module)
-        => AggregateLayout(reference, module, [], new Dictionary<string, AggregateInfo>());
+    internal static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture = "scalar")
+        => AggregateLayout(reference, module, architecture, [], new Dictionary<string, AggregateInfo>());
 
-    static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module,
+    static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture,
         HashSet<string> active, Dictionary<string, AggregateInfo> layouts)
     {
-        if (ValueTuples.Is(reference)) return TupleLayout(reference, module);
+        if (ValueTuples.Is(reference)) return TupleLayout(reference, module, architecture);
         var type = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate");
         if (reference.Scope != module || type.Module != module || !reference.IsValueType ||
             !type.IsValueType || !RuntimeModels.HasRuntimeValueTypeBase(type) ||
@@ -84,19 +92,23 @@ internal static class MetadataValidation
         var packing = type.PackingSize;
         if (packing is not (-1 or 0 or 1 or 2 or 4 or 8 or 16 or 32 or 64 or 128))
             throw new InvalidDataException($"Invalid aggregate packing: {reference.FullName}");
-        var pack = packing <= 0 ? 8 : packing;
+        int pack = packing <= 0 ? 64 : packing;
         var offsets = new Dictionary<string, int>();
         var end = 0;
         var alignment = 1;
         foreach (var field in type.Fields.Where(f => !f.IsStatic))
         {
-            if (field.FieldType is TypeSpecification)
+            int? vectorWidth = VectorWidth(field.FieldType);
+            if (field.FieldType is TypeSpecification && vectorWidth is null)
                 throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
             var nested = IsAggregate(field.FieldType, module)
-                ? AggregateLayout(field.FieldType, module, active, layouts) : null;
-            var width = nested?.Size ?? PrimitiveWidth(field.FieldType);
-            if (nested is null) RuntimeModels.ValidateTypeIdentity(field.FieldType, module);
-            var fieldAlignment = Math.Min(pack, nested?.Alignment ?? width);
+                ? AggregateLayout(field.FieldType, module, architecture, active, layouts) : null;
+            int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(field.FieldType);
+            if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
+                throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
+            if (nested is null) RuntimeModels.ValidateTypeIdentity(field.FieldType, module, architecture);
+            int naturalAlignment = vectorWidth == 32 && architecture == "arm64" ? 16 : width;
+            int fieldAlignment = Math.Min(pack, nested?.Alignment ?? naturalAlignment);
             alignment = Math.Max(alignment, fieldAlignment);
             var offset = type.IsExplicitLayout ? field.Offset : (end + fieldAlignment - 1) / fieldAlignment * fieldAlignment;
             if (offset < 0 || offset > 65536 - width ||
@@ -119,9 +131,9 @@ internal static class MetadataValidation
     }
 
     // Equal-width primitive fields, where auto layout coincides with sequential placement.
-    static AggregateInfo TupleLayout(TypeReference reference, ModuleDefinition module)
+    static AggregateInfo TupleLayout(TypeReference reference, ModuleDefinition module, string architecture)
     {
-        RuntimeModels.ValidateTypeIdentity(reference, module);
+        RuntimeModels.ValidateTypeIdentity(reference, module, architecture);
         var fields = ValueTuples.Fields(reference);
         foreach (var field in fields)
             if (field.Type is TypeSpecification || EnumTypes.IsEnum(field.Type) || IsAggregate(field.Type, module))
@@ -133,17 +145,17 @@ internal static class MetadataValidation
         return new AggregateInfo(fields.Length * width, width, offsets);
     }
 
-    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, bool span = false)
+    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, bool span = false, string architecture = "scalar")
     {
         if (type is ByReferenceType byRef)
         {
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
-            Type(byRef.ElementType, module);
+            Type(byRef.ElementType, module, architecture: architecture);
             return;
         }
         type = EnumTypes.Storage(type);
-        if (IsAggregate(type, module)) { Layout(type, module); return; }
+        if (IsAggregate(type, module)) { Layout(type, module, architecture); return; }
         if (!(returns && type.FullName == "System.Void") && type.FullName is not
             ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char") &&
@@ -151,7 +163,7 @@ internal static class MetadataValidation
             // Spans are admitted only as by-value returns and folded receivers; elsewhere their reference field would sit in unmodelled storage.
             !((returns || span) && Spans.Width(type) is not null))
             throw new InvalidDataException($"Unsupported type: {type.FullName}");
-        RuntimeModels.ValidateTypeIdentity(type, module);
+        RuntimeModels.ValidateTypeIdentity(type, module, architecture);
     }
 
     internal sealed record Blocked(MethodDefinition Method, Instruction? At, Exception Error, MethodDefinition[] Chain);
@@ -175,7 +187,7 @@ internal static class MetadataValidation
             (module.Attributes & ModuleAttributes.Required32Bit) != 0)
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
         MethodDefinition entry = MethodSelector.Resolve(module, entrySignature);
-        var specializations = new MethodSpecialization(module);
+        MethodSpecialization specializations = new(module, profile.Architecture);
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
         List<MethodDefinition> ordered = [];
@@ -230,17 +242,17 @@ internal static class MetadataValidation
             })) return;
             Check(method, null, () =>
             {
-                if (method.HasThis) Layout(method.DeclaringType, module);
+                if (method.HasThis) Layout(method.DeclaringType, module, profile.Architecture);
                 if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
-                Type(method.ReturnType, module, returns: true);
+                Type(method.ReturnType, module, returns: true, architecture: profile.Architecture);
             }, named: true);
             foreach (ParameterDefinition parameter in method.Parameters)
-                Check(method, null, () => Type(parameter.ParameterType, module), named: true);
+                Check(method, null, () => Type(parameter.ParameterType, module, architecture: profile.Architecture), named: true);
             Spans.Analysis? spans = null;
             if (Check(method, null, () => spans = Spans.Analyze(method), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
-                    Check(method, null, () => Type(local.VariableType, module, span: spans!.Locals.Contains(local.Index)), named: true);
+                    Check(method, null, () => Type(local.VariableType, module, span: spans!.Locals.Contains(local.Index), architecture: profile.Architecture), named: true);
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;
@@ -308,10 +320,10 @@ internal static class MetadataValidation
                 StaticValues.Value value;
                 try
                 {
-                    var field = StaticValues.Field(loaded, module);
+                    FieldDefinition field = StaticValues.Field(loaded, module, profile.Architecture);
                     if (!initializedTypes.Contains(field.DeclaringType.FullName, StringComparer.Ordinal))
                         throw new InvalidDataException($"Unsupported static field load: {loaded.FullName}\n  Loading it requires --assume-initialized {field.DeclaringType.FullName}.");
-                    value = StaticValues.Resolve(loaded, module);
+                    value = StaticValues.Resolve(loaded, module, profile.Architecture);
                 }
                 catch (InvalidDataException error) when (Rejections.Of(error) is null)
                 {

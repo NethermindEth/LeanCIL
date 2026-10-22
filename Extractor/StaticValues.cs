@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Mono.Cecil;
@@ -16,7 +17,7 @@ internal static class StaticValues
     sealed record Snapshot(byte[] Data) : Slot;
     sealed record Self(byte[] Data) : Slot;
 
-    static readonly ConditionalWeakTable<FieldDefinition, Value> cache = new();
+    static readonly ConditionalWeakTable<FieldDefinition, ConcurrentDictionary<string, Value>> cache = new();
 
     static InvalidDataException Unsupported(FieldReference field, string reason) =>
         new($"Unsupported static initializer: {field.FullName}\n  {reason}");
@@ -30,7 +31,7 @@ internal static class StaticValues
     static bool Conversion(Instruction i) => i.OpCode.Code is Code.Conv_I8 or Code.Conv_U8 or Code.Conv_I4 or Code.Conv_U4 or Code.Conv_I or Code.Conv_U;
 
     // The loaded field itself; its declaring type's initialization is checked by the caller.
-    internal static FieldDefinition Field(FieldReference reference, ModuleDefinition module)
+    internal static FieldDefinition Field(FieldReference reference, ModuleDefinition module, string architecture = "scalar")
     {
         FieldDefinition? field = reference.Resolve();
         if (field is null || reference.DeclaringType.Scope != module || reference.DeclaringType is TypeSpecification ||
@@ -38,14 +39,19 @@ internal static class StaticValues
             (field.Attributes & FieldAttributes.HasFieldRVA) != 0 || !MetadataValidation.IsAggregate(field.FieldType, module) ||
             field.DeclaringType.HasGenericParameters)
             throw new InvalidDataException($"Unsupported static field load: {reference.FullName}\n  Only static readonly fields of a reference-free struct declared in this assembly are loaded.");
-        MetadataValidation.Layout(field.FieldType, module);
+        MetadataValidation.Layout(field.FieldType, module, architecture);
         return field;
     }
 
-    internal static Value Resolve(FieldReference reference, ModuleDefinition module) =>
-        cache.GetValue(Field(reference, module), field => Compute(field, module));
+    internal static Value Resolve(FieldReference reference, ModuleDefinition module, string architecture = "scalar")
+    {
+        FieldDefinition field = Field(reference, module, architecture);
+        ConcurrentDictionary<string, Value> values = cache.GetValue(field, _ => new());
+        return values.GetOrAdd(architecture, static (selected, context) => Compute(context.Field, context.Module, selected),
+            (Field: field, Module: module));
+    }
 
-    static Value Compute(FieldDefinition field, ModuleDefinition module)
+    static Value Compute(FieldDefinition field, ModuleDefinition module, string architecture)
     {
         var constructor = field.DeclaringType.Methods.SingleOrDefault(m => m.IsConstructor && m.IsStatic && m.HasBody) ??
             throw Unsupported(field, "No static constructor stores its value.");
@@ -74,7 +80,7 @@ internal static class StaticValues
             if (source.DeclaringType != field.DeclaringType || source.FieldType.FullName != field.FieldType.FullName ||
                 !code.Take(store - 1).Any(i => Stored(i, Code.Stsfld) == source))
                 throw Unsupported(field, $"It copies {source.FullName}, which is not stored earlier in the same static constructor.");
-            return Resolve(source, module) with { Field = field };
+            return Resolve(source, module, architecture) with { Field = field };
         }
         if (store == 0 || code[store - 1] is not { OpCode.Code: Code.Call, Operand: MethodDefinition initializer } ||
             initializer.Module != module || !initializer.IsStatic || initializer.HasGenericParameters ||
@@ -97,8 +103,8 @@ internal static class StaticValues
         foreach (var method in Closure(initializer, module))
             if (method.Body.Instructions.Any(i => i.OpCode.Code is Code.Ldsfld or Code.Ldsflda or Code.Stsfld))
                 throw Unsupported(field, $"Its initializer accesses static fields, in {method.FullName}.");
-        if (Run(initializer, arguments, field, module, 0) is not Snapshot { Data: var bytes } ||
-            bytes.Length != MetadataValidation.Layout(field.FieldType, module))
+        if (Run(initializer, arguments, field, module, 0, architecture) is not Snapshot { Data: byte[] bytes } ||
+            bytes.Length != MetadataValidation.Layout(field.FieldType, module, architecture))
             throw Unsupported(field, $"{initializer.FullName} does not return a complete value.");
         return new Value(field, initializer, arguments.Select(a => a is Word { Width: 8, Bits: var b }
             ? $".i64 {b.ToString(CultureInfo.InvariantCulture)}" : $".i32 {((Word)a).Bits.ToString(CultureInfo.InvariantCulture)}").ToArray(), bytes);
@@ -120,7 +126,7 @@ internal static class StaticValues
     }
 
     // Computes the bytes to emit; an evaluator mistake only makes the Lean certificate fail.
-    static Slot? Run(MethodDefinition method, Slot[] arguments, FieldDefinition field, ModuleDefinition module, int depth)
+    static Slot? Run(MethodDefinition method, Slot[] arguments, FieldDefinition field, ModuleDefinition module, int depth, string architecture)
     {
         if (depth > 32 || !method.HasBody || method.Body.ExceptionHandlers.Count != 0)
             throw Unsupported(field, $"Its initializer cannot be evaluated: {method.FullName}");
@@ -134,21 +140,21 @@ internal static class StaticValues
                 case Code.Newobj when i.Operand is MethodReference reference && reference.Resolve() is { IsConstructor: true, HasThis: true } constructor &&
                     constructor.Module == module && MetadataValidation.IsAggregate(constructor.DeclaringType, module):
                 {
-                    var data = new byte[MetadataValidation.Layout(constructor.DeclaringType, module)];
-                    Run(constructor, [new Self(data), .. Pop(stack, constructor.Parameters.Count)], field, module, depth + 1);
+                    byte[] data = new byte[MetadataValidation.Layout(constructor.DeclaringType, module, architecture)];
+                    Run(constructor, [new Self(data), .. Pop(stack, constructor.Parameters.Count)], field, module, depth + 1, architecture);
                     stack.Push(new Snapshot(data));
                     break;
                 }
                 case Code.Call when i.Operand is MethodReference reference && reference is not GenericInstanceMethod &&
                     reference.Resolve() is { IsStatic: true } callee && callee.Module == module:
-                    if (Run(callee, Pop(stack, callee.Parameters.Count), field, module, depth + 1) is { } result) stack.Push(result);
+                    if (Run(callee, Pop(stack, callee.Parameters.Count), field, module, depth + 1, architecture) is { } result) stack.Push(result);
                     break;
                 case Code.Stfld when i.Operand is FieldReference target && target.Resolve() is { IsStatic: false } resolved:
                 {
                     var value = stack.Pop();
                     if (stack.Pop() is not Self self) throw Unsupported(field, $"Its initializer stores outside the constructed value: {i}");
-                    var offset = MetadataValidation.FieldOffset(resolved.DeclaringType, resolved, module);
-                    var width = MetadataValidation.FieldSize(resolved.FieldType, module);
+                    int offset = MetadataValidation.FieldOffset(resolved.DeclaringType, resolved, module, architecture);
+                    int width = MetadataValidation.FieldSize(resolved.FieldType, module, architecture);
                     for (var b = 0; b < width; b++)
                         self.Data[offset + b] = value switch
                         {

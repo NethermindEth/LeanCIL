@@ -20,10 +20,10 @@ private def levelSource : Level -> Except String String
   | .param name => pure ("(Lean.Level.param " ++ nameSource name ++ ")")
   | .mvar _ => throw "Full verification cannot transfer universe metavariables"
 
-private def mapped (environment : Environment) (shared : Std.HashSet Name) (prefix name : Name) : Except String Name := do
+private def mapped (environment : Environment) (shared : Std.HashSet Name) (targetNamespace name : Name) : Except String Name := do
   unless environment.contains name do throw ("Missing full-verification dependency: " ++ name.toString)
   if shared.contains (CIL.Interface.definingModule environment name) then return name
-  return prefix ++ name
+  return targetNamespace ++ name
 
 private def binderSource : BinderInfo -> String
   | .default => "Lean.BinderInfo.default"
@@ -31,27 +31,27 @@ private def binderSource : BinderInfo -> String
   | .strictImplicit => "Lean.BinderInfo.strictImplicit"
   | .instImplicit => "Lean.BinderInfo.instImplicit"
 
-private def exprSource (environment : Environment) (shared : Std.HashSet Name) (prefix : Name) : Expr -> Except String String
+private def exprSource (environment : Environment) (shared : Std.HashSet Name) (targetNamespace : Name) : Expr -> Except String String
   | .bvar index => pure ("(Lean.Expr.bvar " ++ toString index ++ ")")
   | .fvar _ => throw "Full verification cannot transfer free variables"
   | .mvar _ => throw "Full verification cannot transfer metavariables"
   | .sort level => return "(Lean.Expr.sort " ++ (<- levelSource level) ++ ")"
-  | .const name levels => return "(Lean.Expr.const " ++ nameSource (<- mapped environment shared prefix name) ++ " " ++
+  | .const name levels => return "(Lean.Expr.const " ++ nameSource (<- mapped environment shared targetNamespace name) ++ " " ++
       listSource (<- levels.mapM levelSource) ++ ")"
-  | .app fn argument => return "(Lean.Expr.app " ++ (<- exprSource environment shared prefix fn) ++ " " ++
-      (<- exprSource environment shared prefix argument) ++ ")"
+  | .app fn argument => return "(Lean.Expr.app " ++ (<- exprSource environment shared targetNamespace fn) ++ " " ++
+      (<- exprSource environment shared targetNamespace argument) ++ ")"
   | .lam name type body info => return "(Lean.Expr.lam " ++ nameSource name ++ " " ++
-      (<- exprSource environment shared prefix type) ++ " " ++ (<- exprSource environment shared prefix body) ++ " " ++ binderSource info ++ ")"
+      (<- exprSource environment shared targetNamespace type) ++ " " ++ (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")"
   | .forallE name type body info => return "(Lean.Expr.forallE " ++ nameSource name ++ " " ++
-      (<- exprSource environment shared prefix type) ++ " " ++ (<- exprSource environment shared prefix body) ++ " " ++ binderSource info ++ ")"
+      (<- exprSource environment shared targetNamespace type) ++ " " ++ (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")"
   | .letE name type value body nondep => return "(Lean.Expr.letE " ++ nameSource name ++ " " ++
-      (<- exprSource environment shared prefix type) ++ " " ++ (<- exprSource environment shared prefix value) ++ " " ++
-      (<- exprSource environment shared prefix body) ++ " " ++ toString nondep ++ ")"
+      (<- exprSource environment shared targetNamespace type) ++ " " ++ (<- exprSource environment shared targetNamespace value) ++ " " ++
+      (<- exprSource environment shared targetNamespace body) ++ " " ++ toString nondep ++ ")"
   | .lit (.natVal value) => pure ("(Lean.Expr.lit (Lean.Literal.natVal " ++ toString value ++ "))")
   | .lit (.strVal value) => pure ("(Lean.Expr.lit (Lean.Literal.strVal " ++ quoted value ++ "))")
-  | .mdata _ value => exprSource environment shared prefix value
-  | .proj type index value => return "(Lean.Expr.proj " ++ nameSource (<- mapped environment shared prefix type) ++ " " ++
-      toString index ++ " " ++ (<- exprSource environment shared prefix value) ++ ")"
+  | .mdata _ value => exprSource environment shared targetNamespace value
+  | .proj type index value => return "(Lean.Expr.proj " ++ nameSource (<- mapped environment shared targetNamespace type) ++ " " ++
+      toString index ++ " " ++ (<- exprSource environment shared targetNamespace value) ++ ")"
 
 private def dependencies : Expr -> List Name
   | .const name _ => [name]
@@ -70,11 +70,11 @@ private def value (info : ConstantInfo) : Except String Expr :=
   | .opaqueInfo info => .ok info.value
   | _ => .error ("Unsupported full-verification declaration kind: " ++ info.name.toString)
 
-private def declarationSource (environment : Environment) (shared : Std.HashSet Name) (prefix : Name)
+private def declarationSource (environment : Environment) (shared : Std.HashSet Name) (targetNamespace : Name)
     (info : ConstantInfo) : Except String String := do
-  let target := nameSource (prefix ++ info.name)
-  let type <- exprSource environment shared prefix info.type
-  let body <- exprSource environment shared prefix (<- value info)
+  let target := nameSource (targetNamespace ++ info.name)
+  let type <- exprSource environment shared targetNamespace info.type
+  let body <- exprSource environment shared targetNamespace (<- value info)
   let common := "name := " ++ target ++ ", levelParams := " ++ listSource (info.levelParams.map nameSource) ++
     ", type := " ++ type ++ ", value := " ++ body
   let declaration <- match info with
@@ -98,7 +98,7 @@ private structure TransferState where
   imports : Std.HashSet Name := {}
   sources : Array String := #[]
 
-private partial def visit (environment : Environment) (shared : Std.HashSet Name) (prefix name : Name)
+private partial def visit (environment : Environment) (shared : Std.HashSet Name) (targetNamespace name : Name)
     (state : TransferState) : Except String TransferState := do
   if state.visited.contains name then return state
   let some info := environment.find? name | throw ("Missing full-verification declaration: " ++ name.toString)
@@ -109,14 +109,14 @@ private partial def visit (environment : Environment) (shared : Std.HashSet Name
   let body <- value info
   let mut state := { state with active := state.active.insert name }
   for dependency in dependencies info.type ++ dependencies body do
-    state <- visit environment shared prefix dependency state
-  let source <- declarationSource environment shared prefix info
+    state <- visit environment shared targetNamespace dependency state
+  let source <- declarationSource environment shared targetNamespace info
   return { state with visited := state.visited.insert name, active := state.active.erase name, sources := state.sources.push source }
 
-def capture (environment : Environment) (sharedModules : Array Name) (prefix : Name) (roots : Array Name) : Except String String := do
+def capture (environment : Environment) (sharedModules : Array Name) (targetNamespace : Name) (roots : Array Name) : Except String String := do
   let shared := sharedModules.foldl (fun found name => found.insert name) ({} : Std.HashSet Name)
   let mut state : TransferState := {}
-  for root in roots do state <- visit environment shared prefix root state
+  for root in roots do state <- visit environment shared targetNamespace root state
   let imports := state.imports.toArray.toList.mergeSort (fun left right => left.toString <= right.toString)
   return String.intercalate "\n" (imports.map (fun name => "import " ++ name.toString)) ++
     "\nimport Lean\n\n" ++ String.intercalate "\n" state.sources.toList

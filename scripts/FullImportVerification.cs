@@ -355,7 +355,7 @@ run_cmd do
         source.AppendLine("def libraries : List Library := [" + string.Join(", ", libraries.Select(library => "library" + library.Slot)) + "]");
         source.AppendLine("def specifications : List Relocatable := [" + string.Join(", ", libraries.Select(library =>
             "_root_.CIL.Safety." + (library.Kind == "method" ? "MethodContract" : "OutcomeContract") + ".relocatable _root_." + library.Contract)) + "]");
-        source.AppendLine("theorem prefix : Links Extracted.program (link Extracted.program libraries) := link_links _ _");
+        source.AppendLine("theorem app_prefix : Links Extracted.program (link Extracted.program libraries) := link_links _ _");
         foreach (FullLibrary library in libraries)
             source.AppendLine("theorem relocation" + library.Slot + " : RelocatesInto library" + library.Slot + ".program " +
                 "(link Extracted.program libraries) (linkSlot Extracted.program libraries " + library.Slot + ") := link_relocates _ _ (by decide)");

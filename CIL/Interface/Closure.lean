@@ -106,7 +106,7 @@ private def validateAxioms (environment : Environment) (constants : List Name) :
       if axiomName != `propext && axiomName != `Quot.sound && axiomName != `Classical.choice then
         throw ("Unapproved transitive axiom in contract interface: " ++ axiomName.toString)
 
-private partial def validateDependencies (environment : Environment) (pending visited : List Name) : Except String Unit := do
+private partial def validateDependencies (environment : Environment) (pending : List Name) (visited : Std.HashSet Name) : Except String Unit := do
   match pending with
   | [] => pure ()
   | name :: rest =>
@@ -114,17 +114,17 @@ private partial def validateDependencies (environment : Environment) (pending vi
     let some info := environment.find? name | throw ("Missing declaration in contract closure: " ++ name.toString)
     permitted info
     if trustedModule (definingModule environment name) then
-      return <- validateDependencies environment rest (name :: visited)
+      return <- validateDependencies environment rest (visited.insert name)
     let values := semanticExpressions info ++ match info with
       | .thmInfo theoremInfo => [theoremInfo.value]
       | _ => []
-    validateDependencies environment (rest ++ related info ++ values.flatMap dependencies) (name :: visited)
+    validateDependencies environment (related info ++ values.flatMap dependencies ++ rest) (visited.insert name)
 
 def validateInterfaceDeclarations (environment : Environment) (interfaceModules : Array Name) : Except String Unit := do
   let declarations := environment.constants.toList.filterMap fun (name, _) =>
     if interfaceModules.contains (definingModule environment name) then some name else none
   validateAxioms environment declarations
-  validateDependencies environment declarations []
+  validateDependencies environment declarations {}
 
 private def declaration (info : ConstantInfo) : Except String Json := do
   let type <- expression info.levelParams 0 info.type
@@ -148,7 +148,7 @@ private def declaration (info : ConstantInfo) : Except String Json := do
   | .axiomInfo _ => throw ("Unexpected local axiom in canonical closure: " ++ info.name.toString)
   | .quotInfo _ => throw ("Unexpected local quotient declaration: " ++ info.name.toString)
 
-private partial def collect (environment : Environment) (pending visited : List Name)
+private partial def collect (environment : Environment) (pending : List Name) (visited : Std.HashSet Name)
     (entries : List (String × Json)) : Except String (List (String × Json)) := do
   match pending with
   | [] => pure entries
@@ -157,10 +157,10 @@ private partial def collect (environment : Environment) (pending visited : List 
     let some info := environment.find? name | throw ("Missing declaration in contract closure: " ++ name.toString)
     permitted info
     if trustedModule (definingModule environment name) then
-      return <- collect environment rest (name :: visited) entries
+      return <- collect environment rest (visited.insert name) entries
     let serialized <- declaration info
-    collect environment (rest ++ related info ++ (semanticExpressions info).flatMap dependencies)
-      (name :: visited) ((canonicalName name |>.compress, serialized) :: entries)
+    collect environment (related info ++ (semanticExpressions info).flatMap dependencies ++ rest)
+      (visited.insert name) ((canonicalName name |>.compress, serialized) :: entries)
 
 def contractClosure (environment : Environment) (constant : Name) : Except String (String × String) := do
   let some info := environment.find? constant | throw ("Missing contract constant: " ++ constant.toString)
@@ -171,8 +171,8 @@ def contractClosure (environment : Environment) (constant : Name) : Except Strin
       else throw "Export must have the canonical MethodContract or OutcomeContract type"
     | none => throw "Export must be a closed contract constant"
   validateAxioms environment [constant]
-  validateDependencies environment [constant] []
-  let entries <- collect environment [constant] [] []
+  validateDependencies environment [constant] {}
+  let entries <- collect environment [constant] {} []
   let ordered := entries.mergeSort (fun left right => left.1 <= right.1)
   return (kind, (node "leancil-contract-closure-1" [canonicalName constant, Json.str kind,
     toJson (ordered.map Prod.snd)]).compress)

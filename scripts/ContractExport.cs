@@ -245,11 +245,9 @@ theorem LeanCILExportAudit.noStaticSites :
         if (failures.Count != 0) throw new InvalidDataException("Kernel replay rejected the published interface: " + string.Join(", ", failures.Keys));
         CheckPublishedInterfaceDeclarations(isolated, interfaces.Select(source => source.Name).ToArray(), leanPath);
         Dictionary<string, ExportClosure> closures = new(StringComparer.Ordinal);
+        string imports = string.Join("\n", interfaces.Select(source => "import " + source.Name));
         foreach (string contract in exports.Select(export => export.Request.Contract).Distinct(StringComparer.Ordinal))
-        {
-            string imports = string.Join("\n", interfaces.Select(source => "import " + source.Name));
             closures[contract] = CheckExportClosure(isolated, imports, contract, leanPath, importsAreSource: true);
-        }
         return closures;
     }
 

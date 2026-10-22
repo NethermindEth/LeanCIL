@@ -141,6 +141,12 @@ No `sorry`, `admit`, new axioms, native proof evaluation, or unchecked correctne
 
 Feature certificates record abstract incoming states at every original instruction. Lean checks entry state, abstract transfers, all required successors, joins, the reachable mask and emitted feature-dependent operations, including decided type tests. Closure and weakening theorems support the analysis. This is not a full concrete-interpreter simulation theorem for every raw CLI opcode. Raw metadata fidelity, unsupported transformations, static-data serialization and general instruction translation remain part of the trusted boundary.
 
+Scalar certificates additionally record the complete incoming stack of `word32`, `word64`, `native`, `reference` or `other` kinds at each feature-reachable PC. `ScalarFlowValid` checks the empty entry, code/certificate lengths, raw maximum stack, independently derived raw transfers and exact incoming-stack agreement on every required successor, including joins and backedges. Managed call parameter and result types are bound exactly to the specialized callee's closed signature. Call operands must match the reversed parameter-kind list and a reference receiver where required. External parameter types must match the raw full signature after method and declaring-type argument substitution; unsupported type spellings stay opaque. Local and argument stores must match the declared home kind. Returns require exactly the declared result kind and no extra stack values. External result kinds require the recorded runtime type to agree with the return spelling in the full raw method identity; unknown types remain `other` and cannot justify scalar arithmetic or conversions. Only supported integer producers receive an integer kind; unhandled producers, including floating conversions and reference/array loads, remain `other`. This is a type-flow check of the recorded raw input, not a proof that metadata decoding or raw serialization is faithful.
+
+For every reachable covered opcode, `ScalarFlowValid` requires an exact emitted operation before any general stack-effect check can accept it. The covered families are integer literals (`ldc.i4.*`, `ldc.i4.s`, `ldc.i4`, `ldc.i8`), wrapping and checked add/subtract/multiply, signed/unsigned divide and remainder, bitwise operations, shifts, negation, integer comparisons, and all admitted checked/unchecked integer conversions. Literal encodings must have their signed operand range and exact bit pattern, including high-bit-set 64-bit words. Conversion width, result signedness, input signedness and checkedness are matched independently. Mixed native/int32 binary operands require exactly one `nativeBinary` wrapper; homogeneous operands forbid it, and native/int64 mixtures are rejected. The admitted profiles have a 64-bit native width. `ScalarFlowValid.instruction_checked` exposes this exact matching obligation from an accepted certificate. Direct Lean regressions tamper with emitted arithmetic, literals, conversion flags, wrappers, stack kinds, joins and managed return widths, including whole `TranslationValid` rejection cases.
+
+The scalar extension does not verify the whole extractor or establish a concrete CLI-to-model simulation. Non-covered operations keep their existing specialized checks or stack-effect fallback. Metadata decoding, faithful raw input and static-data serialization, external runtime-model correspondence, and correspondence between the model and the runtime remain explicit trust assumptions.
+
 The verifier compiles a separate audit importing only `Extracted`. It requires `Extracted.translation_valid` to be a theorem of the exact `TranslationValid rawLayouts computedLayouts methodEvidence imports program` type, audits its transitive axioms, prints `Extracted.imports` into the recorded audit and kernel-replays it. A missing certificate, an unrelated `True` theorem, a non-theorem declaration or a certificate over a different import table cannot substitute for this check. Malformed-layout, omitted-site, home-redirection, generic-substitution, feature-pruning, forged type-test and whole-program evidence regressions exercise the validators independently of positive example proofs.
 
 ## Artifact integrity
@@ -168,6 +174,11 @@ Batch verification shares a source snapshot, workspace builds and kernel replay 
 The wrong-addition fixture has a finite execution witness plus a uniqueness theorem refuting the requested output at every successful fuel. Out-of-bounds and dangling-reference examples have classified semantic faults plus `invoke_fault_refutes_success`, ruling out success for every fuel. These proofs explain rejection independently of the tactic diagnostic produced when a positive contract fails.
 
 ## Argument storage
+
+The scalar certificate permits interchange between `word64` and `native` only at a metadata-bound 64-bit local or argument home. Both have the checked interpreter representation `i64` on the validated 64-bit target. This storage rule does not permit a mixed native/int64 arithmetic operation, int32 widening, or recovery of numeric width from `other`.
+
+A raw `stloc` into a validated int32 or narrow integer home with a known `word64` or `native` input is an explicit terminal `invalidState` case. The checked home store rejects every such `i64` input. The certificate therefore requires no successful successor from that store; it does not convert the value or treat later instructions as a successful execution. The rule requires the exact emitted local index. Unknown values, references and missing or different homes cannot use this exception. All covered arithmetic and conversion encodings still require their exact checks, including after the terminal store.
+
 
 Assigned or addressed parameters receive private frame-owned storage with the declared physical type. Argument loads, assignment and address-taking share that storage; ordinary by-value calls copy values into the callee's home. A byref parameter is a private reference slot: assigning it changes that slot, while writing through it affects the referenced allocation. Addresses of byref slots are explicitly rejected because nested managed-reference storage is outside the model.
 
@@ -228,6 +239,13 @@ the stop boundary. Custom axioms, sorry, unsafe/partial declarations, unbound
 variables and missing opaque values are rejected. The ordinary caller theorem
 axiom allowlist and kernel replay policy are unchanged.
 
+Every supplied interface module is independently kernel-replayed before its
+compiled artifacts enter the accepted snapshot. Published certification does not
+exempt interface declarations from this check. Compilation and an axiom audit
+alone cannot detect an unchecked declaration inserted by an elaborator. This
+replay checks interface source declarations; it does not require a library's
+implementation proof or a full-verification bundle.
+
 The implementation-to-contract assertion is accepted from published certification,
 as schema-4 reports state. This is separate from the kernel-checked caller
 reasoning. Sidecar/DLL hashes establish identity; they do not authenticate a
@@ -241,3 +259,12 @@ unsatisfiable published contract can make the caller theorem vacuous. Retaining
 `Links` and `ImportsHold` exposes this condition; it does not prove satisfiability.
 A successful report must be read with that deployment obligation. Reference-only
 authoring checks do not produce a deployment certificate.
+
+## Exception documentation lint
+
+`lint-exceptions` is a diagnostic experiment. Its potential model sites are
+structural observations, not proved exception behavior. XML declarations and
+prose are untrusted. A documented exception absent from this limited model is
+not evidence that the runtime cannot raise it. Lint does not check proof terms,
+alter preconditions or issue a verification receipt. The selected XML bytes
+are recorded but are not independently bound to the DLL build.
