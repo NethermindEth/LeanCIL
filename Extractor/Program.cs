@@ -114,6 +114,8 @@ internal static class Program
                 : FeatureProfile.Select(positional.Count == 4 ? positional[3] : "scalar");
             stage = "assembly loading";
             byte[] assembly = File.ReadAllBytes(assemblyPath);
+            stage = "metadata and CIL validation";
+            VectorSignatures.Validate(assembly);
             using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
             var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
@@ -133,7 +135,7 @@ internal static class Program
             string source = LeanEmitter.Emit(methods, profile, originalModule);
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
                 .Where(i => i.OpCode.Code == Code.Ldsfld)
-                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module).Field.FullName), StringComparer.Ordinal);
+                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
