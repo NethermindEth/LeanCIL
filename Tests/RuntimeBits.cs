@@ -113,6 +113,7 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
+    string expectedDiagnostic;
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
         var method = module.GetType("Examples.Bits").Methods.Single(m => m.Name ==
@@ -130,14 +131,22 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             case "memory-scope": call.DeclaringType.Scope = module.TypeSystem.CoreLibrary; break;
             case "memory-key": ((AssemblyNameReference)call.DeclaringType.Scope).PublicKeyToken = []; break;
         }
+        expectedDiagnostic = mutation switch
+        {
+            "scope" => "Unresolved call: " + call.FullName,
+            "version" => "Unsupported type identity: System.UInt64 [System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+            "memory-key" => "Unsupported runtime assembly scope: " + call.FullName,
+            "instance" => "Invalid evaluation stack during reachability",
+            "generic" => "Generic contract imports are not supported in version 1.",
+            "return" or "argument" or "unsupported" or "memory-scope" => "External managed dependency: " + call.FullName,
+            _ => throw new InvalidOperationException("Unknown runtime rejection fixture: " + mutation)
+        };
         module.Write(dll);
     }
     var selector = mutation.StartsWith("memory-", StringComparison.Ordinal) ? "Bits::ReverseU64(ulong)" : "Bits::Left64(ulong,int)";
     var rejected = Execute(Extract("extract", dll, "Examples", selector, output));
-    if (rejected.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
-        !(rejected.Output.Contains("Unsupported") || rejected.Output.Contains("Unmodelled") ||
-          rejected.Output.Contains("Unresolved call") ||
-          mutation == "instance" && rejected.Output.Contains("Invalid evaluation stack during reachability")))
+    if (rejected.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")) ||
+        !rejected.Output.Contains(expectedDiagnostic, StringComparison.Ordinal))
         throw new InvalidOperationException("Incorrect runtime rejection: " + mutation + "\n" + rejected.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
