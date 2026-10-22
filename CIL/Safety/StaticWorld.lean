@@ -8,16 +8,20 @@ def StaticBindingValid (m : Memory) (descriptor : CIL.StaticDescriptor) (referen
     allocation.kind = .immutableStatic ∧ allocation.layout.size = descriptor.bytes.length ∧
     read m reference descriptor.bytes.length 1 = .ok descriptor.bytes
 
-/-- The registry contains valid fields of this extracted program. Equal keys
-    describe the same field; distinct keys do not collapse storage identities. -/
+def StaticRegistryValid (m : Memory) : Prop :=
+  m.staticBindings.Pairwise (fun left right =>
+    left.1 ≠ right.1 ∧ left.2.allocation ≠ right.2.allocation) ∧
+  ∀ binding ∈ m.staticBindings, ∃ allocation,
+    m.allocations binding.2.allocation = some allocation ∧
+      allocation.live = true ∧ allocation.kind = .immutableStatic
+
 def StaticWorldValid (descriptors : List CIL.StaticDescriptor) (m : Memory) : Prop :=
   (∀ descriptor ∈ descriptors, descriptor.bytes.length < nativeLimit) ∧
   (∀ left ∈ descriptors, ∀ right ∈ descriptors,
     left.identity = right.identity → left = right) ∧
-  m.staticBindings.Pairwise (fun left right =>
-    left.1 ≠ right.1 ∧ left.2.allocation ≠ right.2.allocation) ∧
-  ∀ binding ∈ m.staticBindings, ∃ descriptor ∈ descriptors,
-    descriptor.identity = binding.1 ∧ StaticBindingValid m descriptor binding.2
+  StaticRegistryValid m ∧
+  ∀ descriptor ∈ descriptors, ∀ binding ∈ m.staticBindings,
+    descriptor.identity = binding.1 → StaticBindingValid m descriptor binding.2
 
 theorem cached_static_reference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor)
     (key : Nat) (reference : Reference)
@@ -43,12 +47,10 @@ theorem staticReference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor
   cases hc : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with
   | some binding =>
     have bindingMember : binding ∈ m.staticBindings := List.mem_of_find?_eq_some hc
-    obtain ⟨actual, actualMember, key, valid⟩ := world.2.2.2 binding bindingMember
     have found : binding.1 = descriptor.identity := by
       have matched := List.find?_some hc
       simpa using matched
-    have same : actual = descriptor := world.2.1 actual actualMember descriptor member (key.trans found)
-    subst actual
+    have valid := world.2.2.2 descriptor member binding bindingMember found.symm
     exact ⟨m, binding.2, cached_static_reference_succeeds _ _ _ _ hc valid⟩
   | none =>
     have unused := wellFormed_next_unused m hm
@@ -70,7 +72,7 @@ theorem empty_static_world_valid (descriptors : List CIL.StaticDescriptor) (m : 
       left.identity = right.identity → left = right)
     (empty : m.staticBindings = []) : StaticWorldValid descriptors m := by
   refine ⟨sizes, identities, ?_, ?_⟩
-  · simp [empty]
+  · constructor <;> simp [empty]
   · simp [empty]
 
 theorem static_registry_fields_live (descriptors : List CIL.StaticDescriptor) (m : Memory)
@@ -78,9 +80,63 @@ theorem static_registry_fields_live (descriptors : List CIL.StaticDescriptor) (m
     (member : binding ∈ m.staticBindings) :
     ∃ allocation, m.allocations binding.2.allocation = some allocation ∧
       allocation.live = true ∧ allocation.kind = .immutableStatic := by
-  obtain ⟨descriptor, _, _, _, allocation, present, live, kind, _, _⟩ := world.2.2.2 binding member
-  exact ⟨allocation, present, live, kind⟩
+  exact world.2.2.1.2 binding member
+
+def StaticIdentitiesAbsent (identities : List Nat) (m : Memory) : Prop :=
+  ∀ binding ∈ m.staticBindings, binding.1 ∉ identities
+
+theorem StaticWorldValid.of_absent (descriptors : List CIL.StaticDescriptor) (m : Memory)
+    (sizes : ∀ descriptor ∈ descriptors, descriptor.bytes.length < nativeLimit)
+    (identities : ∀ left ∈ descriptors, ∀ right ∈ descriptors,
+      left.identity = right.identity → left = right)
+    (registry : StaticRegistryValid m)
+    (absent : StaticIdentitiesAbsent (descriptors.map CIL.StaticDescriptor.identity) m) :
+    StaticWorldValid descriptors m := by
+  refine ⟨sizes, identities, registry, ?_⟩
+  intro descriptor selected binding member same
+  exact False.elim (absent binding member (same ▸ List.mem_map.mpr ⟨descriptor, selected, rfl⟩))
+
+theorem StaticWorldValid.mono {descriptors selected : List CIL.StaticDescriptor} {m : Memory}
+    (world : StaticWorldValid descriptors m) (subset : selected ⊆ descriptors) :
+    StaticWorldValid selected m :=
+  ⟨fun descriptor member => world.1 descriptor (subset member),
+    fun left hl right hr => world.2.1 left (subset hl) right (subset hr),
+    world.2.2.1, fun descriptor member => world.2.2.2 descriptor (subset member)⟩
+
+theorem StaticWorldValid.append {left right : List CIL.StaticDescriptor} {m : Memory}
+    (first : StaticWorldValid left m) (second : StaticWorldValid right m)
+    (disjoint : ∀ a ∈ left, ∀ b ∈ right, a.identity ≠ b.identity) :
+    StaticWorldValid (left ++ right) m := by
+  refine ⟨?_, ?_, first.2.2.1, ?_⟩
+  · intro descriptor member
+    rcases List.mem_append.mp member with member | member
+    · exact first.1 descriptor member
+    · exact second.1 descriptor member
+  · intro a ha b hb same
+    rcases List.mem_append.mp ha with ha | ha <;>
+      rcases List.mem_append.mp hb with hb | hb
+    · exact first.2.1 a ha b hb same
+    · exact False.elim (disjoint a ha b hb same)
+    · exact False.elim (disjoint b hb a ha same.symm)
+    · exact second.2.1 a ha b hb same
+  · intro descriptor member
+    rcases List.mem_append.mp member with member | member
+    · exact first.2.2.2 descriptor member
+    · exact second.2.2.2 descriptor member
+
+theorem StaticWorldValid.left {left right : List CIL.StaticDescriptor} {m : Memory}
+    (world : StaticWorldValid (left ++ right) m) : StaticWorldValid left m :=
+  world.mono (fun _ member => List.mem_append_left _ member)
+
+theorem StaticWorldValid.right {left right : List CIL.StaticDescriptor} {m : Memory}
+    (world : StaticWorldValid (left ++ right) m) : StaticWorldValid right m :=
+  world.mono (fun _ member => List.mem_append_right _ member)
 
 #print axioms empty_static_world_valid
 #print axioms static_registry_fields_live
+#print axioms StaticWorldValid.of_absent
+#print axioms StaticWorldValid.mono
+#print axioms StaticWorldValid.append
+#print axioms StaticWorldValid.left
+#print axioms StaticWorldValid.right
 end CIL.Safety

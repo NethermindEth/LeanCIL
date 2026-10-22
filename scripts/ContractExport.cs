@@ -5,7 +5,8 @@ using Nethermind.LeanCIL;
 partial class Program
 {
     sealed record PreparedContractExport(ContractExportRequest Request, string Proof, string Profile,
-        string Identity, string Signature, int ParameterCount, bool ReturnsValue, string Visibility);
+        string Identity, string Signature, int ParameterCount, bool ReturnsValue, string Visibility,
+        StaticIdentityRecord[] StaticIdentities);
     sealed record ExportClosure(string Contract, string Kind, string Digest, string Canonical);
     sealed record CheckedContractExport(PreparedContractExport Export, ExportClosure Closure,
         string StatementDigest, string Statement, string AuditSource, string AuthorModule);
@@ -162,8 +163,12 @@ partial class Program
             throw new InvalidDataException("Export artifact proofRoot differs from the producer manifest.");
         string proof = Path.GetFullPath(settings.proof, request.Artifact);
         Within(manifest.ProofRoot, Path.GetRelativePath(manifest.ProofRoot, proof));
+        StaticIdentityRecord[] statics = identity.GetProperty("staticIdentities").Deserialize<StaticIdentityRecord[]>(ContractInterface.Json)
+            ?? throw new InvalidDataException("Missing export static identities.");
+        StaticIdentity.Validate(statics);
+        StaticIdentity.ValidateFields(statics, module);
         return new(request, proof, profile.Name, module.Assembly.Name.FullName + "::" + method.FullName, method.FullName,
-            method.Parameters.Count, method.ReturnType.MetadataType != MetadataType.Void, method.IsPublic ? "public" : "protected");
+            method.Parameters.Count, method.ReturnType.MetadataType != MetadataType.Void, method.IsPublic ? "public" : "protected", statics);
     }
 
     static string ExportAuditSource(PreparedContractExport export, string kind)
@@ -174,6 +179,8 @@ partial class Program
             "outcome" => "_root_.CIL.Safety.OutcomeContract.Holds",
             _ => throw new InvalidDataException("Export constant is not a MethodContract or OutcomeContract.")
         };
+        string statics = "[" + string.Join(", ", export.StaticIdentities.Select(identity =>
+            $"({identity.Identity}, {JsonSerializer.Serialize(identity.AssemblyIdentity)}, {JsonSerializer.Serialize(identity.FieldName)})")) + "]";
         return $$"""
 import Lean
 import CIL.Safety.Linking
@@ -195,8 +202,11 @@ theorem LeanCILExportAudit.certified : {{holds}} _root_.{{export.Request.Contrac
 theorem LeanCILExportAudit.closed : _root_.CIL.Safety.Closed _root_.Extracted.program :=
   _root_.CIL.Safety.Closed.of_check (by decide +kernel)
 theorem LeanCILExportAudit.noImports : _root_.Extracted.imports = [] := rfl
-theorem LeanCILExportAudit.noStaticSites :
-    _root_.Extracted.program.all (fun body => body.staticSites.isEmpty) = true := by decide +kernel
+theorem LeanCILExportAudit.staticIdentities :
+    let actual : List (Nat × String × String) := _root_.Extracted.program.flatMap fun body =>
+      body.staticSites.map fun site => (site.2.identity, site.2.assemblyIdentity, site.2.fieldName)
+    let expected : List (Nat × String × String) := {{statics}}
+    actual.all (fun identity => expected.contains identity) && expected.all (fun identity => actual.contains identity) = true := by decide +kernel
 """;
     }
 
@@ -328,7 +338,8 @@ run_cmd liftTermElabM do
             Certifications = exports.OrderBy(result => result.Export.Identity, StringComparer.Ordinal)
                 .ThenBy(result => result.Export.Profile, StringComparer.Ordinal)
                 .Select(result => new ContractCertification(result.Export.Identity, result.Export.Profile, sidecar.ImplementationSha256,
-                    sidecar.InterfaceDigest, result.Closure.Digest, ExportTheorem, result.Statement, result.StatementDigest)).ToArray()
+                    sidecar.InterfaceDigest, result.Closure.Digest, ExportTheorem, result.Statement, result.StatementDigest,
+                    result.Export.StaticIdentities)).ToArray()
         };
 
     static void PublishContractSidecar(string output, byte[] bytes)

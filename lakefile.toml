@@ -57,6 +57,9 @@ name = "Tests.Imports"
 name = "Tests.Linking"
 
 [[lean_lib]]
+name = "Tests.ModularStatics"
+
+[[lean_lib]]
 name = "Tests.StepFlow"
 
 [[lean_lib]]

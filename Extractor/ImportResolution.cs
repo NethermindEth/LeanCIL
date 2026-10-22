@@ -10,7 +10,8 @@ internal sealed class ImportResolution : IDisposable
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
         string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
         string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind,
-        string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly);
+        string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly,
+        StaticIdentityRecord[] StaticIdentities);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     readonly List<Library> libraries = [];
     readonly List<Binding> bindings = [];
@@ -107,6 +108,15 @@ internal sealed class ImportResolution : IDisposable
         if (certification.ImplementationSha256 != library.Interface.ImplementationSha256 ||
             certification.InterfaceDigest != library.Interface.InterfaceDigest || certification.ClosureDigest != export.ClosureDigest)
             throw new InvalidDataException("Contract import certification binding mismatch.");
+        StaticIdentity.ValidateFields(certification.StaticIdentities, library.Module);
+        if (!library.Interface.IsReferenceAssembly)
+        {
+            MethodDefinition[] implementation = MetadataValidation.Validate(library.Module, assembly, export.Signature, profile);
+            StaticIdentityRecord[] actualStatics = LeanEmitter.StaticIdentities(implementation, profile);
+            StaticIdentityRecord[] certifiedStatics = certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal).ToArray();
+            if (!actualStatics.SequenceEqual(certifiedStatics))
+                throw new InvalidDataException("Contract import static identities differ from the selected implementation.");
+        }
         int slot = bindings.FindIndex(binding => binding.Identity == identity);
         if (slot < 0)
         {
@@ -114,10 +124,14 @@ internal sealed class ImportResolution : IDisposable
             bindings.Add(new(slot, identity, Path.GetFullPath(library.Source.ImplementationPath), library.Interface.ImplementationSha256,
                 "contract", Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
                 export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest, export.Kind,
-                certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly));
+                certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly,
+                certification.StaticIdentities));
         }
         sites[instruction] = slot;
     }
+
+    internal void ValidateStatics(IEnumerable<StaticIdentityRecord> application) =>
+        StaticIdentity.Validate(application.Concat(bindings.SelectMany(binding => binding.StaticIdentities)));
 
     static string TypeIdentity(TypeReference type) => type switch
     {

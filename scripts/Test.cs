@@ -67,6 +67,8 @@ void RunSuite(string name)
 {
     var (script, description) = independentSuites[name];
     Run(["dotnet", "run", "--file", script], streamOutput: true, progress: "Suite " + name);
+    if (name == "exports")
+        Run(["dotnet", "run", "--file", "Tests/ModularStaticExports.cs"], streamOutput: true, progress: "Modular static exports");
     Passed(description);
 }
 
@@ -115,6 +117,7 @@ if (suite is "all" or "evidence")
     projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "unsafe") projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
+if (suite is "all" or "exports") projects.Add("Tests/ModularStaticExports.cs");
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);
@@ -174,7 +177,7 @@ Passed("external consumer proof package and transitive source identity");
 Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
-Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding", "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels", "Tests.DebugNames", "Tests.MethodContract", "Tests.ConstructContract", "Tests.OutcomeContract", "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints", "Tests.ContractConsequence", "Tests.BufferContents", "Tests.Linking", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
+Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding", "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels", "Tests.DebugNames", "Tests.MethodContract", "Tests.ConstructContract", "Tests.OutcomeContract", "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints", "Tests.ContractConsequence", "Tests.BufferContents", "Tests.Linking", "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, contract consequence, buffer contents, linking and store fact tests");
 
 // Verify each extracted method and immediately check its artifact identity.

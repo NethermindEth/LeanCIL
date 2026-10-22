@@ -36,6 +36,10 @@ internal static class LeanEmitter
     static bool StaticSite(Instruction i) => i.OpCode.Code is Code.Ldsflda or Code.Ldsfld || (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
     static FieldDefinition StaticField(Instruction i, ModuleDefinition module) => i.OpCode.Code == Code.Ldsfld
         ? StaticValues.Resolve((FieldReference)i.Operand, module).Field : StaticData.Validate((FieldReference)i.Operand, module);
+    internal static StaticIdentityRecord[] StaticIdentities(MethodDefinition[] methods, FeatureProfile profile) =>
+        methods.SelectMany(method => Reachability.Analyze(method, profile)).Where(StaticSite)
+            .Select(instruction => StaticIdentity.Of(StaticField(instruction, methods[0].Module)))
+            .Distinct().OrderBy(identity => identity.Identity, StringComparer.Ordinal).ToArray();
     internal static string Initial(TypeReference type, ModuleDefinition module) => Kind(type, module) switch
     {
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
@@ -48,9 +52,7 @@ internal static class LeanEmitter
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
-        FieldDefinition[] data = methods.SelectMany(m => Reachability.Analyze(m, profile))
-            .Where(StaticSite)
-            .Select(i => StaticField(i, methods[0].Module)).Distinct().ToArray();
+        StaticIdentity.Validate(StaticIdentities(methods, profile));
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
             .Concat(m.HasThis ? [m.DeclaringType] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
@@ -99,10 +101,12 @@ internal static class LeanEmitter
                         var value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module);
                         var initializer = Array.IndexOf(methods, value.Initializer);
                         if (initializer < 0) throw new InvalidDataException($"Missing static initializer: {value.Initializer.FullName}");
-                        return $"({s.pc}, {{ identity := {Array.IndexOf(data, value.Field)}, fieldName := {JsonSerializer.Serialize(value.Field.FullName)}, bytes := {StaticData.LeanBytes(value.Bytes)}, initializer := some {{ method := {initializer}, arguments := [{string.Join(", ", value.Arguments)}] }} }})";
+                        StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
+                        return $"({s.pc}, {{ identity := {identity.Identity}, assemblyIdentity := {JsonSerializer.Serialize(identity.AssemblyIdentity)}, fieldName := {JsonSerializer.Serialize(value.Field.FullName)}, bytes := {StaticData.LeanBytes(value.Bytes)}, initializer := some {{ method := {initializer}, arguments := [{string.Join(", ", value.Arguments)}] }} }})";
                     }
                     FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
-                    return $"({s.pc}, {{ identity := {Array.IndexOf(data, f)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)} }})";
+                    StaticIdentityRecord fieldIdentity = StaticIdentity.Of(f);
+                    return $"({s.pc}, {{ identity := {fieldIdentity.Identity}, assemblyIdentity := {JsonSerializer.Serialize(fieldIdentity.AssemblyIdentity)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)} }})";
                 }));
             lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)

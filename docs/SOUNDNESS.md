@@ -119,6 +119,28 @@ A null managed reference is a distinct value, not address zero. `Unsafe.NullRef<
 
 Static data is immutable, extraction-bound RVA storage with field identities retained separately from contents. Static initializers that could execute unmodelled code are rejected.
 
+Generated static identities are unsigned natural numbers from SHA-256 of the
+full assembly identity and full field name. Each UTF-8 component is preceded by
+its byte length as a little-endian 32-bit integer. The hash bytes are interpreted
+as one unsigned big-endian number. MVID and method bodies are excluded. No proof
+assumes that this hash is injective. Extraction and import checks reject key
+collisions, and `linkChecked` checks every linked descriptor for compatibility.
+The raw `link` function has no collision guarantee.
+
+`StaticWorldValid descriptors memory` constrains cached contents only for the
+listed descriptors. `StaticRegistryValid memory` still requires unique keys,
+distinct allocations and live immutable storage for every registry entry.
+Thus another assembly's loaded fields do not make a library world false.
+Composition joins descriptor lists over one memory with disjoint keys; it does
+not merge memories or infer allocation disjointness from key disjointness.
+`StaticIdentitiesAbsent` supplies a public first-use premise. Repeated calls
+with loaded fields require a content predicate instead of this absence premise.
+RVA exports carry a kernel-checked static identity set in their certification.
+Import extraction recomputes the selected implementation's reachable static set
+at the selected profile. This analysis remains trusted metadata processing, not
+a proof of CLR execution or library correctness. Static-value and type-init
+assumptions are still rejected by the closed-export producer.
+
 A static readonly struct field set by its static constructor is admitted only for `ldsfld`, under `--assume-initialized` for its declaring type, and loads as a constant aggregate. Two parts are trusted: the extractor's recognition that the constructor stores `M(constants)` (or a copy of such a field stored earlier) exactly once and unconditionally, and the runtime assumption that nothing writes the field after that store. The extractor rejects other stores in the module and `ldsflda` of the field in the constructor or its same-assembly callees, and never forms the field's address in an extracted method; writes through `Unsafe`, reflection or other unmodelled code are excluded by assumption, as the JIT also treats an initialized `static readonly` field as constant. The value itself is kernel checked: `StaticValuesValid`, part of `TranslationValid`, reruns `M` on its recorded arguments from empty memory, with constructor-initialized sites removed so that no initializer can read a value it justifies, and requires exactly the emitted bytes. `M` runs under the selected profile, so this also assumes the profile matches the runtime during initialization. Reports list each such field as a caller assumption next to the initialization assumption. Unsafe reference arithmetic wraps at the modeled native width and retains allocation provenance; every resulting reference must pass formation checks. A valid end sentinel grants no access permission.
 
 ## Trusted computing base

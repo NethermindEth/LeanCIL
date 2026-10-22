@@ -243,6 +243,10 @@ library implementation proof source, artifact or full bundle is required.
 
 The sidecar export adds `kind` (`method` or `outcome`). Each selected certification
 record requires `theorem`, `statement` and `statementDigest`. The driver checks
+its required `staticIdentities` list against the selected implementation's
+reachable static fields. Each entry contains `identity`, `assemblyIdentity` and
+`fieldName`. The producer kernel-checks this list against its generated program.
+The driver also checks
 the actual exported contract type and canonical closure. `statementDigest` is the
 publisher's digest of its canonical certification type, not a hash of its pretty
 printed statement. The consumer records this provenance without obtaining the

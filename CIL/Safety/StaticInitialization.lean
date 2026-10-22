@@ -119,23 +119,32 @@ theorem staticReference_preserves_static_world (descriptor : CIL.StaticDescripto
         repeat' first | cases allocation | split at allocation
         rfl
       refine ⟨world.1, world.2.1, ?_, ?_⟩
-      · simp only [List.pairwise_cons, registry]
-        refine ⟨?_, world.2.2.1⟩
-        intro binding member
-        constructor
-        · have absent := List.find?_eq_none.mp hc binding member
-          have notSame : binding.1 ≠ descriptor.identity := by
-            simpa only [beq_iff_eq] using absent
-          exact Ne.symm notSame
-        · obtain ⟨a, present, _, _⟩ := static_registry_fields_live _ _ world binding member
-          rw [fresh.1]
-          exact Ne.symm (Nat.ne_of_lt (hm.1 _ _ present).1)
-      · intro binding member
+      · constructor
+        · simp only [List.pairwise_cons, registry]
+          refine ⟨?_, world.2.2.1.1⟩
+          intro binding member
+          constructor
+          · have absent := List.find?_eq_none.mp hc binding member
+            have notSame : binding.1 ≠ descriptor.identity := by
+              simpa only [beq_iff_eq] using absent
+            exact Ne.symm notSame
+          · obtain ⟨a, present, _, _⟩ := static_registry_fields_live _ _ world binding member
+            rw [fresh.1]
+            exact Ne.symm (Nat.ne_of_lt (hm.1 _ _ present).1)
+        · intro binding member
+          simp only [List.mem_cons, registry] at member
+          rcases member with rfl | member
+          · obtain ⟨_, a, present, live, kind, _, _⟩ := initialized
+            exact ⟨a, present, live, kind⟩
+          · obtain ⟨a, present, live, kind⟩ := world.2.2.1.2 binding member
+            exact ⟨a, (retained _ _ present kind).1, live, kind⟩
+      · intro other selectedOther binding member key
         simp only [List.mem_cons, registry] at member
         rcases member with rfl | member
-        · exact ⟨descriptor, selected, rfl, initialized⟩
-        · obtain ⟨old, oldSelected, key, valid⟩ := world.2.2.2 binding member
-          exact ⟨old, oldSelected, key, retained.binding _ _ valid⟩
+        · have same := world.2.1 other selectedOther descriptor selected key
+          subst other
+          exact initialized
+        · exact retained.binding _ _ (world.2.2.2 other selectedOther binding member key)
 
 theorem staticReference_valid_result (descriptor : CIL.StaticDescriptor)
     (descriptors : List CIL.StaticDescriptor) (m : Memory) (hm : m.WellFormed)
@@ -148,12 +157,9 @@ theorem staticReference_valid_result (descriptor : CIL.StaticDescriptor)
   cases hc : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with
   | none => exact staticReference_new_binding_valid _ _ _ _ hc success
   | some binding =>
-    obtain ⟨actual, actualSelected, key, valid⟩ :=
-      world.2.2.2 binding (List.mem_of_find?_eq_some hc)
     have found : binding.1 = descriptor.identity := by
       simpa only [beq_iff_eq] using List.find?_some hc
-    have same := world.2.1 actual actualSelected descriptor selected (key.trans found)
-    subst actual
+    have valid := world.2.2.2 descriptor selected binding (List.mem_of_find?_eq_some hc) found.symm
     obtain ⟨rfl, rfl, _⟩ := cached_static_reference_checked _ _ _ _ _ _ hc success
     exact valid
 

@@ -43,12 +43,16 @@ theorem PreservesImmutable.world {m result : Memory} (preserves : PreservesImmut
     (descriptors : List CIL.StaticDescriptor) (world : StaticWorldValid descriptors m)
     (registry : result.staticBindings = m.staticBindings) : StaticWorldValid descriptors result := by
   refine ⟨world.1, world.2.1, ?_, ?_⟩
-  · rw [registry]
-    exact world.2.2.1
-  · intro binding member
+  · constructor
+    · rw [registry]
+      exact world.2.2.1.1
+    · intro binding member
+      rw [registry] at member
+      obtain ⟨allocation, present, live, kind⟩ := world.2.2.1.2 binding member
+      exact ⟨allocation, (preserves _ _ present kind).1, live, kind⟩
+  · intro descriptor selected binding member key
     rw [registry] at member
-    obtain ⟨descriptor, selected, key, valid⟩ := world.2.2.2 binding member
-    exact ⟨descriptor, selected, key, preserves.binding _ _ valid⟩
+    exact preserves.binding _ _ (world.2.2.2 descriptor selected binding member key)
 
 theorem write_preserves_immutable (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat)

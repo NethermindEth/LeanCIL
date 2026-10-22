@@ -113,6 +113,7 @@ structure StaticDescriptor where
   bytes : List (BitVec 8)
   /-- `some` for a value fixed by its static constructor, `none` for RVA data. -/
   initializer : Option StaticInitializer := none
+  assemblyIdentity : String := ""
   deriving DecidableEq, Repr
 
 structure Method where

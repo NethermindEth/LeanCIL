@@ -178,6 +178,8 @@ internal static class Program
             using ImportResolution imports = new(importSources);
             stage = "metadata and CIL validation";
             MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports);
+            StaticIdentityRecord[] staticIdentities = LeanEmitter.StaticIdentities(methods, profile);
+            imports.ValidateStatics(staticIdentities);
             string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             if (recorded is { } prior)
             {
@@ -212,6 +214,7 @@ internal static class Program
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
                 assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile, initializedTypes, staticValues,
+                staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),

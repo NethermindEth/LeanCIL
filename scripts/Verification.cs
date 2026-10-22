@@ -1017,14 +1017,14 @@ unsafe def main (args : List String) : IO Unit := do
                 slot = import.GetProperty("slot"), identity = import.GetProperty("identity"),
                 profile = import.GetProperty("profile"), interfaceDigest = import.GetProperty("interfaceDigest"),
                 closureDigest = import.GetProperty("closureDigest"), constant = import.GetProperty("contractConstant"),
-                kind = import.GetProperty("contractKind")
+                kind = import.GetProperty("contractKind"), staticIdentities = import.GetProperty("staticIdentities")
             })
         }));
     }
 
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
-        string certificationStatementDigest, string deploymentObligation);
+        string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1032,6 +1032,7 @@ unsafe def main (args : List String) : IO Unit := do
             import.GetProperty("implementationSha256").GetString()!, import.GetProperty("interfaceDigest").GetString()!,
             "published-certification", import.GetProperty("certificationTheorem").GetString()!,
             import.GetProperty("certificationStatement").GetString()!, import.GetProperty("certificationStatementDigest").GetString()!,
+            import.GetProperty("staticIdentities"),
             "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.")).ToArray()
         : [];
 
