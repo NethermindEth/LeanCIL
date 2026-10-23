@@ -230,7 +230,7 @@ JsonObject RestrictedManifest(string assembly, string method, string folder)
     manifest["exports"]![0]!["artifact"] = folder;
     return manifest;
 }
-const string shape = "Contract exports require a public or protected static, non-virtual, non-generic method.";
+const string shape = "Contract exports require a public or protected static, non-virtual, closed method.";
 const string assumptions = "Contract export version 1 rejects imports and static/initialization assumptions: ";
 foreach ((string Name, string Method, string Marker) restriction in new[]
 {
