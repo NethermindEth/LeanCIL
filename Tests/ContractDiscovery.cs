@@ -54,8 +54,10 @@ namespace ImportFixture { public static class Library {
 } }
 """.Replace("DIGEST", digest, StringComparison.Ordinal));
 Run(["dotnet", "build", Path.Combine(producer, "Producer.csproj"), "-c", "Release"]);
-string implementation = Path.Combine(producer, "bin", Library + ".dll");
-string reference = Path.Combine(producer, "obj", "Release", "net10.0", "ref", Library + ".dll");
+// Directory.Build.props redirects outputs; ask MSBuild instead of assuming SDK layout.
+JsonElement producerPaths = MsBuildProperties(Path.Combine(producer, "Producer.csproj"), "TargetPath", "TargetRefPath");
+string implementation = producerPaths.GetProperty("TargetPath").GetString()!;
+string reference = producerPaths.GetProperty("TargetRefPath").GetString()!;
 using (ModuleDefinition metadata = ModuleDefinition.ReadModule(reference))
 {
     if (!metadata.Assembly.CustomAttributes.Any(attribute => attribute.AttributeType.FullName == "Nethermind.LeanCIL.LeanCilContractsAttribute") ||
@@ -371,6 +373,14 @@ Console.WriteLine("PASS SDK reference attribute locates interface without certif
 
 partial class Program
 {
+    static JsonElement MsBuildProperties(string project, params string[] names)
+    {
+        (int Code, string Output, string Stdout, string Stderr) result = Execute(["dotnet", "msbuild", project, "-p:Configuration=Release",
+            .. names.Select(name => "-getProperty:" + name)]);
+        if (result.Code != 0) throw new InvalidOperationException("MSBuild property query failed: " + result.Output);
+        return JsonSerializer.Deserialize<JsonElement>(result.Stdout).GetProperty("Properties");
+    }
+
     static void RejectPostAuditDiscoveryMutation(string assembly, string output, string package, string proof, string manifest)
     {
         byte[] original = File.ReadAllBytes(manifest);
