@@ -1114,13 +1114,37 @@ unsafe def main (args : List String) : IO Unit := do
             extractorBuilt = true;
         }
 
+        if (!existingArtifacts)
+            Run(Extract("extract", assembly, identity, entry, output, profile));
+        byte[] proofSourceBytes = File.ReadAllBytes(proof);
+        string proofSourceHash = Convert.ToHexStringLower(SHA256.HashData(proofSourceBytes));
+        string proofSource;
+        using (StreamReader reader = new(new MemoryStream(proofSourceBytes)))
+        {
+            proofSource = reader.ReadToEnd();
+        }
+        bool symbols = ImportsSymbols(proofSource);
+        string? symbolsSource = symbols ? SymbolsFor(output) : null;
+        byte[]? symbolsSourceBytes = symbolsSource is null ? null : File.ReadAllBytes(symbolsSource);
+        string? symbolsSourceHash = symbolsSourceBytes is null ? null : Convert.ToHexStringLower(SHA256.HashData(symbolsSourceBytes));
+        var before = Inputs(proof, settings);
+        if (before["proof:" + proof] != proofSourceHash)
+            throw new InvalidOperationException("Proof inputs changed before their source snapshot");
+        ExtractionIdentity extraction = ExtractionIdentity.Read(output);
+
+        // Retain the selected bytes before support or interface builds can run code.
+        void RequireOriginalProofSources()
+        {
+            if (!File.Exists(proof) || Sha(proof) != proofSourceHash ||
+                symbolsSource is not null && (!File.Exists(symbolsSource) || Sha(symbolsSource) != symbolsSourceHash))
+                throw new InvalidOperationException("Proof inputs changed during verification");
+        }
+
         // Use a source-bound build; CI and --fresh bypass the local library cache.
         stage?.Invoke("Lean library build");
-        var before = Inputs(proof, settings);
         var session = Library(before);
-        ExtractionIdentity? extraction = existingArtifacts ? ExtractionIdentity.Read(output) : null;
-        HashSet<string> importSourceNames = extraction?.Sources.Keys.ToHashSet(StringComparer.Ordinal) ?? [];
-        var support = Regex.Matches(File.ReadAllText(proof), @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
+        HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
+        var support = Regex.Matches(proofSource, @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
             .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
         if (support.Length > 0)
@@ -1167,9 +1191,7 @@ unsafe def main (args : List String) : IO Unit := do
             }
         }
 
-        if (!existingArtifacts)
-            Run(Extract("extract", assembly, identity, entry, output, profile));
-        extraction ??= ExtractionIdentity.Read(output);
+        RequireOriginalProofSources();
         var identityHash = extraction.Sha256;
 
         // Isolate generated code and the selected proof, then audit the named theorem.
@@ -1178,6 +1200,15 @@ unsafe def main (args : List String) : IO Unit := do
         string audit;
         string extractionAudit = "";
         string[] axioms;
+        string stagedProof = Path.Combine(fresh, "Proof.lean");
+        string stagedSymbols = Path.Combine(fresh, "ExtractedSymbols.lean");
+        void RequireStagedProofSources()
+        {
+            if (!File.Exists(stagedProof) || Sha(stagedProof) != proofSourceHash)
+                throw new InvalidOperationException("Proof sources changed during verification: Proof.lean");
+            if (symbols && (!File.Exists(stagedSymbols) || Sha(stagedSymbols) != symbolsSourceHash))
+                throw new InvalidOperationException("Proof sources changed during verification: ExtractedSymbols.lean");
+        }
 
         try
         {
@@ -1185,9 +1216,6 @@ unsafe def main (args : List String) : IO Unit := do
             if (Sha(Path.Combine(fresh, "Extracted.lean")) != extraction.Root.GetProperty("generatedSha256").GetString())
                 throw new InvalidOperationException("Inputs changed during verification");
             string[] importModules = StageImportSources(extraction, fresh);
-            File.Copy(proof, Path.Combine(fresh, "Proof.lean"));
-            var symbols = ImportsSymbols(File.ReadAllText(proof));
-            if (symbols) File.Copy(SymbolsFor(output), Path.Combine(fresh, "ExtractedSymbols.lean"));
             File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
 
@@ -1219,7 +1247,7 @@ unsafe def main (args : List String) : IO Unit := do
                 foreach (var name in new[] { "Extracted", "ExtractionAudit" })
                 {
                     stage?.Invoke(name == "ExtractionAudit" ? "extraction certificate audit" : "proof checking");
-                    var checkedOutput = Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
+                    var checkedOutput = Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
                         leanPath: leanPath, progress: $"Checking {name}: {entry}");
                     if (name == "ExtractionAudit") extractionAudit = checkedOutput;
                 }
@@ -1236,22 +1264,32 @@ unsafe def main (args : List String) : IO Unit := do
             foreach (string module in importModules)
             {
                 string source = Path.Combine(fresh, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
-                Run(["lean", "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source], leanPath: leanPath,
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source], leanPath: leanPath,
                     progress: "Checking contract interface: " + module);
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next, module.Replace('.', '/'));
                 bound = next;
             }
+            if (File.Exists(stagedProof))
+                throw new InvalidOperationException("Proof sources changed during verification: Proof.lean");
+            if (File.Exists(stagedSymbols))
+                throw new InvalidOperationException("Proof sources changed during verification: ExtractedSymbols.lean");
+            RequireOriginalProofSources();
+            File.WriteAllBytes(stagedProof, proofSourceBytes);
+            if (symbols) File.WriteAllBytes(stagedSymbols, symbolsSourceBytes!);
+            RequireStagedProofSources();
             if (symbols)
             {
-                Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), Path.Combine(fresh, "ExtractedSymbols.lean")],
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), stagedSymbols],
                     leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next, "ExtractedSymbols");
                 bound = next;
+                RequireStagedProofSources();
             }
-            var proofKey = ContentKey("theorem-audit-v2\n" + extractedKey + "\n" + Sha(Path.Combine(fresh, "Proof.lean")) + "\n" +
-                (symbols ? Sha(Path.Combine(fresh, "ExtractedSymbols.lean")) + "\n" : "") +
+            RequireStagedProofSources();
+            var proofKey = ContentKey("theorem-audit-v2\n" + extractedKey + "\n" + proofSourceHash + "\n" +
+                (symbols ? symbolsSourceHash + "\n" : "") +
                 JsonSerializer.Serialize(extraction.Sources) + "\n" + theorem);
             var proofRestored = RestoreSuccess(proofKey, fresh);
             if (proofRestored)
@@ -1262,9 +1300,11 @@ unsafe def main (args : List String) : IO Unit := do
             else
             {
                 stage?.Invoke("proof checking");
-                Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "Proof.olean"), Path.Combine(fresh, "Proof.lean")],
+                RequireStagedProofSources();
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "Proof.olean"), stagedProof],
                     leanPath: leanPath, progress: "Checking Proof: " + entry);
             }
+            RequireStagedProofSources();
             var built = OleanHashes(fresh, session);
             RequireOnlyAdded(bound, built, "Proof");
             string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"], .. importModules,
@@ -1277,7 +1317,9 @@ unsafe def main (args : List String) : IO Unit := do
             // The audit reads the bytes leanchecker replayed: nothing may change until it finishes.
             stage?.Invoke("theorem audit");
             string[] auditModules = ["Proof", "ExtractionAudit", .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
+            RequireStagedProofSources();
             var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(theorem, extraction), ExtractionCertificate("ExtractionAudit.valid")], ImportPremise(extraction));
+            RequireStagedProofSources();
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
             RequireAuditedModule(audited, "Proof", Path.Combine(fresh, "Proof.olean"));
@@ -1290,6 +1332,10 @@ unsafe def main (args : List String) : IO Unit := do
             stage?.Invoke("theorem audit");
             axioms = AuditedAxioms(audited.theorems[0]);
             audit = AuditText(audited.theorems[0]);
+            RequireOriginalProofSources();
+            RequireStagedProofSources();
+            if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
+                throw new InvalidOperationException("Inputs changed during verification");
             if (!proofRestored)
             {
                 var publication = Path.Combine(fresh, "proof-cache");
@@ -1314,6 +1360,7 @@ unsafe def main (args : List String) : IO Unit := do
         stage?.Invoke("extraction integrity");
         Run(existingArtifacts ? ["dotnet", ExtractorPath, "check", output] : Extract("check", assembly, identity, entry, output, profile));
 
+        RequireOriginalProofSources();
         if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
             throw new InvalidOperationException("Inputs changed during verification");
 

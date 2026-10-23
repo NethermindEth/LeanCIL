@@ -125,6 +125,53 @@ if (report.GetProperty("contractImports").GetArrayLength() != 1)
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
 
 string originalInterface = contract["interfaceModules"]![0]!["source"]!.GetValue<string>();
+string selectedProof = Path.Combine(directory, "SelectedCaller.lean");
+string selectedProofSource = File.ReadAllText(Path.Combine(fixture, "Caller.lean"));
+File.WriteAllText(selectedProof, selectedProofSource);
+string substitutedSourceMarker = Path.Combine(directory, "proof-source-substitution");
+File.Delete(substitutedSourceMarker);
+string weakerProof = """
+import ExtractedImports
+namespace ExampleProof
+theorem correctness : CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun _ => True) := by
+  intro linked links imported
+  trivial
+#print axioms correctness
+end ExampleProof
+""";
+contract["interfaceModules"]![0]!["source"] = "import Lean\n" + originalInterface + $$"""
+
+open Lean Elab Command in
+run_cmd do
+  let folder := (System.FilePath.mk (<- getFileName)).parent.getD "."
+  IO.FS.writeFile (folder / "Proof.lean") {{JsonSerializer.Serialize(weakerProof)}}
+  IO.FS.writeFile {{JsonSerializer.Serialize(substitutedSourceMarker)}} "rewritten"
+""";
+Save();
+Run(Command());
+string sourceAttackCache = Path.Combine(directory, "proof-source-cache-" + Guid.NewGuid().ToString("N"));
+string? previousSourceAttackCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", sourceAttackCache);
+    (int Code, string Output, string Stdout, string Stderr) sourceAttack =
+        Execute([.. cli, "verify", output, "--proof", selectedProof]);
+    bool proofReceipt = Directory.Exists(sourceAttackCache) && Directory.EnumerateFiles(sourceAttackCache, "receipt.json", SearchOption.AllDirectories)
+        .Any(path => JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path))!.Keys
+            .Any(name => name.StartsWith("Proof.olean", StringComparison.Ordinal)));
+    if (sourceAttack.Code != 1 ||
+        !sourceAttack.Output.Contains("Proof sources changed during verification: Proof.lean", StringComparison.Ordinal) ||
+        !File.Exists(substitutedSourceMarker) || File.ReadAllText(selectedProof) != selectedProofSource ||
+        File.Exists(Path.Combine(output, "verified.json")) || proofReceipt)
+        throw new InvalidOperationException("A pinned interface substituted the selected proof source or left a report or proof receipt: " + sourceAttack.Output);
+}
+finally
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", previousSourceAttackCache);
+    Reset();
+}
+Console.WriteLine("PASS pinned interface proof-source substitution rejects with unchanged original proof and no report or proof receipt");
+Run(Command());
 contract["interfaceModules"]![0]!["source"] = "  /- outer /- nested -/ -/ import ZContractBase\n" +
     originalInterface + "\nexample : ZContractHeader.token = 7 := rfl\n";
 contract["interfaceModules"]!.AsArray().Add(new JsonObject
