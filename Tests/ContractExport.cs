@@ -1,11 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Mono.Cecil;
 
 string[] cli = ["dotnet", ExtractorPath];
 string root = At("artifacts/ContractExport-" + Guid.NewGuid().ToString("N"));
@@ -30,8 +32,12 @@ File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
 """);
 string librarySource = Path.Combine(libraryRoot, "Library.cs");
 File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; " +
-    "internal static ulong Hidden(ulong value) => value + 1; } public struct Value { public ulong Field; public ulong Add(ulong value) => value + Field; } " +
-    "public static class Seeded { public static readonly ulong Seed = (ulong)System.Environment.ProcessorCount; }\n");
+    "public static ulong Generic<T>(ulong value) => value + 1; internal static ulong Hidden(ulong value) => value + 1; } " +
+    "public struct Value { public ulong Field; public ulong Add(ulong value) => value + Field; } " +
+    "public static class Seeded { public static readonly ulong Seed = (ulong)System.Environment.ProcessorCount; } " +
+    "public struct ConstantWord { public ulong Value; public ConstantWord(ulong value) { Value = value; } " +
+    "public static implicit operator ConstantWord(ulong value) => new(value); public static readonly ConstantWord One = 1ul; } " +
+    "public static class StaticReader { public static ulong Read() { ConstantWord copy = ConstantWord.One; copy.Value += 1; return copy.Value; } }\n");
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => Library.AddOne(value); }\n");
 Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string library = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.dll");
@@ -104,7 +110,7 @@ void RejectExport(JsonObject manifest, string marker, string? previous)
 {
     File.WriteAllText(manifestPath, manifest.ToJsonString());
     (int Code, string Output, string Stdout, string Stderr) result = Execute([.. cli, "export-contracts", manifestPath, "--output", sidecar]);
-    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal) ||
+    if (result.Code != 1 || !result.Output.Contains(marker, StringComparison.Ordinal) ||
         (previous is null ? File.Exists(sidecar) : !File.Exists(sidecar) || Sha(sidecar) != previous))
         throw new InvalidOperationException("Failed export changed/published a sidecar: " + result.Output);
 }
@@ -192,6 +198,36 @@ foreach ((string Name, string Method, string Marker) restriction in new[]
     ("instance", "ImportFixture.Value::Add(ulong)", shape)
 })
     RejectExport(RestrictedManifest(library, restriction.Method, Restriction(restriction.Name, library, restriction.Method)), restriction.Marker, restricted);
+string genericOutput = Path.Combine(root, "Restriction-generic");
+(int Code, string Output, string Stdout, string Stderr) generic = Execute([.. cli, "extract", library,
+    "ImportFixture.Library::Generic(ulong)", genericOutput]);
+if (generic.Code != 1 || !generic.Output.Contains(
+    "Unsupported method metadata or static initialisation: System.UInt64 ImportFixture.Library::Generic(System.UInt64)", StringComparison.Ordinal) ||
+    File.Exists(Path.Combine(genericOutput, "Extracted.lean")) || File.Exists(Path.Combine(genericOutput, "identity.json")) ||
+    File.Exists(Path.Combine(genericOutput, "verified.json")) || Sha(sidecar) != restricted)
+    throw new InvalidOperationException("An open generic export candidate was not rejected before extraction: " + generic.Output);
+string virtualAssembly = Path.Combine(root, "Virtual.dll");
+using (ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(library))))
+{
+    MethodDefinition method = module.GetType("ImportFixture.Library").Methods.Single(candidate => candidate.Name == "AddOne");
+    method.IsVirtual = true;
+    module.Write(virtualAssembly);
+}
+string virtualArtifact = Restriction("virtual", virtualAssembly, "ImportFixture.Library::AddOne(ulong)");
+RejectExport(RestrictedManifest(virtualAssembly, "ImportFixture.Library::AddOne(ulong)", virtualArtifact), shape, restricted);
+if (File.Exists(Path.Combine(virtualArtifact, "verified.json")))
+    throw new InvalidOperationException("A rejected virtual export published a verification report.");
+string staticValueArtifact = Restriction("static-values", library, "ImportFixture.StaticReader::Read()",
+    "--assume-initialized", "ImportFixture.ConstantWord");
+JsonElement staticValueIdentity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(staticValueArtifact, "identity.json")));
+if (staticValueIdentity.GetProperty("staticValues").GetArrayLength() != 1 ||
+    staticValueIdentity.GetProperty("initializedTypes").GetArrayLength() != 1)
+    throw new InvalidOperationException("Precondition: the real static-value export candidate must record its value and initialization assumption.");
+RejectExport(RestrictedManifest(library, "ImportFixture.StaticReader::Read()", staticValueArtifact),
+    assumptions + "initializedTypes", restricted);
+if (File.Exists(Path.Combine(staticValueArtifact, "verified.json")))
+    throw new InvalidOperationException("A rejected static-value export published a verification report.");
+Console.WriteLine("PASS generic, virtual and static-value export candidates reject without changing the published sidecar");
 RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
     Restriction("initialized", library, "ImportFixture.Library::AddOne(ulong)", "--assume-initialized", "ImportFixture.Seeded")),
     assumptions + "initializedTypes", restricted);
