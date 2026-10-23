@@ -1,4 +1,5 @@
 import CIL.Interface.Closure
+import CIL.Safety.MethodContract
 
 open Lean CIL.Interface
 
