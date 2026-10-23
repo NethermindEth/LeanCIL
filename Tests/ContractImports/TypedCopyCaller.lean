@@ -19,7 +19,9 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   refine run_next_exists _ found (by rfl : Extracted.method0.code[1]? = some (.arg 1))
     (by cil_checked_step [checkedValue, formValue, checkedAt, destinationForm, Except.mapError]) ?_
   refine run_call_of_contract holds (source, destination, value) found
-    (by rfl : Extracted.method0.code[2]? = some (.call 1 2)) (by cil_checked_step []) rfl
+    (by rfl : Extracted.method0.code[2]? = some (.call 1 2))
+    (by cil_checked_step [formValue, sourceForm, destinationForm,
+      TypedImportInterface.copy, Except.mapError]) rfl
     ⟨formed, readable, writable⟩ ?_
   rintro final values _ framed returns
   obtain ⟨output, rfl, copied⟩ := returns

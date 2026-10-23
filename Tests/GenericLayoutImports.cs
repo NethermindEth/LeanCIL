@@ -15,7 +15,8 @@ string root = At("artifacts/GenericLayoutImports-" + Guid.NewGuid().ToString("N"
 string libRoot = Path.Combine(root, "Lib");
 string appRoot = Path.Combine(root, "App");
 string package = Path.Combine(root, "Proofs");
-foreach (string directory in new[] { libRoot, appRoot, package }) Directory.CreateDirectory(directory);
+string callerPackage = Path.Combine(root, "CallerProofs");
+foreach (string directory in new[] { libRoot, appRoot, package, callerPackage }) Directory.CreateDirectory(directory);
 string[] cli = ["dotnet", ExtractorPath];
 string libProject = Path.Combine(libRoot, "Lib.csproj");
 string appProject = Path.Combine(appRoot, "App.csproj");
@@ -61,11 +62,21 @@ string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(package, "lakefile.toml"),
     "name = \"typed-import-proofs\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
     "\nrev = " + JsonSerializer.Serialize(revision) +
-    "\n[[lean_lib]]\nname = \"TypedImportInterface\"\n[[lean_lib]]\nname = \"TypedIdentityProof\"\n[[lean_lib]]\nname = \"TypedCopyProof\"\n[[lean_lib]]\nname = \"TypedIdentityCaller\"\n[[lean_lib]]\nname = \"TypedCopyCaller\"\n");
+    "\n[[lean_lib]]\nname = \"PublishedTypedInterface\"\n[[lean_lib]]\nname = \"TypedIdentityProof\"\n[[lean_lib]]\nname = \"TypedCopyProof\"\n");
 File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
-foreach (string name in new[] { "TypedImportInterface", "TypedIdentityProof", "TypedCopyProof", "TypedIdentityCaller", "TypedCopyCaller" })
-    File.Copy(At("Tests/ContractImports/" + name + ".lean"), Path.Combine(package, name + ".lean"));
+foreach (string name in new[] { "TypedImportInterface", "TypedIdentityProof", "TypedCopyProof" })
+    File.WriteAllText(Path.Combine(package, (name == "TypedImportInterface" ? "PublishedTypedInterface" : name) + ".lean"),
+        File.ReadAllText(At("Tests/ContractImports/" + name + ".lean"))
+            .Replace("import TypedImportInterface", "import PublishedTypedInterface", StringComparison.Ordinal));
 Run(["lake", "update"], package);
+File.WriteAllText(Path.Combine(callerPackage, "lakefile.toml"),
+    "name = \"typed-import-callers\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
+    "\nrev = " + JsonSerializer.Serialize(revision) +
+    "\n[[lean_lib]]\nname = \"TypedIdentityCaller\"\n[[lean_lib]]\nname = \"TypedCopyCaller\"\n");
+File.Copy(At("lean-toolchain"), Path.Combine(callerPackage, "lean-toolchain"));
+foreach (string name in new[] { "TypedIdentityCaller", "TypedCopyCaller" })
+    File.Copy(At("Tests/ContractImports/" + name + ".lean"), Path.Combine(callerPackage, name + ".lean"));
+Run(["lake", "update"], callerPackage);
 string copyArtifact = Path.Combine(root, "Copy");
 string identityArtifact = Path.Combine(root, "Identity");
 string manifest = Path.Combine(root, "export.json");
@@ -95,7 +106,7 @@ void Publish()
     File.WriteAllText(manifest, JsonSerializer.Serialize(new
     {
         schema = 1, assembly = lib, proofRoot = package,
-        @interface = new[] { new { module = "TypedImportInterface", source = Path.Combine(package, "TypedImportInterface.lean") } },
+        @interface = new[] { new { module = "PublishedTypedInterface", source = Path.Combine(package, "PublishedTypedInterface.lean") } },
         exports = new object[]
         {
             new { method = "TypedFixture.Library::Copy(TypedFixture.Pair&,TypedFixture.Pair&)", artifact = copyArtifact,
@@ -202,9 +213,9 @@ foreach ((string name, string selector, string proof) in new[]
 {
     string artifact = Path.Combine(root, "App-" + name);
     Run([.. cli, "extract", app, selector, artifact, .. Import(sidecar, interfaceDigest)]);
-    string author = Path.Combine(package, proof + ".lean");
-    Run([.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness", "--proof-root", package]);
-    Run([.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness", "--proof-root", package, "--force-full-verify"]);
+    string author = Path.Combine(callerPackage, proof + ".lean");
+    Run([.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness", "--proof-root", callerPackage]);
+    Run([.. cli, "verify", artifact, "--proof", author, "--theorem", proof + ".correctness", "--proof-root", callerPackage, "--force-full-verify"]);
     JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
     JsonElement imported = report.GetProperty("imports")[0];
     if (imported.GetProperty("acceptedVia").GetString() != "independently-verified" ||
