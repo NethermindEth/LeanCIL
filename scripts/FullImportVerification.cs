@@ -47,7 +47,7 @@ partial class Program
 
     void PreflightFullImports(string output, IReadOnlyDictionary<string, string> overrides)
     {
-        JsonElement[] imports = ImportedBindings(output);
+        JsonElement[] imports = ExtractionIdentity.Read(output).Imports;
         if (imports.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         HashSet<string> used = new(StringComparer.Ordinal);
         foreach (JsonElement binding in imports) SelectFullBundle(binding, overrides, used);
@@ -79,7 +79,7 @@ partial class Program
         SortedDictionary<string, string> originalModules = FullModulePaths(originalLeanPath);
         string originalClaim = CaptureFullCallerClaim(callerSession, callerModule, callerTheorem, originalLeanPath);
         CheckFullResolution(callerSession, originalLeanPath, originalModules);
-        JsonElement[] bindings = ImportedBindings(output).OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
+        JsonElement[] bindings = ExtractionIdentity.Read(output).Imports.OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
         if (bindings.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         for (int index = 0; index < bindings.Length; index++)
             if (bindings[index].GetProperty("slot").GetInt32() != index)

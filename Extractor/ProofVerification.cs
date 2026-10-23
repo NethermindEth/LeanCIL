@@ -291,7 +291,8 @@ partial class Program
             foreach (PublishedImport import in report.imports ?? [])
             {
                 Console.WriteLine("  Imported contract accepted via " + import.acceptedVia + ": " + import.identity);
-                Console.WriteLine("  Published certification: " + import.certificationTheorem + " : " + import.certificationStatement);
+                Console.WriteLine("  Published certification (unauthenticated sidecar record, sidecar SHA-256 " + import.sidecarSha256 + "): " +
+                    import.certificationTheorem + " : " + import.certificationStatement);
                 Console.WriteLine("  Deployment obligation: " + import.deploymentObligation);
             }
             if (report.compositionTheorem is not null)

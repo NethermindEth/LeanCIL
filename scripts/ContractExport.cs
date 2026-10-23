@@ -56,7 +56,7 @@ partial class Program
             throw new InvalidDataException("Duplicate contract export method/profile pair.");
         if (prepared.GroupBy(export => export.Identity).Any(group => group.Select(export => export.Request.Contract).Distinct(StringComparer.Ordinal).Count() != 1))
             throw new InvalidDataException("One exported method must name one contract across its profiles.");
-        InterfaceModule[] interfaces = manifest.Interface.Select(source => new InterfaceModule(source.Module, File.ReadAllText(source.Source))).ToArray();
+        InterfaceModule[] interfaces = manifest.Interface.Select(source => new InterfaceModule(source.Module, ProofRootInterface(manifest, source, before))).ToArray();
         string staging = Path.Combine(Path.GetTempPath(), "leancil-contract-export-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
         try
@@ -99,6 +99,7 @@ partial class Program
                 module.Mvid, target, implementationHash, false, interfaces, "", exports, [], []);
             sidecar = sidecar with { InterfaceDigest = sidecar.ComputeInterfaceDigest() };
             sidecar = AddExportCertifications(sidecar, verified);
+            if (!Same(before, ExportInputs(manifestPath, manifest))) throw new InvalidDataException("Contract export inputs changed before publication.");
             if (bundle is not null)
             {
                 string digest = PublishContractSources(bundle, staging, manifestPath, manifest, before, verified);
@@ -132,16 +133,40 @@ partial class Program
         string pdb = Path.ChangeExtension(manifest.Assembly, ".pdb");
         inputs["pdb:" + pdb] = File.Exists(pdb) ? Sha(pdb) : "absent";
         foreach (ContractSource source in manifest.Interface) inputs["interface:" + source.Source] = Sha(source.Source);
+        foreach (string path in FrameworkBundleSources()) inputs["framework:" + path] = Sha(path);
         foreach (ContractExportRequest export in manifest.Exports)
             foreach (string file in new[] { "identity.json", "verification.json", "Extracted.lean" })
                 inputs["artifact:" + Path.Combine(export.Artifact, file)] = Sha(Path.Combine(export.Artifact, file));
         return inputs;
     }
 
+    static IEnumerable<string> FrameworkBundleSources() => Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
+        .Append(At("CIL.lean")).Append(At("lean-toolchain")).Append(At("lakefile.toml")).Append(At("lake-manifest.json"));
+
+    static string? SnapshotSource(SortedDictionary<string, string> snapshot, string path)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        path = Path.GetFullPath(path);
+        return snapshot.Where(pair => pair.Key.StartsWith("consumer:", StringComparison.Ordinal) &&
+            Path.GetFullPath(pair.Key["consumer:".Length..]).Equals(path, comparison)).Select(pair => pair.Value).FirstOrDefault();
+    }
+
+    // The published text is the proofRoot module the export proof compiled against, byte for byte.
+    static string ProofRootInterface(ContractExportManifest manifest, ContractSource source, SortedDictionary<string, string> before)
+    {
+        string module = Path.Combine(manifest.ProofRoot, source.Module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+        byte[] bytes = File.ReadAllBytes(source.Source);
+        string published = ContractInterface.Hash(bytes);
+        if (published != before["interface:" + source.Source] || SnapshotSource(before, module) != published)
+            throw new InvalidDataException("Published contract interface source must be byte-identical to its proofRoot module: " + source.Module);
+        using StreamReader reader = new(new MemoryStream(bytes));
+        return reader.ReadToEnd();
+    }
+
     static PreparedContractExport PrepareContractExport(ContractExportManifest manifest, ModuleDefinition module, ContractExportRequest request)
     {
         Run(["dotnet", ExtractorPath, "check", request.Artifact, "--assembly-path", manifest.Assembly]);
-        JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Artifact, "identity.json")));
+        JsonElement identity = ExtractionIdentity.Read(request.Artifact).Root;
         MethodDefinition method = MethodSelector.Resolve(module, request.Method);
         FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>() ?? throw new InvalidDataException("Missing export profile.");
         if (FeatureProfile.Select(profile.Name) != profile) throw new InvalidDataException("Contract exports require an exact built-in profile.");
@@ -354,33 +379,52 @@ run_cmd liftTermElabM do
     static string PublishContractSources(string bundle, string staging, string manifestPath, ContractExportManifest manifest,
         SortedDictionary<string, string> snapshot, IReadOnlyList<CheckedContractExport> verified)
     {
+        // Every bundled file must still hash to the bytes the export audited.
         SortedDictionary<string, string> sources = new(StringComparer.Ordinal) { ["producer/manifest.json"] = manifestPath };
+        SortedDictionary<string, string> expected = new(StringComparer.Ordinal) { ["producer/manifest.json"] = snapshot["manifest:" + manifestPath] };
         foreach (string key in snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal)))
         {
             string path = key["consumer:".Length..];
-            sources["consumer/" + Path.GetRelativePath(manifest.ProofRoot, path).Replace('\\', '/')] = path;
+            string relative = Path.GetRelativePath(manifest.ProofRoot, path).Replace('\\', '/');
+            // The framework package duplicates framework/, which the bundle already pins.
+            if (relative.StartsWith(".lake/packages/leancil/", StringComparison.Ordinal)) continue;
+            sources["consumer/" + relative] = path;
+            expected["consumer/" + relative] = snapshot[key];
         }
         foreach (ContractSource source in manifest.Interface)
+        {
             sources["interface/" + source.Module.Replace('.', '/') + ".lean"] = source.Source;
-        foreach (string path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
-            .Append(At("CIL.lean")).Append(At("lean-toolchain")).Append(At("lakefile.toml")).Append(At("lake-manifest.json")))
+            expected["interface/" + source.Module.Replace('.', '/') + ".lean"] = snapshot["interface:" + source.Source];
+        }
+        foreach (string path in FrameworkBundleSources())
+        {
             sources["framework/" + Path.GetRelativePath(Root, path).Replace('\\', '/')] = path;
+            expected["framework/" + Path.GetRelativePath(Root, path).Replace('\\', '/')] = snapshot["framework:" + path];
+        }
         for (int index = 0; index < verified.Count; index++)
         {
             CheckedContractExport result = verified[index];
             string prefix = "exports/" + index + "/";
             foreach (string file in new[] { "Extracted.lean", "identity.json", "verification.json" })
+            {
                 sources[prefix + file] = Path.Combine(result.Export.Request.Artifact, file);
+                expected[prefix + file] = snapshot["artifact:" + Path.Combine(result.Export.Request.Artifact, file)];
+            }
             string auditPath = Path.Combine(staging, "ExportAudit" + index + ".lean");
             File.WriteAllText(auditPath, "import " + result.AuthorModule + "\n" + result.AuditSource);
             sources[prefix + "ExportAudit.lean"] = auditPath;
+            expected[prefix + "ExportAudit.lean"] = Sha(auditPath);
             sources[prefix + result.AuthorModule + ".lean"] = result.Export.Proof;
+            expected[prefix + result.AuthorModule + ".lean"] = SnapshotSource(snapshot, result.Export.Proof)
+                ?? throw new InvalidDataException("Export proof is outside the proof snapshot: " + result.Export.Proof);
         }
+        string revision = snapshot.TryGetValue("revision:leancil", out string? pinned) ? pinned.ToLowerInvariant()
+            : throw new InvalidDataException("Contract bundles require a proofRoot pinned to a leancil revision.");
         JsonElement bindings = JsonSerializer.SerializeToElement(verified.Select(result => new
         {
             result.Export.Identity, result.Export.Profile, result.Export.Request.Contract, result.Export.Request.Theorem,
             result.Closure.Digest, result.StatementDigest, result.Statement
         }).ToArray(), ContractExportManifest.Json);
-        return ContractSourceBundle.Publish(bundle, sources, bindings);
+        return ContractSourceBundle.Publish(bundle, sources, expected, bindings, ContractInterface.CurrentFrameworkKey(), revision);
     }
 }

@@ -6,13 +6,16 @@ namespace Nethermind.LeanCIL;
 
 internal sealed class ImportResolution : IDisposable
 {
-    internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256, string ExpectedInterfaceDigest);
+    // A discovered sidecar is read only when a call site needs its library, so unused sidecars need no pins.
+    internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256, string ExpectedInterfaceDigest, bool Discovered = false);
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
         string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
         string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind,
         string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     readonly List<Library> libraries = [];
+    readonly HashSet<Library> used = [];
+    readonly Dictionary<string, Source> discovered = new(StringComparer.Ordinal);
     readonly List<Binding> bindings = [];
     readonly Dictionary<Instruction, int> sites = [];
     internal IReadOnlyList<Binding> Bindings => bindings;
@@ -23,6 +26,16 @@ internal sealed class ImportResolution : IDisposable
         {
             foreach (Source source in sources)
             {
+                if (source.Discovered) discovered[Path.GetFileName(source.SidecarPath)[..^".leancil.contracts".Length]] = source;
+                else Load(source);
+            }
+            Modules(libraries);
+        }
+        catch { Dispose(); throw; }
+    }
+
+    void Load(Source source)
+    {
                 byte[] sidecar = File.ReadAllBytes(source.SidecarPath);
                 ContractInterface contract = ContractInterface.Read(sidecar);
                 byte[] implementation = File.ReadAllBytes(source.ImplementationPath);
@@ -57,10 +70,6 @@ internal sealed class ImportResolution : IDisposable
                     libraries.Add(new(source, contract, ContractInterface.Hash(sidecar), module));
                 }
                 catch { module.Dispose(); throw; }
-            }
-            InterfaceModules();
-        }
-        catch { Dispose(); throw; }
     }
 
     internal static bool External(MethodReference reference, ModuleDefinition module) =>
@@ -68,11 +77,18 @@ internal sealed class ImportResolution : IDisposable
 
     internal void Admit(MethodReference reference, Instruction instruction, FeatureProfile profile)
     {
+        // Shapes no sidecar can import are rejected before any sidecar is read or suggested.
         if (instruction.OpCode.Code != Code.Call)
             throw new InvalidDataException("Contract imports support call only, not callvirt, newobj or ldftn.");
         if (reference is GenericInstanceMethod || reference.HasGenericParameters || reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters)
             throw new InvalidDataException("Generic contract imports are not supported in version 1.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
+        if (!libraries.Any(candidate => candidate.Interface.AssemblyIdentity == assembly) &&
+            discovered.Remove(reference.DeclaringType.Scope.Name, out Source? pending))
+        {
+            Load(pending);
+            Modules(libraries);
+        }
         Library? library = libraries.SingleOrDefault(candidate => candidate.Interface.AssemblyIdentity == assembly);
         if (library is null)
             throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Next: supply --import {reference.DeclaringType.Scope.Name}.leancil.contracts and --import-sha256 {reference.DeclaringType.Scope.Name}=<hex> and --import-interface-sha256 {reference.DeclaringType.Scope.Name}=<hex>.");
@@ -107,6 +123,7 @@ internal sealed class ImportResolution : IDisposable
         if (certification.ImplementationSha256 != library.Interface.ImplementationSha256 ||
             certification.InterfaceDigest != library.Interface.InterfaceDigest || certification.ClosureDigest != export.ClosureDigest)
             throw new InvalidDataException("Contract import certification binding mismatch.");
+        used.Add(library);
         int slot = bindings.FindIndex(binding => binding.Identity == identity);
         if (slot < 0)
         {
@@ -139,12 +156,16 @@ internal sealed class ImportResolution : IDisposable
         return false;
     }
 
-    internal SortedDictionary<string, string> InterfaceModules()
+    // Only libraries with a bound call site contribute modules to the extraction.
+    internal SortedDictionary<string, string> InterfaceModules() => Modules(libraries.Where(used.Contains));
+
+    static SortedDictionary<string, string> Modules(IEnumerable<Library> selected)
     {
         SortedDictionary<string, string> modules = new(StringComparer.Ordinal);
-        foreach (InterfaceModule module in libraries.SelectMany(library => library.Interface.InterfaceModules))
+        foreach (InterfaceModule module in selected.SelectMany(library => library.Interface.InterfaceModules))
         {
-            if (modules.TryGetValue(module.Name, out string? prior) && prior != module.Source)
+            if ((modules.TryGetValue(module.Name, out string? prior) && prior != module.Source) ||
+                modules.Keys.Any(name => name != module.Name && string.Equals(name, module.Name, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidDataException("Conflicting contract interface module: " + module.Name);
             modules[module.Name] = module.Source;
         }
@@ -166,5 +187,6 @@ internal sealed class ImportResolution : IDisposable
     {
         foreach (Library library in libraries) library.Module.Dispose();
         libraries.Clear();
+        used.Clear();
     }
 }

@@ -160,9 +160,75 @@ theorem scalarUnsafe_shiftRight_all_concretizations (value : Vector.V256) (low :
   exact congrArg
     (fun count => some (Value.v256 (Vector.shiftRightCount64 value count))) represents
 
+/-- `concrete` is a value the runtime may hold where the model holds `value`. -/
+def Concretizes (value concrete : Value) : Prop :=
+  match value with
+  | .v128Low64 _ => ∃ bits, concrete = .v128 bits ∧ Vector128Represents value bits
+  | _ => concrete = value
+
+def ConcretizesAll : List Value → List Value → Prop
+  | [], [] => True
+  | value :: values, concrete :: concretes => Concretizes value concrete ∧ ConcretizesAll values concretes
+  | _, _ => False
+
+/-- Whatever the unspecified upper lanes hold, the ISA result agrees with the model result. -/
+theorem evalUnspecifiedIntrinsic_concretizations {op : Intrinsic} {args concrete : List Value} {result : Value}
+    (evaluated : evalUnspecifiedIntrinsic op args = some result)
+    (represents : ConcretizesAll args concrete) :
+    ∃ value, evalIntrinsic op concrete = some value ∧ Concretizes result value := by
+  unfold evalUnspecifiedIntrinsic at evaluated
+  split at evaluated
+  · cases evaluated
+    rcases concrete with _ | ⟨first, _ | ⟨_, _⟩⟩ <;> simp only [ConcretizesAll, and_false, and_true] at represents
+    obtain ⟨bits, rfl, lane⟩ := represents
+    exact ⟨.v128 bits, rfl, bits, rfl, lane⟩
+  · rename_i low index
+    rcases concrete with _ | ⟨first, _ | ⟨second, _ | ⟨_, _⟩⟩⟩ <;>
+      simp only [ConcretizesAll, and_false, and_true] at represents
+    obtain ⟨⟨bits, rfl, lane⟩, rfl⟩ := represents
+    change Vector.lane64 bits 0 = low at lane
+    split at evaluated
+    · rename_i zero
+      cases evaluated
+      have zero : index.toNat = 0 := Nat.eq_of_beq_eq_true zero
+      refine ⟨.i64 low, ?_, rfl⟩
+      show (if index.toNat < 2 then some (Value.i64 (Vector.lane64 bits index.toNat)) else none) = _
+      rw [zero, lane]
+      rfl
+    · cases evaluated
+  all_goals first
+    | cases evaluated
+      rcases concrete with _ | ⟨first, _ | ⟨second, _ | ⟨_, _⟩⟩⟩ <;>
+        simp only [ConcretizesAll, and_false, and_true] at represents
+      obtain ⟨rfl, bits, rfl, lane⟩ := represents
+      change Vector.lane64 bits 0 = _ at lane
+      exact ⟨_, rfl, by simp only [Concretizes, lane]⟩
+    | cases evaluated
+
+/-- The checked and the plain evaluator agree wherever unspecified lanes are consumed. -/
+theorem evalUnspecifiedIntrinsic_sound {op : Intrinsic} {args : List Value} {result : Value}
+    (evaluated : evalUnspecifiedIntrinsic op args = some result) : evalIntrinsic op args = some result := by
+  unfold evalUnspecifiedIntrinsic at evaluated
+  split at evaluated
+  all_goals first | (cases evaluated; rfl) | (cases evaluated) | exact evaluated
+
 end CIL
 
 namespace CIL.Safety
+
+/-- Every intrinsic the checked semantics evaluates on unspecified lanes agrees with every
+    runtime concretisation of them; no other operation can succeed on such operands. -/
+theorem checkedIntrinsic_unspecified {op : CIL.Intrinsic} {operands concrete : List CIL.Value} {result : CIL.Value}
+    (unspecified : operands.any CIL.Value.hasUnspecified = true)
+    (checked : checkedIntrinsic op operands = .ok result)
+    (represents : CIL.ConcretizesAll operands concrete) :
+    ∃ value, CIL.evalIntrinsic op concrete = some value ∧ CIL.Concretizes result value := by
+  unfold checkedIntrinsic at checked
+  simp only [unspecified, ite_true] at checked
+  split at checked
+  · cases checked
+    exact CIL.evalUnspecifiedIntrinsic_concretizations (by assumption) represents
+  · cases checked
 
 theorem opaque128_load (memory : Memory) (value : Opaque128Value) :
     loadLocal memory (.opaque128 (some value)) = .ok (.scalar value.value) := rfl
@@ -217,3 +283,24 @@ end CIL.Safety
 #print axioms CIL.Vector.zip512_lane
 #print axioms CIL.Vector.shiftLeftCount64_lane
 #print axioms CIL.Vector.shiftRightCount64_lane
+#print axioms CIL.Vector.lane512_0
+#print axioms CIL.Vector.lane512_1
+#print axioms CIL.Vector.lane512_2
+#print axioms CIL.Vector.lane512_3
+#print axioms CIL.Vector.lane512_4
+#print axioms CIL.Vector.lane512_5
+#print axioms CIL.Vector.lane512_6
+#print axioms CIL.Vector.lane512_7
+#print axioms CIL.Vector.lane64_and
+#print axioms CIL.Vector.lane64_or
+#print axioms CIL.Vector.lane64_xor
+#print axioms CIL.Vector.lane64_andNot
+#print axioms CIL.Vector.map256_lane
+#print axioms CIL.scalarUnsafe_extract_all_concretizations
+#print axioms CIL.scalarUnsafe_reinterpret_preserves
+#print axioms CIL.evalUnspecifiedIntrinsic_concretizations
+#print axioms CIL.evalUnspecifiedIntrinsic_sound
+#print axioms CIL.Safety.checkedIntrinsic_unspecified
+#print axioms CIL.Safety.opaque128_load
+#print axioms CIL.Safety.opaque128_init_zero
+#print axioms CIL.Safety.opaque128_init_unknown
