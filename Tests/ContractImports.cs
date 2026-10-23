@@ -572,16 +572,16 @@ Reset();
 // Closed generic imports are supported, but this sidecar exports only AddOne.
 Reject(Command(method: "Generic"), "Contract export not present: " + contract["assemblyIdentity"]!.GetValue<string>() +
     "::T ImportFixture.Library::Identity<System.UInt64>(T)|arguments|");
-foreach (Action<MethodDefinition> mutation in new Action<MethodDefinition>[]
+foreach ((Action<MethodDefinition> Mutation, string Diagnostic) test in new (Action<MethodDefinition>, string)[]
 {
-    method => { method.IsStatic = false; method.HasThis = true; },
-    method => method.IsVirtual = true,
-    method => { method.IsPublic = false; method.IsPrivate = true; }
+    (method => { method.IsStatic = false; method.HasThis = true; }, "Contract definition not present or ambiguous:"),
+    (method => method.IsVirtual = true, "must be static, non-virtual and public or protected"),
+    (method => { method.IsPublic = false; method.IsPrivate = true; }, "must be static, non-virtual and public or protected")
 })
 {
     Reset();
-    MutateLibrary(module => mutation(module.GetType("ImportFixture.Library").Methods.Single(method => method.Name == "AddOne")));
-    Reject(Command(), "must be static, non-virtual and public or protected");
+    MutateLibrary(module => test.Mutation(module.GetType("ImportFixture.Library").Methods.Single(method => method.Name == "AddOne")));
+    Reject(Command(), test.Diagnostic);
 }
 foreach ((OpCode opcode, string diagnostic) in new[]
 {
