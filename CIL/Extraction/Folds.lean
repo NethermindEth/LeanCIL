@@ -2,9 +2,6 @@ import CIL.Extraction.Generics
 
 namespace CIL.Extraction
 
-private def runtimeScope : String :=
-  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-
 private def plainChar (c : Char) : Bool :=
   c.isAlphanum || c == '_' || c == '.' || c == '/' || c == '`'
 

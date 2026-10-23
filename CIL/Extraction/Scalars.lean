@@ -12,7 +12,7 @@ def scalarType : TypeExpr → ScalarKind
   | .enum _ underlying => scalarType underlying
   | .byref _ => .reference
   | .atom scope name =>
-    if scope != "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" then .other
+    if scope != runtimeScope then .other
     else if name ∈ ["System.IntPtr", "System.UIntPtr"] then .native
     else if name ∈ ["System.Int64", "System.UInt64"] then .word64
     else if name ∈ ["System.Boolean", "System.Char", "System.SByte", "System.Byte", "System.Int16",
@@ -231,12 +231,11 @@ private def callResult (site : CallSite) : ScalarKind :=
   | .external identity => externalResult site identity
 
 private def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
-  let runtime := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
   opcode == 115 && site.name == ".ctor" && site.hasThis && !site.returnsValue &&
     site.typeArguments.isEmpty && site.parameterCount == 2 && site.returnType == .void &&
-    site.declaringType == .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte") &&
-    site.parameterTypes == [.pointer .void, .atom runtime "System.Int32"] &&
-    site.target == .external (runtime ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)")
+    site.declaringType == .apply (.constructor runtimeScope "System.ReadOnlySpan`1") (.atom runtimeScope "System.Byte") &&
+    site.parameterTypes == [.pointer .void, .atom runtimeScope "System.Int32"] &&
+    site.target == .external (runtimeScope ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)")
 
 private def spanCreateMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
   let modeled := match instruction.operand with
