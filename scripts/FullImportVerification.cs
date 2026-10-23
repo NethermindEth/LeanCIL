@@ -290,23 +290,20 @@ partial class Program
         using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(implementation)));
         PreparedContractExport[] prepared = slots.Select(slot => PrepareContractExport(manifest, module, slot.Request)).ToArray();
         using Program independent = new() { freshLibrary = true, forceFullVerification = true, fullBundleDependencies = [dependency] };
-        Dictionary<string, ExportClosure> published = independent.CheckPublishedContractInterfaces(manifest, contract.InterfaceModules, prepared, staging);
         string?[] transfers = new string?[slots.Count];
         ConsumerRequest[] requests = slots.Select((slot, index) =>
         {
             ContractExport export = slot.Import.Export;
-            ExportClosure closure = published[export.ContractConstant];
-            if (closure.Digest != export.ClosureDigest || closure.Kind != export.Kind)
-                throw new InvalidDataException("Independent published interface closure mismatch.");
             ConsumerExportAudit audit = new(ExportAuditSource(prepared[index], export.Kind), (session, proofModule, leanPath) =>
             {
                 ExportClosure actual = independent.CheckExportClosure(session, proofModule, export.ContractConstant, leanPath);
                 (string statementDigest, string _) = independent.CheckExportStatement(session, proofModule, leanPath);
-                if (actual.Digest != export.ClosureDigest || actual.Canonical != closure.Canonical || actual.Kind != export.Kind ||
+                if (actual.Digest != export.ClosureDigest || actual.Kind != export.Kind ||
                     statementDigest != slot.Import.Certification.StatementDigest)
                     throw new InvalidDataException("Independent library export closure or canonical statement mismatch.");
                 transfers[index] = independent.CaptureFullTerms(session, proofModule, "LeanCILFullLibrary" + slot.Import.Slot, contract.InterfaceModules, leanPath);
-            });
+            }, [ExportTheoremRequest(export.ContractConstant, export.Kind),
+                ExportTheoremRequest(export.ContractConstant, export.Kind) with { name = slot.Author }]);
             return new ConsumerRequest(implementation, slot.Artifact, prepared[index].Proof, ExportTheorem, null, ExportAudit: audit);
         }).ToArray();
         ConsumerOutcome[] outcomes = independent.VerifyConsumerRequests(consumer, requests, null, batch: false);

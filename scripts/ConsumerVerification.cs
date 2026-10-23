@@ -853,7 +853,7 @@ unsafe def main (args : List String) : IO Unit := do
         return new(frameworkCopy, copied.ToDictionary(path => path, Sha));
     }
 
-    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked);
+    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked, AuditRequest[]? Theorems = null);
 
     sealed record ConsumerRequest(string Assembly, string Output, string Proof, string Theorem, string? Settings,
         bool ExpectRejection = false, ConsumerExportAudit? ExportAudit = null);
@@ -935,11 +935,8 @@ unsafe def main (args : List String) : IO Unit := do
             });
         }
         CheckExtractions(all);
-        // Reference-only inputs never publish or reuse receipts; the flag covers only this call.
+        // Cache eligibility is local to each request/group, including parallel groups.
         referenceOnlyAuthoring = false;
-        foreach (var i in Pending(all))
-            try { referenceOnlyAuthoring |= ReferenceOnlyImports(ExtractionIdentity.Read(outputs[i])); }
-            catch (Exception error) { Fail([i], error); }
         var live = Pending(all);
         if (live.Length == 0) return outcomes;
 
@@ -1039,7 +1036,7 @@ unsafe def main (args : List String) : IO Unit := do
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
                     (symbols[i] is null ? "" : "\n" + symbols[i]));
-                if (requests[i].ExpectRejection) continue;
+                if (requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
                 try
@@ -1340,9 +1337,11 @@ unsafe def main (args : List String) : IO Unit := do
                 {
                     var module = names[Array.IndexOf(members, i)];
                     string[] auditModules = [module, .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
-                    var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
+                    var audited = AuditOleans(leanPath, auditModules,
+                        requests[i].ExportAudit?.Theorems ?? [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
                     RequireAuditedConstants(audited);
+                    foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
                     audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]));
                 }
                 catch (Exception error) { Fail([i], error); }
@@ -1447,11 +1446,13 @@ unsafe def main (args : List String) : IO Unit := do
 
         void RunGroup(int[] members, bool first, bool share)
         {
+            bool priorReferenceOnly = referenceOnlyAuthoring;
+            referenceOnlyAuthoring = ReferenceOnlyImports(extractions[members[0]]);
             var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(session);
             try { VerifyGroup(members, session, first, share); }
             catch (Exception error) { Fail(members, error); }
-            finally { Directory.Delete(session, true); }
+            finally { referenceOnlyAuthoring = priorReferenceOnly; Directory.Delete(session, true); }
             foreach (var i in members.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
         }
 
