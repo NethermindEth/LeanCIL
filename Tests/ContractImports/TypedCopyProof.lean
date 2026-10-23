@@ -15,7 +15,7 @@ theorem permitted_alias : TypedImportInterface.copy.pre (⟨0, 0⟩, ⟨0, 0⟩,
     · rename_i same
       subst id
       cases found
-      exact ⟨by decide, by decide⟩
+      exact ⟨by decide, by simp [Allocation.WellFormed, nativeLimit]⟩
     · cases found
   · intro view member
     simp only [Examples.caller, List.mem_singleton] at member
