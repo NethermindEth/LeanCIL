@@ -132,6 +132,10 @@ internal sealed class ImportResolution : IDisposable
         // Shapes no sidecar can import are rejected before any sidecar is read or suggested.
         if (instruction.OpCode.Code != Code.Call)
             throw new InvalidDataException("Contract imports support call only, not callvirt, newobj or ldftn.");
+        if (reference is not GenericInstanceMethod && reference.HasGenericParameters ||
+            reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters ||
+            reference is GenericInstanceMethod generic && generic.GenericArguments.Count != generic.ElementMethod.GenericParameters.Count)
+            throw new InvalidDataException("Contract imports require an exact closed generic instantiation on a non-generic declaring type.");
         if (reference.DeclaringType.Scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" or "System.Private.CoreLib" or "mscorlib" or "netstandard")
             throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Contract imports from framework assemblies are not supported.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
@@ -262,6 +266,7 @@ internal sealed class ImportResolution : IDisposable
     internal bool ValidateByref(TypeReference type, FeatureProfile profile)
     {
         if (type is not ByReferenceType reference || ContractMethodMetadata.Primitive(reference.ElementType) ||
+            RuntimeModels.SupportedType(reference.ElementType) || ValueTuples.Is(reference.ElementType) ||
             reference.ElementType.Scope is not AssemblyNameReference scope) return false;
         // Framework layouts stay on the existing runtime-model path, which checks their exact scope and shape.
         if (scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory") return false;

@@ -519,6 +519,7 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
 {
     ("Unsupported contract export kind", value => value["exports"]![0]!["kind"] = "unrecognized"),
     ("Unsupported contract interface format", value => value["formatVersion"] = 3),
+    ("Typed contract exports require definition, arguments, signature and layouts", value => value["formatVersion"] = 2),
     ("Unsupported contract interface format", value => value["semanticsVersion"] = 2),
     ("framework key mismatch", value => value["frameworkKey"] = new string('0', 64)),
     ("Invalid or duplicate contract dependency", value => value["dependencies"] = new JsonArray(new JsonObject
@@ -570,8 +571,14 @@ expectedHash = new string('0', 64);
 Reject(Command(), "implementation SHA-256 mismatch: expected " + expectedHash);
 Reset();
 // Closed generic imports are supported, but this sidecar exports only AddOne.
-Reject(Command(method: "Generic"), "Contract export not present: " + contract["assemblyIdentity"]!.GetValue<string>() +
-    "::T ImportFixture.Library::Identity<System.UInt64>(T)|arguments|");
+foreach (string artifact in new[] { "Extracted.lean", "identity.json", "verified.json" })
+    File.Delete(Path.Combine(output, artifact));
+(int Code, string Output, string Stdout, string Stderr) unlistedGeneric = Execute(Command(method: "Generic"));
+if (unlistedGeneric.Code != 1 ||
+    !unlistedGeneric.Output.Contains("Contract export not present:", StringComparison.Ordinal) ||
+    !unlistedGeneric.Output.Contains("ImportFixture.Library::Identity<System.UInt64>", StringComparison.Ordinal) ||
+    new[] { "Extracted.lean", "identity.json", "verified.json" }.Any(artifact => File.Exists(Path.Combine(output, artifact))))
+    throw new InvalidOperationException("An unlisted closed generic instance did not fail before emission: " + unlistedGeneric.Output);
 foreach ((Action<MethodDefinition> Mutation, string Diagnostic) test in new (Action<MethodDefinition>, string)[]
 {
     (method => { method.IsStatic = false; method.HasThis = true; }, "Contract definition not present or ambiguous:"),
