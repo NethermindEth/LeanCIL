@@ -300,6 +300,22 @@ theorem OutcomeContract.Holds.weaken {Input Output : Type} {internal exported : 
     leaving each `.call` for `cil_outcome_raise`. -/
 syntax "cil_raise_steps_normalized" "[" term,* "]" : tactic
 
+/-- One raising step on the fetched opcode: a `throw` raises here, any other op steps to the next pc. -/
+syntax "cil_raise_run_step" "[" term,* "]" : tactic
+
+open Lean Elab Tactic in
+elab_rules : tactic
+  | `(tactic| cil_raise_run_step [$facts:term,*]) => withMainContext do
+    let (methodSyntax, instructionSyntax, operation) ←
+      cilFetchedOp ``CIL.Safety.run_next_raises some 4 facts.getElems
+    evalTactic (← if operation == ``CIL.Op.throw then
+        `(tactic| cil_strict exact CIL.Safety.run_throw_raises $methodSyntax $instructionSyntax rfl)
+      else
+        `(tactic| (
+          cil_strict refine CIL.Safety.run_next_raises $methodSyntax $instructionSyntax
+            (by cil_checked_step_normalized [$facts,*]) ?_
+          cil_stack_cleanup)))
+
 macro_rules
   | `(tactic| cil_raise_steps_normalized [$facts:term,*]) =>
   `(tactic| (
@@ -309,16 +325,8 @@ macro_rules
            (by cil_lookup [$[$facts:term],*])
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
-    cil_steps_from "cil_raise_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" first
-    | (cil_strict exact CIL.Safety.run_throw_raises
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step_normalized [$[$facts:term],*]))
-    | (cil_strict refine CIL.Safety.run_next_raises
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step_normalized [$[$facts:term],*]) ?_
-       cil_stack_cleanup)))
+    cil_steps_from "cil_raise_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts"
+      cil_raise_run_step [$[$facts:term],*]))
 
 syntax "cil_raise_steps" "[" term,* "]" : tactic
 

@@ -1,6 +1,6 @@
 import Lean
-import CIL.Safety.Equations
-import CIL.StepEquations
+-- Only the tactic module: its checked-step fallback unfolds `CIL.step`, so it must bring the shared copies.
+import CIL.Safety.SymbolicExecution
 
 namespace Tests.InterpreterEquations
 open Lean
