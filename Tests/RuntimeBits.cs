@@ -137,7 +137,8 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             "version" => "Unsupported type identity: System.UInt64 [System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
             "memory-key" => "Unsupported runtime assembly scope: " + call.FullName,
             "instance" => "Invalid evaluation stack during reachability",
-            "generic" or "return" or "argument" or "unsupported" or "memory-scope" => "External managed dependency: " + call.FullName,
+            "generic" => "Generic contract imports are not supported in version 1.",
+            "return" or "argument" or "unsupported" or "memory-scope" => "External managed dependency: " + call.FullName,
             _ => throw new InvalidOperationException("Unknown runtime rejection fixture: " + mutation)
         };
         module.Write(dll);
