@@ -241,6 +241,30 @@ byte[] deployed = File.ReadAllBytes(RidAsset("linux-x64"));
 File.WriteAllBytes(RidAsset("linux-x64"), variants["unix"]);
 Rejected("differing app-local and package copies", "Ambiguous discovery files", Resolve("linux-x64"));
 File.WriteAllBytes(RidAsset("linux-x64"), deployed);
+
+// SDK deps.json has no compile assets; the NuGet reference assembly must still be read.
+byte[] Attributed(byte[] assembly, string? advertised)
+{
+    using ModuleDefinition metadata = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+    CustomAttribute attribute = metadata.Assembly.CustomAttributes.Single(item => item.AttributeType.FullName == "Nethermind.LeanCIL.LeanCilContractsAttribute");
+    if (advertised is null) metadata.Assembly.CustomAttributes.Remove(attribute);
+    else attribute.ConstructorArguments[0] = new CustomAttributeArgument(attribute.ConstructorArguments[0].Type, advertised);
+    using MemoryStream bytes = new();
+    metadata.Write(bytes);
+    return bytes.ToArray();
+}
+string packagedReference = Path.Combine(packageRoot, "ref", "net10.0", Library + ".dll");
+byte[] originalReference = File.ReadAllBytes(packagedReference);
+File.WriteAllBytes(packagedReference, Attributed(originalReference, new string('0', 64)));
+Rejected("reference/runtime digest disagreement", "Reference/runtime contract attribute mismatch", Resolve("linux-x64"));
+File.WriteAllBytes(packagedReference, originalReference);
+string packagedRuntime = Path.Combine(packageRoot, "runtimes", "linux-x64", "lib", "net10.0", Library + ".dll");
+byte[] unadvertised = Attributed(variants["linux-x64"], null);
+foreach (string path in new[] { RidAsset("linux-x64"), packagedRuntime }) File.WriteAllBytes(path, unadvertised);
+(int Code, string Output, JsonElement? Result) referenceAdvertised = Resolve("linux-x64");
+foreach (string path in new[] { RidAsset("linux-x64"), packagedRuntime }) File.WriteAllBytes(path, variants["linux-x64"]);
+if (referenceAdvertised.Code != 0 || !Same(referenceAdvertised.Result!.Value.GetProperty("imports")[0].GetProperty("sidecar").GetString(), packagedSidecar))
+    throw new InvalidOperationException("A digest advertised only by the reference assembly did not locate its sidecar: " + referenceAdvertised.Output);
 Console.WriteLine("PASS resolver rejects missing RID or graph, cross-architecture and malformed graphs, and unsafe or ambiguous manifests");
 
 // Certify the resolved linux-x64 import; the resolver output is locations, the pins come separately.

@@ -92,6 +92,8 @@ internal static class ImportResolver
                 if (!selected.TryGetValue(name, out RuntimeAsset? prior)) selected.Add(name, asset);
                 else if (prior.Library != asset.Library || prior.AssetPath != asset.AssetPath)
                     throw new InvalidDataException("Conflicting deps/NuGet runtime asset: " + name);
+                // SDK deps.json omits compile assets; keep deps probing and add NuGet's reference assemblies.
+                else selected[name] = prior with { ReferenceAssets = [.. prior.ReferenceAssets.Union(asset.ReferenceAssets, StringComparer.Ordinal)] };
             }
         string[] roots = packageRoots.Concat(nuget is not null && nuget.RootElement.TryGetProperty("packageFolders", out JsonElement folders) &&
                 folders.ValueKind == JsonValueKind.Object ? folders.EnumerateObject().Select(folder => folder.Name) : [])
