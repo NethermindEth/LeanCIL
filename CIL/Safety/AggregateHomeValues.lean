@@ -29,7 +29,7 @@ theorem store_local_aggregate {memory : Memory} {reference : Reference}
     write_allocations _ _ _ _ _ written⟩
   have encoded : numberBytes (byteNumber bytes) size = bytes := by
     rw [← length, numberBytes_byteNumber]
-  simp [storeLocal, localNumber, localWidth, length, encoded, written, checkedAt,
+  simp [storeLocal, Value.hasUnspecified, CIL.Value.hasUnspecified, localNumber, localWidth, length, encoded, written, checkedAt,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 /-- Fresh aggregate storage is initialized, readable and writable at its exact

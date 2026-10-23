@@ -14,7 +14,8 @@ theorem correctness (x y : W32) (nonzero : y ≠ 0) :
     simp only [divideValues, divideBits, nonzero, ite_false]
     rfl
   simp [Extracted.program, Extracted.method0, CIL.Safety.invoke, CIL.Safety.run,
-    CIL.Safety.step, checkedValue, numericValue, enterFrame, makeLocals,
+    CIL.Safety.step, checkedValue, numericValue, enterFrame, makeSelectedLocals, makeLocals,
+    observerCount, unspecifiedOperands, CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
     makeArgumentHomes, makeParameterHomes, leaveFrame, calculation, List.mapM, List.mapM.loop,
     Bind.bind, Except.bind, Except.mapError, Except.map, Pure.pure, Except.pure]
 

@@ -51,7 +51,8 @@ theorem fresh_home_storeLocal_succeeds (m result : Memory) (activation : Nat)
   have writable : access result r (numberBytes number (localWidth kind)).length 1 true = .ok () := by
     simpa only [width] using accessOK
   cases value
-  case snapshot shape bytes => cases kind <;> simp [localNumber] at fits
+  case snapshot shape bytes => cases kind <;> simp [localNumber, CIL.Value.hasUnspecified] at fits
+  case v128Low64 low => simp [localNumber, CIL.Value.hasUnspecified] at fits
   all_goals simp only [storeLocal, fits, write, writable, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
   all_goals exact ⟨_, _, rfl⟩

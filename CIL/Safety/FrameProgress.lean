@@ -11,13 +11,13 @@ def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
   | .reference, .nullRef => True
   | .byte, .i32 bits => bits.toNat < 256
   | .narrow _, .i32 _ => True
-  | .word32, .i32 _ | .word64, .i64 _ | .vector128, .v128 _ | .vector256, .v256 _ => True
+  | .word32, .i32 _ | .word64, .i64 _ | .vector128, .v128 _ | .vector256, .v256 _ | .vector512, .v512 _ => True
   | _, _ => False
 
 theorem initializer_numeric_number {kind : CIL.LocalKind} {initial : CIL.Value}
     (fits : InitializerFits kind initial) (numeric : kind ≠ .reference)
     (known : initial ≠ .unmodeled) : ∃ number, localNumber kind initial = .ok number := by
-  cases kind <;> cases initial <;> simp_all [InitializerFits, localNumber]
+  cases kind <;> cases initial <;> simp_all [InitializerFits, localNumber, CIL.Value.hasUnspecified]
 
 theorem localWidth_bounded (kind : CIL.LocalKind) : localWidth kind < nativeLimit := by
   cases kind <;> simp only [localWidth, nativeLimit] <;> first | exact CIL.NarrowKind.width_lt _ | simp
@@ -83,6 +83,7 @@ theorem makeArgumentHomes_succeeds (m : Memory) (activation : Nat) (indices : Li
     obtain ⟨homes, owned, result, rest⟩ := ih stored valid (fun i member => fits i (by simp [member]))
     exact ⟨(index, slot) :: homes, reference.allocation :: owned, result, by
       simp [makeArgumentHomes, argument, home, store, rest,
+        Value.hasUnspecified, CIL.Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
 
 def ParameterFits (kind : CIL.LocalKind) : Value → Prop
@@ -106,7 +107,8 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
     have formed := checkedValue_of_valid m (.reference r) valid
     exact ⟨.root none, [], m, .root (some r), m, rfl, by
       simp only [checkedValue] at formed
-      simp [storeLocal, formed, Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
+      simp [storeLocal, formed, Value.hasUnspecified,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
   | scalar value =>
     obtain ⟨numeric, number, numbered⟩ := fits
     obtain ⟨r, home, allocated⟩ := allocateHome_succeeds m activation (localWidth kind) hm (localWidth_bounded kind) (localAlignment_pos kind)
@@ -134,23 +136,78 @@ theorem makeParameterHomes_succeeds (m : Memory) (activation : Nat)
       simp [makeParameterHomes, argument, made, store, rest,
         Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
 
+def SelectedKindsFit (indices : List Nat) (index : Nat) : List CIL.LocalKind → Prop
+  | [] => True
+  | kind :: kinds => (index ∈ indices → kind = .vector128) ∧ SelectedKindsFit indices (index + 1) kinds
+
+theorem makeSelectedLocalsFrom_succeeds (m : Memory) (activation : Nat) (indices : List Nat)
+    (index : Nat) (kinds : List CIL.LocalKind) (initializers : List CIL.Value)
+    (wellFormed : m.WellFormed) (fits : InitializersFit kinds initializers)
+    (selected : SelectedKindsFit indices index kinds) :
+    ∃ slots owned result, makeSelectedLocalsFrom activation indices index kinds initializers m = .ok (slots, owned, result) := by
+  induction kinds generalizing index m initializers with
+  | nil => cases initializers with
+    | nil => exact ⟨[], [], m, rfl⟩
+    | cons _ _ => cases fits
+  | cons kind kinds ih =>
+    cases initializers with
+    | nil => cases fits
+    | cons initial initials =>
+      have prepared : ∃ slot ids memory,
+          (if index ∈ indices then if kind == .vector128 then makeOpaque128 initial m else .error .invalidState
+            else makeLocal activation kind initial m) = .ok (slot, ids, memory) ∧ memory.WellFormed := by
+        by_cases member : index ∈ indices
+        · have same := selected.1 member
+          subst kind
+          have compatible : InitializerFits .vector128 initial := fits.1
+          rcases compatible with unknown | known
+          · subst initial
+            exact ⟨.opaque128 none, [], m, by rw [if_pos member]; rfl, wellFormed⟩
+          · cases initial with
+            | v128 bits =>
+              exact ⟨.opaque128 (some (.known bits)), [], m, by rw [if_pos member]; rfl, wellFormed⟩
+            | _ => cases known
+        · obtain ⟨slot, ids, memory, made⟩ := makeLocal_succeeds m activation kind initial wellFormed fits.1
+          exact ⟨slot, ids, memory, by simpa [member] using made,
+            makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made⟩
+      obtain ⟨slot, ids, memory, made, valid⟩ := prepared
+      obtain ⟨slots, other, result, rest⟩ := ih memory (index + 1) initials valid fits.2 selected.2
+      refine ⟨slot :: slots, ids ++ other, result, ?_⟩
+      by_cases member : index ∈ indices
+      · have same := selected.1 member
+        subst kind
+        simp [member] at made
+        simp [makeSelectedLocalsFrom, member, made, rest, Bind.bind, Except.bind, Pure.pure, Except.pure]
+      · simp only [member, ite_false] at made
+        simp [makeSelectedLocalsFrom, member, made, rest, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+theorem makeSelectedLocals_succeeds (m : Memory) (activation : Nat) (indices : List Nat)
+    (kinds : List CIL.LocalKind) (initializers : List CIL.Value) (wellFormed : m.WellFormed)
+    (fits : InitializersFit kinds initializers) (selected : SelectedKindsFit indices 0 kinds) :
+    ∃ slots owned result, makeSelectedLocals activation indices kinds initializers m = .ok (slots, owned, result) := by
+  unfold makeSelectedLocals
+  split
+  · exact makeLocals_succeeds _ _ _ _ wellFormed fits
+  · exact makeSelectedLocalsFrom_succeeds _ _ _ _ _ _ wellFormed fits selected
+
 def FrameSetupFits (body : CIL.Method) (args : List Value) : Prop :=
   InitializersFit body.localKinds body.locals ∧ AggregateArgumentsFit body.vectorArgs args ∧
-    ParameterArgumentsFit body.parameterHomes args
+    ParameterArgumentsFit body.parameterHomes args ∧ SelectedKindsFit body.opaqueVectorLocals 0 body.localKinds
 
 theorem enterFrame_succeeds (body : CIL.Method) (args : List Value) (m : Memory)
     (wellFormed : m.WellFormed) (validArgs : ValuesValid m args) (fits : FrameSetupFits body args) :
     ∃ frame memory, enterFrame body args m = .ok (frame, memory) := by
   obtain ⟨locals, owned, memory, prepared⟩ :=
-    makeLocals_succeeds m m.nextIdentity body.localKinds body.locals wellFormed fits.1
-  have valid := makeLocals_preserves_wellFormed _ _ _ _ _ _ _ wellFormed prepared
+    makeSelectedLocals_succeeds m m.nextIdentity body.opaqueVectorLocals body.localKinds body.locals wellFormed fits.1 fits.2.2.2
+  have setup := makeSelectedLocals_setup _ _ _ _ _ _ _ _ prepared
+  have valid := setup.wellFormed wellFormed
   obtain ⟨arguments, ids, result, homes⟩ :=
     makeArgumentHomes_succeeds memory m.nextIdentity body.vectorArgs args valid fits.2.1
   have resultWF := makeArgumentHomes_preserves_wellFormed _ _ _ _ _ _ _ valid homes
-  have ext := (makeLocals_fresh _ _ _ _ _ _ _ prepared).1.trans
+  have ext := setup.fresh.1.trans
     (makeArgumentHomes_fresh _ _ _ _ _ _ _ homes).1
   obtain ⟨parameters, other, final, parametersMade⟩ := makeParameterHomes_succeeds result m.nextIdentity
-    body.parameterHomes args resultWF (validArgs.preserve wellFormed ext) fits.2.2
+    body.parameterHomes args resultWF (validArgs.preserve wellFormed ext) fits.2.2.1
   exact ⟨⟨m.nextIdentity, locals ++ parameters.map Prod.snd, (owned ++ ids) ++ other, arguments⟩, final, by
     simp [enterFrame, prepared, homes, parametersMade, Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
 

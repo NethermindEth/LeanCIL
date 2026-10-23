@@ -2,21 +2,28 @@ import CIL.Safety.Certificate
 
 namespace CIL.Safety
 
+private theorem bind_success {source : Except ε α} {continuation : α → Except ε β} {value : β} :
+    (source.bind continuation = .ok value) ↔
+      ∃ input, source = .ok input ∧ continuation input = .ok value := by
+  cases source <;> simp [Except.bind]
+
 /-- A checked return has the arity declared by its actual method body. -/
 theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
     values.length = if body.returnsValue then 1 else 0 := by
   unfold step at executed
+  dsimp only at executed
   repeat' first
-    | solve | simp_all
+    | split at executed
     | solve |
       have same : values = stack := (checkedValues_valid _ _ _ (by assumption)).1
       rw [same]
       simp_all
+    | solve | simp_all
     | cases executed
-    | split at executed
-    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+    | obtain ⟨_, _, executed⟩ := bind_success.mp executed
+    | simp only [Bind.bind, Pure.pure, Except.pure] at executed
 
 theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body : CIL.Method)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value)
