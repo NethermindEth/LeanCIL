@@ -1,16 +1,22 @@
 import Extracted
 import TypedImportInterface
 import CIL.Safety.WordMemory
-import Examples.Support
 
 namespace TypedCopyProof
 open CIL.Safety
 
-theorem permitted_alias : TypedImportInterface.copy.pre (⟨0, 0⟩, ⟨0, 0⟩, 0) Examples.caller := by
+def caller : Memory := {
+  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨8, 1, []⟩, true, [8]⟩ else none
+  cells := fun _ _ => ⟨0, true⟩
+  views := [⟨0, 0, 8, true, true⟩]
+  nextIdentity := 1
+}
+
+theorem permitted_alias : TypedImportInterface.copy.pre (⟨0, 0⟩, ⟨0, 0⟩, 0) caller := by
   refine ⟨?_, by rfl, by rfl⟩
   constructor
   · intro id allocation found
-    simp only [Examples.caller] at found
+    simp only [caller] at found
     split at found
     · rename_i same
       subst id
@@ -18,7 +24,7 @@ theorem permitted_alias : TypedImportInterface.copy.pre (⟨0, 0⟩, ⟨0, 0⟩,
       exact ⟨by decide, by simp [Allocation.WellFormed, nativeLimit]⟩
     · cases found
   · intro view member
-    simp only [Examples.caller, List.mem_singleton] at member
+    simp only [caller, List.mem_singleton] at member
     subst view
     exact ⟨_, rfl, by decide⟩
 
