@@ -366,8 +366,6 @@ if (!consumerStages.Any(stage => stage.GetProperty("stage").GetString() == "Chec
     throw new InvalidOperationException("The caller audit did not build all import modules omitted by the unrelated proof.");
 Console.WriteLine("PASS ordinary and consumer import audits reject unrelated theorems without verification reports");
 Reset();
-// Earlier consumer checks leave a --proof-root selection that these ordinary proofs must not inherit.
-File.Delete(Path.Combine(output, "verification.json"));
 Run(Command());
 File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
 Run([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"]);
@@ -428,7 +426,6 @@ using (ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(Fi
     body.GetILProcessor().InsertAfter(call, Instruction.Create(OpCodes.Call, (MethodReference)call.Operand));
     module.Write(app);
 }
-File.Delete(Path.Combine(output, "verification.json"));
 contract["interfaceModules"]![0]!["source"] = originalInterface + "\ninstance (priority := high) retarget : OfNat Nat 1 := { ofNat := 0 }\n";
 Save();
 Run(Command());
