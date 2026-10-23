@@ -394,6 +394,16 @@ example : ¬ ScalarFlowValid { loopRaw with code := [i 22, i 0, i 43 (.target 0)
     [unknown 0, state [some 0], state [some 0]] [some [], some [.word32], some [.word32]]
     [.const32 0, .nop, .branch 0] := by decide
 
+-- Defaulted signature fields are accepted only where they are the true signature.
+private def unsignedSite : CallSite := {
+  target := .managed 1, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true }
+example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
+example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
+example : scalarTransfer addRaw (i 40 (.call { unsignedSite with
+    target := .external "Scope::System.UInt64 Owner::M(System.UInt64,System.UInt64)" })) [.word64, .word64] = none := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { unsignedSite with
+    target := .external "Scope::System.Void Owner::M()", parameterCount := 0, returnsValue := false })) [] = some [] := by decide +kernel
+
 -- An uncovered raw opcode with the same stack effect cannot stand in for a scalar computation.
 private def holeRaw (opcode : Nat) (operand : RawOperand := .none) := raw [i 2, i 3, i opcode operand, i 38, i 2, i 42]
 private def holeFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 2, unknown 1, unknown 0, unknown 1]

@@ -13,7 +13,7 @@ structure MethodEvidence where
   parameterInput : RawArguments
   reachable : List Bool
   featureStates : FeatureCertificate
-  scalarStates : ScalarCertificate := []
+  scalarStates : ScalarCertificate
   layoutUses : List LayoutUse
 
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=
