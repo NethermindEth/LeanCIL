@@ -302,8 +302,7 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]!.AsArray().Add(new JsonObject
     {
         ["name"] = value["interfaceModules"]![0]!["name"]!.GetValue<string>().ToLowerInvariant(),
-        ["source"] = "def caseCollision : Nat := 0
-"
+        ["source"] = "def caseCollision : Nat := 0\n"
     })),
     ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "Bad;axiom"),
     ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "_root_.ImportFixture.addOne")
