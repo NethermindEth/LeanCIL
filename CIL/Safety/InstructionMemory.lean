@@ -28,6 +28,7 @@ def Value.hasUnspecified : Value → Bool
 def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
   (stack.take count).any Value.hasUnspecified
 
+/-- Operands an op reads as numbers; no default, so each new op states whether it observes vector bits. -/
 def observerCount : CIL.Op → Nat
   | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
   | .checkedConvert .. | .neg | .bnot | .convI1 | .convI2 | .convU2
@@ -42,7 +43,11 @@ def observerCount : CIL.Op → Nat
   | .setLane _ | .store64 | .copyObject _ => 2
   | .ret (some _) => 1
   | .memory operation => operation.argumentCount
-  | _ => 0
+  -- Forwarders: the consumer (storeLocal, checkedIntrinsic, enterFrame, the caller) guards.
+  | .nop | .arg .. | .vectorArg _ | .vectorArgAddr _ | .local .. | .vectorLocal _ | .vectorLocalAddr _
+  | .setVectorLocal _ | .localAddr _ | .setLocal .. | .const32 _ | .const64 _ | .dup | .pop
+  | .branch _ | .call .. | .newVector256 .. | .newAggregate .. | .feature _ | .intrinsic ..
+  | .ret none | .throw _ | .unsupported _ => 0
 
 def checkedAt (reference : ManagedReference) (width : Nat) (result : Checked α) : ExecutionResult α :=
   result.mapError fun rule => .memory rule reference width

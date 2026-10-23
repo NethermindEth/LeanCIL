@@ -9,6 +9,13 @@ var root = At("artifacts/DebugNames");
 const string Selector = "Calls::Sum(uint,uint)";
 const string Sum = "System.UInt32 Names.Calls::Sum(System.UInt32,System.UInt32)";
 
+foreach (var import in new[] { "import ExtractedSymbols", "  import ExtractedSymbols -- names\r\n",
+    "import ExtractedSymbols /- names -/", "public meta import all ExtractedSymbols -- names" })
+    if (!ImportsSymbols(import)) throw new InvalidOperationException("Missed PDB import: " + import);
+foreach (var import in new[] { "-- import ExtractedSymbols", "import ExtractedSymbolsExtra",
+    "import ExtractedSymbols.Other", "import ExtractedSymbols'" })
+    if (ImportsSymbols(import)) throw new InvalidOperationException("Spurious PDB import: " + import);
+
 string Source(string inserted) => string.Join("\n",
     "namespace Names;",
     "public static class Calls",
@@ -60,7 +67,7 @@ if (!File.Exists(Path.Combine(withSymbols, "Symbols.lean")) || File.Exists(Path.
     throw new InvalidOperationException("Symbols.lean must exist exactly when a matching PDB does.");
 Console.WriteLine("PASS Extracted.lean is byte-identical with and without the PDB; Symbols.lean only with it");
 
-string Proof(string name, string[] slots, string imports = "import ExtractedSymbols\n")
+string Proof(string name, string[] slots, string imports = "  import ExtractedSymbols -- PDB names for this proof\n")
 {
     var path = Path.Combine(root, name + ".lean");
     File.WriteAllText(path, $$"""

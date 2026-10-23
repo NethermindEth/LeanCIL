@@ -4,6 +4,7 @@
 #:include ../scripts/Verification.cs
 
 using System.Reflection;
+using System.Text.Json;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using Mono.Cecil;
@@ -38,8 +39,8 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
         "theorem correctness : (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 " + left +
         "), .scalar (.i64 " + right + ")] Examples.empty).map Prod.snd = .ok [.scalar (." + word + " " + expected +
         ")] := by " + (wide ? "\n  apply ok_of_toOption\n  decide +kernel" : "rfl") + "\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", selectors[name], proof, output,
-        profile: wide ? "x64-avx512dqvl" : "x64-avx2-bmi2");
+    verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: wide ? "x64-v4" : "x64-v3");
+    RequireRuntimeGroups(output, wide);
     if (wide ? Avx512DQ.IsSupported && Avx512F.IsSupported : Avx2.IsSupported)
     {
         object result = runtime.GetMethod(name)!.Invoke(null, [left, right])!;
@@ -62,7 +63,7 @@ using (ModuleDefinition module = ModuleDefinition.ReadModule(assembly))
 }
 File.Delete(Path.Combine(rejectedEncoding, "Extracted.lean"));
 (int Code, string Output, string Stdout, string Stderr) rejected = Execute(
-    Extract("extract", malformedAssembly, "Examples", selectors["Less"], rejectedEncoding, "x64-avx512dqvl"));
+    Extract("extract", malformedAssembly, "Examples", selectors["Less"], rejectedEncoding, "x64-v4"));
 if (rejected.Code == 0 || File.Exists(Path.Combine(rejectedEncoding, "Extracted.lean")) ||
     !rejected.Output.Contains("Unsupported vector type encoding", StringComparison.Ordinal))
     throw new InvalidOperationException("Malformed Vector512 signature was not rejected by the raw metadata check: " + rejected.Output);
@@ -108,4 +109,16 @@ end ExampleProof
     };
     if (!zero) throw new InvalidOperationException("Runtime vector initialization did not clear every lane: " + name);
     Console.WriteLine("PASS vector initialization, exact zero bytes and bounds: " + name);
+}
+
+// .NET 10 reports AVX2 only with BMI1/BMI2 and AVX-512 F/DQ/VL only together; any other profile certifies no runtime.
+static void RequireRuntimeGroups(string output, bool wide)
+{
+    using JsonDocument identity = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json")));
+    JsonElement profile = identity.RootElement.GetProperty("profile");
+    bool Flag(string name) => profile.GetProperty(name).GetBoolean();
+    bool v3 = Flag("Avx2") && Flag("Bmi1") && Flag("Bmi2");
+    bool v4 = Flag("Avx512F") && Flag("Avx512FVL") && Flag("Avx512DQ") && Flag("Avx512DQVL");
+    if (!v3 || v4 != wide)
+        throw new InvalidOperationException("Division profile matches no .NET 10 x64 ISA level: " + profile);
 }
