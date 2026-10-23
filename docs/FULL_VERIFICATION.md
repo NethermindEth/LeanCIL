@@ -22,9 +22,11 @@ dependency only. Transitive library imports, extra source packages, static sites
 and initialization assumptions fail. Package configuration is generated from the
 validated source inventory; no Git history is inferred from a source bundle.
 
-The author source first passes the ordinary fresh export, extraction, closure,
-statement, axiom and replay checks. The verifier then transfers actual checked
-definition/theorem/opaque kernel terms into fresh namespaces. It preserves
+Imports from one source bundle share one staged package and one fresh library
+build. The author source first passes the ordinary fresh export, extraction,
+closure, statement, axiom and replay checks. The verifier then transfers the
+actual checked `LeanCILExportAudit.certified` term and the definitions, theorems
+and opaques it depends on into fresh namespaces. It preserves
 universe information and renames constant and projection type references.
 Every transferred declaration passes `Lean.addDecl` with kernel checking on.
 Unsupported user inductives, constructors, recursors and cyclic declarations
@@ -34,7 +36,18 @@ A separate fresh compilation of the regenerated extraction supplies the concrete
 program definitions. Kernel proofs check program equality, extraction evidence,
 library closure, prefix linking, relocation and `CIL.Safety.composed`. The final
 composed theorem uses the actual rechecked library proof terms and caller theorem.
-Source and compiled artifact hashes are rechecked around replay and publication.
+Staging and composition use a temporary directory outside every Lean search
+root, so their files cannot shadow a caller or toolchain module.
+
+Building the author source elaborates producer code with the verifier's
+privileges: macros, `initialize` and `run_cmd` can read and write any file the
+verifier can, start processes, and use the network. Hashes cannot contain that.
+The verifier snapshots the inputs, caller artifacts and module resolution once
+before and once after each phase that elaborates producer-derived code. These
+snapshots detect accidental mutation only; they omit the trusted toolchain. Run
+full verification of an untrusted bundle in an isolated environment: a
+read-only toolchain, extractor and caller, no network, and a workspace
+discarded afterwards.
 
 Reports retain the original conditional caller theorem. They add the composed
 theorem and audit, source bundle identities, and `acceptedVia:
