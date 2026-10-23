@@ -120,7 +120,7 @@ partial class Program
                 if (!File.Exists(path) || Sha(path) != digest) throw new InvalidDataException("Full-verification input changed: " + path);
             foreach ((string directory, string digest) in bundles) ContractSourceBundle.Validate(directory, digest);
         }
-        // One snapshot after each phase that elaborates producer-derived code; it detects accidental, not hostile, mutation.
+        // One snapshot after each run that elaborates producer-derived code; it detects accidental, not hostile, mutation.
         void RequireCallerUnchanged()
         {
             RecheckOriginal();
