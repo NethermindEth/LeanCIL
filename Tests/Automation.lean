@@ -214,6 +214,32 @@ example (body : CIL.Method) (args : List CIL.Safety.Value) (frame : CIL.Safety.F
     CIL.Safety.step body (.bltu 5) 2 args frame [.scalar (.i64 y), .scalar (.i64 x)] m = .ok (.next 3 [] frame m) := by
   simp only [cil_step, above, ↓reduceIte]
 
+-- Guard reduction inspects only consumed values, even with an unknown stack tail.
+theorem guard_known_i64 (value : CIL.W64) (rest : List CIL.Safety.Value) :
+    CIL.Safety.unspecifiedOperands 1 (.scalar (.i64 value) :: rest) = false := by
+  simp only [cil_guard, Bool.false_or]
+
+theorem guard_i64_step (body : CIL.Method) (args : List CIL.Safety.Value)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) (pc : Nat)
+    (value : CIL.W64) (rest : List CIL.Safety.Value) :
+    CIL.Safety.step body .neg pc args frame (.scalar (.i64 value) :: rest) memory =
+      .ok (.next (pc + 1) (.scalar (.i64 (-value)) :: rest) frame memory) := by
+  simp only [cil_step]
+
+-- A partial vector must still fail before an instruction observes its unknown bits.
+theorem guard_partial_vector_rejected (body : CIL.Method) (args : List CIL.Safety.Value)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) (pc : Nat)
+    (value : CIL.W64) (rest : List CIL.Safety.Value) :
+    CIL.Safety.step body .neg pc args frame (.scalar (.v128Low64 value) :: rest) memory =
+      .error (.unsupported "Instruction observes unspecified vector bits") := by
+  cil_checked_step []
+
+-- An unknown constructor leaves its guard as a required fact.
+theorem guard_unknown_requires_fact (value : CIL.Value) (known : value.hasUnspecified = false) :
+    CIL.Safety.unspecifiedOperands 1 [.scalar value] = false := by
+  fail_if_success (simp only [cil_guard, Bool.or_false]; done)
+  simpa only [cil_guard, Bool.or_false] using known
+
 /-- info: 'Tests.Automation.leaf_checked' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms leaf_checked
 /-- info: 'Tests.Automation.bound_checked' depends on axioms: [propext, Quot.sound] -/

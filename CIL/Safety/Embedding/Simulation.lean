@@ -23,6 +23,7 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
   returnsValue : actual.returnsValue = expected.returnsValue
   locals : actual.locals = expected.locals
   localKinds : actual.localKinds = expected.localKinds
+  opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
   vectorArgs : actual.vectorArgs = expected.vectorArgs
   parameterHomes : actual.parameterHomes = expected.parameterHomes
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
@@ -32,7 +33,8 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
     (op.continues = true → r (p + 1) = r p + 1)
 
 theorem BodyRefines.refl (body : Method) : BodyRefines body body id :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, fun _ op found _ => ⟨by simp [found, Op.relabel_id], rfl, fun _ => rfl⟩⟩
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
+    fun _ op found _ => ⟨by simp [found, Op.relabel_id], rfl, fun _ => rfl⟩⟩
 
 theorem mem_sites {limit : Nat} {code : List Op} {map : List Nat} {start p : Nat} {op : Op}
     (found : code[p]? = some op) (live : op.live = true) :
@@ -73,7 +75,7 @@ theorem pick_eq (code : List Op) (qs : List Nat) (start : Nat) :
 
 theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat} (embeds : Embeds expected actual map) :
     BodyRefines expected actual (rename map actual.code.length) := by
-  refine ⟨embeds.profile, embeds.returnsValue, embeds.locals, embeds.localKinds, embeds.vectorArgs,
+  refine ⟨embeds.profile, embeds.returnsValue, embeds.locals, embeds.localKinds, embeds.opaqueVectorLocals, embeds.vectorArgs,
     embeds.parameterHomes, embeds.descriptors, embeds.entry, ?_⟩
   intro p op found live
   have member := mem_sites (limit := actual.code.length) (map := map) (start := 0) found live
@@ -99,7 +101,8 @@ open CIL.Embedding
 
 theorem enterFrame_congr {expected actual : CIL.Method} {r : Nat → Nat} (refines : BodyRefines expected actual r)
     (args : List Value) (m : Memory) : enterFrame actual args m = enterFrame expected args m := by
-  simp only [enterFrame, refines.locals, refines.localKinds, refines.vectorArgs, refines.parameterHomes]
+  simp only [enterFrame, refines.locals, refines.localKinds, refines.opaqueVectorLocals,
+    refines.vectorArgs, refines.parameterHomes]
 
 theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}

@@ -42,7 +42,8 @@ internal sealed class VectorSignatures : ISignatureTypeProvider<bool, object?>
     static bool Check(MetadataReader reader, StringHandle scope, StringHandle name, byte kind)
     {
         if (reader.StringComparer.Equals(scope, "System.Runtime.Intrinsics") &&
-            (reader.StringComparer.Equals(name, "Vector128`1") || reader.StringComparer.Equals(name, "Vector256`1")) &&
+            (reader.StringComparer.Equals(name, "Vector128`1") || reader.StringComparer.Equals(name, "Vector256`1") ||
+                reader.StringComparer.Equals(name, "Vector512`1")) &&
             kind != (byte)SignatureTypeKind.ValueType)
             throw new InvalidDataException("Unsupported vector type encoding: " + reader.GetString(name) + " must use a value-type signature.");
         return false;

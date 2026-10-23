@@ -30,7 +30,7 @@ theorem step_store_aggregate {body : CIL.Method} {pc index watermark : Nat}
     · simp only [List.getElem?_set_ne same]
   refine ⟨result, ?_, written, loaded, value, allocations,
     write_preserves_memory_below _ _ _ _ _ _ privateHome written⟩
-  simp only [step, slot, stored, unchanged, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, unchanged, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem step_load_aggregate {body : CIL.Method} {pc index : Nat}
     {args stack : List Value} {frame : Frame} {memory : Memory} {reference : Reference}
@@ -39,7 +39,7 @@ theorem step_load_aggregate {body : CIL.Method} {pc index : Nat}
     (loaded : read memory reference size 1 = .ok bytes) :
     step body (.local index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: stack) frame memory) := by
-  simp only [step, slot, load_local_aggregate_of_read loaded,
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or, Bool.false_eq_true, ite_false, slot, load_local_aggregate_of_read loaded,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_store_aggregate

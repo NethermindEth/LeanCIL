@@ -31,7 +31,7 @@ theorem loadValue_checked_read {m : Memory} {reference : ManagedReference}
   | address r =>
     cases ha : access m r width 1 false with
     | error fault =>
-      by_cases h16 : width = 16 <;> by_cases h32 : width = 32 <;>
+      by_cases h16 : width = 16 <;> by_cases h32 : width = 32 <;> by_cases h64 : width = 64 <;>
         simp_all [loadValue, dereference, read, checkedAt, loadSnapshot, referenceAt,
           ordinaryAccessAlignment, CIL.SnapshotShape.width, readSnapshot, Except.mapError, Bind.bind, Except.bind]
       all_goals repeat' first | cases loaded | split at loaded

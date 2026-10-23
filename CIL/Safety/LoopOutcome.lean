@@ -188,13 +188,16 @@ theorem ensures_outcome_of_loop (program : CIL.Program) (method : Nat)
 #print axioms ensures_outcome_of_loop
 
 /-- Step a `LoopOutcome` goal through non-call, non-return instructions until one does not apply. -/
-macro "cil_loop_outcome_advance" "[" facts:term,* "]" : tactic =>
-  `(tactic| repeat first
-    | (simp only [$[$facts:term],*])
-    | (apply CIL.Safety.loop_outcome_next
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step [CIL.truth, $[$facts:term],*]))
+syntax "cil_loop_outcome_advance" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| cil_loop_outcome_advance [$facts:term,*]) => cilWithNormalisedFacts facts.getElems fun facts prepared =>
+    `(tactic| repeat first
+      | (simp only [$[$facts:term],*])
+      | (apply CIL.Safety.loop_outcome_next
+         · cil_lookup [$[$facts:term],*]
+         · cil_lookup [$[$facts:term],*]
+         · cil_checked_step_normalized [$[$prepared:term],*]))
 
 /-- Continue past a returning callee at a `bind_call` site; leaves `pre`, the `raises` equation, then the continuation. -/
 syntax "cil_loop_outcome_call" term:max term:max " at " ident "[" term,* "]" : tactic

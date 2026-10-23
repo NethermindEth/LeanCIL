@@ -129,6 +129,9 @@ name = "Tests.ImportEvidence"
 name = "Tests.ContractClosure"
 
 [[lean_lib]]
+name = "Tests.DivisionIntrinsics"
+
+[[lean_lib]]
 name = "Tests.ScalarEvidence"
 
 [[lean_lib]]
