@@ -166,7 +166,7 @@ partial class Program
     static PreparedContractExport PrepareContractExport(ContractExportManifest manifest, ModuleDefinition module, ContractExportRequest request)
     {
         Run(["dotnet", ExtractorPath, "check", request.Artifact, "--assembly-path", manifest.Assembly]);
-        JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Artifact, "identity.json")));
+        JsonElement identity = ExtractionIdentity.Read(request.Artifact).Root;
         MethodDefinition method = MethodSelector.Resolve(module, request.Method);
         FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>() ?? throw new InvalidDataException("Missing export profile.");
         if (FeatureProfile.Select(profile.Name) != profile) throw new InvalidDataException("Contract exports require an exact built-in profile.");
