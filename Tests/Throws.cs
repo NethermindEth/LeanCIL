@@ -62,6 +62,7 @@ foreach (var (mutation, marker) in new[]
     ("thrown-null", "Unsupported instruction"),
     ("interior-branch", "Branch into a folded throw"),
     ("non-exception", "Unsupported exception constructor"),
+    ("dead-non-exception", ""),
     ("missing-constructor", "Unsupported exception constructor"),
     ("wrong-parameter", "Unsupported exception constructor"),
     ("explicit-this", "Unsupported exception constructor"),
@@ -98,15 +99,16 @@ foreach (var (mutation, marker) in new[]
                 break;
             case "thrown-null": il.Replace(code[0], il.Create(OpCodes.Ldnull)); break;
             case "non-exception":
+            case "dead-non-exception":
             case "missing-constructor":
             case "wrong-parameter":
             {
                 var original = (MethodReference)code[0].Operand;
-                var type = new TypeReference("System", mutation == "non-exception" ? "Object" : "DivideByZeroException",
+                var type = new TypeReference("System", mutation.EndsWith("non-exception", StringComparison.Ordinal) ? "Object" : "DivideByZeroException",
                     module, original.DeclaringType.Scope);
                 var constructor = new MethodReference(".ctor", module.TypeSystem.Void, type) { HasThis = true };
                 code[0].Operand = constructor;
-                if (mutation != "non-exception")
+                if (mutation is "missing-constructor" or "wrong-parameter")
                 {
                     var creation = code[0];
                     for (int n = 0; n < (mutation == "missing-constructor" ? 2 : 1); n++)
@@ -114,6 +116,12 @@ foreach (var (mutation, marker) in new[]
                         constructor.Parameters.Add(new ParameterDefinition(mutation == "missing-constructor" ? module.TypeSystem.String : module.TypeSystem.Int32));
                         il.InsertBefore(creation, il.Create(OpCodes.Ldstr, "message"));
                     }
+                }
+                if (mutation == "dead-non-exception")
+                {
+                    var returned = il.Create(OpCodes.Ret);
+                    il.InsertBefore(code[0], il.Create(OpCodes.Br, returned));
+                    il.Append(returned);
                 }
                 break;
             }
@@ -138,6 +146,13 @@ foreach (var (mutation, marker) in new[]
         Console.WriteLine($"PASS runtime throws {expected} for {mutation}; it must not be folded as the constructed type");
     }
     var result = Execute(Extract("extract", dll, "Examples", "Throws::Quotient(uint,uint)", output));
+    if (mutation == "dead-non-exception")
+    {
+        if (result.Code != 0) throw new InvalidOperationException("Unreachable unsupported throw blocked extraction: " + result.Output);
+        Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")]);
+        Console.WriteLine("PASS unreachable unsupported throw stays excluded and its certificate checks");
+        continue;
+    }
     if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) || !result.Output.Contains(marker))
         throw new InvalidOperationException("Incorrect throw rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);

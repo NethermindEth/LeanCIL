@@ -42,10 +42,8 @@ internal static class Throws
             int count = 0;
             while (at + count < code.Count && code[at + count].OpCode.Code is Code.Ldstr or Code.Ldnull) count++;
             int raise = at + count + 1;
-            if (raise >= code.Count || code[raise].OpCode.Code != Code.Throw || code[at + count].OpCode.Code != Code.Newobj)
+            if (raise >= code.Count || code[raise].OpCode.Code != Code.Throw || Raised(code[at + count], count) is not string name)
                 continue;
-            if (Raised(code[at + count], count) is not string name)
-                throw new InvalidDataException($"Unsupported exception constructor: {code[at + count]}\n  Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
             for (int k = at; k < raise; k++) analysis.Operands.Add(code[k]);
             for (int k = at + 1; k <= raise; k++) analysis.Interior.Add(code[k]);
             analysis.Raises.Add(code[raise], name);
