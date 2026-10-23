@@ -49,7 +49,7 @@ File.WriteAllText(librarySource, "namespace ImportFixture; public static class L
     "public static implicit operator ConstantWord(ulong value) => new(value); public static readonly ConstantWord One = 1ul; } " +
     "public static class StaticReader { public static ulong Read() { ConstantWord copy = ConstantWord.One; copy.Value += 1; return copy.Value; } }\n");
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => Library.AddOne(value); }\n");
-Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
+Run(["dotnet", "build", cohort == "discovery" ? Path.Combine(libraryRoot, "Lib.csproj") : Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string library = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.dll");
 string app = Path.Combine(appRoot, "bin", "ImportFixture.App.dll");
 string sidecar = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.leancil.contracts");
@@ -181,7 +181,17 @@ string CallerVerify()
 
 if (cohort != "core")
 {
-    if (cohort == "audit")
+    if (cohort == "discovery")
+    {
+        ExportSuite discovery = ExportVerificationSuites.Plan().Single(entry => entry.Cohort == cohort);
+        string child = discovery.ChildScript ?? throw new InvalidDataException("Missing discovery child script.");
+        Run(["dotnet", "run", "--file", child, "--", .. ExportVerificationSuites.DiscoveryArguments(
+            sidecar, callerProof, callerPackage, package, proof, contractSource)],
+            streamOutput: true, progress: "Contract discovery through SDK assets and carriers");
+        completed.CompleteCase("discovery.fixture");
+        completed.Finish();
+    }
+    else if (cohort == "audit")
     {
         RejectPostAuditMutations(library, artifact, package, proof, contractSource, sidecar, completed);
         completed.Finish();
@@ -199,8 +209,6 @@ if (initialCaller.GetProperty("schema").GetInt32() != 4)
     throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
 completed.CompleteCase("core.caller");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
-Run(["dotnet", "run", "--file", "Tests/ContractDiscovery.cs", "--", sidecar, callerProof, callerPackage, package, proof, contractSource],
-    streamOutput: true, progress: "Contract discovery through SDK assets and carriers");
 
 string restricted = Sha(sidecar);
 string Restriction(string name, string assembly, string method, params string[] options)
