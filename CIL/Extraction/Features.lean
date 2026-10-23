@@ -21,9 +21,6 @@ def factsWeaken (source target : List (Option W32)) : Bool :=
 def FeatureState.weakens (source target : FeatureState) : Bool :=
   factsWeaken source.stack target.stack && factsWeaken source.locals target.locals
 
-private def runtimeIdentity := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-private def intrinsicIdentity := "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-
 private def featureNames : List (String × Feature) := [
   ("Arm.AdvSimd", .advSimd), ("Arm.ArmBase/Arm64", .armBase64),
   ("X86.Sse2", .sse2), ("X86.Ssse3", .ssse3), ("X86.Sse41", .sse41),
@@ -38,7 +35,7 @@ def featureGetter (site : CallSite) : Option Feature := do
   let .external identity := site.target | none
   if site.parameterCount != 0 || site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none
   else (featureNames.find? fun (name, feature) =>
-    identity == intrinsicIdentity ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++ "::" ++
+    identity == intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++ "::" ++
       (if feature == .vector128Accelerated || feature == .vector256Accelerated then "get_IsHardwareAccelerated"
         else "get_IsSupported") ++
       "()").map Prod.snd
@@ -49,7 +46,7 @@ private def addressed (raw : RawMethod) (index : Nat) : Bool := raw.code.any fun
 private def eligibleFact (raw : RawMethod) (index : Nat) (fact : Option W32) : Bool :=
   if fact.isNone then true else if addressed raw index then false else
   match raw.locals[index]? with
-  | some (.atom scope name) => scope == runtimeIdentity &&
+  | some (.atom scope name) => scope == runtimeScope &&
       (name == "System.Int32" || name == "System.UInt32" ||
         name == "System.Boolean" && (fact == some 0 || fact == some 1))
   | _ => false

@@ -394,9 +394,111 @@ example : ¬ ScalarFlowValid { loopRaw with code := [i 22, i 0, i 43 (.target 0)
     [unknown 0, state [some 0], state [some 0]] [some [], some [.word32], some [.word32]]
     [.const32 0, .nop, .branch 0] := by decide
 
+-- Defaulted signature fields are accepted only where they are the true signature.
+private def unsignedSite : CallSite := {
+  target := .managed 1, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true }
+example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
+example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
+example : scalarTransfer addRaw (i 40 (.call { unsignedSite with
+    target := .external "Scope::System.UInt64 Owner::M(System.UInt64,System.UInt64)" })) [.word64, .word64] = none := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { unsignedSite with
+    target := .external "Scope::System.Void Owner::M()", parameterCount := 0, returnsValue := false })) [] = some [] := by decide +kernel
+
+-- An uncovered raw opcode with the same stack effect cannot stand in for a scalar computation.
+private def holeRaw (opcode : Nat) (operand : RawOperand := .none) := raw [i 2, i 3, i opcode operand, i 38, i 2, i 42]
+private def holeFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 2, unknown 1, unknown 0, unknown 1]
+private def holeStates : ScalarCertificate :=
+  [some [], some [.word64], some [.word64, .word64], some [.other], some [], some [.word64]]
+private def holeCode (emitted : Op) : List Op := [.arg 0, .arg 1, emitted, .pop, .arg 0, .ret]
+example : ScalarFlowValid (holeRaw 88) holeFeatures (holeStates.set 3 (some [.word64])) (holeCode .add) := by decide
+example : ScalarFlowValid (holeRaw 149) holeFeatures holeStates (holeCode (.memory (.spanItem 4))) := by decide
+example : ¬ ScalarFlowValid (holeRaw 149) holeFeatures holeStates (holeCode .add) := by decide
+example : ¬ ScalarFlowValid (holeRaw 143 (.type intType)) holeFeatures holeStates (holeCode (.divide true false)) := by decide
+example : ¬ ScalarFlowValid (holeRaw 149) holeFeatures holeStates (holeCode (.nativeBinary .add)) := by decide
+private def holeEvidence (opcode : Nat) (states : ScalarCertificate) : MethodEvidence := {
+  original := holeRaw opcode, arguments := [], closed := holeRaw opcode,
+  parameterInput := { arguments := [.field .unsigned64, .field .unsigned64], locals := [], code := [.load 0, .load 1, .other, .other, .load 0, .other] },
+  reachable := List.replicate 6 true, featureStates := holeFeatures, scalarStates := states, layoutUses := [] }
+private def holeMethod (emitted : Op) : Method := { locals := [], returnsValue := true, code := holeCode emitted }
+example : TranslationValid [] #[] [holeEvidence 88 (holeStates.set 3 (some [.word64]))] [] [holeMethod .add] := by decide +kernel
+example : ¬ TranslationValid [] #[] [holeEvidence 149 holeStates] [] [holeMethod .add] := by decide +kernel
+
+private def unaryHoleRaw (opcode : Nat) := raw [i 2, i opcode, i 38, i 2, i 42] [word]
+private def unaryHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1, unknown 0, unknown 1]
+private def unaryHoleStates : ScalarCertificate := [some [], some [.word64], some [.other], some [], some [.word64]]
+private def unaryHoleCode (emitted : Op) : List Op := [.arg 0, emitted, .pop, .arg 0, .ret]
+example : ScalarFlowValid (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates (unaryHoleCode (.loadScalar 8)) := by decide
+example : ¬ ScalarFlowValid (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates (unaryHoleCode .convI8) := by decide
+example : ¬ ScalarFlowValid (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
+    (unaryHoleCode (.checkedConvert 64 true false)) := by decide
+
+private def pushHoleRaw (opcode : Nat) := raw [i opcode, i 38, i 2, i 42] [word]
+private def pushHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1]
+private def pushHoleStates : ScalarCertificate := [some [], some [.other], some [], some [.word64]]
+private def pushHoleCode (emitted : Op) : List Op := [emitted, .pop, .arg 0, .ret]
+example : ScalarFlowValid (pushHoleRaw 20) pushHoleFeatures pushHoleStates (pushHoleCode (.memory .nullRef)) := by decide
+example : ¬ ScalarFlowValid (pushHoleRaw 20) pushHoleFeatures pushHoleStates (pushHoleCode (.const64 0)) := by decide
+example : ¬ ScalarFlowValid (pushHoleRaw 35) pushHoleFeatures pushHoleStates (pushHoleCode (.const64 0)) := by decide
+example : ¬ ScalarFlowValid (pushHoleRaw 35) pushHoleFeatures pushHoleStates (pushHoleCode (.const32 0)) := by decide
+
+-- Size constants are the only uncovered literal producers; primitive widths are bound here.
+private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
+private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]
+private def sizeCode (bits : W32) : List Op := [.const32 bits, .pop, .arg 0, .ret]
+private def sizeAt (instruction : RawInstruction) (bits : W32) : Bool :=
+  decide (ScalarFlowValid (sizeRaw instruction) pushHoleFeatures sizeStates (sizeCode bits))
+private def sizeOfSite (type : TypeExpr) : CallSite := {
+  declaringType := .atom runtime "System.Runtime.CompilerServices.Unsafe", name := "SizeOf",
+  target := .external (runtime ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf()"),
+  typeArguments := [type], parameterCount := 0, hasThis := false, returnsValue := true,
+  returnType := intType, parameterTypes := [] }
+private def vector128 : TypeExpr := .apply
+  (.constructor "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+    "System.Runtime.Intrinsics.Vector128`1") word
+private def packet : TypeExpr := .aggregate "Fixture::Packet" 0
+example : sizeAt (i 65052 (.type intType)) 4 = true := by decide +kernel
+example : sizeAt (i 65052 (.type nativeType)) 8 = true := by decide +kernel
+example : sizeAt (i 65052 (.type packet)) 24 = true := by decide +kernel
+example : sizeAt (i 65052 (.type intType)) 7 = false := by decide +kernel
+example : sizeAt (i 65052 (.type (.pointer word))) 8 = false := by decide +kernel
+example : sizeAt (i 40 (.call (sizeOfSite intType))) 4 = true := by decide +kernel
+example : sizeAt (i 40 (.call (sizeOfSite vector128))) 16 = true := by decide +kernel
+example : sizeAt (i 40 (.call (sizeOfSite packet))) 24 = true := by decide +kernel
+example : sizeAt (i 40 (.call (sizeOfSite intType))) 5 = false := by decide +kernel
+private def otherSite : CallSite := { sizeOfSite intType with
+  name := "Other", target := .external (runtime ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::Other()") }
+example : sizeAt (i 40 (.call otherSite)) 4 = false := by decide +kernel
+example : sizeAt (i 40 (.call { sizeOfSite intType with declaringType := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" })) 4 = false := by decide +kernel
+
+-- Compare-and-branch: exact encoding, one wrapper exactly for native/int32, and no mixed unsigned form.
+private def branchRaw (opcode : Nat) (parameters : List TypeExpr) :=
+  { raw [i 2, i 3, i opcode (.target 3), i 42] parameters with returnType := .void }
+private def branchFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 2, unknown 0]
+private def branchStates (left right : ScalarKind) : ScalarCertificate := [some [], some [left], some [right, left], some []]
+private def branchCode (emitted : Op) : List Op := [.arg 0, .arg 1, emitted, .ret]
+private def branchAt (opcode : Nat) (left right : ScalarKind) (emitted : Op) : Bool :=
+  let parameters := [left, right].map fun | .native => nativeType | .word32 => intType | .word64 => word | _ => .byref word
+  decide (ScalarFlowValid (branchRaw opcode parameters) branchFeatures (branchStates left right) (branchCode emitted))
+private def branches : List (Nat × Op) := [
+  (46, .beq 3), (47, .bge 3), (48, .bgt 3), (49, .ble 3), (50, .blt 3), (51, .bne 3), (52, .bgeu 3),
+  (53, .bgtu 3), (54, .bleu 3), (55, .bltu 3), (59, .beq 3), (60, .bge 3), (61, .bgt 3), (62, .ble 3),
+  (63, .blt 3), (64, .bne 3), (65, .bgeu 3), (66, .bgtu 3), (67, .bleu 3), (68, .bltu 3)]
+example : branches.all (fun (opcode, emitted) => branchAt opcode .word64 .word64 emitted) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => branchAt opcode .word32 .word32 emitted) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => !branchAt opcode .word64 .word64 (.nativeBinary emitted)) = true := by decide +kernel
+example : branches.all (fun (opcode, _) => !branchAt opcode .word64 .word64 (if opcode ∈ [50, 63] then .bge 3 else .blt 3)) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => branchAt opcode .native .word32 (.nativeBinary emitted) ==
+    (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => branchAt opcode .word32 .native (.nativeBinary emitted) ==
+    (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => !branchAt opcode .native .word32 emitted) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => !branchAt opcode .native .word64 emitted) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => !branchAt opcode .word32 .word64 emitted) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => !branchAt opcode .reference .reference emitted) = true := by decide +kernel
+
 example (valid : ScalarFlowValid addRaw addFeatures addStates addCode) :
-    scalarOpMatches (i 88) [.word64, .word64] .add = true :=
-  valid.instruction_checked (pc := 2) rfl rfl rfl rfl (by decide)
+    scalarEmissionMatches none (i 88) [.word64, .word64] .add = true :=
+  valid.instruction_checked (pc := 2) rfl rfl rfl rfl rfl
 
 #print axioms external_call_validated
 

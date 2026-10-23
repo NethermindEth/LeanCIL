@@ -15,9 +15,10 @@ inductive TypeExpr where
   | apply (constructor argument : TypeExpr)
   deriving DecidableEq, Repr
 
-private def runtimeScope : String :=
+/-- Exact assembly identities of the admitted runtime; every raw-identity check uses these. -/
+def runtimeScope : String :=
   "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-private def intrinsicsScope : String :=
+def intrinsicsScope : String :=
   "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
 private def primitiveField : String → Option FieldType
