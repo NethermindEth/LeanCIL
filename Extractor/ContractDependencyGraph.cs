@@ -19,7 +19,7 @@ internal static class ContractDependencyGraph
         foreach (ContractInterface contract in nodes.Values)
             foreach (ContractDependency dependency in contract.Dependencies)
                 if (!nodes.ContainsKey(dependency.AssemblyIdentity))
-                    throw new InvalidDataException("Missing independently pinned contract dependency: " + contract.AssemblyIdentity +
+                    throw new InvalidDataException("Missing independently pinned contract dependency: " + dependency.AssemblyIdentity +
                         " required by " + contract.AssemblyIdentity);
         Dictionary<string, int> state = new(StringComparer.Ordinal);
         foreach (string identity in nodes.Keys.Order(StringComparer.Ordinal))

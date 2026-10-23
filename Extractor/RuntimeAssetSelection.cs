@@ -112,8 +112,6 @@ internal static class RuntimeAssetSelection
         if (deps)
         {
             target = Text(Object(root, "runtimeTarget"), "name");
-            if (RuntimeIdentifier(root) is { } declared && declared != rid)
-                throw new InvalidDataException("Explicit runtime identifier conflicts with deps runtime target.");
         }
         else
         {

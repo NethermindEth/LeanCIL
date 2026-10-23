@@ -121,8 +121,10 @@ pinned direct dependencies and without external initialization assumptions. Its
 own reachable static identity set must match the selected certification exactly.
 This checks metadata and serialization; it does not verify the imported theorem.
 Each node's static identities are checked with those of its direct imports before
-output. A collision reports both scoped field names. `linkChecked` checks all
-descriptors in the complete linked program.
+output. A collision reports both scoped field names. Full verification uses
+`linkChecked` to check all descriptors in its linked program, but currently rejects
+transitive dependency graphs. Conditional transitive proofs retain the
+`StaticWorldValid` premises; extraction does not compare every pair of graph nodes.
 
 The framework manifest lists `CIL.lean`, all `CIL/**/*.lean`, and `lean-toolchain`
 in ordinal relative-path order. Paths use `/`. Each line is `path=sha256(bytes)`.

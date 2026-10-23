@@ -74,7 +74,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
             "void" => "Unsupported type: System.Void",
             "byref" => "Unsupported Unsafe element type: System.Int32&",
             "pointer" => "Unsupported Unsafe element type: System.Int32*",
-            "arity" or "parameter" or "return" => "Generic contract imports are not supported in version 1.",
+            "arity" or "parameter" or "return" => "External managed dependency: " + call.FullName,
             "instance" => "Invalid evaluation stack during reachability",
             "scope" => "Unsupported generic call: " + call.FullName,
             "version" => "Unsupported type identity: System.Void [System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",

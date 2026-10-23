@@ -4,12 +4,14 @@
 #:include ../scripts/Verification.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
+#:include ../Extractor/RuntimeAssetSelection.cs
 
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Mono.Cecil;
+using Nethermind.LeanCIL;
 
 if (args.Length != 6) throw new ArgumentException("Expected sidecar, caller proof/package, producer package/proof/interface source.");
 string originalSidecar = args[0];
@@ -159,9 +161,16 @@ Selected("osx-arm64", "unix", RidAsset("unix"));
 // No win group matches, so the portable runtime group applies; bin/Lib.dll is its localPath.
 Selected("win-x64", "portable", Path.Combine(bin, Library + ".dll"));
 using (JsonDocument sdkGraph = JsonDocument.Parse(File.ReadAllBytes(graph)))
+using (JsonDocument selectedDeps = JsonDocument.Parse(File.ReadAllBytes(deps)))
     foreach (string rid in sdkGraph.RootElement.GetProperty("runtimes").EnumerateObject().Select(entry => entry.Name)
         .Where(rid => rid.EndsWith("-x64", StringComparison.Ordinal) || rid.EndsWith("-arm64", StringComparison.Ordinal)))
-        if (Resolve(rid) is { Code: not 0 } failed) throw new InvalidOperationException("SDK graph RID rejected: " + rid + ": " + failed.Output);
+    {
+        string[] fallback = RuntimeAssetSelection.Expand(sdkGraph.RootElement, rid);
+        Dictionary<string, RuntimeAsset> selected = RuntimeAssetSelection.Select(selectedDeps.RootElement, true, rid, () => fallback,
+            new HashSet<string>(StringComparer.Ordinal) { Library });
+        if (!selected.TryGetValue(Library, out RuntimeAsset? asset) || asset.AssetPath.Length == 0)
+            throw new InvalidOperationException("SDK graph RID did not select an implementation: " + rid);
+    }
 // SDK executables record localPath; the host probes the application directory exactly there.
 string relocated = Path.Combine(bin, "alt", Library + ".dll");
 Directory.CreateDirectory(Path.GetDirectoryName(relocated)!);
@@ -296,7 +305,7 @@ Run([.. cli, "verify", selectedOutput, "--proof", callerProof, "--proof-root", c
 JsonElement import = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(selectedOutput, "verified.json"))).GetProperty("imports")[0];
 JsonElement binding = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(selectedOutput, "identity.json"))).GetProperty("imports")[0];
 if (import.GetProperty("implementationSha256").GetString() != Hash(variants["linux-x64"]) ||
-    !Same(binding.GetProperty("implementationPath").GetString(), RidAsset("linux-x64")) || import.GetProperty("interfaceDigest").GetString() != digest)
+    !Same(ExtractionIdentity.Resolve(selectedOutput, binding.GetProperty("implementationPath").GetString()!), RidAsset("linux-x64")) || import.GetProperty("interfaceDigest").GetString() != digest)
     throw new InvalidOperationException("Report did not name the resolved net10.0 linux-x64 implementation: " + import);
 (int Code, string Output, string Stdout, string Stderr) wrongPin = Execute(Extract(Path.Combine(root, "WrongPin"), Hash(variants["linux-arm64"])));
 if (wrongPin.Code != 1 || !wrongPin.Output.Contains("implementation SHA-256 mismatch", StringComparison.Ordinal) ||

@@ -317,9 +317,9 @@ try
     Rebundle(File.ReadAllText(producerProof), staleClosure: true);
     Reject("Full source bundle export statement or closure binding mismatch");
     Rebundle("import Extracted\nimport PublishedArithmetic\nnamespace LibProof\ntheorem correctness : True := True.intro\nend LibProof\n");
-    Reject("Export theorem does not have the exact canonical Holds statement");
+    Reject("Type mismatch");
     Rebundle(File.ReadAllText(producerProof).Replace("theorem correctness", "def correctness", StringComparison.Ordinal));
-    Reject("Expected an export theorem");
+    Reject("Expected a theorem");
 }
 finally
 {
@@ -346,3 +346,24 @@ try
 }
 finally { File.WriteAllText(caller, originalCaller); }
 Console.WriteLine("PASS missing/tampered bundles, source and olean substitution, changed DLL, false certification, wrong theorem and missing caller hypotheses reject without reports");
+
+try
+{
+    string forgedTransfer = """
+
+macro_rules
+  | `(theorem $name:ident : $type:term := $_proof:term) => do
+      if name.getId.toString != "certified" || type.isIdent then Lean.Macro.throwUnsupported
+      `(theorem $name:ident : True := True.intro)
+""";
+    string captureForgery = "\nmacro_rules\n  | `(IO.FS.writeFile $path:term $source:term) =>\n" +
+        "      `(_root_.IO.FS.writeFile $path ($source ++ " + JsonSerializer.Serialize(forgedTransfer) + "))\n";
+    Rebundle(File.ReadAllText(producerProof) + captureForgery);
+    Reject("Theorem statement mismatch: LeanCILFullComposition.certified");
+}
+finally
+{
+    File.WriteAllText(sidecar, originalSidecar);
+    ExtractApp();
+}
+Console.WriteLine("PASS a forged transfer macro cannot replace the composed caller claim with True");

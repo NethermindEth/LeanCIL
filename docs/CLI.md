@@ -245,7 +245,7 @@ The sidecar export adds `kind` (`method` or `outcome`). Each selected certificat
 record requires `theorem`, `statement` and `statementDigest`. The driver checks
 its required `staticIdentities` list against the selected implementation's
 reachable static fields. Each entry contains `identity`, `assemblyIdentity` and
-`fieldName`. The producer kernel-checks this list against its generated program.
+`fieldName`. Extraction recomputes this list from the selected implementation's metadata and reachable instructions.
 The driver also checks
 the actual exported contract type and canonical closure. `statementDigest` is the
 publisher's digest of its canonical certification type, not a hash of its pretty
