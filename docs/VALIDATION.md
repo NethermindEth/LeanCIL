@@ -190,3 +190,50 @@ improvement. Preserve the kernel replay, axiom audits and negative regressions.
 Stores reuse existing read permissions when they already cover the written range, including coverage spread across multiple views. The `write_run_equivalent` theorem proves that replacing the previous always-prepending write preserves any subsequent checked execution: returned values, exact faults, allocation state, bytes and permissions. `Memory.Equivalent.run` and `.invoke` cover branches, calls, constructors and frame cleanup.
 
 Run `pwsh scripts/BenchmarkViews.ps1 -Stores 128 -Repetitions 3` to compare kernel reduction against the previous write implementation. In a local Windows run with Lean 4.35.0, 128 alternating stores retained 1 view instead of 129; median elapsed time was 5.6 seconds versus 17.7 seconds. These timings include process startup and shared-machine activity; view counts are checked by kernel reduction.
+
+## Export suite selection
+
+`dotnet run --file Tests/ContractExport.cs` runs every export cohort once.
+`dotnet run --file scripts/Test.cs -- --suite all` runs the same export leaves
+once with the other suites. Each export leaf has a fresh SDK and proof
+workspace. Full verification keeps fresh extraction, source audit, independent
+kernel replay, and all report and artifact checks.
+
+Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
+
+| Name | Cases |
+| --- | --- |
+| `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
+| `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
+| `exportsresolution` | Same loaded files and changed loaded module |
+| `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal |
+| `exportsfullordinary` | Ordinary caller full verification |
+| `exportsfullpair` | Two imported slots from one bundle |
+| `exportsfullchecks` | Bundle, DLL, closure, statement digest and caller-premise rejection |
+| `exportsfulltheorems` | Wrong producer theorem statement and definition |
+| `exportsfullcomposition` | Transferred macro cannot replace the composition theorem with True |
+| `exportsmutationordinary` | Executed ordinary caller artifact mutation |
+| `exportsmutationconsumer` | Executed consumer caller artifact mutation |
+| `exportsmutationsource` | Executed consumer caller source mutation |
+| `exportsmutationshadow` | Executed original-root module shadow |
+| `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
+
+The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
+20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
+The artifact-mode rejection follows real consumer positives so it still checks
+removal of an actual successful report. The default eight-argument
+`Tests/FullImportVerification.cs` invocation runs resolution and all full cohorts
+once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
+duplicate selections fail before fixture setup.
+The full plan contains only its ten explicit base cohorts. Later standalone
+statics, transitive, discovery and typed suites cannot enter that plan.
+The registry now has 14 leaves. `exportsstatics` runs directly, with no core
+export bootstrap or nested post-call. Its existing fixture assertions are
+separate from the 46 base case IDs. A standalone fixture cannot use an empty
+base completion ledger to claim coverage.
+
+New cohort durations are unmeasured. The existing CI caps remain 90 minutes
+for imports, 120 for each exports leaf, and 30 for other suites. The matrix
+still uses at most eight runners. Run the resource-bounded routing tests with
+`dotnet run --file scripts/TestSelectVerification.cs`; they need no Lean build
+or fixture SDK project. Full integration results come from the CI leaf jobs.
