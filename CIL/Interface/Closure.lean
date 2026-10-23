@@ -1,5 +1,4 @@
 import Lean
-import CIL.Safety.OutcomeContract
 
 namespace CIL.Interface
 open Lean
@@ -83,48 +82,19 @@ private def related (info : ConstantInfo) : List Name :=
   | .recInfo value => value.all ++ value.rules.map (fun rule => rule.ctor)
   | _ => []
 
+def approvedAxioms : List Name := [`propext, `Quot.sound, `Classical.choice]
+
 private def permitted (info : ConstantInfo) : Except String Unit := do
   if info.name == `sorryAx then throw "sorry in contract interface"
   if info.isUnsafe || info.isPartial then throw ("Unsafe or partial declaration in contract interface: " ++ info.name.toString)
   match info with
   | .axiomInfo _ =>
-    if info.name != `propext && info.name != `Quot.sound && info.name != `Classical.choice then
+    if !approvedAxioms.contains info.name then
       throw ("Axiom in contract interface: " ++ info.name.toString)
   | .opaqueInfo value =>
     if value.value.getAppFn.constName? == some info.name then
       throw ("Valueless opaque in contract interface: " ++ info.name.toString)
   | _ => pure ()
-
-private instance : MonadEnv (StateM Environment) where
-  getEnv := get
-  modifyEnv := modify
-
-private def validateAxioms (environment : Environment) (constants : List Name) : Except String Unit := do
-  for constant in constants do
-    let axioms := Id.run ((collectAxioms (m := StateM Environment) constant).run' environment)
-    for axiomName in axioms do
-      if axiomName != `propext && axiomName != `Quot.sound && axiomName != `Classical.choice then
-        throw ("Unapproved transitive axiom in contract interface: " ++ axiomName.toString)
-
-private partial def validateDependencies (environment : Environment) (pending : List Name) (visited : Std.HashSet Name) : Except String Unit := do
-  match pending with
-  | [] => pure ()
-  | name :: rest =>
-    if visited.contains name then return <- validateDependencies environment rest visited
-    let some info := environment.find? name | throw ("Missing declaration in contract closure: " ++ name.toString)
-    permitted info
-    if trustedModule (definingModule environment name) then
-      return <- validateDependencies environment rest (visited.insert name)
-    let values := semanticExpressions info ++ match info with
-      | .thmInfo theoremInfo => [theoremInfo.value]
-      | _ => []
-    validateDependencies environment (related info ++ values.flatMap dependencies ++ rest) (visited.insert name)
-
-def validateInterfaceDeclarations (environment : Environment) (interfaceModules : Array Name) : Except String Unit := do
-  let declarations := environment.constants.toList.filterMap fun (name, _) =>
-    if interfaceModules.contains (definingModule environment name) then some name else none
-  validateAxioms environment declarations
-  validateDependencies environment declarations {}
 
 private def declaration (info : ConstantInfo) : Except String Json := do
   let type <- expression info.levelParams 0 info.type
@@ -148,19 +118,67 @@ private def declaration (info : ConstantInfo) : Except String Json := do
   | .axiomInfo _ => throw ("Unexpected local axiom in canonical closure: " ++ info.name.toString)
   | .quotInfo _ => throw ("Unexpected local quotient declaration: " ++ info.name.toString)
 
-private partial def collect (environment : Environment) (pending : List Name) (visited : Std.HashSet Name)
-    (entries : List (String × Json)) : Except String (List (String × Json)) := do
-  match pending with
-  | [] => pure entries
-  | name :: rest =>
-    if visited.contains name then return <- collect environment rest visited entries
-    let some info := environment.find? name | throw ("Missing declaration in contract closure: " ++ name.toString)
-    permitted info
-    if trustedModule (definingModule environment name) then
-      return <- collect environment rest (visited.insert name) entries
-    let serialized <- declaration info
-    collect environment (related info ++ (semanticExpressions info).flatMap dependencies ++ rest)
-      (visited.insert name) ((canonicalName name |>.compress, serialized) :: entries)
+private def proofDependencies : ConstantInfo -> List Name
+  | .thmInfo value => dependencies value.value
+  | _ => []
+
+private def semanticDependencies (info : ConstantInfo) : List Name :=
+  related info ++ (semanticExpressions info).flatMap dependencies
+
+/-- One walk over everything `roots` reach, visiting each declaration once. Untrusted declarations, and
+the trusted ones they name, must be `permitted`; every reachable axiom, trusted or not, must be approved.
+With `serialize`, untrusted declarations reached through types, values and inductive families (not
+proofs) are serialized. Kernel declarations are read directly, never an axiom summary. -/
+private def walk (environment : Environment) (roots : List Name) (serialize : Bool) :
+    Except String (List (String × Json)) := do
+  let lookup (name : Name) : Except String ConstantInfo := match environment.find? name with
+    | some info => pure info
+    | none => throw ("Missing declaration in contract closure: " ++ name.toString)
+  let mut visited : Std.HashSet Name := {}
+  let mut entries : List (String × Json) := []
+  let mut semantic := if serialize then roots else []
+  let mut proofs := if serialize then [] else roots
+  -- Both untrusted stacks drain first, so trusted declarations are walked for axioms only.
+  let mut trusted : List Name := []
+  repeat
+    if let name :: rest := semantic then
+      semantic := rest
+      unless visited.contains name do
+        let info <- lookup name
+        permitted info
+        if trustedModule (definingModule environment name) then
+          trusted := name :: trusted
+        else
+          visited := visited.insert name
+          entries := (canonicalName name |>.compress, <- declaration info) :: entries
+          semantic := semanticDependencies info ++ semantic
+          proofs := proofDependencies info ++ proofs
+    else if let name :: rest := proofs then
+      proofs := rest
+      unless visited.contains name do
+        let info <- lookup name
+        permitted info
+        if trustedModule (definingModule environment name) then
+          trusted := name :: trusted
+        else
+          visited := visited.insert name
+          proofs := semanticDependencies info ++ proofDependencies info ++ proofs
+    else if let name :: rest := trusted then
+      trusted := rest
+      unless visited.contains name do
+        visited := visited.insert name
+        let info <- lookup name
+        if let .axiomInfo _ := info then
+          unless approvedAxioms.contains name do
+            throw ("Unapproved transitive axiom in contract interface: " ++ name.toString)
+        trusted := semanticDependencies info ++ proofDependencies info ++ trusted
+    else break
+  return entries
+
+def validateInterfaceDeclarations (environment : Environment) (interfaceModules : Array Name) : Except String Unit := do
+  let declarations := environment.constants.toList.filterMap fun (name, _) =>
+    if interfaceModules.contains (definingModule environment name) then some name else none
+  discard <| walk environment declarations false
 
 def contractClosure (environment : Environment) (constant : Name) : Except String (String × String) := do
   let some info := environment.find? constant | throw ("Missing contract constant: " ++ constant.toString)
@@ -170,14 +188,13 @@ def contractClosure (environment : Environment) (constant : Name) : Except Strin
       else if name == `CIL.Safety.OutcomeContract then pure "outcome"
       else throw "Export must have the canonical MethodContract or OutcomeContract type"
     | none => throw "Export must be a closed contract constant"
-  validateAxioms environment [constant]
-  validateDependencies environment [constant] {}
-  let entries <- collect environment [constant] {} []
+  let entries <- walk environment [constant] true
   let ordered := entries.mergeSort (fun left right => left.1 <= right.1)
   return (kind, (node "leancil-contract-closure-1" [canonicalName constant, Json.str kind,
     toJson (ordered.map Prod.snd)]).compress)
 
 open Elab Command in
+/-- Prints a contract closure for authoring; verification computes it in `leancil-audit` instead. -/
 elab "#leancil_contract_closure " constant:ident : command => do
   let name <- resolveGlobalConstNoOverload constant
   let (kind, canonical) <- match contractClosure (<- getEnv) name with

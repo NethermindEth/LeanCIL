@@ -88,9 +88,10 @@ across method gates.
 
 ## Replay
 
-Kernel replay and the theorem audit run the pinned toolchain's `lean` directly
-with the `LEAN_PATH` that `lake env` resolves after the build (and `LEAN_SYSROOT`
-set to that toolchain), instead of starting Lake again for each step. The
+Kernel replay and the theorem audit run the pinned toolchain's `leanchecker` and the
+library's `leancil-audit` directly with the `LEAN_PATH` that `lake env` resolves after
+the build (and `LEAN_SYSROOT` set to that toolchain), instead of starting Lake again
+for each step. The audit reads the replayed oleans and elaborates no consumer source. The
 resolved import paths are still compared with those resolved before the build.
 
 ## Batch verification

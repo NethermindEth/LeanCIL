@@ -3,6 +3,7 @@
   "measurement": "Completed job duration in seconds, including setup and verification",
   "seconds": {
     "arguments": 163,
+    "audit": 240,
     "blockers": 90,
     "bits": 534,
     "blocks": 128,

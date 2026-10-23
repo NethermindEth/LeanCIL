@@ -129,16 +129,23 @@ CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold claim
 ```
 
 This retains both `Links` and the required imported contracts. The theorem audit
-checks this shape in addition to the existing theorem-kind and transitive axiom
-audit. This shape check does not establish that an arbitrary `claim` is useful.
+(`leancil-audit`, on replayed oleans) compares the compiled theorem type with this
+application structurally, so no binder may precede it, and requires the compiled
+value of `Extracted.ImportsHold` to equal the conjunction rebuilt from
+`identity.json`: each slot's root contract at the canonical `Nat` numeral. An
+interface `OfNat` instance, notation or elaborator therefore cannot retarget a
+slot. This shape check does not establish that an arbitrary `claim` is useful.
 The caller proof supplies the intended claim. A concrete linked implementation
 must separately discharge the import contracts before this conditional result
 can establish an unconditional application guarantee.
 
 The verifier stages the exact interface sources, includes them in proof cache
-identities, compiles them, and performs kernel replay. It hashes the compiled
-interface artifacts before the closure audit and requires the same hashes after
-the audit, after their replay and before each later step. Consumer workspaces also
+identities, compiles them, and performs kernel replay. `leancil-audit` then
+validates the interface declarations and computes each canonical closure from the
+replayed oleans, without running interface code; no compiler output is read, so
+an interface macro or elaborator cannot forge a closure. The compiled interface
+artifacts are hashed before replay and must keep those hashes after the audit
+and before each later step. Consumer workspaces also
 reject source-name collisions and include their hashes in snapshot checks.
 Schema-4 reports list `imports` accepted via `published-certification`, as well
 as `contractImports`; CLI output states the conditional assumptions and deployment
