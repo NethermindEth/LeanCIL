@@ -56,7 +56,8 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     if scope != intrinsicsScope || elementScope != runtimeScope ||
         element ∉ ["System.UInt64", "System.Int64", "System.UInt32", "System.Int32", "System.Byte", "System.Double", "System.Single"] then none
     else if name = "System.Runtime.Intrinsics.Vector128`1" then some .vector128
-    else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256 else none
+    else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256
+    else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
   | _ => none
 
 /-- Structural substitution includes nested type constructors, not just signature strings. -/

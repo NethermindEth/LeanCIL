@@ -1,4 +1,5 @@
 import CIL.Safety.StepComposition
+import CIL.Safety.GuardNormalization
 
 namespace CIL.Safety
 
@@ -27,6 +28,8 @@ elab_rules : command
     let simprocs := #[← Simp.getSimprocs]
     let select ← Simp.mkContext (congrTheorems := congruences) (simpTheorems := #[← unfolding #[
       ``CIL.Safety.pureArity, ``CIL.Safety.scalars, ``CIL.Safety.numericValue, ``CIL.Safety.checkedValue,
+      ``CIL.Safety.observerCount, ``CIL.Safety.unspecifiedOperands,
+      ``CIL.Safety.Value.hasUnspecified, ``CIL.Value.hasUnspecified, ``List.any,
       ``List.take, ``List.drop, ``List.map, ``Bind.bind, ``Pure.pure, ``Except.bind, ``Except.pure,
       ``Option.bind] {}])
     -- Unfold a dispatcher only once its discriminants are constructors, so just the selected arm is kept.

@@ -36,7 +36,7 @@ def narrowValue (kind : Option NarrowKind) (value : Value) : Option Value :=
 inductive LocalKind where
   | narrow (kind : NarrowKind)
   | aggregate (size : Fin (2^64))
-  | byte | word32 | word64 | vector128 | vector256 | reference
+  | byte | word32 | word64 | vector128 | vector256 | vector512 | reference
   deriving DecidableEq, Repr
 
 inductive Op where
@@ -123,6 +123,7 @@ structure Method where
   localKinds : List LocalKind := []
   staticSites : List (Nat × StaticDescriptor) := []
   vectorLocals : List Nat := []
+  opaqueVectorLocals : List Nat := []
   vectorArgs : List Nat := []
   parameterHomes : List (Nat × LocalKind) := []
   returnsValue : Bool

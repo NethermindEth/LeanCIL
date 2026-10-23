@@ -174,12 +174,13 @@ def Intrinsic.requiredFeatures : Intrinsic → List Feature
   | .sse .alignBytes => [.ssse3]
   | .avx _ => [.avx]
   | .avx2 _ => [.avx2]
+  | .avx512 .ltu512 | .avx512 .gtu512 => [.avx512F]
   | .avx512 _ => [.avx512F, .avx512FVL]
   | .bmi1 _ => [.bmi1]
   | .bmi2 _ => [.bmi2]
   | .armBase64 _ => [.armBase64]
   | .x86Base _ => [.x86Base64]
-  | .avx512DQ .moveMask64 => [.avx512DQ]
+  | .avx512DQ .moveMask64 | .avx512DQ .moveMask512 => [.avx512DQ]
   | .avx512DQ .mul64 => [.avx512DQ, .avx512DQVL, .avx512F, .avx512FVL]
 
 theorem Intrinsic.available_of_required (operation : Intrinsic) (p : FeatureProfile)
@@ -187,6 +188,7 @@ theorem Intrinsic.available_of_required (operation : Intrinsic) (p : FeatureProf
     operation.available p = true := by
   cases operation <;> simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
   case sse operation => cases operation <;> simp_all
+  case avx512 operation => cases operation <;> simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
   case avx512DQ operation => cases operation <;> simp_all
 
 theorem Op.ProfileAgreement.symm (op : Op) (p q : FeatureProfile)
