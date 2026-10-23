@@ -29,7 +29,9 @@ File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
 """);
 string librarySource = Path.Combine(libraryRoot, "Library.cs");
-File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; }\n");
+File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; " +
+    "internal static ulong Hidden(ulong value) => value + 1; } public struct Value { public ulong Field; public ulong Add(ulong value) => value + Field; } " +
+    "public static class Seeded { public static readonly ulong Seed = (ulong)System.Environment.ProcessorCount; }\n");
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => Library.AddOne(value); }\n");
 Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string library = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.dll");
@@ -150,6 +152,64 @@ if (initialCaller.GetProperty("schema").GetInt32() != 4)
     throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
 RejectPostAuditMutations(library, artifact, package, proof, contractSource, sidecar);
+
+string restricted = Sha(sidecar);
+string Restriction(string name, string assembly, string method, params string[] options)
+{
+    string folder = Path.Combine(root, "Restriction-" + name);
+    Run([.. cli, "extract", assembly, method, folder, .. options]);
+    File.WriteAllText(Path.Combine(folder, "verification.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1, proof = Path.GetRelativePath(folder, proof).Replace('\\', '/'), theorem = "LibProof.correctness",
+        proofRoot = Path.GetRelativePath(folder, package).Replace('\\', '/')
+    }));
+    return folder;
+}
+JsonObject RestrictedManifest(string assembly, string method, string folder)
+{
+    JsonObject manifest = ProducerManifest();
+    manifest["assembly"] = assembly;
+    manifest["exports"]![0]!["method"] = method;
+    manifest["exports"]![0]!["artifact"] = folder;
+    return manifest;
+}
+const string shape = "Contract exports require a public or protected static, non-virtual, non-generic method.";
+const string assumptions = "Contract export version 1 rejects imports and static/initialization assumptions: ";
+foreach ((string Name, string Method, string Marker) restriction in new[]
+{
+    ("internal", "ImportFixture.Library::Hidden(ulong)", shape),
+    ("instance", "ImportFixture.Value::Add(ulong)", shape)
+})
+    RejectExport(RestrictedManifest(library, restriction.Method, Restriction(restriction.Name, library, restriction.Method)), restriction.Marker, restricted);
+RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
+    Restriction("initialized", library, "ImportFixture.Library::AddOne(ulong)", "--assume-initialized", "ImportFixture.Seeded")),
+    assumptions + "initializedTypes", restricted);
+RejectExport(RestrictedManifest(app, "ImportFixture.Application::Entry(ulong)",
+    Restriction("imports", app, "ImportFixture.Application::Entry(ulong)", "--import", sidecar, "--import-implementation", "ImportFixture.Lib=" + library,
+        "--import-sha256", "ImportFixture.Lib=" + Sha(library), "--import-interface-sha256", "ImportFixture.Lib=" + interfaceDigest)),
+    assumptions + "imports", restricted);
+string customProfile = Path.Combine(root, "custom-profile.json");
+JsonObject profile = JsonNode.Parse(JsonSerializer.Serialize(new
+{
+    name = "scalar", architecture = "scalar", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = false, ssse3 = false,
+    sse42 = false, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false, sse41 = false, avx512DQ = false,
+    avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false, x86Base64 = false, vector128Accelerated = true
+}))!.AsObject();
+File.WriteAllText(customProfile, profile.ToJsonString());
+RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
+    Restriction("profile", library, "ImportFixture.Library::AddOne(ulong)", "@" + customProfile)),
+    "Contract exports require an exact built-in profile.", restricted);
+string referenceAssembly = Directory.EnumerateFiles(libraryRoot, "ImportFixture.Lib.dll", SearchOption.AllDirectories)
+    .Single(path => path.Replace('\\', '/').Contains("/ref/", StringComparison.Ordinal));
+RejectExport(RestrictedManifest(referenceAssembly, "ImportFixture.Library::AddOne(ulong)", artifact),
+    "Cannot certify exports from a reference assembly.", restricted);
+File.WriteAllText(manifestPath, ProducerManifest().ToJsonString());
+(int Code, string Output, string Stdout, string Stderr) overlapping = Execute([.. cli, "export-contracts", manifestPath, "--output", sidecar,
+    "--bundle", Path.Combine(package, "Bundles")]);
+if (overlapping.Code == 0 || !overlapping.Output.Contains("Contract bundle output must be outside proof sources and extraction artifacts.", StringComparison.Ordinal) ||
+    Sha(sidecar) != restricted || Directory.Exists(Path.Combine(package, "Bundles")))
+    throw new InvalidOperationException("A bundle inside the proof sources was not rejected before publication: " + overlapping.Output);
+Console.WriteLine("PASS version 1 export restrictions reject each unsupported method shape, assumption, profile, reference assembly and bundle location");
 
 string pinnedSidecar = Sha(sidecar);
 string[] bundlesBefore = Directory.EnumerateDirectories(bundle).Order(StringComparer.Ordinal).ToArray();
