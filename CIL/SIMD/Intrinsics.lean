@@ -220,4 +220,15 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .vector .byteToBool, [.i8 a] => some (.i32 (a.setWidth 32))
   | _, _ => none
 
+/-- The only consumers of unspecified upper lanes; each reads lane 0 alone, and every other
+    operation rejects them here rather than relying on its `evalIntrinsic` patterns. -/
+def evalUnspecifiedIntrinsic (op : Intrinsic) (args : List Value) : Option Value :=
+  match op, args with
+  | .vector (.reinterpret 128), [.v128Low64 low] => some (.v128Low64 low)
+  | .vector (.extract64 128), [.v128Low64 low, .i32 index] =>
+    if index.toNat == 0 then some (.i64 low) else none
+  | .avx2 .shl64Count, [.v256 value, .v128Low64 low] => some (.v256 (Vector.shiftLeftCount64 value low))
+  | .avx2 .shr64Count, [.v256 value, .v128Low64 low] => some (.v256 (Vector.shiftRightCount64 value low))
+  | _, _ => none
+
 end CIL
