@@ -466,8 +466,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return inputs;
     }
 
-    static readonly Regex ConsumerImport = new(@"^[ \t]*(?:(?:public|meta)[ \t]+)*import[ \t]+(?:all[ \t]+)?([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline);
-
     // Read from source text before any build, so the proof key can bind PDB names; Lean's
     // compiled import headers confirm it after the build. Ambiguous module paths all count.
     static bool ConsumerImportsSymbols(string proof, SortedDictionary<string, string> snapshot, string root)
@@ -479,7 +477,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         while (pending.TryDequeue(out var path))
         {
             if (!seen.Add(path)) continue;
-            foreach (Match import in ConsumerImport.Matches(File.ReadAllText(path)))
+            foreach (Match import in SourceImport().Matches(File.ReadAllText(path)))
             {
                 if (import.Groups[1].Value == "ExtractedSymbols") return true;
                 var module = "/" + import.Groups[1].Value.Replace('.', '/') + ".lean";
