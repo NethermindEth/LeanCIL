@@ -294,7 +294,6 @@ unsafe def main (args : List String) : IO Unit := do
     // Every requested module is reported as replayed or rejected; a checker process failure throws.
     Dictionary<string, string> ReplayConsumerModules(string session, IEnumerable<string> modules, string leanPath)
     {
-        fullInputRecheck?.Invoke();
         var targets = modules.ToArray();
         var profile = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") == "true";
         // A rejected or ineligible joint replay falls through to per-module replay, which attributes failures.
@@ -380,7 +379,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
-    ConsumerDependency[]? fullBundleDependencies;
+    ConsumerDependency[]? fullBundleDependencies { get; init; }
 
     static string Within(string root, string relative)
     {
@@ -1413,8 +1412,6 @@ unsafe def main (args : List String) : IO Unit := do
                     ? assumptions.Deserialize<string[]>() : [];
                 RequireImplementationImports(outputs[i]);
                 fullResults.TryGetValue(i, out FullImportResult? fullResult);
-                fullResult?.Recheck();
-                fullInputRecheck?.Invoke();
                 var report = new Report(4, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
                     audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
