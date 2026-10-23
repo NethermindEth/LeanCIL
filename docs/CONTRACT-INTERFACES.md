@@ -114,7 +114,10 @@ Several slots form a conjunction. The selected kind uses the fully qualified
 framework `MethodContract.Holds` or `OutcomeContract.Holds` predicate. Both the
 framework predicate and selected contract use `_root_` qualification, so an
 `Extracted` namespace declaration cannot replace either one. Lean checks
-that the named value has that actual framework contract type. A user-defined
+that the named value has that actual framework contract type. The audit compares
+the head constant of that type, so a contract typed through an `abbrev` of
+`MethodContract` or `OutcomeContract` is rejected; declare it with the framework
+structure directly. A user-defined
 `Contract.Holds` predicate cannot replace this check. Each contract applies to
 the actual linked program and its absolute slot. No body, axiom, summary or
 implementation proof is generated for an import.
