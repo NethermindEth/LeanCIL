@@ -491,7 +491,7 @@ run_cmd liftTermElabM do
 
     static string FullCompositionSource(string callerModule, string callerTheorem, string originalClaim, IReadOnlyList<FullLibrary> libraries)
     {
-        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Interface.Closure\n");
+        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Safety.StaticLinking\nimport CIL.Interface.Closure\n");
         foreach (FullLibrary library in libraries) source.AppendLine("import " + library.Module).AppendLine("import " + library.ExpectedModule);
         source.AppendLine("namespace LeanCILFullComposition\nopen CIL.Safety");
         foreach (FullLibrary library in libraries)
@@ -512,6 +512,8 @@ run_cmd liftTermElabM do
         source.AppendLine("def specifications : List Relocatable := [" + string.Join(", ", libraries.Select(library =>
             "_root_.CIL.Safety." + (library.Kind == "method" ? "MethodContract" : "OutcomeContract") + ".relocatable _root_." + library.Contract)) + "]");
         source.AppendLine("theorem app_prefix : Links Extracted.program (link Extracted.program libraries) := link_links _ _");
+        // Equal static identities must name equal descriptors across the whole linked program.
+        source.AppendLine("theorem staticLink : linkChecked Extracted.program libraries = .ok (link Extracted.program libraries) :=\n  linkChecked_of_compatible (by decide +kernel)");
         foreach (FullLibrary library in libraries)
             source.AppendLine("theorem relocation" + library.Slot + " : RelocatesInto library" + library.Slot + ".program " +
                 "(link Extracted.program libraries) (linkSlot Extracted.program libraries " + library.Slot + ") := link_relocates Extracted.program libraries (j := " + library.Slot + ") (by decide)");
@@ -531,7 +533,7 @@ run_cmd liftTermElabM do
     | .error message => throwError "{message}"
   unless canonical == {{JsonSerializer.Serialize(originalClaim)}} do throwError "Full-verification caller claim changed during composition"
 """);
-        source.AppendLine("theorem certified : fullCallerClaim (link Extracted.program libraries) := discharge _root_." + callerTheorem);
+        source.AppendLine("theorem certified : linkChecked Extracted.program libraries = .ok (link Extracted.program libraries) /\\\n    fullCallerClaim (link Extracted.program libraries) :=\n  And.intro staticLink (discharge _root_." + callerTheorem + ")");
         source.AppendLine("end LeanCILFullComposition");
         return source.ToString();
     }
