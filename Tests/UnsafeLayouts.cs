@@ -113,7 +113,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
             "void" => "Unsupported type: System.Void",
             "byref" => "Unsupported Unsafe element type: System.Int32&",
             "pointer" => "Unsupported Unsafe element type: System.Int32*",
-            "arity" or "offset" or "return" => "External managed dependency: " + call.FullName,
+            "arity" or "offset" or "return" => "Generic contract imports are not supported in version 1.",
             "scope" => "Unsupported generic call: " + call.FullName,
             "version" => "Unsupported aggregate layout: Examples.PackedLeaf",
             _ => throw new InvalidOperationException("Unknown Unsafe rejection fixture: " + mutation)
