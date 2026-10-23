@@ -1,13 +1,10 @@
 # Soundness boundary
 
-Contract discovery is an untrusted location-selection phase. deps.json, NuGet
-assets, retained LeanCilContracts metadata, and embedded descriptors do not prove
-the imported contracts or authenticate a publisher. Admission hashes and inspects
-one shared snapshot of the selected runtime DLL. Independent implementation and
-interface pins remain mandatory. Embedded descriptors exclude final-DLL hash and
-certification metadata; the external sidecar binds the final resource-bearing DLL.
-The same provenance checker rejects changed selection inputs on recheck, reuse,
-and final report publication. A reference DLL alone cannot complete certification.
+`leancil resolve-imports` is untrusted location selection outside extraction.
+deps.json, NuGet assets, the RID graph and the LeanCilContracts attribute only
+choose the sidecar and DLL paths passed to `extract`, which never reads them.
+Extraction hashes the files it is given against the independent implementation
+and interface pins, so a wrong selection can only fail, never certify other bytes.
 
 ## What is defined and proved
 
