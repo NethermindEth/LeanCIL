@@ -2,6 +2,9 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 #:include ../scripts/FullModuleResolution.cs
+#:include ../scripts/ExportVerificationSuites.cs
+
+ExportCaseLedger completed = new("resolution");
 
 using Program paths = new();
 string root = At("artifacts/FullModuleResolution-" + Guid.NewGuid().ToString("N"));
@@ -15,6 +18,7 @@ SortedDictionary<string, string> accepted = new(StringComparer.Ordinal)
 // Lean joins search roots verbatim, so the root's spelling (separators, "." segments, drive case) must not matter.
 string spelled = paths.Toolchain + "/lib/./lean";
 paths.CheckFullResolution(root, spelled, accepted);
+completed.CompleteCase("resolution.same-files");
 Console.WriteLine("PASS full-verification resolution accepts the same files under another root spelling");
 
 SortedDictionary<string, string> swapped = new(StringComparer.Ordinal) { ["Init"] = accepted["Lean.Elab"] };
@@ -24,3 +28,5 @@ catch (InvalidOperationException error) { rejection = error.Message; }
 if (rejection?.Contains("Full-verification resolved module path changed: Init", StringComparison.Ordinal) != true)
     throw new InvalidOperationException("Full-verification resolution accepted a module loaded from a different file: " + rejection);
 Console.WriteLine("PASS full-verification resolution rejects a module loaded from a different file");
+completed.CompleteCase("resolution.changed-file");
+completed.Finish();
