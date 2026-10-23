@@ -60,8 +60,9 @@ for the regression coverage.
 Lean stores a definition's equation lemmas in the first module that unfolds it,
 so every import chain that unfolds the interpreter rebuilds them. Import
 `CIL.Safety.Equations` (checked dispatchers, `CIL.binary` and `CIL.unary`) and,
-only when unfolding the full `CIL.step` dispatcher, `CIL.StepEquations` (about
-20 MB) to reuse one copy. `CIL.Safety.Execution` provides `CIL.step.eq_def` and
+when unfolding the full `CIL.step` dispatcher, `CIL.StepEquations` (about
+20 MB) to reuse one copy. `CIL.Safety.SymbolicExecution` imports both, since the
+checked-step fallback unfolds `CIL.step`. `CIL.Safety.Execution` provides `CIL.step.eq_def` and
 `CIL.Safety.step.eq_def`, which tactic macros cannot generate themselves.
 
 ## Extension points

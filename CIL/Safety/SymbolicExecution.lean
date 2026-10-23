@@ -1,4 +1,6 @@
 import CIL.SymbolicExecution
+import CIL.StepEquations
+import CIL.Safety.Equations
 import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
 import CIL.Safety.CallComposition
@@ -88,9 +90,9 @@ syntax "cil_lookup" "[" term,* "]" : tactic
 macro_rules
   | `(tactic| cil_lookup [$facts:term,*]) =>
   `(tactic| first
+    | with_reducible assumption
     | (simp only [cil_code, Nat.reduceAdd]; rfl)
     | rfl
-    | with_reducible assumption
     | (simp only [cil_code, Nat.reduceAdd, $[$facts:term],*]; done)
     | (simp only [cil_code, Nat.reduceAdd, $[$facts:term],*]; rfl))
 
@@ -156,6 +158,14 @@ elab_rules : tactic
 syntax "cil_checked_step" "[" term,* "]" : tactic
 
 open Lean Elab Tactic in
+/-- Normalise `CIL.truth` and `facts` once for a stepping loop, then build its tactic from the raw and
+    normalised facts; per-step normalisation would re-simp every local fact on every instruction. -/
+def cilWithNormalisedFacts (facts : Array Term) (body : Array Term → Array Term → TacticM Syntax) : TacticM Unit :=
+  withMainContext do
+    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) (#[← `(CIL.truth)] ++ facts)
+    withMainContext <| evalTactic (← body facts prepared)
+
+open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_step [$facts:term,*]) => do
     let config ← `(Lean.Parser.Tactic.optConfig|)
@@ -166,6 +176,69 @@ elab_rules : tactic
     Unresolved memory and arithmetic conditions remain proof obligations. -/
 syntax "cil_checked_steps_normalized" "[" term,* "]" : tactic
 
+macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+    cil_strict refine Eq.trans (CIL.Safety.run_return $methodFound $instructionFound
+      (by cil_checked_step_normalized [$[$facts:term],*])
+      (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
+    try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
+      List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend, BitVec.reduceOfInt, BitVec.isValue,
+      Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
+    try with_reducible rfl
+    try (with_reducible simp [$[$facts:term],*]; done)))
+
+-- Elaborate the step proof before creating the continuation goal, so reference/frame
+-- metavariables remain assignable by the step facts.
+macro "cil_checked_next_at " methodFound:term:max instructionFound:term:max "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+    cil_strict refine Eq.trans (CIL.Safety.run_next $methodFound $instructionFound
+      (by cil_checked_step_normalized [$[$facts:term],*])) ?_
+    cil_stack_cleanup))
+
+macro "cil_checked_call_at " methodFound:term:max instructionFound:term:max "[" facts:term,* "]" : tactic =>
+  `(tactic| cil_strict refine CIL.Safety.run_call_of_invoke $methodFound $instructionFound
+    (by cil_checked_step_normalized [$[$facts:term],*])
+    (by cil_checked_steps_normalized [$[$facts:term],*]; done)
+    (by cil_checked_steps_normalized [$[$facts:term],*]; done))
+
+open Lean Elab Tactic Meta in
+/-- Instantiate `lemma` against the goal through `select`, close its method and instruction lookups
+    (the premises `lookups` places from the end) with `cil_lookup`, and return both proofs as syntax
+    with the fetched opcode's constructor. -/
+def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (lookups : Nat)
+    (facts : Array Lean.Term) : Lean.Elab.Tactic.TacticM (Lean.Term × Lean.Term × Lean.Name) := do
+  let target ← instantiateMVars (← getMainTarget)
+  let (premises, _, conclusion) ← forallMetaTelescopeReducing (← inferType (← mkConstWithFreshMVarLevels lemma))
+  let some goalPart := select target | throwError "The goal does not have the shape of {lemma}"
+  let some lemmaPart := select conclusion | throwError "Unexpected statement of {lemma}"
+  unless ← isDefEq lemmaPart goalPart do throwError "The goal does not have the shape of {lemma}"
+  let methodFound := premises[premises.size - lookups]!
+  let instructionFound := premises[premises.size - lookups + 1]!
+  for proof in [methodFound, instructionFound] do
+    let remaining ← Tactic.run proof.mvarId! (evalTactic (← `(tactic| cil_lookup [$facts,*])))
+    unless remaining.isEmpty do throwError "The method or instruction lookup did not close"
+  let fetched ← instantiateMVars (← inferType instructionFound)
+  let some (_, _, found) := fetched.eq? | throwError "Unexpected instruction lookup"
+  let operation := (← whnfR found.appArg!).getAppFn.constName?.getD Name.anonymous
+  return (← Term.exprToSyntax (← instantiateMVars methodFound),
+    ← Term.exprToSyntax (← instantiateMVars instructionFound), operation)
+
+/-- One `run` step: prove the method and instruction lookups once, then apply only the
+    composition lemma for the fetched opcode instead of trying each in turn. -/
+syntax "cil_checked_run_step" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_checked_run_step [$facts:term,*]) => withMainContext do
+    let (methodSyntax, instructionSyntax, operation) ←
+      cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts.getElems
+    evalTactic (← if operation == ``CIL.Op.ret then
+        `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
+      else if operation == ``CIL.Op.call then
+        `(tactic| cil_checked_call_at $methodSyntax $instructionSyntax [$facts,*])
+      else
+        `(tactic| cil_checked_next_at $methodSyntax $instructionSyntax [$facts,*]))
+
 macro_rules
   | `(tactic| cil_checked_steps_normalized [$facts:term,*]) =>
   `(tactic| (
@@ -174,31 +247,8 @@ macro_rules
          · cil_lookup [$[$facts:term],*]
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
          · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
-    cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" first
-    | (cil_strict refine Eq.trans (CIL.Safety.run_return (op := .ret _)
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step_normalized [$[$facts:term],*])
-        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
-       try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
-         List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend, BitVec.reduceOfInt, BitVec.isValue,
-         Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
-       try with_reducible rfl
-       try (with_reducible simp [$[$facts:term],*]; done))
-    -- Elaborate each intermediate-state proof before creating the continuation
-    -- goal, so reference/frame metavariables remain assignable by the step facts.
-    | (cil_strict refine Eq.trans (CIL.Safety.run_next
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_checked_step_normalized [$[$facts:term],*])) ?_
-       cil_stack_cleanup)
-    | (cil_strict apply CIL.Safety.run_call_of_invoke
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step_normalized [$[$facts:term],*]
-       · solve | cil_checked_steps_normalized [$[$facts:term],*]
-       · solve | cil_checked_steps_normalized [$[$facts:term],*])
-    ))
+    cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts"
+      cil_checked_run_step [$[$facts:term],*]))
 
 syntax "cil_checked_steps" "[" term,* "]" : tactic
 
