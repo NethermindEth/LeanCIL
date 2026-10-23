@@ -1057,9 +1057,10 @@ unsafe def main (args : List String) : IO Unit := do
         }));
     }
 
+    // Certification fields are sidecar text outside every pinned digest; sidecarSha256 names the bytes they came from.
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
-        string certificationStatementDigest, string deploymentObligation);
+        string certificationStatementDigest, string deploymentObligation, string? sidecarSha256 = null, bool certificationAuthenticated = false);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1067,7 +1068,8 @@ unsafe def main (args : List String) : IO Unit := do
             import.GetProperty("implementationSha256").GetString()!, import.GetProperty("interfaceDigest").GetString()!,
             "published-certification", import.GetProperty("certificationTheorem").GetString()!,
             import.GetProperty("certificationStatement").GetString()!, import.GetProperty("certificationStatementDigest").GetString()!,
-            "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.")).ToArray()
+            "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.",
+            import.GetProperty("sidecarSha256").GetString()!)).ToArray()
         : [];
 
     static string ImportAuditHeader(ExtractionIdentity extraction) => extraction.Sources.ContainsKey("ExtractedImports") ? "import ExtractedImports\n" : "";

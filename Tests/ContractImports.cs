@@ -94,7 +94,6 @@ void Reset()
     contract["interfaceModules"]![0]!["source"] = interfaceSource;
     contract["exports"]![0]!["closureDigest"] = closureDigest;
     contract["certifications"]![0]!["closureDigest"] = closureDigest;
-    contract["certifications"]![0]!["statementDigest"] = ContentKey("published canonical certification statement fixture");
     contract["fullVerificationLocator"] = Path.Combine(directory, "deleted-library-proofs");
     contract["exports"]![0]!["identity"] = module.Assembly.Name.FullName + "::System.UInt64 ImportFixture.Library::AddOne(System.UInt64)";
     contract["certifications"]![0]!["identity"] = contract["exports"]![0]!["identity"]!.DeepClone();
@@ -177,6 +176,11 @@ if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contract
     report.GetProperty("imports")[0].GetProperty("acceptedVia").GetString() != "published-certification" ||
     !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
+// No pinned digest covers certification text, so the report must not present it as authenticated.
+if (!report.GetProperty("imports")[0].TryGetProperty("certificationAuthenticated", out JsonElement authenticated) || authenticated.GetBoolean() ||
+    !report.GetProperty("imports")[0].TryGetProperty("sidecarSha256", out JsonElement sidecarDigest) || sidecarDigest.GetString() != Sha(sidecar) ||
+    !verified.Contains("Published certification (unauthenticated sidecar record, sidecar SHA-256 " + Sha(sidecar) + ")", StringComparison.Ordinal))
+    throw new InvalidOperationException("Verification presented unpinned certification text without its sidecar provenance: " + verified);
 
 string replacementInterface = interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal);
 string SubstitutionProof(string sourceFolder, string artifactPath, string markerPath)
