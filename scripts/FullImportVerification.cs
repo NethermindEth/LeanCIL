@@ -15,10 +15,10 @@ partial class Program
     }
 
     // The sidecar names a content-addressed bundle; an override may relocate it but not change its identity.
-    static FullSelection SelectFullBundle(JsonElement binding, IReadOnlyDictionary<string, string> overrides, ISet<string> used)
+    static FullSelection SelectFullBundle(string output, JsonElement binding, IReadOnlyDictionary<string, string> overrides, ISet<string> used)
     {
-        string sidecar = binding.GetProperty("sidecarPath").GetString()!;
-        string implementation = binding.GetProperty("implementationPath").GetString()!;
+        string sidecar = ExtractionIdentity.Resolve(output, binding.GetProperty("sidecarPath").GetString()!);
+        string implementation = ExtractionIdentity.Resolve(output, binding.GetProperty("implementationPath").GetString()!);
         byte[] sidecarBytes = File.ReadAllBytes(sidecar);
         string sidecarSha256 = ContractInterface.Hash(sidecarBytes);
         string implementationSha256 = Sha(implementation);
@@ -50,7 +50,7 @@ partial class Program
         JsonElement[] imports = ExtractionIdentity.Read(output).Imports;
         if (imports.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         HashSet<string> used = new(StringComparer.Ordinal);
-        foreach (JsonElement binding in imports) SelectFullBundle(binding, overrides, used);
+        foreach (JsonElement binding in imports) SelectFullBundle(output, binding, overrides, used);
         RequireUsedOverrides(overrides, used);
     }
 
@@ -134,7 +134,7 @@ partial class Program
         foreach (JsonElement binding in bindings)
         {
             string identity = binding.GetProperty("identity").GetString()!;
-            FullSelection selection = SelectFullBundle(binding, overrides, usedOverrides);
+            FullSelection selection = SelectFullBundle(output, binding, overrides, usedOverrides);
             original[selection.Sidecar] = selection.SidecarSha256;
             original[selection.Implementation] = selection.ImplementationSha256;
             ContractInterface contract = selection.Contract;
