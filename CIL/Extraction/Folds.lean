@@ -2,9 +2,6 @@ import CIL.Extraction.Generics
 
 namespace CIL.Extraction
 
-private def runtimeScope : String :=
-  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-
 private def plainChar (c : Char) : Bool :=
   c.isAlphanum || c == '_' || c == '.' || c == '/' || c == '`'
 
@@ -62,7 +59,10 @@ private def typeHandle : RawInstruction → Option TypeExpr
 private def typeMethod (name signature : String) (parameters : Nat) : CallSite := {
   declaringType := .atom runtimeScope "System.Type", name,
   target := .external (runtimeScope ++ "::" ++ signature),
-  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true }
+  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true,
+  returnType := .atom runtimeScope (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+  parameterTypes := if name == "GetTypeFromHandle" then [.atom runtimeScope "System.RuntimeTypeHandle"]
+    else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] }
 
 private def getTypeFromHandle : CallSite :=
   typeMethod "GetTypeFromHandle" "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1

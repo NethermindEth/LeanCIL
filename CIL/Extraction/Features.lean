@@ -21,9 +21,6 @@ def factsWeaken (source target : List (Option W32)) : Bool :=
 def FeatureState.weakens (source target : FeatureState) : Bool :=
   factsWeaken source.stack target.stack && factsWeaken source.locals target.locals
 
-private def runtimeIdentity := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-private def intrinsicIdentity := "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-
 private def featureNames : List (String × Feature) := [
   ("Arm.AdvSimd", .advSimd), ("Arm.ArmBase/Arm64", .armBase64),
   ("X86.Sse2", .sse2), ("X86.Ssse3", .ssse3), ("X86.Sse41", .sse41),
@@ -38,7 +35,7 @@ def featureGetter (site : CallSite) : Option Feature := do
   let .external identity := site.target | none
   if site.parameterCount != 0 || site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none
   else (featureNames.find? fun (name, feature) =>
-    identity == intrinsicIdentity ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++ "::" ++
+    identity == intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++ "::" ++
       (if feature == .vector128Accelerated || feature == .vector256Accelerated then "get_IsHardwareAccelerated"
         else "get_IsSupported") ++
       "()").map Prod.snd
@@ -49,7 +46,7 @@ private def addressed (raw : RawMethod) (index : Nat) : Bool := raw.code.any fun
 private def eligibleFact (raw : RawMethod) (index : Nat) (fact : Option W32) : Bool :=
   if fact.isNone then true else if addressed raw index then false else
   match raw.locals[index]? with
-  | some (.atom scope name) => scope == runtimeIdentity &&
+  | some (.atom scope name) => scope == runtimeScope &&
       (name == "System.Int32" || name == "System.UInt32" ||
         name == "System.Boolean" && (fact == some 0 || fact == some 1))
   | _ => false
@@ -67,7 +64,7 @@ private def constant32 (i : RawInstruction) : Option W32 :=
 
 /-- Fixed CLI stack effects; unknown values are never interpreted as false.
     Variable call and return effects are handled from raw signatures below. -/
-private def stackEffect : Nat → Option (Nat × Nat)
+def rawStackEffect : Nat → Option (Nat × Nat)
   | 0 | 1 | 39 | 43 | 56 | 220 | 65042 | 65043 | 65044 | 65046 | 65049 | 65050 | 65054 => some (0, 0)
   | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 14 | 15 | 17 | 18 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 114 | 126 | 127 | 208 | 65024 | 65030 | 65033 | 65034 | 65036 | 65037 | 65052 => some (0, 1)
   | 10 | 11 | 12 | 13 | 16 | 19 | 38 | 44 | 45 | 57 | 58 | 69 | 122 | 128 | 65035 | 65038 | 65041 | 65045 => some (1, 0)
@@ -116,7 +113,7 @@ def featureTransfer (raw : RawMethod) (profile : FeatureProfile)
     return { next with stack := if i.opcode == 115 || site.returnsValue then none :: next.stack else next.stack }
   if i.opcode == 42 then forget state (if raw.returnType == .void then 0 else 1) 0
   else
-    let (pops, pushes) ← stackEffect i.opcode
+    let (pops, pushes) ← rawStackEffect i.opcode
     forget state pops pushes
 
 /-- A decided type test replaces the raw comparison result by its exact word. -/
@@ -151,7 +148,7 @@ private def rawFeatureEffect (i : RawInstruction) : Option (Nat × Nat) := do
     let .call site := i.operand | none
     return (site.parameterCount + if i.opcode == 40 && site.hasThis then 1 else 0,
       if i.opcode == 115 || site.returnsValue then 1 else 0)
-  else stackEffect i.opcode
+  else rawStackEffect i.opcode
 
 private def fallbackFeatureEffect (i : RawInstruction) (emitted : Op) : Bool :=
   let returnsValue := match i.operand with | .call site => site.returnsValue | _ => false
