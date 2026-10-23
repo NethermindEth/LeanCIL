@@ -106,7 +106,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves all 46 real cases", () =>
+Test("independent export cohort map preserves 14 leaves and 46 base cases", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -127,7 +127,8 @@ Test("independent export cohort map preserves all 46 real cases", () =>
         ["exportsmutationordinary"] = ("ordinary-artifact", ["full.ordinary-artifact"]),
         ["exportsmutationconsumer"] = ("consumer-artifact", ["full.consumer-artifact"]),
         ["exportsmutationsource"] = ("consumer-source", ["full.consumer-source"]),
-        ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"])
+        ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"]),
+        ["exportsstatics"] = ("statics", [])
     };
     void ExactPlan(IEnumerable<ExportSuite> plan)
     {
@@ -137,9 +138,16 @@ Test("independent export cohort map preserves all 46 real cases", () =>
         {
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
-            Require(entry.Script == (entry.Cohort == "resolution" ? "Tests/FullModuleResolution.cs" : "Tests/ContractExport.cs"),
+            Require(entry.Standalone == (entry.Cohort == "statics"), "Wrong standalone fixture kind: " + entry.Name);
+            string script = entry.Cohort switch
+            {
+                "resolution" => "Tests/FullModuleResolution.cs",
+                "statics" => "Tests/ModularStaticExports.cs",
+                _ => "Tests/ContractExport.cs"
+            };
+            Require(entry.Script == script,
                 "Wrong fixture: " + entry.Name);
-            Equal(entry.Arguments, entry.Cohort == "resolution" ? [] : ["--cohort", entry.Cohort]);
+            Equal(entry.Arguments, entry.Cohort is "resolution" or "statics" ? [] : ["--cohort", entry.Cohort]);
         }
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
@@ -149,15 +157,15 @@ Test("independent export cohort map preserves all 46 real cases", () =>
     foreach (ExportSuite omitted in all)
         MustReject(() => ExactPlan(all.Where(entry => entry.Name != omitted.Name)));
     Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Name),
-        all.Where(entry => entry.Cases.All(id => id.StartsWith("full.", StringComparison.Ordinal))).Select(entry => entry.Name));
+        all.Where(entry => entry.Cases.Length != 0 && entry.Cases.All(id => id.StartsWith("full.", StringComparison.Ordinal))).Select(entry => entry.Name));
     Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Cohort).Order(StringComparer.Ordinal),
         new[] { "composition", "consumer", "ordinary", "pair", "checks", "theorems",
             "ordinary-artifact", "consumer-artifact", "consumer-source", "consumer-shadow" }.Order(StringComparer.Ordinal));
     foreach (ExportSuite entry in all)
     {
-        if (entry.Cohort != "resolution")
+        if (!entry.Standalone && entry.Cohort != "resolution")
             Require(ExportVerificationSuites.Select(entry.Arguments) == entry.Cohort, "Wrong ContractExport dispatch");
-        if (entry.Cases.All(id => id.StartsWith("full.", StringComparison.Ordinal)))
+        if (entry.Cases.Length != 0 && entry.Cases.All(id => id.StartsWith("full.", StringComparison.Ordinal)))
             Require(ExportVerificationSuites.Select(["--cohort", entry.Cohort], full: true) == entry.Cohort, "Wrong full dispatch");
     }
 });
@@ -166,7 +174,8 @@ Test("export coverage detects each omitted completion and invalid selection", ()
     Require(ExportVerificationSuites.Select([]) is null && ExportVerificationSuites.Select([], full: true) is null,
         "Default standalone must aggregate leaves");
     foreach (string[] invalid in new string[][] {
-        ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"], ["--cohort", "resolution"] })
+        ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"],
+        ["--cohort", "resolution"], ["--cohort", "statics"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     foreach (string cohort in new[] { "core", "audit", "resolution", "statics", "transitive", "discovery", "typed", "unknown" })
     {
@@ -179,6 +188,12 @@ Test("export coverage detects each omitted completion and invalid selection", ()
     MustReject(() => ExportVerificationSuites.Validate([all[0] with { Cases = [] }]));
     foreach (ExportSuite entry in all)
     {
+        if (entry.Standalone)
+        {
+            MustReject(() => new ExportCaseLedger(entry.Cohort));
+            MustReject(() => ExportVerificationSuites.Validate([entry with { Cases = ["untracked-standalone-case"] }]));
+            continue;
+        }
         foreach (string omitted in entry.Cases)
         {
             ExportCaseLedger incomplete = new(entry.Cohort);
@@ -195,7 +210,7 @@ Test("export coverage detects each omitted completion and invalid selection", ()
 Test("export leaf selection, strict files and shared inputs", () =>
 {
     string[] exports = ExportVerificationSuites.Plan().Select(entry => entry.Name).Order(StringComparer.Ordinal).ToArray();
-    string[] bootstrap = ExportVerificationSuites.Plan().Where(entry => entry.Cohort != "resolution")
+    string[] bootstrap = ExportVerificationSuites.Plan().Where(entry => !entry.Standalone && entry.Cohort != "resolution")
         .Select(entry => entry.Name).Order(StringComparer.Ordinal).ToArray();
     foreach (string name in exports) Require(All().Contains(name, StringComparer.Ordinal), "Missing selected export leaf: " + name);
     foreach (string name in bootstrap)
@@ -203,11 +218,14 @@ Test("export leaf selection, strict files and shared inputs", () =>
     foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
         Require(VerificationSelection.Select(["Tests/FullImportVerification.cs"]).Contains(entry.Name, StringComparer.Ordinal), "Full change lost " + entry.Name);
     Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
+    Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]), ["exportsstatics"]);
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
     string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
     Require(runner.Contains(".. arguments", StringComparison.Ordinal) &&
         runner.Contains("ExportVerificationSuites.Plan()", StringComparison.Ordinal) &&
         runner.Contains("projects.Distinct(StringComparer.Ordinal)", StringComparison.Ordinal), "Runner lost leaf arguments or build deduplication");
+    Require(!runner.Contains("if (name == \"exports\")", StringComparison.Ordinal) &&
+        !runner.Contains("projects.Add(\"Tests/ModularStaticExports.cs\")", StringComparison.Ordinal), "Old nested static suite remains");
     string standalone = File.ReadAllText(Path.Combine(root, "Tests/ContractExport.cs"));
     Require(standalone.Contains("foreach (ExportSuite entry in ExportVerificationSuites.Plan())", StringComparison.Ordinal) &&
         standalone.Contains(".. entry.Arguments", StringComparison.Ordinal), "Standalone lost exact leaf dispatch");
@@ -226,6 +244,12 @@ Test("a missing registered export fixture fails selection", () =>
         catch (InvalidDataException error) { rejection = error.Message; }
         Require(rejection == "Missing registered export fixture: Tests/FullModuleResolution.cs",
             "A missing resolution fixture was silently skipped: " + rejection);
+        File.WriteAllText(Path.Combine(isolated, "Tests/FullModuleResolution.cs"), "");
+        rejection = null;
+        try { VerificationSelection.SuiteInputs(isolated); }
+        catch (InvalidDataException error) { rejection = error.Message; }
+        Require(rejection == "Missing registered export fixture: Tests/ModularStaticExports.cs",
+            "A missing standalone static fixture was silently skipped: " + rejection);
     }
     finally { Directory.Delete(isolated, recursive: true); }
 });

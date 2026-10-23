@@ -60,7 +60,6 @@ internal static class VerificationSelection
         inputs["core"].UnionWith(new[] { "Add", "Choose", "Calls", "Alias", "Struct", "StructCopy", "LargeStruct",
             "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["core"].Add("Tests/ModularStatics.lean");
-        inputs["exports"].Add("Tests/ModularStaticExports.cs");
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
             "Throws", "SpanTables", "StaticValues", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "ScalarEvidence", "TypeTestEvidence",
@@ -76,6 +75,7 @@ internal static class VerificationSelection
             var pending = new Stack<string>(paths);
             while (pending.TryPop(out var path))
             {
+                if (path == "scripts/ExportVerificationSuites.cs") continue;
                 var source = Path.Combine(root, path);
                 if (!File.Exists(source)) continue;
                 var text = File.ReadAllText(source);

@@ -75,8 +75,6 @@ void RunSuite(string name)
     ExportSuite? export = ExportVerificationSuites.Plan().FirstOrDefault(entry => entry.Name == name);
     string[] arguments = export?.Arguments ?? [];
     Run(["dotnet", "run", "--file", script, "--", .. arguments], streamOutput: true, progress: "Suite " + name);
-    if (name == "exports")
-        Run(["dotnet", "run", "--file", "Tests/ModularStaticExports.cs"], streamOutput: true, progress: "Modular static exports");
     Passed(description);
 }
 
@@ -125,7 +123,6 @@ if (suite is "all" or "evidence")
     projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "unsafe") projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
-if (suite is "all" or "exports") projects.Add("Tests/ModularStaticExports.cs");
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);
