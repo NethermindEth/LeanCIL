@@ -1,5 +1,5 @@
 internal sealed record ExportSuite(string Name, string Cohort, string Script, string[] Arguments,
-    string Description, string[] Cases, string[] Inputs);
+    string Description, string[] Cases, string[] Inputs, bool Standalone = false);
 
 internal static class ExportVerificationSuites
 {
@@ -28,7 +28,9 @@ internal static class ExportVerificationSuites
         Entry("exportsmutationordinary", "ordinary-artifact", "ordinary caller artifact mutation", ["full.ordinary-artifact"]),
         Entry("exportsmutationconsumer", "consumer-artifact", "consumer caller artifact mutation", ["full.consumer-artifact"]),
         Entry("exportsmutationsource", "consumer-source", "consumer caller source mutation", ["full.consumer-source"]),
-        Entry("exportsmutationshadow", "consumer-shadow", "original caller root shadow mutation", ["full.consumer-shadow"])
+        Entry("exportsmutationshadow", "consumer-shadow", "original caller root shadow mutation", ["full.consumer-shadow"]),
+        new("exportsstatics", "statics", "Tests/ModularStaticExports.cs", [], "independent modular static exports",
+            [], ["Tests/ModularStaticExports.cs"], Standalone: true)
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>
@@ -49,7 +51,7 @@ internal static class ExportVerificationSuites
     {
         if (args.Length == 0) return null;
         if (args is not ["--cohort", string cohort] ||
-            !Plan().Any(entry => entry.Cohort == cohort && (full ? IsFull(cohort) : cohort != "resolution")))
+            !Plan().Any(entry => entry.Cohort == cohort && !entry.Standalone && (full ? IsFull(cohort) : cohort != "resolution")))
             throw new ArgumentException("Expected --cohort with one registered " + (full ? "full " : "") + "export cohort.");
         return cohort;
     }
@@ -61,7 +63,8 @@ internal static class ExportVerificationSuites
         HashSet<string> cases = new(StringComparer.Ordinal);
         foreach (ExportSuite entry in entries)
         {
-            if (!names.Add(entry.Name) || !cohorts.Add(entry.Cohort) || entry.Cases.Length == 0 ||
+            if (!names.Add(entry.Name) || !cohorts.Add(entry.Cohort) ||
+                (entry.Standalone ? entry.Cases.Length != 0 || IsFull(entry.Cohort) : entry.Cases.Length == 0) ||
                 entry.Cases.Any(id => string.IsNullOrWhiteSpace(id) || !cases.Add(id)))
                 throw new InvalidDataException("Invalid or duplicate export suite/case: " + entry.Name);
         }
@@ -77,6 +80,7 @@ internal sealed class ExportCaseLedger
     internal ExportCaseLedger(string cohort)
     {
         ExportSuite entry = ExportVerificationSuites.Plan().Single(item => item.Cohort == cohort);
+        if (entry.Standalone) throw new InvalidOperationException("Standalone fixture has its own assertions: " + cohort);
         expected = new(entry.Cases, StringComparer.Ordinal);
     }
 
