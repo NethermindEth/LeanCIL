@@ -393,6 +393,23 @@ Directory.Delete(moved, true);
 Console.WriteLine("PASS import paths resolve relative to a moved extraction");
 
 Reset();
+string pinnedSidecarPath = Path.Combine(directory, "pinned-sidecar", Path.GetFileName(sidecar));
+Directory.CreateDirectory(Path.GetDirectoryName(pinnedSidecarPath)!);
+File.Move(sidecar, pinnedSidecarPath, true);
+string[] pinnedCommand = Command();
+pinnedCommand[Array.IndexOf(pinnedCommand, sidecar)] = pinnedSidecarPath;
+Run(pinnedCommand);
+Run([.. cli, "check", output]);
+// Sidecars that appear beside the App after extraction are outside the recorded import graph.
+File.Copy(pinnedSidecarPath, sidecar, true);
+Run([.. cli, "check", output]);
+File.WriteAllText(sidecar, "{}");
+Run([.. cli, "check", output]);
+File.Delete(sidecar);
+Directory.Delete(Path.GetDirectoryName(pinnedSidecarPath)!, true);
+Console.WriteLine("PASS check ignores sidecars that appear beside the App after extraction");
+
+Reset();
 string pinnedInterface = originalInterface + "\ndef ImportFixture.marker : Nat := 0\n";
 string forgedInterface = originalInterface + "\ndef ImportFixture.marker : Nat := 1\n";
 string forgedOutput = Path.Combine(directory, "forged-extraction");
