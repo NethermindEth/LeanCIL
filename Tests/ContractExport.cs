@@ -127,10 +127,14 @@ JsonObject inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(publishedBun
 foreach (string path in Directory.EnumerateFiles(publishedBundle, "*", SearchOption.AllDirectories))
     if (Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal) || Path.GetExtension(path) is ".dll" or ".ilean" or ".c" or ".o")
         throw new InvalidOperationException("Source bundle contained compiled output: " + path);
-if (!inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("consumer/.lake/packages/leancil/", StringComparison.Ordinal)) ||
+if (inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("consumer/.lake/packages/leancil/", StringComparison.Ordinal)) ||
     !inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("framework/CIL/", StringComparison.Ordinal)) ||
     !inventory["files"]!.AsObject().ContainsKey("exports/0/ExportAudit.lean"))
-    throw new InvalidOperationException("Source bundle omitted its dependency/framework/audit source closure.");
+    throw new InvalidOperationException("Source bundle duplicated the framework package or omitted its framework/audit source closure.");
+// A verifier needs the compatibility key and the producing revision without a second source.
+if (inventory["frameworkKey"]?.GetValue<string>() != first["frameworkKey"]!.GetValue<string>() ||
+    inventory["leanCilRevision"]?.GetValue<string>() != revision)
+    throw new InvalidOperationException("Source bundle did not record its framework key and LeanCIL revision: " + inventory.ToJsonString());
 
 string CallerVerify()
 {
@@ -146,6 +150,33 @@ if (initialCaller.GetProperty("schema").GetInt32() != 4)
     throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
 RejectPostAuditMutations(library, artifact, package, proof, contractSource, sidecar);
+
+string pinnedSidecar = Sha(sidecar);
+string[] bundlesBefore = Directory.EnumerateDirectories(bundle).Order(StringComparer.Ordinal).ToArray();
+// The extractor verifies against the framework copy beside it.
+string frameworkManifest = Path.Combine(Path.GetDirectoryName(ExtractorPath)!, "verification", "lake-manifest.json");
+byte[] frameworkManifestBytes = File.ReadAllBytes(frameworkManifest);
+string authorProof = File.ReadAllText(proof);
+try
+{
+    // The proof elaborates after the input snapshot and edits a bundled framework source; neither a bundle nor a sidecar may appear.
+    File.WriteAllText(proof, authorProof.Replace("namespace LibProof", "run_cmd Lean.Elab.Command.liftIO <| IO.FS.withFile " +
+        JsonSerializer.Serialize(frameworkManifest) + " .append (fun handle => handle.putStr \"\\n\")\nnamespace LibProof", StringComparison.Ordinal));
+    File.WriteAllText(manifestPath, ProducerManifest().ToJsonString());
+    (int Code, string Output, string Stdout, string Stderr) changed = Execute([.. cli, "export-contracts", manifestPath, "--output", sidecar, "--bundle", bundle]);
+    if (File.ReadAllBytes(frameworkManifest).SequenceEqual(frameworkManifestBytes))
+        throw new InvalidOperationException("Precondition: the export proof did not edit the framework source: " + changed.Output);
+    if (changed.Code == 0 || !changed.Output.Contains("inputs changed during", StringComparison.OrdinalIgnoreCase) || Sha(sidecar) != pinnedSidecar ||
+        !Directory.EnumerateDirectories(bundle).Order(StringComparer.Ordinal).SequenceEqual(bundlesBefore))
+        throw new InvalidOperationException("A framework source changed during export was published: " + changed.Output);
+}
+finally
+{
+    File.WriteAllBytes(frameworkManifest, frameworkManifestBytes);
+    File.WriteAllText(proof, authorProof);
+}
+Console.WriteLine("PASS a bundled framework source changed during export publishes neither a bundle nor a sidecar");
+
 
 JsonObject two = ProducerManifest();
 JsonObject invalid = two["exports"]![0]!.DeepClone().AsObject();

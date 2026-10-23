@@ -274,12 +274,25 @@ check the selected deployment bytes and independently pin the interface with
 `--bundle directory` also writes an immutable content-addressed source bundle.
 Its inventory binds the original producer inputs, complete consumer/dependency
 source closure, exact bundled framework sources, generated extraction and audit
-sources, and checked export statement metadata. It contains no compiled DLL,
+sources, and checked export statement metadata. The consumer's own
+`.lake/packages/leancil` copy is omitted because `framework/` already pins those
+sources. Every bundled file must still match the hash taken in the export's input
+snapshot, which includes the framework sources; a change fails the export
+before the bundle or sidecar is published. It contains no compiled DLL,
 `.olean`, local receipt or build cache. The selected implementation DLL remains a
 separate input. The bundle publishes before the sidecar, and its source locator
 is recorded in the sidecar. A source bundle is not proof certification and is not
 accepted as a trusted cache. Independent verification of a published library is
 a separate workflow.
+
+`bundle.json` also records `frameworkKey`, the strict compatibility key that the
+sidecar carries, and `leanCilRevision`, the leancil revision pinned by the
+producer's `proofRoot`. The revision is diagnostic: it names the sources to
+rebuild with, while acceptance compares only the framework key and file hashes.
+Any LeanCIL change to `CIL/` or the toolchain changes the framework key, so
+sidecars and bundles exported with an older framework are rejected by a newer
+verifier. Publishers re-export with the new LeanCIL; consumers that cannot upgrade
+the publisher keep the LeanCIL revision the bundle records.
 
 Run `dotnet run --file scripts/Test.cs -- --suite exports` for the producer/App
 round trip, unchanged caller after a library rebuild, rejecting exports and
