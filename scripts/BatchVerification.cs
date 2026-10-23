@@ -66,6 +66,8 @@ partial class Program
         {
             var request = requests[i];
             Run(Extract("extract", request.Assembly!, identity, request.Entry, request.Output, profile));
+            if (HasContractImports(ExtractionIdentity.Read(request.Output)))
+                throw new InvalidDataException("Generated batch verification does not support contract imports.");
             hashes[i] = Sha(Path.Combine(request.Output, "identity.json"));
             bodies.AppendLine($"namespace BatchCase{i}");
             bodies.AppendLine(Body(File.ReadAllText(Path.Combine(request.Output, "Extracted.lean"))));

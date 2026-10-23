@@ -135,6 +135,18 @@ Run([.. cli, "check", output]);
 Run(Command());
 Run([.. cli, "check", output]);
 JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+foreach (string path in identity.GetProperty("imports").EnumerateArray()
+    .SelectMany(binding => new[] { binding.GetProperty("implementationPath").GetString()!, binding.GetProperty("sidecarPath").GetString()! })
+    .Append(identity.GetProperty("assemblyPath").GetString()!))
+    if (path.Contains('\\') || Path.IsPathRooted(path))
+        throw new InvalidOperationException("Extraction paths must be portable and relative: " + path);
+string identityPath = Path.Combine(output, "identity.json");
+string currentIdentity = File.ReadAllText(identityPath);
+JsonObject oldIdentity = JsonNode.Parse(currentIdentity)!.AsObject();
+oldIdentity["schema"] = 2;
+File.WriteAllText(identityPath, oldIdentity.ToJsonString());
+Reject([.. cli, "check", output], "Unsupported extraction manifest schema; run leancil extract again.");
+File.WriteAllText(identityPath, currentIdentity);
 string generated = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (identity.GetProperty("schema").GetInt32() != 3 || identity.GetProperty("imports").GetArrayLength() != 1 ||
     !generated.Contains(".call 1 1", StringComparison.Ordinal) || generated.Contains(expectedHash, StringComparison.Ordinal) ||
@@ -228,6 +240,53 @@ RejectSubstitution(Path.Combine(directory, "SubstitutedInterface.lean"),
 Console.WriteLine("PASS single-file verification rejects elaborator substitution of audited interface artifacts with unchanged sources");
 
 string originalInterface = contract["interfaceModules"]![0]!["source"]!.GetValue<string>();
+string selectedProof = Path.Combine(directory, "SelectedCaller.lean");
+string selectedProofSource = File.ReadAllText(Path.Combine(fixture, "Caller.lean"));
+File.WriteAllText(selectedProof, selectedProofSource);
+string substitutedSourceMarker = Path.Combine(directory, "proof-source-substitution");
+File.Delete(substitutedSourceMarker);
+string weakerProof = """
+import ExtractedImports
+namespace ExampleProof
+theorem correctness : CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun _ => True) := by
+  intro linked links imported
+  trivial
+#print axioms correctness
+end ExampleProof
+""";
+contract["interfaceModules"]![0]!["source"] = "import Lean\n" + originalInterface + $$"""
+
+open Lean Elab Command in
+run_cmd do
+  let folder := (System.FilePath.mk (<- getFileName)).parent.getD "."
+  IO.FS.writeFile (folder / "Proof.lean") {{JsonSerializer.Serialize(weakerProof)}}
+  IO.FS.writeFile {{JsonSerializer.Serialize(substitutedSourceMarker)}} "rewritten"
+""";
+Save();
+Run(Command());
+string sourceAttackCache = Path.Combine(directory, "proof-source-cache-" + Guid.NewGuid().ToString("N"));
+string? previousSourceAttackCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", sourceAttackCache);
+    (int Code, string Output, string Stdout, string Stderr) sourceAttack =
+        Execute([.. cli, "verify", output, "--proof", selectedProof]);
+    bool proofReceipt = Directory.Exists(sourceAttackCache) && Directory.EnumerateFiles(sourceAttackCache, "receipt.json", SearchOption.AllDirectories)
+        .Any(path => JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path))!.Keys
+            .Any(name => name.StartsWith("Proof.olean", StringComparison.Ordinal)));
+    if (sourceAttack.Code != 1 ||
+        !sourceAttack.Output.Contains("Proof sources changed during verification: Proof.lean", StringComparison.Ordinal) ||
+        !File.Exists(substitutedSourceMarker) || File.ReadAllText(selectedProof) != selectedProofSource ||
+        File.Exists(Path.Combine(output, "verified.json")) || proofReceipt)
+        throw new InvalidOperationException("A pinned interface substituted the selected proof source or left a report or proof receipt: " + sourceAttack.Output);
+}
+finally
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", previousSourceAttackCache);
+    Reset();
+}
+Console.WriteLine("PASS pinned interface proof-source substitution rejects with unchanged original proof and no report or proof receipt");
+Run(Command());
 contract["interfaceModules"]![0]!["source"] = "  /- outer /- nested -/ -/ import ZContractBase\n" +
     originalInterface + "\nexample : ZContractHeader.token = 7 := rfl\n";
 contract["interfaceModules"]!.AsArray().Add(new JsonObject
@@ -438,17 +497,16 @@ if (retargetResult.Code != 1 || !retargetResult.Output.Contains("Constant value 
 Console.WriteLine("PASS an interface numeral instance cannot retarget the import premise onto the caller");
 Reset();
 File.Delete(Path.Combine(output, "verification.json"));
-// The interface weakens the contract and redefines the authoring command to print the honest closure.
-string honestClosure = closureLine[closureLine.IndexOf('{')..].Trim();
+// The olean audit rejects a weakened contract even when the sidecar retains its honest closure pin.
 contract["interfaceModules"]![0]!["source"] = "import CIL.Interface.Closure\n" +
     interfaceSource.Replace("output = input + 1", "True", StringComparison.Ordinal) +
-    "\nmacro_rules\n  | `(#leancil_contract_closure $_:ident) => `(#eval IO.println " + JsonSerializer.Serialize(honestClosure) + ")\n";
+    "\n";
 Save();
 Run(Command());
 Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"], "canonical closure digest mismatch");
 if (File.Exists(Path.Combine(output, "verified.json")))
     throw new InvalidOperationException("A forged closure left a verification report.");
-Console.WriteLine("PASS interface macros cannot forge the canonical closure of a weakened contract");
+Console.WriteLine("PASS the olean audit rejects a weakened contract against its pinned canonical closure");
 Reset();
 Run(Command());
 File.AppendAllText(Path.Combine(output, interfaceModule + ".lean"), "\n");
@@ -563,7 +621,7 @@ contract["interfaceModules"]![0]!["source"] = interfaceSource + "\naxiom unpubli
 Save();
 Run(Command());
 Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "contract interface");
-Reject([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"], "Unapproved transitive axiom in contract interface: unpublishedAssumption");
+Reject([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"], "Axiom in contract interface: unpublishedAssumption");
 if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Consumer unused-axiom rejection left a verification report.");
 Reset();
 contract["isReferenceAssembly"] = true;
