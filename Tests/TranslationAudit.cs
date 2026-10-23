@@ -4,6 +4,8 @@
 
 using System.Text.RegularExpressions;
 
+using var verification = new Program();
+verification.Library(Inputs(At("CIL.lean")));
 var output = At("artifacts/TranslationAudit");
 Directory.CreateDirectory(output);
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
@@ -13,7 +15,8 @@ var declaration = new Regex(@"theorem translation_valid\s*:[\s\S]*?(?=@\[cil_cod
 if (declaration.Matches(baseline).Count != 1)
     throw new InvalidOperationException("Expected exactly one complete extraction certificate");
 
-void Audit(string name, string source, bool accepted)
+// The emitted certificate itself must also state the validator application exactly, as batches audit it directly.
+void Audit(string name, string source, bool accepted, bool emitted = true)
 {
     var folder = Path.Combine(output, name);
     Directory.CreateDirectory(folder);
@@ -26,14 +29,21 @@ void Audit(string name, string source, bool accepted)
         throw new InvalidOperationException("Unexpected certificate audit result " + name + ": " + result.Output);
     if (accepted)
     {
-        AuditedAxioms(result.Output, "ExtractionAudit.valid");
         var checker = Path.Combine(Run(["lean", "--print-prefix"]).Trim(), "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
         Run([checker, "Extracted", "ExtractionAudit"], leanPath: leanPath);
+        var audited = verification.AuditOleans(leanPath, ["ExtractionAudit"],
+            [ExtractionCertificate("ExtractionAudit.valid"), ExtractionCertificate("Extracted.translation_valid")]);
+        AuditedAxioms(audited.theorems[0]);
+        if ((audited.theorems[1].error is null) != emitted)
+            throw new InvalidOperationException("Unexpected emitted certificate audit result " + name + ": " + audited.theorems[1].error);
     }
     Console.WriteLine("PASS mandatory extraction audit " + name);
 }
 
 Audit("valid", baseline, true);
+// Definitionally equal, so elaboration accepts it, but not the statement the extractor emits.
+Audit("wrapped-statement", baseline.Replace("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by",
+    "theorem translation_valid : id (Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program) := by"), true, emitted: false);
 Audit("missing-certificate", declaration.Replace(baseline, ""), false);
 Audit("unrelated-true", declaration.Replace(baseline, "theorem translation_valid : True := True.intro"), false);
 Audit("definition-instead-of-theorem", baseline.Replace("theorem translation_valid", "def translation_valid"), false);
