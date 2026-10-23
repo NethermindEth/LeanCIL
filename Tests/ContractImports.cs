@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -618,3 +620,54 @@ finally
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedDisabled);
 }
 Console.WriteLine("PASS staged interface sources, proof keys and the report come from one identity.json snapshot");
+
+Reset();
+Run(Command());
+string hashWindow = Path.Combine(directory, "hash-window");
+Directory.CreateDirectory(hashWindow);
+File.WriteAllText(Path.Combine(hashWindow, interfaceModule + ".lean"), interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
+Run([interfaceVerification.LeanExecutable, "--root=" + hashWindow, "-o", Path.Combine(hashWindow, interfaceModule + ".olean"),
+    Path.Combine(hashWindow, interfaceModule + ".lean")], leanPath: hashWindow + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean"));
+byte[] unauditedArtifact = File.ReadAllBytes(Path.Combine(hashWindow, interfaceModule + ".olean"));
+void RejectReplayWindowSwap(Func<string?> locate, Action<Action<string>> verify)
+{
+    bool replaced = false;
+    Exception? rejected = null;
+    try
+    {
+        verify(value =>
+        {
+            // The compiled olean is replaced after its closure audit and before its kernel replay.
+            if (value != "kernel replay" || replaced || locate() is not string artifact) return;
+            File.WriteAllBytes(artifact, unauditedArtifact);
+            replaced = true;
+        });
+    }
+    catch (Exception error) { rejected = error; }
+    if (!replaced) throw new InvalidOperationException("Precondition: verification never reached the interface replay window.");
+    if (rejected is null || !rejected.Message.Contains("changed after their closure audit", StringComparison.Ordinal) ||
+        File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException("An interface olean replaced after its closure audit was certified: " + rejected?.Message);
+}
+string? savedHashCache = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
+    RejectReplayWindowSwap(() => Directory.EnumerateDirectories(output, "proof-*")
+            .Select(fresh => Path.Combine(fresh, interfaceModule + ".olean")).SingleOrDefault(File.Exists),
+        stage => { using Program single = new(); single.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true, stage: stage); });
+    Console.WriteLine("PASS single-file verification binds interface oleans before their closure audit");
+    // A token in the proof tells this session apart from concurrent consumer sessions.
+    string token = Guid.NewGuid().ToString("N");
+    File.WriteAllText(consumerProof, File.ReadAllText(Path.Combine(fixture, "Caller.lean")) + "\n-- " + token + "\n");
+    DateTime started = DateTime.UtcNow.AddSeconds(-1);
+    RejectReplayWindowSwap(() => new DirectoryInfo(Path.GetTempPath()).EnumerateDirectories("leancil-consumer-*")
+            .Where(session => session.CreationTimeUtc >= started && session.Name.Length == "leancil-consumer-".Length + 32 &&
+                session.EnumerateFiles("*.lean").Any(file => File.ReadAllText(file.FullName).Contains(token, StringComparison.Ordinal)))
+            .Select(session => Path.Combine(session.FullName, ".lake/packages/leancil/.lake/build/lib/lean", interfaceModule + ".olean"))
+            .SingleOrDefault(File.Exists),
+        stage => { using Program consumer = new(); consumer.VerifyConsumer(app, consumerProof, output, "ExampleProof.correctness", package, null, stage); });
+    File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
+    Console.WriteLine("PASS consumer verification binds interface oleans before their closure audit");
+}
+finally { Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedHashCache); }

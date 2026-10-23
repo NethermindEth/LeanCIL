@@ -130,7 +130,9 @@ must separately discharge the import contracts before this conditional result
 can establish an unconditional application guarantee.
 
 The verifier stages the exact interface sources, includes them in proof cache
-identities, compiles them, and performs kernel replay. Consumer workspaces also
+identities, compiles them, and performs kernel replay. It hashes the compiled
+interface artifacts before the closure audit and requires the same hashes after
+the audit, after their replay and before each later step. Consumer workspaces also
 reject source-name collisions and include their hashes in snapshot checks.
 Schema-4 reports list `imports` accepted via `published-certification`, as well
 as `contractImports`; CLI output states the conditional assumptions and deployment

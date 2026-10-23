@@ -1271,10 +1271,16 @@ unsafe def main (args : List String) : IO Unit := do
                 Run([LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(assumptionsSource, ".olean"), assumptionsSource],
                     leanPath: leanPath, progress: "Checking App import assumptions");
             }
-            CheckContractInterfaces(extraction, fresh, importModules, leanPath);
-            if (importModules.Length > 0)
-                Run([checker, .. importModules], leanPath: leanPath, progress: "Kernel replay of published contract interfaces and App import assumptions");
+            // The audit, the replay and the proof must all read the bytes compiled here.
             SortedDictionary<string, string> acceptedInterfaceArtifacts = ContractInterfaceArtifacts(fresh, importModules);
+            CheckContractInterfaces(extraction, fresh, importModules, leanPath);
+            RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
+            if (importModules.Length > 0)
+            {
+                stage?.Invoke("kernel replay");
+                Run([checker, .. importModules], leanPath: leanPath, progress: "Kernel replay of published contract interfaces and App import assumptions");
+                RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
+            }
             if (symbols)
                 Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), Path.Combine(fresh, "ExtractedSymbols.lean")],
                     leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);

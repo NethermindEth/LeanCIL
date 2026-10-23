@@ -1085,20 +1085,33 @@ unsafe def main (args : List String) : IO Unit := do
                 members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash);
             var frameworkCopy = prepared.FrameworkCopy;
             string[] interfaceModules = extractions[members[0]].Sources.Keys.Where(module => module != "ExtractedImports").ToArray();
+            Dictionary<string, string> InterfaceArtifacts() => ModuleArtifacts(frameworkCopy)
+                .Where(pair => interfaceModules.Contains(ModuleName(pair.Key), StringComparer.Ordinal)).ToDictionary();
+            Dictionary<string, string> acceptedInterfaceArtifacts = new(StringComparer.Ordinal);
+            void RequireInterfaceArtifacts()
+            {
+                Dictionary<string, string> current = InterfaceArtifacts();
+                if (current.Count != acceptedInterfaceArtifacts.Count ||
+                    current.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value))
+                    throw new InvalidDataException("Published contract interface artifacts changed after their closure audit.");
+            }
             if (interfaceModules.Length > 0)
             {
                 Stage(members, "contract interface validation");
                 Run(["lake", "build", .. interfaceModules.Select(module => "+" + module + ":olean")], frameworkCopy,
                     progress: "Compiling published contract interfaces");
+                // The audit, the replay and the proof must all read the bytes compiled here.
+                acceptedInterfaceArtifacts = InterfaceArtifacts();
                 string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
                 CheckContractInterfaces(extractions[members[0]], frameworkCopy, [.. interfaceModules, "ExtractedImports"], interfaceLeanPath);
+                RequireInterfaceArtifacts();
+                Stage(members, "kernel replay");
                 Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
                 if (interfaceFailures.Count > 0)
                     throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
                         string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
+                RequireInterfaceArtifacts();
             }
-            Dictionary<string, string> acceptedInterfaceArtifacts = ModuleArtifacts(frameworkCopy)
-                .Where(pair => interfaceModules.Contains(ModuleName(pair.Key), StringComparer.Ordinal)).ToDictionary();
             string[] initialImportDirectories;
             if (!first && relativeImportDirectories.Length > 0)
                 initialImportDirectories = relativeImportDirectories.Select(path => Path.GetFullPath(path, session)).ToArray();
