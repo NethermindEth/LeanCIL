@@ -340,7 +340,7 @@ finally
 try
 {
     File.WriteAllText(caller, originalCaller.Replace("theorem correctness :", "theorem correctness (extra : False) :", StringComparison.Ordinal));
-    Reject("LeanCILImportAudit.requireConditional");
+    Reject("Theorem statement mismatch: ExampleProof.correctness");
 }
 finally { File.WriteAllText(caller, originalCaller); }
 Console.WriteLine("PASS missing/tampered bundles, source and olean substitution, changed DLL, false certification, wrong theorem and missing caller hypotheses reject without reports");
