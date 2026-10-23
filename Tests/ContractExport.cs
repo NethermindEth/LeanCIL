@@ -110,8 +110,8 @@ void RejectExport(JsonObject manifest, string marker, string? previous)
 }
 
 ExtractLibrary();
-RejectExport(ProducerManifest("LibProof.unrelated"), "exact canonical Holds statement", null);
-RejectExport(ProducerManifest("LibProof.proofDefinition"), "Expected an export theorem", null);
+RejectExport(ProducerManifest("LibProof.unrelated"), "Type mismatch", null);
+RejectExport(ProducerManifest("LibProof.proofDefinition"), "Expected a theorem", null);
 Export(ProducerManifest());
 JsonObject first = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
 string interfaceDigest = first["interfaceDigest"]!.GetValue<string>();
@@ -124,7 +124,9 @@ if (first["implementationSha256"]!.GetValue<string>() != implementation || first
     string.IsNullOrWhiteSpace(first["certifications"]![0]!["statement"]!.GetValue<string>()) ||
     !System.Text.RegularExpressions.Regex.IsMatch(first["certifications"]![0]!["statementDigest"]!.GetValue<string>(), @"\A[0-9a-f]{64}\z"))
     throw new InvalidOperationException("Export did not bind the actual implementation and complete certification.");
-string publishedBundle = first["fullVerificationLocator"]!.GetValue<string>();
+string locator = first["fullVerificationLocator"]!.GetValue<string>();
+if (Path.IsPathRooted(locator) || locator.Contains('\\')) throw new InvalidOperationException("Bundle locator is not portable.");
+string publishedBundle = Path.GetFullPath(locator, Path.GetDirectoryName(sidecar)!);
 JsonObject inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(publishedBundle, "bundle.json")))!.AsObject();
 foreach (string path in Directory.EnumerateFiles(publishedBundle, "*", SearchOption.AllDirectories))
     if (Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal) || Path.GetExtension(path) is ".dll" or ".ilean" or ".c" or ".o")
@@ -258,7 +260,7 @@ File.WriteAllText(Path.Combine(secondArtifact, "verification.json"), JsonSeriali
 }));
 invalid["method"] = "ImportFixture.Library::AddSame(ulong)";
 invalid["artifact"] = secondArtifact;
-RejectExport(two, "exact canonical Holds statement", firstSidecar);
+RejectExport(two, "Type mismatch", firstSidecar);
 Console.WriteLine("PASS a later invalid export cannot publish a partial sidecar");
 
 File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => unchecked(value - ulong.MaxValue); public static ulong AddSame(ulong value) => value + 1; }\n");

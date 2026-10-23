@@ -848,7 +848,7 @@ unsafe def main (args : List String) : IO Unit := do
         return new(frameworkCopy, copied.ToDictionary(path => path, Sha));
     }
 
-    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked);
+    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked, AuditRequest[]? Theorems = null);
 
     sealed record ConsumerRequest(string Assembly, string Output, string Proof, string Theorem, string? Settings,
         bool ExpectRejection = false, ConsumerExportAudit? ExportAudit = null);
@@ -1335,9 +1335,11 @@ unsafe def main (args : List String) : IO Unit := do
                 {
                     var module = names[Array.IndexOf(members, i)];
                     string[] auditModules = [module, .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
-                    var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
+                    var audited = AuditOleans(leanPath, auditModules,
+                        requests[i].ExportAudit?.Theorems ?? [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
                     RequireAuditedConstants(audited);
+                    foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
                     audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]));
                 }
                 catch (Exception error) { Fail([i], error); }
