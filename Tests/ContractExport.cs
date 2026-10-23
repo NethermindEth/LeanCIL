@@ -29,7 +29,9 @@ File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
 """);
 string librarySource = Path.Combine(libraryRoot, "Library.cs");
-File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; }\n");
+File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; " +
+    "internal static ulong Hidden(ulong value) => value + 1; } public struct Value { public ulong Field; public ulong Add(ulong value) => value + Field; } " +
+    "public static class Seeded { public static readonly ulong Seed = (ulong)System.Environment.ProcessorCount; }\n");
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => Library.AddOne(value); }\n");
 Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string library = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.dll");
@@ -127,10 +129,14 @@ JsonObject inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(publishedBun
 foreach (string path in Directory.EnumerateFiles(publishedBundle, "*", SearchOption.AllDirectories))
     if (Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal) || Path.GetExtension(path) is ".dll" or ".ilean" or ".c" or ".o")
         throw new InvalidOperationException("Source bundle contained compiled output: " + path);
-if (!inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("consumer/.lake/packages/leancil/", StringComparison.Ordinal)) ||
+if (inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("consumer/.lake/packages/leancil/", StringComparison.Ordinal)) ||
     !inventory["files"]!.AsObject().Any(pair => pair.Key.StartsWith("framework/CIL/", StringComparison.Ordinal)) ||
     !inventory["files"]!.AsObject().ContainsKey("exports/0/ExportAudit.lean"))
-    throw new InvalidOperationException("Source bundle omitted its dependency/framework/audit source closure.");
+    throw new InvalidOperationException("Source bundle duplicated the framework package or omitted its framework/audit source closure.");
+// A verifier needs the compatibility key and the producing revision without a second source.
+if (inventory["frameworkKey"]?.GetValue<string>() != first["frameworkKey"]!.GetValue<string>() ||
+    inventory["leanCilRevision"]?.GetValue<string>() != revision)
+    throw new InvalidOperationException("Source bundle did not record its framework key and LeanCIL revision: " + inventory.ToJsonString());
 
 string CallerVerify()
 {
@@ -148,6 +154,97 @@ Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-
 RejectPostAuditMutations(library, artifact, package, proof, contractSource, sidecar);
 Run(["dotnet", "run", "--file", "Tests/FullImportVerification.cs", "--", app, library, sidecar, publishedBundle,
     callerPackage, callerProof, package, proof], streamOutput: true, progress: "Independent full imported-library verification");
+
+string restricted = Sha(sidecar);
+string Restriction(string name, string assembly, string method, params string[] options)
+{
+    string folder = Path.Combine(root, "Restriction-" + name);
+    Run([.. cli, "extract", assembly, method, folder, .. options]);
+    File.WriteAllText(Path.Combine(folder, "verification.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1, proof = Path.GetRelativePath(folder, proof).Replace('\\', '/'), theorem = "LibProof.correctness",
+        proofRoot = Path.GetRelativePath(folder, package).Replace('\\', '/')
+    }));
+    return folder;
+}
+JsonObject RestrictedManifest(string assembly, string method, string folder)
+{
+    JsonObject manifest = ProducerManifest();
+    manifest["assembly"] = assembly;
+    manifest["exports"]![0]!["method"] = method;
+    manifest["exports"]![0]!["artifact"] = folder;
+    return manifest;
+}
+const string shape = "Contract exports require a public or protected static, non-virtual, non-generic method.";
+const string assumptions = "Contract export version 1 rejects imports and static/initialization assumptions: ";
+foreach ((string Name, string Method, string Marker) restriction in new[]
+{
+    ("internal", "ImportFixture.Library::Hidden(ulong)", shape),
+    ("instance", "ImportFixture.Value::Add(ulong)", shape)
+})
+    RejectExport(RestrictedManifest(library, restriction.Method, Restriction(restriction.Name, library, restriction.Method)), restriction.Marker, restricted);
+RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
+    Restriction("initialized", library, "ImportFixture.Library::AddOne(ulong)", "--assume-initialized", "ImportFixture.Seeded")),
+    assumptions + "initializedTypes", restricted);
+RejectExport(RestrictedManifest(app, "ImportFixture.Application::Entry(ulong)",
+    Restriction("imports", app, "ImportFixture.Application::Entry(ulong)", "--import", sidecar, "--import-implementation", "ImportFixture.Lib=" + library,
+        "--import-sha256", "ImportFixture.Lib=" + Sha(library), "--import-interface-sha256", "ImportFixture.Lib=" + interfaceDigest)),
+    assumptions + "imports", restricted);
+string customProfile = Path.Combine(root, "custom-profile.json");
+JsonObject profile = JsonNode.Parse(JsonSerializer.Serialize(new
+{
+    name = "scalar", architecture = "scalar", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = false, ssse3 = false,
+    sse42 = false, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false, sse41 = false, avx512DQ = false,
+    avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false, x86Base64 = false, vector128Accelerated = true
+}))!.AsObject();
+File.WriteAllText(customProfile, profile.ToJsonString());
+RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
+    Restriction("profile", library, "ImportFixture.Library::AddOne(ulong)", "@" + customProfile)),
+    "Contract exports require an exact built-in profile.", restricted);
+string referenceAssembly = Directory.EnumerateFiles(libraryRoot, "ImportFixture.Lib.dll", SearchOption.AllDirectories)
+    .Single(path => path.Replace('\\', '/').Contains("/ref/", StringComparison.Ordinal));
+RejectExport(RestrictedManifest(referenceAssembly, "ImportFixture.Library::AddOne(ulong)", artifact),
+    "Cannot certify exports from a reference assembly.", restricted);
+File.WriteAllText(manifestPath, ProducerManifest().ToJsonString());
+(int Code, string Output, string Stdout, string Stderr) overlapping = Execute([.. cli, "export-contracts", manifestPath, "--output", sidecar,
+    "--bundle", Path.Combine(package, "Bundles")]);
+if (overlapping.Code == 0 || !overlapping.Output.Contains("Contract bundle output must be outside proof sources and extraction artifacts.", StringComparison.Ordinal) ||
+    Sha(sidecar) != restricted || Directory.Exists(Path.Combine(package, "Bundles")))
+    throw new InvalidOperationException("A bundle inside the proof sources was not rejected before publication: " + overlapping.Output);
+Console.WriteLine("PASS version 1 export restrictions reject each unsupported method shape, assumption, profile, reference assembly and bundle location");
+
+string pinnedSidecar = Sha(sidecar);
+string[] bundlesBefore = Directory.EnumerateDirectories(bundle).Order(StringComparer.Ordinal).ToArray();
+// The extractor verifies against the framework copy beside it.
+string frameworkManifest = Path.Combine(Path.GetDirectoryName(ExtractorPath)!, "verification", "lake-manifest.json");
+byte[] frameworkManifestBytes = File.ReadAllBytes(frameworkManifest);
+string authorProof = File.ReadAllText(proof);
+try
+{
+    // The proof elaborates after the input snapshot and edits a bundled framework source; neither a bundle nor a sidecar may appear.
+    File.WriteAllText(proof, authorProof.Replace("namespace LibProof", "run_cmd Lean.Elab.Command.liftIO <| IO.FS.withFile " +
+        JsonSerializer.Serialize(frameworkManifest) + " .append (fun handle => handle.putStr \"\\n\")\nnamespace LibProof", StringComparison.Ordinal));
+    File.WriteAllText(manifestPath, ProducerManifest().ToJsonString());
+    (int Code, string Output, string Stdout, string Stderr) changed = Execute([.. cli, "export-contracts", manifestPath, "--output", sidecar, "--bundle", bundle]);
+    if (File.ReadAllBytes(frameworkManifest).SequenceEqual(frameworkManifestBytes))
+        throw new InvalidOperationException("Precondition: the export proof did not edit the framework source: " + changed.Output);
+    if (changed.Code == 0 || !changed.Output.Contains("inputs changed during", StringComparison.OrdinalIgnoreCase) || Sha(sidecar) != pinnedSidecar ||
+        !Directory.EnumerateDirectories(bundle).Order(StringComparer.Ordinal).SequenceEqual(bundlesBefore))
+        throw new InvalidOperationException("A framework source changed during export was published: " + changed.Output);
+}
+finally
+{
+    File.WriteAllBytes(frameworkManifest, frameworkManifestBytes);
+    File.WriteAllText(proof, authorProof);
+}
+Console.WriteLine("PASS a bundled framework source changed during export publishes neither a bundle nor a sidecar");
+
+string commentedCopy = Path.Combine(root, "CommentedArithmetic.lean");
+File.WriteAllText(commentedCopy, File.ReadAllText(contractSource) + "\n-- Same closure, different published text.\n");
+JsonObject commentedPublication = ProducerManifest();
+commentedPublication["interface"]![0]!["source"] = commentedCopy;
+RejectExport(commentedPublication, "byte-identical to its proofRoot module: PublishedArithmetic", pinnedSidecar);
+Console.WriteLine("PASS a published interface must be the proofRoot module the export proof compiled against");
 
 JsonObject two = ProducerManifest();
 JsonObject invalid = two["exports"]![0]!.DeepClone().AsObject();
@@ -191,7 +288,7 @@ if (File.ReadAllText(publishedOnly) == originalContractSource)
     throw new InvalidOperationException("Precondition: the independent published contract must differ from the producer contract.");
 JsonObject differentPublication = ProducerManifest();
 differentPublication["interface"]![0]!["source"] = publishedOnly;
-RejectExport(differentPublication, "Export contract differs from its published interface closure", prior);
+RejectExport(differentPublication, "byte-identical to its proofRoot module: PublishedArithmetic", prior);
 if (File.ReadAllText(contractSource) != originalContractSource)
     throw new InvalidOperationException("The independent closure mismatch fixture changed the producer proof interface.");
 Console.WriteLine("PASS different valid published and proof contract closures cannot replace a published sidecar");

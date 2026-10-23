@@ -26,9 +26,8 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
 
     internal static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
     internal static bool Digest(string value) => value is not null && Regex.IsMatch(value, @"\A[0-9a-f]{64}\z");
-    internal static bool Constant(string value) => value is not null && !value.Split('.').Contains("_root_", StringComparer.Ordinal) && Regex.IsMatch(value, @"\A[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z");
-    internal static bool ModuleName(string value) => Constant(value) && value.Split('.')[0] is not
-        ("CIL" or "Lean" or "Init" or "Std" or "Extracted" or "ExtractedImports" or "Proof" or "Audit" or "ExtractionAudit" or "ExtractedSymbols" or "Symbols" or "Examples" or "Tests" or "lakefile");
+    internal static bool Constant(string value) => global::Program.ContractModules.Name(value);
+    internal static bool ModuleName(string value) => global::Program.ContractModules.Interface(value);
 
     internal static string CurrentFrameworkKey()
     {
@@ -79,7 +78,7 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
             throw new InvalidDataException("Invalid contract interface identity or digest.");
         if (value.InterfaceModules is null || value.InterfaceModules.Length == 0 ||
             value.InterfaceModules.Any(module => module is null || !ModuleName(module.Name) || string.IsNullOrWhiteSpace(module.Source)) ||
-            value.InterfaceModules.Select(module => module.Name).Distinct(StringComparer.Ordinal).Count() != value.InterfaceModules.Length)
+            value.InterfaceModules.Select(module => module.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != value.InterfaceModules.Length)
             throw new InvalidDataException("Invalid or duplicate contract interface module.");
         if (value.Exports is not null && value.Exports.Any(export => export is not null && export.Kind is not ("method" or "outcome")))
             throw new InvalidDataException("Unsupported contract export kind; expected method or outcome.");

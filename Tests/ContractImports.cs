@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -92,7 +94,6 @@ void Reset()
     contract["interfaceModules"]![0]!["source"] = interfaceSource;
     contract["exports"]![0]!["closureDigest"] = closureDigest;
     contract["certifications"]![0]!["closureDigest"] = closureDigest;
-    contract["certifications"]![0]!["statementDigest"] = ContentKey("published canonical certification statement fixture");
     contract["fullVerificationLocator"] = Path.Combine(directory, "deleted-library-proofs");
     contract["exports"]![0]!["identity"] = module.Assembly.Name.FullName + "::System.UInt64 ImportFixture.Library::AddOne(System.UInt64)";
     contract["certifications"]![0]!["identity"] = contract["exports"]![0]!["identity"]!.DeepClone();
@@ -175,6 +176,11 @@ if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contract
     report.GetProperty("imports")[0].GetProperty("acceptedVia").GetString() != "published-certification" ||
     !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
+// No pinned digest covers certification text, so the report must not present it as authenticated.
+if (!report.GetProperty("imports")[0].TryGetProperty("certificationAuthenticated", out JsonElement authenticated) || authenticated.GetBoolean() ||
+    !report.GetProperty("imports")[0].TryGetProperty("sidecarSha256", out JsonElement sidecarDigest) || sidecarDigest.GetString() != Sha(sidecar) ||
+    !verified.Contains("Published certification (unauthenticated sidecar record, sidecar SHA-256 " + Sha(sidecar) + ")", StringComparison.Ordinal))
+    throw new InvalidOperationException("Verification presented unpinned certification text without its sidecar provenance: " + verified);
 
 string replacementInterface = interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal);
 string SubstitutionProof(string sourceFolder, string artifactPath, string markerPath)
@@ -437,6 +443,16 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
     ("certification binding mismatch", value => value["certifications"]![0]!["closureDigest"] = new string('0', 64)),
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "CIL.Types"),
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "../Escape"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "cil.Types"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "tests.Imports"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "Lake.Build"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "LeanCILContractClosureAudit"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "leancilProof"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]!.AsArray().Add(new JsonObject
+    {
+        ["name"] = value["interfaceModules"]![0]!["name"]!.GetValue<string>().ToLowerInvariant(),
+        ["source"] = "def caseCollision : Nat := 0\n"
+    })),
     ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "Bad;axiom"),
     ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "_root_.ImportFixture.addOne")
 })
@@ -516,3 +532,190 @@ Run(Command());
 Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "caller proof checked for authoring only");
 if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Reference-only input produced a verification report.");
 Console.WriteLine("PASS canonical published contracts, fresh caller-only verification, reference authoring and import rejection paths");
+
+foreach (string? adjacentSidecar in new[] { "{ not a contract interface", null })
+{
+    Reset();
+    if (adjacentSidecar is not null) File.WriteAllText(sidecar, adjacentSidecar);
+    Run([.. cli, "extract", app, "ImportFixture.Application::Unrelated(ulong)", output]);
+    Run([.. cli, "check", output]);
+    JsonElement unrelatedIdentity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+    if (unrelatedIdentity.GetProperty("imports").GetArrayLength() != 0 || unrelatedIdentity.GetProperty("importModules").EnumerateObject().Any())
+        throw new InvalidOperationException("An adjacent sidecar of an uncalled library entered the extraction.");
+}
+Console.WriteLine("PASS adjacent sidecars of uncalled libraries need no pins and stay out of the extraction");
+
+Reset();
+Run(Command());
+foreach (JsonElement import in JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json"))).GetProperty("imports").EnumerateArray())
+    foreach (string field in new[] { "implementationPath", "sidecarPath" })
+        if (Path.IsPathRooted(import.GetProperty(field).GetString()!))
+            throw new InvalidOperationException("identity.json records a machine-specific import path: " + field);
+string moved = directory + "-moved";
+if (Directory.Exists(moved)) Directory.Delete(moved, true);
+Directory.CreateDirectory(moved);
+foreach (string file in new[] { app, library, sidecar }) File.Copy(file, Path.Combine(moved, Path.GetFileName(file)));
+CopyTree(output, Path.Combine(moved, "extraction"));
+// A stale original must not be what the moved artifact checks against.
+File.AppendAllText(library, "rebuilt");
+Run([.. cli, "check", Path.Combine(moved, "extraction")]);
+Directory.Delete(moved, true);
+Console.WriteLine("PASS import paths resolve relative to a moved extraction");
+
+Reset();
+string pinnedSidecarPath = Path.Combine(directory, "pinned-sidecar", Path.GetFileName(sidecar));
+Directory.CreateDirectory(Path.GetDirectoryName(pinnedSidecarPath)!);
+File.Move(sidecar, pinnedSidecarPath, true);
+string[] pinnedCommand = Command();
+pinnedCommand[Array.IndexOf(pinnedCommand, sidecar)] = pinnedSidecarPath;
+Run(pinnedCommand);
+Run([.. cli, "check", output]);
+// Sidecars that appear beside the App after extraction are outside the recorded import graph.
+File.Copy(pinnedSidecarPath, sidecar, true);
+Run([.. cli, "check", output]);
+File.WriteAllText(sidecar, "{}");
+Run([.. cli, "check", output]);
+File.Delete(sidecar);
+Directory.Delete(Path.GetDirectoryName(pinnedSidecarPath)!, true);
+Console.WriteLine("PASS check ignores sidecars that appear beside the App after extraction");
+
+Reset();
+string pinnedInterface = interfaceSource + "\ndef ImportFixture.marker : Nat := 0\n";
+string forgedInterface = interfaceSource + "\ndef ImportFixture.marker : Nat := 1\n";
+string forgedOutput = Path.Combine(directory, "forged-extraction");
+contract["interfaceModules"]![0]!["source"] = forgedInterface;
+Save();
+byte[] forgedSidecar = File.ReadAllBytes(sidecar);
+string[] forgedCommand = Command();
+forgedCommand[5] = forgedOutput;
+Run(forgedCommand);
+contract["interfaceModules"]![0]!["source"] = pinnedInterface;
+Save();
+Run(Command());
+string markerProof = Path.Combine(directory, "MarkerCaller.lean");
+File.WriteAllText(markerProof, File.ReadAllText(Path.Combine(fixture, "Caller.lean")) +
+    "\nnamespace ExampleProof\ntheorem marker : ImportFixture.marker = 0 := rfl\nend ExampleProof\n");
+string[] swappedFiles = ["identity.json", interfaceModule + ".lean"];
+Dictionary<string, byte[]> pinnedFiles = swappedFiles.ToDictionary(file => file, file => File.ReadAllBytes(Path.Combine(output, file)));
+Dictionary<string, byte[]> forgedFiles = swappedFiles.ToDictionary(file => file, file => File.ReadAllBytes(Path.Combine(forgedOutput, file)));
+string swapCache = Path.Combine(directory, "swap-cache-" + Guid.NewGuid().ToString("N"));
+string sharedCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
+    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
+Directory.CreateDirectory(swapCache);
+if (Directory.Exists(sharedCache))
+    foreach (string candidate in Directory.EnumerateDirectories(sharedCache))
+        if (File.Exists(Path.Combine(candidate, "cache-manifest.json")) && File.Exists(Path.Combine(candidate, "lakefile.toml")) &&
+            Sha(Path.Combine(candidate, "lakefile.toml")) == Sha(At("lakefile.toml")))
+            CopyTree(candidate, Path.Combine(swapCache, Path.GetFileName(candidate)));
+string? savedSwapCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+string? savedDisabled = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
+bool swapped = false;
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", swapCache);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
+    using (Program swapping = new())
+        swapping.Verify(app, "", "", markerProof, output, existingArtifacts: true, stage: value =>
+        {
+            // A self-consistent forged extraction appears after staging and is restored before the final check.
+            if (value == "proof checking" && !swapped)
+            {
+                foreach ((string file, byte[] bytes) in forgedFiles) File.WriteAllBytes(Path.Combine(output, file), bytes);
+                swapped = true;
+            }
+            else if (value == "theorem audit" && swapped)
+                foreach ((string file, byte[] bytes) in pinnedFiles) File.WriteAllBytes(Path.Combine(output, file), bytes);
+        });
+    if (!swapped) throw new InvalidOperationException("Precondition: verification never reached the swap window.");
+    File.WriteAllBytes(sidecar, forgedSidecar);
+    // Receipts are keyed by this driver's policy, so the forged extraction is checked by the same driver.
+    Exception? rejected = null;
+    using (Program reuse = new())
+        try { reuse.Verify(app, "", "", markerProof, forgedOutput, existingArtifacts: true); }
+        catch (Exception error) { rejected = error; }
+    if (rejected is null || File.Exists(Path.Combine(forgedOutput, "verified.json")))
+        throw new InvalidOperationException("A proof checked against one interface certified another through its success receipt.");
+}
+finally
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", savedSwapCache);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedDisabled);
+}
+Console.WriteLine("PASS staged interface sources, proof keys and the report come from one identity.json snapshot");
+
+Reset();
+Run(Command());
+string hashWindow = Path.Combine(directory, "hash-window");
+Directory.CreateDirectory(hashWindow);
+File.WriteAllText(Path.Combine(hashWindow, interfaceModule + ".lean"), interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
+Run([interfaceVerification.LeanExecutable, "--root=" + hashWindow, "-o", Path.Combine(hashWindow, interfaceModule + ".olean"),
+    Path.Combine(hashWindow, interfaceModule + ".lean")], leanPath: hashWindow + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean"));
+byte[] unauditedArtifact = File.ReadAllBytes(Path.Combine(hashWindow, interfaceModule + ".olean"));
+void RejectReplayWindowSwap(Func<string?> locate, Action<Action<string>> verify)
+{
+    bool replaced = false;
+    Exception? rejected = null;
+    try
+    {
+        verify(value =>
+        {
+            // The compiled olean is replaced after its closure audit and before its kernel replay.
+            if (value != "kernel replay" || replaced || locate() is not string artifact) return;
+            File.WriteAllBytes(artifact, unauditedArtifact);
+            replaced = true;
+        });
+    }
+    catch (Exception error) { rejected = error; }
+    if (!replaced) throw new InvalidOperationException("Precondition: verification never reached the interface replay window.");
+    if (rejected is null || !rejected.Message.Contains("changed after their closure audit", StringComparison.Ordinal) ||
+        File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException("An interface olean replaced after its closure audit was certified: " + rejected?.Message);
+}
+string? savedHashCache = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
+    RejectReplayWindowSwap(() => Directory.EnumerateDirectories(output, "proof-*")
+            .Select(fresh => Path.Combine(fresh, interfaceModule + ".olean")).SingleOrDefault(File.Exists),
+        stage => { using Program single = new(); single.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true, stage: stage); });
+    Console.WriteLine("PASS single-file verification binds interface oleans before their closure audit");
+    // A token in the proof tells this session apart from concurrent consumer sessions.
+    string token = Guid.NewGuid().ToString("N");
+    File.WriteAllText(consumerProof, File.ReadAllText(Path.Combine(fixture, "Caller.lean")) + "\n-- " + token + "\n");
+    DateTime started = DateTime.UtcNow.AddSeconds(-1);
+    RejectReplayWindowSwap(() => new DirectoryInfo(Path.GetTempPath()).EnumerateDirectories("leancil-consumer-*")
+            .Where(session => session.CreationTimeUtc >= started && session.Name.Length == "leancil-consumer-".Length + 32 &&
+                session.EnumerateFiles("*.lean").Any(file => File.ReadAllText(file.FullName).Contains(token, StringComparison.Ordinal)))
+            .Select(session => Path.Combine(session.FullName, ".lake/packages/leancil/.lake/build/lib/lean", interfaceModule + ".olean"))
+            .SingleOrDefault(File.Exists),
+        stage => { using Program consumer = new(); consumer.VerifyConsumer(app, consumerProof, output, "ExampleProof.correctness", package, null, stage); });
+    File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
+    Console.WriteLine("PASS consumer verification binds interface oleans before their closure audit");
+}
+finally { Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedHashCache); }
+
+Reset();
+contract["isReferenceAssembly"] = true;
+Save();
+string referenceOutput = Path.Combine(directory, "reference-extraction");
+string[] referenceCommand = Command();
+referenceCommand[5] = referenceOutput;
+Run(referenceCommand);
+string? savedReferenceCache = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
+    using Program sequence = new();
+    Exception? authoring = null;
+    try { sequence.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), referenceOutput, existingArtifacts: true); }
+    catch (Exception error) { authoring = error; }
+    if (authoring is null || !authoring.Message.Contains("caller proof checked for authoring only", StringComparison.Ordinal))
+        throw new InvalidOperationException("Precondition: the reference-only request must stop at authoring: " + authoring);
+    Reset();
+    Run(Command());
+    sequence.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true);
+    if (!sequence.UseSuccessCache)
+        throw new InvalidOperationException("A reference-only request disabled success receipts for a later implementation-bound request.");
+}
+finally { Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedReferenceCache); }
+Console.WriteLine("PASS reference-only authoring disables success receipts only for its own request");
