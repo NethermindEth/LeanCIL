@@ -89,7 +89,8 @@ internal static class Program
                             throw new ArgumentException(option + " requires Lib=<value>.");
                         Dictionary<string, string> selected = option == "--import-sha256" ? importHashes :
                             option == "--import-interface-sha256" ? interfaceHashes : implementationPaths;
-                        if (!selected.TryAdd(args[index][..separator], args[index][(separator + 1)..]))
+                        string value = args[index][(separator + 1)..];
+                        if (!selected.TryAdd(args[index][..separator], selected == implementationPaths ? value : value.ToLowerInvariant()))
                             throw new ArgumentException("Duplicate " + option + " assembly.");
                     }
                 }
@@ -158,22 +159,17 @@ internal static class Program
             if (recorded is { } recordedImports && recordedImports.TryGetProperty("imports", out JsonElement importRecords))
                 foreach (JsonElement binding in importRecords.EnumerateArray())
                 {
-                    string sidecar = binding.GetProperty("sidecarPath").GetString()!;
+                    string sidecar = global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("sidecarPath").GetString()!);
                     if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
                     string name = AssemblyNameReference.Parse(binding.GetProperty("identity").GetString()!.Split("::", 2)[0]).Name;
-                    string implementation = implementationPaths.GetValueOrDefault(name) ?? binding.GetProperty("implementationPath").GetString()!;
+                    string implementation = implementationPaths.GetValueOrDefault(name) ??
+                        global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("implementationPath").GetString()!);
                     string expected = importHashes.GetValueOrDefault(name) ?? binding.GetProperty("implementationSha256").GetString()!;
                     string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
                         (binding.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import extraction has no independent interface digest; extract again with --import-interface-sha256."));
                     importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
                 }
-            foreach (AssemblyNameReference reference in module.AssemblyReferences)
-            {
-                string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
-                if (File.Exists(discovered) && !importPaths.Contains(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
-                    importPaths.Add(discovered);
-            }
             foreach (string sidecar in importPaths.Distinct(StringComparer.Ordinal))
             {
                 if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
@@ -183,6 +179,14 @@ internal static class Program
                 string implementation = implementationPaths.GetValueOrDefault(name) ?? (File.Exists(adjacent) ? adjacent :
                     Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, name + ".dll"));
                 importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
+            }
+            foreach (AssemblyNameReference reference in module.AssemblyReferences)
+            {
+                string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
+                if (File.Exists(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
+                    importSources.Add(new(discovered, Path.GetFullPath(implementationPaths.GetValueOrDefault(reference.Name) ??
+                        Path.Combine(Path.GetDirectoryName(discovered)!, reference.Name + ".dll")),
+                        importHashes.GetValueOrDefault(reference.Name) ?? "", interfaceHashes.GetValueOrDefault(reference.Name) ?? "", Discovered: true));
             }
             using ImportResolution imports = new(importSources);
             stage = "metadata and CIL validation";
@@ -215,7 +219,11 @@ internal static class Program
             string manifest = JsonSerializer.Serialize(new
             {
                 schema = 3,
-                imports = imports.Bindings.Select(binding => JsonSerializer.SerializeToElement(binding, ContractInterface.Json)),
+                imports = imports.Bindings.Select(binding => JsonSerializer.SerializeToElement(binding with
+                {
+                    ImplementationPath = Path.GetRelativePath(output, binding.ImplementationPath),
+                    SidecarPath = Path.GetRelativePath(output, binding.SidecarPath)
+                }, ContractInterface.Json)),
                 importModules = importModuleHashes,
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),

@@ -250,8 +250,10 @@ implementation proof. See [Contract interfaces](CONTRACT-INTERFACES.md).
 
 A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to
 `published-certification`, the implementation SHA-256, interface digest,
-certification theorem/statement/digest, and deployment obligation. CLI output
-prints the accepted certification and obligation. The caller theorem remains
+certification theorem/statement/digest, `sidecarSha256`, `certificationAuthenticated`
+(always `false`: no pinned digest covers the certification text) and deployment
+obligation. CLI output prints the certification as an unauthenticated sidecar
+record with its sidecar SHA-256, and the obligation. The caller theorem remains
 conditional on those imported contracts.
 
 Reference-only extraction is an authoring input. Verification checks its caller

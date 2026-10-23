@@ -58,7 +58,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
 foreach (var (mutation, marker) in new[]
 {
     ("handler", "Unsupported method metadata"),
-    ("no-throw", "Contract imports support call only, not callvirt, newobj or ldftn."),
+    ("no-throw", "External managed dependency: System.Void System.DivideByZeroException::.ctor()"),
     ("thrown-null", "Unsupported instruction"),
     ("interior-branch", "Branch into a folded throw")
 })
