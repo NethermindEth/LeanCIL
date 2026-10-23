@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ImportReviewRegressions.cs
 
 using System.Numerics;
 using System.Security.Cryptography;
@@ -63,12 +65,13 @@ open CIL.Safety
 theorem correctness : CIL.Safety.MethodContract.Holds ImportFixture.addOne Extracted.program 0 := by
   rintro value memory formed
   dsimp only [ImportFixture.addOne, MethodContract.Returns]
-  refine Exists.intro 12 (Exists.intro memory (Exists.intro _
-    (And.intro ?execution (And.intro (Confined.refl _ memory) ?returns))))
-  case returns => exact Exists.intro (value + 1) (And.intro rfl rfl)
+  refine ⟨12, memory, [.scalar (.i64 (value + 1))], ?execution,
+    Confined.refl _ memory, value + 1, rfl, ?post⟩
+  case post => simp only [CIL.importedPost]
   case execution =>
     cil_checked_steps
     all_goals bv_omega
+#print axioms correctness
 end BProof
 """);
 foreach (string package in new[] { bPackage, aPackage, appPackage }) Run(["lake", "update"], package);
@@ -108,6 +111,10 @@ Export(a, aArtifact, aPackage, "APublished", Path.Combine(aPackage, "Conditional
     "ImportFixture.LibraryA::AddOne(ulong)", "ExampleProof.correctness", aSidecar);
 JsonObject originalA = JsonNode.Parse(File.ReadAllText(aSidecar))!.AsObject();
 JsonObject originalB = JsonNode.Parse(File.ReadAllText(bSidecar))!.AsObject();
+ImportReviewRegressions.ValidateGraph_WhenDuplicateImplementationHashDiffers_RejectsIdentity(ExtractorPath, originalB);
+ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
+    ExtractorPath, bSidecar, b, Path.Combine(root, "AmbiguousVersions"));
+Console.WriteLine("PASS conflicting duplicate implementation hashes and ambiguous assembly simple names reject at their production boundaries");
 if (originalA["dependencies"]!.AsArray().Count != 1 ||
     !originalA["certifications"]![0]!["statement"]!.GetValue<string>().Contains("HoldsGiven", StringComparison.Ordinal))
     throw new InvalidOperationException("Conditional A export lost its B dependency or its exact conditional statement.");

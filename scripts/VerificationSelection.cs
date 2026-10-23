@@ -43,6 +43,14 @@ internal static class VerificationSelection
         foreach (Match match in Regex.Matches(runner, @"\[""([a-z]+)""\] = \(""(Tests/[^""\n]+\.cs)"""))
             inputs[match.Groups[1].Value] = new(StringComparer.Ordinal) { match.Groups[2].Value };
         if (!inputs.ContainsKey("unsafe")) throw new InvalidDataException("Could not read verification suite registry");
+        foreach (ExportSuite entry in ExportVerificationSuites.Plan())
+        {
+            if (!File.Exists(Path.Combine(root, entry.Script)))
+                throw new InvalidDataException("Missing registered export fixture: " + entry.Script);
+            if (entry.ChildScript is string child && !File.Exists(Path.Combine(root, child)))
+                throw new InvalidDataException("Missing registered export fixture: " + child);
+            inputs.Add(entry.Name, new(entry.Inputs.Append(entry.Script), StringComparer.Ordinal));
+        }
         inputs["core"] = new(StringComparer.Ordinal)
         {
             "Examples/Verify.cs", "Examples/Hardware/Hardware.cs", "scripts/Verify.cs",
@@ -54,10 +62,6 @@ internal static class VerificationSelection
         inputs["core"].UnionWith(new[] { "Add", "Choose", "Calls", "Alias", "Struct", "StructCopy", "LargeStruct",
             "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["core"].Add("Tests/ModularStatics.lean");
-        inputs["exports"].UnionWith(["Tests/ModularStaticExports.cs", "Tests/GenericLayoutImports.cs",
-            "Tests/ContractImports/TypedImportInterface.lean", "Tests/ContractImports/TypedIdentityProof.lean",
-            "Tests/ContractImports/TypedCopyProof.lean", "Tests/ContractImports/TypedIdentityCaller.lean",
-            "Tests/ContractImports/TypedCopyCaller.lean"]);
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
             "Throws", "SpanTables", "StaticValues", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "ScalarEvidence", "TypeTestEvidence",
@@ -73,6 +77,7 @@ internal static class VerificationSelection
             var pending = new Stack<string>(paths);
             while (pending.TryPop(out var path))
             {
+                if (path == "scripts/ExportVerificationSuites.cs") continue;
                 var source = Path.Combine(root, path);
                 if (!File.Exists(source)) continue;
                 var text = File.ReadAllText(source);
@@ -115,6 +120,7 @@ internal static class VerificationSelection
         foreach (var path in paths)
         {
             if (path.EndsWith(".md", StringComparison.Ordinal) || path == "LICENSE") continue;
+            if (path == "scripts/ExportVerificationSuites.cs") return all;
             if (new[] { "CIL/", "Extractor/", "Examples/Assembly/", "Examples/FSharp/" }
                     .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Examples/Support.lean")
                 return all;
