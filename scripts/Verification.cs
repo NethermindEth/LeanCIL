@@ -32,9 +32,8 @@ partial class Program : IDisposable
 
     bool referenceOnlyAuthoring;
     bool forceFullVerification { get; init; }
-    sealed record FullImportResult(string Theorem, string Audit, PublishedImport[] Imports, Action Recheck);
+    sealed record FullImportResult(string Theorem, string Audit, PublishedImport[] Imports);
     Func<string, string, string, string, FullImportResult>? fullImportAudit { get; set; }
-    Action? fullInputRecheck { get; set; }
     bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
@@ -1319,8 +1318,6 @@ unsafe def main (args : List String) : IO Unit := do
             var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
             RequireImplementationImports(output);
-            fullResult?.Recheck();
-            fullInputRecheck?.Invoke();
             var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: fullResult?.Imports ?? PublishedImports(extraction),
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);

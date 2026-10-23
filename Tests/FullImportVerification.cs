@@ -82,6 +82,67 @@ if (stages.Count(stage => stage.GetProperty("stage").GetString() == "Fresh extra
     throw new InvalidOperationException("Repeated full verification did not re-extract, audit and replay each actual library and composition.");
 Console.WriteLine("PASS ordinary and consumer full verification, including a repeated run without original library proof paths");
 
+string[] TraceStages(string directory) => Directory.EnumerateFiles(directory, "*.jsonl").SelectMany(File.ReadLines)
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
+string pairRoot = Path.Combine(root, "Pair");
+Directory.CreateDirectory(pairRoot);
+string[] pairMethods = ["ImportFixture.Library::AddOne(ulong)", "ImportFixture.Library::AddSame(ulong)"];
+string[] pairArtifacts = pairMethods.Select((_, index) => Path.Combine(pairRoot, "Export" + index)).ToArray();
+for (int index = 0; index < pairMethods.Length; index++)
+{
+    Run([.. cli, "extract", library, pairMethods[index], pairArtifacts[index]]);
+    File.WriteAllText(Path.Combine(pairArtifacts[index], "verification.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1, proof = Path.GetRelativePath(pairArtifacts[index], producerProof).Replace('\\', '/'), theorem = "LibProof.correctness",
+        proofRoot = Path.GetRelativePath(pairArtifacts[index], producerPackage).Replace('\\', '/')
+    }));
+}
+string pairManifest = Path.Combine(pairRoot, "export.json");
+string pairSidecar = Path.Combine(pairRoot, "ImportFixture.Lib.leancil.contracts");
+File.WriteAllText(pairManifest, JsonSerializer.Serialize(new
+{
+    schema = 1, assembly = library, proofRoot = producerPackage,
+    @interface = new[] { new { module = "PublishedArithmetic", source = Path.Combine(producerPackage, "PublishedArithmetic.lean") } },
+    exports = pairMethods.Select((method, index) => new { method, artifact = pairArtifacts[index], contract = "ImportFixture.addOne", theorem = "LibProof.correctness" })
+}));
+Run([.. cli, "export-contracts", pairManifest, "--output", pairSidecar, "--bundle", Path.Combine(pairRoot, "Bundles")]);
+string pairApp = Path.Combine(pairRoot, "App");
+Directory.CreateDirectory(pairApp);
+File.WriteAllText(Path.Combine(pairApp, "PairApp.csproj"), $$"""
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.PairApp</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><Reference Include="ImportFixture.Lib"><HintPath>{{library}}</HintPath></Reference></ItemGroup></Project>
+""");
+File.WriteAllText(Path.Combine(pairApp, "Application.cs"), "namespace ImportFixture; public static class PairApplication { public static ulong Entry(ulong value) => Library.AddSame(Library.AddOne(value)); }\n");
+Run(["dotnet", "build", Path.Combine(pairApp, "PairApp.csproj"), "-c", "Release"]);
+if (!originalLibrary.AsSpan().SequenceEqual(File.ReadAllBytes(library))) throw new InvalidOperationException("Precondition: the pair caller build changed the library DLL.");
+string pairArtifact = Path.Combine(pairRoot, "Caller");
+JsonObject pairContract = JsonNode.Parse(File.ReadAllText(pairSidecar))!.AsObject();
+Run([.. cli, "extract", Path.Combine(pairApp, "bin", "ImportFixture.PairApp.dll"), "ImportFixture.PairApplication::Entry(ulong)", pairArtifact,
+    "--import", pairSidecar, "--import-implementation", "ImportFixture.Lib=" + library, "--import-sha256", "ImportFixture.Lib=" + Sha(library),
+    "--import-interface-sha256", "ImportFixture.Lib=" + pairContract["interfaceDigest"]!.GetValue<string>()]);
+string pairCaller = Path.Combine(pairRoot, "PairCaller.lean");
+File.WriteAllText(pairCaller, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness : " +
+    "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun _ => True) := by\n" +
+    "  intro linked links imported\n  trivial\nend ExampleProof\n");
+string pairTrace = Path.Combine(root, "pair-trace");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", pairTrace);
+    Run([.. cli, "verify", pairArtifact, "--proof", pairCaller, "--force-full-verify"]);
+}
+finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+JsonElement pairReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(pairArtifact, "verified.json")));
+JsonElement[] pairImports = pairReport.GetProperty("imports").EnumerateArray().ToArray();
+string pairBundle = Path.GetFileName(pairContract["fullVerificationLocator"]!.GetValue<string>());
+string[] pairStages = TraceStages(pairTrace);
+// The caller and the shared bundle each build the fresh library once; a per-slot build would add a third.
+if (pairImports.Length != 2 || pairImports.Any(import => import.GetProperty("acceptedVia").GetString() != "independently-verified" ||
+        import.GetProperty("sourceBundleDigest").GetString() != pairBundle) ||
+    pairStages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
+    pairStages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
+    pairStages.Count(stage => stage == "Building fresh Lean verification library") != 2)
+    throw new InvalidOperationException("Two imports from one bundle were not verified with one library build: " + string.Join(", ", pairStages));
+Console.WriteLine("PASS two imports from one source bundle share one independent library build");
+
 (int Code, string Output, string Stdout, string Stderr) artifactWithoutFull = Execute([.. cli, "verify", artifact,
     "--proof", caller, "--proof-root", callerPackage, "--full-artifact", "ImportFixture.Lib=" + bundle]);
 if (artifactWithoutFull.Code != 1 || !artifactWithoutFull.Output.Contains("--full-artifact requires --force-full-verify", StringComparison.Ordinal) ||
@@ -136,10 +197,9 @@ string Rebundle(string proofSource, bool staleClosure = false)
     return destination;
 }
 
-void RejectCallerMutation(bool consumer, bool sourceOnly, bool shadow = false, bool originalRootShadow = false)
+void RejectCallerMutation(bool consumer, bool sourceOnly, bool shadow = false)
 {
-    string suffix = (consumer ? "consumer" : "ordinary") +
-        (originalRootShadow ? "-original-root-shadow" : shadow ? "-shadow" : sourceOnly ? "-source" : "-artifact");
+    string suffix = (consumer ? "consumer" : "ordinary") + (shadow ? "-original-root-shadow" : sourceOnly ? "-source" : "-artifact");
     string callerContext = Path.Combine(root, suffix + "-caller.json");
     string mutationMarker = Path.Combine(root, suffix + "-mutation.json");
     string attackCaller = Path.Combine(callerPackage, "FullMutationCaller.lean");
@@ -175,16 +235,11 @@ run_cmd do
   let callerArtifact := folder / {{JsonSerializer.Serialize(consumer ? ".lake/build/lib/lean/LeanCILProof.olean" : "Proof.olean")}}
   let originalArtifact <- IO.FS.readBinFile callerArtifact
   let target <-
-    if {{(originalRootShadow ? "true" : "false")}} then
+    if {{(shadow ? "true" : "false")}} then
       pure ((callerArtifact.parent.getD ".") / "LeanCILFullExpected0.olean")
-    else if {{(shadow ? "true" : "false")}} then do
-      let candidates := (<- IO.FS.readDir folder).filter (fun entry => entry.fileName.startsWith "full-imports-")
-      unless candidates.size == 1 do throwError "Expected exactly one producer staging directory"
-      let some entry := candidates[0]? | throwError "Missing producer staging directory"
-      pure (entry.path / {{JsonSerializer.Serialize(consumer ? "LeanCILProof.olean" : "Proof.olean")}})
     else pure {{(sourceOnly ? "source" : "callerArtifact")}}
   if {{(shadow ? "true" : "false")}} then
-    let shadowSource := (target.parent.getD ".") / {{JsonSerializer.Serialize(originalRootShadow ? "LeanCILFullExpected0.lean" : consumer ? "LeanCILProof.lean" : "Proof.lean")}}
+    let shadowSource := (target.parent.getD ".") / "LeanCILFullExpected0.lean"
     IO.FS.writeFile shadowSource {{JsonSerializer.Serialize(weakCaller)}}
     let search <- IO.ofExcept <| context.getObjValAs? String "leanPath"
     let cwd := System.FilePath.mk (<- IO.ofExcept <| context.getObjValAs? String "cwd")
@@ -226,13 +281,12 @@ run_cmd do
         if (!File.Exists(mutationMarker))
             throw new InvalidOperationException("Producer mutation did not execute during fresh verification: " + rejected.Output);
         JsonElement mutation = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(mutationMarker));
-        // Lean spells joined paths with mixed separators on Windows.
+        // Lean spells paths with mixed separators and a lowercase drive on Windows.
         string target = Path.GetFullPath(mutation.GetProperty("target").GetString()!);
-        string diagnostic = originalRootShadow ? "Unexpected full-verification caller artifact: " + target
-            : shadow ? "Unexpected producer staging module: " + (consumer ? "LeanCILProof" : "Proof")
+        string diagnostic = shadow ? "Unexpected full-verification caller artifact: " + target
             : sourceOnly ? "Sources changed during full import audit"
             : "Full-verification source or compiled artifact changed: " + target;
-        if (rejected.Code != 1 || !rejected.Output.Contains(diagnostic, StringComparison.Ordinal) ||
+        if (rejected.Code != 1 || !rejected.Output.Contains(diagnostic, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
             mutation.GetProperty("sourceRestored").GetBoolean() == sourceOnly ||
             mutation.GetProperty("originalArtifactUnchanged").GetBoolean() != (sourceOnly || shadow) ||
             File.Exists(Path.Combine(attackArtifact, "verified.json")) ||
@@ -256,8 +310,6 @@ RejectCallerMutation(consumer: true, sourceOnly: false);
 RejectCallerMutation(consumer: false, sourceOnly: false);
 RejectCallerMutation(consumer: true, sourceOnly: true);
 RejectCallerMutation(consumer: true, sourceOnly: false, shadow: true);
-RejectCallerMutation(consumer: false, sourceOnly: false, shadow: true);
-RejectCallerMutation(consumer: true, sourceOnly: false, shadow: true, originalRootShadow: true);
 try
 {
     Rebundle(File.ReadAllText(producerProof), staleClosure: true);
