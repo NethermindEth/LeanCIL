@@ -8,7 +8,8 @@ namespace Nethermind.LeanCIL;
 internal static class ImportResolver
 {
     internal const string Usage = "Usage: leancil resolve-imports App.dll --library Lib... [--deps App.deps.json] [--assets obj/project.assets.json] " +
-        "[--runtime-identifier RID] [--rid-graph PortableRuntimeIdentifierGraph.json] [--package-root directory]... [--profile name|@profile.json] [--output resolved.json]";
+        "[--runtime-identifier RID] [--rid-graph PortableRuntimeIdentifierGraph.json] [--package-root directory]... [--profile name|@profile.json] [--output resolved.json]\n" +
+        "List every required library with --library, including transitive contract dependencies; sidecar dependencies are not followed.";
     internal const string AttributeName = "Nethermind.LeanCIL.LeanCilContractsAttribute";
 
     internal sealed record Resolved(string Assembly, string Library, string AssetPath, string? AssetRuntimeIdentifier,
