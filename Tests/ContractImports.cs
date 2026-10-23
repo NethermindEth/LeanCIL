@@ -112,6 +112,18 @@ Run([.. cli, "check", output]);
 Run(Command());
 Run([.. cli, "check", output]);
 JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+foreach (string path in identity.GetProperty("imports").EnumerateArray()
+    .SelectMany(binding => new[] { binding.GetProperty("implementationPath").GetString()!, binding.GetProperty("sidecarPath").GetString()! })
+    .Append(identity.GetProperty("assemblyPath").GetString()!))
+    if (path.Contains('\\') || Path.IsPathRooted(path))
+        throw new InvalidOperationException("Extraction paths must be portable and relative: " + path);
+string identityPath = Path.Combine(output, "identity.json");
+string currentIdentity = File.ReadAllText(identityPath);
+JsonObject oldIdentity = JsonNode.Parse(currentIdentity)!.AsObject();
+oldIdentity["schema"] = 2;
+File.WriteAllText(identityPath, oldIdentity.ToJsonString());
+Reject([.. cli, "check", output], "Unsupported extraction manifest schema; run leancil extract again.");
+File.WriteAllText(identityPath, currentIdentity);
 string generated = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (identity.GetProperty("schema").GetInt32() != 3 || identity.GetProperty("imports").GetArrayLength() != 1 ||
     !generated.Contains(".call 1 1", StringComparison.Ordinal) || generated.Contains(expectedHash, StringComparison.Ordinal) ||
