@@ -261,6 +261,34 @@ if (!consumerStages.Any(stage => stage.GetProperty("stage").GetString() == "Chec
 Console.WriteLine("PASS ordinary and consumer import audits reject unrelated theorems without verification reports");
 Reset();
 Run(Command());
+string falseCaller = Path.Combine(directory, "ImplicitFalse.lean");
+File.WriteAllText(falseCaller, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness {h : False} :\n    CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun _ => False) := h.elim\nend ExampleProof\n");
+(int Code, string Output, string Stdout, string Stderr) falseResult = Execute([.. cli, "verify", output, "--proof", falseCaller]);
+if (falseResult.Code != 1 || !falseResult.Output.Contains("Theorem statement mismatch: ExampleProof.correctness", StringComparison.Ordinal) ||
+    File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("A claim behind an implicit False premise passed the conditional-claim audit: " + falseResult.Output);
+Console.WriteLine("PASS a conditional claim behind an implicit False premise is not certified");
+Reset();
+using (ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(app))))
+{
+    // Entry now adds two, so a proof that the caller meets addOne is false.
+    MethodBody body = module.GetType("ImportFixture.Application").Methods.Single(method => method.Name == "Entry").Body;
+    Instruction call = body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Call);
+    body.GetILProcessor().InsertAfter(call, Instruction.Create(OpCodes.Call, (MethodReference)call.Operand));
+    module.Write(app);
+}
+contract["interfaceModules"]![0]!["source"] = originalInterface + "\ninstance (priority := high) retarget : OfNat Nat 1 := { ofNat := 0 }\n";
+Save();
+Run(Command());
+string retargeted = Path.Combine(directory, "Retargeted.lean");
+File.WriteAllText(retargeted, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness :\n    CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun linked => ImportFixture.addOne.Holds linked 0) := by\n  intro linked links imported\n  exact imported\nend ExampleProof\n");
+(int Code, string Output, string Stdout, string Stderr) retargetResult = Execute([.. cli, "verify", output, "--proof", retargeted]);
+if (retargetResult.Code != 1 || !retargetResult.Output.Contains("Constant value mismatch: Extracted.ImportsHold", StringComparison.Ordinal) ||
+    File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("An interface OfNat instance retargeted the import slot onto the caller: " + retargetResult.Output);
+Console.WriteLine("PASS an interface numeral instance cannot retarget the import premise onto the caller");
+Reset();
+Run(Command());
 File.AppendAllText(Path.Combine(output, "ImportFixture.lean"), "\n");
 Reject([.. cli, "check", output], "Stale or mismatched contract interface source");
 Run(Command());
