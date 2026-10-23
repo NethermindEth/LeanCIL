@@ -106,7 +106,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 15 leaves and 46 base cases", () =>
+Test("independent export cohort map preserves 16 leaves, 46 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -129,7 +129,8 @@ Test("independent export cohort map preserves 15 leaves and 46 base cases", () =
         ["exportsmutationsource"] = ("consumer-source", ["full.consumer-source"]),
         ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"]),
         ["exportsstatics"] = ("statics", []),
-        ["exportstransitive"] = ("transitive", [])
+        ["exportstransitive"] = ("transitive", []),
+        ["exportsdiscovery"] = ("discovery", ["discovery.fixture"])
     };
     void ExactPlan(IEnumerable<ExportSuite> plan)
     {
@@ -140,6 +141,8 @@ Test("independent export cohort map preserves 15 leaves and 46 base cases", () =
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
             Require(entry.Standalone == (entry.Cohort is "statics" or "transitive"), "Wrong standalone fixture kind: " + entry.Name);
+            Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
+                "Wrong bootstrapped child fixture: " + entry.Name);
             string script = entry.Cohort switch
             {
                 "resolution" => "Tests/FullModuleResolution.cs",
@@ -154,8 +157,12 @@ Test("independent export cohort map preserves 15 leaves and 46 base cases", () =
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
     ExactPlan(all);
-    Require(all.SelectMany(entry => entry.Cases).Count() == 46 &&
-        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 46, "Lost or duplicate base behavior");
+    string[] baseCases = all.Where(entry => entry.Cohort != "discovery").SelectMany(entry => entry.Cases).ToArray();
+    Require(baseCases.Length == 46 && baseCases.Distinct(StringComparer.Ordinal).Count() == 46, "Lost or duplicate base behavior");
+    Require(all.SelectMany(entry => entry.Cases).Count() == 47 &&
+        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 47, "Lost or duplicate discovery completion");
+    Equal(ExportVerificationSuites.DiscoveryArguments("sidecar", "caller-proof", "caller-package", "producer-package", "producer-proof", "interface-source"),
+        ["sidecar", "caller-proof", "caller-package", "producer-package", "producer-proof", "interface-source"]);
     foreach (ExportSuite omitted in all)
         MustReject(() => ExactPlan(all.Where(entry => entry.Name != omitted.Name)));
     Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Name),
@@ -222,6 +229,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
     Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]), ["exportsstatics"]);
     Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
+    Equal(VerificationSelection.Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
     string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
     Require(runner.Contains(".. arguments", StringComparison.Ordinal) &&
@@ -233,6 +241,11 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Require(standalone.Contains("foreach (ExportSuite entry in ExportVerificationSuites.Plan())", StringComparison.Ordinal) &&
         standalone.Contains(".. entry.Arguments", StringComparison.Ordinal), "Standalone lost exact leaf dispatch");
     Require(!standalone.Contains("\"Tests/TransitiveImports.cs\"", StringComparison.Ordinal), "Old nested transitive suite remains");
+    Require(!standalone.Contains("\"Tests/ContractDiscovery.cs\"", StringComparison.Ordinal) &&
+        standalone.Contains("if (cohort == \"discovery\")", StringComparison.Ordinal) &&
+        standalone.Contains("ExportVerificationSuites.DiscoveryArguments(", StringComparison.Ordinal) &&
+        standalone.Contains("sidecar, callerProof, callerPackage, package, proof, contractSource)", StringComparison.Ordinal),
+        "Discovery lost its selected six-argument child dispatch");
 });
 Test("a missing registered export fixture fails selection", () =>
 {
@@ -260,6 +273,12 @@ Test("a missing registered export fixture fails selection", () =>
         catch (InvalidDataException error) { rejection = error.Message; }
         Require(rejection == "Missing registered export fixture: Tests/TransitiveImports.cs",
             "A missing standalone transitive fixture was silently skipped: " + rejection);
+        File.WriteAllText(Path.Combine(isolated, "Tests/TransitiveImports.cs"), "");
+        rejection = null;
+        try { VerificationSelection.SuiteInputs(isolated); }
+        catch (InvalidDataException error) { rejection = error.Message; }
+        Require(rejection == "Missing registered export fixture: Tests/ContractDiscovery.cs",
+            "A missing discovery child fixture was silently skipped: " + rejection);
     }
     finally { Directory.Delete(isolated, recursive: true); }
 });
