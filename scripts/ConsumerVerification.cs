@@ -477,7 +477,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         while (pending.TryDequeue(out var path))
         {
             if (!seen.Add(path)) continue;
-            foreach (Match import in SourceImport.Matches(File.ReadAllText(path)))
+            foreach (Match import in SourceImport().Matches(File.ReadAllText(path)))
             {
                 if (import.Groups[1].Value == "ExtractedSymbols") return true;
                 var module = "/" + import.Groups[1].Value.Replace('.', '/') + ".lean";
