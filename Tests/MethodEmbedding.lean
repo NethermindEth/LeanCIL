@@ -7,6 +7,20 @@ namespace Tests.MethodEmbedding
 
 open CIL
 
+private def byteHomeBody : Method := {
+  locals := [.v128 0], localKinds := [.vector128], returnsValue := false,
+  code := [.local 0, .pop, .ret] }
+private def opaqueHomeBody : Method := { byteHomeBody with opaqueVectorLocals := [0] }
+
+example : CIL.MethodBinding.embedFailure byteHomeBody byteHomeBody [0, 1, 2] = none := by decide +kernel
+example : (CIL.MethodBinding.embedFailure byteHomeBody opaqueHomeBody [0, 1, 2]).isSome = true := by decide +kernel
+example : ¬ Embeds byteHomeBody opaqueHomeBody [0, 1, 2] := by
+  intro embedded
+  have metadata := embedded.opaqueVectorLocals
+  change ([0] : List Nat) = [] at metadata
+  cases metadata
+example : MethodEmbeds [opaqueHomeBody] 0 opaqueHomeBody := by cil_embed
+
 /-- Returns argument 1 on both paths; pc 4 is reached only by the branch. -/
 @[cil_code] def body : Method := {
   code := [.arg 0, .brzero 4, .arg 1, .ret, .arg 1, .ret]

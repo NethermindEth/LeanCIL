@@ -20,8 +20,8 @@ theorem store_numeric_local {memory : Memory} {reference : Reference}
   rw [length] at loaded
   refine ⟨result, written, ?_, loaded⟩
   cases value <;> try cases fits
-  all_goals try solve | cases kind <;> simp [localNumber] at fits
-  all_goals simp [storeLocal, fits, written, checkedAt, Except.mapError,
+  all_goals try solve | cases kind <;> simp [localNumber, CIL.Value.hasUnspecified] at fits
+  all_goals simp [storeLocal, Value.hasUnspecified, CIL.Value.hasUnspecified, fits, written, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms store_numeric_local

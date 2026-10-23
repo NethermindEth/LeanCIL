@@ -10,13 +10,24 @@ def localWidth : CIL.LocalKind → Nat
   | .word64 => 8
   | .vector128 => 16
   | .vector256 => 32
+  | .vector512 => 64
   | .reference => 0
+
+inductive Opaque128Value where
+  | known (bits : BitVec 128)
+  | low64 (low : CIL.W64)
+  deriving DecidableEq, Repr
+
+def Opaque128Value.value : Opaque128Value → CIL.Value
+  | .known bits => .v128 bits
+  | .low64 low => .v128Low64 low
 
 /-- Byref slots are roots, not byte encodings that unsafe integer accesses can
     reinterpret. Numeric homes are ordinary allocation-backed byte storage. -/
 inductive LocalSlot where
   | bytes (kind : CIL.LocalKind) (reference : Reference)
   | root (value : Option ManagedReference)
+  | opaque128 (value : Option Opaque128Value)
   deriving DecidableEq, Repr
 
 structure Frame where
@@ -48,6 +59,7 @@ def allocateHome (m : Memory) (activation width : Nat) (alignment : Nat := 1) :
     views := ⟨id, 0, width, true, true⟩ :: memory.views })
 
 def localNumber (kind : CIL.LocalKind) (value : CIL.Value) : ExecutionResult Nat :=
+  if value.hasUnspecified then .error (.unsupported "Unspecified vector bytes") else
   match kind, value with
   | .narrow _, .i32 bits => .ok bits.toNat
   | .aggregate size, .aggregate bytes =>
@@ -57,6 +69,7 @@ def localNumber (kind : CIL.LocalKind) (value : CIL.Value) : ExecutionResult Nat
   | .word64, .i64 bits => .ok bits.toNat
   | .vector128, .v128 bits => .ok bits.toNat
   | .vector256, .v256 bits => .ok bits.toNat
+  | .vector512, .v512 bits => .ok bits.toNat
   | _, _ => .error .invalidState
 
 /-- Readback after a typed store includes the CLI's narrowing and extension. -/
@@ -69,11 +82,16 @@ def localSnapshotShape : CIL.LocalKind → Option CIL.SnapshotShape
   | .aggregate size => some (.aggregate size)
   | .vector128 => some .vector128
   | .vector256 => some .vector256
+  | .vector512 => some .vector512
   | _ => none
 
 def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     ExecutionResult (LocalSlot × Memory) := do
+  let selectedOpaque := match slot with | .opaque128 _ => true | _ => false
+  if value.hasUnspecified && !selectedOpaque then .error (.unsupported "Byte home observes unspecified vector bits") else
   match slot, value with
+  | .opaque128 _, .scalar (.v128 bits) => return (.opaque128 (some (.known bits)), m)
+  | .opaque128 _, .scalar (.v128Low64 low) => return (.opaque128 (some (.low64 low)), m)
   | .root _, .reference reference =>
     let _ ← formValue m reference
     return (.root (some reference), m)
@@ -90,6 +108,8 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
 
 def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
   match slot with
+  | .opaque128 none => .error (.unsupported "Uninitialized opaque vector local")
+  | .opaque128 (some value) => return .scalar value.value
   | .root none => .error .invalidState
   | .root (some reference) => formValue m reference
   | .bytes kind reference =>
@@ -106,12 +126,14 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
     | .word64 => return .scalar (.i64 (BitVec.ofNat 64 number))
     | .vector128 => return .scalar (.v128 (BitVec.ofNat 128 number))
     | .vector256 => return .scalar (.v256 (BitVec.ofNat 256 number))
+    | .vector512 => return .scalar (.v512 (BitVec.ofNat 512 number))
     | .reference => .error .invalidState
 
 def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
   match slot with
   | .bytes _ reference => formValue m (.address reference)
   | .root _ => .error (.unsupported "Address of managed-reference local")
+  | .opaque128 _ => .error (.unsupported "Address of opaque vector local")
 
 /-- Initialized reads retain the original typed decoding, independently of the
     fallback used for partial aggregate/vector copies. -/
@@ -125,6 +147,7 @@ theorem loadLocal_of_read {m : Memory} {reference : Reference} {kind : CIL.Local
       | .word64 => .ok (.scalar (.i64 (BitVec.ofNat 64 (byteNumber bytes))))
       | .vector128 => .ok (.scalar (.v128 (BitVec.ofNat 128 (byteNumber bytes))))
       | .vector256 => .ok (.scalar (.v256 (BitVec.ofNat 256 (byteNumber bytes))))
+      | .vector512 => .ok (.scalar (.v512 (BitVec.ofNat 512 (byteNumber bytes))))
       | .reference => .error .invalidState) := by
   simp only [loadLocal, loaded, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
@@ -159,6 +182,29 @@ def makeLocals (activation : Nat) (kinds : List CIL.LocalKind)
     return (slot :: slots, owned ++ other, memory)
   | _, _ => .error .invalidState
 
+def makeOpaque128 (initial : CIL.Value) (m : Memory) :
+    ExecutionResult (LocalSlot × List AllocationId × Memory) :=
+  match initial with
+  | .v128 bits => .ok (.opaque128 (some (.known bits)), [], m)
+  | .unmodeled => .ok (.opaque128 none, [], m)
+  | _ => .error .invalidState
+
+def makeSelectedLocalsFrom (activation : Nat) (indices : List Nat) : Nat → List CIL.LocalKind →
+    List CIL.Value → Memory → ExecutionResult (List LocalSlot × List AllocationId × Memory)
+  | _, [], [], m => .ok ([], [], m)
+  | index, kind :: kinds, initial :: initials, m => do
+    let (slot, owned, memory) ← if index ∈ indices then
+      if kind == .vector128 then makeOpaque128 initial m else .error .invalidState
+      else makeLocal activation kind initial m
+    let (slots, other, memory) ← makeSelectedLocalsFrom activation indices (index + 1) kinds initials memory
+    return (slot :: slots, owned ++ other, memory)
+  | _, _, _, _ => .error .invalidState
+
+def makeSelectedLocals (activation : Nat) (indices : List Nat) (kinds : List CIL.LocalKind)
+    (initializers : List CIL.Value) (m : Memory) : ExecutionResult (List LocalSlot × List AllocationId × Memory) :=
+  if indices.isEmpty then makeLocals activation kinds initializers m
+  else makeSelectedLocalsFrom activation indices 0 kinds initializers m
+
 /-- Aggregate argument instructions operate on a private snapshot home, never
     directly on the caller's by-value source. Their extracted indices identify
     the 256-bit vector representation supported by those CIL operations. -/
@@ -167,6 +213,8 @@ def makeArgumentHomes (activation : Nat) (indices : List Nat) (args : List Value
   match indices with
   | [] => return ([], [], m)
   | index :: rest =>
+    if (args[index]?.map Value.hasUnspecified).getD false then
+      .error (.unsupported "Argument home observes unspecified vector bits") else
     let some (.scalar (.v256 bits)) := args[index]? | .error .invalidState
     let (reference, memory) ← allocateHome m activation (localWidth .vector256)
     let (slot, memory) ← storeLocal memory (.bytes .vector256 reference) (.scalar (.v256 bits))
@@ -193,7 +241,7 @@ def makeParameterHomes (activation : Nat) (parameters : List (Nat × CIL.LocalKi
 
 def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) : ExecutionResult (Frame × Memory) := do
   let activation := m.nextIdentity
-  let (locals, owned, memory) ← makeLocals activation body.localKinds body.locals m
+  let (locals, owned, memory) ← makeSelectedLocals activation body.opaqueVectorLocals body.localKinds body.locals m
   let (arguments, argumentIds, memory) ← makeArgumentHomes activation body.vectorArgs args memory
   let (parameters, parameterIds, memory) ← makeParameterHomes activation body.parameterHomes args memory
   return (⟨activation, locals ++ parameters.map Prod.snd, (owned ++ argumentIds) ++ parameterIds, arguments⟩, memory)

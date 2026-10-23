@@ -73,7 +73,8 @@ theorem WritableHomes.home_at {memory : Memory} {lower : Nat} {kinds slots}
 theorem unknown_frame_setup (body : CIL.Method)
     (initializers : body.locals = body.localKinds.map fun _ => .unmodeled)
     (numeric : ∀ kind ∈ body.localKinds, kind ≠ .reference)
-    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = []) (memory : Memory) (args : List Value)
+    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = [])
+    (opaqueLocals : body.opaqueVectorLocals = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
     ∃ frame result,
       enterFrame body args memory = .ok (frame, result) ∧
@@ -83,7 +84,8 @@ theorem unknown_frame_setup (body : CIL.Method)
     make_unknown_locals memory memory.nextIdentity body.localKinds wellFormed numeric
   let frame : Frame := ⟨memory.nextIdentity, slots, owned, []⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
-    simp only [enterFrame, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes, List.map_nil,
+    simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true, initializers, made,
+      arguments, makeArgumentHomes, parameters, makeParameterHomes, List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl
   exact ⟨frame, result, setup, homes, enterFrame_preserves_caller_memory _ _ _ _ _ setup,
