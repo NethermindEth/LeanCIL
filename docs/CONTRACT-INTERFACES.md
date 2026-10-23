@@ -121,8 +121,10 @@ pinned direct dependencies and without external initialization assumptions. Its
 own reachable static identity set must match the selected certification exactly.
 This checks metadata and serialization; it does not verify the imported theorem.
 Each node's static identities are checked with those of its direct imports before
-output. A collision reports both scoped field names. `linkChecked` checks all
-descriptors in the complete linked program.
+output. A collision reports both scoped field names. Full verification uses
+`linkChecked` to check all descriptors in its linked program, but currently rejects
+transitive dependency graphs. Conditional transitive proofs retain the
+`StaticWorldValid` premises; extraction does not compare every pair of graph nodes.
 
 The framework manifest lists `CIL.lean`, all `CIL/**/*.lean`, and `lean-toolchain`
 in ordinal relative-path order. Paths use `/`. Each line is `path=sha256(bytes)`.
@@ -144,10 +146,10 @@ source and every qualified contract name is included in this digest.
 must equal the selected certification record. This includes definition values,
 theorem/inductive types, constructor metadata and recursor computation rules.
 A certification record does not supply a Lean implementation proof. Its theorem,
-statement and canonical statement digest are publisher provenance accepted by
+statement and statement digest are publisher provenance accepted by
 the consumer, and are reported as such. No pinned digest covers them: the
-interface digest excludes certifications and the consumer cannot recompute
-`statementDigest`. Reports therefore set `certificationAuthenticated` to `false`
+interface digest excludes certifications. Hashing the reported statement cannot
+authenticate a publisher's theorem. Reports therefore set `certificationAuthenticated` to `false`
 and record the `sidecarSha256` the text came from.
 
 ## Generated proof interface and guarantees

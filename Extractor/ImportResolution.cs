@@ -10,8 +10,8 @@ internal sealed class ImportResolution : IDisposable
     // A discovered sidecar is read only when a call site needs its library, so unused sidecars need no pins.
     internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256, string ExpectedInterfaceDigest, bool Discovered = false);
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
-        string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
-        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind,
+        string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
+        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ContractKind,
         string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly,
         StaticIdentityRecord[] StaticIdentities,
         string? DefinitionSignature, string[] TypeArguments, ContractMethodSignature? TypedSignature,
@@ -136,6 +136,8 @@ internal sealed class ImportResolution : IDisposable
             reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters ||
             reference is GenericInstanceMethod generic && generic.GenericArguments.Count != generic.ElementMethod.GenericParameters.Count)
             throw new InvalidDataException("Contract imports require an exact closed generic instantiation on a non-generic declaring type.");
+        if (reference.DeclaringType.Scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" or "System.Private.CoreLib" or "mscorlib" or "netstandard")
+            throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Contract imports from framework assemblies are not supported.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
         if (allowedDependencies is not null && !allowedDependencies.Contains(assembly))
             throw new InvalidDataException("Undeclared contract dependency: " + assembly + " required by " + validatingAssembly);
@@ -203,8 +205,8 @@ internal sealed class ImportResolution : IDisposable
         {
             slot = bindings.Count;
             bindings.Add(new(slot, identity, Path.GetFullPath(library.Source.ImplementationPath), library.Interface.ImplementationSha256,
-                "contract", Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
-                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest, export.Kind,
+                Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
+                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, export.Kind,
                 certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly,
                 certification.StaticIdentities, export.DefinitionSignature,
                 export.TypeArguments ?? [], export.TypedSignature, export.Layouts ?? [], metadata.ActualLayouts,
@@ -266,6 +268,8 @@ internal sealed class ImportResolution : IDisposable
         if (type is not ByReferenceType reference || ContractMethodMetadata.Primitive(reference.ElementType) ||
             RuntimeModels.SupportedType(reference.ElementType) || ValueTuples.Is(reference.ElementType) ||
             reference.ElementType.Scope is not AssemblyNameReference scope) return false;
+        // Framework layouts stay on the existing runtime-model path, which checks their exact scope and shape.
+        if (scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory") return false;
         ContractMethodMetadata.RejectModifiers(reference);
         if (allowedDependencies is not null && !allowedDependencies.Contains(scope.FullName))
             throw new InvalidDataException("Undeclared imported layout dependency: " + scope.FullName);
