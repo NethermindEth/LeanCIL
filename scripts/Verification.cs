@@ -30,7 +30,8 @@ partial class Program : IDisposable
     string VerificationPolicy => verificationPolicy ??= Sha(typeof(Program).Assembly.Location);
     readonly Dictionary<string, SortedDictionary<string, string>> supportSourceKeys = new(StringComparer.Ordinal);
 
-    bool referenceOnlyAuthoring;
+    readonly AsyncLocal<bool> referenceOnlyContext = new();
+    bool referenceOnlyAuthoring { get => referenceOnlyContext.Value; set => referenceOnlyContext.Value = value; }
     bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
@@ -1110,7 +1111,9 @@ unsafe def main (args : List String) : IO Unit := do
             import.GetProperty("implementationSha256").GetString()!, import.GetProperty("interfaceDigest").GetString()!,
             "published-certification", import.GetProperty("certificationTheorem").GetString()!,
             import.GetProperty("certificationStatement").GetString()!, import.GetProperty("certificationStatementDigest").GetString()!,
-            "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.",
+            "This conditional caller proof is not a deployment guarantee: an unsatisfiable imported contract can make it vacuous. " +
+            "Deployment must use these exact implementation bytes and discharge the published contract at this identity, signature and profile. " +
+            "Published interface sources execute code with verifier permissions during compilation.",
             import.GetProperty("sidecarSha256").GetString()!)).ToArray()
         : [];
 
@@ -1344,7 +1347,7 @@ unsafe def main (args : List String) : IO Unit := do
             foreach (string module in importModules.Where(module => module != "ExtractedImports"))
             {
                 string source = Path.Combine(fresh, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
-                Run(["lean", "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source], leanPath: leanPath,
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source], leanPath: leanPath,
                     progress: "Checking contract interface: " + module);
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next, module.Replace('.', '/'));

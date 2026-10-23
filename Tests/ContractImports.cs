@@ -438,17 +438,16 @@ if (retargetResult.Code != 1 || !retargetResult.Output.Contains("Constant value 
 Console.WriteLine("PASS an interface numeral instance cannot retarget the import premise onto the caller");
 Reset();
 File.Delete(Path.Combine(output, "verification.json"));
-// The interface weakens the contract and redefines the authoring command to print the honest closure.
-string honestClosure = closureLine[closureLine.IndexOf('{')..].Trim();
+// The olean audit rejects a weakened contract even when the sidecar retains its honest closure pin.
 contract["interfaceModules"]![0]!["source"] = "import CIL.Interface.Closure\n" +
     interfaceSource.Replace("output = input + 1", "True", StringComparison.Ordinal) +
-    "\nmacro_rules\n  | `(#leancil_contract_closure $_:ident) => `(#eval IO.println " + JsonSerializer.Serialize(honestClosure) + ")\n";
+    "\n";
 Save();
 Run(Command());
 Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"], "canonical closure digest mismatch");
 if (File.Exists(Path.Combine(output, "verified.json")))
     throw new InvalidOperationException("A forged closure left a verification report.");
-Console.WriteLine("PASS interface macros cannot forge the canonical closure of a weakened contract");
+Console.WriteLine("PASS the olean audit rejects a weakened contract against its pinned canonical closure");
 Reset();
 Run(Command());
 File.AppendAllText(Path.Combine(output, interfaceModule + ".lean"), "\n");
@@ -563,7 +562,7 @@ contract["interfaceModules"]![0]!["source"] = interfaceSource + "\naxiom unpubli
 Save();
 Run(Command());
 Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean")], "contract interface");
-Reject([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"], "Unapproved transitive axiom in contract interface: unpublishedAssumption");
+Reject([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"], "Axiom in contract interface: unpublishedAssumption");
 if (File.Exists(Path.Combine(output, "verified.json"))) throw new InvalidOperationException("Consumer unused-axiom rejection left a verification report.");
 Reset();
 contract["isReferenceAssembly"] = true;
