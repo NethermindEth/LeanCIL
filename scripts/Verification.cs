@@ -1140,7 +1140,8 @@ unsafe def main (args : List String) : IO Unit := do
         var before = Inputs(proof, settings);
         var session = Library(before);
         ExtractionIdentity? extraction = existingArtifacts ? ExtractionIdentity.Read(output) : null;
-        if (extraction is not null) referenceOnlyAuthoring |= ReferenceOnlyImports(extraction);
+        // Reference-only inputs never publish or reuse receipts; the flag covers only this request.
+        referenceOnlyAuthoring = extraction is not null && ReferenceOnlyImports(extraction);
         HashSet<string> importSourceNames = extraction?.Sources.Keys.ToHashSet(StringComparer.Ordinal) ?? [];
         var support = Regex.Matches(File.ReadAllText(proof), @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
             .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
@@ -1192,7 +1193,7 @@ unsafe def main (args : List String) : IO Unit := do
         if (!existingArtifacts)
             Run(Extract("extract", assembly, identity, entry, output, profile));
         extraction ??= ExtractionIdentity.Read(output);
-        referenceOnlyAuthoring |= ReferenceOnlyImports(extraction);
+        referenceOnlyAuthoring = ReferenceOnlyImports(extraction);
         var identityHash = extraction.Sha256;
 
         // Isolate generated code and the selected proof, then audit the named theorem.

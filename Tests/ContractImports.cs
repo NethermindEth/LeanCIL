@@ -675,3 +675,29 @@ try
     Console.WriteLine("PASS consumer verification binds interface oleans before their closure audit");
 }
 finally { Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedHashCache); }
+
+Reset();
+contract["isReferenceAssembly"] = true;
+Save();
+string referenceOutput = Path.Combine(directory, "reference-extraction");
+string[] referenceCommand = Command();
+referenceCommand[5] = referenceOutput;
+Run(referenceCommand);
+string? savedReferenceCache = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
+    using Program sequence = new();
+    Exception? authoring = null;
+    try { sequence.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), referenceOutput, existingArtifacts: true); }
+    catch (Exception error) { authoring = error; }
+    if (authoring is null || !authoring.Message.Contains("caller proof checked for authoring only", StringComparison.Ordinal))
+        throw new InvalidOperationException("Precondition: the reference-only request must stop at authoring: " + authoring);
+    Reset();
+    Run(Command());
+    sequence.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true);
+    if (!sequence.UseSuccessCache)
+        throw new InvalidOperationException("A reference-only request disabled success receipts for a later implementation-bound request.");
+}
+finally { Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedReferenceCache); }
+Console.WriteLine("PASS reference-only authoring disables success receipts only for its own request");

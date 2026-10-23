@@ -911,6 +911,8 @@ unsafe def main (args : List String) : IO Unit := do
             });
         }
         CheckExtractions(all);
+        // Reference-only inputs never publish or reuse receipts; the flag covers only this call.
+        referenceOnlyAuthoring = false;
         foreach (var i in Pending(all))
             try { referenceOnlyAuthoring |= ReferenceOnlyImports(ExtractionIdentity.Read(outputs[i])); }
             catch (Exception error) { Fail([i], error); }
