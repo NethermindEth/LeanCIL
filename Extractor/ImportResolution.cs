@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -11,7 +12,9 @@ internal sealed class ImportResolution : IDisposable
         string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
         string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind,
         string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly,
-        StaticIdentityRecord[] StaticIdentities);
+        StaticIdentityRecord[] StaticIdentities,
+        string? DefinitionSignature, string[] TypeArguments, ContractMethodSignature? TypedSignature,
+        ContractLayout[] PublishedLayouts, ContractLayout[] ActualLayouts, string ComputedLayouts);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     internal sealed record Node(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest,
         string SidecarPath, string ImplementationPath, string ExpectedInterfaceDigest, bool IsReferenceAssembly,
@@ -104,35 +107,39 @@ internal sealed class ImportResolution : IDisposable
     {
         if (instruction.OpCode.Code != Code.Call)
             throw new InvalidDataException("Contract imports support call only, not callvirt, newobj or ldftn.");
-        if (reference is GenericInstanceMethod || reference.HasGenericParameters || reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters)
-            throw new InvalidDataException("Generic contract imports are not supported in version 1.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
         if (allowedDependencies is not null && !allowedDependencies.Contains(assembly))
             throw new InvalidDataException("Undeclared contract dependency: " + assembly + " required by " + validatingAssembly);
         Library? library = libraries.SingleOrDefault(candidate => candidate.Interface.AssemblyIdentity == assembly);
         if (library is null)
             throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Next: supply --import {reference.DeclaringType.Scope.Name}.leancil.contracts and --import-sha256 {reference.DeclaringType.Scope.Name}=<hex> and --import-interface-sha256 {reference.DeclaringType.Scope.Name}=<hex>.");
-        string identity = assembly + "::" + reference.FullName;
+        ContractMethodMetadata.Selection selection = ContractMethodMetadata.ResolveImported(reference, library.Module, profile.Architecture);
+        string identity = selection.Identity;
         ContractExport export = library.Interface.Exports.SingleOrDefault(candidate => candidate.Identity == identity)
             ?? throw new InvalidDataException("Contract export not present: " + identity);
-        MethodDefinition[] definitions = library.Module.GetTypes().Where(type => type.FullName == reference.DeclaringType.FullName)
-            .SelectMany(type => type.Methods).Where(method => method.FullName == reference.FullName).ToArray();
-        if (definitions.Length != 1) throw new InvalidDataException("Contract export definition not present or ambiguous: " + identity);
-        MethodDefinition definition = definitions[0];
-        if (definition.HasGenericParameters || definition.DeclaringType.HasGenericParameters)
-            throw new InvalidDataException("Generic contract imports are not supported in version 1.");
+        MethodDefinition definition = selection.Definition;
+        ContractLayout[] actualLayouts = [];
+        if (library.Interface.FormatVersion == 2)
+        {
+            actualLayouts = ImportedLayoutMetadata.Signature(selection.Reference, library.Module, profile.Architecture);
+            if (export.DefinitionSignature != definition.FullName ||
+                !export.TypeArguments!.SequenceEqual(selection.ArgumentNames, StringComparer.Ordinal) ||
+                !MetadataEqual(export.TypedSignature, selection.Signature) || !MetadataEqual(export.Layouts, actualLayouts))
+                throw new InvalidDataException("Contract import typed signature or raw layout differs from selected implementation metadata.");
+        }
+        else if (selection.Arguments.Length != 0)
+            throw new InvalidDataException("Legacy contract imports cannot admit generic instances.");
         string visibility = definition.IsPublic ? "public" : definition.IsFamily || definition.IsFamilyOrAssembly ? "protected" : "private";
         if (!definition.IsStatic || definition.IsVirtual || visibility == "private" || export.Visibility != visibility ||
-            reference.HasThis || reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default || definition.IsPInvokeImpl)
+            reference.HasThis || reference.ExplicitThis || (reference.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default || definition.IsPInvokeImpl)
             throw new InvalidDataException("Contract export must be static, non-virtual and public or protected with matching visibility.");
-        MetadataValidation.Type(reference.ReturnType, reference.Module, returns: true);
-        foreach (ParameterDefinition parameter in reference.Parameters) MetadataValidation.Type(parameter.ParameterType, reference.Module);
-        if (TypeIdentity(definition.ReturnType) != TypeIdentity(reference.ReturnType) ||
-            !definition.Parameters.Select(parameter => TypeIdentity(parameter.ParameterType)).SequenceEqual(
-                reference.Parameters.Select(parameter => TypeIdentity(parameter.ParameterType)), StringComparer.Ordinal))
-            throw new InvalidDataException("Contract import exact signature identity mismatch.");
-        if (export.Signature != reference.FullName || export.ParameterCount != reference.Parameters.Count || export.HasThis != reference.HasThis ||
-            export.ReturnsValue != (reference.ReturnType.MetadataType != MetadataType.Void) || definition.Parameters.Count != export.ParameterCount)
+        if (library.Interface.FormatVersion == 1)
+        {
+            MetadataValidation.Type(reference.ReturnType, reference.Module, returns: true);
+            foreach (ParameterDefinition parameter in reference.Parameters) MetadataValidation.Type(parameter.ParameterType, reference.Module);
+        }
+        if (export.Signature != selection.Closed.FullName || export.ParameterCount != selection.Closed.Parameters.Count || export.HasThis != reference.HasThis ||
+            export.ReturnsValue != (selection.Closed.ReturnType.MetadataType != MetadataType.Void))
             throw new InvalidDataException("Contract import signature counts mismatch.");
         if (FeatureProfile.Select(profile.Name) != profile)
             throw new InvalidDataException("Contract import requires an exact named built-in profile.");
@@ -154,7 +161,9 @@ internal sealed class ImportResolution : IDisposable
                 "contract", Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
                 export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest, export.Kind,
                 certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly,
-                certification.StaticIdentities));
+                certification.StaticIdentities, export.DefinitionSignature,
+                export.TypeArguments ?? [], export.TypedSignature, export.Layouts ?? [], actualLayouts,
+                ImportedLayoutMetadata.ComputedLean(actualLayouts, library.Module, profile.Architecture)));
         }
         sites[instruction] = slot;
     }
@@ -170,7 +179,8 @@ internal sealed class ImportResolution : IDisposable
         {
             using ImportResolution imports = new(libraries, implementationState, library.Interface);
             MethodDefinition[] implementation = MetadataValidation.Validate(library.Module, library.Interface.AssemblyIdentity,
-                export.Signature, profile, imports: imports);
+                export.DefinitionSignature ?? export.Signature, profile, imports: imports,
+                typeArguments: export.TypeArguments, importedByref: type => imports.ValidateByref(type, profile));
             StaticIdentityRecord[] actualStatics = LeanEmitter.StaticIdentities(implementation, profile);
             StaticIdentityRecord[] certifiedStatics = certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal).ToArray();
             if (!actualStatics.SequenceEqual(certifiedStatics))
@@ -188,14 +198,38 @@ internal sealed class ImportResolution : IDisposable
     internal void ValidateStatics(IEnumerable<StaticIdentityRecord> application) =>
         StaticIdentity.Validate(application.Concat(bindings.SelectMany(binding => binding.StaticIdentities)));
 
-    static string TypeIdentity(TypeReference type) => type switch
+    static bool MetadataEqual<T>(T expected, T actual) => JsonElement.DeepEquals(
+        JsonSerializer.SerializeToElement(expected, ContractInterface.Json), JsonSerializer.SerializeToElement(actual, ContractInterface.Json));
+
+    internal string? Identity(Instruction instruction) => sites.TryGetValue(instruction, out int slot) ? bindings[slot].Identity : null;
+
+    internal bool ValidateByref(TypeReference type, FeatureProfile profile)
     {
-        ByReferenceType reference => "&" + TypeIdentity(reference.ElementType),
-        GenericInstanceType generic => TypeIdentity(generic.ElementType) + "<" + string.Join(",", generic.GenericArguments.Select(TypeIdentity)) + ">",
-        TypeSpecification specification => specification.GetType().Name + ":" + TypeIdentity(specification.ElementType),
-        _ => (type.Scope is AssemblyNameReference assembly ? assembly.FullName :
-            type.Scope is ModuleDefinition module ? module.Assembly.Name.FullName : type.Scope.Name) + "::" + type.FullName
-    };
+        if (type is not ByReferenceType reference || ContractMethodMetadata.Primitive(reference.ElementType) ||
+            reference.ElementType.Scope is not AssemblyNameReference scope) return false;
+        ContractMethodMetadata.RejectModifiers(reference);
+        if (allowedDependencies is not null && !allowedDependencies.Contains(scope.FullName))
+            throw new InvalidDataException("Undeclared imported layout dependency: " + scope.FullName);
+        Library? library = libraries.SingleOrDefault(candidate => candidate.Interface.AssemblyIdentity == scope.FullName);
+        if (library is null || library.Interface.FormatVersion != 2)
+            throw new InvalidDataException("Imported byref layout requires a pinned typed interface: " + reference.FullName);
+        ContractLayout[] actual = ImportedLayoutMetadata.ForType(reference.ElementType, library.Module, profile.Architecture);
+        foreach (ContractLayout layout in actual)
+        {
+            ContractLayout[] published = library.Interface.Exports.SelectMany(export => export.Layouts ?? [])
+                .Where(candidate => candidate.Identity == layout.Identity).ToArray();
+            if (published.Length == 0 || published.Any(candidate => !MetadataEqual(candidate, layout)))
+                throw new InvalidDataException("Imported raw layout differs from selected implementation metadata: " + layout.Identity);
+        }
+        return true;
+    }
+
+    internal static string LeanSlot(Binding binding) =>
+        "{ identity := " + JsonSerializer.Serialize(binding.Identity) + ", closureDigest := " + JsonSerializer.Serialize(binding.ClosureDigest) +
+        ", parameterCount := " + binding.ParameterCount + ", hasThis := false, returnsValue := " + (binding.ReturnsValue ? "true" : "false") +
+        (binding.TypedSignature is null ? "" : ", signature := some (" + binding.TypedSignature.Lean + "), layouts := { published := " +
+            ImportedLayoutMetadata.RawLean(binding.PublishedLayouts) + ", actual := " + ImportedLayoutMetadata.RawLean(binding.ActualLayouts) +
+            ", computed := " + binding.ComputedLayouts + " }") + " }";
 
     internal bool TryTranslate(Instruction instruction, int methodCount, out string translated)
     {

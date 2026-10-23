@@ -3,18 +3,6 @@ import CIL.Imports
 
 namespace CIL.Extraction
 
-inductive TypeExpr where
-  | void
-  | atom (scope name : String)
-  | aggregate (identity : String) (index : Nat)
-  | enum (identity : String) (underlying : TypeExpr)
-  | parameter (index : Nat)
-  | byref (element : TypeExpr)
-  | pointer (element : TypeExpr)
-  | constructor (scope name : String)
-  | apply (constructor argument : TypeExpr)
-  deriving DecidableEq, Repr
-
 private def runtimeScope : String :=
   "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 private def intrinsicsScope : String :=
@@ -205,15 +193,27 @@ private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
     if opcode = 115 then some (target, count) else none
   | _ => none
 
-/-- An external site may call import slot `target - methods.length` only with its exact identity and arity. -/
+/-- Legacy slots accept only primitive signatures; new families require exact typed metadata. -/
+def importSignatureMatches (slot : ImportSlot) (site : CallSite) : Bool :=
+  site.parameterTypes.length == site.parameterCount &&
+  (site.returnType != .void) == site.returnsValue &&
+  match slot.signature with
+  | none => site.typeArguments.isEmpty &&
+    ImportSignature.supported ⟨site.declaringType, site.name, [], site.returnType, site.parameterTypes⟩ []
+  | some signature =>
+    signature.owner == site.declaringType && signature.name == site.name &&
+    signature.arguments == site.typeArguments && signature.returnType == site.returnType &&
+    signature.parameters == site.parameterTypes && signature.supported slot.layouts.actual
+
+/-- An external call must bind exact instance metadata as well as identity and arity. -/
 def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot) (opcode : Nat)
     (site : CallSite) (identity : String) (target count : Nat) : Bool :=
-  opcode == 40 && methods.length ≤ target && site.typeArguments.isEmpty && match imports[target - methods.length]? with
+  opcode == 40 && methods.length ≤ target && match imports[target - methods.length]? with
   | none => false
   | some slot =>
     slot.identity == identity && slot.parameterCount == site.parameterCount &&
     slot.hasThis == site.hasThis && slot.returnsValue == site.returnsValue &&
-    count == site.parameterCount + (if site.hasThis then 1 else 0)
+    count == site.parameterCount + (if site.hasThis then 1 else 0) && importSignatureMatches slot site
 
 /-- Every live managed call must select the independently instantiated definition
 with the exact substituted type arguments and signature; an external one, a matching import slot. -/
@@ -267,7 +267,7 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
     (valid : validateManagedCall methods imports raw true (.call target count) = true)
     (outside : methods.length ≤ target) :
     ∃ site identity slot, raw.operand = .call site ∧ site.target = .external identity ∧ raw.opcode = 40 ∧
-      site.typeArguments = [] ∧ imports[target - methods.length]? = some slot ∧ slot.identity = identity ∧
+      importSignatureMatches slot site = true ∧ imports[target - methods.length]? = some slot ∧ slot.identity = identity ∧
       slot.parameterCount = site.parameterCount ∧ slot.hasThis = site.hasThis ∧
       slot.returnsValue = site.returnsValue ∧ count = site.parameterCount + (if site.hasThis then 1 else 0) := by
   obtain ⟨offset, opcode, operand⟩ := raw
@@ -285,8 +285,8 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
       | none => simp [found] at valid
       | some slot =>
         simp [found] at valid
-        obtain ⟨⟨⟨opcode40, _⟩, generic⟩, ⟨⟨⟨same, arity⟩, receiver⟩, result⟩, argc⟩ := valid
-        exact ⟨_, identity, slot, rfl, rfl, opcode40, generic, rfl, same, arity, receiver, result, argc⟩
+        obtain ⟨⟨opcode40, _⟩, ⟨⟨⟨⟨⟨same, arity⟩, receiver⟩, result⟩, argc⟩, typed⟩⟩ := valid
+        exact ⟨_, identity, slot, rfl, rfl, opcode40, typed, rfl, same, arity, receiver, result, argc⟩
   | _ => simp [validateManagedCall] at valid
 
 /-- Every accepted live `call` targets an extracted method or an existing import slot. -/

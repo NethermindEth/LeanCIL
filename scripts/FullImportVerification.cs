@@ -245,15 +245,16 @@ partial class Program
         }).ToArray();
         string artifact = Path.Combine(staging, "regenerated");
         string implementation = binding.GetProperty("implementationPath").GetString()!;
-        Run(["dotnet", ExtractorPath, "extract", implementation, export.Signature, artifact, certification.Profile],
-            progress: "Fresh extraction of the current imported library DLL");
+        List<string> extraction = ["dotnet", ExtractorPath, "extract", implementation, export.DefinitionSignature ?? export.Signature, artifact, certification.Profile];
+        foreach (string argument in export.TypeArguments ?? []) extraction.AddRange(["--type-argument", argument]);
+        Run(extraction, progress: "Fresh extraction of the current imported library DLL");
         JsonElement regenerated = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
         foreach (string property in new[] { "initializedTypes", "staticValues", "staticIdentities" })
             if (regenerated.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
                 throw new InvalidDataException("Full verification version 1 rejects static or initialization state: " + property);
         File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(new VerificationSettings(1,
             Path.GetRelativePath(artifact, proof), author, Path.GetRelativePath(artifact, consumer)), Json));
-        ContractExportRequest exportRequest = new(export.Signature, artifact, export.ContractConstant, author);
+        ContractExportRequest exportRequest = new(export.DefinitionSignature ?? export.Signature, artifact, export.ContractConstant, author, export.TypeArguments);
         ContractExportManifest manifest = new(1, implementation, consumer, interfaces, [exportRequest]);
         using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(implementation)));
         PreparedContractExport prepared = PrepareContractExport(manifest, module, exportRequest);

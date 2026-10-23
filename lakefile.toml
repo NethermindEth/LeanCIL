@@ -126,6 +126,9 @@ name = "Tests.InterpreterEquations"
 name = "Tests.ImportEvidence"
 
 [[lean_lib]]
+name = "Tests.ImportedLayouts"
+
+[[lean_lib]]
 name = "Tests.ContractClosure"
 
 [[lean_lib]]

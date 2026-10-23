@@ -7,7 +7,8 @@ partial class Program
     sealed record PreparedContractExport(ContractExportRequest Request, string Proof, string Profile,
         string Identity, string Signature, int ParameterCount, bool ReturnsValue, string Visibility,
         bool Conditional, ContractDependency[] Dependencies, InterfaceModule[] ImportedInterfaces,
-        StaticIdentityRecord[] StaticIdentities);
+        StaticIdentityRecord[] StaticIdentities, string DefinitionSignature, string[] TypeArguments,
+        ContractMethodSignature TypedSignature, ContractLayout[] Layouts, string ComputedLayouts, int[] LayoutIndices);
     sealed record ExportClosure(string Contract, string Kind, string Digest, string Canonical);
     sealed record CheckedContractExport(PreparedContractExport Export, ExportClosure Closure,
         string StatementDigest, string Statement, string AuditSource, string AuthorModule);
@@ -105,11 +106,12 @@ partial class Program
                 .Select(group => new ContractExport(group.Key, group.First().Export.Signature, group.First().Export.ParameterCount,
                     false, group.First().Export.ReturnsValue, group.First().Export.Visibility, group.First().Export.Request.Contract,
                     group.First().Closure.Digest, group.Select(result => result.Export.Profile).Order(StringComparer.Ordinal).ToArray(),
-                    group.First().Closure.Kind)).ToArray();
+                    group.First().Closure.Kind, group.First().Export.DefinitionSignature, group.First().Export.TypeArguments,
+                    group.First().Export.TypedSignature, group.First().Export.Layouts)).ToArray();
             string target = module.Assembly.CustomAttributes.Single(attribute => attribute.AttributeType.FullName ==
                 "System.Runtime.Versioning.TargetFrameworkAttribute").ConstructorArguments.Single().Value as string
                 ?? throw new InvalidDataException("Missing target framework.");
-            ContractInterface sidecar = new(1, 1, 1, ContractInterface.CurrentFrameworkKey(), module.Assembly.Name.FullName,
+            ContractInterface sidecar = new(1, 1, 2, ContractInterface.CurrentFrameworkKey(), module.Assembly.Name.FullName,
                 module.Mvid, target, implementationHash, false, interfaces, "", exports, [], dependencies);
             sidecar = sidecar with { InterfaceDigest = sidecar.ComputeInterfaceDigest() };
             sidecar = AddExportCertifications(sidecar, verified);
@@ -169,8 +171,15 @@ partial class Program
     {
         Run(["dotnet", ExtractorPath, "check", request.Artifact, "--assembly-path", manifest.Assembly]);
         JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Artifact, "identity.json")));
-        MethodDefinition method = MethodSelector.Resolve(module, request.Method);
         FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>() ?? throw new InvalidDataException("Missing export profile.");
+        ContractMethodMetadata.Selection selection = ContractMethodMetadata.Select(module, request.Method, request.TypeArguments ?? [], profile.Architecture);
+        MethodDefinition method = selection.Closed;
+        if (identity.GetProperty("entryDefinition").GetString() != selection.Definition.FullName ||
+            !identity.GetProperty("entryTypeArguments").Deserialize<string[]>()!.SequenceEqual(selection.ArgumentNames, StringComparer.Ordinal))
+            throw new InvalidDataException("Export closed method selection differs from its artifact.");
+        ContractLayout[] layouts = ImportedLayoutMetadata.Signature(selection.Reference, module, profile.Architecture);
+        string computedLayouts = ImportedLayoutMetadata.ComputedLean(layouts, module, profile.Architecture);
+        int[] projection = ImportedLayoutMetadata.Projection(layouts, identity.GetProperty("layoutIdentities").Deserialize<string[]>()!);
         if (FeatureProfile.Select(profile.Name) != profile) throw new InvalidDataException("Contract exports require an exact built-in profile.");
         if (identity.GetProperty("entry").GetString() != method.FullName || identity.GetProperty("assemblyIdentity").GetString() != module.Assembly.Name.FullName ||
             identity.GetProperty("assemblySha256").GetString() != Sha(manifest.Assembly))
@@ -180,7 +189,7 @@ partial class Program
                 throw new InvalidDataException("Contract export rejects static/initialization assumptions: " + property);
         if (!method.IsStatic || method.IsVirtual || method.IsPInvokeImpl || method.IsConstructor || method.HasGenericParameters || method.DeclaringType.HasGenericParameters ||
             !(method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly))
-            throw new InvalidDataException("Contract exports require a public or protected static, non-virtual, non-generic method.");
+            throw new InvalidDataException("Contract exports require a public or protected static, non-virtual, closed method.");
         VerificationSettings settings = JsonSerializer.Deserialize<VerificationSettings>(File.ReadAllText(Path.Combine(request.Artifact, "verification.json")),
             new JsonSerializerOptions { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow })
             ?? throw new InvalidDataException("Missing export verification settings.");
@@ -200,9 +209,10 @@ partial class Program
             .Distinct().OrderBy(dependency => dependency.AssemblyIdentity, StringComparer.Ordinal).ToArray();
         InterfaceModule[] importedInterfaces = ImportSources(request.Artifact).Where(pair => pair.Key != "ExtractedImports")
             .Select(pair => new InterfaceModule(pair.Key, pair.Value)).ToArray();
-        return new(request, proof, profile.Name, module.Assembly.Name.FullName + "::" + method.FullName, method.FullName,
+        return new(request, proof, profile.Name, selection.Identity, method.FullName,
             method.Parameters.Count, method.ReturnType.MetadataType != MetadataType.Void, method.IsPublic ? "public" : "protected",
-            imports.Length != 0, dependencies, importedInterfaces, statics);
+            imports.Length != 0, dependencies, importedInterfaces, statics, selection.Definition.FullName,
+            selection.ArgumentNames, selection.Signature, layouts, computedLayouts, projection);
     }
 
     static InterfaceModule[] MergeContractInterfaces(InterfaceModule[] own, IEnumerable<InterfaceModule> imported)
@@ -249,6 +259,7 @@ import Lean
 import CIL.Safety.Linking
 import CIL.Safety.OutcomeContract
 import CIL.Interface.Closure
+import CIL.Extraction.LayoutProjection
 open Lean Meta Elab Command in
 run_cmd liftTermElabM do
   let contract <- getConstInfo `{{export.Request.Contract}}
@@ -263,6 +274,11 @@ run_cmd liftTermElabM do
 theorem LeanCILExportAudit.certified : {{statement}} :=
   _root_.{{export.Request.Theorem}}
 {{closure}}
+theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectionValid
+    _root_.Extracted.rawLayouts _root_.Extracted.computedLayouts
+    {{ImportedLayoutMetadata.RawLean(export.Layouts)}} {{export.ComputedLayouts}}
+    [{{string.Join(", ", export.LayoutIndices)}}] .{{FeatureProfile.Select(export.Profile).Architecture}} := by decide +kernel
+#print axioms LeanCILExportAudit.publicLayouts
 theorem LeanCILExportAudit.staticIdentities :
     let actual : List (Nat × String × String) := _root_.Extracted.program.flatMap fun body =>
       body.staticSites.map fun site => (site.2.identity, site.2.assemblyIdentity, site.2.fieldName)
@@ -328,6 +344,7 @@ theorem LeanCILExportAudit.staticIdentities :
         File.WriteAllText(path, string.Join("\n", modules.Select(module => "import " + module)) + $$"""
 
 import CIL.Interface.Closure
+import CIL.Extraction.LayoutProjection
 open Lean Elab Command in
 run_cmd do
   match CIL.Interface.validateInterfaceDeclarations (<- getEnv) #[{{string.Join(", ", modules.Select(module => "`" + module))}}] with

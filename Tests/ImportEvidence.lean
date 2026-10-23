@@ -18,7 +18,8 @@ def slot : ImportSlot := { identity := addToIdentity, closureDigest := "digest",
 def imports : List ImportSlot := [slot]
 def site : CallSite := {
   declaringType := .atom "Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Library.Adder", name := "AddTo",
-  target := .external addToIdentity, typeArguments := [], parameterCount := 3, hasThis := false, returnsValue := false }
+  target := .external addToIdentity, typeArguments := [], parameterCount := 3, hasThis := false, returnsValue := false,
+  returnType := .void, parameterTypes := [.byref word, .byref word, .byref word] }
 def call (site : CallSite) : RawInstruction := ⟨8, 40, .call site⟩
 
 example : validateManagedCall methods imports (call site) true (.call 1 3) = true := by decide +kernel

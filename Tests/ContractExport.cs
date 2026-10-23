@@ -202,6 +202,9 @@ RejectExport(ProducerManifest(), "unsolved goals", prior);
 Console.WriteLine("PASS a failing library contract cannot replace a published sidecar");
 Run(["dotnet", "run", "--file", "Tests/TransitiveImports.cs"], streamOutput: true, progress: "Transitive contract import checks");
 
+Run(["dotnet", "run", "--file", "Tests/GenericLayoutImports.cs"],
+    progress: "Typed generic imports and imported struct layouts");
+
 partial class Program
 {
     static void RejectPostAuditMutations(string assembly, string output, string package, string proof,

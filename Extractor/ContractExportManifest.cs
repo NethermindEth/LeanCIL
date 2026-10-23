@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Nethermind.LeanCIL;
 
 internal sealed record ContractSource(string Module, string Source);
-internal sealed record ContractExportRequest(string Method, string Artifact, string Contract, string Theorem);
+internal sealed record ContractExportRequest(string Method, string Artifact, string Contract, string Theorem, string[]? TypeArguments = null);
 internal sealed record ContractExportManifest(int Schema, string Assembly, string ProofRoot,
     ContractSource[] Interface, ContractExportRequest[] Exports)
 {

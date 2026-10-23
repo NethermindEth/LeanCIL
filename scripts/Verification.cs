@@ -1068,7 +1068,8 @@ unsafe def main (args : List String) : IO Unit := do
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
         string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation,
-        string? sourceBundleDigest = null);
+        string? sourceBundleDigest = null,
+        JsonElement? typedSignature = null, JsonElement? layouts = null, string[]? typeArguments = null);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1077,7 +1078,10 @@ unsafe def main (args : List String) : IO Unit := do
             "published-certification", import.GetProperty("certificationTheorem").GetString()!,
             import.GetProperty("certificationStatement").GetString()!, import.GetProperty("certificationStatementDigest").GetString()!,
             import.GetProperty("staticIdentities"),
-            "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.")).ToArray()
+            "Deployment must use these exact implementation bytes and an implementation that satisfies the published contract at this identity, signature and profile; the caller proof is conditional on that contract.",
+            typedSignature: import.TryGetProperty("typedSignature", out JsonElement typed) ? typed : null,
+            layouts: import.TryGetProperty("publishedLayouts", out JsonElement layouts) ? layouts : null,
+            typeArguments: import.TryGetProperty("typeArguments", out JsonElement arguments) ? arguments.Deserialize<string[]>() : null)).ToArray()
         : [];
 
     static string ImportAuditHeader(string output) => ImportSources(output).ContainsKey("ExtractedImports") ? "import ExtractedImports\n" : "";

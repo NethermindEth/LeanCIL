@@ -48,12 +48,10 @@ internal static class LeanEmitter
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module, architecture)} 0)"
     };
-    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null)
+    internal static string[] RawLayoutIdentities(MethodDefinition[] methods) => new LayoutEvidence(LayoutTypes(methods)).Identities;
+
+    static TypeReference[] LayoutTypes(MethodDefinition[] methods)
     {
-        StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
-        lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
-        lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
-        StaticIdentity.Validate(StaticIdentities(methods, profile));
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
             .Concat(m.HasThis ? [m.DeclaringType] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
@@ -63,17 +61,26 @@ internal static class LeanEmitter
             .Concat(m.Body.Instructions.Where(i => i.Operand is FieldReference).Select(i => ((FieldReference)i.Operand).DeclaringType)))
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
             .Where(t => MetadataValidation.IsAggregate(t, methods[0].Module)).DistinctBy(t => t.FullName).ToArray();
-        var layouts = new List<TypeReference>();
-        var seenLayouts = new HashSet<string>();
+        List<TypeReference> layouts = [];
+        HashSet<string> seenLayouts = new(StringComparer.Ordinal);
         void IncludeLayout(TypeReference type)
         {
             if (!seenLayouts.Add(type.FullName)) return;
             layouts.Add(type);
-            foreach (var field in MetadataValidation.Fields(type))
+            foreach (MetadataValidation.InstanceField field in MetadataValidation.Fields(type))
                 if (MetadataValidation.IsAggregate(field.Type, methods[0].Module)) IncludeLayout(field.Type);
         }
-        foreach (var type in types) IncludeLayout(type);
-        types = layouts.ToArray();
+        foreach (TypeReference type in types) IncludeLayout(type);
+        return layouts.ToArray();
+    }
+
+    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null)
+    {
+        StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
+        lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
+        lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
+        StaticIdentity.Validate(StaticIdentities(methods, profile));
+        TypeReference[] types = LayoutTypes(methods);
         for (int i = 0; i < types.Length; i++)
         {
             int size = MetadataValidation.Layout(types[i], methods[0].Module, profile.Architecture);
@@ -84,7 +91,7 @@ internal static class LeanEmitter
         }
         LayoutEvidence layoutEvidence = new(types, profile.Architecture);
         layoutEvidence.EmitLayouts(lean);
-        var genericEvidence = new GenericEvidence(originalModule, layoutEvidence);
+        var genericEvidence = new GenericEvidence(originalModule, layoutEvidence, importResolution);
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
@@ -141,8 +148,7 @@ internal static class LeanEmitter
         }
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
-        lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(binding =>
-            $"{{ identity := {JsonSerializer.Serialize(binding.Identity)}, closureDigest := {JsonSerializer.Serialize(binding.ClosureDigest)}, parameterCount := {binding.ParameterCount}, hasThis := false, returnsValue := {binding.ReturnsValue.ToString().ToLowerInvariant()} }}")) + "]");
+        lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods imports method{n}Closed method{n}Reachable method{n} := {Decide}");
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
@@ -164,8 +170,10 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_division_validated, method{n}_opaque_validated, method{n}_vector_initializations_validated, method{n}_scalars_validated⟩");
         }
+        lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
+        lean.AppendLine("#print axioms import_layouts_validated");
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
-        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated");
+        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");

@@ -1,3 +1,5 @@
+import CIL.ImportMetadata
+
 /-! Import slots: methods of another assembly that an extraction calls without a body. -/
 
 namespace CIL
@@ -9,6 +11,8 @@ structure ImportSlot where
   parameterCount : Nat
   hasThis : Bool
   returnsValue : Bool
+  signature : Option Extraction.ImportSignature := none
+  layouts : Extraction.ImportLayoutCatalog := {}
   deriving DecidableEq, Repr
 
 end CIL
