@@ -2,15 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../Extractor/StaticIdentity.cs
 
-using System.Numerics;
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using Nethermind.LeanCIL;
 
 string root = At("artifacts/ModularStaticExports-" + Guid.NewGuid().ToString("N"));
 string libRoot = Path.Combine(root, "Lib");
@@ -19,7 +18,7 @@ string package = Path.Combine(root, "Package");
 string caller = Path.Combine(root, "Caller");
 foreach (string path in new[] { libRoot, appRoot, package, caller }) Directory.CreateDirectory(path);
 File.WriteAllText(Path.Combine(libRoot, "Lib.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.Lib</AssemblyName><AssemblyVersion>1.0.0.0</AssemblyVersion><Optimize>true</Optimize></PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
@@ -79,6 +78,19 @@ string libKey = libStatic["identity"]!.GetValue<string>();
 if (libraryIdentity["staticIdentities"]!.AsArray().Count != 1 || appIdentity["staticIdentities"]!.AsArray().Count != 1 ||
     libKey == appStatic["identity"]!.GetValue<string>() || libStatic["fieldName"]!.GetValue<string>() != appStatic["fieldName"]!.GetValue<string>())
     throw new InvalidOperationException("Separately extracted first static fields must have distinct scoped identities.");
+// A fixed vector: published keys must not move with the encoder or the metadata library's name format.
+if (libStatic["assemblyIdentity"]!.GetValue<string>() != "StaticFixture.Lib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" ||
+    libStatic["fieldName"]!.GetValue<string>() != "StaticFixture.Blob StaticFixture.Data::Table" ||
+    libKey != "64781076327034064410872480157833285817926388820730852631679551572519415251497")
+    throw new InvalidOperationException("Scoped static identity encoding changed: " + libStatic.ToJsonString());
+AssemblyNameReference signed = new("Signed.Lib", new Version(1, 2, 3, 4))
+{
+    Culture = "de-DE", PublicKeyToken = [0xb7, 0x7a, 0x5c, 0x56, 0x19, 0x34, 0xe0, 0x89], IsRetargetable = true
+};
+using (ModuleDefinition libModule = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(lib))))
+    if (StaticIdentity.AssemblyIdentity(signed) != signed.FullName ||
+        StaticIdentity.AssemblyIdentity(libModule.Assembly.Name) != libModule.Assembly.Name.FullName)
+        throw new InvalidOperationException("Pinned assembly identity text no longer matches metadata assembly identities.");
 
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 void CreatePackage(string path, string name, params string[] modules)
@@ -96,13 +108,16 @@ File.WriteAllText(contract, $$"""
 import CIL.Safety.MethodContract
 namespace PublishedTable
 open CIL.Safety
-def identity : Nat := {{libKey}}
+def table : CIL.StaticDescriptor :=
+  { identity := {{libKey}}, assemblyIdentity := {{JsonSerializer.Serialize(libStatic["assemblyIdentity"]!.GetValue<string>())}},
+    fieldName := {{JsonSerializer.Serialize(libStatic["fieldName"]!.GetValue<string>())}},
+    bytes := [17#8, 0#8, 0#8, 0#8, 0#8, 0#8, 0#8, 0#8] }
 def read : MethodContract Unit CIL.W64 where
   args _ := []
   results value := [.scalar (.i64 value)]
-  pre _ memory := memory.WellFormed ∧ StaticRegistryValid memory ∧ StaticIdentitiesAbsent [identity] memory
+  pre _ memory := memory.WellFormed ∧ StaticWorldValid [table] memory
   footprint _ := []
-  post _ _ _ output := output = 17
+  post _ _ final output := output = 17 ∧ final.WellFormed ∧ StaticWorldValid [table] final
 end PublishedTable
 """);
 string proof = Path.Combine(package, "LibraryProof.lean");
@@ -116,9 +131,9 @@ namespace LibraryProof
 open CIL.Safety
 private def descriptor : CIL.StaticDescriptor := (Extracted.method0.staticSites[0]'(by decide)).2
 theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
-  rintro input memory ⟨formed, registry, absent⟩
-  have world : StaticWorldValid [descriptor] memory :=
-    StaticWorldValid.of_absent _ _ (by decide) (by simp) registry (by simpa [descriptor, PublishedTable.identity, Extracted.method0] using absent)
+  rintro input memory ⟨formed, published⟩
+  have same : descriptor = PublishedTable.table := by decide +kernel
+  have world : StaticWorldValid [descriptor] memory := by rw [same]; exact published
   obtain ⟨result, reference, resolved, _, valid⟩ := staticReference_valid_result descriptor [descriptor] memory formed world (by simp)
   have contents : descriptor.bytes = numberBytes (17#64).toNat 8 := by decide +kernel
   have loaded : read result reference 8 1 = .ok (numberBytes (17#64).toNat 8) := by
@@ -153,11 +168,12 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
         (by rfl) (by rfl) second).trans
         (run_return (program := Extracted.program) (fuel := 5) (method := 0) (pc := 2)
           (by rfl) (by rfl) returned (by rfl)))
-  refine ⟨8, result, [.scalar (.i64 17)], ?_,
+  have preserved := staticReference_preserves_static_world _ _ _ _ _ formed world (by simp) resolved
+  rw [same] at preserved
+  exact ⟨8, result, [.scalar (.i64 17)], invoke_of_run (body := Extracted.method0) (by rfl) (by rfl) (by rfl) executed,
     Confined.ofMemoryBelow (staticReference_preserves_memory_below _ _ _ _ resolved)
       (Nat.le_refl _) (staticReference_extends_allocations _ _ _ _ resolved).next,
-    17, rfl, rfl⟩
-  exact invoke_of_run (body := Extracted.method0) (by rfl) (by rfl) (by rfl) executed
+    17, rfl, rfl, staticReference_preserves_wellFormed _ _ _ _ formed resolved, preserved⟩
 end LibraryProof
 """);
 File.WriteAllText(Path.Combine(libArtifact, "verification.json"), JsonSerializer.Serialize(new
@@ -184,7 +200,7 @@ string callerProof = Path.Combine(caller, "CallerProof.lean");
 File.WriteAllText(callerProof, """
 import ExtractedImports
 import CIL.Safety.MethodContract
-namespace CallerProof
+namespace ExampleProof
 open CIL.Safety
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => PublishedTable.read.Holds linked 0) := by
@@ -194,13 +210,13 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   dsimp only [PublishedTable.read, MethodContract.Returns]
   refine invoke_exists_of_run found (by rfl) (by rfl) ?_
   refine run_call_of_contract holds input found
-    (by rfl : Extracted.method0.code[0]? = some (.call 1 0)) (by cil_checked_step) rfl permitted ?_
+    (by rfl : Extracted.method0.code[0]? = some (.call 1 0)) (by cil_checked_step []) rfl permitted ?_
   rintro final values _ framed returns
   obtain ⟨output, rfl, result⟩ := returns
   refine run_return_exists found (by rfl : Extracted.method0.code[1]? = some (.ret none))
-    (by cil_checked_step) (by rfl) ?_
+    (by cil_checked_step []) (by rfl) ?_
   exact ⟨framed, output, rfl, result⟩
-end CallerProof
+end ExampleProof
 """);
 string[] ExtractApp(string output) => [.. cli, "extract", app, "StaticFixture.Application::Entry()", output,
     "--import", sidecar, "--import-implementation", "StaticFixture.Lib=" + lib,
@@ -210,20 +226,8 @@ Run([.. cli, "verify", appArtifact, "--proof", callerProof, "--proof-root", call
 JsonObject report = JsonNode.Parse(File.ReadAllText(Path.Combine(appArtifact, "verified.json")))!.AsObject();
 if (report["imports"]![0]!["staticIdentities"]![0]!["identity"]!.GetValue<string>() != libKey)
     throw new InvalidOperationException("Verified deployment report omitted the imported static identity.");
-Console.WriteLine("PASS RVA static export, public identity-only precondition, imported caller and report provenance");
+Console.WriteLine("PASS RVA static export, repeatable published static world precondition, imported caller and report provenance");
 
-string ScopedKey(string assemblyIdentity, string fieldName)
-{
-    using MemoryStream encoded = new();
-    using (BinaryWriter writer = new(encoded, Encoding.UTF8, leaveOpen: true))
-        foreach (string part in new[] { assemblyIdentity, fieldName })
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(part);
-            writer.Write(bytes.Length);
-            writer.Write(bytes);
-        }
-    return new BigInteger(SHA256.HashData(encoded.ToArray()), isUnsigned: true, isBigEndian: true).ToString(System.Globalization.CultureInfo.InvariantCulture);
-}
 void Reject(Action<JsonObject> mutate, string marker)
 {
     JsonObject invalid = published.DeepClone().AsObject();
@@ -241,7 +245,7 @@ Reject(value =>
 {
     JsonNode identity = value["certifications"]![0]!["staticIdentities"]![0]!;
     identity["fieldName"] = "StaticFixture.Blob StaticFixture.Data::Missing";
-    identity["identity"] = ScopedKey(identity["assemblyIdentity"]!.GetValue<string>(), identity["fieldName"]!.GetValue<string>());
+    identity["identity"] = StaticIdentity.Key(identity["assemblyIdentity"]!.GetValue<string>(), identity["fieldName"]!.GetValue<string>());
 }, "Certified static field is not present");
 Reject(value => value["certifications"]![0]!["staticIdentities"]!.AsArray().Add(libStatic.DeepClone()), "Invalid or duplicate contract certification");
 Reject(value =>

@@ -120,21 +120,28 @@ A null managed reference is a distinct value, not address zero. `Unsafe.NullRef<
 Static data is immutable, extraction-bound RVA storage with field identities retained separately from contents. Static initializers that could execute unmodelled code are rejected.
 
 Generated static identities are unsigned natural numbers from SHA-256 of the
-full assembly identity and full field name. Each UTF-8 component is preceded by
+full assembly identity and full field name. The assembly identity text is
+`Name, Version=a.b.c.d, Culture=<culture or neutral>, PublicKeyToken=<16 lowercase
+hex digits or null>`, followed by `, Retargetable=Yes` for a retargetable name. It
+is built from the name's components, not from a metadata library's display string.
+The field name is Mono.Cecil's `FieldReference.FullName`,
+`<field type> <declaring type>::<name>`. A fixed test vector detects a change to
+either text or to the encoding. Each UTF-8 component is preceded by
 its byte length as a little-endian 32-bit integer. The hash bytes are interpreted
 as one unsigned big-endian number. MVID and method bodies are excluded. No proof
 assumes that this hash is injective. Extraction and import checks reject key
-collisions, and `linkChecked` checks every linked descriptor for compatibility.
+collisions. Full verification also proves `linkChecked` for the composed program,
+so every linked descriptor is compatible there.
 The raw `link` function has no collision guarantee.
 
 `StaticWorldValid descriptors memory` constrains cached contents only for the
 listed descriptors. `StaticRegistryValid memory` still requires unique keys,
 distinct allocations and live immutable storage for every registry entry.
 Thus another assembly's loaded fields do not make a library world false.
-Composition joins descriptor lists over one memory with disjoint keys; it does
-not merge memories or infer allocation disjointness from key disjointness.
-`StaticIdentitiesAbsent` supplies a public first-use premise. Repeated calls
-with loaded fields require a content predicate instead of this absence premise.
+Composition joins descriptor lists over one memory whose shared keys name equal
+descriptors; it does not merge memories or infer allocation disjointness from key
+disjointness. `StaticIdentitiesAbsent` supplies a public first-use premise only.
+Repeated calls with loaded fields use a published `StaticWorldValid` precondition.
 RVA exports carry a kernel-checked static identity set in their certification.
 Import extraction recomputes the selected implementation's reachable static set
 at the selected profile. This analysis remains trusted metadata processing, not
