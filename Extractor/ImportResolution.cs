@@ -75,6 +75,11 @@ internal sealed class ImportResolution : IDisposable
 
     internal void Admit(MethodReference reference, Instruction instruction, FeatureProfile profile)
     {
+        // Shapes no sidecar can import are rejected before any sidecar is read or suggested.
+        if (instruction.OpCode.Code != Code.Call)
+            throw new InvalidDataException("Contract imports support call only, not callvirt, newobj or ldftn.");
+        if (reference is GenericInstanceMethod || reference.HasGenericParameters || reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters)
+            throw new InvalidDataException("Generic contract imports are not supported in version 1.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
         if (!libraries.Any(candidate => candidate.Interface.AssemblyIdentity == assembly) &&
             discovered.Remove(reference.DeclaringType.Scope.Name, out Source? pending))
@@ -85,10 +90,6 @@ internal sealed class ImportResolution : IDisposable
         Library? library = libraries.SingleOrDefault(candidate => candidate.Interface.AssemblyIdentity == assembly);
         if (library is null)
             throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Next: supply --import {reference.DeclaringType.Scope.Name}.leancil.contracts and --import-sha256 {reference.DeclaringType.Scope.Name}=<hex> and --import-interface-sha256 {reference.DeclaringType.Scope.Name}=<hex>.");
-        if (instruction.OpCode.Code != Code.Call)
-            throw new InvalidDataException("Contract imports support call only, not callvirt, newobj or ldftn.");
-        if (reference is GenericInstanceMethod || reference.HasGenericParameters || reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters)
-            throw new InvalidDataException("Generic contract imports are not supported in version 1.");
         string identity = assembly + "::" + reference.FullName;
         ContractExport export = library.Interface.Exports.SingleOrDefault(candidate => candidate.Identity == identity)
             ?? throw new InvalidDataException("Contract export not present: " + identity);
