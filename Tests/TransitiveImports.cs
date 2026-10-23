@@ -157,7 +157,8 @@ void Reject(string diagnostic, bool includeB = true)
         File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("Invalid transitive dependency was not rejected before extraction: " + rejected.Output);
 }
-Reject("Missing independently pinned contract dependency", includeB: false);
+Reject("Missing independently pinned contract dependency: " + originalB["assemblyIdentity"]!.GetValue<string>() +
+    " required by " + originalA["assemblyIdentity"]!.GetValue<string>(), includeB: false);
 JsonObject wrong = originalA.DeepClone().AsObject();
 wrong["dependencies"]![0]!["implementationSha256"] = new string('0', 64);
 Save(aSidecar, wrong);
@@ -202,4 +203,4 @@ cycle["dependencies"] = new JsonArray(new JsonObject
 Save(bSidecar, cycle);
 Reject("Contract dependency cycle: " + originalA["assemblyIdentity"]!.GetValue<string>() + " -> " +
     originalB["assemblyIdentity"]!.GetValue<string>() + " -> " + originalA["assemblyIdentity"]!.GetValue<string>());
-Console.WriteLine("PASS missing nodes, conflicting B hashes, interface mismatch and named A -> B -> A cycles reject without artifacts");
+Console.WriteLine("PASS missing nodes, dependency hash mismatch, interface mismatch and named A -> B -> A cycles reject without artifacts");

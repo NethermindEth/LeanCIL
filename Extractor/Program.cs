@@ -164,7 +164,9 @@ internal static class Program
                     string implementation = implementationPaths.GetValueOrDefault(name) ??
                         global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
                     string expected = importHashes.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
-                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ?? node.GetProperty("expectedInterfaceDigest").GetString()!;
+                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
+                        (node.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
+                            throw new InvalidDataException("Import graph has no independent interface digest; extract again with --import-interface-sha256."));
                     importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
                 }
             if (recorded is { } recordedImports && recordedImports.TryGetProperty("imports", out JsonElement importRecords))
@@ -238,7 +240,11 @@ internal static class Program
                     ImplementationPath = Path.GetRelativePath(output, binding.ImplementationPath),
                     SidecarPath = Path.GetRelativePath(output, binding.SidecarPath)
                 }, ContractInterface.Json)),
-                importGraph = imports.Nodes.Select(node => JsonSerializer.SerializeToElement(node, ContractInterface.Json)),
+                importGraph = imports.Nodes.Select(node => JsonSerializer.SerializeToElement(node with
+                {
+                    SidecarPath = Path.GetRelativePath(output, node.SidecarPath).Replace('\\', '/'),
+                    ImplementationPath = Path.GetRelativePath(output, node.ImplementationPath).Replace('\\', '/')
+                }, ContractInterface.Json)),
                 importModules = importModuleHashes,
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),

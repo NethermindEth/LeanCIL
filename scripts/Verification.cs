@@ -1081,12 +1081,15 @@ unsafe def main (args : List String) : IO Unit := do
 
     static JsonElement[] ImportGraph(string output) => ExtractionIdentity.Read(output).Graph;
 
-    sealed record DeploymentDependency(string assemblyIdentity, string implementationSha256, string interfaceDigest);
+    sealed record DeploymentDependency(string assemblyIdentity, string implementationSha256, string interfaceDigest,
+        string[] dependencies, bool conditional);
 
     static DeploymentDependency[] DeploymentDependencies(JsonElement identity) =>
         identity.TryGetProperty("importGraph", out JsonElement graph) ? graph.EnumerateArray().Select(node =>
             new DeploymentDependency(node.GetProperty("assemblyIdentity").GetString()!,
-                node.GetProperty("implementationSha256").GetString()!, node.GetProperty("interfaceDigest").GetString()!)).ToArray() : [];
+                node.GetProperty("implementationSha256").GetString()!, node.GetProperty("interfaceDigest").GetString()!,
+                node.GetProperty("dependencies").EnumerateArray().Select(dependency => dependency.GetProperty("assemblyIdentity").GetString()!).ToArray(),
+                node.GetProperty("dependencies").GetArrayLength() > 0)).ToArray() : [];
 
     static bool ReferenceOnlyImports(ExtractionIdentity extraction) =>
         extraction.Imports.Any(import => import.GetProperty("isReferenceAssembly").GetBoolean()) ||
@@ -1106,7 +1109,11 @@ unsafe def main (args : List String) : IO Unit := do
         {
             assembly = identity.GetProperty("assemblySha256"), generated = identity.GetProperty("generatedSha256"),
             profile = identity.GetProperty("profile"), interfaces = extraction.Sources,
-            dependencyGraph = graph.Any(node => node.GetProperty("dependencies").GetArrayLength() > 0) ? graph : [],
+            dependencyGraph = graph.Any(node => node.GetProperty("dependencies").GetArrayLength() > 0) ? graph.Select(node => new
+            {
+                assemblyIdentity = node.GetProperty("assemblyIdentity"), implementationSha256 = node.GetProperty("implementationSha256"),
+                interfaceDigest = node.GetProperty("interfaceDigest"), dependencies = node.GetProperty("dependencies")
+            }).ToArray() : [],
             imports = extraction.Imports.Select(import => new
             {
                 slot = import.GetProperty("slot"), identity = import.GetProperty("identity"),
