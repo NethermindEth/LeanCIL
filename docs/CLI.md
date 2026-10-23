@@ -247,9 +247,9 @@ its required `staticIdentities` list against the selected implementation's
 reachable static fields. Each entry contains `identity`, `assemblyIdentity` and
 `fieldName`. Extraction recomputes this list from the selected implementation's metadata and reachable instructions.
 The driver also checks
-the actual exported contract type and canonical closure. `statementDigest` is the
-publisher's digest of its canonical certification type, not a hash of its pretty
-printed statement. The consumer records this provenance without obtaining the
+the actual exported contract type structurally and computes its canonical closure
+from replayed oleans. `statementDigest` hashes the UTF-8 `statement` returned by
+that audit. The consumer records this provenance without obtaining the
 implementation proof. See [Contract interfaces](CONTRACT-INTERFACES.md).
 
 A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to

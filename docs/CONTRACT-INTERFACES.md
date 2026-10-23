@@ -100,10 +100,10 @@ source and every qualified contract name is included in this digest.
 must equal the selected certification record. This includes definition values,
 theorem/inductive types, constructor metadata and recursor computation rules.
 A certification record does not supply a Lean implementation proof. Its theorem,
-statement and canonical statement digest are publisher provenance accepted by
+statement and statement digest are publisher provenance accepted by
 the consumer, and are reported as such. No pinned digest covers them: the
-interface digest excludes certifications and the consumer cannot recompute
-`statementDigest`. Reports therefore set `certificationAuthenticated` to `false`
+interface digest excludes certifications. Hashing the reported statement cannot
+authenticate a publisher's theorem. Reports therefore set `certificationAuthenticated` to `false`
 and record the `sidecarSha256` the text came from.
 
 ## Generated proof interface and guarantees
