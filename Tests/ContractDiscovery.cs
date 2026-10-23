@@ -128,9 +128,9 @@ int resolutions = 0;
         .. extra, "--output", output]);
     return (code, text, code == 0 ? JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(output)) : null);
 }
-JsonElement Selected(string? rid, string variant, string expectedPath)
+JsonElement Selected(string? rid, string variant, string expectedPath, string depsFile = "")
 {
-    (int code, string text, JsonElement? result) = Resolve(rid);
+    (int code, string text, JsonElement? result) = Resolve(rid, depsFile);
     if (code != 0) throw new InvalidOperationException("Resolution failed for " + rid + ": " + text);
     JsonElement import = result!.Value.GetProperty("imports").EnumerateArray().Single();
     string path = import.GetProperty("implementation").GetString()!;
@@ -162,6 +162,15 @@ using (JsonDocument sdkGraph = JsonDocument.Parse(File.ReadAllBytes(graph)))
     foreach (string rid in sdkGraph.RootElement.GetProperty("runtimes").EnumerateObject().Select(entry => entry.Name)
         .Where(rid => rid.EndsWith("-x64", StringComparison.Ordinal) || rid.EndsWith("-arm64", StringComparison.Ordinal)))
         if (Resolve(rid) is { Code: not 0 } failed) throw new InvalidOperationException("SDK graph RID rejected: " + rid + ": " + failed.Output);
+// SDK executables record localPath; the host probes the application directory exactly there.
+string relocated = Path.Combine(bin, "alt", Library + ".dll");
+Directory.CreateDirectory(Path.GetDirectoryName(relocated)!);
+File.WriteAllBytes(relocated, variants["linux-x64"]);
+JsonObject localDeps = Copy(deps);
+EachLibrary(localDeps, library => library["runtimeTargets"]!["runtimes/linux-x64/lib/net10.0/" + Library + ".dll"]!["localPath"] = "alt/" + Library + ".dll");
+Selected("linux-x64", "linux-x64", relocated, Write("local.deps.json", localDeps));
+EachLibrary(localDeps, library => library["runtimeTargets"]!["runtimes/linux-x64/lib/net10.0/" + Library + ".dll"]!["localPath"] = "../" + Library + ".dll");
+Rejected("unsafe localPath", "Unsafe discovery asset path", Resolve("linux-x64", Write("unsafe-local.deps.json", localDeps)));
 Console.WriteLine("PASS actual SDK deps/assets and portable RID graph select the host's net10.0 runtime asset");
 
 Rejected("portable without RID", "Runtime identifier is required", Resolve(null));
@@ -212,7 +221,6 @@ foreach (JsonObject document in new[] { traversalDeps, traversalAssets })
         JsonObject targets = library["runtimeTargets"]!.AsObject();
         string path = "runtimes/linux-x64/lib/net10.0/" + Library + ".dll";
         JsonNode entry = targets[path]!.DeepClone();
-        if (entry["localPath"] is not null) entry["localPath"] = "../../" + Library + ".dll";
         targets.Remove(path);
         targets["../../" + Library + ".dll"] = entry;
     });

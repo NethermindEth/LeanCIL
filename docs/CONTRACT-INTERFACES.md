@@ -54,17 +54,20 @@ restore, use the network, or infer a RID from the host.
 Selection follows the .NET 8+ host and NuGet. RID fallback is NuGet's
 breadth-first `RuntimeGraph.ExpandRuntime` over the SDK's
 `PortableRuntimeIdentifierGraph.json`; for `linux-x64` that is `linux-x64`,
-`linux`, `unix-x64`, `unix`, `any`, `base`, matching the host's built-in list. A
+`linux`, `unix-x64`, `unix`, `any`, `base`; the host's built-in list is its prefix
+through `any`. A
 deps.json `runtimes` section is never read; the host ignores it too unless
 `UseRidGraph` is set. A library's best-matching RID group replaces its whole
 portable `runtime` group. With no match, the portable group applies. A library
 with RID-specific runtime assets needs `--runtime-identifier` and `--rid-graph`.
-deps.json assets are probed in the application directory at their `localPath`,
-or at the bare file name without one, as the host does. Package assets are probed
+deps.json assets are probed in the application directory as hostpolicy does: at
+`localPath` (written for executables), else at a RID asset's relative path, else
+at the bare file name. Package assets are probed
 at `<root>/<package path>/<asset path>`. Copies with different bytes are rejected.
 
 The RID must be x64 or arm64. A fallback that ends in another architecture is
-rejected, and `--profile` must agree with the RID unless it is scalar. Compile
+rejected. `--profile` defaults to scalar, as `extract` does; any other profile
+must agree with the RID's architecture. Compile
 assets never become implementations. A reference-only selection fails.
 
 `Nethermind.LeanCIL.LeanCilContractsAttribute(string digest)` on the runtime or
