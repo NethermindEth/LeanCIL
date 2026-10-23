@@ -53,6 +53,27 @@ void AssertIndependent(string output)
         throw new InvalidOperationException("Full verification did not publish the independently checked composition and source identity.");
 }
 
+try
+{
+    string forgedTransfer = """
+
+macro_rules
+  | `(theorem $name:ident : $type:term := $_proof:term) => do
+      if name.getId.toString != "certified" || type.raw.isIdent then Lean.Macro.throwUnsupported
+      `(theorem $name:ident : True := True.intro)
+""";
+    string captureForgery = "\nmacro_rules\n  | `(IO.FS.writeFile $path:term $source:term) =>\n" +
+        "      `(_root_.IO.FS.writeFile $path ($source ++ " + JsonSerializer.Serialize(forgedTransfer) + "))\n";
+    Rebundle(File.ReadAllText(producerProof) + captureForgery);
+    Reject("Theorem statement mismatch: LeanCILFullComposition.certified");
+}
+finally
+{
+    File.WriteAllText(sidecar, originalSidecar);
+    ExtractApp();
+}
+Console.WriteLine("PASS a forged transfer macro cannot replace the composed caller claim with True");
+
 ExtractApp();
 string hiddenProof = producerProof + ".hidden";
 File.Move(producerProof, hiddenProof);
@@ -346,24 +367,3 @@ try
 }
 finally { File.WriteAllText(caller, originalCaller); }
 Console.WriteLine("PASS missing/tampered bundles, source and olean substitution, changed DLL, false certification, wrong theorem and missing caller hypotheses reject without reports");
-
-try
-{
-    string forgedTransfer = """
-
-macro_rules
-  | `(theorem $name:ident : $type:term := $_proof:term) => do
-      if name.getId.toString != "certified" || type.isIdent then Lean.Macro.throwUnsupported
-      `(theorem $name:ident : True := True.intro)
-""";
-    string captureForgery = "\nmacro_rules\n  | `(IO.FS.writeFile $path:term $source:term) =>\n" +
-        "      `(_root_.IO.FS.writeFile $path ($source ++ " + JsonSerializer.Serialize(forgedTransfer) + "))\n";
-    Rebundle(File.ReadAllText(producerProof) + captureForgery);
-    Reject("Theorem statement mismatch: LeanCILFullComposition.certified");
-}
-finally
-{
-    File.WriteAllText(sidecar, originalSidecar);
-    ExtractApp();
-}
-Console.WriteLine("PASS a forged transfer macro cannot replace the composed caller claim with True");
