@@ -33,6 +33,14 @@ theorem linkChecked_sound {app : CIL.Program} {libraries : List Library} {linked
     exact ⟨rfl, compatible⟩
   next incompatible => cases checked
 
+theorem linkChecked_of_compatible {app : CIL.Program} {libraries : List Library}
+    (compatible : StaticDescriptorsCompatible (programStaticDescriptors (link app libraries))) :
+    linkChecked app libraries = .ok (link app libraries) := by
+  dsimp only [linkChecked]
+  split
+  · rfl
+  · contradiction
+
 theorem linkChecked_links {app : CIL.Program} {libraries : List Library} {linked : CIL.Program}
     (checked : linkChecked app libraries = .ok linked) : Links app linked := by
   rw [(linkChecked_sound checked).1]
@@ -58,6 +66,7 @@ theorem StaticDescriptorsCompatible.identities {descriptors : List CIL.StaticDes
       · exact ih tail left leftMember right rightMember same
 
 #print axioms linkChecked_sound
+#print axioms linkChecked_of_compatible
 #print axioms linkChecked_links
 #print axioms StaticDescriptorsCompatible.identities
 

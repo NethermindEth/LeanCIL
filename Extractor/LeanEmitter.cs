@@ -74,12 +74,13 @@ internal static class LeanEmitter
         return layouts.ToArray();
     }
 
-    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null)
+    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null,
+        StaticIdentityRecord[]? staticIdentities = null)
     {
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
-        StaticIdentity.Validate(StaticIdentities(methods, profile));
+        StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
         TypeReference[] types = LayoutTypes(methods);
         for (int i = 0; i < types.Length; i++)
         {
