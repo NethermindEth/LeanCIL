@@ -3,6 +3,7 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../Extractor/StaticIdentity.cs
+#:include ImportReviewRegressions.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -83,6 +84,8 @@ if (libStatic["assemblyIdentity"]!.GetValue<string>() != "StaticFixture.Lib, Ver
     libStatic["fieldName"]!.GetValue<string>() != "StaticFixture.Blob StaticFixture.Data::Table" ||
     libKey != "64781076327034064410872480157833285817926388820730852631679551572519415251497")
     throw new InvalidOperationException("Scoped static identity encoding changed: " + libStatic.ToJsonString());
+ImportReviewRegressions.ValidateStatics_WhenApplicationCollidesWithImport_RejectsBothFields(ExtractorPath, appStatic, libStatic);
+Console.WriteLine("PASS the production app-versus-import static merge rejects a named injected collision");
 AssemblyNameReference signed = new("Signed.Lib", new Version(1, 2, 3, 4))
 {
     Culture = "de-DE", PublicKeyToken = [0xb7, 0x7a, 0x5c, 0x56, 0x19, 0x34, 0xe0, 0x89], IsRetargetable = true
