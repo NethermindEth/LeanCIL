@@ -1,11 +1,22 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/ExportVerificationSuites.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-if (args.Length != 8) throw new ArgumentException("Expected app, library, sidecar, bundle, caller package/proof and producer package/proof.");
+if (args.Length < 8) throw new ArgumentException("Expected app, library, sidecar, bundle, caller package/proof and producer package/proof.");
+string? cohort = ExportVerificationSuites.Select(args[8..], full: true);
+if (cohort is null)
+{
+    Run(["dotnet", "run", "--file", "Tests/FullModuleResolution.cs"], streamOutput: true, progress: "Full-verification module resolution");
+    foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
+        Run(["dotnet", "run", "--file", "Tests/FullImportVerification.cs", "--", .. args[..8], "--cohort", entry.Cohort],
+            streamOutput: true, progress: "Full export cohort " + entry.Cohort);
+    return;
+}
+ExportCaseLedger completed = new(cohort);
 string app = args[0];
 string library = args[1];
 string sidecar = args[2];
@@ -14,7 +25,6 @@ string callerPackage = args[4];
 string caller = args[5];
 string producerPackage = args[6];
 string producerProof = args[7];
-Run(["dotnet", "run", "--file", "Tests/FullModuleResolution.cs"], streamOutput: true, progress: "Full-verification module resolution");
 string root = At("artifacts/FullImportVerification-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 string artifact = Path.Combine(root, "App");
@@ -51,133 +61,165 @@ void AssertIndependent(string output)
         throw new InvalidOperationException("Full verification did not publish the independently checked composition and source identity.");
 }
 
-ExtractApp();
-string hiddenProof = producerProof + ".hidden";
-File.Move(producerProof, hiddenProof);
-string trace = Path.Combine(root, "trace");
 string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
-try
+if (cohort is "consumer" or "checks" or "theorems" or "composition") ExtractApp();
+if (cohort is "consumer" or "ordinary")
 {
-    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
-    Run(FullCommand("--full-artifact", "ImportFixture.Lib=" + bundle));
-    AssertIndependent(artifact);
-    Run(FullCommand());
-    AssertIndependent(artifact);
-    string ordinary = Path.Combine(root, "OrdinaryApp");
-    ExtractApp(ordinary);
-    Run([.. cli, "verify", ordinary, "--proof", caller, "--force-full-verify"]);
-    AssertIndependent(ordinary);
-}
-finally
-{
-    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace);
-    File.Move(hiddenProof, producerProof);
-}
-JsonElement[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
-    .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
-if (stages.Count(stage => stage.GetProperty("stage").GetString() == "Fresh extraction of the current imported library DLL") != 3 ||
-    stages.Count(stage => stage.GetProperty("stage").GetString() == "Capturing actual checked author and extraction kernel terms") != 3 ||
-    stages.Count(stage => stage.GetProperty("stage").GetString() == "Independent kernel replay of the composed caller theorem") != 3 ||
-    stages.Any(stage => stage.GetProperty("stage").GetString()!.Contains("certified proof:", StringComparison.Ordinal)))
-    throw new InvalidOperationException("Repeated full verification did not re-extract, audit and replay each actual library and composition.");
-Console.WriteLine("PASS ordinary and consumer full verification, including a repeated run without original library proof paths");
-
-string[] TraceStages(string directory) => Directory.EnumerateFiles(directory, "*.jsonl").SelectMany(File.ReadLines)
-    .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
-string pairRoot = Path.Combine(root, "Pair");
-Directory.CreateDirectory(pairRoot);
-string[] pairMethods = ["ImportFixture.Library::AddOne(ulong)", "ImportFixture.Library::AddSame(ulong)"];
-string[] pairArtifacts = pairMethods.Select((_, index) => Path.Combine(pairRoot, "Export" + index)).ToArray();
-for (int index = 0; index < pairMethods.Length; index++)
-{
-    Run([.. cli, "extract", library, pairMethods[index], pairArtifacts[index]]);
-    File.WriteAllText(Path.Combine(pairArtifacts[index], "verification.json"), JsonSerializer.Serialize(new
+    string hiddenProof = producerProof + ".hidden";
+    File.Move(producerProof, hiddenProof);
+    string trace = Path.Combine(root, "trace");
+    try
     {
-        schema = 1, proof = Path.GetRelativePath(pairArtifacts[index], producerProof).Replace('\\', '/'), theorem = "LibProof.correctness",
-        proofRoot = Path.GetRelativePath(pairArtifacts[index], producerPackage).Replace('\\', '/')
-    }));
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+        if (cohort == "consumer")
+        {
+            Run(FullCommand("--full-artifact", "ImportFixture.Lib=" + bundle));
+            AssertIndependent(artifact);
+            completed.CompleteCase("full.consumer-explicit");
+            Run(FullCommand());
+            AssertIndependent(artifact);
+            completed.CompleteCase("full.consumer-repeat");
+        }
+        else
+        {
+            string ordinary = Path.Combine(root, "OrdinaryApp");
+            ExtractApp(ordinary);
+            Run([.. cli, "verify", ordinary, "--proof", caller, "--force-full-verify"]);
+            AssertIndependent(ordinary);
+            completed.CompleteCase("full.ordinary");
+        }
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace);
+        File.Move(hiddenProof, producerProof);
+    }
+    JsonElement[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+    int expectedRuns = cohort == "consumer" ? 2 : 1;
+    if (stages.Count(stage => stage.GetProperty("stage").GetString() == "Fresh extraction of the current imported library DLL") != expectedRuns ||
+        stages.Count(stage => stage.GetProperty("stage").GetString() == "Capturing actual checked author and extraction kernel terms") != expectedRuns ||
+        stages.Count(stage => stage.GetProperty("stage").GetString() == "Independent kernel replay of the composed caller theorem") != expectedRuns ||
+        stages.Any(stage => stage.GetProperty("stage").GetString()!.Contains("certified proof:", StringComparison.Ordinal)))
+        throw new InvalidOperationException("Repeated full verification did not re-extract, audit and replay each actual library and composition.");
+    Console.WriteLine("PASS " + cohort + " full verification without original library proof paths");
 }
-string pairManifest = Path.Combine(pairRoot, "export.json");
-string pairSidecar = Path.Combine(pairRoot, "ImportFixture.Lib.leancil.contracts");
-File.WriteAllText(pairManifest, JsonSerializer.Serialize(new
-{
-    schema = 1, assembly = library, proofRoot = producerPackage,
-    @interface = new[] { new { module = "PublishedArithmetic", source = Path.Combine(producerPackage, "PublishedArithmetic.lean") } },
-    exports = pairMethods.Select((method, index) => new { method, artifact = pairArtifacts[index], contract = "ImportFixture.addOne", theorem = "LibProof.correctness" })
-}));
-Run([.. cli, "export-contracts", pairManifest, "--output", pairSidecar, "--bundle", Path.Combine(pairRoot, "Bundles")]);
-string pairApp = Path.Combine(pairRoot, "App");
-Directory.CreateDirectory(pairApp);
-File.WriteAllText(Path.Combine(pairApp, "PairApp.csproj"), $$"""
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.PairApp</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><Reference Include="ImportFixture.Lib"><HintPath>{{library}}</HintPath></Reference></ItemGroup></Project>
-""");
-File.WriteAllText(Path.Combine(pairApp, "Application.cs"), "namespace ImportFixture; public static class PairApplication { public static ulong Entry(ulong value) => Library.AddSame(Library.AddOne(value)); }\n");
-Run(["dotnet", "build", Path.Combine(pairApp, "PairApp.csproj"), "-c", "Release"]);
-if (!originalLibrary.AsSpan().SequenceEqual(File.ReadAllBytes(library))) throw new InvalidOperationException("Precondition: the pair caller build changed the library DLL.");
-string pairArtifact = Path.Combine(pairRoot, "Caller");
-JsonObject pairContract = JsonNode.Parse(File.ReadAllText(pairSidecar))!.AsObject();
-Run([.. cli, "extract", Path.Combine(pairApp, "bin", "ImportFixture.PairApp.dll"), "ImportFixture.PairApplication::Entry(ulong)", pairArtifact,
-    "--import", pairSidecar, "--import-implementation", "ImportFixture.Lib=" + library, "--import-sha256", "ImportFixture.Lib=" + Sha(library),
-    "--import-interface-sha256", "ImportFixture.Lib=" + pairContract["interfaceDigest"]!.GetValue<string>()]);
-string pairCaller = Path.Combine(pairRoot, "PairCaller.lean");
-File.WriteAllText(pairCaller, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness : " +
-    "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun _ => True) := by\n" +
-    "  intro linked links imported\n  trivial\nend ExampleProof\n");
-string pairTrace = Path.Combine(root, "pair-trace");
-try
-{
-    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", pairTrace);
-    Run([.. cli, "verify", pairArtifact, "--proof", pairCaller, "--force-full-verify"]);
-}
-finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
-JsonElement pairReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(pairArtifact, "verified.json")));
-JsonElement[] pairImports = pairReport.GetProperty("imports").EnumerateArray().ToArray();
-string pairBundle = Path.GetFileName(pairContract["fullVerificationLocator"]!.GetValue<string>());
-string[] pairStages = TraceStages(pairTrace);
-// The caller and the shared bundle each build the fresh library once; a per-slot build would add a third.
-if (pairImports.Length != 2 || pairImports.Any(import => import.GetProperty("acceptedVia").GetString() != "independently-verified" ||
-        import.GetProperty("sourceBundleDigest").GetString() != pairBundle) ||
-    pairStages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
-    pairStages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
-    pairStages.Count(stage => stage == "Building fresh Lean verification library") != 2)
-    throw new InvalidOperationException("Two imports from one bundle were not verified with one library build: " + string.Join(", ", pairStages));
-Console.WriteLine("PASS two imports from one source bundle share one independent library build");
 
-(int Code, string Output, string Stdout, string Stderr) artifactWithoutFull = Execute([.. cli, "verify", artifact,
-    "--proof", caller, "--proof-root", callerPackage, "--full-artifact", "ImportFixture.Lib=" + bundle]);
-if (artifactWithoutFull.Code != 1 || !artifactWithoutFull.Output.Contains("--full-artifact requires --force-full-verify", StringComparison.Ordinal) ||
-    File.Exists(Path.Combine(artifact, "verified.json")))
-    throw new InvalidOperationException("A full artifact without full mode was accepted or retained a stale report: " + artifactWithoutFull.Output);
-Reject("Full verification source bundle is missing", "--full-artifact", "ImportFixture.Lib=" + Path.Combine(root, "missing", Path.GetFileName(bundle)));
-string inventoryPath = Path.Combine(bundle, "bundle.json");
-byte[] inventoryBytes = File.ReadAllBytes(inventoryPath);
-try
+if (cohort == "pair")
 {
-    File.AppendAllText(inventoryPath, "\n");
-    Reject("Contract source bundle manifest digest mismatch");
+    string[] TraceStages(string directory) => Directory.EnumerateFiles(directory, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
+    string pairRoot = Path.Combine(root, "Pair");
+    Directory.CreateDirectory(pairRoot);
+    string[] pairMethods = ["ImportFixture.Library::AddOne(ulong)", "ImportFixture.Library::AddSame(ulong)"];
+    string[] pairArtifacts = pairMethods.Select((_, index) => Path.Combine(pairRoot, "Export" + index)).ToArray();
+    for (int index = 0; index < pairMethods.Length; index++)
+    {
+        Run([.. cli, "extract", library, pairMethods[index], pairArtifacts[index]]);
+        File.WriteAllText(Path.Combine(pairArtifacts[index], "verification.json"), JsonSerializer.Serialize(new
+        {
+            schema = 1, proof = Path.GetRelativePath(pairArtifacts[index], producerProof).Replace('\\', '/'), theorem = "LibProof.correctness",
+            proofRoot = Path.GetRelativePath(pairArtifacts[index], producerPackage).Replace('\\', '/')
+        }));
+    }
+    string pairManifest = Path.Combine(pairRoot, "export.json");
+    string pairSidecar = Path.Combine(pairRoot, "ImportFixture.Lib.leancil.contracts");
+    File.WriteAllText(pairManifest, JsonSerializer.Serialize(new
+    {
+        schema = 1, assembly = library, proofRoot = producerPackage,
+        @interface = new[] { new { module = "PublishedArithmetic", source = Path.Combine(producerPackage, "PublishedArithmetic.lean") } },
+        exports = pairMethods.Select((method, index) => new { method, artifact = pairArtifacts[index], contract = "ImportFixture.addOne", theorem = "LibProof.correctness" })
+    }));
+    Run([.. cli, "export-contracts", pairManifest, "--output", pairSidecar, "--bundle", Path.Combine(pairRoot, "Bundles")]);
+    string pairApp = Path.Combine(pairRoot, "App");
+    Directory.CreateDirectory(pairApp);
+    File.WriteAllText(Path.Combine(pairApp, "PairApp.csproj"), $$"""
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.PairApp</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><Reference Include="ImportFixture.Lib"><HintPath>{{library}}</HintPath></Reference></ItemGroup></Project>
+    """);
+    File.WriteAllText(Path.Combine(pairApp, "Application.cs"), "namespace ImportFixture; public static class PairApplication { public static ulong Entry(ulong value) => Library.AddSame(Library.AddOne(value)); }\n");
+    Run(["dotnet", "build", Path.Combine(pairApp, "PairApp.csproj"), "-c", "Release"]);
+    if (!originalLibrary.AsSpan().SequenceEqual(File.ReadAllBytes(library))) throw new InvalidOperationException("Precondition: the pair caller build changed the library DLL.");
+    string pairArtifact = Path.Combine(pairRoot, "Caller");
+    JsonObject pairContract = JsonNode.Parse(File.ReadAllText(pairSidecar))!.AsObject();
+    Run([.. cli, "extract", Path.Combine(pairApp, "bin", "ImportFixture.PairApp.dll"), "ImportFixture.PairApplication::Entry(ulong)", pairArtifact,
+        "--import", pairSidecar, "--import-implementation", "ImportFixture.Lib=" + library, "--import-sha256", "ImportFixture.Lib=" + Sha(library),
+        "--import-interface-sha256", "ImportFixture.Lib=" + pairContract["interfaceDigest"]!.GetValue<string>()]);
+    string pairCaller = Path.Combine(pairRoot, "PairCaller.lean");
+    File.WriteAllText(pairCaller, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness : " +
+        "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun _ => True) := by\n" +
+        "  intro linked links imported\n  trivial\nend ExampleProof\n");
+    string pairTrace = Path.Combine(root, "pair-trace");
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", pairTrace);
+        Run([.. cli, "verify", pairArtifact, "--proof", pairCaller, "--force-full-verify"]);
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+    JsonElement pairReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(pairArtifact, "verified.json")));
+    JsonElement[] pairImports = pairReport.GetProperty("imports").EnumerateArray().ToArray();
+    string pairBundle = Path.GetFileName(pairContract["fullVerificationLocator"]!.GetValue<string>());
+    string[] pairStages = TraceStages(pairTrace);
+    // The caller and the shared bundle each build the fresh library once; a per-slot build would add a third.
+    if (pairImports.Length != 2 || pairImports.Any(import => import.GetProperty("acceptedVia").GetString() != "independently-verified" ||
+            import.GetProperty("sourceBundleDigest").GetString() != pairBundle) ||
+        pairStages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
+        pairStages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
+        pairStages.Count(stage => stage == "Building fresh Lean verification library") != 2)
+        throw new InvalidOperationException("Two imports from one bundle were not verified with one library build: " + string.Join(", ", pairStages));
+    completed.CompleteCase("full.pair");
+    Console.WriteLine("PASS two imports from one source bundle share one independent library build");
+
 }
-finally { File.WriteAllBytes(inventoryPath, inventoryBytes); }
-string authorPath = Path.Combine(bundle, proofInBundle);
-byte[] authorBytes = File.ReadAllBytes(authorPath);
-try
+
+if (cohort == "consumer")
 {
-    File.AppendAllText(authorPath, "\n");
-    Reject("Contract source bundle file is missing or changed: " + proofInBundle);
+    (int Code, string Output, string Stdout, string Stderr) artifactWithoutFull = Execute([.. cli, "verify", artifact,
+        "--proof", caller, "--proof-root", callerPackage, "--full-artifact", "ImportFixture.Lib=" + bundle]);
+    if (artifactWithoutFull.Code != 1 || !artifactWithoutFull.Output.Contains("--full-artifact requires --force-full-verify", StringComparison.Ordinal) ||
+        File.Exists(Path.Combine(artifact, "verified.json")))
+        throw new InvalidOperationException("A full artifact without full mode was accepted or retained a stale report: " + artifactWithoutFull.Output);
+    completed.CompleteCase("full.artifact-mode");
 }
-finally { File.WriteAllBytes(authorPath, authorBytes); }
-string forgedArtifact = Path.Combine(bundle, "Proof.olean");
-try
+
+if (cohort == "checks")
 {
-    File.WriteAllText(forgedArtifact, "not proof evidence");
-    Reject("Contract source bundle contains an unrecorded file: Proof.olean");
+    Reject("Full verification source bundle is missing", "--full-artifact", "ImportFixture.Lib=" + Path.Combine(root, "missing", Path.GetFileName(bundle)));
+    completed.CompleteCase("full.missing-bundle");
+    string inventoryPath = Path.Combine(bundle, "bundle.json");
+    byte[] inventoryBytes = File.ReadAllBytes(inventoryPath);
+    try
+    {
+        File.AppendAllText(inventoryPath, "\n");
+        Reject("Contract source bundle manifest digest mismatch");
+        completed.CompleteCase("full.inventory-bytes");
+    }
+    finally { File.WriteAllBytes(inventoryPath, inventoryBytes); }
+    string authorPath = Path.Combine(bundle, proofInBundle);
+    byte[] authorBytes = File.ReadAllBytes(authorPath);
+    try
+    {
+        File.AppendAllText(authorPath, "\n");
+        Reject("Contract source bundle file is missing or changed: " + proofInBundle);
+        completed.CompleteCase("full.producer-bytes");
+    }
+    finally { File.WriteAllBytes(authorPath, authorBytes); }
+    string forgedArtifact = Path.Combine(bundle, "Proof.olean");
+    try
+    {
+        File.WriteAllText(forgedArtifact, "not proof evidence");
+        Reject("Contract source bundle contains an unrecorded file: Proof.olean");
+        completed.CompleteCase("full.unrecorded-olean");
+    }
+    finally { File.Delete(forgedArtifact); }
+    try
+    {
+        File.AppendAllText(library, "changed-current-dll");
+        Reject("Full-verification imported implementation or sidecar changed");
+        completed.CompleteCase("full.deployed-dll");
+    }
+    finally { File.WriteAllBytes(library, originalLibrary); }
+
 }
-finally { File.Delete(forgedArtifact); }
-try
-{
-    File.AppendAllText(library, "changed-current-dll");
-    Reject("Full-verification imported implementation or sidecar changed");
-}
-finally { File.WriteAllBytes(library, originalLibrary); }
 
 string Rebundle(string proofSource, bool staleClosure = false)
 {
@@ -306,62 +348,100 @@ run_cmd do
     }
 }
 
-RejectCallerMutation(consumer: true, sourceOnly: false);
-RejectCallerMutation(consumer: false, sourceOnly: false);
-RejectCallerMutation(consumer: true, sourceOnly: true);
-RejectCallerMutation(consumer: true, sourceOnly: false, shadow: true);
-try
+switch (cohort)
 {
-    Rebundle(File.ReadAllText(producerProof), staleClosure: true);
-    Reject("Full source bundle export statement or closure binding mismatch");
-    Rebundle("import Extracted\nimport PublishedArithmetic\nnamespace LibProof\ntheorem correctness : True := True.intro\nend LibProof\n");
-    Reject("Type mismatch");
-    Rebundle(File.ReadAllText(producerProof).Replace("theorem correctness", "def correctness", StringComparison.Ordinal));
-    Reject("Expected a theorem");
+    case "consumer-artifact":
+        RejectCallerMutation(consumer: true, sourceOnly: false);
+        completed.CompleteCase("full.consumer-artifact");
+        break;
+    case "ordinary-artifact":
+        RejectCallerMutation(consumer: false, sourceOnly: false);
+        completed.CompleteCase("full.ordinary-artifact");
+        break;
+    case "consumer-source":
+        RejectCallerMutation(consumer: true, sourceOnly: true);
+        completed.CompleteCase("full.consumer-source");
+        break;
+    case "consumer-shadow":
+        RejectCallerMutation(consumer: true, sourceOnly: false, shadow: true);
+        completed.CompleteCase("full.consumer-shadow");
+        break;
 }
-finally
+if (cohort == "checks")
 {
-    File.WriteAllText(sidecar, originalSidecar);
-    ExtractApp();
+    try
+    {
+        Rebundle(File.ReadAllText(producerProof), staleClosure: true);
+        Reject("Full source bundle export statement or closure binding mismatch");
+        completed.CompleteCase("full.stale-closure");
+    }
+    finally
+    {
+        File.WriteAllText(sidecar, originalSidecar);
+        ExtractApp();
+    }
+    try
+    {
+        JsonObject forged = JsonNode.Parse(originalSidecar)!.AsObject();
+        forged["certifications"]![0]!["statementDigest"] = new string('0', 64);
+        File.WriteAllText(sidecar, forged.ToJsonString());
+        ExtractApp();
+        Reject("Full source bundle export statement or closure binding mismatch");
+        completed.CompleteCase("full.statement-digest");
+    }
+    finally
+    {
+        File.WriteAllText(sidecar, originalSidecar);
+        ExtractApp();
+    }
+    try
+    {
+        File.WriteAllText(caller, originalCaller.Replace("theorem correctness :", "theorem correctness (extra : False) :", StringComparison.Ordinal));
+        Reject("Theorem statement mismatch: ExampleProof.correctness");
+        completed.CompleteCase("full.extra-premise");
+    }
+    finally { File.WriteAllText(caller, originalCaller); }
 }
-try
+if (cohort == "theorems")
 {
-    JsonObject forged = JsonNode.Parse(originalSidecar)!.AsObject();
-    forged["certifications"]![0]!["statementDigest"] = new string('0', 64);
-    File.WriteAllText(sidecar, forged.ToJsonString());
-    ExtractApp();
-    Reject("Full source bundle export statement or closure binding mismatch");
+    try
+    {
+        Rebundle("import Extracted\nimport PublishedArithmetic\nnamespace LibProof\ntheorem correctness : True := True.intro\nend LibProof\n");
+        Reject("Type mismatch");
+        completed.CompleteCase("full.producer-true");
+        Rebundle(File.ReadAllText(producerProof).Replace("theorem correctness", "def correctness", StringComparison.Ordinal));
+        Reject("Expected a theorem");
+        completed.CompleteCase("full.producer-definition");
+    }
+    finally
+    {
+        File.WriteAllText(sidecar, originalSidecar);
+        ExtractApp();
+    }
 }
-finally
-{
-    File.WriteAllText(sidecar, originalSidecar);
-    ExtractApp();
-}
-try
-{
-    File.WriteAllText(caller, originalCaller.Replace("theorem correctness :", "theorem correctness (extra : False) :", StringComparison.Ordinal));
-    Reject("Theorem statement mismatch: ExampleProof.correctness");
-}
-finally { File.WriteAllText(caller, originalCaller); }
-Console.WriteLine("PASS missing/tampered bundles, source and olean substitution, changed DLL, false certification, wrong theorem and missing caller hypotheses reject without reports");
 
-try
+if (cohort == "composition")
 {
-    string forgedTransfer = """
+    try
+    {
+        string forgedTransfer = """
 
-macro_rules
-  | `(theorem $name:ident : $type:term := $_proof:term) => do
-      if name.getId.toString != "certified" || type.isIdent then Lean.Macro.throwUnsupported
-      `(theorem $name:ident : True := True.intro)
-""";
-    string captureForgery = "\nmacro_rules\n  | `(IO.FS.writeFile $path:term $source:term) =>\n" +
-        "      `(_root_.IO.FS.writeFile $path ($source ++ " + JsonSerializer.Serialize(forgedTransfer) + "))\n";
-    Rebundle(File.ReadAllText(producerProof) + captureForgery);
-    Reject("Theorem statement mismatch: LeanCILFullComposition.certified");
+    macro_rules
+      | `(theorem $name:ident : $type:term := $_proof:term) => do
+          if name.getId.toString != "certified" || type.raw.isIdent then Lean.Macro.throwUnsupported
+          `(theorem $name:ident : True := True.intro)
+    """;
+        string captureForgery = "\nmacro_rules\n  | `(IO.FS.writeFile $path:term $source:term) =>\n" +
+            "      `(_root_.IO.FS.writeFile $path ($source ++ " + JsonSerializer.Serialize(forgedTransfer) + "))\n";
+        Rebundle(File.ReadAllText(producerProof) + captureForgery);
+        Reject("Theorem statement mismatch: LeanCILFullComposition.certified");
+        completed.CompleteCase("full.composition-true");
+    }
+    finally
+    {
+        File.WriteAllText(sidecar, originalSidecar);
+        ExtractApp();
+    }
+    Console.WriteLine("PASS a forged transfer macro cannot replace the composed caller claim with True");
 }
-finally
-{
-    File.WriteAllText(sidecar, originalSidecar);
-    ExtractApp();
-}
-Console.WriteLine("PASS a forged transfer macro cannot replace the composed caller claim with True");
+completed.Finish();
