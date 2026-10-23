@@ -691,7 +691,7 @@ File.WriteAllText(Path.Combine(hashWindow, interfaceModule + ".lean"), interface
 Run([interfaceVerification.LeanExecutable, "--root=" + hashWindow, "-o", Path.Combine(hashWindow, interfaceModule + ".olean"),
     Path.Combine(hashWindow, interfaceModule + ".lean")], leanPath: hashWindow + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean"));
 byte[] unauditedArtifact = File.ReadAllBytes(Path.Combine(hashWindow, interfaceModule + ".olean"));
-void RejectReplayWindowSwap(Func<string?> locate, Action<Action<string>> verify)
+void RejectReplayWindowSwap(string expectedDiagnostic, Func<string?> locate, Action<Action<string>> verify)
 {
     bool replaced = false;
     Exception? rejected = null;
@@ -699,7 +699,7 @@ void RejectReplayWindowSwap(Func<string?> locate, Action<Action<string>> verify)
     {
         verify(value =>
         {
-            // The compiled olean is replaced after its closure audit and before its kernel replay.
+            // Replace the compiled interface immediately before its kernel replay.
             if (value != "kernel replay" || replaced || locate() is not string artifact) return;
             File.WriteAllBytes(artifact, unauditedArtifact);
             replaced = true;
@@ -707,15 +707,15 @@ void RejectReplayWindowSwap(Func<string?> locate, Action<Action<string>> verify)
     }
     catch (Exception error) { rejected = error; }
     if (!replaced) throw new InvalidOperationException("Precondition: verification never reached the interface replay window.");
-    if (rejected is null || !rejected.Message.Contains("changed after their closure audit", StringComparison.Ordinal) ||
+    if (rejected is null || !rejected.Message.Contains(expectedDiagnostic, StringComparison.Ordinal) ||
         File.Exists(Path.Combine(output, "verified.json")))
-        throw new InvalidOperationException("An interface olean replaced after its closure audit was certified: " + rejected?.Message);
+        throw new InvalidOperationException("Incorrect rejection of an interface olean replaced before replay: " + rejected?.Message);
 }
 string? savedHashCache = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
 try
 {
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
-    RejectReplayWindowSwap(() => Directory.EnumerateDirectories(output, "proof-*")
+    RejectReplayWindowSwap("Published contract canonical closure digest mismatch: ImportFixture.addOne", () => Directory.EnumerateDirectories(output, "proof-*")
             .Select(fresh => Path.Combine(fresh, interfaceModule + ".olean")).SingleOrDefault(File.Exists),
         stage => { using Program single = new(); single.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true, stage: stage); });
     Console.WriteLine("PASS single-file verification binds interface oleans before their closure audit");
@@ -723,7 +723,7 @@ try
     string token = Guid.NewGuid().ToString("N");
     File.WriteAllText(consumerProof, File.ReadAllText(Path.Combine(fixture, "Caller.lean")) + "\n-- " + token + "\n");
     DateTime started = DateTime.UtcNow.AddSeconds(-1);
-    RejectReplayWindowSwap(() => new DirectoryInfo(Path.GetTempPath()).EnumerateDirectories("leancil-consumer-*")
+    RejectReplayWindowSwap("changed after their closure audit", () => new DirectoryInfo(Path.GetTempPath()).EnumerateDirectories("leancil-consumer-*")
             .Where(session => session.CreationTimeUtc >= started && session.Name.Length == "leancil-consumer-".Length + 32 &&
                 session.EnumerateFiles("*.lean").Any(file => File.ReadAllText(file.FullName).Contains(token, StringComparison.Ordinal)))
             .Select(session => Path.Combine(session.FullName, ".lake/packages/leancil/.lake/build/lib/lean", interfaceModule + ".olean"))
