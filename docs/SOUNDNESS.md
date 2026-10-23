@@ -277,6 +277,13 @@ publisher or prove a library implementation theorem. The supplied certification
 theorem, statement and statement digest are provenance records here. Full
 implementation verification is a separate producer operation.
 
+`--force-full-verify` instead rechecks the library proof and composes it with
+the caller theorem. It elaborates the producer's source bundle with the
+verifier's privileges, so it is sound only when that bundle cannot change the
+toolchain, extractor, caller artifacts or outputs: run an untrusted bundle in an
+isolated, read-only environment without network. See
+[Independent imported-library verification](FULL_VERIFICATION.md).
+
 Deployment must bind the exact implementation bytes, method/signature/profile
 and a library implementation satisfying the published contracts. A false or
 unsatisfiable published contract can make the caller theorem vacuous. Retaining
