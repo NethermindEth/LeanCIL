@@ -60,7 +60,13 @@ foreach (var (mutation, marker) in new[]
     ("handler", "Unsupported method metadata"),
     ("no-throw", "External managed dependency: System.Void System.DivideByZeroException::.ctor()"),
     ("thrown-null", "Unsupported instruction"),
-    ("interior-branch", "Branch into a folded throw")
+    ("interior-branch", "Branch into a folded throw"),
+    ("non-exception", "Unsupported exception constructor"),
+    ("dead-non-exception", ""),
+    ("missing-constructor", "Unsupported exception constructor"),
+    ("wrong-parameter", "Unsupported exception constructor"),
+    ("explicit-this", "Unsupported exception constructor"),
+    ("vararg", "Unsupported exception constructor")
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -92,6 +98,35 @@ foreach (var (mutation, marker) in new[]
                 il.Append(il.Create(OpCodes.Ret));
                 break;
             case "thrown-null": il.Replace(code[0], il.Create(OpCodes.Ldnull)); break;
+            case "non-exception":
+            case "dead-non-exception":
+            case "missing-constructor":
+            case "wrong-parameter":
+            {
+                var original = (MethodReference)code[0].Operand;
+                var type = new TypeReference("System", mutation.EndsWith("non-exception", StringComparison.Ordinal) ? "Object" : "DivideByZeroException",
+                    module, original.DeclaringType.Scope);
+                var constructor = new MethodReference(".ctor", module.TypeSystem.Void, type) { HasThis = true };
+                code[0].Operand = constructor;
+                if (mutation is "missing-constructor" or "wrong-parameter")
+                {
+                    var creation = code[0];
+                    for (int n = 0; n < (mutation == "missing-constructor" ? 2 : 1); n++)
+                    {
+                        constructor.Parameters.Add(new ParameterDefinition(mutation == "missing-constructor" ? module.TypeSystem.String : module.TypeSystem.Int32));
+                        il.InsertBefore(creation, il.Create(OpCodes.Ldstr, "message"));
+                    }
+                }
+                if (mutation == "dead-non-exception")
+                {
+                    var returned = il.Create(OpCodes.Ret);
+                    il.InsertBefore(code[0], il.Create(OpCodes.Br, returned));
+                    il.Append(returned);
+                }
+                break;
+            }
+            case "explicit-this": ((MethodReference)code[0].Operand).ExplicitThis = true; break;
+            case "vararg": ((MethodReference)code[0].Operand).CallingConvention = MethodCallingConvention.VarArg; break;
             case "interior-branch":
                 il.InsertBefore(code[0], il.Create(OpCodes.Br, code[1]));
                 il.InsertBefore(code[0], il.Create(OpCodes.Ldnull));
@@ -99,7 +134,25 @@ foreach (var (mutation, marker) in new[]
         }
         module.Write(dll);
     }
+    if (mutation is "non-exception" or "missing-constructor")
+    {
+        var expected = mutation == "non-exception" ? "System.Runtime.CompilerServices.RuntimeWrappedException" : "System.MissingMethodException";
+        try
+        {
+            Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Throws")!.GetMethod("Quotient")!.Invoke(null, [1u, 0u]);
+            throw new InvalidOperationException("The runtime fixture unexpectedly returned: " + mutation);
+        }
+        catch (TargetInvocationException error) when (error.InnerException?.GetType().FullName == expected) { }
+        Console.WriteLine($"PASS runtime throws {expected} for {mutation}; it must not be folded as the constructed type");
+    }
     var result = Execute(Extract("extract", dll, "Examples", "Throws::Quotient(uint,uint)", output));
+    if (mutation == "dead-non-exception")
+    {
+        if (result.Code != 0) throw new InvalidOperationException("Unreachable unsupported throw blocked extraction: " + result.Output);
+        Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")]);
+        Console.WriteLine("PASS unreachable unsupported throw stays excluded and its certificate checks");
+        continue;
+    }
     if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) || !result.Output.Contains(marker))
         throw new InvalidOperationException("Incorrect throw rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
