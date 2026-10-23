@@ -91,7 +91,8 @@ partial class Program
                         throw new InvalidDataException("Export contract differs from its published interface closure: " + export.Request.Contract);
                     (string digest, string statement) = CheckExportStatement(session, proofModule, leanPath);
                     checkedExport = new(export, actual, digest, statement, audit, proofModule + "Author");
-                });
+                }, [ExportTheoremRequest(export.Request.Contract, published.Kind, export.Conditional),
+                    ExportTheoremRequest(export.Request.Contract, published.Kind, export.Conditional) with { name = export.Request.Theorem }]);
                 ConsumerRequest request = new(manifest.Assembly, export.Request.Artifact, export.Proof, ExportTheorem, null,
                     ExportAudit: specification);
                 ConsumerOutcome outcome = VerifyConsumerRequests(manifest.ProofRoot, [request], null, batch: false)[0];
@@ -120,7 +121,8 @@ partial class Program
             if (bundle is not null)
             {
                 string digest = PublishContractSources(bundle, staging, manifestPath, manifest, before, verified);
-                sidecar = sidecar with { FullVerificationLocator = Path.Combine(Path.GetFullPath(bundle), digest).Replace('\\', '/') };
+                sidecar = sidecar with { FullVerificationLocator = Path.GetRelativePath(Path.GetDirectoryName(output)!,
+                    Path.Combine(Path.GetFullPath(bundle), digest)).Replace('\\', '/') };
             }
             if (!Same(before, ExportInputs(manifestPath, manifest))) throw new InvalidDataException("Contract export inputs changed before publication.");
             byte[] sidecarBytes = JsonSerializer.SerializeToUtf8Bytes(sidecar, ContractInterface.Json);
@@ -246,60 +248,30 @@ partial class Program
         return modules.Select(pair => new InterfaceModule(pair.Key, pair.Value)).ToArray();
     }
 
-    static string ExportAuditSource(PreparedContractExport export, string kind)
+    static AuditRequest ExportTheoremRequest(string contract, string kind, bool conditional = false)
     {
-        string holds = kind switch
-        {
-            "method" => "_root_.CIL.Safety.MethodContract.Holds",
-            "outcome" => "_root_.CIL.Safety.OutcomeContract.Holds",
-            _ => throw new InvalidDataException("Export constant is not a MethodContract or OutcomeContract.")
-        };
-        string statement = export.Conditional
-            ? "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold " +
-                "(fun linked => " + holds + " _root_." + export.Request.Contract + " linked 0)"
-            : holds + " _root_." + export.Request.Contract + " _root_.Extracted.program 0";
-        string closure = export.Conditional ? $$"""
-theorem LeanCILExportAudit.relocated {completion target : _root_.CIL.Program} {f : Nat -> Nat}
-    (linkedPrefix : _root_.CIL.Safety.Links _root_.Extracted.program completion)
-    (met : _root_.Extracted.ImportsHold completion) (closed : _root_.CIL.Safety.Closed completion)
-    (relocates : _root_.CIL.Safety.RelocatesInto completion target f) :
-    {{holds}} _root_.{{export.Request.Contract}} target (f 0) :=
-  _root_.CIL.Safety.{{(kind == "method" ? "MethodContract" : "OutcomeContract")}}.relocateGiven
-    LeanCILExportAudit.certified linkedPrefix met closed relocates
-""" : """
-theorem LeanCILExportAudit.closed : _root_.CIL.Safety.Closed _root_.Extracted.program :=
-  _root_.CIL.Safety.Closed.of_check (by decide +kernel)
-theorem LeanCILExportAudit.noImports : _root_.Extracted.imports = [] := rfl
-""";
-        string statics = "[" + string.Join(", ", export.StaticIdentities.Select(identity =>
-            $"({identity.Identity}, {JsonSerializer.Serialize(identity.AssemblyIdentity)}, {JsonSerializer.Serialize(identity.FieldName)})")) + "]";
-        return $$"""
-import Lean
-import CIL.Safety.Linking
-import CIL.Safety.OutcomeContract
-import CIL.Interface.Closure
-open Lean Meta Elab Command in
-run_cmd liftTermElabM do
-  let contract <- getConstInfo `{{export.Request.Contract}}
-  unless contract.levelParams.isEmpty do throwError "Export contracts must be closed constants"
-  let contractType <- whnf contract.type
-  unless contractType.getAppFn.isConstOf ``CIL.Safety.{{(kind == "method" ? "MethodContract" : "OutcomeContract")}} do
-    throwError "Export must have the canonical contract type"
-  let .thmInfo author <- getConstInfo `{{export.Request.Theorem}} | throwError "Expected an export theorem"
-  unless author.levelParams.isEmpty do throwError "Export theorem must have a closed statement"
-  let expected <- Lean.Elab.Term.elabType (<- `({{statement}}))
-  unless <- isDefEq author.type expected do throwError "Export theorem does not have the exact canonical Holds statement"
-theorem LeanCILExportAudit.certified : {{statement}} :=
-  _root_.{{export.Request.Theorem}}
-{{closure}}
-theorem LeanCILExportAudit.staticIdentities :
-    let actual : List (Nat × String × String) := _root_.Extracted.program.flatMap fun body =>
-      body.staticSites.map fun site => (site.2.identity, site.2.assemblyIdentity, site.2.fieldName)
-    let expected : List (Nat × String × String) := {{statics}}
-    actual.all (fun identity => expected.contains identity) && expected.all (fun identity => actual.contains identity) = true := by decide +kernel
-""";
+        object holds = new { app = new object[] {
+            AuditConstant("CIL.Safety." + (kind == "method" ? "MethodContract" : "OutcomeContract") + ".Holds"),
+            "_", "_", AuditConstant(contract), conditional ? new { bvar = 0 } : AuditConstant("Extracted.program"), new { nat = 0 } } };
+        object type = conditional ? new { app = new object[] { AuditConstant("CIL.Safety.HoldsGiven"),
+            AuditConstant("Extracted.program"), AuditConstant("Extracted.ImportsHold"),
+            new { lam = new[] { AuditConstant("CIL.Program"), holds } } } } : holds;
+        return new(ExportTheorem, axioms: ApprovedAxioms, statement: true, type: type);
     }
 
+    static string ExportAuditSource(PreparedContractExport export, string kind)
+    {
+        string holds = "_root_.CIL.Safety." + (kind == "method" ? "MethodContract" : "OutcomeContract") + ".Holds _root_." + export.Request.Contract;
+        string statement = export.Conditional
+            ? "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun linked => " + holds + " linked 0)"
+            : holds + " _root_.Extracted.program 0";
+        return $$"""
+import CIL.Safety.Linking
+import CIL.Safety.OutcomeContract
+theorem LeanCILExportAudit.certified : {{statement}} := _root_.{{export.Request.Theorem}}
+#print axioms LeanCILExportAudit.certified
+""";
+    }
     Dictionary<string, ExportClosure> CheckPublishedContractInterfaces(ContractExportManifest manifest,
         InterfaceModule[] interfaces, PreparedContractExport[] exports, string staging)
     {
@@ -353,73 +325,30 @@ theorem LeanCILExportAudit.staticIdentities :
 
     void CheckPublishedInterfaceDeclarations(string session, string[] modules, string leanPath)
     {
-        string path = Path.Combine(session, "LeanCILExportInterfaceProbe.lean");
-        File.WriteAllText(path, string.Join("\n", modules.Select(module => "import " + module)) + $$"""
-
-import CIL.Interface.Closure
-open Lean Elab Command in
-run_cmd do
-  match CIL.Interface.validateInterfaceDeclarations (<- getEnv) #[{{string.Join(", ", modules.Select(module => "`" + module))}}] with
-  | .ok () => pure ()
-  | .error error => throwError "{error}"
-""");
-        Run([LeanExecutable, path], session, leanPath, environment: LeanEnvironment,
-            progress: "Rejecting unpublished assumptions in contract interface modules");
+        AuditedOleans audited = AuditOleans(leanPath, modules, [], interfaces: modules);
+        if (audited.interfaces?.error is { } error) throw new InvalidDataException(error);
     }
 
     ExportClosure CheckExportClosure(string session, string import, string contract, string leanPath, bool importsAreSource = false)
     {
-        string path = Path.Combine(session, "LeanCILExportClosureProbe.lean");
-        string imports = importsAreSource ? import : "import " + import;
-        File.WriteAllText(path, imports + "\nimport CIL.Interface.Closure\n#leancil_contract_closure " + contract + "\n");
-        string output = Run([LeanExecutable, path], session, leanPath, environment: LeanEnvironment,
-            progress: "Auditing export contract closure: " + contract);
-        JsonElement record = OneExportRecord(output, "constant", contract);
-        string kind = record.GetProperty("kind").GetString() ?? "";
-        string canonical = record.GetProperty("canonical").GetString() ?? throw new InvalidDataException("Missing canonical contract closure.");
-        if (kind is not ("method" or "outcome") || canonical.Length == 0)
+        string[] modules = importsAreSource
+            ? import.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(line => line["import ".Length..]).ToArray() : [import];
+        AuditedOleans audited = AuditOleans(leanPath, modules, [], closures: [contract]);
+        AuditedClosure closure = audited.closures!.Single();
+        if (closure.error is { } error) throw new InvalidDataException(error);
+        if (closure.kind is not ("method" or "outcome") || string.IsNullOrEmpty(closure.canonical))
             throw new InvalidDataException("Invalid canonical export contract closure.");
-        return new(contract, kind, ContentKey(canonical), canonical);
+        return new(contract, closure.kind, ContentKey(closure.canonical), closure.canonical);
     }
 
     (string Digest, string Statement) CheckExportStatement(string session, string proofModule, string leanPath)
     {
-        string path = Path.Combine(session, "LeanCILExportStatementProbe.lean");
-        File.WriteAllText(path, $$"""
-import {{proofModule}}
-import CIL.Interface.Closure
-set_option pp.fullNames true
-open Lean Meta Elab Command in
-run_cmd liftTermElabM do
-  let .thmInfo info <- getConstInfo `{{ExportTheorem}} | throwError "Expected a checked export theorem"
-  let canonical <- match CIL.Interface.canonicalExpression info.type with
-    | .ok value => pure value
-    | .error error => throwError "{error}"
-  let statement := toString (<- ppExpr info.type)
-  IO.println (Json.mkObj [("theorem", toJson "{{ExportTheorem}}"),
-    ("canonical", toJson canonical), ("statement", toJson statement)]).compress
-""");
-        string output = Run([LeanExecutable, path], session, leanPath, environment: LeanEnvironment,
-            progress: "Auditing the exact export statement");
-        JsonElement record = OneExportRecord(output, "theorem", ExportTheorem);
-        string canonical = record.GetProperty("canonical").GetString() ?? throw new InvalidDataException("Missing canonical export statement.");
-        string statement = record.GetProperty("statement").GetString() ?? throw new InvalidDataException("Missing checked export statement.");
-        if (canonical.Length == 0 || statement.Length == 0) throw new InvalidDataException("Empty export statement audit.");
-        return (ContentKey(canonical), statement);
+        AuditedOleans audited = AuditOleans(leanPath, [proofModule], [new(ExportTheorem, axioms: ApprovedAxioms, statement: true)]);
+        AuditedAxioms(audited.theorems[0]);
+        string statement = audited.theorems[0].statement ?? throw new InvalidDataException("Missing checked export statement.");
+        return (ContentKey(statement), statement);
     }
-
-    static JsonElement OneExportRecord(string output, string field, string expected)
-    {
-        List<JsonElement> records = [];
-        foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (!line.StartsWith('{')) continue;
-            JsonElement record = JsonSerializer.Deserialize<JsonElement>(line);
-            if (record.TryGetProperty(field, out JsonElement value) && value.GetString() == expected) records.Add(record);
-        }
-        return records.Count == 1 ? records[0] : throw new InvalidDataException("Missing or ambiguous export audit JSON for " + expected);
-    }
-
     static ContractInterface AddExportCertifications(ContractInterface sidecar, IReadOnlyList<CheckedContractExport> exports) =>
         sidecar with
         {
@@ -499,6 +428,7 @@ run_cmd liftTermElabM do
         JsonElement bindings = JsonSerializer.SerializeToElement(verified.Select(result => new
         {
             result.Export.Identity, result.Export.Profile, result.Export.Request.Contract, result.Export.Request.Theorem,
+            proofPath = Path.GetRelativePath(manifest.ProofRoot, result.Export.Proof).Replace('\\', '/'),
             result.Closure.Digest, result.StatementDigest, result.Statement
         }).ToArray(), ContractExportManifest.Json);
         return ContractSourceBundle.Publish(bundle, sources, expected, bindings, ContractInterface.CurrentFrameworkKey(), revision);
