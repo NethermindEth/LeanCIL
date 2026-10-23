@@ -118,11 +118,23 @@ def receiverFold (locals : List TypeExpr) (a b : RawInstruction) : Bool :=
 
 private def messageLoad (i : RawInstruction) : Bool := i.opcode == 114 || i.opcode == 20
 
-/-- `newobj` of a plainly named `System.Runtime` constructor taking `count` arguments: the raised type. -/
+/-- Admitted framework exceptions with parameterless/string constructors, plus the three
+    argument exceptions' two-string overloads. Other constructors remain unsupported. -/
+def exceptionConstructor (name : String) (count : Nat) : Bool :=
+  (count ≤ 1 && name ∈ ["System.Exception", "System.SystemException", "System.ApplicationException",
+    "System.ArithmeticException", "System.DivideByZeroException", "System.OverflowException",
+    "System.InvalidOperationException", "System.NotSupportedException", "System.NotImplementedException",
+    "System.ArgumentException", "System.ArgumentNullException", "System.ArgumentOutOfRangeException",
+    "System.IndexOutOfRangeException", "System.NullReferenceException", "System.FormatException"]) ||
+  (count == 2 && name ∈ ["System.ArgumentException", "System.ArgumentNullException", "System.ArgumentOutOfRangeException"])
+
+/-- An exact allowlisted `System.Runtime` constructor, including its complete signature. -/
 private def raisedType (count : Nat) : RawInstruction → Option String
   | ⟨_, 115, .call site⟩ => match site.declaringType, site.target with
-    | .atom scope name, .external _ =>
-      if scope == runtimeScope && plainName name.toList && site.name == ".ctor" && site.hasThis &&
+    | .atom scope name, .external signature =>
+      if scope == runtimeScope && exceptionConstructor name count &&
+        signature == runtimeScope ++ "::System.Void " ++ name ++ "::.ctor(" ++
+          ",".intercalate (List.replicate count "System.String") ++ ")" && site.name == ".ctor" && site.hasThis &&
         !site.returnsValue && site.typeArguments.isEmpty && site.parameterCount == count then some name else none
     | _, _ => none
   | _ => none
