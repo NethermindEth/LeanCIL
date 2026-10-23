@@ -437,6 +437,19 @@ if (retargetResult.Code != 1 || !retargetResult.Output.Contains("Constant value 
     throw new InvalidOperationException("An interface OfNat instance retargeted the import slot onto the caller: " + retargetResult.Output);
 Console.WriteLine("PASS an interface numeral instance cannot retarget the import premise onto the caller");
 Reset();
+File.Delete(Path.Combine(output, "verification.json"));
+// The interface weakens the contract and redefines the authoring command to print the honest closure.
+string honestClosure = closureLine[closureLine.IndexOf('{')..].Trim();
+contract["interfaceModules"]![0]!["source"] = "import CIL.Interface.Closure\n" +
+    interfaceSource.Replace("output = input + 1", "True", StringComparison.Ordinal) +
+    "\nmacro_rules\n  | `(#leancil_contract_closure $_:ident) => `(#eval IO.println " + JsonSerializer.Serialize(honestClosure) + ")\n";
+Save();
+Run(Command());
+Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"], "canonical closure digest mismatch");
+if (File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("A forged closure left a verification report.");
+Console.WriteLine("PASS interface macros cannot forge the canonical closure of a weakened contract");
+Reset();
 Run(Command());
 File.AppendAllText(Path.Combine(output, interfaceModule + ".lean"), "\n");
 Reject([.. cli, "check", output], "Stale or mismatched contract interface source");
