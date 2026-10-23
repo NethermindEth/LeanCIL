@@ -181,7 +181,7 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
         "instance" => "Invalid evaluation stack during reachability",
         "return" => "External managed dependency: System.Int64 System.Math::Min(System.Int32,System.Int32)",
         "argument" => "External managed dependency: System.Int32 System.Math::Min(System.Int32,System.Int64)",
-        "generic" => "External managed dependency: System.Int32 System.Math::Min(System.Int32,System.Int32)",
+        "generic" => "Generic contract imports are not supported in version 1.",
         "unsupported" => "External managed dependency: System.Int32 System.Math::CopySign(System.Int32,System.Int32)",
         _ => throw new InvalidOperationException("Unknown runtime mutation: " + mutation)
     };
