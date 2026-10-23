@@ -1395,6 +1395,7 @@ unsafe def main (args : List String) : IO Unit := do
                     leanPath: leanPath, progress: "Checking Proof: " + entry);
             }
             var built = OleanHashes(fresh, session);
+            RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
             string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"],
