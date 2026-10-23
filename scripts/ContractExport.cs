@@ -423,6 +423,7 @@ run_cmd liftTermElabM do
         JsonElement bindings = JsonSerializer.SerializeToElement(verified.Select(result => new
         {
             result.Export.Identity, result.Export.Profile, result.Export.Request.Contract, result.Export.Request.Theorem,
+            proofPath = Path.GetRelativePath(manifest.ProofRoot, result.Export.Proof).Replace('\\', '/'),
             result.Closure.Digest, result.StatementDigest, result.Statement
         }).ToArray(), ContractExportManifest.Json);
         return ContractSourceBundle.Publish(bundle, sources, expected, bindings, ContractInterface.CurrentFrameworkKey(), revision);

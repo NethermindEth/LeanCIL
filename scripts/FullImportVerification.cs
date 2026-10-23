@@ -31,7 +31,7 @@ partial class Program
         if (!ContractInterface.Digest(digest)) throw new InvalidDataException("Full-verification locator must name a content-addressed source bundle.");
         string simple = AssemblyNameReference.Parse(contract.AssemblyIdentity).Name;
         if (overrides.TryGetValue(simple, out string? replacement)) used.Add(simple);
-        string bundle = Path.GetFullPath(replacement ?? locator);
+        string bundle = replacement is not null ? Path.GetFullPath(replacement) : Path.GetFullPath(locator, Path.GetDirectoryName(sidecar)!);
         if (!Directory.Exists(bundle)) throw new InvalidDataException("Full verification source bundle is missing: " + bundle);
         if (Path.GetFileName(Path.TrimEndingDirectorySeparator(bundle)) != digest)
             throw new InvalidDataException("Full-verification source bundle override has the wrong content identity.");
@@ -77,7 +77,6 @@ partial class Program
         string callerRoots = WithoutToolchain(originalLeanPath);
         SortedDictionary<string, string> acceptedCaller = FullModuleArtifacts(callerRoots);
         SortedDictionary<string, string> originalModules = FullModulePaths(originalLeanPath);
-        string originalClaim = CaptureFullCallerClaim(callerSession, callerModule, callerTheorem, originalLeanPath);
         CheckFullResolution(callerSession, originalLeanPath, originalModules);
         JsonElement[] bindings = ExtractionIdentity.Read(output).Imports.OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
         if (bindings.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
@@ -92,7 +91,7 @@ partial class Program
         try
         {
             return VerifyFullImports(output, callerSession, callerModule, callerTheorem, overrides, bindings, originalLeanPath,
-                callerRoots, acceptedCaller, originalModules, originalClaim, workspace);
+                callerRoots, acceptedCaller, originalModules, workspace);
         }
         finally
         {
@@ -106,7 +105,7 @@ partial class Program
 
     FullImportResult VerifyFullImports(string output, string callerSession, string callerModule, string callerTheorem,
         IReadOnlyDictionary<string, string> overrides, JsonElement[] bindings, string originalLeanPath, string callerRoots,
-        SortedDictionary<string, string> acceptedCaller, SortedDictionary<string, string> originalModules, string originalClaim,
+        SortedDictionary<string, string> acceptedCaller, SortedDictionary<string, string> originalModules,
         string workspace)
     {
         string staging = Path.Combine(workspace, "staging");
@@ -202,13 +201,15 @@ partial class Program
                 progress: "Independent kernel replay of transferred library declarations");
         }
         string composition = "LeanCILFullComposition";
-        File.WriteAllText(Path.Combine(compositionDirectory, composition + ".lean"), FullCompositionSource(callerModule, callerTheorem, originalClaim, libraries));
+        File.WriteAllText(Path.Combine(compositionDirectory, composition + ".lean"), FullCompositionSource(callerModule, callerTheorem, libraries));
         CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
         Compile(composition, "Checking concrete library relocation and caller composition", untrusted: true);
         Run([checker, composition], callerSession, fullLeanPath, progress: "Independent kernel replay of the composed caller theorem");
-        AuditedOleans audited = AuditOleans(fullLeanPath, [composition], [new("LeanCILFullComposition.certified", axioms: ApprovedAxioms, statement: true)]);
+        AuditedOleans audited = AuditOleans(fullLeanPath, [composition], [new("LeanCILFullComposition.certified",
+            type: FullCompositionType(), axioms: ApprovedAxioms, statement: true)], FullCompositionConstants(callerTheorem, libraries));
         RequireAuditedModule(audited, composition, Path.Combine(compositionDirectory, composition + ".olean"));
         RecheckResolution();
+        RequireAuditedConstants(audited);
         AuditedAxioms(audited.theorems[0]);
         string audit = AuditText(audited.theorems[0]);
         PublishedImport[] imported = PublishedImports(JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json"))))
@@ -267,13 +268,9 @@ partial class Program
             if (request.GetProperty("theorem").GetString() != author || !ContractInterface.Constant(author) ||
                 request.GetProperty("contract").GetString() != export.ContractConstant)
                 throw new InvalidDataException("Full source bundle author theorem binding mismatch.");
-            JsonElement settings = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Within(bundle, "exports/" + selected + "/verification.json")));
-            string logicalArtifact = Path.GetFullPath(request.GetProperty("artifact").GetString()!, Path.Combine(staging, "original-path-base"));
-            string savedRoot = settings.TryGetProperty("proofRoot", out JsonElement savedProofRoot) && savedProofRoot.ValueKind == JsonValueKind.String
-                ? Path.GetFullPath(savedProofRoot.GetString()!, logicalArtifact)
-                : Path.GetFullPath(originalManifest.GetProperty("proofRoot").GetString()!, Path.Combine(staging, "original-path-base"));
-            string savedProof = Path.GetFullPath(settings.GetProperty("proof").GetString()!, logicalArtifact);
-            string proof = Within(consumer, Path.GetRelativePath(savedRoot, savedProof));
+            string proofPath = record.TryGetProperty("proofPath", out JsonElement recordedProof) && recordedProof.ValueKind == JsonValueKind.String
+                ? recordedProof.GetString()! : throw new InvalidDataException("Source bundle lacks a portable proof path; export the contracts again.");
+            string proof = Within(consumer, proofPath);
             if (!File.Exists(proof)) throw new InvalidDataException("Full source bundle is missing its rebased author proof.");
             string artifact = Path.Combine(staging, "regenerated-" + import.Slot);
             Run(["dotnet", ExtractorPath, "extract", implementation, export.Signature, artifact, certification.Profile],
@@ -424,7 +421,8 @@ run_cmd do
     static SortedDictionary<string, string> FullModulePaths(string leanPath)
     {
         SortedDictionary<string, string> modules = new(StringComparer.Ordinal);
-        foreach (string root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal))
+        foreach (string root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(Path.GetFullPath).Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal))
         {
             if (!Directory.Exists(root)) continue;
             foreach (string path in Directory.EnumerateFiles(root, "*.olean", SearchOption.AllDirectories))
@@ -432,7 +430,8 @@ run_cmd do
                 string name = ModuleName(Path.GetRelativePath(root, path).Replace('\\', '/'));
                 if (!ContractInterface.Constant(name)) continue;
                 string absolute = Path.GetFullPath(path);
-                if (modules.TryGetValue(name, out string? previous) && previous != absolute)
+                if (modules.TryGetValue(name, out string? previous) && !string.Equals(previous, absolute,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                     throw new InvalidDataException("Ambiguous full-verification module: " + name);
                 modules[name] = absolute;
             }
@@ -468,30 +467,40 @@ run_cmd do
         if (current.Count != expected.Count) throw new InvalidDataException("Full-verification module resolution lost a checked module.");
     }
 
-    string CaptureFullCallerClaim(string session, string module, string theorem, string leanPath)
+    static object FullCompositionType() => new { app = new object[] {
+        AuditConstant("LeanCILFullComposition.fullCallerClaim"), new { app = new[] {
+            AuditConstant("CIL.Safety.link"), AuditConstant("Extracted.program"), AuditConstant("LeanCILFullComposition.libraries") } } } };
+
+    static AuditConstantRequest[] FullCompositionConstants(string callerTheorem, IReadOnlyList<FullLibrary> libraries)
     {
-        string probe = Path.Combine(session, "FullOriginalCallerClaim.lean");
-        File.WriteAllText(probe, "import " + module + "\nimport CIL.Interface.Closure\n" + FullClaimSelector(theorem) + """
-open Lean Meta Elab Command in
-run_cmd liftTermElabM do
-  let expression <- Lean.Elab.Term.elabTerm (<- `(fullCallerClaim)) none
-  let reduced <- withTransparency .all (whnf (<- instantiateMVars expression))
-  let canonical <- match _root_.CIL.Interface.canonicalExpression reduced with
-    | .ok value => pure value
-    | .error message => throwError "{message}"
-  IO.println (Json.mkObj [("kind", toJson "full-caller-claim"), ("canonical", toJson canonical)]).compress
-""");
-        string output = Run([LeanExecutable, probe], session, leanPath, environment: LeanEnvironment,
-            progress: "Binding the original checked caller claim");
-        return OneExportRecord(output, "kind", "full-caller-claim").GetProperty("canonical").GetString()!;
+        static object App(params object[] parts) => new { app = parts };
+        static object ListConstant(string name) => new { @const = "List." + name, levels = new[] { 0 } };
+        object libraryType = AuditConstant("CIL.Safety.Library");
+        object list = App(ListConstant("nil"), libraryType);
+        foreach (FullLibrary library in libraries.Reverse())
+            list = App(ListConstant("cons"), libraryType, AuditConstant("LeanCILFullComposition.library" + library.Slot), list);
+        object claimType = new { forall = new object[] { AuditConstant("CIL.Program"), new { sort = 0 } } };
+        object givenType = App(AuditConstant("CIL.Safety.HoldsGiven"), AuditConstant("Extracted.program"),
+            AuditConstant("Extracted.ImportsHold"), new { bvar = 0 });
+        List<AuditConstantRequest> constants = [
+            new("LeanCILFullComposition.libraries", list),
+            new("LeanCILFullComposition.selectFullCallerClaim", new { lam = new object[] { claimType,
+                new { lam = new object[] { givenType, new { bvar = 1 } } } } }),
+            new("LeanCILFullComposition.fullCallerClaim", App(AuditConstant("LeanCILFullComposition.selectFullCallerClaim"),
+                "_", AuditConstant(callerTheorem)))];
+        foreach (FullLibrary library in libraries)
+            constants.Add(new("LeanCILFullComposition.library" + library.Slot, App(AuditConstant("CIL.Safety.Library.mk"),
+                AuditConstant(library.ExpectedModule + ".Extracted.method0"), App(ListConstant("drop"), AuditConstant("CIL.Method"),
+                    new { nat = 1 }, AuditConstant(library.ExpectedModule + ".Extracted.program")))));
+        return [.. constants];
     }
 
     static string FullClaimSelector(string theorem) =>
-        "private def selectFullCallerClaim {claim : _root_.CIL.Program -> Prop} " +
+        "def selectFullCallerClaim {claim : _root_.CIL.Program -> Prop} " +
         "(_given : _root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold claim) : _root_.CIL.Program -> Prop := claim\n" +
-        "private def fullCallerClaim : _root_.CIL.Program -> Prop := selectFullCallerClaim _root_." + theorem + "\n";
+        "def fullCallerClaim : _root_.CIL.Program -> Prop := selectFullCallerClaim _root_." + theorem + "\n";
 
-    static string FullCompositionSource(string callerModule, string callerTheorem, string originalClaim, IReadOnlyList<FullLibrary> libraries)
+    static string FullCompositionSource(string callerModule, string callerTheorem, IReadOnlyList<FullLibrary> libraries)
     {
         StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Interface.Closure\n");
         foreach (FullLibrary library in libraries) source.AppendLine("import " + library.Module).AppendLine("import " + library.ExpectedModule);
@@ -523,17 +532,8 @@ run_cmd liftTermElabM do
         source.AppendLine(FiniteLibraryProof(libraries.Count, "closed", false));
         source.AppendLine(FiniteLibraryProof(libraries.Count, "holds", true));
         source.AppendLine(FullClaimSelector(callerTheorem));
-        source.AppendLine($$"""
-open Lean Meta Elab Command in
-run_cmd liftTermElabM do
-  let expression <- Lean.Elab.Term.elabTerm (<- `(fullCallerClaim)) none
-  let reduced <- withTransparency .all (whnf (<- instantiateMVars expression))
-  let canonical <- match _root_.CIL.Interface.canonicalExpression reduced with
-    | .ok value => pure value
-    | .error message => throwError "{message}"
-  unless canonical == {{JsonSerializer.Serialize(originalClaim)}} do throwError "Full-verification caller claim changed during composition"
-""");
         source.AppendLine("theorem certified : fullCallerClaim (link Extracted.program libraries) := discharge _root_." + callerTheorem);
+        source.AppendLine("#print axioms certified");
         source.AppendLine("end LeanCILFullComposition");
         return source.ToString();
     }
