@@ -35,6 +35,7 @@ internal static class ValueBitCasts
                 {
                     "System.Runtime.Intrinsics.Vector128`1" => (".vector128", 16),
                     "System.Runtime.Intrinsics.Vector256`1" => (".vector256", 32),
+                    "System.Runtime.Intrinsics.Vector512`1" => (".vector512", 64),
                     _ => null
                 };
             return null;

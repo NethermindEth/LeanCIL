@@ -6,7 +6,8 @@ namespace CIL.Safety
     homes. The body and its recipe are parameters, independent of extraction. -/
 theorem word_frame_setup (body : CIL.Method) (specs : List (Option (BitVec 64)))
     (kinds : body.localKinds = wordKinds specs) (initializers : body.locals = wordInitializers specs)
-    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = []) (memory : Memory) (args : List Value)
+    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = [])
+    (opaqueLocals : body.opaqueVectorLocals = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
     ∃ frame result,
       enterFrame body args memory = .ok (frame, result) ∧
@@ -15,7 +16,8 @@ theorem word_frame_setup (body : CIL.Method) (specs : List (Option (BitVec 64)))
   obtain ⟨slots, owned, result, made, homes⟩ := make_word_locals memory memory.nextIdentity specs wellFormed
   let frame : Frame := ⟨memory.nextIdentity, slots, owned, []⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
-    simp only [enterFrame, kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes, List.map_nil,
+    simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
+      kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes, List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl
   exact ⟨frame, result, setup, homes, enterFrame_preserves_caller_memory _ _ _ _ _ setup,

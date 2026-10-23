@@ -46,7 +46,7 @@ theorem divRem_fields {lower upper divisor : CIL.W64} (fits : upper.toNat < divi
       remainder.toNat = (upper.toNat * 2 ^ 64 + lower.toNat) % divisor.toNat := by
   obtain ⟨quotient, remainder⟩ := CIL.X86.divRem64_fields (lower := lower) fits
   refine ⟨_, _, ?_, item1_of_tuple _ _ rest m, item2_of_tuple _ _ rest m, quotient, remainder⟩
-  simp [checkedIntrinsic, CIL.X86.divRemValue, CIL.X86.divRem64_ok fits, Except.mapError,
+  simp [checkedIntrinsic, CIL.Value.hasUnspecified, CIL.X86.divRemValue, CIL.X86.divRem64_ok fits, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 /-- `upper ≥ divisor`, including a zero divisor, is a located arithmetic fault, never a tuple. -/
@@ -54,6 +54,7 @@ theorem divRem_fault {lower upper divisor : CIL.W64} (overflows : divisor.toNat 
     checkedIntrinsic (.x86Base .divRem64) [.i64 lower, .i64 upper, .i64 divisor] =
       .error (.arithmetic (if divisor = 0 then .divideByZero else .overflow)) := by
   simp only [checkedIntrinsic, CIL.X86.divRemValue, CIL.X86.divRem64_fault overflows,
+    List.any_cons, List.any_nil, CIL.Value.hasUnspecified, Bool.false_or, Bool.false_eq_true, ite_false,
     Except.mapError, Bind.bind, Except.bind]
 
 #print axioms item1_of_tuple

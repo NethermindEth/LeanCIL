@@ -119,9 +119,11 @@ theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => root
   have readback := write_readback _ _ _ _ _ wrote
   rw [length] at readback
   have store : storeValue m2 (.address r) (.i64 v) = .ok m3 := by
-    simp only [storeValue, referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
+      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
   have fr2 := access_reference_valid _ _ _ _ _ writable2
   cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
+    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
     staticInstruction, fr2, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   simp only [leaveFrame, List.foldl_nil]
   exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))),
@@ -146,7 +148,8 @@ theorem add_linked : importsAdd linkedProgram := by
   have readback := write_readback _ _ _ _ _ wrote
   rw [length] at readback
   have store : storeValue m (.address res) (.i64 (x + y)) = .ok stored := by
-    simp only [storeValue, referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
+      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
@@ -154,6 +157,7 @@ theorem add_linked : importsAdd linkedProgram := by
   have lb := load_word64_of_read readB
   refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
+    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem root_linked : rootContract.Holds linkedProgram root :=
