@@ -106,7 +106,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 16 leaves, 46 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 17 leaves, 46 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -130,7 +130,8 @@ Test("independent export cohort map preserves 16 leaves, 46 base cases and one d
         ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"]),
         ["exportsstatics"] = ("statics", []),
         ["exportstransitive"] = ("transitive", []),
-        ["exportsdiscovery"] = ("discovery", ["discovery.fixture"])
+        ["exportsdiscovery"] = ("discovery", ["discovery.fixture"]),
+        ["exportstyped"] = ("typed", [])
     };
     void ExactPlan(IEnumerable<ExportSuite> plan)
     {
@@ -140,7 +141,7 @@ Test("independent export cohort map preserves 16 leaves, 46 base cases and one d
         {
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
-            Require(entry.Standalone == (entry.Cohort is "statics" or "transitive"), "Wrong standalone fixture kind: " + entry.Name);
+            Require(entry.Standalone == (entry.Cohort is "statics" or "transitive" or "typed"), "Wrong standalone fixture kind: " + entry.Name);
             Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
                 "Wrong bootstrapped child fixture: " + entry.Name);
             string script = entry.Cohort switch
@@ -148,11 +149,12 @@ Test("independent export cohort map preserves 16 leaves, 46 base cases and one d
                 "resolution" => "Tests/FullModuleResolution.cs",
                 "statics" => "Tests/ModularStaticExports.cs",
                 "transitive" => "Tests/TransitiveImports.cs",
+                "typed" => "Tests/GenericLayoutImports.cs",
                 _ => "Tests/ContractExport.cs"
             };
             Require(entry.Script == script,
                 "Wrong fixture: " + entry.Name);
-            Equal(entry.Arguments, entry.Cohort is "resolution" or "statics" or "transitive" ? [] : ["--cohort", entry.Cohort]);
+            Equal(entry.Arguments, entry.Cohort is "resolution" or "statics" or "transitive" or "typed" ? [] : ["--cohort", entry.Cohort]);
         }
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
@@ -184,7 +186,7 @@ Test("export coverage detects each omitted completion and invalid selection", ()
         "Default standalone must aggregate leaves");
     foreach (string[] invalid in new string[][] {
         ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"],
-        ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "transitive"] })
+        ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "transitive"], ["--cohort", "typed"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     foreach (string cohort in new[] { "core", "audit", "resolution", "statics", "transitive", "discovery", "typed", "unknown" })
     {
@@ -230,6 +232,11 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]), ["exportsstatics"]);
     Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
     Equal(VerificationSelection.Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
+    Equal(VerificationSelection.Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
+    foreach (string name in new[] { "TypedImportInterface", "TypedIdentityProof", "TypedCopyProof", "TypedIdentityCaller", "TypedCopyCaller" })
+        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportstyped"]);
+    Require(VerificationSelection.Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
+        "Imported-layout model evidence lost its existing suite owner");
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
     string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
     Require(runner.Contains(".. arguments", StringComparison.Ordinal) &&
@@ -241,6 +248,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Require(standalone.Contains("foreach (ExportSuite entry in ExportVerificationSuites.Plan())", StringComparison.Ordinal) &&
         standalone.Contains(".. entry.Arguments", StringComparison.Ordinal), "Standalone lost exact leaf dispatch");
     Require(!standalone.Contains("\"Tests/TransitiveImports.cs\"", StringComparison.Ordinal), "Old nested transitive suite remains");
+    Require(!standalone.Contains("\"Tests/GenericLayoutImports.cs\"", StringComparison.Ordinal), "Old nested typed suite remains");
     Require(!standalone.Contains("\"Tests/ContractDiscovery.cs\"", StringComparison.Ordinal) &&
         standalone.Contains("if (cohort == \"discovery\")", StringComparison.Ordinal) &&
         standalone.Contains("ExportVerificationSuites.DiscoveryArguments(", StringComparison.Ordinal) &&
@@ -279,6 +287,12 @@ Test("a missing registered export fixture fails selection", () =>
         catch (InvalidDataException error) { rejection = error.Message; }
         Require(rejection == "Missing registered export fixture: Tests/ContractDiscovery.cs",
             "A missing discovery child fixture was silently skipped: " + rejection);
+        File.WriteAllText(Path.Combine(isolated, "Tests/ContractDiscovery.cs"), "");
+        rejection = null;
+        try { VerificationSelection.SuiteInputs(isolated); }
+        catch (InvalidDataException error) { rejection = error.Message; }
+        Require(rejection == "Missing registered export fixture: Tests/GenericLayoutImports.cs",
+            "A missing standalone typed fixture was silently skipped: " + rejection);
     }
     finally { Directory.Delete(isolated, recursive: true); }
 });

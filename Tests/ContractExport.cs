@@ -245,7 +245,7 @@ string genericOutput = Path.Combine(root, "Restriction-generic");
 (int Code, string Output, string Stdout, string Stderr) generic = Execute([.. cli, "extract", library,
     "ImportFixture.Library::Generic(ulong)", genericOutput]);
 if (generic.Code != 1 || !generic.Output.Contains(
-    "Unsupported method metadata or static initialisation: System.UInt64 ImportFixture.Library::Generic(System.UInt64)", StringComparison.Ordinal) ||
+    "Contract method requires an exact closed generic instantiation.", StringComparison.Ordinal) ||
     File.Exists(Path.Combine(genericOutput, "Extracted.lean")) || File.Exists(Path.Combine(genericOutput, "identity.json")) ||
     File.Exists(Path.Combine(genericOutput, "verified.json")) || Sha(sidecar) != restricted)
     throw new InvalidOperationException("An open generic export candidate was not rejected before extraction: " + generic.Output);
@@ -400,9 +400,6 @@ Console.WriteLine("PASS a failing library contract cannot replace a published si
 completed.CompleteCase("core.incorrect-post");
 
 completed.Finish();
-
-Run(["dotnet", "run", "--file", "Tests/GenericLayoutImports.cs"],
-    progress: "Typed generic imports and imported struct layouts");
 
 partial class Program
 {
