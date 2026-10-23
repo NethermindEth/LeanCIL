@@ -7,7 +7,8 @@ internal static class ExportVerificationSuites
     [
         Entry("exports", "core", "contract production, restrictions and caller reuse",
             ["core.unrelated", "core.definition", "core.wrapper-true", "core.publication", "core.caller",
-             "core.internal", "core.instance", "core.initialized", "core.imports", "core.profile", "core.reference",
+             "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
+             "core.initialized", "core.imports", "core.profile", "core.reference",
              "core.bundle-location", "core.framework-change", "core.interface-text", "core.duplicate",
              "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post"]),
         Entry("exportsaudit", "audit", "post-callback export integrity",
@@ -41,7 +42,8 @@ internal static class ExportVerificationSuites
     }
 
     internal static ExportSuite[] FullPlan() => Plan().Where(entry => IsFull(entry.Cohort)).ToArray();
-    internal static bool IsFull(string cohort) => cohort is not ("core" or "audit" or "resolution");
+    internal static bool IsFull(string cohort) => cohort is "composition" or "consumer" or "ordinary" or "pair" or
+        "checks" or "theorems" or "ordinary-artifact" or "consumer-artifact" or "consumer-source" or "consumer-shadow";
 
     internal static string? Select(string[] args, bool full = false)
     {

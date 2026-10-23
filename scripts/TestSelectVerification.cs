@@ -106,12 +106,13 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves all 43 real cases", () =>
+Test("independent export cohort map preserves all 46 real cases", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
         ["exports"] = ("core", ["core.unrelated", "core.definition", "core.wrapper-true", "core.publication", "core.caller",
-            "core.internal", "core.instance", "core.initialized", "core.imports", "core.profile", "core.reference",
+            "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
+            "core.initialized", "core.imports", "core.profile", "core.reference",
             "core.bundle-location", "core.framework-change", "core.interface-text", "core.duplicate",
             "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post"]),
         ["exportsaudit"] = ("audit", ["audit.proof-source", "audit.wrapper-artifact"]),
@@ -143,12 +144,15 @@ Test("independent export cohort map preserves all 43 real cases", () =>
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
     ExactPlan(all);
-    Require(all.SelectMany(entry => entry.Cases).Count() == 43 &&
-        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 43, "Lost or duplicate base behavior");
+    Require(all.SelectMany(entry => entry.Cases).Count() == 46 &&
+        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 46, "Lost or duplicate base behavior");
     foreach (ExportSuite omitted in all)
         MustReject(() => ExactPlan(all.Where(entry => entry.Name != omitted.Name)));
     Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Name),
         all.Where(entry => entry.Cases.All(id => id.StartsWith("full.", StringComparison.Ordinal))).Select(entry => entry.Name));
+    Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Cohort).Order(StringComparer.Ordinal),
+        new[] { "composition", "consumer", "ordinary", "pair", "checks", "theorems",
+            "ordinary-artifact", "consumer-artifact", "consumer-source", "consumer-shadow" }.Order(StringComparer.Ordinal));
     foreach (ExportSuite entry in all)
     {
         if (entry.Cohort != "resolution")
@@ -164,8 +168,11 @@ Test("export coverage detects each omitted completion and invalid selection", ()
     foreach (string[] invalid in new string[][] {
         ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"], ["--cohort", "resolution"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
-    foreach (string cohort in new[] { "core", "audit", "resolution", "unknown" })
+    foreach (string cohort in new[] { "core", "audit", "resolution", "statics", "transitive", "discovery", "typed", "unknown" })
+    {
+        Require(!ExportVerificationSuites.IsFull(cohort), "Standalone or unknown cohort entered full verification: " + cohort);
         MustReject(() => ExportVerificationSuites.Select(["--cohort", cohort], full: true));
+    }
     ExportSuite[] all = ExportVerificationSuites.Plan();
     MustReject(() => ExportVerificationSuites.Validate([]));
     MustReject(() => ExportVerificationSuites.Validate(all.Append(all[0])));

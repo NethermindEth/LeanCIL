@@ -203,7 +203,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 
 | Name | Cases |
 | --- | --- |
-| `exports` | Production, wrapper-True rejection, restrictions and caller reuse |
+| `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
 | `exportsresolution` | Same loaded files and changed loaded module |
 | `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal |
@@ -217,13 +217,15 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
 
-The base coverage ledger has 43 cases: 19 core, 2 callback, 2 resolution and
+The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
 The artifact-mode rejection follows real consumer positives so it still checks
 removal of an actual successful report. The default eight-argument
 `Tests/FullImportVerification.cs` invocation runs resolution and all full cohorts
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
+The full plan contains only its ten explicit base cohorts. Later standalone
+statics, transitive, discovery and typed suites cannot enter that plan.
 
 New cohort durations are unmeasured. The existing CI caps remain 90 minutes
 for imports, 120 for each exports leaf, and 30 for other suites. The matrix
