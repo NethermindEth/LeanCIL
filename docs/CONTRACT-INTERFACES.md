@@ -121,8 +121,12 @@ CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold claim
 ```
 
 This retains both `Links` and the required imported contracts. The theorem audit
-checks this shape in addition to the existing theorem-kind and transitive axiom
-audit. This shape check does not establish that an arbitrary `claim` is useful.
+(`leancil-audit`, on replayed oleans) compares the compiled theorem type with this
+application structurally, so no binder may precede it, and requires the compiled
+value of `Extracted.ImportsHold` to equal the conjunction rebuilt from
+`identity.json`: each slot's root contract at the canonical `Nat` numeral. An
+interface `OfNat` instance, notation or elaborator therefore cannot retarget a
+slot. This shape check does not establish that an arbitrary `claim` is useful.
 The caller proof supplies the intended claim. A concrete linked implementation
 must separately discharge the import contracts before this conditional result
 can establish an unconditional application guarantee.

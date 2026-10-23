@@ -83,7 +83,7 @@ inductive FrameAction where
 
 def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : ExecutionResult CIL.Value :=
   if operands.any CIL.Value.hasUnspecified then
-    match CIL.evalIntrinsic operation operands with
+    match CIL.evalUnspecifiedIntrinsic operation operands with
     | some value => .ok value
     | none => .error (.unsupported "Intrinsic observes unspecified vector bits")
   else match operation with

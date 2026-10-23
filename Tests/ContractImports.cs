@@ -223,7 +223,7 @@ Run(Command());
 void RejectUnrelatedTheorem(string proof, params string[] options)
 {
     (int Code, string Output, string Stdout, string Stderr) result = Execute([.. cli, "verify", output, "--proof", proof, .. options]);
-    string[] diagnostics = ["Application type mismatch", "LeanCILImportAudit.requireConditional", "HoldsGiven"];
+    string[] diagnostics = ["Theorem statement mismatch: ExampleProof.correctness"];
     if (result.Code != 1 || diagnostics.Any(diagnostic => !result.Output.Contains(diagnostic, StringComparison.Ordinal)) ||
         File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("Unrelated theorem did not fail the imported-claim audit or left a verification report: " + result.Output);
