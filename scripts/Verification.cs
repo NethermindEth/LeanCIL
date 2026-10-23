@@ -721,6 +721,9 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         // Bound before any proof or support build can run code in this session.
         auditExecutable = Path.Combine(library, ".lake/build/bin", OperatingSystem.IsWindows() ? "leancil-audit.exe" : "leancil-audit");
         auditExecutableSha = File.Exists(auditExecutable) ? Sha(auditExecutable) : null;
+        // Workflow artifacts drop the mode bits that the cache manifest does not cover.
+        if (!OperatingSystem.IsWindows() && auditExecutableSha is not null)
+            File.SetUnixFileMode(auditExecutable, File.GetUnixFileMode(auditExecutable) | UnixFileMode.UserExecute);
         return library;
     }
 
