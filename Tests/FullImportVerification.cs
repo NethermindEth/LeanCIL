@@ -47,7 +47,9 @@ void AssertIndependent(string output)
     if (report.GetProperty("imports")[0].GetProperty("acceptedVia").GetString() != "independently-verified" ||
         report.GetProperty("imports")[0].GetProperty("sourceBundleDigest").GetString() != Path.GetFileName(bundle) ||
         report.GetProperty("compositionTheorem").GetString() != "LeanCILFullComposition.certified" ||
-        !report.GetProperty("compositionAudit").GetString()!.Contains("LeanCILFullComposition.certified", StringComparison.Ordinal))
+        !report.GetProperty("compositionAudit").GetString()!.Contains("LeanCILFullComposition.certified", StringComparison.Ordinal) ||
+        // The published statement must carry the checked static link, not only the raw link.
+        !report.GetProperty("compositionAudit").GetString()!.Contains("linkChecked", StringComparison.Ordinal))
         throw new InvalidOperationException("Full verification did not publish the independently checked composition and source identity.");
 }
 

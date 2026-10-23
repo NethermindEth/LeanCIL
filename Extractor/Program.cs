@@ -216,7 +216,7 @@ internal static class Program
             }
             stage = "metadata and CIL validation";
             using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly));
-            string source = LeanEmitter.Emit(methods, profile, originalModule, imports);
+            string source = LeanEmitter.Emit(methods, profile, originalModule, imports, staticIdentities);
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
                 .Where(i => i.OpCode.Code == Code.Ldsfld)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);

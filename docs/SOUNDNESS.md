@@ -122,21 +122,28 @@ A null managed reference is a distinct value, not address zero. `Unsafe.NullRef<
 Static data is immutable, extraction-bound RVA storage with field identities retained separately from contents. Static initializers that could execute unmodelled code are rejected.
 
 Generated static identities are unsigned natural numbers from SHA-256 of the
-full assembly identity and full field name. Each UTF-8 component is preceded by
+full assembly identity and full field name. The assembly identity text is
+`Name, Version=a.b.c.d, Culture=<culture or neutral>, PublicKeyToken=<16 lowercase
+hex digits or null>`, followed by `, Retargetable=Yes` for a retargetable name. It
+is built from the name's components, not from a metadata library's display string.
+The field name is Mono.Cecil's `FieldReference.FullName`,
+`<field type> <declaring type>::<name>`. A fixed test vector detects a change to
+either text or to the encoding. Each UTF-8 component is preceded by
 its byte length as a little-endian 32-bit integer. The hash bytes are interpreted
 as one unsigned big-endian number. MVID and method bodies are excluded. No proof
 assumes that this hash is injective. Extraction and import checks reject key
-collisions, and `linkChecked` checks every linked descriptor for compatibility.
+collisions. Full verification also proves `linkChecked` for the composed program,
+so every linked descriptor is compatible there.
 The raw `link` function has no collision guarantee.
 
 `StaticWorldValid descriptors memory` constrains cached contents only for the
 listed descriptors. `StaticRegistryValid memory` still requires unique keys,
 distinct allocations and live immutable storage for every registry entry.
 Thus another assembly's loaded fields do not make a library world false.
-Composition joins descriptor lists over one memory with disjoint keys; it does
-not merge memories or infer allocation disjointness from key disjointness.
-`StaticIdentitiesAbsent` supplies a public first-use premise. Repeated calls
-with loaded fields require a content predicate instead of this absence premise.
+Composition joins descriptor lists over one memory whose shared keys name equal
+descriptors; it does not merge memories or infer allocation disjointness from key
+disjointness. `StaticIdentitiesAbsent` supplies a public first-use premise only.
+Repeated calls with loaded fields use a published `StaticWorldValid` precondition.
 RVA exports carry a kernel-checked static identity set in their certification.
 Import extraction recomputes the selected implementation's reachable static set
 at the selected profile. This analysis remains trusted metadata processing, not
@@ -173,7 +180,7 @@ A non-covered opcode cannot emit a literal, arithmetic, comparison, conversion, 
 
 The scalar extension does not verify the whole extractor or establish a concrete CLI-to-model simulation. Non-scalar operations at non-covered opcodes keep their existing specialized checks or stack-effect fallback; runtime models emitted for external calls are outside the scalar certificate. Metadata decoding, faithful raw input and static-data serialization, external runtime-model correspondence, and correspondence between the model and the runtime remain explicit trust assumptions.
 
-The verifier compiles a separate audit importing only `Extracted`. It requires `Extracted.translation_valid` to be a theorem of the exact `TranslationValid rawLayouts computedLayouts methodEvidence imports program` type, audits its transitive axioms, prints `Extracted.imports` into the recorded audit and kernel-replays it. A missing certificate, an unrelated `True` theorem, a non-theorem declaration or a certificate over a different import table cannot substitute for this check. Malformed-layout, omitted-site, home-redirection, generic-substitution, feature-pruning, forged type-test and whole-program evidence regressions exercise the validators independently of positive example proofs.
+The verifier compiles a separate audit importing only `Extracted`, which restates `Extracted.translation_valid` at the exact `TranslationValid rawLayouts computedLayouts methodEvidence imports program` type and prints `Extracted.imports` into the recorded audit, and kernel-replays it. The theorem audit below then requires the compiled `ExtractionAudit.valid` (in batches, each `Extracted.translation_valid`) to be a theorem whose type is that application, compared structurally, and audits its transitive axioms. A missing certificate, an unrelated `True` theorem, a non-theorem declaration or a certificate over a different import table cannot substitute for this check. Malformed-layout, omitted-site, home-redirection, generic-substitution, feature-pruning, forged type-test and whole-program evidence regressions exercise the validators independently of positive example proofs.
 
 ## Artifact integrity
 
@@ -181,7 +188,7 @@ The extractor reads assembly bytes without loading/executing the assembly. It ch
 
 The verification driver builds and kernel-replays a source-keyed library before publishing it to a local cache. The key binds CIL sources, build configuration, platform and selected Lean compiler. Cache manifests cover every cached file; changed, missing or unexpected artifacts cause a rebuild. Each verification copies the validated base into a private session before building proof dependencies. `--fresh` and CI runs bypass cache reads and writes. Reports record the library key and whether the base was freshly built or reused. The installed `leancil verify` command uses the Lean sources bundled with the tool and the same verification implementation as the repository scripts. Library builds use temporary directories; generated code and proofs use an explicit isolated Lean module root. Within one process the driver may reuse that session only while source hashes remain identical. Every generated program and proof uses a separate fresh module directory. The generated module, proof module and privately built support modules are independently kernel-replayed, so disabling kernel type checking during elaboration cannot manufacture a successful report. Locally cached consumer modules that import `Extracted` are restored only to skip rebuilding: they are always kernel-replayed against the freshly built extraction, which is itself never restored. `Extracted.lean` omits the assembly hash; the extraction integrity check and the report bind the actual assembly. Transitive theorem axioms are audited separately. Reports use schema 3 and require an independently kernel-replayed extraction certificate as well as the selected theorem; older reports must be regenerated. A report is written only after a second identity/source check. A failed proof attempt removes the previous report at its output path.
 
-The repository script's `--check` checks the report's selected theorem, proof/framework/tool inputs, generated artifact and assembly identity. It does not rerun the kernel and is not a cryptographic signature against a party able to forge the entire report and toolchain. `leancil check` checks extraction artifacts only. `leancil verify` always reruns verification using the selected proof and theorem. `verification.json` stores that selection separately from results, survives failed proofs and is hashed into the report's inputs. An older report can supply the initial selection during migration; neither settings nor an earlier report are proof evidence. The displayed statement is the selected theorem's Lean-printed type from the audit, not a generated English claim of correctness.
+The repository script's `--check` checks the report's selected theorem, proof/framework/tool inputs, generated artifact and assembly identity. It does not rerun the kernel and is not a cryptographic signature against a party able to forge the entire report and toolchain. `leancil check` checks extraction artifacts only. `leancil verify` always reruns verification using the selected proof and theorem. `verification.json` stores that selection separately from results, survives failed proofs and is hashed into the report's inputs. An older report can supply the initial selection during migration; neither settings nor an earlier report are proof evidence. The displayed statement is the selected theorem's type as the theorem audit prints it, not a generated English claim of correctness. It is printed without the proof's notations, so operators appear as their functions (`HAdd.hAdd`); numerals still print as digits whatever `OfNat` instance they use, so a statement is checked against a stated type only where an audit names one.
 
 `Extracted.signatures` lists each method's emitted metadata signature in program order. It is covered by the generated-source hash and the extraction integrity check, not by `TranslationValid`; `CIL.MethodIdentity` uses it only to choose an index, and every binding it emits is a kernel-checked `rfl` over the same `Extracted.program`.
 
@@ -193,7 +200,13 @@ Portable consumer support manifests require an independently trusted SHA256 and 
 
 Local consumer support generations are a cache, not part of the trusted base. A restored module is reused only when its local HMAC receipt and every file hash verify, its recorded source hashes and compiled imports match the current snapshot, and Lake leaves its bytes unchanged after the build; otherwise every module is replayed. Each such artifact was kernel-replayed (or restored under the same rules) by an earlier successful verification. The key binds the variables Lean, Lake and elan read, not the whole process environment: an elaborator that reads another variable is not tracked by Lake's own traces either, and its output is still kernel-replayed when first certified. Name such variables in `LEANCIL_CACHE_ENVIRONMENT`, or use `--fresh`.
 
-Batch verification shares a source snapshot, workspace builds and kernel replay only between requests with identical generated CIL. Each request's theorem audit runs in a separate Lean process that imports only its proof module, so another request's notations or elaborators cannot affect its printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
+Batch verification shares a source snapshot, workspace builds and kernel replay only between requests with identical generated CIL. Each request's theorem audit loads only its own proof module's replayed oleans and runs none of their code, so no request's notations or elaborators can affect any printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
+
+## Theorem audit
+
+Proof and publisher Lean source is untrusted. Elaborating it runs its code: `elab_rules`, macros, instances, `run_cmd` and, in any module importing it, `initialize`. Audits therefore never elaborate a module whose import closure contains such source, and never read its output. `leancil-audit` (`CIL/OleanAudit.lean`, built with the library before any proof) imports the replayed oleans with `importModules (loadExts := false)`: no environment extension, attribute, elaborator, notation or initializer from them runs, and toolchain modules precede `LEAN_PATH` so none can be shadowed. For each requested theorem it requires a `theorem` declaration, compares its type structurally (after removing metadata, without unfolding or instance resolution) with an expected expression when one is given, computes the axiom closure itself by walking declaration bodies, ignoring the axiom summaries stored in oleans, and reports a `Not (... .Holds ...)` refutation. It writes JSON that the driver checks against the allowed axioms. Request and result formats are documented at the top of the source; constants can also be required to have an exact value.
+
+The audit does not type-check: it is sound only on bytes that kernel replay accepted. The driver hashes every olean of the session library and the proof directory before building the proof, requires the build to leave them unchanged and to add only the proof module's own oleans, replays them, audits, and rehashes the set afterwards; the checker executable is hashed when the library is built and before every run, and each audited module must resolve to the hashed file. This binds the replayed and audited bytes against anything the proof build does while it runs. It does not contain a build that leaves a process behind, which could exchange files between hashing and reading or alter the toolchain, the checker or this driver. Building untrusted source must therefore run isolated: a disposable container or user account, with its process tree ended before verification continues and nothing it could write trusted afterwards.
 
 ## Negative evidence
 
@@ -259,7 +272,8 @@ fully qualified canonical contract predicates. The library's implementation
 proofs and full-verification bundle are not needed for this caller check.
 
 The consumer audits the supplied interface sources and their canonical contract
-closures. The closure representation includes definition values, theorem and
+closures. `leancil-audit` computes both from the kernel-replayed interface oleans,
+in one walk per root that visits each declaration once. The closure representation includes definition values, theorem and
 inductive types, constructor metadata and computational recursor metadata/rules.
 It removes binder names and expression metadata, uses de Bruijn indices, and
 normalizes universe binders. Imported framework/toolchain module identity defines

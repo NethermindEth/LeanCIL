@@ -47,7 +47,7 @@ partial class Program
 
     void PreflightFullImports(string output, IReadOnlyDictionary<string, string> overrides)
     {
-        JsonElement[] imports = ImportedBindings(output);
+        JsonElement[] imports = ExtractionIdentity.Read(output).Imports;
         if (imports.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         HashSet<string> used = new(StringComparer.Ordinal);
         foreach (JsonElement binding in imports) SelectFullBundle(output, binding, overrides, used);
@@ -79,7 +79,7 @@ partial class Program
         SortedDictionary<string, string> originalModules = FullModulePaths(originalLeanPath);
         string originalClaim = CaptureFullCallerClaim(callerSession, callerModule, callerTheorem, originalLeanPath);
         CheckFullResolution(callerSession, originalLeanPath, originalModules);
-        JsonElement[] bindings = ImportedBindings(output).OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
+        JsonElement[] bindings = ExtractionIdentity.Read(output).Imports.OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
         if (bindings.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         for (int index = 0; index < bindings.Length; index++)
             if (bindings[index].GetProperty("slot").GetInt32() != index)
@@ -206,11 +206,11 @@ partial class Program
         CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
         Compile(composition, "Checking concrete library relocation and caller composition", untrusted: true);
         Run([checker, composition], callerSession, fullLeanPath, progress: "Independent kernel replay of the composed caller theorem");
-        string auditPath = Path.Combine(compositionDirectory, "CompositionAudit.lean");
-        File.WriteAllText(auditPath, "import " + composition + "\n#check LeanCILFullComposition.certified\n#print axioms LeanCILFullComposition.certified\n");
-        string audit = Run([LeanExecutable, auditPath], callerSession, fullLeanPath, progress: "Auditing the independently composed theorem");
+        AuditedOleans audited = AuditOleans(fullLeanPath, [composition], [new("LeanCILFullComposition.certified", axioms: ApprovedAxioms, statement: true)]);
+        RequireAuditedModule(audited, composition, Path.Combine(compositionDirectory, composition + ".olean"));
         RecheckResolution();
-        AuditedAxioms(audit, "LeanCILFullComposition.certified");
+        AuditedAxioms(audited.theorems[0]);
+        string audit = AuditText(audited.theorems[0]);
         PublishedImport[] imported = PublishedImports(JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json"))))
             .Select(import => import with
             {
@@ -493,7 +493,7 @@ run_cmd liftTermElabM do
 
     static string FullCompositionSource(string callerModule, string callerTheorem, string originalClaim, IReadOnlyList<FullLibrary> libraries)
     {
-        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Interface.Closure\n");
+        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Safety.StaticLinking\nimport CIL.Interface.Closure\n");
         foreach (FullLibrary library in libraries) source.AppendLine("import " + library.Module).AppendLine("import " + library.ExpectedModule);
         source.AppendLine("namespace LeanCILFullComposition\nopen CIL.Safety");
         foreach (FullLibrary library in libraries)
@@ -514,6 +514,8 @@ run_cmd liftTermElabM do
         source.AppendLine("def specifications : List Relocatable := [" + string.Join(", ", libraries.Select(library =>
             "_root_.CIL.Safety." + (library.Kind == "method" ? "MethodContract" : "OutcomeContract") + ".relocatable _root_." + library.Contract)) + "]");
         source.AppendLine("theorem app_prefix : Links Extracted.program (link Extracted.program libraries) := link_links _ _");
+        // Equal static identities must name equal descriptors across the whole linked program.
+        source.AppendLine("theorem staticLink : linkChecked Extracted.program libraries = .ok (link Extracted.program libraries) :=\n  linkChecked_of_compatible (by decide +kernel)");
         foreach (FullLibrary library in libraries)
             source.AppendLine("theorem relocation" + library.Slot + " : RelocatesInto library" + library.Slot + ".program " +
                 "(link Extracted.program libraries) (linkSlot Extracted.program libraries " + library.Slot + ") := link_relocates Extracted.program libraries (j := " + library.Slot + ") (by decide)");
@@ -533,7 +535,7 @@ run_cmd liftTermElabM do
     | .error message => throwError "{message}"
   unless canonical == {{JsonSerializer.Serialize(originalClaim)}} do throwError "Full-verification caller claim changed during composition"
 """);
-        source.AppendLine("theorem certified : fullCallerClaim (link Extracted.program libraries) := discharge _root_." + callerTheorem);
+        source.AppendLine("theorem certified : linkChecked Extracted.program libraries = .ok (link Extracted.program libraries) /\\\n    fullCallerClaim (link Extracted.program libraries) :=\n  And.intro staticLink (discharge _root_." + callerTheorem + ")");
         source.AppendLine("end LeanCILFullComposition");
         return source.ToString();
     }

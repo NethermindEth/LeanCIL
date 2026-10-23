@@ -88,9 +88,10 @@ across method gates.
 
 ## Replay
 
-Kernel replay and the theorem audit run the pinned toolchain's `lean` directly
-with the `LEAN_PATH` that `lake env` resolves after the build (and `LEAN_SYSROOT`
-set to that toolchain), instead of starting Lake again for each step. The
+Kernel replay and the theorem audit run the pinned toolchain's `leanchecker` and the
+library's `leancil-audit` directly with the `LEAN_PATH` that `lake env` resolves after
+the build (and `LEAN_SYSROOT` set to that toolchain), instead of starting Lake again
+for each step. The audit reads the replayed oleans and elaborates no consumer source. The
 resolved import paths are still compared with those resolved before the build.
 
 ## Batch verification
@@ -270,12 +271,23 @@ Static identities are stable across separate extractions and body-only rebuilds.
 They use the full assembly identity and full field name. `StaticWorldValid`
 describes the fields in its descriptor list and permits other loaded immutable
 fields in the same valid registry. Its `append`, `left`, `right` and `mono` lemmas
-support worlds over the same memory. Append requires disjoint field identities.
-`StaticIdentitiesAbsent` lets an exported first-use contract name only its public
-identity list. It does not describe a field that was already loaded; that case
-needs a content predicate. `linkChecked` in `CIL.Safety.StaticLinking` rejects
-conflicting descriptors and names both fields. The raw `link` API remains a pure
-construction without that check.
+support worlds over the same memory. Append requires equal identities to name equal
+descriptors, so two exports that read one shared table compose.
+
+An export that can run after its tables are loaded, including a repeated call,
+should take `StaticWorldValid published memory` as its precondition and restate it
+for the final memory in its postcondition. `published` lists literal descriptors
+(identity, assembly identity, field name and bytes) in an interface module. A
+published descriptor that differs from the extracted one leaves the author proof
+unprovable, so no separate equality audit is needed. `StaticIdentitiesAbsent`
+suits only a first-use contract: after the first call the field is loaded and the
+premise is false.
+
+Full verification proves `linkChecked` for the composed program inside
+`LeanCILFullComposition.certified`, which rejects conflicting descriptors and
+names both fields. A published-certification import has no linked program; there
+the extractor's static identity checks and the `StaticWorldValid` premises guard
+collisions. The raw `link` API remains a pure construction without that check.
 
 The default output is `<assembly-simple-name>.leancil.contracts` next to the DLL.
 Use `--output path.leancil.contracts` to select another path. Publication is atomic
