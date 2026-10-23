@@ -88,8 +88,8 @@ instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
 
 private def opaqueEligible (closed : RawMethod) (addressed : List Nat) (index : Nat) : Bool :=
   (match closed.locals[index]? with
-  | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom scalarScope "System.UInt64")) =>
-    scope == intrinsicScope && scalarScope == "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+  | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom elementScope "System.UInt64")) =>
+    scope == intrinsicScope && elementScope == scalarScope
   | _ => false) && !addressed.contains index
 
 def opaqueLocalIndices (closed : RawMethod) : List Nat :=
