@@ -56,6 +56,9 @@ void Save(bool bind = true, bool updatePin = true)
 
 void Reset()
 {
+    // A proof selection left by an earlier run or a consumer check must not steer the next verification.
+    Directory.CreateDirectory(output);
+    File.Delete(Path.Combine(output, "verification.json"));
     File.Copy(originalApp, app, true);
     File.Copy(originalLibrary, library, true);
     expectedHash = Sha(library);
@@ -260,8 +263,6 @@ if (!consumerStages.Any(stage => stage.GetProperty("stage").GetString() == "Chec
     throw new InvalidOperationException("The caller audit did not build all import modules omitted by the unrelated proof.");
 Console.WriteLine("PASS ordinary and consumer import audits reject unrelated theorems without verification reports");
 Reset();
-// Earlier consumer checks leave a --proof-root selection that these ordinary proofs must not inherit.
-File.Delete(Path.Combine(output, "verification.json"));
 Run(Command());
 string falseCaller = Path.Combine(directory, "ImplicitFalse.lean");
 File.WriteAllText(falseCaller, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness {h : False} :\n    CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun _ => False) := h.elim\nend ExampleProof\n");
@@ -279,7 +280,6 @@ using (ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(Fi
     body.GetILProcessor().InsertAfter(call, Instruction.Create(OpCodes.Call, (MethodReference)call.Operand));
     module.Write(app);
 }
-File.Delete(Path.Combine(output, "verification.json"));
 contract["interfaceModules"]![0]!["source"] = originalInterface + "\ninstance (priority := high) retarget : OfNat Nat 1 := { ofNat := 0 }\n";
 Save();
 Run(Command());
