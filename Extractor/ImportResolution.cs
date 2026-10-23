@@ -9,8 +9,8 @@ internal sealed class ImportResolution : IDisposable
     // A discovered sidecar is read only when a call site needs its library, so unused sidecars need no pins.
     internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256, string ExpectedInterfaceDigest, bool Discovered = false);
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
-        string Kind, string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
-        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ExpectedInterfaceDigest, string ContractKind,
+        string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
+        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ContractKind,
         string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     readonly List<Library> libraries = [];
@@ -82,6 +82,8 @@ internal sealed class ImportResolution : IDisposable
             throw new InvalidDataException("Contract imports support call only, not callvirt, newobj or ldftn.");
         if (reference is GenericInstanceMethod || reference.HasGenericParameters || reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters)
             throw new InvalidDataException("Generic contract imports are not supported in version 1.");
+        if (reference.DeclaringType.Scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" or "System.Private.CoreLib" or "mscorlib" or "netstandard")
+            throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Contract imports from framework assemblies are not supported.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
         if (!libraries.Any(candidate => candidate.Interface.AssemblyIdentity == assembly) &&
             discovered.Remove(reference.DeclaringType.Scope.Name, out Source? pending))
@@ -129,8 +131,8 @@ internal sealed class ImportResolution : IDisposable
         {
             slot = bindings.Count;
             bindings.Add(new(slot, identity, Path.GetFullPath(library.Source.ImplementationPath), library.Interface.ImplementationSha256,
-                "contract", Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
-                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest, export.Kind,
+                Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
+                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, export.Kind,
                 certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly));
         }
         sites[instruction] = slot;
