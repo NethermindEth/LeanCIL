@@ -930,11 +930,8 @@ unsafe def main (args : List String) : IO Unit := do
             });
         }
         CheckExtractions(all);
-        // Reference-only inputs never publish or reuse receipts; the flag covers only this call.
+        // Cache eligibility is local to each request/group, including parallel groups.
         referenceOnlyAuthoring = false;
-        foreach (var i in Pending(all))
-            try { referenceOnlyAuthoring |= ReferenceOnlyImports(ExtractionIdentity.Read(outputs[i])); }
-            catch (Exception error) { Fail([i], error); }
         var live = Pending(all);
         if (live.Length == 0) return outcomes;
 
@@ -1034,7 +1031,7 @@ unsafe def main (args : List String) : IO Unit := do
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
                     (symbols[i] is null ? "" : "\n" + symbols[i]));
-                if (requests[i].ExpectRejection) continue;
+                if (requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
                 try
@@ -1436,11 +1433,13 @@ unsafe def main (args : List String) : IO Unit := do
 
         void RunGroup(int[] members, bool first, bool share)
         {
+            bool priorReferenceOnly = referenceOnlyAuthoring;
+            referenceOnlyAuthoring = ReferenceOnlyImports(extractions[members[0]]);
             var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(session);
             try { VerifyGroup(members, session, first, share); }
             catch (Exception error) { Fail(members, error); }
-            finally { Directory.Delete(session, true); }
+            finally { referenceOnlyAuthoring = priorReferenceOnly; Directory.Delete(session, true); }
             foreach (var i in members.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
         }
 

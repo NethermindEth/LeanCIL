@@ -112,6 +112,15 @@ void RejectExport(JsonObject manifest, string marker, string? previous)
 ExtractLibrary();
 RejectExport(ProducerManifest("LibProof.unrelated"), "Type mismatch", null);
 RejectExport(ProducerManifest("LibProof.proofDefinition"), "Expected a theorem", null);
+string honestProof = File.ReadAllText(proof);
+File.AppendAllText(proof, """
+
+macro_rules
+  | `(theorem $name:ident : _root_.CIL.Safety.MethodContract.Holds $_contract:term $_program:term $_index:term := $_proof:term) =>
+      `(theorem $name:ident : True := True.intro)
+""");
+RejectExport(ProducerManifest(), "Theorem statement mismatch: LeanCILExportAudit.certified", null);
+File.WriteAllText(proof, honestProof);
 Export(ProducerManifest());
 JsonObject first = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
 string interfaceDigest = first["interfaceDigest"]!.GetValue<string>();

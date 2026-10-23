@@ -138,7 +138,7 @@ internal static class Program
                     throw new InvalidDataException("Initialization assumptions differ from the recorded extraction.");
                 initializedTypes.UnionWith(names);
             }
-            if (recorded is { } existing && existing.GetProperty("schema").GetInt32() is not (2 or 3))
+            if (recorded is { } existing && existing.GetProperty("schema").GetInt32() != 3)
                 throw new InvalidDataException("Unsupported extraction manifest schema; run leancil extract again.");
             var assemblyPath = recordedCheck
                 ? assemblyOverride ?? Path.GetFullPath(recorded!.Value.GetProperty("assemblyPath").GetString()!, output)
@@ -166,7 +166,7 @@ internal static class Program
                         global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("implementationPath").GetString()!);
                     string expected = importHashes.GetValueOrDefault(name) ?? binding.GetProperty("implementationSha256").GetString()!;
                     string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
-                        (binding.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
+                        (binding.TryGetProperty("interfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import extraction has no independent interface digest; extract again with --import-interface-sha256."));
                     importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
                 }
@@ -222,12 +222,12 @@ internal static class Program
                 schema = 3,
                 imports = imports.Bindings.Select(binding => JsonSerializer.SerializeToElement(binding with
                 {
-                    ImplementationPath = Path.GetRelativePath(output, binding.ImplementationPath),
-                    SidecarPath = Path.GetRelativePath(output, binding.SidecarPath)
+                    ImplementationPath = Path.GetRelativePath(output, binding.ImplementationPath).Replace('\\', '/'),
+                    SidecarPath = Path.GetRelativePath(output, binding.SidecarPath).Replace('\\', '/')
                 }, ContractInterface.Json)),
                 importModules = importModuleHashes,
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
-                    ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),
+                    ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)).Replace('\\', '/'),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
                 assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile, initializedTypes, staticValues,
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
