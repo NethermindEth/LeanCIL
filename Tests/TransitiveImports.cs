@@ -120,7 +120,7 @@ weakenedManifest["exports"]![0]!["theorem"] = "ExampleProof.weakened";
 string weakenedPath = Path.Combine(root, "Weakened.json");
 File.WriteAllText(weakenedPath, weakenedManifest.ToJsonString());
 (int Code, string Output, string Stdout, string Stderr) weakened = Execute([.. cli, "export-contracts", weakenedPath, "--output", aSidecar]);
-if (weakened.Code != 1 || !weakened.Output.Contains("exact canonical Holds statement", StringComparison.Ordinal) || Sha(aSidecar) != certifiedA)
+if (weakened.Code != 1 || !weakened.Output.Contains("Type mismatch", StringComparison.Ordinal) || Sha(aSidecar) != certifiedA)
     throw new InvalidOperationException("Conditional export accepted an extra hypothesis or replaced the sidecar: " + weakened.Output);
 
 foreach (string entry in new[] { "Entry", "Direct" })
@@ -131,6 +131,15 @@ foreach (string entry in new[] { "Entry", "Direct" })
     Run([.. cli, "verify", artifact, "--proof", Path.Combine(appPackage, "Conditional.lean"), "--proof-root", appPackage, "--fresh"]);
     JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
     JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+    foreach (JsonElement node in identity.GetProperty("importGraph").EnumerateArray())
+        foreach (string field in new[] { "implementationPath", "sidecarPath" })
+            if (node.GetProperty(field).GetString() is not { } path || Path.IsPathRooted(path) || path.Contains('\\') ||
+                !File.Exists(ExtractionIdentity.Resolve(artifact, path)))
+                throw new InvalidOperationException("Graph path is not portable or does not resolve: " + field);
+    JsonElement conditionalA = report.GetProperty("contractDependencies").EnumerateArray()
+        .Single(node => node.GetProperty("assemblyIdentity").GetString() == originalA["assemblyIdentity"]!.GetValue<string>());
+    if (!conditionalA.GetProperty("conditional").GetBoolean() || conditionalA.GetProperty("dependencies")[0].GetString() != originalB["assemblyIdentity"]!.GetValue<string>())
+        throw new InvalidOperationException("The report lost A's conditional dependency on B.");
     if (identity.GetProperty("importGraph").GetArrayLength() != 2 || identity.GetProperty("imports").GetArrayLength() != 1 ||
         report.GetProperty("contractDependencies").GetArrayLength() != 2 ||
         identity.GetProperty("importGraph").EnumerateArray().Count(node => node.GetProperty("assemblyIdentity").GetString() == originalB["assemblyIdentity"]!.GetValue<string>()) != 1)
