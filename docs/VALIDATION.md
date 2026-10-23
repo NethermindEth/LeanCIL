@@ -216,6 +216,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationconsumer` | Executed consumer caller artifact mutation |
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
+| `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -226,6 +227,10 @@ once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
 statics, transitive, discovery and typed suites cannot enter that plan.
+The registry now has 14 leaves. `exportsstatics` runs directly, with no core
+export bootstrap or nested post-call. Its existing fixture assertions are
+separate from the 46 base case IDs. A standalone fixture cannot use an empty
+base completion ledger to claim coverage.
 
 New cohort durations are unmeasured. The existing CI caps remain 90 minutes
 for imports, 120 for each exports leaf, and 30 for other suites. The matrix
