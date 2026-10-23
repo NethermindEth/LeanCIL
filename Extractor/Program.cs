@@ -237,7 +237,8 @@ internal static class Program
             }
             stage = "metadata and CIL validation";
             using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly));
-            string source = LeanEmitter.Emit(methods, profile, originalModule, imports, staticIdentities);
+            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, originalModule, imports, staticIdentities);
+            string source = emitted.Source;
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
                 .Where(i => i.OpCode.Code == Code.Ldsfld)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);
@@ -266,7 +267,7 @@ internal static class Program
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
                 assemblySha256 = Hash(assembly), entry = methods[0].FullName,
                 entryDefinition = MethodSpecialization.Definition(methods[0]).FullName, entryTypeArguments,
-                layoutIdentities = LeanEmitter.RawLayoutIdentities(methods), profile, initializedTypes, staticValues,
+                layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes, staticValues,
                 staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),

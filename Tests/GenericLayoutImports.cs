@@ -163,7 +163,7 @@ Reject("WrongArity", "exact closed generic", lib, "TypedFixture.Library::Identit
     "--type-argument", "System.UInt64", "--type-argument", "System.UInt32");
 Reject("Constraint", "constraints", lib, "TypedFixture.Library::Unsupported(T)", sidecar, interfaceDigest, "--type-argument", "System.UInt64");
 Reject("GenericOwner", "exact closed generic", lib, "TypedFixture.Generic`1::Value(ulong)", sidecar, interfaceDigest);
-Reject("Profile", "profile not listed", app, "TypedFixture.Application::Identity(ulong)", sidecar, interfaceDigest, "x64-avx2-bmi2");
+Reject("Profile", "profile not listed", app, "TypedFixture.Application::Identity(ulong)", sidecar, interfaceDigest, "x64-v3");
 
 foreach (string modifierScope in new[] { "ModifierA", "ModifierB" })
 {

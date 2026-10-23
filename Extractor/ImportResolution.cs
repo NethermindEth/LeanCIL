@@ -17,11 +17,13 @@ internal sealed class ImportResolution : IDisposable
         string? DefinitionSignature, string[] TypeArguments, ContractMethodSignature? TypedSignature,
         ContractLayout[] PublishedLayouts, ContractLayout[] ActualLayouts, string ComputedLayouts);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
+    readonly record struct ValidatedMetadata(ContractLayout[] ActualLayouts, string ComputedLayouts);
     internal sealed record Node(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest,
         string SidecarPath, string ImplementationPath, string ExpectedInterfaceDigest, bool IsReferenceAssembly,
         ContractDependency[] Dependencies);
     readonly List<Library> libraries = [];
     readonly Dictionary<(string Identity, string Profile), int> implementationState = [];
+    readonly Dictionary<(string Identity, string Profile), ValidatedMetadata> validatedMetadata = [];
     readonly HashSet<string>? allowedDependencies;
     readonly string? validatingAssembly;
     readonly bool ownsLibraries = true;
@@ -112,10 +114,11 @@ internal sealed class ImportResolution : IDisposable
     }
 
     ImportResolution(List<Library> libraries, Dictionary<(string Identity, string Profile), int> implementationState,
-        ContractInterface contract)
+        Dictionary<(string Identity, string Profile), ValidatedMetadata> validatedMetadata, ContractInterface contract)
     {
         this.libraries = libraries;
         this.implementationState = implementationState;
+        this.validatedMetadata = validatedMetadata;
         allowedDependencies = contract.Dependencies.Select(dependency => dependency.AssemblyIdentity).ToHashSet(StringComparer.Ordinal);
         validatingAssembly = contract.AssemblyIdentity;
         ownsLibraries = false;
@@ -146,13 +149,10 @@ internal sealed class ImportResolution : IDisposable
         ContractExport export = library.Interface.Exports.SingleOrDefault(candidate => candidate.Identity == identity)
             ?? throw new InvalidDataException("Contract export not present: " + identity);
         MethodDefinition definition = selection.Definition;
-        ContractLayout[] actualLayouts = [];
         if (library.Interface.FormatVersion == 2)
         {
-            actualLayouts = ImportedLayoutMetadata.Signature(selection.Reference, library.Module, profile.Architecture);
             if (export.DefinitionSignature != definition.FullName ||
-                !export.TypeArguments!.SequenceEqual(selection.ArgumentNames, StringComparer.Ordinal) ||
-                !MetadataEqual(export.TypedSignature, selection.Signature) || !MetadataEqual(export.Layouts, actualLayouts))
+                !export.TypeArguments!.SequenceEqual(selection.ArgumentNames, StringComparer.Ordinal))
                 throw new InvalidDataException("Contract import typed signature or raw layout differs from selected implementation metadata.");
         }
         else if (selection.Arguments.Length != 0)
@@ -178,6 +178,18 @@ internal sealed class ImportResolution : IDisposable
         if (certification.ImplementationSha256 != library.Interface.ImplementationSha256 ||
             certification.InterfaceDigest != library.Interface.InterfaceDigest || certification.ClosureDigest != export.ClosureDigest)
             throw new InvalidDataException("Contract import certification binding mismatch.");
+        (string Identity, string Profile) key = (identity, profile.Name);
+        if (!validatedMetadata.TryGetValue(key, out ValidatedMetadata metadata))
+        {
+            ContractLayout[] actualLayouts = [];
+            if (library.Interface.FormatVersion == 2)
+            {
+                actualLayouts = ImportedLayoutMetadata.Signature(selection.Reference, library.Module, profile.Architecture);
+                if (!MetadataEqual(export.TypedSignature, selection.Signature) || !MetadataEqual(export.Layouts, actualLayouts))
+                    throw new InvalidDataException("Contract import typed signature or raw layout differs from selected implementation metadata.");
+            }
+            metadata = new(actualLayouts, ImportedLayoutMetadata.ComputedLean(actualLayouts, library.Module, profile.Architecture));
+        }
         StaticIdentity.ValidateFields(certification.StaticIdentities, library.Module);
         if (!library.Interface.IsReferenceAssembly)
             ValidateImplementation(library, export, certification, profile);
@@ -191,10 +203,11 @@ internal sealed class ImportResolution : IDisposable
                 export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, library.Source.ExpectedInterfaceDigest, export.Kind,
                 certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly,
                 certification.StaticIdentities, export.DefinitionSignature,
-                export.TypeArguments ?? [], export.TypedSignature, export.Layouts ?? [], actualLayouts,
-                ImportedLayoutMetadata.ComputedLean(actualLayouts, library.Module, profile.Architecture)));
+                export.TypeArguments ?? [], export.TypedSignature, export.Layouts ?? [], metadata.ActualLayouts,
+                metadata.ComputedLayouts));
         }
         sites[instruction] = slot;
+        validatedMetadata.TryAdd(key, metadata);
     }
 
     void MarkUsed(Library library)
@@ -218,7 +231,7 @@ internal sealed class ImportResolution : IDisposable
         implementationState[key] = 1;
         try
         {
-            using ImportResolution imports = new(libraries, implementationState, library.Interface);
+            using ImportResolution imports = new(libraries, implementationState, validatedMetadata, library.Interface);
             MethodDefinition[] implementation = MetadataValidation.Validate(library.Module, library.Interface.AssemblyIdentity,
                 export.DefinitionSignature ?? export.Signature, profile, imports: imports,
                 typeArguments: export.TypeArguments, importedByref: type => imports.ValidateByref(type, profile));
@@ -321,6 +334,7 @@ internal sealed class ImportResolution : IDisposable
         if (!ownsLibraries) return;
         foreach (Library library in libraries) library.Module.Dispose();
         libraries.Clear();
+        validatedMetadata.Clear();
         used.Clear();
     }
 }

@@ -22,7 +22,7 @@ internal sealed class LayoutEvidence(TypeReference[] types, string architecture 
                 if (MetadataValidation.IsAggregate(field.Type, type.Module)) Include(field.Type);
             ordered.Add(type);
         }
-        foreach (var entry in entries.OrderBy(Identity, StringComparer.Ordinal)) Include(entry);
+        foreach (TypeReference entry in entries.OrderBy(Identity, StringComparer.Ordinal)) Include(entry);
         return [.. ordered];
     }
 

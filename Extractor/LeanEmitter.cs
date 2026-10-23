@@ -7,6 +7,8 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
+    internal readonly record struct Emission(string Source, string[] LayoutIdentities);
+
     internal static string? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
         "System.SByte" => "signed8",
@@ -48,8 +50,6 @@ internal static class LeanEmitter
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module, architecture)} 0)"
     };
-    internal static string[] RawLayoutIdentities(MethodDefinition[] methods) => new LayoutEvidence(LayoutTypes(methods)).Identities;
-
     static TypeReference[] LayoutTypes(MethodDefinition[] methods)
     {
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
@@ -74,7 +74,7 @@ internal static class LeanEmitter
         return layouts.ToArray();
     }
 
-    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null,
+    internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null,
         StaticIdentityRecord[]? staticIdentities = null)
     {
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
@@ -92,7 +92,7 @@ internal static class LeanEmitter
         }
         LayoutEvidence layoutEvidence = new(types, profile.Architecture);
         layoutEvidence.EmitLayouts(lean);
-        var genericEvidence = new GenericEvidence(originalModule, layoutEvidence, importResolution);
+        GenericEvidence genericEvidence = new(originalModule, layoutEvidence, importResolution);
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
@@ -181,6 +181,6 @@ internal static class LeanEmitter
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
         lean.AppendLine("end Extracted");
-        return lean.ToString();
+        return new(lean.ToString(), layoutEvidence.Identities);
     }
 }
