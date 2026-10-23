@@ -294,6 +294,17 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
     ("certification binding mismatch", value => value["certifications"]![0]!["closureDigest"] = new string('0', 64)),
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "CIL.Types"),
     ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "../Escape"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "cil.Types"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "tests.Imports"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "Lake.Build"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "LeanCILContractClosureAudit"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]![0]!["name"] = "leancilProof"),
+    ("Invalid or duplicate contract interface module", value => value["interfaceModules"]!.AsArray().Add(new JsonObject
+    {
+        ["name"] = value["interfaceModules"]![0]!["name"]!.GetValue<string>().ToLowerInvariant(),
+        ["source"] = "def caseCollision : Nat := 0
+"
+    })),
     ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "Bad;axiom"),
     ("Invalid or duplicate contract export", value => value["exports"]![0]!["contractConstant"] = "_root_.ImportFixture.addOne")
 })
@@ -352,3 +363,96 @@ Save();
 if (contract["interfaceDigest"]!.GetValue<string>() != stableInterface)
     throw new InvalidOperationException("Implementation identity changed the interface digest.");
 Console.WriteLine("PASS implementation-bound contract interfaces, conditional caller proof, rejected metadata and stale imports");
+
+foreach (string? adjacentSidecar in new[] { "{ not a contract interface", null })
+{
+    Reset();
+    if (adjacentSidecar is not null) File.WriteAllText(sidecar, adjacentSidecar);
+    Run([.. cli, "extract", app, "ImportFixture.Application::Unrelated(ulong)", output]);
+    Run([.. cli, "check", output]);
+    JsonElement unrelatedIdentity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+    if (unrelatedIdentity.GetProperty("imports").GetArrayLength() != 0 || unrelatedIdentity.GetProperty("importModules").EnumerateObject().Any())
+        throw new InvalidOperationException("An adjacent sidecar of an uncalled library entered the extraction.");
+}
+Console.WriteLine("PASS adjacent sidecars of uncalled libraries need no pins and stay out of the extraction");
+
+Reset();
+Run(Command());
+foreach (JsonElement import in JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json"))).GetProperty("imports").EnumerateArray())
+    foreach (string field in new[] { "implementationPath", "sidecarPath" })
+        if (Path.IsPathRooted(import.GetProperty(field).GetString()!))
+            throw new InvalidOperationException("identity.json records a machine-specific import path: " + field);
+string moved = directory + "-moved";
+if (Directory.Exists(moved)) Directory.Delete(moved, true);
+Directory.CreateDirectory(moved);
+foreach (string file in new[] { app, library, sidecar }) File.Copy(file, Path.Combine(moved, Path.GetFileName(file)));
+CopyTree(output, Path.Combine(moved, "extraction"));
+// A stale original must not be what the moved artifact checks against.
+File.AppendAllText(library, "rebuilt");
+Run([.. cli, "check", Path.Combine(moved, "extraction")]);
+Directory.Delete(moved, true);
+Console.WriteLine("PASS import paths resolve relative to a moved extraction");
+
+Reset();
+string pinnedInterface = originalInterface + "\ndef ImportFixture.marker : Nat := 0\n";
+string forgedInterface = originalInterface + "\ndef ImportFixture.marker : Nat := 1\n";
+string forgedOutput = Path.Combine(directory, "forged-extraction");
+contract["interfaceModules"]![0]!["source"] = forgedInterface;
+Save();
+byte[] forgedSidecar = File.ReadAllBytes(sidecar);
+string[] forgedCommand = Command();
+forgedCommand[5] = forgedOutput;
+Run(forgedCommand);
+contract["interfaceModules"]![0]!["source"] = pinnedInterface;
+Save();
+Run(Command());
+string markerProof = Path.Combine(directory, "MarkerCaller.lean");
+File.WriteAllText(markerProof, File.ReadAllText(Path.Combine(fixture, "Caller.lean")) +
+    "\nnamespace ExampleProof\ntheorem marker : ImportFixture.marker = 0 := rfl\nend ExampleProof\n");
+string[] swappedFiles = ["identity.json", "ImportFixture.lean"];
+Dictionary<string, byte[]> pinnedFiles = swappedFiles.ToDictionary(file => file, file => File.ReadAllBytes(Path.Combine(output, file)));
+Dictionary<string, byte[]> forgedFiles = swappedFiles.ToDictionary(file => file, file => File.ReadAllBytes(Path.Combine(forgedOutput, file)));
+string swapCache = Path.Combine(directory, "swap-cache-" + Guid.NewGuid().ToString("N"));
+string sharedCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
+    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
+Directory.CreateDirectory(swapCache);
+if (Directory.Exists(sharedCache))
+    foreach (string candidate in Directory.EnumerateDirectories(sharedCache))
+        if (File.Exists(Path.Combine(candidate, "cache-manifest.json")) && File.Exists(Path.Combine(candidate, "lakefile.toml")) &&
+            Sha(Path.Combine(candidate, "lakefile.toml")) == Sha(At("lakefile.toml")))
+            CopyTree(candidate, Path.Combine(swapCache, Path.GetFileName(candidate)));
+string? savedSwapCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+string? savedDisabled = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
+bool swapped = false;
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", swapCache);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
+    using (Program swapping = new())
+        swapping.Verify(app, "", "", markerProof, output, existingArtifacts: true, stage: value =>
+        {
+            // A self-consistent forged extraction appears after staging and is restored before the final check.
+            if (value == "proof checking" && !swapped)
+            {
+                foreach ((string file, byte[] bytes) in forgedFiles) File.WriteAllBytes(Path.Combine(output, file), bytes);
+                swapped = true;
+            }
+            else if (value == "theorem audit" && swapped)
+                foreach ((string file, byte[] bytes) in pinnedFiles) File.WriteAllBytes(Path.Combine(output, file), bytes);
+        });
+    if (!swapped) throw new InvalidOperationException("Precondition: verification never reached the swap window.");
+    File.WriteAllBytes(sidecar, forgedSidecar);
+    // Receipts are keyed by this driver's policy, so the forged extraction is checked by the same driver.
+    Exception? rejected = null;
+    using (Program reuse = new())
+        try { reuse.Verify(app, "", "", markerProof, forgedOutput, existingArtifacts: true); }
+        catch (Exception error) { rejected = error; }
+    if (rejected is null || File.Exists(Path.Combine(forgedOutput, "verified.json")))
+        throw new InvalidOperationException("A proof checked against one interface certified another through its success receipt.");
+}
+finally
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", savedSwapCache);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedDisabled);
+}
+Console.WriteLine("PASS staged interface sources, proof keys and the report come from one identity.json snapshot");

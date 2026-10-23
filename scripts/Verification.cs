@@ -860,23 +860,43 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         return axioms;
     }
 
-    static SortedDictionary<string, string> ImportSources(string output)
+    // Names the drivers generate or resolve from the toolchain and framework. Case variants collide on Windows and macOS.
+    internal static class ContractModules
     {
-        JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
-        SortedDictionary<string, string> sources = new(StringComparer.Ordinal);
-        if (!identity.TryGetProperty("importModules", out JsonElement modules)) return sources;
-        foreach (JsonProperty module in modules.EnumerateObject())
+        static readonly string[] ReservedRoots = ["CIL", "Lean", "Init", "Std", "Lake", "Extracted", "ExtractedImports", "Proof", "Audit",
+            "ExtractionAudit", "ExtractedSymbols", "Symbols", "Examples", "Tests", "lakefile"];
+
+        internal static bool Name(string? value) => value is not null && !value.Split('.').Contains("_root_", StringComparer.Ordinal) &&
+            Regex.IsMatch(value, @"\A[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z");
+
+        internal static bool Interface(string? value) => Name(value) && value!.Split('.')[0] is var root &&
+            !ReservedRoots.Contains(root, StringComparer.OrdinalIgnoreCase) && !root.StartsWith("LeanCIL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // One read of identity.json and of the import sources it pins; staging, keys and reports all derive from it.
+    internal sealed record ExtractionIdentity(string Output, string Sha256, JsonElement Root, SortedDictionary<string, string> Sources)
+    {
+        internal JsonElement[] Imports => Root.TryGetProperty("imports", out JsonElement imports) ? [.. imports.EnumerateArray()] : [];
+
+        internal static string Resolve(string output, string recorded) => Path.GetFullPath(recorded, output);
+
+        internal static ExtractionIdentity Read(string output)
         {
-            if (!Regex.IsMatch(module.Name, @"\A[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z") ||
-                (module.Name != "ExtractedImports" && module.Name.Split('.')[0] is
-                    "CIL" or "Lean" or "Init" or "Std" or "Extracted" or "Proof" or "Audit" or "ExtractionAudit" or "ExtractedSymbols" or "Symbols" or "Examples" or "Tests" or "lakefile"))
-                throw new InvalidDataException("Invalid imported interface module: " + module.Name);
-            string path = Path.Combine(output, module.Name.Replace('.', Path.DirectorySeparatorChar) + ".lean");
-            string source = File.ReadAllText(path);
-            if (ContentKey(source) != module.Value.GetString()) throw new InvalidDataException("Imported interface source hash mismatch: " + module.Name);
-            sources.Add(module.Name, source);
+            byte[] bytes = File.ReadAllBytes(Path.Combine(output, "identity.json"));
+            JsonElement root = JsonSerializer.Deserialize<JsonElement>(bytes);
+            SortedDictionary<string, string> sources = new(StringComparer.Ordinal);
+            if (root.TryGetProperty("importModules", out JsonElement modules))
+                foreach (JsonProperty module in modules.EnumerateObject())
+                {
+                    if ((module.Name != "ExtractedImports" && !ContractModules.Interface(module.Name)) ||
+                        sources.Keys.Any(name => string.Equals(name, module.Name, StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidDataException("Invalid imported interface module: " + module.Name);
+                    string source = File.ReadAllText(Path.Combine(output, module.Name.Replace('.', Path.DirectorySeparatorChar) + ".lean"));
+                    if (ContentKey(source) != module.Value.GetString()) throw new InvalidDataException("Imported interface source hash mismatch: " + module.Name);
+                    sources.Add(module.Name, source);
+                }
+            return new(output, Convert.ToHexStringLower(SHA256.HashData(bytes)), root, sources);
         }
-        return sources;
     }
 
     Dictionary<string, string[]> ContractModuleImports(string destination, SortedDictionary<string, string> sources)
@@ -914,9 +934,9 @@ unsafe def main (args : List String) : IO Unit := do
         finally { File.Delete(probe); File.Delete(input); }
     }
 
-    string[] StageImportSources(string output, string destination)
+    string[] StageImportSources(ExtractionIdentity extraction, string destination)
     {
-        SortedDictionary<string, string> sources = ImportSources(output);
+        SortedDictionary<string, string> sources = extraction.Sources;
         if (sources.Count == 0) return [];
         Dictionary<string, string[]> dependencies = ContractModuleImports(destination, sources);
         List<string> ordered = [];
@@ -938,9 +958,9 @@ unsafe def main (args : List String) : IO Unit := do
         return ordered.ToArray();
     }
 
-    static string ImportAuditHeader(string output) => ImportSources(output).ContainsKey("ExtractedImports") ? "import ExtractedImports\n" : "";
+    static string ImportAuditHeader(ExtractionIdentity extraction) => extraction.Sources.ContainsKey("ExtractedImports") ? "import ExtractedImports\n" : "";
 
-    static string ImportClaimAudit(string output, string theorem) => ImportSources(output).ContainsKey("ExtractedImports")
+    static string ImportClaimAudit(ExtractionIdentity extraction, string theorem) => extraction.Sources.ContainsKey("ExtractedImports")
         ? "def LeanCILImportAudit.requireConditional {claim : CIL.Program -> Prop} " +
           "(proved : CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold claim) := proved\n" +
           "#check LeanCILImportAudit.requireConditional " + theorem + "\n"
@@ -1005,7 +1025,8 @@ unsafe def main (args : List String) : IO Unit := do
         stage?.Invoke("Lean library build");
         var before = Inputs(proof, settings);
         var session = Library(before);
-        HashSet<string> importSourceNames = existingArtifacts ? ImportSources(output).Keys.ToHashSet(StringComparer.Ordinal) : [];
+        ExtractionIdentity? extraction = existingArtifacts ? ExtractionIdentity.Read(output) : null;
+        HashSet<string> importSourceNames = extraction?.Sources.Keys.ToHashSet(StringComparer.Ordinal) ?? [];
         var support = Regex.Matches(File.ReadAllText(proof), @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
             .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
@@ -1055,7 +1076,8 @@ unsafe def main (args : List String) : IO Unit := do
 
         if (!existingArtifacts)
             Run(Extract("extract", assembly, identity, entry, output, profile));
-        var identityHash = Sha(Path.Combine(output, "identity.json"));
+        extraction ??= ExtractionIdentity.Read(output);
+        var identityHash = extraction.Sha256;
 
         // Isolate generated code and the selected proof, then audit the named theorem.
         var fresh = Path.Combine(output, "proof-" + Guid.NewGuid().ToString("N"));
@@ -1067,11 +1089,13 @@ unsafe def main (args : List String) : IO Unit := do
         try
         {
             File.Copy(Path.Combine(output, "Extracted.lean"), Path.Combine(fresh, "Extracted.lean"));
-            string[] importModules = StageImportSources(output, fresh);
+            if (Sha(Path.Combine(fresh, "Extracted.lean")) != extraction.Root.GetProperty("generatedSha256").GetString())
+                throw new InvalidOperationException("Inputs changed during verification");
+            string[] importModules = StageImportSources(extraction, fresh);
             File.Copy(proof, Path.Combine(fresh, "Proof.lean"));
             var symbols = ImportsSymbols(File.ReadAllText(proof));
             if (symbols) File.Copy(SymbolsFor(output), Path.Combine(fresh, "ExtractedSymbols.lean"));
-            File.WriteAllText(Path.Combine(fresh, "Audit.lean"), ImportAuditHeader(output) + $"import Proof\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + ImportClaimAudit(output, theorem) + RefutationAudit(theorem));
+            File.WriteAllText(Path.Combine(fresh, "Audit.lean"), ImportAuditHeader(extraction) + $"import Proof\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + ImportClaimAudit(extraction, theorem) + RefutationAudit(theorem));
             File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
 
@@ -1134,7 +1158,7 @@ unsafe def main (args : List String) : IO Unit := do
                     leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);
             var proofKey = ContentKey("theorem-audit-v1\n" + extractedKey + "\n" + Sha(Path.Combine(fresh, "Proof.lean")) + "\n" +
                 (symbols ? Sha(Path.Combine(fresh, "ExtractedSymbols.lean")) + "\n" : "") +
-                JsonSerializer.Serialize(ImportSources(output)) + "\n" + theorem);
+                JsonSerializer.Serialize(extraction.Sources) + "\n" + theorem);
             if (RestoreSuccess(proofKey, fresh))
             {
                 if (extractionPublication is not null)
@@ -1179,11 +1203,10 @@ unsafe def main (args : List String) : IO Unit := do
         if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
             throw new InvalidOperationException("Inputs changed during verification");
 
-        var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
-        var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
+        var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
             ? assumptions.Deserialize<string[]>() : [];
         var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-            staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction));
+            staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root));
         File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
         return report;
