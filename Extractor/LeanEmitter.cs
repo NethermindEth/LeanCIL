@@ -48,12 +48,13 @@ internal static class LeanEmitter
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module, architecture)} 0)"
     };
-    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null)
+    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null,
+        StaticIdentityRecord[]? staticIdentities = null)
     {
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
-        StaticIdentity.Validate(StaticIdentities(methods, profile));
+        StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
             .Concat(m.HasThis ? [m.DeclaringType] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
