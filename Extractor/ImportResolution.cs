@@ -261,6 +261,8 @@ internal sealed class ImportResolution : IDisposable
     {
         if (type is not ByReferenceType reference || ContractMethodMetadata.Primitive(reference.ElementType) ||
             reference.ElementType.Scope is not AssemblyNameReference scope) return false;
+        // Framework layouts stay on the existing runtime-model path, which checks their exact scope and shape.
+        if (scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory") return false;
         ContractMethodMetadata.RejectModifiers(reference);
         if (allowedDependencies is not null && !allowedDependencies.Contains(scope.FullName))
             throw new InvalidDataException("Undeclared imported layout dependency: " + scope.FullName);

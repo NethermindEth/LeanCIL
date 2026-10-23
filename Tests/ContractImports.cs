@@ -460,7 +460,7 @@ Reject([.. cli, "check", output], "expected " + expectedHash + ", actual ");
 foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Action<JsonObject>)[]
 {
     ("Unsupported contract export kind", value => value["exports"]![0]!["kind"] = "unrecognized"),
-    ("Unsupported contract interface format", value => value["formatVersion"] = 2),
+    ("Unsupported contract interface format", value => value["formatVersion"] = 3),
     ("Unsupported contract interface format", value => value["semanticsVersion"] = 2),
     ("framework key mismatch", value => value["frameworkKey"] = new string('0', 64)),
     ("Invalid or duplicate contract dependency", value => value["dependencies"] = new JsonArray(new JsonObject
