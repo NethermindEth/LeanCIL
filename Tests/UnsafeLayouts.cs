@@ -113,7 +113,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
             "void" => "Unsupported type: System.Void",
             "byref" => "Unsupported Unsafe element type: System.Int32&",
             "pointer" => "Unsupported Unsafe element type: System.Int32*",
-            "arity" or "offset" or "return" => "Generic contract imports are not supported in version 1.",
+            "arity" or "offset" or "return" => "External managed dependency: " + call.FullName,
             "scope" => "Unsupported generic call: " + call.FullName,
             "version" => "Unsupported aggregate layout: Examples.PackedLeaf",
             _ => throw new InvalidOperationException("Unknown Unsafe rejection fixture: " + mutation)
@@ -121,7 +121,8 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
         module.Write(dll);
     }
     var result = Execute(Extract("extract", dll, "Examples", "UnsafeLayouts::Add14int(Examples.PackedLeaf&,int)", output));
-    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")) ||
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "identity.json")) ||
+        File.Exists(Path.Combine(output, "verified.json")) ||
         !result.Output.Contains(expectedDiagnostic, StringComparison.Ordinal))
         throw new InvalidOperationException("Incorrect Unsafe rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
