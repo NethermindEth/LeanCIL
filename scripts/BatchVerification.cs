@@ -96,36 +96,35 @@ partial class Program
             var batchSource = string.Join("\n", imports.Select(n => "import " + n)) + "\n" + bodies;
             var source = Path.Combine(fresh, "Batch.lean");
             File.WriteAllText(source, batchSource);
-            var auditSource = new StringBuilder("import Batch\n");
-            for (var i = 0; i < requests.Count; i++)
-            {
-                var theorem = $"BatchCase{i}.{requests[i].Theorem}";
-                auditSource.AppendLine(ExtractionAuditSource.Replace("import Extracted", "", StringComparison.Ordinal)
-                    .Replace("Extracted.", $"BatchCase{i}.Extracted.", StringComparison.Ordinal)
-                    .Replace("ExtractionAudit.valid", $"BatchCase{i}.ExtractionAudit.valid", StringComparison.Ordinal));
-                auditSource.AppendLine($"run_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#print axioms {theorem}");
-            }
-            File.WriteAllText(Path.Combine(fresh, "BatchAudit.lean"), auditSource.ToString());
+            // Building the batch runs its proofs' code; the library must survive it unchanged.
+            var bound = OleanHashes(fresh, session);
             Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "Batch.olean"), source],
                 leanPath: leanPath, progress: $"Checking {requests.Count} generated fixtures");
-            var audit = Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "BatchAudit.olean"), Path.Combine(fresh, "BatchAudit.lean")],
-                leanPath: leanPath, progress: $"Auditing {requests.Count} generated fixtures");
-            Run([checker, "Batch", "BatchAudit"], leanPath: leanPath, progress: $"Kernel replay of {requests.Count} generated fixtures");
+            var built = OleanHashes(fresh, session);
+            RequireOnlyAdded(bound, built, "Batch");
+            Run([checker, "Batch"], leanPath: leanPath, progress: $"Kernel replay of {requests.Count} generated fixtures");
+            var audited = AuditOleans(leanPath, ["Batch"], [.. Enumerable.Range(0, requests.Count).SelectMany(i => new[] {
+                ProofTheorem($"BatchCase{i}.{requests[i].Theorem}"),
+                ExtractionCertificate($"BatchCase{i}.Extracted.translation_valid", $"BatchCase{i}.") })]);
+            if (!Same(built, OleanHashes(fresh, session)))
+                throw new InvalidOperationException("Compiled artifacts changed during verification");
+            RequireAuditedModule(audited, "Batch", Path.Combine(fresh, "Batch.olean"));
             var reports = new Report[requests.Count];
             for (var i = 0; i < requests.Count; i++)
             {
                 var request = requests[i];
                 var theorem = $"BatchCase{i}.{request.Theorem}";
-                var axioms = AuditedAxioms(audit, theorem);
-                AuditedAxioms(audit, $"BatchCase{i}.ExtractionAudit.valid");
+                var axioms = AuditedAxioms(audited.theorems[2 * i]);
+                AuditedAxioms(audited.theorems[2 * i + 1]);
                 Run(Extract("check", request.Assembly!, identity, request.Entry, request.Output, profile));
                 if (!Same(before[i], Inputs(request.Proof)) || hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
                     throw new InvalidOperationException("Batch inputs changed during verification");
                 var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
-                reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, audit, before[i],
-                    libraryKey, libraryBuild, audit, initializedTypes, Sha(source), theorem, staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction));
+                reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
+                    libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(source), theorem,
+                    staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction));
             }
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)

@@ -329,7 +329,7 @@ Run(Command());
 void RejectUnrelatedTheorem(string proof, params string[] options)
 {
     (int Code, string Output, string Stdout, string Stderr) result = Execute([.. cli, "verify", output, "--proof", proof, .. options]);
-    string[] diagnostics = ["Application type mismatch", "LeanCILImportAudit.requireConditional", "HoldsGiven"];
+    string[] diagnostics = ["Theorem statement mismatch: ExampleProof.correctness"];
     if (result.Code != 1 || diagnostics.Any(diagnostic => !result.Output.Contains(diagnostic, StringComparison.Ordinal)) ||
         File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("Unrelated theorem did not fail the imported-claim audit or left a verification report: " + result.Output);
@@ -408,6 +408,47 @@ end ExampleProof
 }
 File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
 Console.WriteLine("PASS ordinary and consumer interface replay reject unchecked falsehoods without reports");
+Reset();
+Run(Command());
+string falseCaller = Path.Combine(directory, "ImplicitFalse.lean");
+File.WriteAllText(falseCaller, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness {h : False} :\n    CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun _ => False) := h.elim\nend ExampleProof\n");
+(int Code, string Output, string Stdout, string Stderr) falseResult = Execute([.. cli, "verify", output, "--proof", falseCaller]);
+if (falseResult.Code != 1 || !falseResult.Output.Contains("Theorem statement mismatch: ExampleProof.correctness", StringComparison.Ordinal) ||
+    File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("A claim behind an implicit False premise passed the conditional-claim audit: " + falseResult.Output);
+Console.WriteLine("PASS a conditional claim behind an implicit False premise is not certified");
+Reset();
+using (ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(app))))
+{
+    // Entry now adds two, so a proof that the caller meets addOne is false.
+    MethodBody body = module.GetType("ImportFixture.Application").Methods.Single(method => method.Name == "Entry").Body;
+    Instruction call = body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Call);
+    body.GetILProcessor().InsertAfter(call, Instruction.Create(OpCodes.Call, (MethodReference)call.Operand));
+    module.Write(app);
+}
+contract["interfaceModules"]![0]!["source"] = originalInterface + "\ninstance (priority := high) retarget : OfNat Nat 1 := { ofNat := 0 }\n";
+Save();
+Run(Command());
+string retargeted = Path.Combine(directory, "Retargeted.lean");
+File.WriteAllText(retargeted, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness :\n    CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold (fun linked => ImportFixture.addOne.Holds linked 0) := by\n  intro linked links imported\n  exact imported\nend ExampleProof\n");
+(int Code, string Output, string Stdout, string Stderr) retargetResult = Execute([.. cli, "verify", output, "--proof", retargeted]);
+if (retargetResult.Code != 1 || !retargetResult.Output.Contains("Constant value mismatch: Extracted.ImportsHold", StringComparison.Ordinal) ||
+    File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("An interface OfNat instance retargeted the import slot onto the caller: " + retargetResult.Output);
+Console.WriteLine("PASS an interface numeral instance cannot retarget the import premise onto the caller");
+Reset();
+File.Delete(Path.Combine(output, "verification.json"));
+// The interface weakens the contract and redefines the authoring command to print the honest closure.
+string honestClosure = closureLine[closureLine.IndexOf('{')..].Trim();
+contract["interfaceModules"]![0]!["source"] = "import CIL.Interface.Closure\n" +
+    interfaceSource.Replace("output = input + 1", "True", StringComparison.Ordinal) +
+    "\nmacro_rules\n  | `(#leancil_contract_closure $_:ident) => `(#eval IO.println " + JsonSerializer.Serialize(honestClosure) + ")\n";
+Save();
+Run(Command());
+Reject([.. cli, "verify", output, "--proof", Path.Combine(fixture, "Caller.lean"), "--fresh"], "canonical closure digest mismatch");
+if (File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("A forged closure left a verification report.");
+Console.WriteLine("PASS interface macros cannot forge the canonical closure of a weakened contract");
 Reset();
 Run(Command());
 File.AppendAllText(Path.Combine(output, interfaceModule + ".lean"), "\n");
