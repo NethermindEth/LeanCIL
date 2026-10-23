@@ -55,6 +55,20 @@ def write256 (m : Memory) (address : Address) (bits : BitVec 256) : Option Memor
     if offset + 32 ≤ 32 then some (writeHomeBytes m frame kind index offset bits.toNat 32)
     else none
 
+def read512 (m : Memory) : Address → Option Value
+  | .byte base => do return .v512 (BitVec.ofNat 512 (← readBytes m base 64))
+  | .local frame index => do
+    let .v512 bits ← m (.local frame index) | none
+    return .v512 bits
+  | .static bytes base => do return .v512 (BitVec.ofNat 512 (← readStaticBytes bytes base 64))
+  | .home .. => none
+
+def write512 (m : Memory) (address : Address) (bits : BitVec 512) : Option Memory :=
+  match address with
+  | .byte base => some (writeBytes m base bits.toNat 64)
+  | .local frame index => some (write m (.local frame index) (.v512 bits))
+  | .static .. | .home .. => none
+
 /-- Only actual pointer representations may be reinterpreted as managed refs.
     In particular, a vector snapshot cannot become a pointer to caller storage. -/
 def unsafeAsRef : Value → Option Value
@@ -87,7 +101,7 @@ def unsafeAdd (sizeBytes : Nat) (offset : Int) : Address → Option Address
 inductive MemoryOp where
   | bigMul64
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
-  | load128 | load256 | store128 | store256 | init256
+  | load128 | load256 | load512 | store128 | store256 | store512 | init256
   | asRef | add (sizeBytes : Nat) (signed : Bool)
   | bitcast256 | bitcastByteBool | skipInit
   | bitcastValue (source target : SnapshotShape)
@@ -99,6 +113,14 @@ inductive MemoryOp where
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
   deriving Repr
+
+/-- Every popped operand; no default, so each new operation states what it reads. -/
+def MemoryOp.argumentCount : MemoryOp → Nat
+  | .bigMul64 | .copyBlock _ | .initBlock _ => 3
+  | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
+  | .staticAddress _ | .staticValue _ | .nullRef => 0
+  | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
+  | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef => 1
 
 /-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
 def offsetValue (signed : Bool) (value : Value) : Option Int :=
@@ -116,6 +138,9 @@ def evalMemory (op : MemoryOp) (stack : List Value) (m : Memory) :
   | .load128, .ref address :: rest => return (m, (← read128 m address) :: rest)
   | .load256, .ref address :: rest => return (m, (← read256 m address) :: rest)
   | .load256, .object base :: rest => return (m, (← read256 m (.byte base)) :: rest)
+  | .load512, .ref address :: rest => do return (m, (← read512 m address) :: rest)
+  | .store512, .v512 bits :: .ref address :: rest =>
+    return (← write512 m address bits, rest)
   | .store128, .v128 bits :: .ref address :: rest =>
     return (← write128 m address bits, rest)
   | .store256, .v256 bits :: .ref address :: rest =>

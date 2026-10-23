@@ -6,7 +6,7 @@ namespace CIL.Safety
 
 def numericValue : CIL.Value → Bool
   | .snapshot shape bytes => bytes.length == shape.width
-  | .aggregate _ | .i8 _ | .i32 _ | .i64 _ | .v128 _ | .v256 _ => true
+  | .aggregate _ | .i8 _ | .i32 _ | .i64 _ | .v128 _ | .v128Low64 _ | .v256 _ | .v512 _ => true
   | _ => false
 
 theorem numericValue_snapshotValue (shape : CIL.SnapshotShape) (bytes : List (BitVec 8 × Bool))
@@ -33,15 +33,17 @@ theorem bitcastValue_numeric {source target : CIL.SnapshotShape} {input value : 
   unfold bitcastValue at h
   split at h
   · cases h
-  · rename_i sizes
-    split at h
-    · rename_i bytes found
-      cases h
-      apply numericValue_snapshotValue
-      have length := valueSnapshot_length found
-      simp only [bne_iff_ne, ne_eq, Decidable.not_not] at sizes
-      exact length.trans sizes
+  · split at h
     · cases h
+    · rename_i sizes
+      split at h
+      · rename_i bytes found
+        cases h
+        apply numericValue_snapshotValue
+        have length := valueSnapshot_length found
+        simp only [bne_iff_ne, ne_eq, Decidable.not_not] at sizes
+        exact length.trans sizes
+      · cases h
 
 def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .reference r => formValue m r
@@ -80,7 +82,11 @@ inductive FrameAction where
   | returned (result : List Value) (memory : Memory)
 
 def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : ExecutionResult CIL.Value :=
-  match operation with
+  if operands.any CIL.Value.hasUnspecified then
+    match CIL.evalUnspecifiedIntrinsic operation operands with
+    | some value => .ok value
+    | none => .error (.unsupported "Intrinsic observes unspecified vector bits")
+  else match operation with
   | .scalar (.math kind width signed) =>
     (CIL.evalIntegerMath kind width signed operands).mapError ExecutionFault.arithmetic
   | .x86Base .divRem64 => (CIL.X86.divRemValue operands).mapError ExecutionFault.arithmetic
@@ -90,6 +96,11 @@ def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : E
 
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
+  let unknownArgument := match op with
+    | .arg index (some _) => (args[index]?.map Value.hasUnspecified).getD false
+    | _ => false
+  if unspecifiedOperands (observerCount op) stack || unknownArgument then
+    .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
   | .intrinsic operation argc, _ =>
     if !operation.available body.profile then .error (.unsupported "Intrinsic unavailable in target profile") else

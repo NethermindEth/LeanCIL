@@ -85,6 +85,11 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             "x64-avx2" or "x64-avx2-bmi1" => new(name, "x64", 64, true,
                 Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true, Bmi1: name.EndsWith("-bmi1", StringComparison.Ordinal),
                 X86Base64: true, Vector128Accelerated: true),
+            // .NET 10 enables x86-64-v3 (AVX2 with BMI1/BMI2) and v4 (AVX-512 F/DQ/VL) only as whole groups.
+            "x64-v3" or "x64-v4" => new(name, "x64", 64, true,
+                Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true, Bmi1: true, Bmi2: true,
+                Avx512F: name == "x64-v4", Avx512FVL: name == "x64-v4", Avx512DQ: name == "x64-v4", Avx512DQVL: name == "x64-v4",
+                X86Base64: true, Vector128Accelerated: true, Vector256Accelerated: true),
             "x64-avx512" or "x64-avx512-bmi1" => new(name, "x64", 64, true,
                 Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true,
                 Avx512F: true, Avx512FVL: true, Bmi1: name.EndsWith("-bmi1", StringComparison.Ordinal),

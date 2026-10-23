@@ -12,7 +12,7 @@ theorem load_numeric_local {memory : Memory} {reference : Reference}
     loadLocal memory (.bytes kind reference) = .ok (.scalar (localResult kind value)) := by
   rw [loadLocal_of_read loaded]
   cases kind <;> cases value <;>
-    simp_all [localNumber, localWidth, localResult, byteNumber_numberBytes]
+    simp_all [localNumber, CIL.Value.hasUnspecified, localWidth, localResult, byteNumber_numberBytes]
 
   case aggregate.aggregate size bytes =>
     split at fits <;> simp_all

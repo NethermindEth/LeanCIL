@@ -25,14 +25,14 @@ theorem allocate_initialized256 (memory : Memory) (activation : Nat) (bits : Bit
   rw [length] at readback
   have stored : storeLocal allocated (.bytes .vector256 reference) (.scalar (.v256 bits)) =
       .ok (.bytes .vector256 reference, result) := by
-    simp [storeLocal, localNumber, localWidth, written, checkedAt,
+    simp [storeLocal, Value.hasUnspecified, CIL.Value.hasUnspecified, localNumber, localWidth, written, checkedAt,
       Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   have created : makeLocal activation .vector256 (.v256 bits) memory =
       .ok (.bytes .vector256 reference, [reference.allocation], result) := by
     simp [makeLocal, localWidth, localAlignment, home, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
   refine ⟨reference, allocated, result, home, ?_, stored, readback, ?_,
     makeLocal_preserves_caller_memory _ _ _ _ _ _ _ created⟩
-  · simp [storeValue, referenceAt, written, checkedAt,
+  · simp [storeValue, CIL.Value.hasUnspecified, referenceAt, written, checkedAt,
       Except.mapError, Bind.bind, Except.bind]
   · simpa only [length] using (ready.after_write written).access
 
@@ -52,7 +52,7 @@ theorem make_argument_home256 (memory : Memory) (activation index : Nat)
     allocate_initialized256 memory activation bits wellFormed
   have made : makeArgumentHomes activation [index] args memory =
       .ok ([(index, .bytes .vector256 reference)], [reference.allocation], result) := by
-    simp [makeArgumentHomes, argument, localWidth, home, stored,
+    simp [makeArgumentHomes, argument, Value.hasUnspecified, CIL.Value.hasUnspecified, localWidth, home, stored,
       Bind.bind, Except.bind, Pure.pure, Except.pure]
   exact ⟨reference, result, made, readback, writable, preserved⟩
 

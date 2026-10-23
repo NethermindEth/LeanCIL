@@ -1,6 +1,8 @@
 import CIL.Extraction.Scalars
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
+import CIL.Extraction.DivisionIntrinsics
+import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 
 namespace CIL.Extraction
@@ -26,6 +28,7 @@ private def initialLocal : LocalKind → Value
   | .word64 => .i64 0
   | .vector128 => .v128 0
   | .vector256 => .v256 0
+  | .vector512 => .v512 0
   | .aggregate size => .aggregate (List.replicate size.val 0)
 
 /-- Narrow return conversion is part of the closed metadata signature. -/
@@ -59,12 +62,15 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid rawLayouts item.closed method ∧
   UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
+  DivisionIntrinsicsValid item.closed item.reachable method ∧
+  OpaqueLocalsValid item.closed method ∧
+  VectorInitializationsValid item.closed item.reachable method ∧
   ScalarFlowValid item.closed item.featureStates item.scalarStates method.code
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Option Method) : Prop :=

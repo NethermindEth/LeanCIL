@@ -21,6 +21,34 @@ inductive ExecutionFault where
 
 abbrev ExecutionResult := Except ExecutionFault
 
+def Value.hasUnspecified : Value → Bool
+  | .scalar value => value.hasUnspecified
+  | _ => false
+
+def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
+  (stack.take count).any Value.hasUnspecified
+
+/-- Operands an op reads as numbers; no default, so each new op states whether it observes vector bits. -/
+def observerCount : CIL.Op → Nat
+  | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
+  | .checkedConvert .. | .neg | .bnot | .convI1 | .convI2 | .convU2
+  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU => 1
+  | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
+  | .lt | .ltu | .gt | .gtu | .eq | .bgt _ | .ble _ | .bleu _
+  | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => 2
+  | .brzero _ | .brnonzero _ | .switch _ => 1
+  | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
+  | .lane _ | .laneAddress _ | .load64 | .skipInit | .asRef | .initAggregate _ => 1
+  | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
+  | .setLane _ | .store64 | .copyObject _ => 2
+  | .ret (some _) => 1
+  | .memory operation => operation.argumentCount
+  -- Forwarders: the consumer (storeLocal, checkedIntrinsic, enterFrame, the caller) guards.
+  | .nop | .arg .. | .vectorArg _ | .vectorArgAddr _ | .local .. | .vectorLocal _ | .vectorLocalAddr _
+  | .setVectorLocal _ | .localAddr _ | .setLocal .. | .const32 _ | .const64 _ | .dup | .pop
+  | .branch _ | .call .. | .newVector256 .. | .newAggregate .. | .feature _ | .intrinsic ..
+  | .ret none | .throw _ | .unsupported _ => 0
+
 def checkedAt (reference : ManagedReference) (width : Nat) (result : Checked α) : ExecutionResult α :=
   result.mapError fun rule => .memory rule reference width
 
@@ -46,6 +74,7 @@ def snapshotValue (shape : CIL.SnapshotShape) (bytes : List (BitVec 8 × Bool)) 
     | .aggregate _ => .aggregate data
     | .vector128 => .v128 (BitVec.ofNat 128 (byteNumber data))
     | .vector256 => .v256 (BitVec.ofNat 256 (byteNumber data))
+    | .vector512 => .v512 (BitVec.ofNat 512 (byteNumber data))
   else .snapshot shape bytes
 
 def valueSnapshot (shape : CIL.SnapshotShape) : CIL.Value → Option (List (BitVec 8 × Bool))
@@ -56,9 +85,11 @@ def valueSnapshot (shape : CIL.SnapshotShape) : CIL.Value → Option (List (BitV
     | _ => none
   | .v128 bits => if shape = .vector128 then some ((numberBytes bits.toNat 16).map fun b => (b, true)) else none
   | .v256 bits => if shape = .vector256 then some ((numberBytes bits.toNat 32).map fun b => (b, true)) else none
+  | .v512 bits => if shape = .vector512 then some ((numberBytes bits.toNat 64).map fun b => (b, true)) else none
   | _ => none
 
 def bitcastValue (source target : CIL.SnapshotShape) (value : CIL.Value) : ExecutionResult CIL.Value := do
+  if value.hasUnspecified then .error (.unsupported "Bitcast observes unspecified vector bits") else
   if source.width != target.width then .error .invalidState else
     let some bytes := valueSnapshot source value | .error .invalidState
     return snapshotValue target bytes
@@ -93,9 +124,9 @@ abbrev ordinaryAccessAlignment : Nat := 1
 
 def loadValue (m : Memory) (reference : ManagedReference) (width : Nat)
     (signed : Bool := false) : ExecutionResult CIL.Value := do
-  if width = 16 || width = 32 then
+  if width = 16 || width = 32 || width = 64 then
     if let .error .uninitialized := dereference m reference width ordinaryAccessAlignment then
-      return ← loadSnapshot m reference (if width = 16 then .vector128 else .vector256)
+      return ← loadSnapshot m reference (if width = 16 then .vector128 else if width = 32 then .vector256 else .vector512)
   let bytes ← checkedAt reference width (dereference m reference width ordinaryAccessAlignment)
   let number := byteNumber bytes
   match width with
@@ -105,11 +136,13 @@ def loadValue (m : Memory) (reference : ManagedReference) (width : Nat)
   | 8 => return .i64 (BitVec.ofNat 64 number)
   | 16 => return .v128 (BitVec.ofNat 128 number)
   | 32 => return .v256 (BitVec.ofNat 256 number)
+  | 64 => return .v512 (BitVec.ofNat 512 number)
   | _ => .error (.unsupported "Memory value width")
 
 def storeValue (m : Memory) (reference : ManagedReference) (value : CIL.Value) : ExecutionResult Memory := do
+  if value.hasUnspecified then .error (.unsupported "Store observes unspecified vector bytes") else
   if let .snapshot shape bytes := value then
-    if (shape = .vector128 || shape = .vector256) && bytes.length == shape.width then
+    if (shape = .vector128 || shape = .vector256 || shape = .vector512) && bytes.length == shape.width then
       let address ← referenceAt reference
       return ← checkedAt reference shape.width (writeSnapshot m address bytes ordinaryAccessAlignment)
     else .error .invalidState
@@ -117,6 +150,7 @@ def storeValue (m : Memory) (reference : ManagedReference) (value : CIL.Value) :
     | .i64 bits => .ok (8, bits.toNat)
     | .v128 bits => .ok (16, bits.toNat)
     | .v256 bits => .ok (32, bits.toNat)
+    | .v512 bits => .ok (64, bits.toNat)
     | _ => .error .invalidState
   let address ← referenceAt reference
   checkedAt reference width (write m address (numberBytes number width) ordinaryAccessAlignment)
@@ -133,6 +167,8 @@ def formValue (m : Memory) (reference : ManagedReference) : ExecutionResult Valu
     allocation metadata and is explicitly unsupported until that is supplied. -/
 def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
+  if unspecifiedOperands operation.argumentCount stack then
+    .error (.unsupported "Memory operation observes unspecified vector bits") else
   match operation, stack with
   | .bigMul64, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
     return (← storeValue m low (.i64 (left * right)), .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest)
@@ -154,6 +190,11 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memor
       return (← checkedAt destination width (write m dst (List.replicate width (value.setWidth 8)) alignment), rest)
   | .load128, .reference r :: rest => return (m, .scalar (← loadValue m r 16) :: rest)
   | .load256, .reference r :: rest => return (m, .scalar (← loadValue m r 32) :: rest)
+  | .load512, .reference r :: rest => return (m, .scalar (← loadValue m r 64) :: rest)
+  | .store512, .scalar (.v512 bits) :: .reference r :: rest =>
+    return (← storeValue m r (.v512 bits), rest)
+  | .store512, .scalar (.snapshot .vector512 bytes) :: .reference r :: rest =>
+    return (← storeValue m r (.snapshot .vector512 bytes), rest)
   | .store128, .scalar (.v128 bits) :: .reference r :: rest =>
     return (← storeValue m r (.v128 bits), rest)
   | .store256, .scalar (.v256 bits) :: .reference r :: rest =>
@@ -204,6 +245,8 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memor
     an unchecked memory interpreter here. -/
 def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
+  if unspecifiedOperands (observerCount op) stack then
+    .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
   | .copyObject size, .reference source :: .reference destination :: rest =>
     let src ← referenceAt source
