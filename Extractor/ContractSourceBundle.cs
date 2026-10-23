@@ -2,12 +2,17 @@ using System.Text.Json;
 
 namespace Nethermind.LeanCIL;
 
-internal sealed record ContractBundleManifest(int Schema, SortedDictionary<string, string> Files, JsonElement Exports);
+// FrameworkKey is the compatibility key; LeanCilRevision records which framework revision produced the bundle.
+internal sealed record ContractBundleManifest(int Schema, SortedDictionary<string, string> Files, JsonElement Exports,
+    string FrameworkKey, string LeanCilRevision);
 
 internal static class ContractSourceBundle
 {
-    internal static string Publish(string destination, SortedDictionary<string, string> sources, JsonElement exports)
+    internal static string Publish(string destination, SortedDictionary<string, string> sources,
+        SortedDictionary<string, string> expected, JsonElement exports, string frameworkKey, string revision)
     {
+        if (!ContractInterface.Digest(frameworkKey) || !System.Text.RegularExpressions.Regex.IsMatch(revision, @"\A[0-9a-f]{40}\z"))
+            throw new InvalidDataException("Contract bundles require a framework key and a full leancil revision.");
         Directory.CreateDirectory(destination);
         string staging = Path.Combine(destination, ".staging-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
@@ -22,8 +27,10 @@ internal static class ContractSourceBundle
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(source, target);
                 files[relative] = ContractInterface.Hash(File.ReadAllBytes(target));
+                if (!expected.TryGetValue(relative, out string? audited) || audited != files[relative])
+                    throw new InvalidDataException("Contract bundle source changed after its export snapshot: " + relative);
             }
-            ContractBundleManifest manifest = new(1, files, exports);
+            ContractBundleManifest manifest = new(1, files, exports, frameworkKey, revision);
             byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, ContractExportManifest.Json);
             string digest = ContractInterface.Hash(bytes);
             File.WriteAllBytes(Path.Combine(staging, "bundle.json"), bytes);
@@ -52,7 +59,8 @@ internal static class ContractSourceBundle
             throw new InvalidDataException("Contract source bundle manifest digest mismatch.");
         ContractBundleManifest manifest = JsonSerializer.Deserialize<ContractBundleManifest>(bytes, ContractExportManifest.Json)
             ?? throw new InvalidDataException("Missing contract source bundle manifest.");
-        if (manifest.Schema != 1 || manifest.Files is null || manifest.Files.Count == 0)
+        if (manifest.Schema != 1 || manifest.Files is null || manifest.Files.Count == 0 || !ContractInterface.Digest(manifest.FrameworkKey) ||
+            manifest.LeanCilRevision is null || !System.Text.RegularExpressions.Regex.IsMatch(manifest.LeanCilRevision, @"\A[0-9a-f]{40}\z"))
             throw new InvalidDataException("Invalid contract source bundle manifest.");
         foreach ((string relative, string hash) in manifest.Files)
         {
