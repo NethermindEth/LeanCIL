@@ -112,7 +112,8 @@ partial class Program
         RecheckOriginal();
         string compositionDirectory = Path.Combine(callerSession, "full-composition-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(compositionDirectory);
-        string fullLeanPath = originalLeanPath + Path.PathSeparator + compositionDirectory;
+        // First: the caller session is itself a root, and leanchecker names each olean by the first root containing it.
+        string fullLeanPath = compositionDirectory + Path.PathSeparator + originalLeanPath;
         HashSet<string> generatedModules = new(StringComparer.Ordinal);
         SortedDictionary<string, string> generatedArtifacts = new(StringComparer.Ordinal);
         void RecheckResolution()
