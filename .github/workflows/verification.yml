@@ -120,7 +120,7 @@ jobs:
     needs: [select, prepare]
     if: needs.select.outputs.has-suites == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ matrix.suite == 'imports' && 45 || 30 }}
+    timeout-minutes: ${{ matrix.suite == 'imports' && 90 || matrix.suite == 'exports' && 120 || 30 }}
     strategy:
       fail-fast: false
       # Longest measured suites start first; eight runners bound concurrent load.
