@@ -56,7 +56,7 @@ partial class Program
             throw new InvalidDataException("Duplicate contract export method/profile pair.");
         if (prepared.GroupBy(export => export.Identity).Any(group => group.Select(export => export.Request.Contract).Distinct(StringComparer.Ordinal).Count() != 1))
             throw new InvalidDataException("One exported method must name one contract across its profiles.");
-        InterfaceModule[] interfaces = manifest.Interface.Select(source => new InterfaceModule(source.Module, File.ReadAllText(source.Source))).ToArray();
+        InterfaceModule[] interfaces = manifest.Interface.Select(source => new InterfaceModule(source.Module, ProofRootInterface(manifest, source, before))).ToArray();
         string staging = Path.Combine(Path.GetTempPath(), "leancil-contract-export-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
         try
@@ -149,6 +149,18 @@ partial class Program
         path = Path.GetFullPath(path);
         return snapshot.Where(pair => pair.Key.StartsWith("consumer:", StringComparison.Ordinal) &&
             Path.GetFullPath(pair.Key["consumer:".Length..]).Equals(path, comparison)).Select(pair => pair.Value).FirstOrDefault();
+    }
+
+    // The published text is the proofRoot module the export proof compiled against, byte for byte.
+    static string ProofRootInterface(ContractExportManifest manifest, ContractSource source, SortedDictionary<string, string> before)
+    {
+        string module = Path.Combine(manifest.ProofRoot, source.Module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+        byte[] bytes = File.ReadAllBytes(source.Source);
+        string published = ContractInterface.Hash(bytes);
+        if (published != before["interface:" + source.Source] || SnapshotSource(before, module) != published)
+            throw new InvalidDataException("Published contract interface source must be byte-identical to its proofRoot module: " + source.Module);
+        using StreamReader reader = new(new MemoryStream(bytes));
+        return reader.ReadToEnd();
     }
 
     static PreparedContractExport PrepareContractExport(ContractExportManifest manifest, ModuleDefinition module, ContractExportRequest request)

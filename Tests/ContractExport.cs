@@ -177,6 +177,12 @@ finally
 }
 Console.WriteLine("PASS a bundled framework source changed during export publishes neither a bundle nor a sidecar");
 
+string commentedCopy = Path.Combine(root, "CommentedArithmetic.lean");
+File.WriteAllText(commentedCopy, File.ReadAllText(contractSource) + "\n-- Same closure, different published text.\n");
+JsonObject commentedPublication = ProducerManifest();
+commentedPublication["interface"]![0]!["source"] = commentedCopy;
+RejectExport(commentedPublication, "byte-identical to its proofRoot module: PublishedArithmetic", pinnedSidecar);
+Console.WriteLine("PASS a published interface must be the proofRoot module the export proof compiled against");
 
 JsonObject two = ProducerManifest();
 JsonObject invalid = two["exports"]![0]!.DeepClone().AsObject();
@@ -220,7 +226,7 @@ if (File.ReadAllText(publishedOnly) == originalContractSource)
     throw new InvalidOperationException("Precondition: the independent published contract must differ from the producer contract.");
 JsonObject differentPublication = ProducerManifest();
 differentPublication["interface"]![0]!["source"] = publishedOnly;
-RejectExport(differentPublication, "Export contract differs from its published interface closure", prior);
+RejectExport(differentPublication, "byte-identical to its proofRoot module: PublishedArithmetic", prior);
 if (File.ReadAllText(contractSource) != originalContractSource)
     throw new InvalidOperationException("The independent closure mismatch fixture changed the producer proof interface.");
 Console.WriteLine("PASS different valid published and proof contract closures cannot replace a published sidecar");

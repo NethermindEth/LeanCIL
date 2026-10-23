@@ -240,7 +240,9 @@ The recorded method must be the export entry, its DLL must match `assembly`, and
 its execution profile must be an exact built-in profile. The consumer package
 under `proofRoot` must have resolved pinned dependencies. One method may list
 several artifact entries for different profiles; duplicate method/profile pairs
-fail. Unknown and duplicate JSON properties are rejected.
+fail. Unknown and duplicate JSON properties are rejected. Each `interface` source
+must be byte-identical to the module of that name under `proofRoot`, the module
+the author proof compiled against, so the published text is what was audited.
 
 The contract constant must have type `CIL.Safety.MethodContract` or
 `CIL.Safety.OutcomeContract`. The named author declaration must be a theorem with
