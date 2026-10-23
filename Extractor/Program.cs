@@ -180,7 +180,8 @@ internal static class Program
                     Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, name + ".dll"));
                 importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
             }
-            foreach (AssemblyNameReference reference in module.AssemblyReferences)
+            // check replays only the recorded import graph; sidecars appearing after extraction are outside it.
+            foreach (AssemblyNameReference reference in recorded is null ? module.AssemblyReferences : [])
             {
                 string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
                 if (File.Exists(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
