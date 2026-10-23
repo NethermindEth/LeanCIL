@@ -1126,13 +1126,15 @@ unsafe def main (args : List String) : IO Unit := do
                 // The audit, the replay and the proof must all read the bytes compiled here.
                 acceptedInterfaceArtifacts = InterfaceArtifacts();
                 string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
-                CheckContractInterfaces(extractions[members[0]], frameworkCopy, [.. interfaceModules, "ExtractedImports"], interfaceLeanPath);
-                RequireInterfaceArtifacts();
                 Stage(members, "kernel replay");
                 Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
                 if (interfaceFailures.Count > 0)
                     throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
                         string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
+                RequireInterfaceArtifacts();
+                // The checker reads only the bytes just replayed.
+                CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
+                    module => Path.Combine(frameworkCopy, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
                 RequireInterfaceArtifacts();
             }
             string[] initialImportDirectories;
@@ -1187,7 +1189,6 @@ unsafe def main (args : List String) : IO Unit := do
             Stage(members, "extraction certificate audit");
             var extractionAudit = Run(["lake", "build", "+ExtractionAudit:olean"], frameworkCopy,
                 progress: "Checking consumer extraction certificate");
-            AuditedAxioms(extractionAudit, "ExtractionAudit.valid");
             Stage(members, "proof checking");
             string[] importModules = extractions[members[0]].Sources.Keys.ToArray();
             if (importModules.Length > 0)
@@ -1311,7 +1312,8 @@ unsafe def main (args : List String) : IO Unit := do
             {
                 // A request depends only on its own proof's import closure and the extraction certificate.
                 var closure = graph is null ? null
-                    : ImportClosure(graph, [names[Array.IndexOf(members, i)], "Extracted", "ExtractionAudit"]);
+                    : ImportClosure(graph, [names[Array.IndexOf(members, i)], "Extracted", "ExtractionAudit",
+                        .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()]);
                 var rejected = failures.Keys.Where(name => closure is null || closure.Contains(name)).Order(StringComparer.Ordinal).ToArray();
                 if (rejected.Length > 0)
                     Fail([i], new InvalidOperationException("Kernel replay rejected " + string.Join(", ", rejected) + ":\n" +
@@ -1319,24 +1321,24 @@ unsafe def main (args : List String) : IO Unit := do
             }
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
+            // Audits read the replayed oleans only; Lake and the consumer's metaprograms never see them.
+            Stage(proceeding, "extraction certificate audit");
+            var certificate = AuditOleans(leanPath, ["ExtractionAudit"], [ExtractionCertificate("ExtractionAudit.valid")]);
+            RequireAuditedModule(certificate, "ExtractionAudit", currentArtifacts["ExtractionAudit"]);
+            AuditedAxioms(certificate.theorems[0]);
+            extractionAudit += AuditText(certificate.theorems[0]);
             Stage(proceeding, "theorem audit");
             var audits = new Dictionary<int, (string Audit, string[] Axioms)>();
             foreach (var i in proceeding)
             {
                 try
                 {
-                    var theorem = requests[i].Theorem;
                     var module = names[Array.IndexOf(members, i)];
-                    var auditPath = Path.Combine(session, "LeanCILAudit" + module["LeanCILProof".Length..] + ".lean");
-                    File.WriteAllText(auditPath, ImportAuditHeader(extractions[i]) + $"import {module}\nrun_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#check {theorem}\n#print axioms {theorem}\n" + ImportClaimAudit(extractions[i], theorem) + RefutationAudit(theorem));
-                    var audit = Run([LeanExecutable, auditPath], session, leanPath, environment: LeanEnvironment);
-                    var matches = Regex.Matches(audit, "'" + Regex.Escape(theorem) + @"' depends on axioms:\s*\[([^\]]*)\]");
-                    if (matches.Count > 1 || (matches.Count == 0 && !audit.Contains($"'{theorem}' does not depend on any axioms")))
-                        throw new InvalidOperationException("Missing or ambiguous transitive theorem axiom audit");
-                    string[] axioms = matches.Count == 0 ? [] : matches[0].Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    if (axioms.Any(a => a is not ("propext" or "Quot.sound" or "Classical.choice")))
-                        throw new InvalidOperationException("Unapproved proof axioms: " + string.Join(", ", axioms));
-                    audits[i] = (audit, axioms);
+                    string[] auditModules = [module, .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                    var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
+                    foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
+                    RequireAuditedConstants(audited);
+                    audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]));
                 }
                 catch (Exception error) { Fail([i], error); }
             }
