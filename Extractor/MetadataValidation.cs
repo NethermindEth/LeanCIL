@@ -336,6 +336,10 @@ internal static class MetadataValidation
                     continue;
                 if (!Check(method, instruction, () =>
                     {
+                        // Fold recognition scans the whole body, but only reachable unsupported throws are rejected.
+                        if (instruction.OpCode.Code == Code.Newobj && instruction.Next?.OpCode.Code == Code.Throw)
+                            throw Call("Unsupported exception constructor", reference, method, instruction,
+                                "Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);
