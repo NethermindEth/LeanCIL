@@ -99,6 +99,7 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   locals : actual.locals = expected.locals
   localKinds : actual.localKinds = expected.localKinds
   vectorLocals : actual.vectorLocals = expected.vectorLocals
+  opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
   vectorArgs : actual.vectorArgs = expected.vectorArgs
   parameterHomes : actual.parameterHomes = expected.parameterHomes
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd

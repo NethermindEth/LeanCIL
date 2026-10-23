@@ -7,8 +7,8 @@ using System.Text.Json;
 var suite = args switch
 {
     [] => "all",
-    ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem" or "imports" or "exports" or "exceptionlint"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|exports|exceptionlint]")
+    ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem" or "imports" or "exports" or "exceptionlint" or "intrinsics"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|exports|exceptionlint|intrinsics]")
 };
 
 using var verification = new Program();
@@ -26,6 +26,7 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["blocks"] = ("Tests/Blocks.cs", "block memory, alignment prefixes, runtime comparisons and safety faults"),
     ["unsafe"] = ("Tests/UnsafeLayouts.cs", "layout-based Unsafe sizes, reference offsets and metadata validation"),
     ["math"] = ("Tests/IntegerMath.cs", "integer Math helpers, runtime faults and universal minimum"),
+    ["intrinsics"] = ("Tests/DivisionIntrinsics.cs", "division SIMD signatures, unspecified lanes, opaque locals and profile rejection"),
     ["divrem"] = ("Tests/TupleDivision.cs", "X86Base.X64.DivRem through ValueTuple fields, divide-error faults and layout rejection"),
     ["fsharp"] = ("Tests/FSharp.cs", "F# arithmetic, branches, calls, references and struct construction"),
     ["constructors"] = ("Tests/Constructors.cs", "struct construction, initialized temporaries and constructor faults"),

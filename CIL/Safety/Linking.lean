@@ -86,7 +86,8 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Op) (pc : 
     cases op <;> simp only [CIL.Op.callees, reduceCtorEq] at hc
     all_goals
       unfold step
-      simp only [CIL.Op.relocate, Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map]
+      simp only [CIL.Op.relocate, observerCount, Bool.or_false,
+        Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map]
       repeat' (split <;> simp_all [FrameAction.relocate])
 
 /-- A method that `step` enters is a callee its instruction names, so it is in a closed library. -/

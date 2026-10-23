@@ -28,7 +28,7 @@ theorem step_load_word64 {body : CIL.Method} {pc index : Nat} {args stack : List
     (loaded : read memory reference 8 1 = .ok (numberBytes word.toNat 8)) :
     step body (.local index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.i64 word) :: stack) frame memory) := by
-  simp only [step, slot, load_local_word64_of_read loaded, Bind.bind, Except.bind,
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or, Bool.false_eq_true, ite_false, slot, load_local_word64_of_read loaded, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 
 theorem step_store_word64 {body : CIL.Method} {pc index : Nat} {args rest : List Value}
@@ -43,7 +43,7 @@ theorem step_store_word64 {body : CIL.Method} {pc index : Nat} {args rest : List
       read result reference 8 1 = .ok (numberBytes word.toNat 8) := by
   obtain ⟨result, written, stored, readback, _⟩ := store_local_word64 word ready
   refine ⟨result, ?_, written, readback⟩
-  simp only [step, slot, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 /-- Storing a numeric local changes its bytes, not the frame's slot identities.
     This lets subsequent calls retain indexed home and separation facts. -/

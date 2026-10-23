@@ -41,7 +41,8 @@ theorem store_local_word64 {memory : Memory} {reference : Reference} (word : Bit
   have readback := write_readback _ _ _ _ _ written
   rw [length] at readback
   refine ⟨result, written, ?_, readback, load_local_word64_of_read readback⟩
-  simp only [storeLocal, localNumber, localWidth, written, checkedAt, Except.mapError,
+  simp only [storeLocal, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_and, Bool.false_eq_true,
+    ite_false, localNumber, localWidth, written, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms decode_word64

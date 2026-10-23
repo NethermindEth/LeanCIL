@@ -15,9 +15,9 @@ theorem make_numeric_local (memory : Memory) (activation : Nat)
       access result reference (localWidth kind) 1 true = .ok () ∧
       MemoryBelow memory.nextIdentity memory result := by
   have numeric : kind ≠ .reference := by
-    cases kind <;> cases value <;> simp_all [localNumber]
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have modeled : value ≠ .unmodeled := by
-    cases kind <;> cases value <;> simp_all [localNumber]
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have bounded : localWidth kind < nativeLimit := by
     cases kind <;> simp only [localWidth, nativeLimit] <;> first | exact CIL.NarrowKind.width_lt _ | simp
   obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds memory activation (localWidth kind) wellFormed bounded (localAlignment_pos kind)
@@ -37,7 +37,7 @@ theorem step_load_numeric_local {body : CIL.Method} {pc index : Nat} {args stack
     (loaded : read memory reference (localWidth kind) 1 = .ok (numberBytes number (localWidth kind))) :
     step body (.local index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (localResult kind value) :: stack) frame memory) := by
-  simp only [step, slot, load_numeric_local kind value number fits loaded,
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or, Bool.false_eq_true, ite_false, slot, load_numeric_local kind value number fits loaded,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem step_store_numeric_local {body : CIL.Method} {pc index : Nat} {args rest : List Value}
@@ -61,7 +61,7 @@ theorem step_store_numeric_local {body : CIL.Method} {pc index : Nat} {args rest
       rfl
     · simp only [List.getElem?_set_ne same]
   refine ⟨result, ?_, written, readback⟩
-  simp only [step, slot, stored, unchanged, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, unchanged, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms make_numeric_local
 #print axioms step_load_numeric_local

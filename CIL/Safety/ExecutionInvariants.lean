@@ -59,6 +59,7 @@ theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
   all_goals
     repeat' first
       | rfl
+      | solve | cases ‹Opaque128Value› <;> rfl
       | solve | exact loadSnapshot_numeric (by assumption)
       | solve | apply formValue_result_valid; assumption
       | cases h
@@ -68,6 +69,7 @@ theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value
     (h : localAddress m slot = .ok value) : value.Valid m := by
   cases slot with
   | root root => cases h
+  | opaque128 _ => cases h
   | bytes kind r => exact formValue_result_valid m (.address r) value h
 
 theorem ValuesValid.drop {m : Memory} {values : List Value}

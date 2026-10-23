@@ -5,11 +5,11 @@ namespace CIL.Extraction
 private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .bigMul64 => (3, 1)
   | .copyBlock _ | .initBlock _ => (3, 0)
-  | .store128 | .store256 => (2, 0)
+  | .store128 | .store256 | .store512 => (2, 0)
   | .init256 | .skipInit => (1, 0)
   | .staticAddress _ | .staticValue _ | .nullRef => (0, 1)
   | .add .. | .spanCreate | .spanItem _ => (2, 1)
-  | .load128 | .load256 | .asRef | .bitcast256 | .bitcastByteBool | .bitcastValue ..
+  | .load128 | .load256 | .load512 | .asRef | .bitcast256 | .bitcastByteBool | .bitcastValue ..
   | .createSpan _ | .spanReference | .spanLength | .isNullRef => (1, 1)
 
 /-- Successful stack effects for instructions that cannot create a local alias or

@@ -71,6 +71,7 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option (String ×
     listField "locals" expected.locals actual.locals,
     listField "localKinds" expected.localKinds actual.localKinds,
     listField "vectorLocals" expected.vectorLocals actual.vectorLocals,
+    listField "opaqueVectorLocals" expected.opaqueVectorLocals actual.opaqueVectorLocals,
     listField "vectorArgs" expected.vectorArgs actual.vectorArgs,
     listField "parameterHomes" expected.parameterHomes actual.parameterHomes,
     listField "static descriptors" (expected.staticSites.map Prod.snd) (actual.staticSites.map Prod.snd) ].filterMap id
