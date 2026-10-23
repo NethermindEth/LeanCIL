@@ -130,12 +130,16 @@ internal static class ContractMethodMetadata
         GenericInstanceMethod reference = new(definition);
         foreach (TypeReference argument in arguments) reference.GenericArguments.Add(argument);
         MethodDefinition closed = new MethodSpecialization(definition.Module, architecture).Instantiate(reference);
-        StringBuilder identity = new(definition.Module.Assembly.Name.FullName + "::" + reference.FullName + "|arguments|");
+        // Scalar certificates read the closed return and parameter types from the identity.
+        // Keep the scoped instantiation key inside the method name, before the parameter list.
+        StringBuilder identity = new(definition.Module.Assembly.Name.FullName + "::" + closed.ReturnType.FullName + " " +
+            closed.DeclaringType.FullName + "::" + closed.Name + "|arguments|");
         foreach (TypeReference argument in arguments)
         {
             string scoped = OpenType(argument);
             identity.Append(scoped.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(scoped);
         }
+        identity.Append('(').AppendJoin(',', closed.Parameters.Select(parameter => parameter.ParameterType.FullName)).Append(')');
         return new(definition, closed, reference, arguments, identity.ToString());
     }
 

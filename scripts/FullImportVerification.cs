@@ -182,7 +182,8 @@ partial class Program
         }
         void Compile(string name, string progress, bool untrusted)
         {
-            Run([LeanExecutable, "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, name + ".olean"), Path.Combine(compositionDirectory, name + ".lean")],
+            // Rechecking expanded kernel terms can cost more than elaborating the original tactic proof.
+            Run([LeanExecutable, "-DmaxHeartbeats=2000000", "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, name + ".olean"), Path.Combine(compositionDirectory, name + ".lean")],
                 callerSession, fullLeanPath, progress: progress);
             generatedModules.Add(name);
             if (untrusted) RecheckResolution();
