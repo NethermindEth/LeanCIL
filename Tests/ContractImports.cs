@@ -569,7 +569,9 @@ Reset();
 expectedHash = new string('0', 64);
 Reject(Command(), "implementation SHA-256 mismatch: expected " + expectedHash);
 Reset();
-Reject(Command(method: "Generic"), "Generic contract imports");
+// Closed generic imports are supported, but this sidecar exports only AddOne.
+Reject(Command(method: "Generic"), "Contract export not present: " + contract["assemblyIdentity"]!.GetValue<string>() +
+    "::T ImportFixture.Library::Identity<System.UInt64>(T)|arguments|");
 foreach (Action<MethodDefinition> mutation in new Action<MethodDefinition>[]
 {
     method => { method.IsStatic = false; method.HasThis = true; },
