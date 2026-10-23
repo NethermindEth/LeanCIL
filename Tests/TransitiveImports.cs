@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ImportReviewRegressions.cs
 
 using System.Numerics;
 using System.Security.Cryptography;
@@ -109,6 +111,10 @@ Export(a, aArtifact, aPackage, "APublished", Path.Combine(aPackage, "Conditional
     "ImportFixture.LibraryA::AddOne(ulong)", "ExampleProof.correctness", aSidecar);
 JsonObject originalA = JsonNode.Parse(File.ReadAllText(aSidecar))!.AsObject();
 JsonObject originalB = JsonNode.Parse(File.ReadAllText(bSidecar))!.AsObject();
+ImportReviewRegressions.ValidateGraph_WhenDuplicateImplementationHashDiffers_RejectsIdentity(ExtractorPath, originalB);
+ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
+    ExtractorPath, bSidecar, b, Path.Combine(root, "AmbiguousVersions"));
+Console.WriteLine("PASS conflicting duplicate implementation hashes and ambiguous assembly simple names reject at their production boundaries");
 if (originalA["dependencies"]!.AsArray().Count != 1 ||
     !originalA["certifications"]![0]!["statement"]!.GetValue<string>().Contains("HoldsGiven", StringComparison.Ordinal))
     throw new InvalidOperationException("Conditional A export lost its B dependency or its exact conditional statement.");
