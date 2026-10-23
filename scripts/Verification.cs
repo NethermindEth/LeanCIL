@@ -798,9 +798,12 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         At("Extractor/bin/Nethermind.LeanCIL.dll");
 #endif
 
+    // Read the module name, not the whole line: a trailing comment does not change an import.
+    // Shared by standalone proofs and consumer dependency traversal.
+    static readonly Regex SourceImport = new(@"^[ \t]*(?:(?:public|meta)[ \t]+)*import[ \t]+(?:all[ \t]+)?([A-Za-z_][A-Za-z0-9_'.]*)(?=[ \t]*(?:--|/-|\r?$))", RegexOptions.Multiline);
+
     // Proofs opt in to PDB names and locations with `import ExtractedSymbols`.
-    static bool ImportsSymbols(string proof) => Regex.IsMatch(proof,
-        @"^(?:(?:public|meta)[ \t]+)*import[ \t]+(?:all[ \t]+)?ExtractedSymbols[ \t]*\r?$", RegexOptions.Multiline);
+    static bool ImportsSymbols(string proof) => SourceImport.Matches(proof).Any(import => import.Groups[1].Value == "ExtractedSymbols");
 
     static string SymbolsFor(string output) => Path.Combine(output, "Symbols.lean") is var path && File.Exists(path) ? path
         : throw new InvalidOperationException(MissingSymbols(output));
