@@ -131,9 +131,10 @@ internal static class ContractMethodMetadata
         foreach (TypeReference argument in arguments) reference.GenericArguments.Add(argument);
         MethodDefinition closed = new MethodSpecialization(definition.Module, architecture).Instantiate(reference);
         // Scalar certificates read the closed return and parameter types from the identity.
-        // Keep the scoped instantiation key inside the method name, before the parameter list.
+        // Keep definition and scoped argument keys before the parameter list.
+        string definitionHash = ContractInterface.Hash(Encoding.UTF8.GetBytes(DefinitionKey(definition)));
         StringBuilder identity = new(definition.Module.Assembly.Name.FullName + "::" + closed.ReturnType.FullName + " " +
-            closed.DeclaringType.FullName + "::" + closed.Name + "|arguments|");
+            closed.DeclaringType.FullName + "::" + closed.Name + "|definition|" + definitionHash + "|arguments|");
         foreach (TypeReference argument in arguments)
         {
             string scoped = OpenType(argument);
@@ -170,6 +171,20 @@ internal static class ContractMethodMetadata
             OpenType(definition.ReturnType) == OpenType(reference.ReturnType) &&
             definition.Parameters.Select(parameter => OpenType(parameter.ParameterType)).SequenceEqual(
                 reference.Parameters.Select(parameter => OpenType(parameter.ParameterType)), StringComparer.Ordinal);
+    }
+
+    static string DefinitionKey(MethodDefinition definition)
+    {
+        StringBuilder key = new("contract-definition-v1:");
+        key.Append(Part(OpenType(definition.DeclaringType))).Append(Part(definition.Name))
+            .Append(Part(definition.GenericParameters.Count.ToString(CultureInfo.InvariantCulture)))
+            .Append(Part(((byte)definition.CallingConvention).ToString(CultureInfo.InvariantCulture)))
+            .Append(Part(definition.HasThis ? "1" : "0")).Append(Part(definition.ExplicitThis ? "1" : "0"))
+            .Append(Part(OpenType(definition.ReturnType)))
+            .Append(Part(definition.Parameters.Count.ToString(CultureInfo.InvariantCulture)));
+        foreach (ParameterDefinition parameter in definition.Parameters)
+            key.Append(Part(OpenType(parameter.ParameterType)));
+        return key.ToString();
     }
 
     static string Part(string value) => value.Length.ToString(CultureInfo.InvariantCulture) + ":" + value;

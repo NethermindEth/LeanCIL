@@ -39,6 +39,8 @@ public static class Library
         destination.Head.Value = source.Head.Value;
     }
     public static T Identity<T>(T value) where T : unmanaged => value;
+    public static T Overload<T>(T value) where T : unmanaged => value;
+    public static ulong Overload<T>(ulong value) where T : unmanaged => value + 1;
     public static T Unsupported<T>(T value) where T : class => value;
 }
 public static class Generic<T> { public static ulong Value(ulong value) => value; }
@@ -58,6 +60,40 @@ public static class Application
 Run(["dotnet", "build", appProject, "-c", "Release"]);
 string lib = Path.Combine(libRoot, "bin", "TypedFixture.Lib.dll");
 string app = Path.Combine(appRoot, "bin", "TypedFixture.App.dll");
+Type methodMetadata = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.ContractMethodMetadata", throwOnError: true)!;
+MethodInfo selectMethod = methodMetadata.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
+List<(string Selector, string Definition, string Closed, string Identity)> overloads = [];
+using (ModuleDefinition module = ModuleDefinition.ReadModule(lib))
+{
+    foreach (string selector in new[] { "TypedFixture.Library::Overload(T)", "TypedFixture.Library::Overload(ulong)" })
+    {
+        object selection = selectMethod.Invoke(null, [module, selector, new[] { "System.UInt64" }, "scalar"])!;
+        object Member(object value, string name) => value.GetType().GetProperty(name,
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(value)!;
+        overloads.Add((selector, (string)Member(Member(selection, "Definition"), "FullName"),
+            (string)Member(Member(selection, "Closed"), "FullName"), (string)Member(selection, "Identity")));
+    }
+}
+if (overloads[0].Definition == overloads[1].Definition || overloads[0].Closed != overloads[1].Closed ||
+    overloads[0].Identity == overloads[1].Identity)
+    throw new InvalidOperationException("Distinct generic definitions with the same closed signature must retain distinct contract identities.");
+List<string> overloadBodies = [];
+for (int index = 0; index < overloads.Count; index++)
+{
+    string artifact = Path.Combine(root, "Overload-" + index);
+    Run([.. cli, "extract", lib, overloads[index].Selector, artifact, "--type-argument", "System.UInt64"]);
+    JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
+    if (identity.GetProperty("assemblySha256").GetString() != Sha(lib) ||
+        identity.GetProperty("entryDefinition").GetString() != overloads[index].Definition ||
+        !identity.GetProperty("entryTypeArguments").Deserialize<string[]>()!.SequenceEqual(new[] { "System.UInt64" }) ||
+        !File.Exists(Path.Combine(artifact, "Extracted.lean")))
+        throw new InvalidOperationException("Generic overload extraction lost its actual DLL, open definition or closed argument.");
+    overloadBodies.Add(identity.GetProperty("methods")[0].GetProperty("instructions").GetRawText());
+}
+if (overloadBodies[0] == overloadBodies[1])
+    throw new InvalidOperationException("Generic overload regression requires distinct actual method bodies.");
+Console.WriteLine("PASS distinct generic definitions retain distinct closed contract identities");
+
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(package, "lakefile.toml"),
     "name = \"typed-import-proofs\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
