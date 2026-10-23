@@ -67,7 +67,7 @@ File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"), true);
 // Only the helper imports ExtractedSymbols; the proof names a local through it.
 File.WriteAllText(Path.Combine(package, "Client", "Named.lean"), $$"""
     import Extracted
-    import ExtractedSymbols
+    import ExtractedSymbols -- PDB names through a consumer helper
     import CIL.StructuralLabels
 
     namespace Client

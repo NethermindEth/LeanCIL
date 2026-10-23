@@ -9,11 +9,24 @@ internal static class Throws
 {
     internal sealed record Analysis(Dictionary<Instruction, string> Raises, HashSet<Instruction> Operands, HashSet<Instruction> Interior);
 
+    // Exact framework constructors whose string arguments cannot change the raised type.
+    // Keep the same allowlist in CIL.Extraction.exceptionConstructor.
+    static bool ExceptionConstructor(string type, int count) =>
+        (count <= 1 && type is "System.Exception" or "System.SystemException" or "System.ApplicationException" or
+            "System.ArithmeticException" or "System.DivideByZeroException" or "System.OverflowException" or
+            "System.InvalidOperationException" or "System.NotSupportedException" or "System.NotImplementedException" or
+            "System.ArgumentException" or "System.ArgumentNullException" or "System.ArgumentOutOfRangeException" or
+            "System.IndexOutOfRangeException" or "System.NullReferenceException" or "System.FormatException") ||
+        (count == 2 && type is "System.ArgumentException" or "System.ArgumentNullException" or "System.ArgumentOutOfRangeException");
+
     static string? Raised(Instruction instruction, int count) =>
         instruction.OpCode.Code == Code.Newobj && instruction.Operand is MethodReference constructor &&
         constructor is not GenericInstanceMethod && constructor.Name == ".ctor" && constructor.HasThis &&
-        constructor.ReturnType.FullName == "System.Void" && constructor.Parameters.Count == count &&
-        constructor.DeclaringType is not TypeSpecification && TypeTests.PlainName(constructor.DeclaringType.FullName) &&
+        !constructor.ExplicitThis && constructor.CallingConvention == MethodCallingConvention.Default && !constructor.HasGenericParameters &&
+        constructor.ReturnType.MetadataType == MetadataType.Void && constructor.Parameters.Count == count &&
+        constructor.Parameters.All(p => p.ParameterType.MetadataType == MetadataType.String) &&
+        constructor.DeclaringType is not TypeSpecification && !constructor.DeclaringType.IsValueType &&
+        ExceptionConstructor(constructor.DeclaringType.FullName, count) &&
         LayoutEvidence.Scope(constructor.DeclaringType) == TypeTests.RuntimeScope ? constructor.DeclaringType.FullName : null;
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Analysis> cache = new();

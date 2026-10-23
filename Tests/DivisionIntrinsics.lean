@@ -1,3 +1,4 @@
+import Lean
 import CIL.Extraction.Translation
 import CIL.SIMD.DivisionLemmas
 
@@ -237,5 +238,28 @@ example : ¬ VectorInitializationsValid (initBody (vectorType "128")) []
     (body [.initAggregate 16]) := by decide +kernel
 example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
     (body []) := by decide +kernel
+
+-- A default case yields a guarded equation, so a new op reading vector bits would pass as a
+-- forwarder. Every equation must be unconditional: one per constructor pattern.
+open Lean Meta in
+run_meta do
+  for name in [``CIL.Safety.observerCount, ``CIL.MemoryOp.argumentCount] do
+    let some equations ← getEqnsFor? name | throwError "No equations for {name}"
+    for equation in equations do
+      let type ← inferType (← mkConstWithLevelParams equation)
+      forallTelescope type fun binders _ => do
+        for binder in binders do
+          if ← isProp (← inferType binder) then
+            throwError "{name} has a default case: {equation} assumes {← inferType binder}"
+
+-- Unspecified lanes reach only the four lane-0 consumers, whatever else evalIntrinsic admits.
+example : Safety.checkedIntrinsic (.vector (.reinterpret 128)) [.v128Low64 7] = .ok (.v128Low64 7) := rfl
+example : Safety.checkedIntrinsic (.avx2 .shl64Count) [.v256 1, .v128Low64 1] = .ok (.v256 (Vector.shiftLeftCount64 1 1)) := rfl
+example : Safety.checkedIntrinsic (.vector (.reinterpret 256)) [.v128Low64 7] =
+    .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
+example : Safety.checkedIntrinsic (.avx2 .shl64Count) [.v128Low64 1, .v128Low64 1] =
+    .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
+example : Safety.checkedIntrinsic (.scalar (.leadingZeroCount 64)) [.v128Low64 1] =
+    .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
 
 end Tests.DivisionIntrinsics
