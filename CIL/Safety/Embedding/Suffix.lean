@@ -26,6 +26,7 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     by simpa only using congrArg Method.returnsValue metadata,
     by simpa only using congrArg Method.locals metadata,
     by simpa only using congrArg Method.localKinds metadata,
+    by simpa only using congrArg Method.opaqueVectorLocals metadata,
     by simpa only using congrArg Method.vectorArgs metadata,
     by simpa only using congrArg Method.parameterHomes metadata, descriptors, ?_, ?_⟩
   · by_cases zero : lower = 0

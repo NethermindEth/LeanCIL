@@ -19,6 +19,7 @@ theorem instruction_preserves (memory : Memory) (reference : ManagedReference) (
     (valid : ∃ value, formValue memory reference = .ok value) :
     instruction .skipInit (.reference reference :: stack) memory = .ok (memory, stack) := by
   obtain ⟨value, valid⟩ := valid
-  simp [instruction, valid, Functor.map, Except.map]
+  simp [instruction, observerCount, unspecifiedOperands, CIL.Safety.Value.hasUnspecified,
+    valid, Functor.map, Except.map]
 
 end ExampleProof

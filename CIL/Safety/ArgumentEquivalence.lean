@@ -16,7 +16,9 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Op) (pc : Nat)
         return FrameAction.next (pc + 1) ((← checkedValue memory value) :: stack) frame memory)
         (agreement index none rfl)
     | some kind =>
-      exact congrArg (fun selected => do
+      exact congrArg (fun (selected : Option Value) => show ExecutionResult FrameAction from do
+        if (selected.map Value.hasUnspecified).getD false then
+          .error (.unsupported "Instruction observes unspecified vector bits") else
         let some (Value.scalar (.i32 bits)) := selected | .error .invalidState
         return FrameAction.next (pc + 1)
           ((← checkedValue memory (.scalar (.i32 (kind.extend bits)))) :: stack) frame memory)

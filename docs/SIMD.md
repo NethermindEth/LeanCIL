@@ -162,3 +162,10 @@ Byte controls are consumed by the Lean evaluator as `i32` values in 0–255; oth
 The extraction inventory comes from [RuntimeModels.cs](../Extractor/RuntimeModels.cs) and [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs). Operand checks and operation evaluation are defined in [Intrinsics.lean](../CIL/SIMD/Intrinsics.lean), with bit-level functions in the [SIMD modules](../CIL/SIMD).
 
 Additional Lean definitions, such as portable vector multiplication, do not automatically add extractor mappings. These tables describe implemented support, not exhaustive testing of every overload or universal correctness of user methods. See [validation results](VALIDATION.md) for the tests run and the [opcode table](OPCODES.md) for non-intrinsic CIL support.
+
+`initobj` for the exact `Vector128<UInt64>`, `Vector256<UInt64>`, and
+`Vector512<UInt64>` runtime types clears 16, 32, and 64 bytes respectively. The
+translation certificate binds the raw opcode, full type identities, and byte
+width. These ordinary memory writes need no SIMD ISA capability and require a
+valid modeled profile. They retain ordinary write bounds and access checks.
+This support does not add vector512 field layouts or verify CoreCLR behavior.

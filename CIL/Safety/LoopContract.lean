@@ -58,13 +58,16 @@ theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract In
 #print axioms loop_terminates_call_formed
 
 /-- Step a `LoopTerminates` goal through non-call, non-return instructions until one does not apply. -/
-macro "cil_loop_advance" "[" facts:term,* "]" : tactic =>
-  `(tactic| repeat first
-    | (simp only [$[$facts:term],*])
-    | (apply CIL.Safety.loop_terminates_next
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step [CIL.truth, $[$facts:term],*]))
+syntax "cil_loop_advance" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| cil_loop_advance [$facts:term,*]) => cilWithNormalisedFacts facts.getElems fun facts prepared =>
+    `(tactic| repeat first
+      | (simp only [$[$facts:term],*])
+      | (apply CIL.Safety.loop_terminates_next
+         · cil_lookup [$[$facts:term],*]
+         · cil_lookup [$[$facts:term],*]
+         · cil_checked_step_normalized [$[$prepared:term],*]))
 
 /-- Apply a contract at the fetched loop call or a `bind_call` site; leaves `pre`, then the continuation. -/
 syntax "cil_loop_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic

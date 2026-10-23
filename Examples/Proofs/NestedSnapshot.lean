@@ -15,7 +15,9 @@ theorem correctness (bytes : List (BitVec 8)) (size : bytes.length = 32) :
       .ok (.next 1 args frame Examples.empty) := rfl
   have second : step Extracted.method0 (.aggregateFieldAt 8 16) 1 args frame args Examples.empty =
       .ok (.next 2 [.scalar (.aggregate ((bytes.drop 8).take 16))] frame Examples.empty) := by
-    simp [CIL.Safety.step, pureArity, instruction, args, size, Pure.pure, Except.pure, Bind.bind, Except.bind]
+    simp [CIL.Safety.step, pureArity, instruction, observerCount, unspecifiedOperands,
+      CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
+      args, size, Pure.pure, Except.pure, Bind.bind, Except.bind]
   have ran : run Extracted.program 3 0 0 args frame [] Examples.empty =
       .ok (Examples.empty, [.scalar (.aggregate ((bytes.drop 8).take 16))]) := by
     rw [run_next Extracted.lookup0 Extracted.method0_instruction0 first]

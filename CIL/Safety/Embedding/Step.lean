@@ -148,12 +148,38 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
           | ok checked => rw [hc] at h; cases h; rfl
         · cases h
 
+private theorem observer_ok {observed : Bool} {result : ExecutionResult FrameAction} {action : FrameAction}
+    (h : (if observed then .error (.unsupported "Instruction observes unspecified vector bits") else result) = .ok action) :
+    observed = false ∧ result = .ok action := by
+  cases observed with
+  | false => exact ⟨rfl, h⟩
+  | true => cases h
+
+private theorem observer_thrown {observed : Bool} {result : ExecutionResult FrameAction} {exception : String}
+    (h : (if observed then .error (.unsupported "Instruction observes unspecified vector bits") else result) =
+      .error (.thrown exception)) : observed = false ∧ result = .error (.thrown exception) := by
+  cases observed with
+  | false => exact ⟨rfl, h⟩
+  | true => cases h
+
+set_option hygiene false in
+macro "step_observers" : tactic => `(tactic| (
+  first
+  | (obtain ⟨observed, h⟩ := observer_ok h
+     simp only [observerCount] at observed h ⊢
+     simp only [observed, Bool.false_eq_true, ite_false] at h ⊢)
+  | (obtain ⟨observed, h⟩ := observer_thrown h
+     simp only [observerCount] at observed h ⊢
+     simp only [observed, Bool.false_eq_true, ite_false] at h ⊢)
+  | skip))
+
 set_option hygiene false in
 /-- Steps an instruction that `step` handles only in its shared tail. -/
 macro "step_relabel_fallback" base:term:max plain:term:max : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
   dsimp only [CIL.Op.relabel] at h ⊢
+  step_observers
   rw [context.profile]
   refine fallback_relabel (profile := expected.profile) _ rfl ?_ ?_ context.next h
   · exact $base
@@ -180,7 +206,8 @@ set_option hygiene false in
 macro "explicit_intro" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢))
+  dsimp only [CIL.Op.relabel] at h ⊢
+  step_observers))
 
 theorem mapError_ok {x : Except ε α} {f : ε → ε'} {a : α} (h : x.mapError f = .ok a) : x = .ok a := by
   cases x with
@@ -191,6 +218,8 @@ set_option hygiene false in
 macro "stack_cases" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
+  dsimp only [CIL.Op.relabel] at h ⊢
+  step_observers
   rcases stack with _ | ⟨v1, _ | ⟨v2, rest⟩⟩ <;> (try cases v1) <;> (try cases v2)
   all_goals dsimp only [CIL.Op.relabel] at h ⊢
   all_goals (try rw [context.profile])))
@@ -198,13 +227,14 @@ macro "stack_cases" : tactic => `(tactic| (
 set_option hygiene false in
 macro "fallback_vacuous" : tactic => `(tactic|
   exact fallback_relabel (profile := expected.profile) _ rfl (fun absent => absurd rfl absent)
-    (fun _ _ ran => by unfold instruction at ran; dsimp only at ran; cases ran) context.next h)
+    (fun _ _ ran => by unfold instruction at ran; dsimp only at ran; split at ran <;> cases ran) context.next h)
 
 set_option hygiene false in
 macro "plain_cases" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
   dsimp only [CIL.Op.relabel] at h ⊢
+  step_observers
   (try rw [context.profile])
   (try rw [context.returnsValue])))
 
@@ -317,6 +347,8 @@ theorem step_relabel_memory (operation : MemoryOp) : StepRelabel (.memory operat
 theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow) := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
+  dsimp only [CIL.Op.relabel] at h ⊢
+  step_observers
   cases narrow
   · dsimp only [CIL.Op.relabel] at h ⊢
     rw [context.returnsValue]
@@ -328,16 +360,22 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
   · rcases stack with _ | ⟨v, rest⟩
     · dsimp only [CIL.Op.relabel] at h ⊢
       fallback_vacuous
-    · cases v <;> (try (rename_i x; cases x)) <;> cases rest
-      all_goals dsimp only [CIL.Op.relabel] at h ⊢
-      all_goals (try rw [context.returnsValue])
-      all_goals first
-        | fallback_vacuous
-        | (by_cases returns : expected.returnsValue = true
-           · simp only [returns, ↓reduceIte] at h ⊢
-             lockstep
-           · simp only [returns, ↓reduceIte, Bool.false_eq_true] at h
-             cases h)
+    · cases v with
+      | scalar value =>
+        cases value <;> cases rest
+        all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+        all_goals (try rw [context.returnsValue])
+        all_goals first
+          | fallback_vacuous
+          | (by_cases returns : expected.returnsValue = true
+             · simp only [returns, ↓reduceIte] at h ⊢
+               lockstep
+             · simp only [returns, ↓reduceIte, Bool.false_eq_true] at h
+               cases h)
+      | reference reference =>
+        cases rest <;> fallback_vacuous
+      | span reference length =>
+        cases rest <;> fallback_vacuous
 
 theorem step_relabel_unsupported (description : String) : StepRelabel (.unsupported description) := by
   plain_cases
@@ -561,6 +599,7 @@ macro "step_raise_fallback" base:term:max plain:term:max : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
   dsimp only [CIL.Op.relabel] at h ⊢
+  step_observers
   rw [context.profile]
   refine fallback_raise (profile := expected.profile) _ rfl ?_ ?_ context.next h
   · exact $base
@@ -569,7 +608,7 @@ macro "step_raise_fallback" base:term:max plain:term:max : tactic => `(tactic| (
 set_option hygiene false in
 macro "fallback_raise_vacuous" : tactic => `(tactic|
   exact fallback_raise (profile := expected.profile) _ rfl (fun absent => absurd rfl absent)
-    (fun _ ran => by unfold instruction at ran; dsimp only at ran; cases ran) context.next h)
+    (fun _ ran => by unfold instruction at ran; dsimp only at ran; split at ran <;> cases ran) context.next h)
 
 set_option hygiene false in
 /-- Replays the shared monadic prefix of both steps up to the bind that throws. -/
@@ -647,6 +686,8 @@ theorem step_raise_intrinsic (operation : Intrinsic) (argc : Nat) : StepRaise (.
 theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
+  dsimp only [CIL.Op.relabel] at h ⊢
+  step_observers
   cases narrow
   · dsimp only [CIL.Op.relabel] at h ⊢
     rw [context.returnsValue]
@@ -658,16 +699,22 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
   · rcases stack with _ | ⟨v, rest⟩
     · dsimp only [CIL.Op.relabel] at h ⊢
       fallback_raise_vacuous
-    · cases v <;> (try (rename_i x; cases x)) <;> cases rest
-      all_goals dsimp only [CIL.Op.relabel] at h ⊢
-      all_goals (try rw [context.returnsValue])
-      all_goals first
-        | fallback_raise_vacuous
-        | (by_cases returns : expected.returnsValue = true
-           · simp only [returns, ↓reduceIte] at h ⊢
-             raise_lockstep
-           · simp only [returns, ↓reduceIte, Bool.false_eq_true] at h
-             cases h)
+    · cases v with
+      | scalar value =>
+        cases value <;> cases rest
+        all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+        all_goals (try rw [context.returnsValue])
+        all_goals first
+          | fallback_raise_vacuous
+          | (by_cases returns : expected.returnsValue = true
+             · simp only [returns, ↓reduceIte] at h ⊢
+               raise_lockstep
+             · simp only [returns, ↓reduceIte, Bool.false_eq_true] at h
+               cases h)
+      | reference reference =>
+        cases rest <;> fallback_raise_vacuous
+      | span reference length =>
+        cases rest <;> fallback_raise_vacuous
 
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/
 theorem step_raise (op : CIL.Op) : StepRaise op := by

@@ -17,6 +17,7 @@ internal static class ParameterEvidence
             {
                 "System.Runtime.Intrinsics.Vector128`1" => ".vector128",
                 "System.Runtime.Intrinsics.Vector256`1" => ".vector256",
+                "System.Runtime.Intrinsics.Vector512`1" => ".vector512",
                 _ => throw new InvalidDataException("Unsupported raw argument/local type: " + type.FullName)
             };
         return $".field ({layouts.RawFieldType(type, module)})";
