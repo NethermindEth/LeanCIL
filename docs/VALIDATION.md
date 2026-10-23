@@ -218,6 +218,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationshadow` | Executed original-root module shadow |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
+| `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -228,10 +229,16 @@ once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
 statics, transitive, discovery and typed suites cannot enter that plan.
-The registry now has 15 leaves. `exportsstatics` and `exportstransitive` run
+The registry now has 16 leaves. `exportsstatics` and `exportstransitive` run
 directly, with no core export bootstrap or nested post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
+`exportsdiscovery` records one separate `discovery.fixture` completion after
+the actual child succeeds. It does not count individual child behaviors in
+the 46 base cases. It builds the producer library and creates real proof
+packages and publication. The child builds, extracts and verifies its own
+caller. It needs no baseline caller artifact or verified report. The discovery
+leaf runs no core caller verification, restrictions, callbacks or full cases.
 
 New cohort durations are unmeasured. The existing CI caps remain 90 minutes
 for imports, 120 for each exports leaf, and 30 for other suites. The matrix

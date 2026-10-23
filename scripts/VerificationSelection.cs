@@ -47,6 +47,8 @@ internal static class VerificationSelection
         {
             if (!File.Exists(Path.Combine(root, entry.Script)))
                 throw new InvalidDataException("Missing registered export fixture: " + entry.Script);
+            if (entry.ChildScript is string child && !File.Exists(Path.Combine(root, child)))
+                throw new InvalidDataException("Missing registered export fixture: " + child);
             inputs.Add(entry.Name, new(entry.Inputs.Append(entry.Script), StringComparer.Ordinal));
         }
         inputs["core"] = new(StringComparer.Ordinal)
