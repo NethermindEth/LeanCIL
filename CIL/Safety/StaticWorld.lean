@@ -105,7 +105,7 @@ theorem StaticWorldValid.mono {descriptors selected : List CIL.StaticDescriptor}
 
 theorem StaticWorldValid.append {left right : List CIL.StaticDescriptor} {m : Memory}
     (first : StaticWorldValid left m) (second : StaticWorldValid right m)
-    (disjoint : ∀ a ∈ left, ∀ b ∈ right, a.identity ≠ b.identity) :
+    (compatible : ∀ a ∈ left, ∀ b ∈ right, a.identity = b.identity → a = b) :
     StaticWorldValid (left ++ right) m := by
   refine ⟨?_, ?_, first.2.2.1, ?_⟩
   · intro descriptor member
@@ -116,8 +116,8 @@ theorem StaticWorldValid.append {left right : List CIL.StaticDescriptor} {m : Me
     rcases List.mem_append.mp ha with ha | ha <;>
       rcases List.mem_append.mp hb with hb | hb
     · exact first.2.1 a ha b hb same
-    · exact False.elim (disjoint a ha b hb same)
-    · exact False.elim (disjoint b hb a ha same.symm)
+    · exact compatible a ha b hb same
+    · exact (compatible b hb a ha same.symm).symm
     · exact second.2.1 a ha b hb same
   · intro descriptor member
     rcases List.mem_append.mp member with member | member

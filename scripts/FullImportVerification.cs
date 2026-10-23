@@ -7,30 +7,65 @@ partial class Program
 {
     sealed record FullLibrary(int Slot, string Module, string ExpectedModule, string BundleDigest,
         string Contract, string Kind, string TransferSource, string GeneratedSource);
+    sealed record FullSelection(JsonElement Binding, string Sidecar, string SidecarSha256, string Implementation,
+        string ImplementationSha256, ContractInterface Contract, string Bundle, string Digest, ContractBundleManifest Inventory);
+    sealed record FullImport(FullSelection Selection, ContractExport Export, ContractCertification Certification)
+    {
+        public int Slot => Selection.Binding.GetProperty("slot").GetInt32();
+    }
+
+    // The sidecar names a content-addressed bundle; an override may relocate it but not change its identity.
+    static FullSelection SelectFullBundle(string output, JsonElement binding, IReadOnlyDictionary<string, string> overrides, ISet<string> used)
+    {
+        string sidecar = ExtractionIdentity.Resolve(output, binding.GetProperty("sidecarPath").GetString()!);
+        string implementation = ExtractionIdentity.Resolve(output, binding.GetProperty("implementationPath").GetString()!);
+        byte[] sidecarBytes = File.ReadAllBytes(sidecar);
+        string sidecarSha256 = ContractInterface.Hash(sidecarBytes);
+        string implementationSha256 = Sha(implementation);
+        if (sidecarSha256 != binding.GetProperty("sidecarSha256").GetString() ||
+            implementationSha256 != binding.GetProperty("implementationSha256").GetString())
+            throw new InvalidDataException("Full-verification imported implementation or sidecar changed: " + binding.GetProperty("identity").GetString());
+        ContractInterface contract = ContractInterface.Read(sidecarBytes);
+        string locator = contract.FullVerificationLocator ?? throw new InvalidDataException("Full verification source bundle is missing: " + contract.AssemblyIdentity);
+        string digest = Path.GetFileName(Path.TrimEndingDirectorySeparator(locator));
+        if (!ContractInterface.Digest(digest)) throw new InvalidDataException("Full-verification locator must name a content-addressed source bundle.");
+        string simple = AssemblyNameReference.Parse(contract.AssemblyIdentity).Name;
+        if (overrides.TryGetValue(simple, out string? replacement)) used.Add(simple);
+        string bundle = Path.GetFullPath(replacement ?? locator);
+        if (!Directory.Exists(bundle)) throw new InvalidDataException("Full verification source bundle is missing: " + bundle);
+        if (Path.GetFileName(Path.TrimEndingDirectorySeparator(bundle)) != digest)
+            throw new InvalidDataException("Full-verification source bundle override has the wrong content identity.");
+        return new(binding, sidecar, sidecarSha256, implementation, implementationSha256, contract, bundle, digest,
+            ContractSourceBundle.Validate(bundle, digest));
+    }
+
+    static void RequireUsedOverrides(IReadOnlyDictionary<string, string> overrides, ISet<string> used)
+    {
+        if (overrides.Keys.Any(name => !used.Contains(name)))
+            throw new InvalidDataException("Unused --full-artifact override; supply the imported assembly simple name.");
+    }
 
     void PreflightFullImports(string output, IReadOnlyDictionary<string, string> overrides)
     {
-        JsonElement[] imports = ImportedBindings(output);
+        JsonElement[] imports = ExtractionIdentity.Read(output).Imports;
         if (imports.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         HashSet<string> used = new(StringComparer.Ordinal);
-        foreach (JsonElement binding in imports)
-        {
-            string sidecar = binding.GetProperty("sidecarPath").GetString()!;
-            if (Sha(sidecar) != binding.GetProperty("sidecarSha256").GetString() ||
-                Sha(binding.GetProperty("implementationPath").GetString()!) != binding.GetProperty("implementationSha256").GetString())
-                throw new InvalidDataException("Full-verification imported implementation or sidecar changed.");
-            ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecar));
-            string locator = contract.FullVerificationLocator ?? throw new InvalidDataException("Full verification source bundle is missing: " + contract.AssemblyIdentity);
-            string digest = Path.GetFileName(Path.TrimEndingDirectorySeparator(locator));
-            string name = AssemblyNameReference.Parse(contract.AssemblyIdentity).Name;
-            string selected = overrides.TryGetValue(name, out string? replacement) ? replacement : locator;
-            if (replacement is not null) used.Add(name);
-            if (!Directory.Exists(selected)) throw new InvalidDataException("Full verification source bundle is missing: " + selected);
-            if (!ContractInterface.Digest(digest) || Path.GetFileName(Path.TrimEndingDirectorySeparator(selected)) != digest)
-                throw new InvalidDataException("Full-verification source bundle override has the wrong content identity.");
-            ContractSourceBundle.Validate(selected, digest);
-        }
-        if (overrides.Keys.Any(name => !used.Contains(name))) throw new InvalidDataException("Unused --full-artifact override.");
+        foreach (JsonElement binding in imports) SelectFullBundle(output, binding, overrides, used);
+        RequireUsedOverrides(overrides, used);
+    }
+
+    // Search roots without the toolchain, which a supported run keeps read-only instead of rehashing.
+    string WithoutToolchain(string leanPath)
+    {
+        string toolchain = Path.GetFullPath(Toolchain);
+        return string.Join(Path.PathSeparator, leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(root => !Inside(toolchain, Path.GetFullPath(root))));
+    }
+
+    static bool Inside(string root, string path)
+    {
+        string relative = Path.GetRelativePath(root, path);
+        return relative == "." || !(relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || Path.IsPathRooted(relative));
     }
 
     FullImportResult VerifyFullImports(string output, string callerSession, string callerModule, string callerTheorem,
@@ -39,87 +74,104 @@ partial class Program
         string originalLeanPath = string.Join(Path.PathSeparator, callerLeanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(path => Path.GetFullPath(path, callerSession)).Append(Path.Combine(Toolchain, "lib/lean"))
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal));
-        SortedDictionary<string, string> acceptedCaller = FullModuleArtifacts(originalLeanPath);
+        string callerRoots = WithoutToolchain(originalLeanPath);
+        SortedDictionary<string, string> acceptedCaller = FullModuleArtifacts(callerRoots);
         SortedDictionary<string, string> originalModules = FullModulePaths(originalLeanPath);
         string originalClaim = CaptureFullCallerClaim(callerSession, callerModule, callerTheorem, originalLeanPath);
         CheckFullResolution(callerSession, originalLeanPath, originalModules);
-        RequireFullArtifacts(acceptedCaller);
-        JsonElement[] bindings = ImportedBindings(output).OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
+        JsonElement[] bindings = ExtractionIdentity.Read(output).Imports.OrderBy(binding => binding.GetProperty("slot").GetInt32()).ToArray();
         if (bindings.Length == 0) throw new InvalidDataException("Full verification requires at least one contract import.");
         for (int index = 0; index < bindings.Length; index++)
             if (bindings[index].GetProperty("slot").GetInt32() != index)
                 throw new InvalidDataException("Full verification requires contiguous unique import slots.");
-        string staging = Path.Combine(callerSession, "full-imports-" + Guid.NewGuid().ToString("N"));
+        // Outside every search root, so no staged or generated file can shadow a checked module.
+        string workspace = Path.Combine(Path.GetTempPath(), "leancil-full-" + Guid.NewGuid().ToString("N"));
+        if (originalLeanPath.Split(Path.PathSeparator).Any(root => Inside(Path.GetFullPath(root), workspace)))
+            throw new InvalidDataException("Full-verification workspace lies inside a Lean search root: " + workspace);
+        Directory.CreateDirectory(workspace);
+        try
+        {
+            return VerifyFullImports(output, callerSession, callerModule, callerTheorem, overrides, bindings, originalLeanPath,
+                callerRoots, acceptedCaller, originalModules, originalClaim, workspace);
+        }
+        finally
+        {
+            try { Directory.Delete(workspace, true); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine("warning: full-verification workspace cleanup failed: " + error.Message);
+            }
+        }
+    }
+
+    FullImportResult VerifyFullImports(string output, string callerSession, string callerModule, string callerTheorem,
+        IReadOnlyDictionary<string, string> overrides, JsonElement[] bindings, string originalLeanPath, string callerRoots,
+        SortedDictionary<string, string> acceptedCaller, SortedDictionary<string, string> originalModules, string originalClaim,
+        string workspace)
+    {
+        string staging = Path.Combine(workspace, "staging");
         Directory.CreateDirectory(staging);
         SortedDictionary<string, string> original = new(StringComparer.Ordinal);
         Dictionary<string, string> bundles = new(StringComparer.Ordinal);
-        List<FullLibrary> libraries = [];
         HashSet<string> usedOverrides = new(StringComparer.Ordinal);
-        void Original(string path) => original[path] = Sha(path);
         void RecheckOriginal()
         {
             foreach ((string path, string digest) in original)
                 if (!File.Exists(path) || Sha(path) != digest) throw new InvalidDataException("Full-verification input changed: " + path);
             foreach ((string directory, string digest) in bundles) ContractSourceBundle.Validate(directory, digest);
         }
-        Original(Path.Combine(output, "identity.json"));
-        Original(Path.Combine(output, "Extracted.lean"));
+        // One snapshot after each run that elaborates producer-derived code; it detects accidental, not hostile, mutation.
+        void RequireCallerUnchanged()
+        {
+            RecheckOriginal();
+            RequireFullArtifacts(acceptedCaller);
+            RequireFullModuleArtifactSet(callerRoots, acceptedCaller);
+            RequireFullModulePaths(originalLeanPath, originalModules);
+        }
+        foreach (string file in new[] { "identity.json", "Extracted.lean" })
+            original[Path.Combine(output, file)] = Sha(Path.Combine(output, file));
+        List<FullImport> imports = [];
         foreach (JsonElement binding in bindings)
         {
             string identity = binding.GetProperty("identity").GetString()!;
-            string sidecarPath = binding.GetProperty("sidecarPath").GetString()!;
-            string implementation = binding.GetProperty("implementationPath").GetString()!;
-            Original(sidecarPath);
-            Original(implementation);
-            if (original[sidecarPath] != binding.GetProperty("sidecarSha256").GetString() ||
-                original[implementation] != binding.GetProperty("implementationSha256").GetString())
-                throw new InvalidDataException("Full-verification imported implementation or sidecar changed: " + identity);
-            ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecarPath));
+            FullSelection selection = SelectFullBundle(output, binding, overrides, usedOverrides);
+            original[selection.Sidecar] = selection.SidecarSha256;
+            original[selection.Implementation] = selection.ImplementationSha256;
+            ContractInterface contract = selection.Contract;
             if (contract.Dependencies.Length != 0 || contract.IsReferenceAssembly)
                 throw new InvalidDataException("Full verification version 1 requires closed implementation libraries without transitive imports.");
             string profile = binding.GetProperty("profile").GetString()!;
             ContractExport export = contract.Exports.Single(item => item.Identity == identity);
             ContractCertification certification = contract.Certifications.Single(item => item.Identity == identity && item.Profile == profile);
-            if (certification.ImplementationSha256 != original[implementation] || certification.InterfaceDigest != contract.InterfaceDigest ||
+            if (certification.ImplementationSha256 != selection.ImplementationSha256 || certification.InterfaceDigest != contract.InterfaceDigest ||
                 certification.ClosureDigest != export.ClosureDigest || certification.StatementDigest != binding.GetProperty("certificationStatementDigest").GetString())
                 throw new InvalidDataException("Full-verification certification binding mismatch: " + identity);
-            string locator = contract.FullVerificationLocator ?? throw new InvalidDataException("Full verification source bundle is missing: " + identity);
-            string digest = Path.GetFileName(Path.TrimEndingDirectorySeparator(locator));
-            if (!ContractInterface.Digest(digest)) throw new InvalidDataException("Full-verification locator must name a content-addressed source bundle.");
-            string simple = AssemblyNameReference.Parse(contract.AssemblyIdentity).Name;
-            string selected = overrides.TryGetValue(simple, out string? selectedOverride) ? selectedOverride : locator;
-            if (selectedOverride is not null) usedOverrides.Add(simple);
-            string bundle = Path.GetFullPath(selected);
-            if (!Directory.Exists(bundle)) throw new InvalidDataException("Full verification source bundle is missing: " + bundle);
-            if (Path.GetFileName(Path.TrimEndingDirectorySeparator(bundle)) != digest)
-                throw new InvalidDataException("Full-verification source bundle override has the wrong content identity.");
-            ContractBundleManifest inventory = ContractSourceBundle.Validate(bundle, digest);
-            if (bundles.TryGetValue(bundle, out string? previousDigest) && previousDigest != digest)
-                throw new InvalidDataException("Full-verification source bundle path has conflicting content identities: " + bundle);
-            bundles.TryAdd(bundle, digest);
-            int slot = binding.GetProperty("slot").GetInt32();
-            libraries.Add(CheckFullLibrary(binding, contract, export, certification, inventory, bundle, digest,
-                Path.Combine(staging, "library-" + slot), RecheckOriginal));
-            RequireFullArtifacts(acceptedCaller);
-            RequireFullModuleArtifactSet(originalLeanPath, acceptedCaller);
-            RequireFullModulePaths(originalLeanPath, originalModules);
-            RequireEmptyProducerModules(staging);
+            if (bundles.TryGetValue(selection.Bundle, out string? previousDigest) && previousDigest != selection.Digest)
+                throw new InvalidDataException("Full-verification source bundle path has conflicting content identities: " + selection.Bundle);
+            bundles.TryAdd(selection.Bundle, selection.Digest);
+            imports.Add(new(selection, export, certification));
         }
-        if (overrides.Keys.Any(name => !usedOverrides.Contains(name)))
-            throw new InvalidDataException("Unused --full-artifact override; supply the imported assembly simple name.");
-        RecheckOriginal();
-        string compositionDirectory = Path.Combine(callerSession, "full-composition-" + Guid.NewGuid().ToString("N"));
+        RequireUsedOverrides(overrides, usedOverrides);
+        List<FullLibrary> libraries = [];
+        // One library build per bundle, however many of its methods the caller imports.
+        foreach ((IGrouping<string, FullImport> group, int index) in imports.GroupBy(item => item.Selection.Bundle, StringComparer.Ordinal)
+            .Select((group, index) => (group, index)))
+        {
+            if (group.Select(item => (item.Selection.SidecarSha256, item.Selection.ImplementationSha256)).Distinct().Count() != 1)
+                throw new InvalidDataException("Full-verification source bundle is shared by different implementations: " + group.Key);
+            libraries.AddRange(CheckFullBundle(group.ToArray(), Path.Combine(staging, "bundle-" + index)));
+            RequireCallerUnchanged();
+        }
+        libraries.Sort((left, right) => left.Slot.CompareTo(right.Slot));
+        string compositionDirectory = Path.Combine(workspace, "composition");
         Directory.CreateDirectory(compositionDirectory);
-        // First: the caller session is itself a root, and leanchecker names each olean by the first root containing it.
+        // First: leanchecker names each olean by the first root containing it.
         string fullLeanPath = compositionDirectory + Path.PathSeparator + originalLeanPath;
         HashSet<string> generatedModules = new(StringComparer.Ordinal);
         SortedDictionary<string, string> generatedArtifacts = new(StringComparer.Ordinal);
         void RecheckResolution()
         {
-            RequireFullArtifacts(acceptedCaller);
-            RequireFullModuleArtifactSet(originalLeanPath, acceptedCaller);
-            RequireFullModulePaths(originalLeanPath, originalModules);
-            RequireEmptyProducerModules(staging);
+            RequireCallerUnchanged();
             RequireFullArtifacts(generatedArtifacts);
             SortedDictionary<string, string> generated = FullModulePaths(compositionDirectory);
             foreach ((string name, string path) in generated)
@@ -129,109 +181,56 @@ partial class Program
                 if (!generatedModules.Contains(ModuleName(Path.GetRelativePath(compositionDirectory, path).Replace('\\', '/'))))
                     throw new InvalidDataException("Unexpected full-verification composition artifact: " + path);
         }
+        void Compile(string name, string progress, bool untrusted)
+        {
+            Run([LeanExecutable, "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, name + ".olean"), Path.Combine(compositionDirectory, name + ".lean")],
+                callerSession, fullLeanPath, progress: progress);
+            generatedModules.Add(name);
+            if (untrusted) RecheckResolution();
+            generatedArtifacts = FullArtifacts(compositionDirectory);
+        }
         foreach (string name in libraries.SelectMany(library => new[] { library.ExpectedModule, library.Module }).Append("LeanCILFullComposition"))
             if (originalModules.ContainsKey(name)) throw new InvalidDataException("Full-verification generated module collides with an existing module: " + name);
         string checker = Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
         foreach (FullLibrary library in libraries)
         {
-            string expected = Path.Combine(compositionDirectory, library.ExpectedModule + ".lean");
-            File.WriteAllText(expected, NamespacedExtraction(library.GeneratedSource, library.ExpectedModule));
-            string transferred = Path.Combine(compositionDirectory, library.Module + ".lean");
-            File.WriteAllText(transferred, "import " + callerModule + "\n" + library.TransferSource);
-            foreach (string name in new[] { library.ExpectedModule, library.Module })
-            {
-                RecheckResolution();
-                Run([LeanExecutable, "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, name + ".olean"), Path.Combine(compositionDirectory, name + ".lean")],
-                    callerSession, fullLeanPath, progress: "Rechecking full-verification program and author kernel terms: " + name);
-                generatedModules.Add(name);
-                RecheckResolution();
-                generatedArtifacts = FullArtifacts(compositionDirectory);
-            }
-            RecheckOriginal();
-            RecheckResolution();
+            File.WriteAllText(Path.Combine(compositionDirectory, library.ExpectedModule + ".lean"), NamespacedExtraction(library.GeneratedSource, library.ExpectedModule));
+            Compile(library.ExpectedModule, "Rechecking full-verification program and author kernel terms: " + library.ExpectedModule, untrusted: false);
+            File.WriteAllText(Path.Combine(compositionDirectory, library.Module + ".lean"), "import " + callerModule + "\n" + library.TransferSource);
+            Compile(library.Module, "Rechecking full-verification program and author kernel terms: " + library.Module, untrusted: true);
             Run([checker, library.ExpectedModule, library.Module], callerSession, fullLeanPath,
                 progress: "Independent kernel replay of transferred library declarations");
-            RequireFullArtifacts(acceptedCaller);
         }
         string composition = "LeanCILFullComposition";
-        string compositionPath = Path.Combine(compositionDirectory, composition + ".lean");
-        File.WriteAllText(compositionPath, FullCompositionSource(callerModule, callerTheorem, originalClaim, libraries));
-        RecheckResolution();
+        File.WriteAllText(Path.Combine(compositionDirectory, composition + ".lean"), FullCompositionSource(callerModule, callerTheorem, originalClaim, libraries));
         CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
-        Run([LeanExecutable, "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, composition + ".olean"), compositionPath],
-            callerSession, fullLeanPath, progress: "Checking concrete library relocation and caller composition");
-        generatedModules.Add(composition);
-        RecheckResolution();
-        generatedArtifacts = FullArtifacts(compositionDirectory);
-        CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
-        RecheckOriginal();
-        RequireFullArtifacts(acceptedCaller);
-        SortedDictionary<string, string> acceptedFull = new(FullFiles(staging).Concat(FullFiles(compositionDirectory))
-            .ToDictionary(pair => pair.Key, pair => pair.Value), StringComparer.Ordinal);
+        Compile(composition, "Checking concrete library relocation and caller composition", untrusted: true);
         Run([checker, composition], callerSession, fullLeanPath, progress: "Independent kernel replay of the composed caller theorem");
-        RequireFullArtifacts(acceptedFull);
-        string auditPath = Path.Combine(compositionDirectory, "CompositionAudit.lean");
-        File.WriteAllText(auditPath, "import " + composition + "\n#check LeanCILFullComposition.certified\n#print axioms LeanCILFullComposition.certified\n");
-        string audit = Run([LeanExecutable, auditPath], callerSession, fullLeanPath, progress: "Auditing the independently composed theorem");
-        AuditedAxioms(audit, "LeanCILFullComposition.certified");
-        RequireFullArtifacts(acceptedFull);
-        RequireFullArtifacts(acceptedCaller);
+        AuditedOleans audited = AuditOleans(fullLeanPath, [composition], [new("LeanCILFullComposition.certified", axioms: ApprovedAxioms, statement: true)]);
+        RequireAuditedModule(audited, composition, Path.Combine(compositionDirectory, composition + ".olean"));
         RecheckResolution();
-        RecheckOriginal();
-        SortedDictionary<string, string> finalFull = new(FullFiles(staging).Concat(FullFiles(compositionDirectory))
-            .ToDictionary(pair => pair.Key, pair => pair.Value), StringComparer.Ordinal);
+        AuditedAxioms(audited.theorems[0]);
+        string audit = AuditText(audited.theorems[0]);
         PublishedImport[] imported = PublishedImports(JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json"))))
             .Select(import => import with
             {
                 acceptedVia = "independently-verified", sourceBundleDigest = libraries[import.slot].BundleDigest,
-                deploymentObligation = "The composed CIL theorem checks this exact implementation and profile; DLL decoding and runtime/model correspondence remain trusted."
+                deploymentObligation = "The composed CIL theorem checks this exact implementation and profile; DLL decoding and runtime/model correspondence remain trusted, " +
+                    "and an untrusted source bundle must be checked in an isolated environment."
             }).ToArray();
-        return new("LeanCILFullComposition.certified", audit, imported, () =>
-        {
-            RecheckOriginal();
-            RequireFullArtifacts(acceptedCaller);
-            RequireFullArtifacts(finalFull);
-            RecheckResolution();
-        });
+        return new("LeanCILFullComposition.certified", audit, imported);
     }
 
-    FullLibrary CheckFullLibrary(JsonElement binding, ContractInterface contract, ContractExport export,
-        ContractCertification certification, ContractBundleManifest inventory, string bundle, string digest,
-        string staging, Action recheck)
+    FullLibrary[] CheckFullBundle(FullImport[] imports, string staging)
     {
         Directory.CreateDirectory(staging);
+        FullSelection selection = imports[0].Selection;
+        (ContractInterface contract, string bundle, string digest, ContractBundleManifest inventory) =
+            (selection.Contract, selection.Bundle, selection.Digest, selection.Inventory);
         JsonElement[] metadata = inventory.Exports.EnumerateArray().ToArray();
-        int[] matches = Enumerable.Range(0, metadata.Length).Where(index =>
-            metadata[index].GetProperty("identity").GetString() == export.Identity &&
-            metadata[index].GetProperty("profile").GetString() == certification.Profile).ToArray();
-        if (matches.Length != 1) throw new InvalidDataException("Full source bundle has no unique selected export/profile.");
-        int selected = matches[0];
-        JsonElement record = metadata[selected];
-        if (record.GetProperty("contract").GetString() != export.ContractConstant || record.GetProperty("digest").GetString() != export.ClosureDigest ||
-            record.GetProperty("statementDigest").GetString() != certification.StatementDigest || record.GetProperty("statement").GetString() != certification.Statement)
-            throw new InvalidDataException("Full source bundle export statement or closure binding mismatch.");
         JsonElement originalManifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Within(bundle, "producer/manifest.json")));
-        JsonElement request = originalManifest.GetProperty("exports")[selected];
-        JsonElement bundledIdentity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Within(bundle, "exports/" + selected + "/identity.json")));
-        if (bundledIdentity.GetProperty("assemblySha256").GetString() != contract.ImplementationSha256 ||
-            bundledIdentity.GetProperty("assemblyIdentity").GetString() != contract.AssemblyIdentity ||
-            bundledIdentity.GetProperty("entry").GetString() != export.Signature ||
-            bundledIdentity.GetProperty("profile").Deserialize<FeatureProfile>()?.Name != certification.Profile)
-            throw new InvalidDataException("Full source bundle extraction metadata differs from the selected implementation, method or profile.");
-        string author = record.GetProperty("theorem").GetString()!;
-        if (request.GetProperty("theorem").GetString() != author || !ContractInterface.Constant(author) ||
-            request.GetProperty("contract").GetString() != export.ContractConstant)
-            throw new InvalidDataException("Full source bundle author theorem binding mismatch.");
         string consumer = Path.Combine(staging, "consumer");
         ConsumerDependency dependency = StageFullConsumer(bundle, inventory, consumer, digest, contract.InterfaceModules);
-        JsonElement settings = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Within(bundle, "exports/" + selected + "/verification.json")));
-        string logicalArtifact = Path.GetFullPath(request.GetProperty("artifact").GetString()!, Path.Combine(staging, "original-path-base"));
-        string savedRoot = settings.TryGetProperty("proofRoot", out JsonElement savedProofRoot) && savedProofRoot.ValueKind == JsonValueKind.String
-            ? Path.GetFullPath(savedProofRoot.GetString()!, logicalArtifact)
-            : Path.GetFullPath(originalManifest.GetProperty("proofRoot").GetString()!, Path.Combine(staging, "original-path-base"));
-        string savedProof = Path.GetFullPath(settings.GetProperty("proof").GetString()!, logicalArtifact);
-        string proof = Within(consumer, Path.GetRelativePath(savedRoot, savedProof));
-        if (!File.Exists(proof)) throw new InvalidDataException("Full source bundle is missing its rebased author proof.");
         ContractSource[] interfaces = contract.InterfaceModules.Select(module =>
         {
             string bundled = Within(bundle, "interface/" + module.Name.Replace('.', '/') + ".lean");
@@ -243,48 +242,87 @@ partial class Program
             File.WriteAllText(target, module.Source);
             return new ContractSource(module.Name, target);
         }).ToArray();
-        string artifact = Path.Combine(staging, "regenerated");
-        string implementation = binding.GetProperty("implementationPath").GetString()!;
-        Run(["dotnet", ExtractorPath, "extract", implementation, export.Signature, artifact, certification.Profile],
-            progress: "Fresh extraction of the current imported library DLL");
-        JsonElement regenerated = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
-        foreach (string property in new[] { "initializedTypes", "staticValues", "staticIdentities" })
-            if (regenerated.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
-                throw new InvalidDataException("Full verification version 1 rejects static or initialization state: " + property);
-        File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(new VerificationSettings(1,
-            Path.GetRelativePath(artifact, proof), author, Path.GetRelativePath(artifact, consumer)), Json));
-        ContractExportRequest exportRequest = new(export.Signature, artifact, export.ContractConstant, author);
-        ContractExportManifest manifest = new(1, implementation, consumer, interfaces, [exportRequest]);
-        using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(implementation)));
-        PreparedContractExport prepared = PrepareContractExport(manifest, module, exportRequest);
-        int slot = binding.GetProperty("slot").GetInt32();
-        string destination = "LeanCILFullLibrary" + slot;
-        string? transfer = null;
-        using Program independent = new() { freshLibrary = true, forceFullVerification = true,
-            fullBundleDependencies = [dependency], fullInputRecheck = recheck };
-        ExportClosure published = independent.CheckPublishedContractInterfaces(manifest, contract.InterfaceModules, [prepared], staging)[export.ContractConstant];
-        if (published.Digest != export.ClosureDigest || published.Kind != export.Kind)
-            throw new InvalidDataException("Independent published interface closure mismatch.");
-        ConsumerExportAudit audit = new(ExportAuditSource(prepared, export.Kind), (session, proofModule, leanPath) =>
+        string implementation = selection.Implementation;
+        List<(FullImport Import, string Author, string Artifact, string Generated, string GeneratedSha256, ContractExportRequest Request)> slots = [];
+        foreach (FullImport import in imports)
         {
-            recheck();
-            ExportClosure actual = independent.CheckExportClosure(session, proofModule, export.ContractConstant, leanPath);
-            (string statementDigest, string _) = independent.CheckExportStatement(session, proofModule, leanPath);
-            if (actual.Digest != export.ClosureDigest || actual.Canonical != published.Canonical || actual.Kind != export.Kind ||
-                statementDigest != certification.StatementDigest)
-                throw new InvalidDataException("Independent library export closure or canonical statement mismatch.");
-            SortedDictionary<string, string> artifacts = FullArtifacts(leanPath);
-            transfer = independent.CaptureFullTerms(session, proofModule, destination, contract.InterfaceModules, leanPath);
-            RequireFullArtifacts(artifacts);
-            recheck();
-        });
-        ConsumerOutcome outcome = independent.VerifyConsumerRequests(consumer,
-            [new(implementation, artifact, proof, ExportTheorem, null, ExportAudit: audit)], null, batch: false)[0];
-        if (outcome.Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
-        if (outcome.Report is null || transfer is null) throw new InvalidDataException("Independent library verification did not complete its exact export audit.");
-        recheck();
-        return new(slot, destination, "LeanCILFullExpected" + slot, digest, export.ContractConstant, export.Kind,
-            transfer, File.ReadAllText(Path.Combine(artifact, "Extracted.lean")));
+            (ContractExport export, ContractCertification certification) = (import.Export, import.Certification);
+            int[] matches = Enumerable.Range(0, metadata.Length).Where(index =>
+                metadata[index].GetProperty("identity").GetString() == export.Identity &&
+                metadata[index].GetProperty("profile").GetString() == certification.Profile).ToArray();
+            if (matches.Length != 1) throw new InvalidDataException("Full source bundle has no unique selected export/profile.");
+            int selected = matches[0];
+            JsonElement record = metadata[selected];
+            if (record.GetProperty("contract").GetString() != export.ContractConstant || record.GetProperty("digest").GetString() != export.ClosureDigest ||
+                record.GetProperty("statementDigest").GetString() != certification.StatementDigest || record.GetProperty("statement").GetString() != certification.Statement)
+                throw new InvalidDataException("Full source bundle export statement or closure binding mismatch.");
+            JsonElement request = originalManifest.GetProperty("exports")[selected];
+            JsonElement bundledIdentity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Within(bundle, "exports/" + selected + "/identity.json")));
+            if (bundledIdentity.GetProperty("assemblySha256").GetString() != contract.ImplementationSha256 ||
+                bundledIdentity.GetProperty("assemblyIdentity").GetString() != contract.AssemblyIdentity ||
+                bundledIdentity.GetProperty("entry").GetString() != export.Signature ||
+                bundledIdentity.GetProperty("profile").Deserialize<FeatureProfile>()?.Name != certification.Profile)
+                throw new InvalidDataException("Full source bundle extraction metadata differs from the selected implementation, method or profile.");
+            string author = record.GetProperty("theorem").GetString()!;
+            if (request.GetProperty("theorem").GetString() != author || !ContractInterface.Constant(author) ||
+                request.GetProperty("contract").GetString() != export.ContractConstant)
+                throw new InvalidDataException("Full source bundle author theorem binding mismatch.");
+            JsonElement settings = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Within(bundle, "exports/" + selected + "/verification.json")));
+            string logicalArtifact = Path.GetFullPath(request.GetProperty("artifact").GetString()!, Path.Combine(staging, "original-path-base"));
+            string savedRoot = settings.TryGetProperty("proofRoot", out JsonElement savedProofRoot) && savedProofRoot.ValueKind == JsonValueKind.String
+                ? Path.GetFullPath(savedProofRoot.GetString()!, logicalArtifact)
+                : Path.GetFullPath(originalManifest.GetProperty("proofRoot").GetString()!, Path.Combine(staging, "original-path-base"));
+            string savedProof = Path.GetFullPath(settings.GetProperty("proof").GetString()!, logicalArtifact);
+            string proof = Within(consumer, Path.GetRelativePath(savedRoot, savedProof));
+            if (!File.Exists(proof)) throw new InvalidDataException("Full source bundle is missing its rebased author proof.");
+            string artifact = Path.Combine(staging, "regenerated-" + import.Slot);
+            Run(["dotnet", ExtractorPath, "extract", implementation, export.Signature, artifact, certification.Profile],
+                progress: "Fresh extraction of the current imported library DLL");
+            // Composition compiles these exact bytes, which the library run below binds to the DLL.
+            byte[] generated = File.ReadAllBytes(Path.Combine(artifact, "Extracted.lean"));
+            JsonElement regenerated = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
+            foreach (string property in new[] { "initializedTypes", "staticValues", "staticIdentities" })
+                if (regenerated.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
+                    throw new InvalidDataException("Full verification version 1 rejects static or initialization state: " + property);
+            File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(new VerificationSettings(1,
+                Path.GetRelativePath(artifact, proof), author, Path.GetRelativePath(artifact, consumer)), Json));
+            slots.Add((import, author, artifact, Encoding.UTF8.GetString(generated), ContractInterface.Hash(generated),
+                new(export.Signature, artifact, export.ContractConstant, author)));
+        }
+        ContractExportManifest manifest = new(1, implementation, consumer, interfaces, slots.Select(slot => slot.Request).ToArray());
+        using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(implementation)));
+        PreparedContractExport[] prepared = slots.Select(slot => PrepareContractExport(manifest, module, slot.Request)).ToArray();
+        using Program independent = new() { freshLibrary = true, forceFullVerification = true, fullBundleDependencies = [dependency] };
+        Dictionary<string, ExportClosure> published = independent.CheckPublishedContractInterfaces(manifest, contract.InterfaceModules, prepared, staging);
+        string?[] transfers = new string?[slots.Count];
+        ConsumerRequest[] requests = slots.Select((slot, index) =>
+        {
+            ContractExport export = slot.Import.Export;
+            ExportClosure closure = published[export.ContractConstant];
+            if (closure.Digest != export.ClosureDigest || closure.Kind != export.Kind)
+                throw new InvalidDataException("Independent published interface closure mismatch.");
+            ConsumerExportAudit audit = new(ExportAuditSource(prepared[index], export.Kind), (session, proofModule, leanPath) =>
+            {
+                ExportClosure actual = independent.CheckExportClosure(session, proofModule, export.ContractConstant, leanPath);
+                (string statementDigest, string _) = independent.CheckExportStatement(session, proofModule, leanPath);
+                if (actual.Digest != export.ClosureDigest || actual.Canonical != closure.Canonical || actual.Kind != export.Kind ||
+                    statementDigest != slot.Import.Certification.StatementDigest)
+                    throw new InvalidDataException("Independent library export closure or canonical statement mismatch.");
+                transfers[index] = independent.CaptureFullTerms(session, proofModule, "LeanCILFullLibrary" + slot.Import.Slot, contract.InterfaceModules, leanPath);
+            });
+            return new ConsumerRequest(implementation, slot.Artifact, prepared[index].Proof, ExportTheorem, null, ExportAudit: audit);
+        }).ToArray();
+        ConsumerOutcome[] outcomes = independent.VerifyConsumerRequests(consumer, requests, null, batch: false);
+        return slots.Select((slot, index) =>
+        {
+            if (outcomes[index].Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcomes[index].Error!);
+            if (outcomes[index].Report is null || transfers[index] is null)
+                throw new InvalidDataException("Independent library verification did not complete its exact export audit.");
+            if (Sha(Path.Combine(slot.Artifact, "Extracted.lean")) != slot.GeneratedSha256)
+                throw new InvalidDataException("Full-verification regenerated extraction changed after its library check: " + slot.Artifact);
+            return new FullLibrary(slot.Import.Slot, "LeanCILFullLibrary" + slot.Import.Slot, "LeanCILFullExpected" + slot.Import.Slot,
+                selection.Digest, slot.Import.Export.ContractConstant, slot.Import.Export.Kind, transfers[index]!, slot.Generated);
+        }).ToArray();
     }
 
     ConsumerDependency StageFullConsumer(string bundle, ContractBundleManifest inventory, string consumer, string digest,
@@ -340,19 +378,15 @@ partial class Program
             .Concat(Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
                 .Select(path => Path.GetRelativePath(Root, path).Replace('\\', '/')[..^5].Replace('/', '.')))
             .Concat(["CIL"]).Concat(interfaces.Select(module => module.Name)).Distinct(StringComparer.Ordinal).ToArray();
-        string captured = Path.Combine(session, "FullTransfer.source");
-        string probe = Path.Combine(session, "LeanCILCaptureFullTerms.lean");
+        string captured = Path.Combine(session, destination + ".transfer");
+        string probe = Path.Combine(session, "LeanCILCapture" + destination + ".lean");
+        // Composition uses only the certified theorem; its closure carries the producer program.
         File.WriteAllText(probe, $$"""
 import {{proofModule}}
-import ExtractionAudit
 import CIL.Interface.FullTransfer
-private theorem LeanCILFullCapture.noStaticSites :
-    _root_.Extracted.program.all (fun body => body.staticSites.isEmpty) = true := by decide +kernel
 run_cmd do
   let shared : Array Lean.Name := ({{JsonSerializer.Serialize(shared)}} : List String).toArray.map String.toName
-  let roots : Array Lean.Name := #[`LeanCILExportAudit.certified, `LeanCILExportAudit.closed,
-    `LeanCILExportAudit.noImports, ``LeanCILFullCapture.noStaticSites, `ExtractionAudit.valid]
-  let source <- match CIL.Interface.FullTransfer.capture (<- Lean.getEnv) shared `{{destination}} roots with
+  let source <- match CIL.Interface.FullTransfer.capture (<- Lean.getEnv) shared `{{destination}} #[`LeanCILExportAudit.certified] with
     | .ok source => pure source
     | .error message => throwError "{message}"
   IO.FS.writeFile {{JsonSerializer.Serialize(captured)}} source
@@ -371,9 +405,6 @@ run_cmd do
             throw new InvalidDataException("Unsupported generated extraction import layout for full verification.");
         return header + "\nnamespace " + name + "\n" + source[(start + 1)..] + "\nend " + name + "\n";
     }
-
-    static SortedDictionary<string, string> FullFiles(string directory) => new(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-        .ToDictionary(path => path, Sha), StringComparer.Ordinal);
 
     static SortedDictionary<string, string> FullArtifacts(string leanPath)
     {
@@ -437,35 +468,6 @@ run_cmd do
         if (current.Count != expected.Count) throw new InvalidDataException("Full-verification module resolution lost a checked module.");
     }
 
-    static void RequireEmptyProducerModules(string staging)
-    {
-        string? path = FullModuleArtifactPaths(staging).FirstOrDefault();
-        if (path is not null)
-            throw new InvalidDataException("Unexpected producer staging module: " + ModuleName(Path.GetRelativePath(staging, path).Replace('\\', '/')));
-    }
-
-    void CheckFullResolution(string directory, string leanPath, SortedDictionary<string, string> modules)
-    {
-        string manifest = Path.Combine(directory, "full-module-resolution.json");
-        File.WriteAllText(manifest, JsonSerializer.Serialize(modules.Select(pair => new { name = pair.Key, path = pair.Value })));
-        string probe = Path.Combine(directory, "FullModuleResolution.lean");
-        File.WriteAllText(probe, $$"""
-import Lean
-private structure ExpectedResolution where
-  name : String
-  path : String
-  deriving Lean.FromJson
-run_cmd do
-  let expected : Array ExpectedResolution <- IO.ofExcept <|
-    (Lean.Json.parse (<- IO.FS.readFile {{JsonSerializer.Serialize(manifest)}})).bind Lean.fromJson?
-  for item in expected do
-    let path <- Lean.findOLean item.name.toName
-    unless path.toString == item.path do throwError "Full-verification resolved module path changed: {item.name}"
-""");
-        Run([LeanExecutable, probe], directory, leanPath, environment: LeanEnvironment,
-            progress: "Checking actual full-verification module resolution");
-    }
-
     string CaptureFullCallerClaim(string session, string module, string theorem, string leanPath)
     {
         string probe = Path.Combine(session, "FullOriginalCallerClaim.lean");
@@ -491,7 +493,7 @@ run_cmd liftTermElabM do
 
     static string FullCompositionSource(string callerModule, string callerTheorem, string originalClaim, IReadOnlyList<FullLibrary> libraries)
     {
-        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Interface.Closure\n");
+        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Safety.StaticLinking\nimport CIL.Interface.Closure\n");
         foreach (FullLibrary library in libraries) source.AppendLine("import " + library.Module).AppendLine("import " + library.ExpectedModule);
         source.AppendLine("namespace LeanCILFullComposition\nopen CIL.Safety");
         foreach (FullLibrary library in libraries)
@@ -512,6 +514,8 @@ run_cmd liftTermElabM do
         source.AppendLine("def specifications : List Relocatable := [" + string.Join(", ", libraries.Select(library =>
             "_root_.CIL.Safety." + (library.Kind == "method" ? "MethodContract" : "OutcomeContract") + ".relocatable _root_." + library.Contract)) + "]");
         source.AppendLine("theorem app_prefix : Links Extracted.program (link Extracted.program libraries) := link_links _ _");
+        // Equal static identities must name equal descriptors across the whole linked program.
+        source.AppendLine("theorem staticLink : linkChecked Extracted.program libraries = .ok (link Extracted.program libraries) :=\n  linkChecked_of_compatible (by decide +kernel)");
         foreach (FullLibrary library in libraries)
             source.AppendLine("theorem relocation" + library.Slot + " : RelocatesInto library" + library.Slot + ".program " +
                 "(link Extracted.program libraries) (linkSlot Extracted.program libraries " + library.Slot + ") := link_relocates Extracted.program libraries (j := " + library.Slot + ") (by decide)");
@@ -531,7 +535,7 @@ run_cmd liftTermElabM do
     | .error message => throwError "{message}"
   unless canonical == {{JsonSerializer.Serialize(originalClaim)}} do throwError "Full-verification caller claim changed during composition"
 """);
-        source.AppendLine("theorem certified : fullCallerClaim (link Extracted.program libraries) := discharge _root_." + callerTheorem);
+        source.AppendLine("theorem certified : linkChecked Extracted.program libraries = .ok (link Extracted.program libraries) /\\\n    fullCallerClaim (link Extracted.program libraries) :=\n  And.intro staticLink (discharge _root_." + callerTheorem + ")");
         source.AppendLine("end LeanCILFullComposition");
         return source.ToString();
     }
