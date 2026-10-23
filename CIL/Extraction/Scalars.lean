@@ -36,8 +36,13 @@ private def conversion : Nat → Bool
   | 179 | 180 | 181 | 182 | 183 | 184 | 185 | 186 | 209 | 210 | 211 | 212 | 213 | 224 => true
   | _ => false
 
+private def compareBranch (opcode : Nat) : Bool := (46 <= opcode && opcode <= 55) || (59 <= opcode && opcode <= 68)
+
+/-- `bne.un` and the unsigned orderings; CoreCLR widens a mixed int32 operand by provenance. -/
+private def unsignedBranch (opcode : Nat) : Bool := (51 <= opcode && opcode <= 55) || (64 <= opcode && opcode <= 68)
+
 def scalarCovered (opcode : Nat) : Bool :=
-  (21 <= opcode && opcode <= 33) || scalarBinary opcode || conversion opcode ||
+  (21 <= opcode && opcode <= 33) || scalarBinary opcode || conversion opcode || compareBranch opcode ||
     opcode ∈ [98, 99, 100, 101, 102]
 
 private def scalarEncodingMatches (opcode : Nat) (emitted : Op) : Bool :=
@@ -65,11 +70,22 @@ private def scalarEncodingMatches (opcode : Nat) (emitted : Op) : Bool :=
   | 65025, .eq | 65026, .gt | 65027, .gtu | 65028, .lt | 65029, .ltu => true
   | _, _ => false
 
+private def branchEncodingMatches (opcode target : Nat) (emitted : Op) : Bool :=
+  match (if opcode <= 55 then opcode - 46 else opcode - 59), emitted with
+  | 0, .beq actual | 1, .bge actual | 2, .bgt actual | 3, .ble actual | 4, .blt actual
+  | 5, .bne actual | 6, .bgeu actual | 7, .bgtu actual | 8, .bleu actual | 9, .bltu actual => actual == target
+  | _, _ => false
+
 private def mixedNative (left right : ScalarKind) : Bool :=
   (left == .native && right == .word32) || (left == .word32 && right == .native)
 
 private def compatibleBinary (left right : ScalarKind) : Bool :=
   numeric left && numeric right && (left == right || mixedNative left right)
+
+/-- Mixed native/int32 operands require exactly one `nativeBinary` wrapper; any other pair forbids it. -/
+private def nativeWrapped (left right : ScalarKind) (encoding : Op → Bool) : Op → Bool
+  | .nativeBinary operation => mixedNative left right && encoding operation
+  | operation => !mixedNative left right && encoding operation
 
 private def literal (instruction : RawInstruction) : Option Op :=
   match instruction.opcode, instruction.operand with
@@ -90,13 +106,15 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
     | some (.const32 expected), .const32 actual => expected == actual
     | some (.const64 expected), .const64 actual => expected == actual
     | _, _ => false
+  else if compareBranch instruction.opcode then match instruction.operand, stack with
+    | .target target, right :: left :: _ => compatibleBinary left right &&
+        !(mixedNative left right && unsignedBranch instruction.opcode) &&
+        nativeWrapped left right (branchEncodingMatches instruction.opcode target) emitted
+    | _, _ => false
   else if instruction.operand != .none then false
   else if scalarBinary instruction.opcode then match stack with
     | right :: left :: _ => compatibleBinary left right &&
-        match mixedNative left right, emitted with
-        | true, .nativeBinary operation => scalarEncodingMatches instruction.opcode operation
-        | false, operation => scalarEncodingMatches instruction.opcode operation
-        | _, _ => false
+        nativeWrapped left right (scalarEncodingMatches instruction.opcode) emitted
     | _ => false
   else if instruction.opcode ∈ [98, 99, 100] then match stack with
     | right :: left :: _ => numeric left && right ∈ [.word32, .native] && scalarEncodingMatches instruction.opcode emitted
@@ -104,6 +122,55 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
   else match stack with
     | value :: _ => numeric value && scalarEncodingMatches instruction.opcode emitted
     | _ => false
+
+/-- Operations computing a scalar from operands or a literal; only a covered encoding may emit one. -/
+private def scalarEmission : Op → Bool
+  | .const32 _ | .const64 _ | .add | .sub | .mul | .divide .. | .band | .bor | .bxor | .shl | .shr | .shrUn
+  | .neg | .bnot | .eq | .lt | .ltu | .gt | .gtu | .convI1 | .convI2 | .convI4 | .convI8 | .convU1 | .convU2
+  | .convU4 | .convU8 | .convU | .checkedConvert .. | .checkedArithmetic .. | .nativeBinary _
+  | .beq _ | .bge _ | .bgt _ | .ble _ | .blt _ | .bne _ | .bgeu _ | .bgtu _ | .bleu _ | .bltu _ => true
+  | _ => false
+
+/-- Byte width of a non-aggregate `sizeof` operand on the admitted 64-bit target. -/
+private def primitiveSize (type : TypeExpr) : Option Nat :=
+  match typeStorage [] type with
+  | some (.field kind) => match kind with
+    | .signed8 | .unsigned8 | .boolean => some 1
+    | .signed16 | .unsigned16 | .character => some 2
+    | .signed32 | .unsigned32 => some 4
+    | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => some 8
+    | _ => none
+  | some .vector128 => some 16
+  | some .vector256 => some 32
+  | _ => none
+
+private def unsafeSizeOf (site : CallSite) : Bool :=
+  site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" && site.name == "SizeOf" &&
+    !site.hasThis && site.returnsValue && site.parameterCount == 0 && site.parameterTypes.isEmpty &&
+    site.returnType == .atom runtimeScope "System.Int32" &&
+    site.target == .external (runtimeScope ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf()")
+
+/-- A size constant has its primitive width; an aggregate size is bound by its layout use instead. -/
+private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
+  let sized : TypeExpr → Bool
+    | .aggregate .. => true
+    | type => primitiveSize type == some bits.toNat
+  match instruction.opcode, instruction.operand with
+  | 65052, .type type => sized type
+  | 40, .call site => unsafeSizeOf site && match site.typeArguments with
+    | [type] => sized type
+    | _ => false
+  | _, _ => false
+
+/-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word
+    (bound by the feature check) or a size constant may emit a scalar operation. -/
+def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
+    (stack : List ScalarKind) (emitted : Op) : Bool :=
+  if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
+  else !scalarEmission emitted || match role, emitted with
+    | some (.result _), .const32 _ => true
+    | _, .const32 bits => sizeConstant instruction bits
+    | _, _ => false
 
 private def resultKind (opcode : Nat) : ScalarKind :=
   if opcode ∈ [211, 212, 213, 138, 139, 224] then .native
@@ -329,11 +396,11 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
       | _ => false) : Option Bool).getD false
 
 private def checkScalarSite (raw : RawMethod) (features : FeatureCertificate) (certificate : ScalarCertificate) :
-    RawInstruction × Nat → Option FeatureState → Option (List ScalarKind) → Op → Bool
-  | (_, _), none, none, .unsupported _ => true
-  | (instruction, pc), some feature, some stack, emitted =>
+    (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) → Op → Bool
+  | _, none, none, .unsupported _ => true
+  | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
-      spanCreateMatches instruction emitted && (!scalarCovered instruction.opcode || scalarOpMatches instruction stack emitted) &&
+      spanCreateMatches instruction emitted && scalarEmissionMatches role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack, featureSuccessors pc instruction feature with
       | some after, some successors =>
@@ -348,7 +415,7 @@ def ScalarFlowValid (raw : RawMethod) (features : FeatureCertificate)
   raw.code.length = features.length ∧ raw.code.length = certificate.length ∧ raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3 (fun (instruction, feature) stack emitted => checkScalarSite raw features certificate instruction feature stack emitted)
-    (raw.code.zipIdx.zip features) certificate code = true
+    ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code = true
 
 instance (raw : RawMethod) (features : FeatureCertificate) (certificate : ScalarCertificate) (code : List Op) :
     Decidable (ScalarFlowValid raw features certificate code) := inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
@@ -356,16 +423,18 @@ instance (raw : RawMethod) (features : FeatureCertificate) (certificate : Scalar
 theorem ScalarFlowValid.instruction_checked {raw : RawMethod} {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Op}
     (valid : ScalarFlowValid raw features certificate code)
-    {pc : Nat} {instruction : RawInstruction} {feature : FeatureState} {stack : List ScalarKind} {emitted : Op}
-    (rawAt : raw.code[pc]? = some instruction) (featureAt : features[pc]? = some (some feature))
-    (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted)
-    (covered : scalarCovered instruction.opcode = true) :
-    scalarOpMatches instruction stack emitted = true := by
-  have pairAt : (raw.code.zipIdx.zip features)[pc]? = some ((instruction, pc), some feature) := by
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
+    {stack : List ScalarKind} {emitted : Op}
+    (rawAt : raw.code[pc]? = some instruction) (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
+    (featureAt : features[pc]? = some (some feature))
+    (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
+    scalarEmissionMatches role instruction stack emitted = true := by
+  have pairAt : ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features)[pc]? =
+      some (((instruction, role), pc), some feature) := by
     apply List.getElem?_zip_eq_some.mpr
-    exact ⟨by simp [List.getElem?_zipIdx, rawAt], featureAt⟩
+    exact ⟨by simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt], featureAt⟩
   have checked := all3_at valid.2.2.2.2 pairAt stackAt emittedAt
-  simp only [checkScalarSite, covered, Bool.not_true, Bool.false_or, Bool.and_eq_true] at checked
+  simp only [checkScalarSite, Bool.and_eq_true] at checked
   exact checked.1.2
 
 #print axioms ScalarFlowValid.instruction_checked
