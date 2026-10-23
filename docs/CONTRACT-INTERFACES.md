@@ -14,7 +14,8 @@ leancil check extracted
 ```
 
 A sidecar next to the application is discovered as `Lib.leancil.contracts`.
-The implementation defaults to `Lib.dll` next to the sidecar, then next to the
+It is read only when a reachable call resolves to `Lib`, so sidecars of uncalled
+libraries need no pins and never enter the extraction. The implementation defaults to `Lib.dll` next to the sidecar, then next to the
 application. Explicit implementation paths override discovery. A separate
 `--import-sha256` is required on extraction. A hash found in the same sidecar
 cannot serve as that independent input. A supplied digest establishes byte
@@ -31,7 +32,9 @@ the recorded independent interface pin before compilation.
 `check` reopens recorded sidecars and implementations. It recomputes their hashes,
 metadata, generated CIL, import slots and interface sources. It reports both the
 expected and actual implementation SHA-256 after the DLL changes. CLI path/hash
-overrides can be supplied again for an explicit recheck.
+overrides can be supplied again for an explicit recheck. `identity.json` records
+sidecar and implementation paths relative to the output directory, as it does
+`assemblyPath`, so a moved extraction rechecks against the moved files.
 
 ## Sidecar schema 1
 
@@ -45,7 +48,9 @@ overrides can be supplied again for an explicit recheck.
   is `.NETCoreApp,Version=v10.0`. Reference assemblies are authoring-only; caller proofs can be checked, but no successful verification report is published.
 - `interfaceModules`: module names and full Lean source strings. Names are plain
   dotted identifiers. Framework, toolchain, generated, example and test module
-  roots are reserved. Duplicate modules and conflicting definitions are rejected.
+  roots and the driver's `LeanCIL*` modules are reserved. Names are compared
+  ignoring case, since case variants collide on Windows and macOS. Duplicate
+  modules and conflicting definitions are rejected.
 - `interfaceDigest`: the canonical descriptor digest described below.
 - `exports`: exact assembly-scoped method identity, Cecil full signature,
   `parameterCount`, `hasThis`, `returnsValue`, `visibility`, `contractConstant`,
