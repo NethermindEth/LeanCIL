@@ -149,6 +149,7 @@ import CIL.Verification
 import CIL.WideMultiply
 import CIL.Safety.WideMultiply
 import CIL.Safety.TupleDivision
+import CIL.Extraction.LayoutProjection
 import CIL.Extraction.Translation
 import CIL.Safety.MemoryEquivalence
 import CIL.Safety.FrameEquivalence

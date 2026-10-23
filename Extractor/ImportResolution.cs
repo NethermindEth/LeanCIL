@@ -132,6 +132,10 @@ internal sealed class ImportResolution : IDisposable
         // Shapes no sidecar can import are rejected before any sidecar is read or suggested.
         if (instruction.OpCode.Code != Code.Call)
             throw new InvalidDataException("Contract imports support call only, not callvirt, newobj or ldftn.");
+        if (reference is not GenericInstanceMethod && reference.HasGenericParameters ||
+            reference.DeclaringType is TypeSpecification || reference.DeclaringType.HasGenericParameters ||
+            reference is GenericInstanceMethod generic && generic.GenericArguments.Count != generic.ElementMethod.GenericParameters.Count)
+            throw new InvalidDataException("Contract imports require an exact closed generic instantiation on a non-generic declaring type.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
         if (allowedDependencies is not null && !allowedDependencies.Contains(assembly))
             throw new InvalidDataException("Undeclared contract dependency: " + assembly + " required by " + validatingAssembly);
@@ -260,6 +264,7 @@ internal sealed class ImportResolution : IDisposable
     internal bool ValidateByref(TypeReference type, FeatureProfile profile)
     {
         if (type is not ByReferenceType reference || ContractMethodMetadata.Primitive(reference.ElementType) ||
+            RuntimeModels.SupportedType(reference.ElementType) || ValueTuples.Is(reference.ElementType) ||
             reference.ElementType.Scope is not AssemblyNameReference scope) return false;
         ContractMethodMetadata.RejectModifiers(reference);
         if (allowedDependencies is not null && !allowedDependencies.Contains(scope.FullName))
