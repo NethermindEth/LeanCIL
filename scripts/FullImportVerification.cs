@@ -206,11 +206,11 @@ partial class Program
         CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
         Compile(composition, "Checking concrete library relocation and caller composition", untrusted: true);
         Run([checker, composition], callerSession, fullLeanPath, progress: "Independent kernel replay of the composed caller theorem");
-        string auditPath = Path.Combine(compositionDirectory, "CompositionAudit.lean");
-        File.WriteAllText(auditPath, "import " + composition + "\n#check LeanCILFullComposition.certified\n#print axioms LeanCILFullComposition.certified\n");
-        string audit = Run([LeanExecutable, auditPath], callerSession, fullLeanPath, progress: "Auditing the independently composed theorem");
+        AuditedOleans audited = AuditOleans(fullLeanPath, [composition], [new("LeanCILFullComposition.certified", axioms: ApprovedAxioms, statement: true)]);
+        RequireAuditedModule(audited, composition, Path.Combine(compositionDirectory, composition + ".olean"));
         RecheckResolution();
-        AuditedAxioms(audit, "LeanCILFullComposition.certified");
+        AuditedAxioms(audited.theorems[0]);
+        string audit = AuditText(audited.theorems[0]);
         PublishedImport[] imported = PublishedImports(JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json"))))
             .Select(import => import with
             {
