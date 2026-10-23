@@ -14,6 +14,7 @@ string callerPackage = args[4];
 string caller = args[5];
 string producerPackage = args[6];
 string producerProof = args[7];
+Run(["dotnet", "run", "--file", "Tests/FullModuleResolution.cs"], streamOutput: true, progress: "Full-verification module resolution");
 string root = At("artifacts/FullImportVerification-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 string artifact = Path.Combine(root, "App");
@@ -225,7 +226,8 @@ run_cmd do
         if (!File.Exists(mutationMarker))
             throw new InvalidOperationException("Producer mutation did not execute during fresh verification: " + rejected.Output);
         JsonElement mutation = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(mutationMarker));
-        string target = mutation.GetProperty("target").GetString()!;
+        // Lean spells joined paths with mixed separators on Windows.
+        string target = Path.GetFullPath(mutation.GetProperty("target").GetString()!);
         string diagnostic = originalRootShadow ? "Unexpected full-verification caller artifact: " + target
             : shadow ? "Unexpected producer staging module: " + (consumer ? "LeanCILProof" : "Proof")
             : sourceOnly ? "Sources changed during full import audit"

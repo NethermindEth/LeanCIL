@@ -444,28 +444,6 @@ run_cmd do
             throw new InvalidDataException("Unexpected producer staging module: " + ModuleName(Path.GetRelativePath(staging, path).Replace('\\', '/')));
     }
 
-    void CheckFullResolution(string directory, string leanPath, SortedDictionary<string, string> modules)
-    {
-        string manifest = Path.Combine(directory, "full-module-resolution.json");
-        File.WriteAllText(manifest, JsonSerializer.Serialize(modules.Select(pair => new { name = pair.Key, path = pair.Value })));
-        string probe = Path.Combine(directory, "FullModuleResolution.lean");
-        File.WriteAllText(probe, $$"""
-import Lean
-private structure ExpectedResolution where
-  name : String
-  path : String
-  deriving Lean.FromJson
-run_cmd do
-  let expected : Array ExpectedResolution <- IO.ofExcept <|
-    (Lean.Json.parse (<- IO.FS.readFile {{JsonSerializer.Serialize(manifest)}})).bind Lean.fromJson?
-  for item in expected do
-    let path <- Lean.findOLean item.name.toName
-    unless path.toString == item.path do throwError "Full-verification resolved module path changed: {item.name}"
-""");
-        Run([LeanExecutable, probe], directory, leanPath, environment: LeanEnvironment,
-            progress: "Checking actual full-verification module resolution");
-    }
-
     string CaptureFullCallerClaim(string session, string module, string theorem, string leanPath)
     {
         string probe = Path.Combine(session, "FullOriginalCallerClaim.lean");
