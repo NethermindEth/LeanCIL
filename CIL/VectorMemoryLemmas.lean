@@ -1,6 +1,14 @@
 import CIL.VectorMemory
 import CIL.MemoryLemmas
 
+/-!
+# Vector memory lemmas
+
+Round-trip and frame lemmas for byte-level vector storage: a vector stored in caller bytes
+reads back unchanged, writes outside its 16 or 32 bytes leave it alone, and a captured local
+survives a store that overlaps its source. Also the `Unsafe.Add` offset equations.
+-/
+
 open CIL
 
 namespace CIL
@@ -24,6 +32,7 @@ namespace CIL
   simp [CIL.evalMemory, CIL.offsetValue, BitVec.zeroExtend, BitVec.toNat_setWidth,
     Nat.mod_eq_of_lt bound]
 
+/-- Each byte inside a written range holds the matching little-endian byte of the value. -/
 theorem writeBytes_inside (m : Memory) (base word count address : Nat)
     (h : base ≤ address ∧ address < base + count) :
     writeBytes m base word count (.byte address) =
@@ -60,6 +69,7 @@ theorem writeBytes_overwrite_same (m : Memory) (base old new count : Nat) :
   | static bytes offset => simp
   | home frame kind index offset => simp
 
+/-- A successful read of `count` bytes is a number below `256^count`. -/
 theorem readBytes_bound (m : Memory) (base count number : Nat)
     (h : readBytes m base count = some number) : number < 256^count := by
   induction count generalizing base number with
@@ -123,6 +133,7 @@ theorem readBytes_append_of (m : Memory) (base low high lo hi : Nat)
           congr 1
           simp [Nat.pow_succ, Nat.mul_add, Nat.mul_assoc, Nat.add_assoc, Nat.mul_left_comm]
 
+/-- Reading back the bytes just written gives the value truncated to their width. -/
 theorem readBytes_writeBytes (m : Memory) (base number count : Nat) :
     readBytes (writeBytes m base number count) base count = some (number % 256^count) := by
   induction count generalizing m base number with

@@ -1,5 +1,12 @@
 import CIL.Safety.Execution
 
+/-!
+# Word branch step
+
+The checked step for `brnonzero` on a 64-bit scalar, in the `if value = 0` form that loop and
+branch proofs split on.
+-/
+
 namespace CIL.Safety
 
 /-- A word-valued conditional branch checks the scalar operand and preserves memory. -/

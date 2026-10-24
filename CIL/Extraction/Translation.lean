@@ -6,6 +6,19 @@ import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 import CIL.Extraction.ImportLayouts
 
+/-!
+# Translation validity
+
+The top of the extraction checks. `TranslationValid` conjoins the kernel-checked validators
+for one extraction: layouts recompute, every emitted method passes the per-method validators
+against its evidence record, static values are reproduced by their initializers, and import
+layouts agree. It is not a simulation proof for every raw opcode; general instruction
+translation and metadata decoding stay trusted, as `docs/SOUNDNESS.md` describes.
+
+Generated modules prove each method's evidence separately and assemble it with
+`translation_of_methods`, so no validator is reduced twice.
+-/
+
 namespace CIL.Extraction
 
 /-- Every extracted method has exactly one record, in emitted program order. -/
@@ -19,9 +32,11 @@ structure MethodEvidence where
   scalarStates : ScalarCertificate
   layoutUses : List LayoutUse
 
+/-- The program's method table, as the call check sees it. -/
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=
   evidence.map fun item => ⟨item.arguments, item.closed⟩
 
+/-- The zero value of each local kind, used when the method zero-initializes its locals. -/
 private def initialLocal : LocalKind → Value
   | .reference => .nullRef
   | .byte => .i8 0
@@ -41,6 +56,7 @@ def returnNarrow (layouts : List RawLayout) (type : TypeExpr) : Option NarrowKin
   | .signed16 => some .signed16
   | .unsigned16 | .character => some .unsigned16
   | _ => none
+
 /-- Bind non-instruction method fields that affect frame setup and return behavior. -/
 def MethodShapeValid (layouts : List RawLayout) (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
@@ -51,10 +67,15 @@ def MethodShapeValid (layouts : List RawLayout) (closed : RawMethod) (method : M
     | .ret narrow => narrow == returnNarrow layouts closed.returnType
     | _ => true) = true
 
-instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) : Decidable (MethodShapeValid layouts closed method) :=
+instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) :
+    Decidable (MethodShapeValid layouts closed method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- One emitted method against its evidence record: every per-method validator, in the
+    order generated modules supply their proofs. -/
 def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Method) : Prop :=
+    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
+    (method : Method) : Prop :=
   SpecializationValid rawLayouts item.original item.arguments item.closed item.parameterInput ∧
   ParameterHomesValid layouts item.parameterInput item.reachable method ∧
   MethodLayoutsValid rawLayouts layouts method item.layoutUses ∧
@@ -69,27 +90,40 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ScalarFlowValid item.closed item.featureStates item.scalarStates method.code
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Method) :
+    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
+    (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
+/-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Option Method) : Prop :=
+    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
+    (method : Option Method) : Prop :=
   match method with
   | none => False
   | some value => MethodEvidenceValid rawLayouts layouts all imports item value
 
 private instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence) (method : Option Method) :
+    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
+    (method : Option Method) :
     Decidable (MethodAtValid rawLayouts layouts all imports item method) := by
   cases method <;> dsimp [MethodAtValid] <;> infer_instance
-/-- The certificate covers the entire emitted program, with no optional method list; calls past it must match `imports`. -/
+
+/-- The architecture layouts are computed for: the first method's profile, or `.scalar` for
+    an empty program. -/
+abbrev programArchitecture (program : Program) : Architecture :=
+  ((program.head?).map fun method => method.profile.architecture).getD .scalar
+
+/-- The certificate covers the entire emitted program, with no optional method list; calls
+    past it must match `imports`. -/
 def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) : Prop :=
-  LayoutsValid rawLayouts layouts (((program.head?).map fun method => method.profile.architecture).getD .scalar) ∧ evidence.length = program.length ∧
-  (∀ index : Fin evidence.length, MethodAtValid rawLayouts layouts evidence imports evidence[index] program[index.val]?) ∧
+  LayoutsValid rawLayouts layouts (programArchitecture program) ∧
+    evidence.length = program.length ∧
+  (∀ index : Fin evidence.length,
+    MethodAtValid rawLayouts layouts evidence imports evidence[index] program[index.val]?) ∧
   StaticValuesValid program ∧
-  ImportedLayoutsValid imports (((program.head?).map fun method => method.profile.architecture).getD .scalar)
+  ImportedLayoutsValid imports (programArchitecture program)
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) :
@@ -98,20 +132,24 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) : List MethodEvidence → Program → Prop where
+    (all : List MethodEvidence) (imports : List ImportSlot) :
+    List MethodEvidence → Program → Prop where
   | nil : MethodsChecked rawLayouts layouts all imports [] []
-  | cons {item rest method program} : MethodEvidenceValid rawLayouts layouts all imports item method →
+  | cons {item rest method program} :
+      MethodEvidenceValid rawLayouts layouts all imports item method →
       MethodsChecked rawLayouts layouts all imports rest program →
       MethodsChecked rawLayouts layouts all imports (item :: rest) (method :: program)
 
+/-- Assembles `TranslationValid` from the program-wide checks and per-method proofs. -/
 theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}
-    (layout : LayoutsValid rawLayouts layouts (((program.head?).map fun method => method.profile.architecture).getD .scalar))
+    (layout : LayoutsValid rawLayouts layouts (programArchitecture program))
     (statics : StaticValuesValid program)
-    (importLayouts : ImportedLayoutsValid imports (((program.head?).map fun method => method.profile.architecture).getD .scalar))
+    (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (methods : MethodsChecked rawLayouts layouts evidence imports evidence program) :
     TranslationValid rawLayouts layouts evidence imports program := by
-  have compose {items code} (checked : MethodsChecked rawLayouts layouts evidence imports items code) :
+  have compose {items code}
+      (checked : MethodsChecked rawLayouts layouts evidence imports items code) :
       items.length = code.length ∧ ∀ index : Fin items.length,
         MethodAtValid rawLayouts layouts evidence imports items[index] code[index.val]? := by
     induction checked with
@@ -124,6 +162,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
       | succ index => exact ih.2 ⟨index, Nat.lt_of_succ_lt_succ bound⟩
   exact ⟨layout, (compose methods).1, (compose methods).2, statics, importLayouts⟩
 
+/-- Each method of a valid translation passes every per-method validator. -/
 theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}
     (valid : TranslationValid rawLayouts layouts evidence imports program)

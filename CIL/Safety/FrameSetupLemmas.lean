@@ -1,9 +1,20 @@
 import CIL.Safety.FrameLemmas
 import CIL.Safety.MemoryBelow
 
+/-!
+# Frame setup effects
+
+What `enterFrame` (in `CIL/Safety/Frames.lean`) does to memory, collected in one
+`FrameSetup` record: the frame owns only fresh allocations of its own activation, caller
+memory below the entry watermark is untouched, the static registry is unchanged, and every
+slot refers to live storage. Each builder (`makeLocal`, `makeArgumentHomes`, ...) proves a
+`FrameSetup`, and `FrameSetup.append` composes them; the other `Frame*` files project it.
+-/
+
 namespace CIL.Safety
 
-theorem allocateHome_fresh {alignment : Nat} (m result : Memory) (activation width : Nat) (r : Reference)
+theorem allocateHome_fresh {alignment : Nat} (m result : Memory) (activation width : Nat)
+    (r : Reference)
     (h : allocateHome m activation width alignment = .ok (r, result)) :
     AllocationExtension m result ∧ r.allocation = m.nextIdentity ∧
       r.allocation < result.nextIdentity := by
@@ -31,6 +42,7 @@ theorem storeLocal_extends_allocations (m result : Memory) (slot final : LocalSl
     | cases h
     | split at h
 
+/-- `after` extends `before`, and every id in `owned` was allocated between them. -/
 def FreshOwned (before after : Memory) (owned : List AllocationId) : Prop :=
   AllocationExtension before after ∧
     ∀ id ∈ owned, before.nextIdentity ≤ id ∧ id < after.nextIdentity
@@ -46,12 +58,15 @@ theorem FreshOwned.trans {first middle last : Memory} {left right : List Allocat
   · obtain ⟨lo, hi⟩ := hr.2 id member
     exact ⟨Nat.le_trans hl.1.next lo, hi⟩
 
+/-- Every id in `owned` is a live allocation belonging to frame `activation`. -/
 def FrameAllocations (m : Memory) (activation : Nat) (owned : List AllocationId) : Prop :=
   ∀ id ∈ owned, ∃ a, m.allocations id = some a ∧ a.kind = .frame activation ∧ a.live = true
 
-theorem FrameAllocations.preserve {before after : Memory} {activation : Nat} {owned : List AllocationId}
+theorem FrameAllocations.preserve {before after : Memory} {activation : Nat}
+    {owned : List AllocationId}
     (ext : AllocationExtension before after) (bounds : ∀ id ∈ owned, id < before.nextIdentity)
-    (owns : FrameAllocations before activation owned) : FrameAllocations after activation owned := by
+    (owns : FrameAllocations before activation owned) :
+    FrameAllocations after activation owned := by
   intro id member
   obtain ⟨a, present, kind, live⟩ := owns id member
   exact ⟨a, (ext.lookup id (bounds id member)).trans present, kind, live⟩
@@ -64,7 +79,8 @@ theorem FrameAllocations.append {m : Memory} {activation : Nat} {left right : Li
   · exact hl id member
   · exact hr id member
 
-theorem allocateHome_owned {alignment : Nat} (m result : Memory) (activation width : Nat) (r : Reference)
+theorem allocateHome_owned {alignment : Nat} (m result : Memory) (activation width : Nat)
+    (r : Reference)
     (h : allocateHome m activation width alignment = .ok (r, result)) :
     FrameAllocations result activation [r.allocation] := by
   unfold allocateHome at h
@@ -81,8 +97,10 @@ theorem allocateHome_owned {alignment : Nat} (m result : Memory) (activation wid
     have lookup := allocation_lookup m _ id memory ha
     exact ⟨_, lookup, rfl, rfl⟩
 
-theorem allocateHome_preserves_caller_memory {alignment : Nat} (m result : Memory) (activation width : Nat) (r : Reference)
-    (h : allocateHome m activation width alignment = .ok (r, result)) : MemoryBelow m.nextIdentity m result := by
+theorem allocateHome_preserves_caller_memory {alignment : Nat} (m result : Memory)
+    (activation width : Nat) (r : Reference)
+    (h : allocateHome m activation width alignment = .ok (r, result)) :
+    MemoryBelow m.nextIdentity m result := by
   unfold allocateHome at h
   cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
     simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
@@ -102,8 +120,10 @@ def LocalSlot.ReferencesValid (m : Memory) : LocalSlot → Prop
   | .root none | .root (some .null) | .opaque128 _ => True
   | .root (some (.address r)) | .bytes _ r => form m r = .ok r
 
+/-- Every slot in `slots` satisfies `LocalSlot.ReferencesValid`. -/
 def SlotsReferencesValid (m : Memory) (slots : List LocalSlot) : Prop :=
   ∀ slot ∈ slots, slot.ReferencesValid m
+
 theorem LocalSlot.ReferencesValid.preserve {m result : Memory} {slot : LocalSlot}
     (valid : slot.ReferencesValid m) (hm : m.WellFormed) (ext : AllocationExtension m result) :
     slot.ReferencesValid result := by
@@ -118,8 +138,10 @@ theorem LocalSlot.ReferencesValid.preserve {m result : Memory} {slot : LocalSlot
       | null => exact True.intro
       | address r => exact ext.preserves_reference hm r r valid
 
-theorem allocateHome_reference_valid {alignment : Nat} (m result : Memory) (activation width : Nat) (r : Reference)
-    (h : allocateHome m activation width alignment = .ok (r, result)) : form result r = .ok r := by
+theorem allocateHome_reference_valid {alignment : Nat} (m result : Memory)
+    (activation width : Nat) (r : Reference)
+    (h : allocateHome m activation width alignment = .ok (r, result)) :
+    form result r = .ok r := by
   unfold allocateHome at h
   cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
     simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
@@ -149,7 +171,8 @@ theorem write_staticBindings {m result : Memory} {r : Reference} {bytes : List (
 
 theorem writeSnapshot_staticBindings {m result : Memory} {r : Reference}
     {bytes : List (BitVec 8 × Bool)} {alignment : Nat}
-    (h : writeSnapshot m r bytes alignment = .ok result) : result.staticBindings = m.staticBindings := by
+    (h : writeSnapshot m r bytes alignment = .ok result) :
+    result.staticBindings = m.staticBindings := by
   unfold writeSnapshot at h
   cases hw : write m r (bytes.map Prod.fst) alignment <;>
     simp only [hw, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
@@ -159,7 +182,8 @@ theorem writeSnapshot_staticBindings {m result : Memory} {r : Reference}
     exact registry
 
 theorem storeLocal_staticBindings {m result : Memory} {slot final : LocalSlot} {value : Value}
-    (h : storeLocal m slot value = .ok (final, result)) : result.staticBindings = m.staticBindings := by
+    (h : storeLocal m slot value = .ok (final, result)) :
+    result.staticBindings = m.staticBindings := by
   unfold storeLocal at h
   repeat' first
     | rfl
@@ -169,7 +193,8 @@ theorem storeLocal_staticBindings {m result : Memory} {slot final : LocalSlot} {
     | split at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
 
-theorem storeLocal_above {m result : Memory} {slot final : LocalSlot} {value : Value} {watermark : Nat}
+theorem storeLocal_above {m result : Memory} {slot final : LocalSlot} {value : Value}
+    {watermark : Nat}
     (above : slot.Above watermark) (h : storeLocal m slot value = .ok (final, result)) :
     final.Above watermark := by
   unfold storeLocal at h
@@ -188,7 +213,8 @@ theorem storeLocal_memory_below {m result : Memory} {slot final : LocalSlot} {va
     | contradiction
     | exact .refl _ _
     | solve | exact write_preserves_memory_below _ _ _ _ _ _ above (checkedAt_ok (by assumption))
-    | solve | exact writeSnapshot_preserves_memory_below _ _ _ _ _ _ above (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_preserves_memory_below _ _ _ _ _ _ above
+                  (checkedAt_ok (by assumption))
     | cases h
     | split at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
@@ -241,7 +267,8 @@ theorem FrameSetup.append {activation : Nat} {first middle last : Memory}
     (b : FrameSetup activation middle last right rightIds) :
     FrameSetup activation first last (left ++ right) (leftIds ++ rightIds) := by
   refine ⟨a.fresh.trans b.fresh,
-    (a.allocations.preserve b.fresh.1 (fun id member => (a.fresh.2 id member).2)).append b.allocations,
+    (a.allocations.preserve b.fresh.1 (fun id member => (a.fresh.2 id member).2)).append
+      b.allocations,
     a.below.trans (b.below.weaken a.fresh.1.next), b.registry.trans a.registry,
     fun hm => b.wellFormed (a.wellFormed hm), ?_, ?_⟩
   · intro hm slot member
@@ -270,7 +297,8 @@ theorem allocateHome_setup {alignment : Nat} (m result : Memory) (activation wid
     exact ⟨Nat.le_of_eq fresh.2.1.symm, fresh.2.2⟩
   · unfold allocateHome at h
     cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
-      simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+      simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+        Except.pure] at h
     · cases h
     · cases h
       unfold allocate at ha
@@ -373,27 +401,21 @@ theorem makeOpaque128_setup (m result : Memory) (activation : Nat) (initial : CI
     FrameSetup activation m result [slot] owned := by
   cases initial with
   | v128 bits =>
-    change Except.ok (LocalSlot.opaque128 (some (.known bits)), [], m) = .ok (slot, owned, result) at h
-    have same := Except.ok.inj h
-    have slotSame : LocalSlot.opaque128 (some (.known bits)) = slot := congrArg Prod.fst same
-    have ownedSame : ([] : List AllocationId) = owned := congrArg (fun value => value.2.1) same
-    have memorySame : m = result := congrArg (fun value => value.2.2) same
-    rw [← slotSame, ← ownedSame, ← memorySame]
-    exact FrameSetup.opaque128 activation m (some (.known bits))
+    change Except.ok (LocalSlot.opaque128 (some (.known bits)), [], m) =
+      .ok (slot, owned, result) at h
+    cases h
+    exact FrameSetup.opaque128 activation m _
   | unmodeled =>
     change Except.ok (LocalSlot.opaque128 none, [], m) = .ok (slot, owned, result) at h
-    have same := Except.ok.inj h
-    have slotSame : LocalSlot.opaque128 none = slot := congrArg Prod.fst same
-    have ownedSame : ([] : List AllocationId) = owned := congrArg (fun value => value.2.1) same
-    have memorySame : m = result := congrArg (fun value => value.2.2) same
-    rw [← slotSame, ← ownedSame, ← memorySame]
-    exact FrameSetup.opaque128 activation m none
+    cases h
+    exact FrameSetup.opaque128 activation m _
   | _ => cases h
 
 theorem makeSelectedLocalsFrom_setup (m result : Memory) (activation : Nat) (indices : List Nat)
     (index : Nat) (kinds : List CIL.LocalKind) (initializers : List CIL.Value)
     (slots : List LocalSlot) (owned : List AllocationId)
-    (h : makeSelectedLocalsFrom activation indices index kinds initializers m = .ok (slots, owned, result)) :
+    (h : makeSelectedLocalsFrom activation indices index kinds initializers m =
+      .ok (slots, owned, result)) :
     FrameSetup activation m result slots owned := by
   induction kinds generalizing index initializers m slots owned result with
   | nil =>
@@ -406,10 +428,12 @@ theorem makeSelectedLocalsFrom_setup (m result : Memory) (activation : Nat) (ind
     | cons initial initials =>
       simp only [makeSelectedLocalsFrom] at h
       have finish (first : ExecutionResult (LocalSlot × List AllocationId × Memory))
-          (setup : ∀ slot ids memory, first = .ok (slot, ids, memory) → FrameSetup activation m memory [slot] ids)
+          (setup : ∀ slot ids memory, first = .ok (slot, ids, memory) →
+            FrameSetup activation m memory [slot] ids)
           (bound : (do
             let (slot, ids, memory) ← first
-            let (rest, other, final) ← makeSelectedLocalsFrom activation indices (index + 1) kinds initials memory
+            let (rest, other, final) ←
+              makeSelectedLocalsFrom activation indices (index + 1) kinds initials memory
             pure (slot :: rest, ids ++ other, final)) = .ok (slots, owned, result)) :
           FrameSetup activation m result slots owned := by
         cases hl : first <;> simp only [hl, Bind.bind, Except.bind] at bound
@@ -422,7 +446,8 @@ theorem makeSelectedLocalsFrom_setup (m result : Memory) (activation : Nat) (ind
           · rename_i rest
             obtain ⟨rest, other, final⟩ := rest
             cases bound
-            exact (setup slot ids memory hl).append (ih memory final (index + 1) initials rest other hr)
+            exact (setup slot ids memory hl).append
+              (ih memory final (index + 1) initials rest other hr)
       split at h
       · split at h
         · exact finish (makeOpaque128 initial m) (fun slot ids memory bound =>
@@ -510,16 +535,20 @@ theorem makeParameterHomes_setup (m result : Memory) (activation : Nat)
 theorem FrameSetup.select {activation : Nat} {before after : Memory}
     {slots selected : List LocalSlot} {owned : List AllocationId}
     (setup : FrameSetup activation before after slots owned)
-    (subset : ∀ slot ∈ selected, slot ∈ slots) : FrameSetup activation before after selected owned :=
+    (subset : ∀ slot ∈ selected, slot ∈ slots) :
+    FrameSetup activation before after selected owned :=
   { setup with
     references := fun hm slot member => setup.references hm slot (subset slot member)
     above := fun slot member => setup.above slot (subset slot member) }
 
-theorem enterFrame_setup (body : CIL.Method) (args : List Value) (m result : Memory) (frame : Frame)
-    (h : enterFrame body args m = .ok (frame, result)) :
-    FrameSetup frame.activation m result (frame.locals ++ frame.arguments.map Prod.snd) frame.owned := by
+/-- Everything `enterFrame` guarantees about the memory it returns and the frame's slots. -/
+theorem enterFrame_setup (body : CIL.Method) (args : List Value) (m result : Memory)
+    (frame : Frame) (h : enterFrame body args m = .ok (frame, result)) :
+    FrameSetup frame.activation m result (frame.locals ++ frame.arguments.map Prod.snd)
+      frame.owned := by
   simp only [enterFrame] at h
-  cases hl : makeSelectedLocals m.nextIdentity body.opaqueVectorLocals body.localKinds body.locals m <;>
+  cases hl : makeSelectedLocals m.nextIdentity body.opaqueVectorLocals body.localKinds
+      body.locals m <;>
     simp only [hl, Bind.bind, Except.bind] at h
   · cases h
   · rename_i locals

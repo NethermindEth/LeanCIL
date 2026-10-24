@@ -1,5 +1,14 @@
 import CIL.Safety.ViewReuse
 
+/-!
+# Memory lemmas
+
+Basic facts about the checked memory operations of `CIL/Safety/Memory.lean`: formation and
+pointer arithmetic keep the allocation identity, successful accesses imply liveness, bounds
+and authority, allocation hands out a fresh uninitialized identity, writes touch only their
+target and grant read-back authority, and well-formedness is preserved.
+-/
+
 namespace CIL.Safety
 
 theorem allocation_valid_iff (a : Allocation) : a.valid = true ↔ a.WellFormed := by
@@ -22,7 +31,8 @@ theorem form_preserves_provenance (m : Memory) (r result : Reference)
   cases ha : liveAllocation m r.allocation <;> simp [ha, Bind.bind, Except.bind, Pure.pure] at h
   split at h <;> simp_all [Except.pure]
 
-theorem add_preserves_provenance (m : Memory) (r result : Reference) (size : Nat) (offset : BitVec 64)
+theorem add_preserves_provenance (m : Memory) (r result : Reference) (size : Nat)
+    (offset : BitVec 64)
     (h : add m r size offset = .ok result) : result.allocation = r.allocation := by
   simp only [add] at h
   cases ha : form m r <;> simp only [ha, Bind.bind, Except.bind] at h
@@ -33,18 +43,21 @@ theorem add_preserves_provenance (m : Memory) (r result : Reference) (size : Nat
 
 theorem formed_reference_live (m : Memory) (r result : Reference)
     (h : form m r = .ok result) :
-    ∃ a, m.allocations r.allocation = some a ∧ a.live = true ∧ validPosition a r.offset = true := by
+    ∃ a, m.allocations r.allocation = some a ∧ a.live = true ∧
+      validPosition a r.offset = true := by
   unfold form at h
   cases ha : liveAllocation m r.allocation <;>
     simp only [ha, Bind.bind, Except.bind] at h
   · cases h
   · split at h
-    · exact ⟨_, (liveAllocation_ok _ _ _ ha).1, (liveAllocation_ok _ _ _ ha).2, by assumption⟩
+    · exact ⟨_, (liveAllocation_ok _ _ _ ha).1, (liveAllocation_ok _ _ _ ha).2,
+        by assumption⟩
     · cases h
 
 theorem access_within_allocation (m : Memory) (r : Reference) (width alignment : Nat)
     (writing : Bool) (h : access m r width alignment writing = .ok ()) :
-    ∃ a, m.allocations r.allocation = some a ∧ a.live = true ∧ r.offset + width ≤ a.layout.size := by
+    ∃ a, m.allocations r.allocation = some a ∧ a.live = true ∧
+      r.offset + width ≤ a.layout.size := by
   unfold access at h
   cases hf : form m r <;> simp only [hf, Bind.bind, Except.bind] at h
   · cases h
@@ -54,7 +67,8 @@ theorem access_within_allocation (m : Memory) (r : Reference) (width alignment :
       · simp at h
       · simp only [Pure.pure, Except.pure] at h
         split at h
-        · exact ⟨_, (liveAllocation_ok _ _ _ ha).1, (liveAllocation_ok _ _ _ ha).2, by assumption⟩
+        · exact ⟨_, (liveAllocation_ok _ _ _ ha).1, (liveAllocation_ok _ _ _ ha).2,
+            by assumption⟩
         · simp at h
 
 theorem access_requires_permission (m : Memory) (r : Reference) (width alignment : Nat)
@@ -90,8 +104,11 @@ theorem skipInit_preserves_memory (m result : Memory) (r : Reference)
   cases ha : form m r <;> simp [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   exact h.symm
 
-theorem allocation_identity_fresh (m : Memory) (a : Allocation) (id : AllocationId) (result : Memory)
-    (h : allocate m a = .ok (id, result)) : id = m.nextIdentity ∧ result.nextIdentity = m.nextIdentity + 1 := by
+/-- Allocation returns the next identity and advances the counter, so identities are
+    never reused. -/
+theorem allocation_identity_fresh (m : Memory) (a : Allocation) (id : AllocationId)
+    (result : Memory) (h : allocate m a = .ok (id, result)) :
+    id = m.nextIdentity ∧ result.nextIdentity = m.nextIdentity + 1 := by
   simp only [allocate] at h
   split at h
   · cases h
@@ -100,7 +117,8 @@ theorem allocation_identity_fresh (m : Memory) (a : Allocation) (id : Allocation
     · cases h
       exact ⟨rfl, rfl⟩
 
-theorem allocation_bytes_uninitialized (m : Memory) (a : Allocation) (id : AllocationId) (result : Memory)
+theorem allocation_bytes_uninitialized (m : Memory) (a : Allocation) (id : AllocationId)
+    (result : Memory)
     (h : allocate m a = .ok (id, result)) (offset : Nat) :
     (result.cells id offset).initialized = false := by
   simp only [allocate] at h
@@ -155,6 +173,7 @@ theorem write_preserves_write_permission (m result : Memory) (r q : Reference)
     rw [writeViews_permitted]
     simp [permitted]
 
+/-- After a write, a byte is readable exactly when it was written or was readable before. -/
 theorem write_read_permission (m result : Memory) (r q : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat)
     (h : write m r bytes alignment = .ok result) :
@@ -180,7 +199,8 @@ theorem write_preserves_wellFormed (m result : Memory) (r : Reference)
   · cases h
     refine ⟨hm.1, ?_⟩
     intro view hv
-    have included : view ∈ ⟨r.allocation, r.offset, bytes.length, true, false⟩ :: m.views := by
+    have included :
+        view ∈ ⟨r.allocation, r.offset, bytes.length, true, false⟩ :: m.views := by
       change view ∈ writeViews m r bytes.length at hv
       unfold writeViews at hv
       split at hv

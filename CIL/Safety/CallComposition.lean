@@ -1,6 +1,14 @@
 import CIL.Safety.FuelLemmas
 import CIL.Safety.LiveValues
 
+/-!
+# Composing a call with its caller
+
+Lets a caller proof use a callee's result proved separately as an `invoke` fact, instead of
+stepping through the callee body inline. The fuel lemmas from `FuelLemmas` reconcile the two
+independent fuel budgets.
+-/
+
 namespace CIL.Safety
 
 /-- Compose an independently checked invocation with the actual caller step.
@@ -8,11 +16,13 @@ namespace CIL.Safety
     caller's later outcome, normal or faulting, carries over unchanged. -/
 theorem run_call_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack arguments rest returned : List Value}
-    {frame : Frame} {memory updated childResult : Memory} {outcome : Except LocatedFault (Memory × List Value)}
+    {frame : Frame} {memory updated childResult : Memory}
+    {outcome : Except LocatedFault (Memory × List Value)}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (child : invoke program fuel callee arguments updated = .ok (childResult, returned))
-    (continuation : run program fuel method (pc + 1) args frame (returned ++ rest) childResult = outcome) :
+    (continuation :
+      run program fuel method (pc + 1) args frame (returned ++ rest) childResult = outcome) :
     run program (fuel + 1) method pc args frame stack memory = outcome := by
   cases hb : program[callee]? with
   | none => simp [invoke, hb] at child
@@ -37,11 +47,14 @@ theorem run_call_exists {program : CIL.Program} {method pc callee : Nat}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (child : ∃ fuel, invoke program fuel callee arguments updated = .ok (childResult, returned))
-    (continuation : ∃ fuel, run program fuel method (pc + 1) args frame (returned ++ rest) childResult = .ok (result, values)) :
+    (continuation : ∃ fuel,
+      run program fuel method (pc + 1) args frame (returned ++ rest) childResult =
+        .ok (result, values)) :
     ∃ fuel, run program fuel method pc args frame stack memory = .ok (result, values) := by
   obtain ⟨childFuel, child⟩ := child
   obtain ⟨parentFuel, continuation⟩ := continuation
-  have hc := invoke_mono program childFuel parentFuel callee arguments updated (.ok (childResult, returned)) trivial child
+  have hc := invoke_mono program childFuel parentFuel callee arguments updated
+    (.ok (childResult, returned)) trivial child
   have hp := run_mono program parentFuel childFuel method (pc + 1) args frame
     (returned ++ rest) childResult (.ok (result, values)) trivial continuation
   rw [Nat.add_comm parentFuel childFuel] at hp

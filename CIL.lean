@@ -1,3 +1,7 @@
+-- Keep this order: it sets the order in which simp lemmas and instances from different
+-- modules are tried in every consumer, so regrouping could change proof behaviour.
+
+-- Reference semantics, feature profiles, method embeddings and extraction metadata
 import CIL.AggregateMemory
 import CIL.ExecutionLemmas
 import CIL.Embedding.Basic
@@ -14,6 +18,7 @@ import CIL.MethodIdentity
 import CIL.StructuralLabels
 import CIL.DebugNames
 import CIL.ProfileEquivalence
+-- Hardware intrinsics
 import CIL.SIMD.AVX
 import CIL.SIMD.AVX2
 import CIL.SIMD.AVX512
@@ -31,6 +36,7 @@ import CIL.SIMD.SSE
 import CIL.SIMD.Vector
 import CIL.SIMD.VectorLemmas
 import CIL.SIMD.X86Base
+-- Checked interpreter: memory safety, contracts, composition and linking
 import CIL.Safety.AccessAlignment
 import CIL.Safety.AccessBelow
 import CIL.Safety.AccessRequirements
@@ -136,6 +142,7 @@ import CIL.Safety.WordSnapshotPreservation
 import CIL.Safety.WordSnapshots
 import CIL.Safety.WriteEffects
 import CIL.Safety.TypedCopy
+-- Mixed: symbolic execution, verification, extraction checks, interfaces, later results
 import CIL.Semantics
 import CIL.StepEquations
 import CIL.SymbolicExecution
@@ -158,4 +165,26 @@ import CIL.Safety.ExecutionEquivalence
 import CIL.Interface.Closure
 import CIL.Safety.StaticLinking
 import CIL.Interface.FullTransfer
-import CIL.SIMD.DivisionLemmas
+import CIL.SIMD.UnspecifiedLanes
+
+/-!
+# LeanCIL
+
+The root of the `CIL` library; importing `CIL` brings in every module listed above.
+
+* `CIL.Types`, `CIL.Instructions`, `CIL.Layout` and `CIL.Memory`: values, opcodes, aggregate
+  layouts and byte memory.
+* `CIL.Semantics`: the reference interpreter (`CIL.step`, `CIL.run`, `CIL.invoke`), which
+  `CIL.SymbolicExecution` steps by rewriting.
+* `CIL.Features`, `CIL.SIMD.*` and `CIL.ProfileEquivalence`: hardware feature profiles, the
+  intrinsic semantics, and when a result does not depend on the profile.
+* `CIL.Safety.*`: the checked interpreter (`CIL.Safety.invoke`) over allocation-aware memory,
+  with its invariants and certificates, method contracts, linking, and the stepping tactics
+  of `CIL.Safety.SymbolicExecution`. State memory-safety claims against this interpreter.
+* `CIL.Verification`: total-correctness specifications over the checked interpreter.
+* `CIL.Embedding.*`, `CIL.Extraction.*`, `CIL.Imports`, `CIL.Interface.*` and the method
+  identity and binding modules: what ties a proof to an extracted assembly, namely body
+  embeddings, translation and layout checks, import slots and published contract interfaces.
+
+`docs/PROOFS.md` explains how to write proofs and `docs/SOUNDNESS.md` what is trusted.
+-/

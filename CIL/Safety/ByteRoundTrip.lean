@@ -1,5 +1,13 @@
 import CIL.Safety.ByteEncoding
 
+/-!
+# Byte round trip
+
+Any byte list decodes to a number below `256^length`, and re-encoding that number at the
+same length gives back the original bytes. Together with `byteNumber_numberBytes` this makes
+the encoding a bijection at each fixed width.
+-/
+
 namespace CIL.Safety
 
 theorem byteNumber_lt (bytes : List (BitVec 8)) : byteNumber bytes < 256 ^ bytes.length := by
@@ -11,6 +19,7 @@ theorem byteNumber_lt (bytes : List (BitVec 8)) : byteNumber bytes < 256 ^ bytes
     change head.toNat + 256 * byteNumber tail < 256 ^ tail.length * 256
     omega
 
+/-- Re-encoding a decoded byte list at its own length returns it unchanged. -/
 theorem numberBytes_byteNumber (bytes : List (BitVec 8)) :
     numberBytes (byteNumber bytes) bytes.length = bytes := by
   induction bytes with

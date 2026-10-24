@@ -1,6 +1,13 @@
 import CIL.SIMD.VectorLemmas
 import CIL.SIMD.Intrinsics
 
+/-!
+# 128-bit intrinsic evaluation lemmas
+
+`evalIntrinsic` on concrete 128-bit operations, as `rfl` simp lemmas, plus the BMI1 flag
+extraction facts. Stepping proofs rewrite with these instead of unfolding `evalIntrinsic`.
+-/
+
 open CIL
 
 namespace CIL.Vector
@@ -76,6 +83,7 @@ theorem bit4_mask_value (a : W32) :
     | subst i; simp only [h, decide_true, Bool.and_true]
     | simp [Ne.symm position]
 
+/-- Testing bit 4 with BEXTR and with an AND mask gives the same truth value. -/
 theorem bextr_mask_flag_agree (a : W32) :
     (bextr32 a 4 1 != BitVec.ofNat 32 0) =
       ((a &&& BitVec.ofNat 32 16) != BitVec.ofNat 32 0) := by
@@ -115,7 +123,8 @@ theorem bextr_mask_flag_agree (a : W32) :
 @[simp] theorem intrinsic_reinterpret128 (a : V128) :
     evalIntrinsic (.vector (.reinterpret 128)) [.v128 a] = some (.v128 a) := rfl
 @[simp] theorem intrinsic_extract128 (a : V128) :
-    evalIntrinsic (.vector (.extract64 128)) [.v128 a, .i32 (BitVec.ofNat 32 1)] = some (.i64 (lane64 a 1)) := rfl
+    evalIntrinsic (.vector (.extract64 128)) [.v128 a, .i32 (BitVec.ofNat 32 1)] =
+      some (.i64 (lane64 a 1)) := rfl
 
 theorem pack128_zero : pack128 0 0 = 0 := by decide
 

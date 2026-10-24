@@ -19,6 +19,19 @@ theorem disabled_intrinsic :
 
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl
 
+theorem unsigned_compare_wraps :
+    CIL.binary .ltu (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 0) = some (.i32 0) := by decide
+
+theorem add_wraps_at_width :
+    CIL.binary .add (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 1) = some (.i64 0) := by decide
+
+theorem write_overwrites (m : CIL.Memory) (a : CIL.Address) (x y : CIL.Value) :
+    CIL.write (CIL.write m a x) a y a = some y := by simp [CIL.write]
+
+#print axioms unsigned_compare_wraps
+#print axioms add_wraps_at_width
+#print axioms write_overwrites
+
 -- New value-only instructions must reject invalid operands in the checked dispatcher.
 private def scalarBody : CIL.Method := { code := [], locals := [], returnsValue := true }
 private def scalarFrame : Frame := { activation := 0, locals := [], owned := [] }

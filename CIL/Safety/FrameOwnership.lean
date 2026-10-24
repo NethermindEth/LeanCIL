@@ -1,5 +1,16 @@
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.AllocationExtension
+
+/-!
+# Frame ownership
+
+A frame owns only allocations created after it was entered, during setup or by temporaries
+that `newVector256` and `newAggregate` allocate, so leaving it expires nothing the caller
+already had. The headline results are `frame_entry_exit_preserves_caller` and
+`frame_entry_exit_preserves_reference`: entering and then leaving a frame keeps every older
+allocation, and every reference the caller could form, unchanged.
+-/
+
 namespace CIL.Safety
 
 theorem makeLocal_fresh (m result : Memory) (activation : Nat) (kind : CIL.LocalKind)
@@ -29,7 +40,8 @@ theorem makeParameterHomes_fresh (m result : Memory) (activation : Nat)
     FreshOwned m result owned := by
   exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).fresh
 
-theorem enterFrame_fresh (body : CIL.Method) (args : List Value) (m result : Memory) (frame : Frame)
+theorem enterFrame_fresh (body : CIL.Method) (args : List Value) (m result : Memory)
+    (frame : Frame)
     (h : enterFrame body args m = .ok (frame, result)) : FreshOwned m result frame.owned := by
   exact (enterFrame_setup _ _ _ _ _ h).fresh
 
@@ -41,6 +53,8 @@ theorem leaveFrame_preserves_older_allocations (frame : Frame) (m : Memory) (wat
     exact Nat.not_lt_of_ge (fresh id owned) old
   simp [leaveFrame, expireAll_allocations, notOwned]
 
+/-- Entering a frame and leaving it again leaves every allocation older than the call as it
+    was. -/
 theorem frame_entry_exit_preserves_caller (body : CIL.Method) (args : List Value)
     (m result : Memory) (frame : Frame) (id : AllocationId)
     (h : enterFrame body args m = .ok (frame, result)) (old : id < m.nextIdentity) :
@@ -54,6 +68,8 @@ theorem frame_entry_exit_preserves_caller (body : CIL.Method) (args : List Value
 #print axioms leaveFrame_preserves_older_allocations
 #print axioms frame_entry_exit_preserves_caller
 
+/-- A reference the caller could form before the call still forms after the callee's frame
+    is entered and left. -/
 theorem frame_entry_exit_preserves_reference (body : CIL.Method) (args : List Value)
     (m result : Memory) (frame : Frame) (r formed : Reference) (hm : m.WellFormed)
     (enter : enterFrame body args m = .ok (frame, result)) (valid : form m r = .ok formed) :
@@ -72,4 +88,5 @@ theorem expireAll_retained_fields (ids : List AllocationId) (m : Memory) :
   induction ids generalizing m with
   | nil => exact ⟨rfl, rfl, rfl, rfl⟩
   | cons id ids ih => exact ih (expire m id)
+
 end CIL.Safety

@@ -1,6 +1,13 @@
 import CIL.Safety.LocalReferences
 import CIL.Safety.ExecutionFrameOwnership
 
+/-!
+# Steps preserve frame references
+
+The references held in a frame's local slots stay valid across one checked step, including
+a store that replaces a slot. Part of the per-step `LiveState` invariant.
+-/
+
 namespace CIL.Safety
 
 theorem stored_frame_references_valid (m result : Memory) (frame : Frame) (index : Nat)
@@ -18,6 +25,7 @@ theorem stored_frame_references_valid (m result : Memory) (frame : Frame) (index
   · subst other
     exact stored
 
+/-- A step keeps every frame slot reference valid in the memory it leaves behind. -/
 theorem step_preserves_frame_references (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (hm : m.WellFormed) (valid : frame.ReferencesValid m)

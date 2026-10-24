@@ -3,6 +3,15 @@ import CIL.Types
 import CIL.Safety.MemoryBelow
 import CIL.Safety.MemoryEquivalence
 
+/-!
+# Snapshot reads and writes
+
+Value copies move bytes together with their initialization flags, so copying uninitialized
+memory never makes it initialized. This file defines `readSnapshot` and `writeSnapshot` and
+proves they keep memory well formed, only extend allocations, leave older memory alone, and
+respect memory equivalence.
+-/
+
 namespace CIL.Safety
 
 /-- A value copy checks authority and lifetime but does not inspect initialization. -/
@@ -57,8 +66,11 @@ theorem writeSnapshot_extends_allocations (m result : Memory) (r : Reference)
     have preserved := write_extends_allocations _ _ _ _ _ hw
     exact ⟨preserved.next, preserved.lookup⟩
 
+/-- A snapshot write into an allocation at or above `watermark` leaves memory below it
+    unchanged. -/
 theorem writeSnapshot_preserves_memory_below (m result : Memory) (r : Reference)
-    (bytes : List (BitVec 8 × Bool)) (alignment watermark : Nat) (fresh : watermark ≤ r.allocation)
+    (bytes : List (BitVec 8 × Bool)) (alignment watermark : Nat)
+    (fresh : watermark ≤ r.allocation)
     (h : writeSnapshot m r bytes alignment = .ok result) : MemoryBelow watermark m result := by
   unfold writeSnapshot at h
   cases hw : write m r (bytes.map Prod.fst) alignment <;>
@@ -78,11 +90,13 @@ theorem Memory.Equivalent.readSnapshot {m n : Memory} (same : m.Equivalent n)
 
 theorem Memory.Equivalent.writeSnapshot {m n : Memory} (same : m.Equivalent n)
     (r : Reference) (bytes : List (BitVec 8 × Bool)) (alignment : Nat) :
-    ResultEquivalent Memory.Equivalent (writeSnapshot m r bytes alignment) (writeSnapshot n r bytes alignment) := by
+    ResultEquivalent Memory.Equivalent (writeSnapshot m r bytes alignment)
+      (writeSnapshot n r bytes alignment) := by
   unfold CIL.Safety.writeSnapshot
   apply ResultEquivalent.bind (same.write r _ alignment)
   intro left right related
   apply ResultEquivalent.ok
-  exact ⟨related.allocations, by simp only [same.cells], related.permissions, related.nextIdentity, related.staticBindings⟩
+  exact ⟨related.allocations, by simp only [same.cells], related.permissions,
+    related.nextIdentity, related.staticBindings⟩
 
 end CIL.Safety

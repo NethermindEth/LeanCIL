@@ -1,6 +1,6 @@
 import Lean
 import CIL.Extraction.Translation
-import CIL.SIMD.DivisionLemmas
+import CIL.SIMD.UnspecifiedLanes
 
 open CIL CIL.Extraction
 

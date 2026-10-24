@@ -3,10 +3,15 @@ import CIL.Safety.Execution
 
 namespace CIL.Safety
 
-/- These are placement-independence theorems for the actual checked interpreter.
-References keep allocation identity and offset; a moving runtime must update their
-physical representations accordingly. Neither GC implementation correctness nor
-availability of physical space for future allocations is proved here. -/
+/-!
+# Relocation and the checked interpreter
+
+Placement-independence theorems for the actual checked interpreter: moving allocations to
+new physical addresses changes no step, run or invocation result. References keep allocation
+identity and offset; a moving runtime must update their physical representations
+accordingly. Neither GC implementation correctness nor availability of physical space for
+future allocations is proved here.
+-/
 
 theorem relocation_preserves_step (m : PlacedMemory) (after : Placement)
     (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)

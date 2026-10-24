@@ -189,7 +189,7 @@ example (m : Memory) : ¬ Raises [stuck] 0 [] m "System.Exception" := by
     rw [show invoke [stuck] 0 0 [] m = .error ⟨0, 0, .fuelExhausted⟩ from rfl] at ran
     cases ran; simp at thrown
   | succ fuel =>
-    rw [show invoke [stuck] (fuel + 1) 0 [] m = .error ⟨0, 0, .unsupported "Non-memory instruction requires execution adapter"⟩ from rfl] at ran
+    rw [show invoke [stuck] (fuel + 1) 0 [] m = .error ⟨0, 0, .unsupported "Not a memory instruction"⟩ from rfl] at ran
     cases ran; simp at thrown
 
 theorem spin_exhausts (m : Memory) (frame : Frame) (fuel : Nat) :

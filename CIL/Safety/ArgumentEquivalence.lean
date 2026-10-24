@@ -1,5 +1,13 @@
 import CIL.Safety.Execution
 
+/-!
+# Unobserved arguments
+
+After frame setup, the checked interpreter reads the argument list only through `ldarg`.
+Two argument lists that agree on every index the body loads therefore give the same
+`step`, `run` and `invoke` results, so a proof may replace arguments the method never reads.
+-/
+
 namespace CIL.Safety
 
 /-- Only argument loads observe the argument list after frame setup. -/
@@ -39,13 +47,15 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Op) (pc : Nat)
       | rfl
       | cases rest with
         | nil => first | rfl | (cases value <;> rfl)
-        | cons next rest => first | rfl | (cases value <;> first | rfl | (cases next <;> rfl))
+        | cons next rest =>
+          first | rfl | (cases value <;> first | rfl | (cases next <;> rfl))
 
 /-- Changing unobserved arguments preserves every checked execution step.
     Child calls receive the same evaluated stack arguments on both sides. -/
 theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)
     (lookup : program[method]? = some body) (args other : List Value)
-    (agreement : ∀ index narrow, CIL.Op.arg index narrow ∈ body.code → args[index]? = other[index]?)
+    (agreement : ∀ index narrow,
+      CIL.Op.arg index narrow ∈ body.code → args[index]? = other[index]?)
     (fuel pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
     run program fuel method pc args frame stack memory =
       run program fuel method pc other frame stack memory := by
@@ -73,9 +83,12 @@ theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Meth
         | construct callee arguments rest frame temporary kind memory =>
           simp only [Except.mapError, Bind.bind, Except.bind, ih]
 
+/-- `invoke` agrees on two argument lists that are both checked, agree where the body loads
+    them, and set up the same frame. -/
 theorem invoke_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)
     (lookup : program[method]? = some body) (args other : List Value)
-    (agreement : ∀ index narrow, CIL.Op.arg index narrow ∈ body.code → args[index]? = other[index]?)
+    (agreement : ∀ index narrow,
+      CIL.Op.arg index narrow ∈ body.code → args[index]? = other[index]?)
     (fuel : Nat) (memory : Memory)
     (checkedArgs : args.mapM (checkedValue memory) = .ok args)
     (checkedOther : other.mapM (checkedValue memory) = .ok other)

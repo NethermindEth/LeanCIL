@@ -1,3 +1,11 @@
+/-!
+# Lockstep list checks
+
+Extraction evidence is mostly per instruction: the raw CIL body, a reachability mask, a
+certificate and the emitted code are parallel lists indexed by pc. `all3` checks such
+lists together in one pass, and `all3_at` recovers the check at any single pc.
+-/
+
 namespace CIL.Extraction
 
 /-- Check three per-instruction lists in lockstep. Generated evidence is decided by
@@ -8,6 +16,7 @@ def all3 (check : α → β → γ → Bool) : List α → List β → List γ �
   | [], [], [] => true
   | _, _, _ => false
 
+/-- A passing lockstep check holds at every index present in all three lists. -/
 theorem all3_at {check : α → β → γ → Bool} :
     ∀ {as : List α} {bs : List β} {cs : List γ} {k : Nat} {a : α} {b : β} {c : γ},
     all3 check as bs cs = true → as[k]? = some a → bs[k]? = some b → cs[k]? = some c →
@@ -22,7 +31,8 @@ theorem all3_at {check : α → β → γ → Bool} :
     exact valid.1
   | _ :: _, _ :: _, _ :: _, _ + 1, _, _, _, valid, foundA, foundB, foundC => by
     simp only [all3, Bool.and_eq_true] at valid
-    exact all3_at valid.2 (by simpa using foundA) (by simpa using foundB) (by simpa using foundC)
+    exact all3_at valid.2 (by simpa using foundA) (by simpa using foundB)
+      (by simpa using foundC)
 
 #print axioms all3_at
 

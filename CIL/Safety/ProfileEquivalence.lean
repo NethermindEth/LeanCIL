@@ -1,12 +1,23 @@
 import CIL.ProfileEquivalence
 import CIL.Safety.Execution
 
+/-!
+# Checked execution across feature profiles
+
+The checked interpreter gives the same result for a program under two feature profiles
+whenever every instruction agrees on them (`CIL.Op.ProfileAgreement`): only feature tests
+and intrinsics consult the profile. `CIL.Safety.ProfileCertificate` lifts this to
+invocation certificates.
+-/
+
 namespace CIL.Safety
 
 theorem enterFrame_profile (body : CIL.Method) (profile : CIL.FeatureProfile)
     (args : List Value) (memory : Memory) :
     enterFrame { body with profile } args memory = enterFrame body args memory := rfl
 
+/-- A checked step does not depend on the method's profile when the instruction agrees on
+    both profiles. -/
 theorem step_profile_eq (body : CIL.Method) (op : CIL.Op) (p q : CIL.FeatureProfile)
     (agreement : op.ProfileAgreement p q) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (memory : Memory) :
@@ -19,6 +30,8 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Op) (p q : CIL.FeatureProf
   all_goals try simp only [agreement]
   all_goals simp only [CIL.step_profile_eq op p q agreement]
 
+/-- Running a reprofiled program gives the same result, fault or success, under any two
+    profiles the program agrees on. -/
 theorem run_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
     (agreement : program.ProfileAgreement p q) (fuel method pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (memory : Memory) :
@@ -72,6 +85,7 @@ theorem invoke_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
     simp only [invoke, CIL.reprofile_lookup, hb, Option.map_some, enterFrame_profile]
     simp only [run_reprofile_eq program p q agreement]
 
+/-- A program whose methods all use profile `p` behaves exactly as its reprofiling to `q`. -/
 theorem invoke_uniform_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
     (uniform : ∀ body ∈ program, body.profile = p)
     (agreement : program.ProfileAgreement p q) (fuel method : Nat)

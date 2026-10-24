@@ -1,6 +1,14 @@
 import CIL.Safety.MemoryBelow
 import CIL.Safety.FrameOwnership
 
+/-!
+# Frame setup leaves caller memory alone
+
+Building a frame changes nothing below the entry watermark `m.nextIdentity`: allocation
+metadata, bytes and permissions of every older allocation are exactly preserved. This is
+what lets a caller's facts about its own memory survive a call.
+-/
+
 namespace CIL.Safety
 
 theorem store_numeric_local_preserves_memory_below (m result : Memory) (kind : CIL.LocalKind)
@@ -9,7 +17,6 @@ theorem store_numeric_local_preserves_memory_below (m result : Memory) (kind : C
     (h : storeLocal m (.bytes kind r) (.scalar value) = .ok (slot, result)) :
     MemoryBelow watermark m result := by
   exact storeLocal_memory_below (slot := .bytes kind r) fresh h
-
 
 theorem makeLocal_preserves_caller_memory (m result : Memory) (activation : Nat)
     (kind : CIL.LocalKind) (initial : CIL.Value) (slot : LocalSlot) (owned : List AllocationId)
@@ -25,7 +32,8 @@ theorem makeLocals_preserves_caller_memory (m result : Memory) (activation : Nat
   exact (makeLocals_setup _ _ _ _ _ _ _ h).below
 
 theorem makeArgumentHomes_preserves_caller_memory (m result : Memory) (activation : Nat)
-    (indices : List Nat) (args : List Value) (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
+    (indices : List Nat) (args : List Value) (homes : List (Nat × LocalSlot))
+    (owned : List AllocationId)
     (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
     MemoryBelow m.nextIdentity m result := by
   exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).below

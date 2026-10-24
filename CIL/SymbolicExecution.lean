@@ -1,10 +1,21 @@
 import Lean
 import CIL.ExecutionLemmas
 
--- Only definitions emitted from the current extracted assembly belong here.
--- Registering a definition supplies its kernel-checked unfolding equations;
--- it does not assign a behavioral contract to the method.
+/-!
+# Symbolic execution of the reference interpreter
+
+`cil_steps` runs `CIL.run` on an extracted method by rewriting, one instruction at a time,
+until the method returns or a symbolic fact is needed. `if_extracted` admits optional
+summary proofs that fall back to raw stepping when they fail. Everything here is a tactic
+or a simp set; the kernel still checks every resulting proof.
+-/
+
+/-- Definitions and facts emitted from the current extracted assembly, and nothing else.
+    Registering a definition supplies its kernel-checked unfolding equations; it does not
+    assign a behavioural contract to the method. -/
 register_simp_attr cil_code
+/-- Evaluation lemmas that the checked stepping tactics in `CIL.Safety.SymbolicExecution`
+    rewrite with. -/
 register_simp_attr cil_eval
 
 namespace CIL
@@ -17,16 +28,16 @@ theorem fin_mk_ofNat {n k : Nat} [NeZero n] (bound : k < n) :
   apply Fin.ext
   simp [Fin.val_ofNat, Nat.mod_eq_of_lt bound]
 
--- A conservative candidate budget for the selected method and later callees.
--- Sufficiency is established by each execution proof, not assumed here.
+/-- A candidate fuel budget for the selected method and later callees: one more than their
+    supported instruction count. Each execution proof establishes that it suffices. -/
 def executionBound (program : Program) (method : Nat) : Nat :=
   (program.drop method).foldl (fun total body => total +
     (body.code.filter fun op => match op with | .unsupported _ => false | _ => true).length) 0 + 1
 
--- Summary candidates are transactions: failed elaboration, kernel checking,
--- or admitted proofs leave neither declarations nor simp registrations behind.
--- Subsequent execution then uses instructions directly.
 open Lean Elab Command in
+/-- `if_extracted name { commands }` elaborates a summary candidate when `name` exists. It is
+    a transaction: failed elaboration, kernel checking or an admitted proof leaves neither
+    declarations nor simp registrations behind, and execution then uses instructions directly. -/
 elab "if_extracted " name:ident " {" commands:command* "}" : command => do
   unless (← getEnv).contains name.getId do return
   let saved ← get
@@ -51,12 +62,13 @@ elab "if_extracted " name:ident " {" commands:command* "}" : command => do
         fun marker => (detail.splitOn marker).length > 1
     let failureClass := if resource then "resource limit" else "proof obligation"
     set saved
-    logInfo m!"Optional summary candidate {name.getId} was not proved; using raw execution ({failureClass}):\n{detail}"
+    logInfo m!"Optional summary candidate {name.getId} was not proved; \
+      using raw execution ({failureClass}):\n{detail}"
 
--- Execute instructions until execution finishes or a symbolic obligation
--- prevents further reduction. Facts are ordinary proved hypotheses/lemmas.
--- There is no instruction trace, method identity, or local layout in this
--- procedure. Lean's heartbeat/depth limits remain explicit failure limits.
+/-- Execute instructions until execution finishes or a symbolic obligation prevents further
+    reduction. Facts are ordinary proved hypotheses or lemmas. There is no instruction trace,
+    method identity or local layout in this procedure; Lean's heartbeat and depth limits
+    remain explicit failure limits. -/
 macro "cil_steps" facts:term,+ : tactic =>
   `(tactic| ((try (simp only [cil_code])); repeat
     (rw [run];
@@ -71,6 +83,7 @@ macro "cil_steps" facts:term,+ : tactic =>
       FeatureProfile.evaluate, Intrinsic.available,
       fin_val_three, $[$facts:term],*])))
 
+/-- `cil_steps` with no extra facts. -/
 macro "cil_steps" : tactic => `(tactic| cil_steps Nat.add_zero)
 
 end CIL

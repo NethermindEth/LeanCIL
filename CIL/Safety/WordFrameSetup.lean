@@ -1,11 +1,20 @@
 import CIL.Safety.WordHomes
 
+/-!
+# Frames of word and root locals
+
+Entering a method whose locals are all 64-bit words with known initial values or null
+object roots succeeds, and gives `WordHomes` for its locals above the caller's memory.
+Consumer proofs start from this frame instead of unfolding `enterFrame`.
+-/
+
 namespace CIL.Safety
 
 /-- Checked numeric/root initializer metadata suffices to construct private
     homes. The body and its recipe are parameters, independent of extraction. -/
 theorem word_frame_setup (body : CIL.Method) (specs : List (Option (BitVec 64)))
-    (kinds : body.localKinds = wordKinds specs) (initializers : body.locals = wordInitializers specs)
+    (kinds : body.localKinds = wordKinds specs)
+    (initializers : body.locals = wordInitializers specs)
     (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = [])
     (opaqueLocals : body.opaqueVectorLocals = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
@@ -13,11 +22,13 @@ theorem word_frame_setup (body : CIL.Method) (specs : List (Option (BitVec 64)))
       enterFrame body args memory = .ok (frame, result) ∧
       WordHomes result memory.nextIdentity specs frame.locals ∧
       MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
-  obtain ⟨slots, owned, result, made, homes⟩ := make_word_locals memory memory.nextIdentity specs wellFormed
+  obtain ⟨slots, owned, result, made, homes⟩ :=
+    make_word_locals memory memory.nextIdentity specs wellFormed
   let frame : Frame := ⟨memory.nextIdentity, slots, owned, []⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
-      kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes, List.map_nil,
+      kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes,
+      List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl
   exact ⟨frame, result, setup, homes, enterFrame_preserves_caller_memory _ _ _ _ _ setup,

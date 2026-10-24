@@ -1,13 +1,23 @@
 import CIL.IntegerArithmetic
 
+/-!
+# X86Base.X64.DivRem
+
+The 128-by-64-bit unsigned division intrinsic, and proofs that it either returns the exact
+quotient and remainder or faults; it never returns a truncated result.
+
+128-by-64 DIV faults (#DE) unless upper < divisor: DivideByZeroException for 0, else
+OverflowException.
+https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/X86Base.cs
+https://learn.microsoft.com/dotnet/api/system.runtime.intrinsics.x86.x86base.x64.divrem?view=net-10.0
+-/
+
 namespace CIL.X86
 
-/- 128-by-64 DIV faults (#DE) unless upper < divisor: DivideByZeroException for 0, else OverflowException.
-https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/X86Base.cs
-https://learn.microsoft.com/dotnet/api/system.runtime.intrinsics.x86.x86base.x64.divrem?view=net-10.0 -/
-
+/-- The 128-bit dividend `upper:lower`. -/
 def dividend (lower upper : W64) : Nat := upper.toNat * 2 ^ 64 + lower.toNat
 
+/-- Quotient and remainder of `upper:lower` by `divisor`, faulting unless `upper < divisor`. -/
 def divRem64 (lower upper divisor : W64) : Except ArithmeticFault (W64 × W64) :=
   if divisor = 0 then .error .divideByZero
   else if divisor.toNat ≤ upper.toNat then .error .overflow

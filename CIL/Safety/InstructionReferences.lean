@@ -1,5 +1,12 @@
 import CIL.Safety.LiveValues
 
+/-!
+# Instructions produce valid values
+
+Corollaries of the instruction contracts: a successful memory or value instruction on a
+stack of valid values in well-formed memory leaves only values valid in the result memory.
+-/
+
 namespace CIL.Safety
 
 theorem memoryInstruction_values_valid (operation : CIL.MemoryOp) (stack values : List Value)

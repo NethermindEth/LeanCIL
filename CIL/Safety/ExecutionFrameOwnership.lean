@@ -1,8 +1,18 @@
 import CIL.Safety.ExecutionLifetime
 import CIL.Safety.FrameAllocations
 
+/-!
+# Frames keep owning their allocations
+
+The current frame's owned allocations stay live frame allocations of its activation across a
+checked step, and across a whole child run. Together with `ExecutionStaticWorld` this lets
+invariants over a frame survive nested calls.
+-/
+
 namespace CIL.Safety
 
+/-- A step keeps every allocation the resulting frame owns live and tagged with its activation,
+    including a home the step just allocated. -/
 theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (hm : m.WellFormed)
@@ -31,6 +41,8 @@ theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op
     · exact new _ (by simp)
     · exact retained id member
 
+/-- A child's whole run, from frame entry to its final memory, leaves the parent frame's
+    allocations live. -/
 theorem child_run_preserves_parent_frame (program : CIL.Program) (fuel method : Nat)
     (body : CIL.Method) (args values : List Value) (child parent : Frame)
     (m entered final : Memory) (hm : m.WellFormed)

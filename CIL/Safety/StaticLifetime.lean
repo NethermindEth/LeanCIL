@@ -1,7 +1,16 @@
 import CIL.Safety.FrameAllocations
 import CIL.Safety.StaticWorld
+
+/-!
+# Statics outlive frames
+
+Readonly static storage is never owned by a frame, so tearing a frame down keeps every
+static binding and the whole `StaticWorldValid` invariant.
+-/
+
 namespace CIL.Safety
 
+/-- A frame never owns an immutable static allocation. -/
 theorem frame_does_not_own_immutable (m : Memory) (frame : Frame)
     (owns : FrameAllocations m frame.activation frame.owned)
     (id : AllocationId) (a : Allocation) (present : m.allocations id = some a)
@@ -13,6 +22,7 @@ theorem frame_does_not_own_immutable (m : Memory) (frame : Frame)
   rw [immutable] at kind
   cases kind
 
+/-- Leaving a frame keeps a valid static binding valid. -/
 theorem leaveFrame_preserves_static_binding (m : Memory) (frame : Frame)
     (owns : FrameAllocations m frame.activation frame.owned)
     (descriptor : CIL.StaticDescriptor) (reference : Reference)
@@ -29,16 +39,19 @@ theorem leaveFrame_preserves_static_binding (m : Memory) (frame : Frame)
     lookup retained.1 retained.2.1]
   exact bytes
 
+/-- Leaving a frame preserves a valid static world. -/
 theorem leaveFrame_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m : Memory) (frame : Frame) (owns : FrameAllocations m frame.activation frame.owned)
-    (world : StaticWorldValid descriptors m) : StaticWorldValid descriptors (leaveFrame frame m) := by
+    (world : StaticWorldValid descriptors m) :
+    StaticWorldValid descriptors (leaveFrame frame m) := by
   have retained := expireAll_retained_fields frame.owned m
   refine ⟨world.1, world.2.1, ?_, ?_⟩
   · constructor
     · rw [show (leaveFrame frame m).staticBindings = m.staticBindings from retained.2.2.1]
       exact world.2.2.1.1
     · intro binding member
-      rw [show (leaveFrame frame m).staticBindings = m.staticBindings from retained.2.2.1] at member
+      rw [show (leaveFrame frame m).staticBindings = m.staticBindings from retained.2.2.1]
+        at member
       obtain ⟨a, present, live, kind⟩ := world.2.2.1.2 binding member
       have absent := frame_does_not_own_immutable _ _ owns _ _ present kind
       refine ⟨a, ?_, live, kind⟩

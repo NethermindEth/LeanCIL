@@ -1,15 +1,25 @@
 import CIL.Safety.Certificate
 
+/-!
+# Return arity and fully specified results
+
+A successful return yields exactly as many values as the method declares (one or none), and
+neither returned values nor ordinary call arguments contain unspecified SIMD lanes. Proved
+for a single step, then lifted to runs and invocations through the return trace.
+-/
+
 namespace CIL.Safety
 
-private theorem bind_success {source : Except ε α} {continuation : α → Except ε β} {value : β} :
+private theorem bind_success {source : Except ε α} {continuation : α → Except ε β}
+    {value : β} :
     (source.bind continuation = .ok value) ↔
       ∃ input, source = .ok input ∧ continuation input = .ok value := by
   cases source <;> simp [Except.bind]
 
 /-- A checked return has the arity declared by its actual method body. -/
 theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
-    (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value)
+    (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
+    (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
     values.length = if body.returnsValue then 1 else 0 := by
   unfold step at executed
@@ -25,8 +35,10 @@ theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     | obtain ⟨_, _, executed⟩ := bind_success.mp executed
     | simp only [Bind.bind, Pure.pure, Except.pure] at executed
 
+/-- A successful run of `method` returns the arity its body declares. -/
 theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body : CIL.Method)
-    (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value)
+    (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
+    (values : List Value)
     (lookup : program[method]? = some body)
     (executed : run program fuel method pc args frame stack memory = .ok (final, values)) :
     values.length = if body.returnsValue then 1 else 0 := by
@@ -36,14 +48,16 @@ theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body :
   rw [lookup] at found
   cases found
   rw [(checkedValues_valid _ _ _ checked).1]
-  exact step_return_length body operation lastPc args lastFrame lastStack before returned raw stepped
+  exact step_return_length body operation lastPc args lastFrame lastStack before returned raw
+    stepped
 
 #print axioms step_return_length
 #print axioms run_return_length
 
 /-- Successful returns never expose unspecified SIMD lanes. -/
 theorem step_return_known (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
-    (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value)
+    (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
+    (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
     values.any Value.hasUnspecified = false := by
   unfold step at executed
@@ -62,6 +76,7 @@ theorem step_return_known (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
 
 #print axioms step_return_known
 
+/-- A successful invocation never returns unspecified SIMD lanes. -/
 theorem invoke_return_known {program : CIL.Program} {fuel method : Nat}
     {args values : List Value} {memory final : Memory}
     (executed : invoke program fuel method args memory = .ok (final, values)) :
@@ -95,5 +110,6 @@ theorem step_call_known {body : CIL.Method} {callee argc pc : Nat}
         obtain ⟨_, rfl, rfl, rfl⟩ := executed
         rw [(checkedValues_valid _ _ _ checked).1]
         simpa [unspecifiedOperands] using known
+
 #print axioms step_call_known
 end CIL.Safety
