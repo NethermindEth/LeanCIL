@@ -754,7 +754,7 @@ unsafe def main (args : List String) : IO Unit := do
     sealed record ConsumerSession(string FrameworkCopy, Dictionary<string, string> Copied);
 
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
-        SortedDictionary<string, string> snapshot, string certifiedLibrary, string extraction,
+        SortedDictionary<string, string> snapshot, string certifiedLibrary, ExtractionIdentity extraction,
         IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols)
     {
         foreach (var dependency in dependencies)
@@ -792,13 +792,19 @@ unsafe def main (args : List String) : IO Unit := do
         // Give Lake a real generated-module target before building consumer imports.
         if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
             throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");
-        File.Copy(Path.Combine(extraction, "Extracted.lean"), Path.Combine(frameworkCopy, "Extracted.lean"));
+        File.Copy(Path.Combine(extraction.Output, "Extracted.lean"), Path.Combine(frameworkCopy, "Extracted.lean"));
         var generated = Sha(Path.Combine(frameworkCopy, "Extracted.lean"));
         foreach (var output in proofs.Select(proof => proof.Output).Distinct())
             if (generated != JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")))
                 .GetProperty("generatedSha256").GetString())
                 throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
         AddConsumerLibrary(frameworkCopy, "Extracted");
+        foreach (string module in extraction.Sources.Keys)
+            if (snapshot.Keys.Any(key => key.StartsWith("consumer:", StringComparison.Ordinal) &&
+                key.Replace('\\', '/').EndsWith("/" + module.Replace('.', '/') + ".lean", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidDataException("Contract interface module shadows a consumer source: " + module);
+        string[] importModules = StageImportSources(extraction, frameworkCopy);
+        foreach (string module in importModules) AddConsumerLibrary(frameworkCopy, module);
         var symbolsPath = Path.Combine(frameworkCopy, "ExtractedSymbols.lean");
         // Declared only when a proof imports it: symbol-free workspaces, and so their support keys, stay unchanged.
         if (symbols is not null)
@@ -806,7 +812,7 @@ unsafe def main (args : List String) : IO Unit := do
             if (File.Exists(symbolsPath) || File.Exists(Path.Combine(session, "ExtractedSymbols.lean")) ||
                 snapshot.Keys.Any(k => k.StartsWith("consumer:", StringComparison.Ordinal) && Path.GetFileName(k) == "ExtractedSymbols.lean"))
                 throw new InvalidDataException("ExtractedSymbols is reserved for the PDB names of the selected extraction.");
-            File.Copy(Path.Combine(extraction, "Symbols.lean"), symbolsPath);
+            File.Copy(Path.Combine(extraction.Output, "Symbols.lean"), symbolsPath);
             if (Sha(symbolsPath) != symbols) throw new InvalidDataException("PDB names changed during consumer snapshot.");
             AddConsumerLibrary(frameworkCopy, "ExtractedSymbols");
         }
@@ -818,6 +824,7 @@ unsafe def main (args : List String) : IO Unit := do
             .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
             .Append(Path.Combine(frameworkCopy, "Extracted.lean"))
             .Append(extractionAuditPath).ToList();
+        copied.AddRange(importModules.Select(module => Path.Combine(frameworkCopy, module.Replace('.', Path.DirectorySeparatorChar) + ".lean")));
         if (symbols is not null) copied.Add(symbolsPath);
         foreach (var (module, proof, _) in proofs)
         {
@@ -879,6 +886,7 @@ unsafe def main (args : List String) : IO Unit := do
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var all = Enumerable.Range(0, requests.Count).ToArray();
         var identities = new string[requests.Count];
+        var extractions = new ExtractionIdentity[requests.Count];
         var proofKeys = new string[requests.Count];
         // Symbols.lean hash for requests whose proofs import ExtractedSymbols, else null.
         var symbols = new string?[requests.Count];
@@ -995,7 +1003,8 @@ unsafe def main (args : List String) : IO Unit := do
         {
             try
             {
-                identities[i] = Sha(Path.Combine(outputs[i], "identity.json"));
+                extractions[i] = ExtractionIdentity.Read(outputs[i]);
+                identities[i] = extractions[i].Sha256;
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], identities[i] + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
                     (symbols[i] is null ? "" : "\n" + symbols[i]));
@@ -1032,7 +1041,8 @@ unsafe def main (args : List String) : IO Unit := do
         foreach (var i in Pending(all))
             try
             {
-                var key = Sha(Path.Combine(outputs[i], "Extracted.lean")) + (symbols[i] is null ? "" : "\n" + symbols[i]);
+                var key = Sha(Path.Combine(outputs[i], "Extracted.lean")) + (symbols[i] is null ? "" : "\n" + symbols[i]) +
+                    "\n" + JsonSerializer.Serialize(extractions[i].Sources);
                 if (!groups.TryGetValue(key, out var members)) groups[key] = members = [];
                 members.Add(i);
             }
@@ -1052,11 +1062,13 @@ unsafe def main (args : List String) : IO Unit := do
 
         void VerifyGroup(int[] members, string session, bool first, bool share)
         {
-            var bound = WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean")));
+            Dictionary<string, string> bound = new(WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean"))), StringComparer.Ordinal);
+            foreach ((string module, string source) in extractions[members[0]].Sources)
+                bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
             var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
             // Groups share one Symbols.lean hash or none.
             var symbolHash = symbols[members[0]];
-            var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, outputs[members[0]],
+            var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, extractions[members[0]],
                 members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash);
             var frameworkCopy = prepared.FrameworkCopy;
             string[] initialImportDirectories;
@@ -1112,6 +1124,10 @@ unsafe def main (args : List String) : IO Unit := do
             var extractionAudit = Run(["lake", "build", "+ExtractionAudit:olean"], frameworkCopy,
                 progress: "Checking consumer extraction certificate");
             Stage(members, "proof checking");
+            string[] importModules = extractions[members[0]].Sources.Keys.ToArray();
+            if (importModules.Length > 0)
+                Run(["lake", "build", .. importModules.Select(module => "+" + module + ":olean")], frameworkCopy,
+                    progress: "Checking consumer contract interfaces and import assumptions");
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
             var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies");
             var buildFailure = build.Code == 0 ? null
@@ -1226,7 +1242,8 @@ unsafe def main (args : List String) : IO Unit := do
             {
                 // A request depends only on its own proof's import closure and the extraction certificate.
                 var closure = graph is null ? null
-                    : ImportClosure(graph, [names[Array.IndexOf(members, i)], "Extracted", "ExtractionAudit"]);
+                    : ImportClosure(graph, [names[Array.IndexOf(members, i)], "Extracted", "ExtractionAudit",
+                        .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()]);
                 var rejected = failures.Keys.Where(name => closure is null || closure.Contains(name)).Order(StringComparer.Ordinal).ToArray();
                 if (rejected.Length > 0)
                     Fail([i], new InvalidOperationException("Kernel replay rejected " + string.Join(", ", rejected) + ":\n" +
@@ -1247,8 +1264,10 @@ unsafe def main (args : List String) : IO Unit := do
                 try
                 {
                     var module = names[Array.IndexOf(members, i)];
-                    var audited = AuditOleans(leanPath, [module], [ProofTheorem(requests[i].Theorem)]);
-                    RequireAuditedModule(audited, module, currentArtifacts[module]);
+                    string[] auditModules = [module, .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                    var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
+                    foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
+                    RequireAuditedConstants(audited);
                     audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]));
                 }
                 catch (Exception error) { Fail([i], error); }
@@ -1308,14 +1327,14 @@ unsafe def main (args : List String) : IO Unit := do
             }
             foreach (var i in proceeding)
             {
-                var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(outputs[i], "identity.json")));
+                var extraction = extractions[i].Root;
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
                 var report = new Report(3, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
                     audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
-                    staticValues: StaticValueAssumptions(extraction));
+                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction));
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));

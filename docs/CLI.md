@@ -226,6 +226,11 @@ the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
 
+Contract imports also require `--import-interface-sha256 Lib=<digest>` from an
+accepted publisher channel. This independently pins the interface descriptor
+and all executable Lean source bytes before compilation. See
+[CONTRACT-INTERFACES.md](CONTRACT-INTERFACES.md) for the source trust boundary.
+
 ## Exception documentation lint experiment
 
 Run `leancil lint-exceptions artifacts/Method --documentation Assembly.xml`

@@ -102,6 +102,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
     var output = Path.Combine(root, $"Reject-{name}-{mutation}");
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
+    string expectedDiagnostic;
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
         var method = module.GetType("Examples.NullReferences").Methods.Single(m => m.Name == name);
@@ -123,13 +124,27 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
             case "scope": call.DeclaringType.Scope = module; break;
             case "version": ((AssemblyNameReference)call.DeclaringType.Scope).Version = new Version(9, 0, 0, 0); break;
         }
+        expectedDiagnostic = mutation switch
+        {
+            "class" => "Unsupported type: System.String",
+            "float" => "Unsupported type: System.Single",
+            "void" => "Unsupported type: System.Void",
+            "byref" => "Unsupported Unsafe element type: System.Int32&",
+            "pointer" => "Unsupported Unsafe element type: System.Int32*",
+            "parameter" when name == "Read" => "Invalid evaluation stack during reachability",
+            "arity" or "parameter" or "return" => "Generic contract imports are not supported in version 1.",
+            "instance" => "Invalid evaluation stack during reachability",
+            "scope" => "Unsupported generic call: " + call.FullName,
+            "version" => "Unsupported type identity: System." + (name == "Read" ? "UInt64" : "Boolean") +
+                " [System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+            _ => throw new InvalidOperationException("Unknown null-reference rejection fixture: " + mutation)
+        };
         module.Write(dll);
     }
     File.Delete(Path.Combine(output, "Extracted.lean"));
     var result = Execute(Extract("extract", dll, "Examples", selector, output));
-    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
-        !(result.Output.Contains("Unsupported") || result.Output.Contains("Unmodelled") || result.Output.Contains("Unresolved") ||
-          result.Output.Contains("Invalid evaluation stack during reachability")))
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")) ||
+        !result.Output.Contains(expectedDiagnostic, StringComparison.Ordinal))
         throw new InvalidOperationException($"Incorrect {name} rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS {name} rejection: {mutation}");
 }

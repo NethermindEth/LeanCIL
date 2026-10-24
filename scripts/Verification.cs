@@ -896,6 +896,12 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             throw new InvalidDataException($"Audited module {module} resolved to {audited.modules[module]}, not {path}");
     }
 
+    static void RequireAuditedConstants(AuditedOleans audited)
+    {
+        foreach (AuditedTheorem constant in audited.constants)
+            if (constant.error is not null) throw new InvalidOperationException(constant.error);
+    }
+
     static string[] AuditedAxioms(AuditedTheorem audited)
     {
         if (audited.error is not null) throw new InvalidOperationException(audited.error);
@@ -904,6 +910,135 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             throw new InvalidOperationException("Unapproved proof axioms: " + string.Join(", ", axioms));
         return axioms;
     }
+
+    // Names the drivers generate or resolve from the toolchain and framework. Case variants collide on Windows and macOS.
+    internal static class ContractModules
+    {
+        static readonly string[] ReservedRoots = ["CIL", "Lean", "Init", "Std", "Lake", "Extracted", "ExtractedImports", "Proof", "Audit",
+            "ExtractionAudit", "ExtractedSymbols", "Symbols", "Examples", "Tests", "lakefile"];
+
+        internal static bool Name(string? value) => value is not null && !value.Split('.').Contains("_root_", StringComparer.Ordinal) &&
+            Regex.IsMatch(value, @"\A[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z");
+
+        internal static bool Interface(string? value) => Name(value) && value!.Split('.')[0] is var root &&
+            !ReservedRoots.Contains(root, StringComparer.OrdinalIgnoreCase) && !root.StartsWith("LeanCIL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // One read of identity.json and of the import sources it pins; staging, keys and reports all derive from it.
+    internal sealed record ExtractionIdentity(string Output, string Sha256, JsonElement Root, SortedDictionary<string, string> Sources)
+    {
+        internal JsonElement[] Imports => Root.TryGetProperty("imports", out JsonElement imports) ? [.. imports.EnumerateArray()] : [];
+
+        internal static string Resolve(string output, string recorded) => Path.GetFullPath(recorded, output);
+
+        internal static ExtractionIdentity Read(string output)
+        {
+            byte[] bytes = File.ReadAllBytes(Path.Combine(output, "identity.json"));
+            JsonElement root = JsonSerializer.Deserialize<JsonElement>(bytes);
+            SortedDictionary<string, string> sources = new(StringComparer.Ordinal);
+            if (root.TryGetProperty("importModules", out JsonElement modules))
+                foreach (JsonProperty module in modules.EnumerateObject())
+                {
+                    if ((module.Name != "ExtractedImports" && !ContractModules.Interface(module.Name)) ||
+                        sources.Keys.Any(name => string.Equals(name, module.Name, StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidDataException("Invalid imported interface module: " + module.Name);
+                    string source = File.ReadAllText(Path.Combine(output, module.Name.Replace('.', Path.DirectorySeparatorChar) + ".lean"));
+                    if (ContentKey(source) != module.Value.GetString()) throw new InvalidDataException("Imported interface source hash mismatch: " + module.Name);
+                    sources.Add(module.Name, source);
+                }
+            return new(output, Convert.ToHexStringLower(SHA256.HashData(bytes)), root, sources);
+        }
+    }
+
+    Dictionary<string, string[]> ContractModuleImports(string destination, SortedDictionary<string, string> sources)
+    {
+        string probe = Path.Combine(destination, "LeanCILHeader" + Guid.NewGuid().ToString("N") + ".lean");
+        string input = probe + ".json";
+        try
+        {
+            File.WriteAllText(probe, """
+import Lean
+open Lean Parser
+unsafe def main (args : List String) : IO Unit := do
+  let [input] := args | throw (IO.userError "Expected interface source manifest")
+  let sources : Array String <- IO.ofExcept <| (Lean.Json.parse (<- IO.FS.readFile input)).bind Lean.fromJson?
+  for source in sources do
+    let (header, _, messages) <- Parser.parseHeader (Parser.mkInputContext source input)
+    if messages.hasErrors then
+      throw (IO.userError "Invalid contract interface import header")
+    let `(Module.header| $[module]? $[prelude]? $imports*) := header
+      | throw (IO.userError "Invalid contract interface header")
+    let mut names : Array Lean.Json := #[]
+    for imported in imports do
+      let `(Module.import| $[public]? $[meta]? import $[all]? $name) := imported
+        | throw (IO.userError "Invalid contract interface import")
+      names := names.push (Lean.Json.str name.getId.toString)
+    IO.println (Lean.Json.arr names).compress
+""");
+            File.WriteAllText(input, JsonSerializer.Serialize(sources.Values));
+            string result = Run([LeanExecutable, "--run", probe, input], destination, environment: LeanEnvironment);
+            string[] lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length != sources.Count) throw new InvalidDataException("Incomplete contract interface import graph.");
+            return sources.Keys.Zip(lines).ToDictionary(pair => pair.First,
+                pair => JsonSerializer.Deserialize<string[]>(pair.Second) ?? throw new InvalidDataException("Invalid contract import graph."), StringComparer.Ordinal);
+        }
+        finally { File.Delete(probe); File.Delete(input); }
+    }
+
+    string[] StageImportSources(ExtractionIdentity extraction, string destination)
+    {
+        SortedDictionary<string, string> sources = extraction.Sources;
+        if (sources.Count == 0) return [];
+        Dictionary<string, string[]> dependencies = ContractModuleImports(destination, sources);
+        List<string> ordered = [];
+        HashSet<string> active = new(StringComparer.Ordinal);
+        void Stage(string module)
+        {
+            if (ordered.Contains(module, StringComparer.Ordinal)) return;
+            if (!active.Add(module)) throw new InvalidDataException("Cyclic contract interface module imports: " + module);
+            foreach (string dependency in dependencies[module])
+                if (sources.ContainsKey(dependency)) Stage(dependency);
+            string path = Path.Combine(destination, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+            if (File.Exists(path)) throw new InvalidDataException("Contract interface module shadows an existing source: " + module);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, sources[module], new UTF8Encoding(false));
+            active.Remove(module);
+            ordered.Add(module);
+        }
+        foreach (string module in sources.Keys) Stage(module);
+        return ordered.ToArray();
+    }
+
+    static bool HasContractImports(ExtractionIdentity extraction) =>
+        extraction.Sources.ContainsKey("ExtractedImports") == (extraction.Imports.Length > 0) ? extraction.Imports.Length > 0
+            : throw new InvalidDataException("Contract import slots and the generated import premise disagree");
+
+    // With imports, only a claim conditional on exactly the generated import premise is certified.
+    static AuditRequest ProofTheorem(string theorem, ExtractionIdentity extraction) => !HasContractImports(extraction) ? ProofTheorem(theorem)
+        : ProofTheorem(theorem) with { type = new { app = new object[] { AuditConstant("CIL.Safety.HoldsGiven"),
+            AuditConstant("Extracted.program"), AuditConstant("Extracted.ImportsHold"), "_" } } };
+
+    // The premise is rebuilt from identity.json: each slot's root contract at its canonical numeral, so
+    // interface instances, notation or shadowing namespaces cannot retarget or weaken it.
+    static AuditConstantRequest[] ImportPremise(ExtractionIdentity extraction)
+    {
+        if (!HasContractImports(extraction)) return [];
+        int methods = extraction.Root.GetProperty("methods").GetArrayLength();
+        object[] slots = [.. extraction.Imports.Select(import => (object)new { app = new object[] {
+            AuditConstant("CIL.Safety." + (import.GetProperty("contractKind").GetString() == "method" ? "MethodContract" : "OutcomeContract") + ".Holds"),
+            "_", "_", AuditConstant(import.GetProperty("contractConstant").GetString()!), new { bvar = 0 },
+            new { nat = methods + import.GetProperty("slot").GetInt32() } } })];
+        object body = slots.Length == 0 ? AuditConstant("True")
+            : slots.SkipLast(1).Reverse().Aggregate(slots[^1], (rest, slot) => new { app = new[] { AuditConstant("And"), slot, rest } });
+        object program = AuditConstant("CIL.Program");
+        return [new("Extracted.ImportsHold", new { lam = new[] { program, body } }, new { forall = new[] { program, new { sort = 0 } } })];
+    }
+
+    static string[] ContractImportAssumptions(JsonElement extraction) =>
+        extraction.TryGetProperty("imports", out JsonElement imports) ? imports.EnumerateArray().Select(import =>
+            "_root_.CIL.Safety." + (import.GetProperty("contractKind").GetString() == "method" ? "MethodContract" : "OutcomeContract") +
+            ".Holds _root_." + import.GetProperty("contractConstant").GetString() + " linked " +
+            (extraction.GetProperty("methods").GetArrayLength() + import.GetProperty("slot").GetInt32())).ToArray() : [];
 
     // Keeps the `#check` and `#print axioms` text shape that statement display and refutation reports read.
     static string AuditText(AuditedTheorem audited) => (audited.statement is null ? "" : audited.statement + "\n") +
@@ -934,7 +1069,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
-        string[]? staticValues = null);
+        string[]? staticValues = null, string[]? contractImports = null);
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -979,12 +1114,38 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             extractorBuilt = true;
         }
 
+        if (!existingArtifacts)
+            Run(Extract("extract", assembly, identity, entry, output, profile));
+        byte[] proofSourceBytes = File.ReadAllBytes(proof);
+        string proofSourceHash = Convert.ToHexStringLower(SHA256.HashData(proofSourceBytes));
+        string proofSource;
+        using (StreamReader reader = new(new MemoryStream(proofSourceBytes)))
+        {
+            proofSource = reader.ReadToEnd();
+        }
+        bool symbols = ImportsSymbols(proofSource);
+        string? symbolsSource = symbols ? SymbolsFor(output) : null;
+        byte[]? symbolsSourceBytes = symbolsSource is null ? null : File.ReadAllBytes(symbolsSource);
+        string? symbolsSourceHash = symbolsSourceBytes is null ? null : Convert.ToHexStringLower(SHA256.HashData(symbolsSourceBytes));
+        var before = Inputs(proof, settings);
+        if (before["proof:" + proof] != proofSourceHash)
+            throw new InvalidOperationException("Proof inputs changed before their source snapshot");
+        ExtractionIdentity extraction = ExtractionIdentity.Read(output);
+
+        // Retain the selected bytes before support or interface builds can run code.
+        void RequireOriginalProofSources()
+        {
+            if (!File.Exists(proof) || Sha(proof) != proofSourceHash ||
+                symbolsSource is not null && (!File.Exists(symbolsSource) || Sha(symbolsSource) != symbolsSourceHash))
+                throw new InvalidOperationException("Proof inputs changed during verification");
+        }
+
         // Use a source-bound build; CI and --fresh bypass the local library cache.
         stage?.Invoke("Lean library build");
-        var before = Inputs(proof, settings);
         var session = Library(before);
-        var support = Regex.Matches(File.ReadAllText(proof), @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
-            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
+        HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
+        var support = Regex.Matches(proofSource, @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
         if (support.Length > 0)
         {
@@ -1030,9 +1191,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             }
         }
 
-        if (!existingArtifacts)
-            Run(Extract("extract", assembly, identity, entry, output, profile));
-        var identityHash = Sha(Path.Combine(output, "identity.json"));
+        RequireOriginalProofSources();
+        var identityHash = extraction.Sha256;
 
         // Isolate generated code and the selected proof, then audit the named theorem.
         var fresh = Path.Combine(output, "proof-" + Guid.NewGuid().ToString("N"));
@@ -1040,13 +1200,22 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         string audit;
         string extractionAudit = "";
         string[] axioms;
+        string stagedProof = Path.Combine(fresh, "Proof.lean");
+        string stagedSymbols = Path.Combine(fresh, "ExtractedSymbols.lean");
+        void RequireStagedProofSources()
+        {
+            if (!File.Exists(stagedProof) || Sha(stagedProof) != proofSourceHash)
+                throw new InvalidOperationException("Proof sources changed during verification: Proof.lean");
+            if (symbols && (!File.Exists(stagedSymbols) || Sha(stagedSymbols) != symbolsSourceHash))
+                throw new InvalidOperationException("Proof sources changed during verification: ExtractedSymbols.lean");
+        }
 
         try
         {
             File.Copy(Path.Combine(output, "Extracted.lean"), Path.Combine(fresh, "Extracted.lean"));
-            File.Copy(proof, Path.Combine(fresh, "Proof.lean"));
-            var symbols = ImportsSymbols(File.ReadAllText(proof));
-            if (symbols) File.Copy(SymbolsFor(output), Path.Combine(fresh, "ExtractedSymbols.lean"));
+            if (Sha(Path.Combine(fresh, "Extracted.lean")) != extraction.Root.GetProperty("generatedSha256").GetString())
+                throw new InvalidOperationException("Inputs changed during verification");
+            string[] importModules = StageImportSources(extraction, fresh);
             File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
 
@@ -1078,7 +1247,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                 foreach (var name in new[] { "Extracted", "ExtractionAudit" })
                 {
                     stage?.Invoke(name == "ExtractionAudit" ? "extraction certificate audit" : "proof checking");
-                    var checkedOutput = Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
+                    var checkedOutput = Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
                         leanPath: leanPath, progress: $"Checking {name}: {entry}");
                     if (name == "ExtractionAudit") extractionAudit = checkedOutput;
                 }
@@ -1090,13 +1259,38 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                     File.Copy(path, Path.Combine(publication, Path.GetFileName(path)));
                 extractionPublication = publication;
             }
-            if (symbols)
-                Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), Path.Combine(fresh, "ExtractedSymbols.lean")],
-                    leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);
-            var proofKey = ContentKey("theorem-audit-v2\n" + extractedKey + "\n" + Sha(Path.Combine(fresh, "Proof.lean")) + "\n" +
-                (symbols ? Sha(Path.Combine(fresh, "ExtractedSymbols.lean")) + "\n" : "") + theorem);
-            // Building the proof runs its code; every olean but its own must survive that build unchanged.
+            // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
             var bound = OleanHashes(fresh, session);
+            foreach (string module in importModules)
+            {
+                string source = Path.Combine(fresh, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source], leanPath: leanPath,
+                    progress: "Checking contract interface: " + module);
+                var next = OleanHashes(fresh, session);
+                RequireOnlyAdded(bound, next, module.Replace('.', '/'));
+                bound = next;
+            }
+            if (File.Exists(stagedProof))
+                throw new InvalidOperationException("Proof sources changed during verification: Proof.lean");
+            if (File.Exists(stagedSymbols))
+                throw new InvalidOperationException("Proof sources changed during verification: ExtractedSymbols.lean");
+            RequireOriginalProofSources();
+            File.WriteAllBytes(stagedProof, proofSourceBytes);
+            if (symbols) File.WriteAllBytes(stagedSymbols, symbolsSourceBytes!);
+            RequireStagedProofSources();
+            if (symbols)
+            {
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), stagedSymbols],
+                    leanPath: leanPath, progress: "Checking ExtractedSymbols: " + entry);
+                var next = OleanHashes(fresh, session);
+                RequireOnlyAdded(bound, next, "ExtractedSymbols");
+                bound = next;
+                RequireStagedProofSources();
+            }
+            RequireStagedProofSources();
+            var proofKey = ContentKey("theorem-audit-v2\n" + extractedKey + "\n" + proofSourceHash + "\n" +
+                (symbols ? symbolsSourceHash + "\n" : "") +
+                JsonSerializer.Serialize(extraction.Sources) + "\n" + theorem);
             var proofRestored = RestoreSuccess(proofKey, fresh);
             if (proofRestored)
             {
@@ -1106,12 +1300,14 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             else
             {
                 stage?.Invoke("proof checking");
-                Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "Proof.olean"), Path.Combine(fresh, "Proof.lean")],
+                RequireStagedProofSources();
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "Proof.olean"), stagedProof],
                     leanPath: leanPath, progress: "Checking Proof: " + entry);
             }
+            RequireStagedProofSources();
             var built = OleanHashes(fresh, session);
             RequireOnlyAdded(bound, built, "Proof");
-            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"],
+            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"], .. importModules,
                 .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(), .. proofRestored ? Array.Empty<string>() : ["Proof"]];
             if (replay.Length > 0)
             {
@@ -1120,16 +1316,26 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             }
             // The audit reads the bytes leanchecker replayed: nothing may change until it finishes.
             stage?.Invoke("theorem audit");
-            var audited = AuditOleans(leanPath, ["Proof", "ExtractionAudit"], [ProofTheorem(theorem), ExtractionCertificate("ExtractionAudit.valid")]);
+            string[] auditModules = ["Proof", "ExtractionAudit", .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
+            RequireStagedProofSources();
+            var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(theorem, extraction), ExtractionCertificate("ExtractionAudit.valid")], ImportPremise(extraction));
+            RequireStagedProofSources();
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
             RequireAuditedModule(audited, "Proof", Path.Combine(fresh, "Proof.olean"));
             RequireAuditedModule(audited, "ExtractionAudit", Path.Combine(fresh, "ExtractionAudit.olean"));
+            if (HasContractImports(extraction))
+                RequireAuditedModule(audited, "ExtractedImports", Path.Combine(fresh, "ExtractedImports.olean"));
+            RequireAuditedConstants(audited);
             stage?.Invoke("extraction certificate audit");
             AuditedAxioms(audited.theorems[1]);
             stage?.Invoke("theorem audit");
             axioms = AuditedAxioms(audited.theorems[0]);
             audit = AuditText(audited.theorems[0]);
+            RequireOriginalProofSources();
+            RequireStagedProofSources();
+            if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
+                throw new InvalidOperationException("Inputs changed during verification");
             if (!proofRestored)
             {
                 var publication = Path.Combine(fresh, "proof-cache");
@@ -1154,14 +1360,14 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         stage?.Invoke("extraction integrity");
         Run(existingArtifacts ? ["dotnet", ExtractorPath, "check", output] : Extract("check", assembly, identity, entry, output, profile));
 
+        RequireOriginalProofSources();
         if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
             throw new InvalidOperationException("Inputs changed during verification");
 
-        var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
-        var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
+        var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
             ? assumptions.Deserialize<string[]>() : [];
         var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-            staticValues: StaticValueAssumptions(extraction));
+            staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root));
         File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
         return report;

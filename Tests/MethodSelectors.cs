@@ -179,25 +179,27 @@ string CallOffset(string input, string caller, string callee)
 
 void RejectedCall(string input, string selector, string caller, string callee, string[] markers)
 {
-    File.Delete(Path.Combine(output, "Extracted.lean"));
+    string[] generatedArtifacts = ["Extracted.lean", "identity.json", "verified.json"];
+    foreach (string artifact in generatedArtifacts) File.Delete(Path.Combine(output, artifact));
     var result = Execute(Extract("extract", input, identity, selector, output));
     var site = $"{callee}\n  Caller: {caller} at {CallOffset(input, caller, callee)}";
     if (result.Code != 1 || !result.Stderr.Contains("Stage: metadata and CIL validation") ||
         !result.Stderr.Contains(site) || markers.Any(marker => !result.Stderr.Contains(marker)) ||
         result.Stderr.Contains("leancil list") || !result.Stderr.Contains("Next: Reachable calls must") ||
-        File.Exists(Path.Combine(output, "Extracted.lean")))
+        generatedArtifacts.Any(artifact => File.Exists(Path.Combine(output, artifact))))
         throw new InvalidOperationException("Missing call-site diagnostic: " + result.Output);
     checks++;
 }
 
 RejectedCall(assembly, "Arithmetic::TypeCheck(ulong)", "System.UInt64 Examples.Arithmetic::TypeCheck(System.UInt64)",
     "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)",
-    ["External managed dependency: ", "Callee assembly: System.Private.CoreLib"]);
+    ["Rejected external call: ", "External managed dependency: ", "Callee scope: System.Runtime"]);
 var instanceCall = At("artifacts/Selectors/instance-call.dll");
 Run(["dotnet", "run", "--file", "Tests/MetadataMutator.cs", "--", assembly, instanceCall, "instance-call"]);
 RejectedCall(instanceCall, "Arithmetic::Add(ulong,ulong)", canonical,
     "System.UInt64 Examples.Arithmetic::Increment(System.UInt64)", ["Unresolved call: ", "Callee scope: Examples"]);
 
+Run(Extract("extract", assembly, null, canonical, output));
 var missingProof = Execute([inferred[0], inferred[1], "verify", output, "--proof", At("artifacts/missing-proof.lean")]);
 if (missingProof.Code != 1 || missingProof.Stdout.Length != 0 || !missingProof.Stderr.Contains("Stage: proof selection") ||
     !missingProof.Stderr.Contains("Next: Supply --proof"))

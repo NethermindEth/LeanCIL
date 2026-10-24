@@ -142,7 +142,7 @@ foreach (var (mutation, method, marker) in new[]
     ("scope", "Quotient", "Unresolved call"),
     ("version", "Quotient", "Unsupported runtime assembly scope"),
     ("signed", "Quotient", "External managed dependency"),
-    ("return", "Quotient", "Unresolved call"),
+    ("return", "Quotient", "Rejected external call"),
     ("mixed", "Local", "auto layout reorders fields of different widths"),
     ("tuple-version", "Local", "Unsupported type"),
     ("field", "Quotient", "Unresolved tuple field")

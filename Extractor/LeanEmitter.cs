@@ -44,7 +44,7 @@ internal static class LeanEmitter
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module, architecture)} 0)"
     };
-    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule)
+    internal static string Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null)
     {
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
@@ -121,7 +121,7 @@ internal static class LeanEmitter
             lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], parameterHomes := [{parameters}], staticSites := [{sites}], code := [");
             List<string> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices) : ".unsupported \"Unreachable under selected profile\"");
+                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices, importResolution) : ".unsupported \"Unreachable under selected profile\"");
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
@@ -136,15 +136,16 @@ internal static class LeanEmitter
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (m.ReturnType.FullName == "System.Void" ? "false" : "true") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
         }
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
-        // Import slots follow the program; external calls are not resolved to slots yet, so the table is empty.
-        lean.AppendLine("def imports : List ImportSlot := []");
+        IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
+        lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(binding =>
+            $"{{ identity := {JsonSerializer.Serialize(binding.Identity)}, closureDigest := {JsonSerializer.Serialize(binding.ClosureDigest)}, parameterCount := {binding.ParameterCount}, hasThis := false, returnsValue := {binding.ReturnsValue.ToString().ToLowerInvariant()} }}")) + "]");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods imports method{n}Closed method{n}Reachable method{n} := {Decide}");
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them.
         lean.AppendLine("def signatures : List String := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}Signature")) + "]");
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
-        lean.AppendLine("def importSignatures : List String := []");
+        lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
         lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses }}")) + "]");
