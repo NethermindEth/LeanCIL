@@ -137,6 +137,11 @@ state `a + b + c`, `a - b - c` and the flag words in source form, through both
 source memory leaves the run stuck at that store, with the exact unsolved goal
 asserted.
 
+`Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the
+lookups its `CodeAt` placement yields, which stepping cannot take without them,
+hands that segment theorem the middle of a larger placed region, and decides a
+concrete placement both ways with `decide +kernel`.
+
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
 bodies with mapped program counters; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed

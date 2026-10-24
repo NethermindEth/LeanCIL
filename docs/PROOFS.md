@@ -129,6 +129,14 @@ stated over an abstract `program` therefore steps exactly like one over
 `cil_raise_steps` fail when they cannot take a first step, instead of returning
 the goal unchanged.
 
+A segment theorem over an abstract body states where its code sits with
+`CodeAt body start segment` ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of
+`body.code = leading ++ segment ++ tail` and `leading.length = start`.
+`CodeAt.lookup placed rfl` proves each `body.code[start + i]? = some op` to pass
+as a lookup hypothesis; `append`, `middle`, `take` and `drop` move a placement
+between a region and its segments, and `decide +kernel` closes a concrete one.
+[Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
+
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the
 relevant proved facts. Branches always use equations before reflexivity, so a fact
 can decide the next program counter before the next lookup. A branch condition is
