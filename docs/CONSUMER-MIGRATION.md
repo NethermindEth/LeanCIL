@@ -52,12 +52,16 @@ evaluating their BitVec payloads. Use the `cil_step` equations for instruction
 reasoning. A `.memory` step now rewrites to `formValue`, `loadValue`, `storeValue`
 or `add`, so state memory facts at that level; facts about `memoryInstruction`
 or `staticInstruction` still apply, through a slower retry in `cil_checked_step`,
-`cil_checked_steps` and `cil_contract_steps`; a hand-written step with such a fact
-must `rw [CIL.Safety.step_memory_eq]` first. `referenceAt` is unfolded like
+`cil_checked_steps`, `cil_contract_steps` and the loop tactics; a hand-written step
+or `cil_checked_step_equations` call with such a fact must
+`rw [CIL.Safety.step_memory_eq]` first or restate it at the per-shape level. `referenceAt` is unfolded like
 `formValue`, so a `referenceAt` fact about a symbolic `ManagedReference` does not
 apply; use the `memoryInstruction` level or the `.address r` form. A `.feature` step
 pushes the profile field, such as `body.profile.avx2`, which is the canonical
-fact form; a fact stated through `FeatureProfile.evaluate` is normalized to it. In custom dispatch tactics, inspect the operation before trying step
+fact form. Those checked-step tactics normalize a fact stated through
+`FeatureProfile.evaluate` (local, proof term, global theorem or quantified over every feature) to it;
+elsewhere, including `simp only [cil_step, facts]` and `cil_checked_step_equations`,
+state it on the field or run `simp only [CIL.FeatureProfile.evaluate] at h` first. In custom dispatch tactics, inspect the operation before trying step
 lemmas for other operations; unifying an unrelated step equation may unfold
 large symbolic stacks. No global heartbeat increase or weakened safety condition
 is part of this migration.
