@@ -52,6 +52,24 @@ theorem check_holds : checkContract.Holds literal 1 := by
     simp only [checkContract, raisesAbove, within, ite_false]
     cil_raise_steps [bound]
 
+/-- The in-range half of `Check` as a plain method contract: no throw is named, so `pre` excludes it. -/
+def checkInRange : MethodContract W64 W64 where
+  args v := [.scalar (.i64 v)]
+  results out := [.scalar (.i64 out)]
+  pre v _ := v ≤ 100
+  footprint _ := []
+  post v _ _ out := out = v
+
+theorem check_in_range : checkInRange.Holds literal 1 := by
+  rintro v m (within : v ≤ 100)
+  have bound : ¬ 100#64 < v := by simpa using within
+  dsimp only [checkInRange]
+  refine ⟨10, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
+  cil_checked_steps [bound]
+
+-- The method contract transfers to the extraction without reading `extractedCheck`.
+theorem extracted_in_range : checkInRange.Holds extracted 1 := check_embeds.method_holds (literal_set ▸ check_in_range)
+
 theorem outer_call : outer.code[1]? = some (.call 1 1) := rfl
 
 /-- `Outer` propagates the helper's exception and returns its result, read off the helper's contract. -/
@@ -207,6 +225,14 @@ example : Safety.invoke extracted 0 1 [.scalar (.i64 101)] empty = .error ⟨1, 
 
 /-- info: 'CIL.MethodEmbeds.holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms MethodEmbeds.holds
+
+#print axioms check_in_range
+
+/-- info: 'CIL.MethodEmbeds.method_holds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms MethodEmbeds.method_holds
+
+/-- info: 'Tests.OutcomeEmbedding.extracted_in_range' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms extracted_in_range
 
 /-- info: 'CIL.MethodEmbeds.raises' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms MethodEmbeds.raises

@@ -144,7 +144,8 @@ elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
     if (← getGoals).isEmpty then return
-    let mut target ← instantiateMVars (← getMainTarget)
+    -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
+    let mut target := (← instantiateMVars (← getMainTarget)).consumeMData
     let some (_, lhs, rhs) := target.eq? | throwError "Expected a checked step equality"
     let mut args := lhs.getAppArgs
     let mut operation := Name.anonymous
@@ -196,6 +197,7 @@ macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max "[
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
     try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
+      CIL.NarrowKind.extend_ite_one_zero, CIL.NarrowKind.extend_ite_ofNat_one_zero,
       List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend, BitVec.reduceOfInt, BitVec.isValue,
       Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
     try with_reducible rfl
@@ -215,13 +217,22 @@ macro "cil_checked_call_at " methodFound:term:max instructionFound:term:max "[" 
     (by cil_checked_steps_normalized [$[$facts:term],*]; done)
     (by cil_checked_steps_normalized [$[$facts:term],*]; done))
 
+-- The callee runs to its return, but the caller's continuation stays open as the goal.
+macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+    cil_strict refine CIL.Safety.run_call_of_invoke $methodFound $instructionFound
+      (by cil_checked_step_normalized [$[$facts:term],*])
+      (by cil_checked_steps_normalized [$[$facts:term],*]; done) ?_
+    cil_stack_cleanup))
+
 open Lean Elab Tactic Meta in
 /-- Instantiate `lemma` against the goal through `select`, close its method and instruction lookups
     (the premises `lookups` places from the end) with `cil_lookup`, and return both proofs as syntax
     with the fetched opcode's constructor. -/
 def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (lookups : Nat)
     (facts : Array Lean.Term) : Lean.Elab.Tactic.TacticM (Lean.Term × Lean.Term × Lean.Name) := do
-  let target ← instantiateMVars (← getMainTarget)
+  -- A tactic `have` leaves the target under `mdata`, which `select` (`Expr.eq?`) does not see through.
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
   let (premises, _, conclusion) ← forallMetaTelescopeReducing (← inferType (← mkConstWithFreshMVarLevels lemma))
   let some goalPart := select target | throwError "The goal does not have the shape of {lemma}"
   let some lemmaPart := select conclusion | throwError "Unexpected statement of {lemma}"
@@ -237,21 +248,24 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
   return (← Term.exprToSyntax (← instantiateMVars methodFound),
     ← Term.exprToSyntax (← instantiateMVars instructionFound), operation)
 
-/-- One `run` step: prove the method and instruction lookups once, then apply only the
-    composition lemma for the fetched opcode instead of trying each in turn. -/
+open Lean Elab Tactic Meta in
+/-- One `run` step: prove the method and instruction lookups once, then apply only the composition
+    lemma for the fetched opcode. With `openCall`, a call leaves the caller's continuation as the goal. -/
+def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMainContext do
+  let (methodSyntax, instructionSyntax, operation) ←
+    cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
+  evalTactic (← if operation == ``CIL.Op.ret then
+      `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
+    else if operation == ``CIL.Op.call then
+      if openCall then `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
+      else `(tactic| cil_checked_call_at $methodSyntax $instructionSyntax [$facts,*])
+    else
+      `(tactic| cil_checked_next_at $methodSyntax $instructionSyntax [$facts,*]))
+
 syntax "cil_checked_run_step" "[" term,* "]" : tactic
 
-open Lean Elab Tactic Meta in
 elab_rules : tactic
-  | `(tactic| cil_checked_run_step [$facts:term,*]) => withMainContext do
-    let (methodSyntax, instructionSyntax, operation) ←
-      cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts.getElems
-    evalTactic (← if operation == ``CIL.Op.ret then
-        `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
-      else if operation == ``CIL.Op.call then
-        `(tactic| cil_checked_call_at $methodSyntax $instructionSyntax [$facts,*])
-      else
-        `(tactic| cil_checked_next_at $methodSyntax $instructionSyntax [$facts,*]))
+  | `(tactic| cil_checked_run_step [$facts:term,*]) => cilRunStep facts.getElems false
 
 macro_rules
   | `(tactic| cil_checked_steps_normalized [$facts:term,*]) =>
@@ -274,5 +288,25 @@ elab_rules : tactic
     withMainContext <| evalTactic (← `(tactic| cil_checked_steps_normalized [$[$prepared:term],*]))
 
 macro "cil_checked_steps" : tactic => `(tactic| cil_checked_steps [])
+
+/-- Exactly `n` fetched steps of the left-hand `run`, for run-to-run goals whose target state is not
+    syntactically the stepped one; unbounded stepping would run past it when the fuel is a literal. -/
+syntax "cil_checked_steps " num " [" term,* "]" : tactic
+
+open Lean Elab Tactic in
+elab_rules : tactic
+  | `(tactic| cil_checked_steps $count:num [$facts:term,*]) => do
+    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) facts.getElems
+    -- Focus the original goal: an early close must error, not step into an unrelated pending goal.
+    focus do
+      for taken in [:count.getNat] do
+        if (← getGoals).isEmpty then
+          throwError "cil_checked_steps {count.getNat}: the goal closed after {taken} steps"
+        cilRunStep prepared true
+      -- Fold the stepped pc (`2 + 1`) so the residual matches a target stated with a numeral.
+      unless (← getGoals).isEmpty do
+        evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))
+
+macro "cil_checked_steps " count:num : tactic => `(tactic| cil_checked_steps $count [])
 
 end CIL.Safety
