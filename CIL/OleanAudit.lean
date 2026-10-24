@@ -13,11 +13,15 @@ REQUEST (JSON):
     "theorems":  [{ "name": N, "type": E?, "levelParams": [u, ...]?, "axioms": [N, ...],
                     "statement": bool?, "refutation": bool? }],
     "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
-    "interfaces": [M, ...]?, "closures": [{ "name": N }]? }
+    "interfaces": [M, ...]?, "closures": [{ "name": N }]?,
+    "namespaces": { "prefixes": [P, ...], "axioms": [N, ...] }? }
 A theorem must be a `theorem` whose type matches `E` (when given) and whose axiom closure is in
 `axioms`. A constant must be a definition whose value (and type) match. Every declaration of the
 `interfaces` modules must pass `CIL.Interface.validateInterfaceDeclarations`, and each `closures` entry
-reports `CIL.Interface.contractClosure`: its contract kind and canonical closure. Expected expressions `E`:
+reports `CIL.Interface.contractClosure`: its contract kind and canonical closure. `namespaces` audits every
+`theorem` that one of `modules` declares under a namespace prefix `P` (`A.` or `A`: whole name components,
+private names by their user name), and fails when any prefix matches none or any axiom closure leaves `axioms`.
+Expected expressions `E`:
   "_"                                any expression
   {"const": N, "levels": [L, ...]}   constant; `levels` defaults to []
   {"app": [E, E1, ..., En]}          `E` applied to exactly the trailing n arguments
@@ -33,7 +37,9 @@ RESULT (JSON):
     "theorems":  [{ "name": N, "error": string?, "axioms": [N, ...], "statement": string?,
                     "refutes": { "contract": N, "line": n, "column": n }? }],
     "constants": [{ "name": N, "error": string?, "axioms": [N, ...] }],
-    "interfaces": { "error": string? }, "closures": [{ "name": N, "error": string?, "kind": string?, "canonical": string? }] }
+    "interfaces": { "error": string? }, "closures": [{ "name": N, "error": string?, "kind": string?, "canonical": string? }],
+    "namespaces": { "count": n, "prefixes": { P: n }, "modules": { M: n }, "axioms": [N, ...],
+                    "rejected": [{ "name": N, "axioms": [N, ...], "error": string }], "error": string? }? }
 Per-item failures are reported in `error`; a missing module or malformed request exits nonzero.
 -/
 
@@ -87,31 +93,36 @@ partial def fits (j : Json) (e : Expr) : Except String Bool := do
       | _, _ => return false
   throw s!"Invalid expression {j.compress}"
 
-/-- Axioms reachable from `root`, walking kernel declarations only; olean axiom summaries are ignored. -/
-def axiomClosure (env : Kernel.Environment) (root : Name) : Array Name := Id.run do
-  let mut seen : NameSet := {}
-  let mut pending := #[root]
+/-- Expressions of a declaration whose constants it depends on, as the kernel sees it. -/
+def parts : ConstantInfo → Array Expr
+  | .axiomInfo v => #[v.type]
+  | .defnInfo v => #[v.type, v.value]
+  | .thmInfo v => #[v.type, v.value]
+  | .opaqueInfo v => #[v.type, v.value]
+  | .ctorInfo v => #[v.type, .const v.induct []]
+  | .recInfo v => #[v.type] ++ v.all.toArray.map (Expr.const · [])
+  | .inductInfo v => #[v.type] ++ v.ctors.toArray.map (Expr.const · [])
+  | .quotInfo v => #[v.type]
+
+/-- Axioms reachable from any of `roots`, in one walk that shares visited declarations; olean axiom summaries are ignored. -/
+def axiomClosureOf (env : Kernel.Environment) (roots : Array Name) : Array Name := Id.run do
+  let mut seen : Std.HashSet Name := {}
+  let mut pending := roots
   let mut axioms : NameSet := {}
   while h : pending.size > 0 do
     let c := pending[pending.size - 1]
     pending := pending.pop
     if seen.contains c then continue
     seen := seen.insert c
-    let exprs := match env.find? c with
-      | some (.axiomInfo v) => #[v.type]
-      | some (.defnInfo v) => #[v.type, v.value]
-      | some (.thmInfo v) => #[v.type, v.value]
-      | some (.opaqueInfo v) => #[v.type, v.value]
-      | some (.ctorInfo v) => #[v.type, .const v.induct []]
-      | some (.recInfo v) => #[v.type] ++ v.all.toArray.map (Expr.const · [])
-      | some (.inductInfo v) => #[v.type] ++ v.ctors.toArray.map (Expr.const · [])
-      | some (.quotInfo v) => #[v.type]
-      | none => #[]
-    if let some (.axiomInfo _) := env.find? c then axioms := axioms.insert c
-    for e in exprs do
+    let some info := env.find? c | continue
+    if info matches .axiomInfo _ then axioms := axioms.insert c
+    for e in parts info do
       for d in e.getUsedConstants do
         unless seen.contains d do pending := pending.push d
   return axioms.toArray.qsort Name.lt
+
+/-- Axioms reachable from `root`, walking kernel declarations only. -/
+def axiomClosure (env : Kernel.Environment) (root : Name) : Array Name := axiomClosureOf env #[root]
 
 partial def stripMData (e : Expr) : Expr := e.replace fun
   | .mdata _ b => some (stripMData b)
@@ -193,6 +204,56 @@ def closure? (env : Environment) (req : Json) : IO Json := do
     | .ok (kind, canonical) => [("kind", toJson kind), ("canonical", toJson canonical)]
     | .error error => [("error", toJson error)]
 
+/-- The namespace of a prefix such as `A.` or `A`; the empty prefix would match every theorem. -/
+def namespacePrefix (p : String) : Except String Name :=
+  let n := name (if p.endsWith "." then p.dropEnd 1 |>.toString else p)
+  if n.isAnonymous then throw s!"Invalid namespace prefix {repr p}" else pure n
+
+/-- Every `theorem` declared in `modules` whose name, or user name if private, lies under a prefix. -/
+def namespaces (env : Environment) (modules : Array Name) (req : Json) : IO Json := do
+  let given ← IO.ofExcept <| (req.getObjValAs? (Array String) "prefixes").bind (·.mapM namespacePrefix)
+  -- `A.` and `A` name one namespace; a duplicate would count each theorem twice under one key.
+  let prefixes := given.foldl (fun acc p => if acc.contains p then acc else acc.push p) #[]
+  let allowed := names req "axioms"
+  let kernel := env.toKernelEnv
+  if prefixes.isEmpty then return Json.mkObj [("error", toJson "No namespace prefixes to audit")]
+  let mut seen : NameSet := {}
+  let mut roots := #[]
+  let mut perPrefix : Std.HashMap Name Nat := {}
+  let mut perModule : Array (String × Json) := #[]
+  for m in env.header.moduleNames, data in env.header.moduleData do
+    unless modules.contains m do continue
+    let mut count := 0
+    for c in data.constNames do
+      if seen.contains c then continue
+      let user := (privateToUserName? c).getD c
+      let matching := prefixes.filter (·.isPrefixOf user)
+      if matching.isEmpty then continue
+      let some (.thmInfo _) := kernel.find? c | continue
+      seen := seen.insert c
+      roots := roots.push c
+      count := count + 1
+      -- Nested prefixes each count the theorem, so neither reports zero.
+      for p in matching do perPrefix := perPrefix.insert p (perPrefix.getD p 0 + 1)
+    perModule := perModule.push (m.toString, toJson count)
+  let found := axiomClosureOf kernel roots
+  -- Attribution walks each theorem again, so it runs only when the shared closure is rejected.
+  let rejected := if (checkAxioms allowed found).isNone then #[] else
+    roots.filterMap fun c =>
+      let axioms := axiomClosure kernel c
+      (checkAxioms allowed axioms).map fun error =>
+        Json.mkObj [("name", toJson c.toString), ("axioms", toJson (axioms.map toString)), ("error", toJson error)]
+  let empty := prefixes.filter (perPrefix.getD · 0 == 0)
+  let error := if !empty.isEmpty then
+      some s!"No theorems under namespace prefixes: {", ".intercalate (empty.toList.map toString)}"
+    else if !rejected.isEmpty then
+      some s!"{rejected.size} of {roots.size} theorems use unapproved proof axioms"
+    else none
+  return Json.mkObj <| [("count", toJson roots.size),
+    ("prefixes", Json.mkObj (prefixes.toList.map fun p => (p.toString, toJson (perPrefix.getD p 0)))),
+    ("modules", Json.mkObj perModule.toList), ("axioms", toJson (found.map toString)),
+    ("rejected", Json.arr rejected)] ++ (error.map fun e => [("error", toJson e)]).getD []
+
 end LeanCILAudit
 
 open Lean LeanCILAudit in
@@ -210,6 +271,9 @@ unsafe def main (args : List String) : IO UInt32 := do
   let theorems ← ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).mapM (theorem? env)
   let constants ← ((req.getObjValAs? (Array Json) "constants").toOption.getD #[]).mapM (constant? env)
   let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM (closure? env)
-  IO.FS.writeFile output (Json.mkObj [("modules", Json.mkObj paths), ("theorems", toJson theorems),
-    ("constants", toJson constants), ("interfaces", interfaces env req), ("closures", toJson closures)]).compress
+  let audited ← match req.getObjVal? "namespaces" with
+    | .ok spec => pure [("namespaces", ← namespaces env modules spec)]
+    | .error _ => pure []
+  IO.FS.writeFile output (Json.mkObj ([("modules", Json.mkObj paths), ("theorems", toJson theorems),
+    ("constants", toJson constants), ("interfaces", interfaces env req), ("closures", toJson closures)] ++ audited)).compress
   return 0

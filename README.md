@@ -149,6 +149,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 | `leancil check` | Regenerate the extraction in memory and compare it with the saved files |
 | `leancil verify` | Check, kernel-replay and audit a proof, then write `verified.json` |
 | `leancil verify-batch` | Verify many requests against one consumer snapshot |
+| `leancil audit-library` | Replay a Lake package and audit the axioms of every theorem under namespace prefixes ([details](docs/CONSUMERS.md#library-audits)) |
 
 All commands exit with code `0` on success. Failures print a diagnostic to standard error and exit with code `1`. Failed checks and verification attempts start with `Invalid:` and produce no standard output. For example, if the generated Lean file has been edited:
 

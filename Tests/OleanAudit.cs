@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/LibraryAudit.cs
 
 using System.Text.Json;
 
@@ -201,6 +204,102 @@ var leanchecker = Path.Combine(verification.Toolchain, "bin", OperatingSystem.Is
 if (Execute([leanchecker, "Unchecked"], fixtures, fixtures, environment: environment).Code == 0)
     throw new InvalidOperationException("Kernel replay accepted an unchecked declaration");
 Console.WriteLine("PASS unchecked declarations pass the audit alone, so it runs only after kernel replay");
+
+// Namespace audits count every theorem a listed module declares under a prefix, private ones by their user name.
+AuditedNamespaces Allowing(string[] axioms, string module, params string[] prefixes) =>
+    verification.AuditOleans(fixtures, [module], [], namespaces: new(prefixes, axioms)).namespaces!;
+AuditedNamespaces Namespaces(string module, params string[] prefixes) => Allowing(ApprovedAxioms, module, prefixes);
+Compile("SpacesBase", "theorem Pfx.imported : True := trivial\n");
+Compile("Spaces", """
+    import SpacesBase
+    theorem Pfx.visible : 1 = 1 := rfl
+    private theorem Pfx.secret : 2 = 2 := rfl
+    def Pfx.value : Nat := 3
+    theorem Other.claim : True := trivial
+    theorem Pfxs.near : True := trivial
+    theorem Pfx.classical (p : Prop) : p ∨ ¬p := Classical.em p
+    """);
+var spaces = Namespaces("Spaces", "Pfx.");
+// The approved axioms reach the audit: the classical theorem passes and reports them.
+if (spaces is not { error: null, count: 3, rejected: [] } || spaces.prefixes["Pfx"] != 3 || spaces.modules["Spaces"] != 3 ||
+    !spaces.axioms.Order(StringComparer.Ordinal).SequenceEqual(["Classical.choice", "Quot.sound", "propext"]))
+    throw new InvalidOperationException("Namespace audit scope: " + JsonSerializer.Serialize(spaces));
+var nested = Namespaces("Spaces", "Pfx.", "Pfx.visible");
+if (nested is not { error: null, count: 3 } || nested.prefixes["Pfx"] != 3 || nested.prefixes["Pfx.visible"] != 1)
+    throw new InvalidOperationException("Nested namespace prefixes: " + JsonSerializer.Serialize(nested));
+var duplicate = Namespaces("Spaces", "Pfx.", "Pfx");
+if (duplicate is not { error: null, count: 3 } || duplicate.prefixes.Count != 1 || duplicate.prefixes["Pfx"] != 3)
+    throw new InvalidOperationException("Duplicate namespace prefixes: " + JsonSerializer.Serialize(duplicate));
+// A prefix that matches nothing is an error even beside one that matches, so a typo cannot pass silently.
+if (Namespaces("Spaces", "Pfx", "Missing").error is not { } typo || !typo.Contains("Missing", StringComparison.Ordinal) ||
+    Namespaces("Spaces", "Pf").error is null)
+    throw new InvalidOperationException("Unmatched namespace prefixes were accepted");
+Compile("Planted", "axiom Pfx.bogus : False\ntheorem Pfx.fine : True := trivial\ntheorem Pfx.forged : 1 = 2 := Pfx.bogus.elim\n");
+var planted = Namespaces("Planted", "Pfx");
+if (planted.error is null || planted.count != 2 || planted.rejected is not [{ name: "Pfx.forged", axioms: ["Pfx.bogus"] }] ||
+    !planted.axioms.Contains("Pfx.bogus"))
+    throw new InvalidOperationException("Planted axiom passed the namespace audit: " + JsonSerializer.Serialize(planted));
+// The request's allowed list replaces the default: allowing the planted axiom passes, omitting Classical.choice fails.
+if (Allowing(["Pfx.bogus"], "Planted", "Pfx") is not { error: null, count: 2, rejected: [] } allowed || !allowed.axioms.SequenceEqual(["Pfx.bogus"]) ||
+    Allowing(["propext", "Quot.sound"], "Spaces", "Pfx").rejected is not [{ name: "Pfx.classical" }])
+    throw new InvalidOperationException("Namespace audit ignored its allowed axioms");
+Console.WriteLine("PASS namespace audits count module theorems, reject unmatched prefixes and planted axioms");
+
+// The CLI path builds a package, replays its modules and audits those bytes; replay rejects what the audit alone would pass.
+var package = Path.Combine(root, "library");
+Directory.CreateDirectory(Path.Combine(package, "Lib"));
+File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
+File.WriteAllText(Path.Combine(package, "lakefile.toml"), "name = \"lib\"\n\n[[lean_lib]]\nname = \"Lib\"\n");
+File.WriteAllText(Path.Combine(package, "Lib.lean"), "import Lib.Core\ntheorem Lib.top : Lib.base = 1 := Core.fact\n");
+void Core(string source) => File.WriteAllText(Path.Combine(package, "Lib", "Core.lean"), source);
+// The planted axiom and the theorem using it lie outside the prefix in an imported module, so only the closure walk finds it.
+Core("def Lib.base : Nat := 1\naxiom bogus : False\ntheorem Core.fact : Lib.base = 1 := bogus.elim\n");
+var library = verification.AuditLibrary(package, ["Lib"], ["Lib."], ApprovedAxioms);
+if (library.Result is not { error: not null, count: 1, rejected: [{ name: "Lib.top", axioms: ["bogus"] }] } ||
+    !library.Modules.SequenceEqual(["Lib", "Lib.Core"]) || !library.Replayed.SequenceEqual(library.Modules))
+    throw new InvalidOperationException("Library audit accepted a planted axiom: " + JsonSerializer.Serialize(library));
+// The CLI reports an unmatched prefix as invalid with exit code 1 and still writes its results.
+var cliResults = Path.Combine(root, "library-results.json");
+var cli = Execute(["dotnet", ExtractorPath, "audit-library", "--project", package, "--module", "Lib", "--prefix", "Missing",
+    "--results", cliResults]);
+if (cli.Code != 1 || !cli.Stderr.StartsWith("Invalid: Library audit failed: No theorems under namespace prefixes: Missing", StringComparison.Ordinal) ||
+    !File.Exists(cliResults) || JsonDocument.Parse(File.ReadAllText(cliResults)).RootElement.GetProperty("count").GetInt32() != 0)
+    throw new InvalidOperationException($"audit-library CLI exit {cli.Code}: {cli.Output}");
+Core("""
+    import Lean
+    def Lib.base : Nat := 1
+    set_option debug.skipKernelTC true
+    run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+      name := `Lib.Core.fact, levelParams := [], type := Lean.mkConst ``False, value := Lean.mkConst ``True.intro })
+    """);
+try
+{
+    verification.AuditLibrary(package, ["Lib.Core"], ["Lib"], ApprovedAxioms);
+    throw new InvalidDataException("Library audit accepted an unchecked declaration");
+}
+catch (InvalidOperationException error) when (error.Message.Contains("Kernel replay rejected Lib.Core", StringComparison.Ordinal)) { }
+// A certified CIL proof skips replay only while every module it imports still matches the certified library.
+var certifiedParts = new SortedDictionary<string, string>
+{
+    ["CIL/Memory.olean"] = "m", ["CIL/Memory.olean.hash"] = "mh", ["CIL/MemoryLemmas.olean"] = "l", ["CIL/MemoryLemmas.olean.hash"] = "lh"
+};
+var importGraph = new Dictionary<string, string[]> { ["CIL.MemoryLemmas"] = ["Init", "CIL.Memory"], ["CIL.Memory"] = ["Init"], ["Lib"] = ["CIL.MemoryLemmas"] };
+SortedDictionary<string, SortedDictionary<string, string>> Packaged(string memory) => new(StringComparer.Ordinal)
+{
+    ["CIL.Memory"] = new() { [".olean"] = memory }, ["CIL.MemoryLemmas"] = new() { [".olean"] = "l" }, ["Lib"] = new() { [".olean"] = "x" }
+};
+if (!ReusableCertified(importGraph, Packaged("m"), certifiedParts).SetEquals(["CIL.Memory", "CIL.MemoryLemmas"]) ||
+    ReusableCertified(importGraph, Packaged("changed"), certifiedParts).Count != 0)
+    throw new InvalidOperationException("A certified module skipped replay against changed imports");
+// The certified library's own oleans, in the shape ModuleArtifacts records them, are all reusable.
+var sessionOleans = Path.Combine(verification.Library(Inputs(At("CIL.lean"))), ".lake/build/lib/lean");
+var sessionParts = new SortedDictionary<string, SortedDictionary<string, string>>(
+    Directory.EnumerateFiles(sessionOleans, "*.olean", SearchOption.AllDirectories).ToDictionary(
+        path => ModuleName(Path.GetRelativePath(sessionOleans, path).Replace('\\', '/')), ConsumerModuleParts), StringComparer.Ordinal);
+var cilModules = sessionParts.Keys.Where(module => module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal)).ToArray();
+if (cilModules.Length == 0 || !ReusableCertified(new(), sessionParts, verification.certifiedModules!).IsSupersetOf(cilModules))
+    throw new InvalidOperationException("The certified library's own CIL modules were not reusable");
+Console.WriteLine("PASS library audits replay the package and stale certified imports before auditing, and reject planted axioms");
 
 // A user module cannot replace a toolchain module on the audit's search path.
 Compile("Init", "prelude\n");
