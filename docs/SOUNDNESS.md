@@ -8,6 +8,31 @@ and interface pins, so a wrong selection can only fail, never certify other byte
 
 ## What is defined and proved
 
+Dynamic stack allocation uses the existing allocation-relative memory model. Each successful
+nonempty `localloc` creates a fresh frame-owned allocation, grants access to exactly its byte
+extent and charges its size rounded to 16 bytes against the activation's resource quota.
+`Memory.stackLimit` defaults to zero and admits at most 65,536 bytes per activation. A proof
+using a positive quota must justify that deployment assumption; this quota excludes the
+runtime's ordinary frame, call and probing overhead and does not establish available physical
+thread-stack space. The model reports `stackAllocationFailure` when the quota is insufficient.
+That resource failure is not automatically a named CLR exception, nor does a successful model
+execution prove that the runtime cannot exhaust its physical stack.
+
+The emitted initialization flag must match the raw method's `localsinit` bit. Without it, new
+bytes remain unreadable until written; with it, the payload is zero-initialized. A zero-byte
+request returns null without reserving storage. Frame exit expires all dynamic allocations,
+and the existing return checks reject escaped references and spans. Pointer values retain
+allocation provenance; numeric address fabrication remains unsupported. Memory equivalence
+now also requires equal stack quotas, and frame records track the charged dynamic bytes.
+
+These initialization and lifetime rules follow the
+[CLI localloc specification](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.localloc?view=net-10.0).
+Zero-size null results and 16-byte reservation rounding follow the .NET 10.0.0 CoreCLR
+[x64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenxarch.cpp)
+and [ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp)
+implementations. This source correspondence is an explicit runtime assumption, not a proof
+of the JIT or of resource availability on every deployment.
+
 Concrete constrained struct calls retain their original prefix and interface slot in raw
 specialization evidence. A mandatory Lean validator independently resolves the slot from the
 serialized type, interface, method and explicit-override declarations, then checks the emitted

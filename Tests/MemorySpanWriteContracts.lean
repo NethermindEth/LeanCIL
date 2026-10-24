@@ -52,7 +52,7 @@ theorem write_holds : writeContract.Holds Extracted.program 2 := by
       Pure.pure, Except.pure, unspecifiedOperands, MemoryOp.argumentCount,
       Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]
   have entered : enterFrame Extracted.method2 (writeContract.args input) memory =
-      .ok (⟨memory.nextIdentity, [.span 4 true (some input.view)], [], []⟩, memory) := by
+      .ok (⟨memory.nextIdentity, [.span 4 true (some input.view)], [], [], 0⟩, memory) := by
     have checked := valid
     dsimp only [WriteInput.view] at checked
     simp [enterFrame, Extracted.method2, writeContract, makeLocals, makeArgumentHomes,

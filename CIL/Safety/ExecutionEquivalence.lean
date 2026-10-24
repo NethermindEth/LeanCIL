@@ -1,5 +1,6 @@
 import CIL.Safety.StaticMemoryEquivalence
 import CIL.Safety.Execution
+import CIL.Safety.StackAllocationEquivalence
 
 /-!
 # The checked interpreter respects memory equivalence
@@ -44,6 +45,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress]
   all_goals repeat' first
+    | (apply ResultEquivalent.bind (same.allocateStack _ _ _)
+       intro left right related
+       obtain ⟨reference, owner, allocated⟩ := left
+       obtain ⟨otherReference, otherOwner, otherAllocated⟩ := right
+       obtain ⟨rfl, rfl, equivalent⟩ := related
+       exact .ok (.next equivalent _ _ _))
     | exact .error _
     | exact .ok (.next same _ _ _)
     | exact .ok (.call same _ _ _)

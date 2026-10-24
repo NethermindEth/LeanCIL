@@ -269,6 +269,8 @@ internal static class RuntimeModels
             {
                 var owner = $"{name}<{element}>";
                 var writable = name == "System.Span`1";
+                if (signature == $"System.Void {owner}::.ctor(System.Void*,System.Int32)")
+                    return $".memory (.spanFromReference {width} {(writable ? "true" : "false")})";
                 if (signature == $"System.Int32 {owner}::get_Length()") return ".memory .spanLength";
                 if (writable && signature == $"!0& {owner}::get_Item(System.Int32)")
                     return $".memory (.spanItem {width})";

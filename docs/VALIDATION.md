@@ -114,6 +114,13 @@ F# validation: 324 comparisons with actual .NET execution passed for addition, u
 
 ## Contracts and extraction evidence
 
+`Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results
+with and without localsinit, rejects uninitialized reads and escaped storage, and checks
+insufficient-budget failure. Mutating the emitted initialization flag is rejected by the Lean
+certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
+`Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack
+items and non-native 64-bit size operands. These run in the `evidence` suite.
+
 `Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls, including
 mutation through the receiver, and rejects forged generated call targets and malformed prefix,
 branch and interface-constraint metadata. `Tests/ConstrainedResolution.cs` checks the extractor's

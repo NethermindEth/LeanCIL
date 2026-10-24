@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 155 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 156 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -64,13 +64,30 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). Other static fields are rejected. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data with an explicit packed blob layout and no static constructor. A `ReadOnlySpan<byte>` over such data may be returned by value (for example from a C# collection-expression property); see [static span tables](#static-span-tables) for other element types. Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist. No arbitrary external calls, generic declaring types, class instance methods or virtual dispatch. |
-| `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also the explicitly modelled `ReadOnlySpan<byte>(void*, int)` runtime constructor. Class construction, generic constructors and cyclic dependencies are rejected. |
+| `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also primitive integer `Span<T>(void*, int)` and `ReadOnlySpan<T>(void*, int)` constructors over checked existing storage. Class construction, generic constructors and cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Only `throw new E(...)` with `ldstr`/`ldnull` arguments (see below): it raises a located `thrown "E"` fault. Other throws are rejected. |
 | `constrained.`, `callvirt` | Partial | Adjacent prefix and call resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
 | `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. |
 | `initblk`, `cpblk` | Partial | Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
 | `unaligned.` | Partial | Values 1, 2 and 4 before supported ordinary or block memory accesses; malformed prefix sequences and interior branch targets are rejected. |
+| `localloc` | Partial | Frame-owned storage within an explicit per-activation quota; checked initialization, alignment and expiry. See [dynamic stack allocation](#dynamic-stack-allocation). |
+
+## Dynamic stack allocation
+
+`localloc` accepts an unsigned int32 or native byte count as its sole stack operand. It creates
+fresh allocation-relative storage owned by the current activation. The caller supplies
+`Memory.stackLimit`, a per-activation quota up to 65,536 bytes; its default is zero. Each nonempty
+request charges its size rounded to 16 bytes. Insufficient quota produces a distinct
+`stackAllocationFailure`; a zero request returns null and consumes no quota.
+
+The raw method's `localsinit` flag controls zero initialization. Otherwise bytes remain unreadable
+until written. Checked pointer offsets, integer loads and stores, and primitive span construction
+retain allocation bounds and authority. Returning a reference or span into expired stack storage
+fails. Numeric address fabrication and general pointer casts remain unsupported.
+
+The quota is a deployment premise rather than a physical-stack measurement. Ordinary frame and
+call overhead are outside it; see [the soundness boundary](SOUNDNESS.md#what-is-defined-and-proved).
 
 ## Block memory and alignment prefixes
 
@@ -90,7 +107,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | --- | --- |
 | Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`; `constrained.` outside the checked struct-call subset |
 | Other conversions | Floating-point conversions |
-| Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*`, `localloc` |
+| Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*` |
 | Objects, arrays and metadata | `ldnull` and `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` of other fields, `ldsflda` of constructor-initialized fields |
 | Dispatch and exceptions | Unconstrained `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |

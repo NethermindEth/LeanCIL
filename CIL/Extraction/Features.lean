@@ -228,6 +228,11 @@ def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted :
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65050] then return false
+  if instruction.opcode == 65039 then
+    return match instruction.operand, emitted with
+      | .none, .stackAlloc flag => flag == raw.initLocals
+      | _, _ => false
+  if let .stackAlloc _ := emitted then return false
   if let some word := constant32 instruction then
     return match emitted with | .const32 actual => word == actual | _ => false
   if let .call site := instruction.operand then

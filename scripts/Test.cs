@@ -129,7 +129,7 @@ if (suite is "all" or "core")
 if (suite is "all" or "evidence")
     projects.Add("Tests/MemorySpans.cs");
 if (suite is "all" or "evidence")
-    projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs"]);
+    projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/StackAllocation.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");

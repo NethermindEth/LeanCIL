@@ -1,4 +1,5 @@
 import CIL.Safety.Frames
+import CIL.Safety.StackAllocation
 import CIL.Safety.StaticMemory
 import CIL.NativeEvaluation
 
@@ -129,6 +130,13 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   if unspecifiedOperands (observerCount op) stack || unknownArgument then
     .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
+  | .stackAlloc initLocals, [.scalar size] =>
+    let bytes ← match size with
+      | .i32 bits => pure bits.toNat
+      | .i64 bits => pure bits.toNat
+      | _ => .error .invalidState
+    let (reference, owner, memory) ← allocateStack m frame bytes initLocals
+    return .next (pc + 1) [.reference reference] owner memory
   | .intrinsic operation argc, _ =>
     if !operation.available body.profile then .error (.unsupported "Intrinsic unavailable in target profile") else
     if stack.length < argc then .error .invalidState else

@@ -62,6 +62,10 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
+  | .pointer (.atom scope name) =>
+    if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
+        "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
+        "System.IntPtr", "System.UIntPtr"] then some .reference else none
   | type@(.apply (.constructor scope name) (.atom elementScope element)) =>
     if let some storage := spanStorage type then some storage else
     if scope != intrinsicsScope || elementScope != runtimeScope ||

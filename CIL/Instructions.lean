@@ -73,6 +73,8 @@ inductive Op where
   | divide (signed remainder : Bool)
   | checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool)
   | checkedConvert (width : Nat) (signed unsignedInput : Bool)
+  /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
+  | stackAlloc (initLocals : Bool)
   | nop | neg | gt
   -- Signed and unsigned compare-and-branch; more follow `switch` below.
   | bgt (target : Nat)

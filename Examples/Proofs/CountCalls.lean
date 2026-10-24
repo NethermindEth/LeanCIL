@@ -27,7 +27,7 @@ theorem decrement_holds : decrementContract.Holds Extracted.program decrement :=
   refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 
-private def frame : Frame := ⟨0, [.bytes .word32 ⟨0, 0⟩, .bytes .word32 ⟨1, 0⟩], [0, 1], []⟩
+private def frame : Frame := ⟨0, [.bytes .word32 ⟨0, 0⟩, .bytes .word32 ⟨1, 0⟩], [0, 1], [], 0⟩
 private def guard : Nat := instructionLocation countBody fun op =>
   match op with | .brnonzero _ => true | _ => false
 /-- The loop head holds the remaining count on the stack. -/

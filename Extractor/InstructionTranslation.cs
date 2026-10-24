@@ -12,12 +12,18 @@ internal static class InstructionTranslation
         return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);
     }
     internal static string Translate(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
-        FeatureProfile? profile = null, HashSet<Instruction>? nativeOperands = null, int[]? parameterHomes = null, ImportResolution? imports = null)
+        FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
+        int[]? parameterHomes = null, ImportResolution? imports = null)
     {
         if (imports is not null && imports.TryTranslate(i, methods.Length, out string imported)) return imported;
         profile ??= FeatureProfile.Scalar;
+        nativeOperands ??= NativeOperands.Certify(m, profile);
+        if (i.OpCode.Code == Code.Add && nativeOperands.Incoming.TryGetValue(i, out var incoming) &&
+            incoming.Length >= 2 && incoming[^2] == NativeOperands.Kind.Reference &&
+            incoming[^1] is NativeOperands.Kind.Word32 or NativeOperands.Kind.Native)
+            return ".memory (.add 1 true)";
         var translated = TranslateCore(i, m, methods, methodIndex, profile, parameterHomes ?? ParameterStorage.Analyze(m, profile));
-        return (nativeOperands ?? NativeOperands.Analyze(m, profile)).Contains(i) ? $".nativeBinary ({translated})" : translated;
+        return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;
     }
 
     static string TranslateCore(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
@@ -104,6 +110,7 @@ internal static class InstructionTranslation
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => ".nop",
+            Code.Localloc => $".stackAlloc {(m.Body.InitLocals ? "true" : "false")}",
             Code.Cpblk => $".memory (.copyBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Initblk => $".memory (.initBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Starg or Code.Starg_S => Parameter("setLocal"),
