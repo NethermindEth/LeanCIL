@@ -2,6 +2,15 @@ import CIL.Safety.ByteRoundTrip
 import CIL.Safety.Execution
 import CIL.Safety.WriteEffects
 
+/-!
+# Bit casts and snapshots
+
+Reinterpreting a value as another shape of the same width keeps every byte and its
+initialization flag: fully initialized bytes round-trip through the vector and aggregate
+values, and partially initialized ones stay snapshots. Snapshot stores likewise keep each
+byte's flag, so `Unsafe.BitCast` and copies of partly unknown data stay precise.
+-/
+
 namespace CIL.Safety
 
 theorem vector128_bytes_roundtrip (bytes : List (BitVec 8)) (length : bytes.length = 16) :
@@ -26,6 +35,7 @@ theorem vector512_bytes_roundtrip (bytes : List (BitVec 8)) (length : bytes.leng
   simp only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt bound]
   simpa [length] using numberBytes_byteNumber bytes
 
+/-- Fully initialized snapshot bytes are their bits, each marked initialized. -/
 theorem initialized_snapshot_bytes (bytes : List (BitVec 8 × Bool))
     (initialized : bytes.all Prod.snd = true) :
     (bytes.map Prod.fst).map (fun b => (b, true)) = bytes := by
@@ -61,10 +71,12 @@ theorem valueSnapshot_snapshotValue (shape : CIL.SnapshotShape) (bytes : List (B
       rw [vector512_bytes_roundtrip _ (by simpa [CIL.SnapshotShape.width] using length), same]
   · simp [valueSnapshot, length]
 
+/-- A bit cast between shapes of equal width succeeds and keeps the input's snapshot. -/
 theorem bitcastValue_preserves_snapshot (source target : CIL.SnapshotShape) (input : CIL.Value)
     (bytes : List (BitVec 8 × Bool)) (sizes : source.width = target.width)
     (snapshot : valueSnapshot source input = some bytes) :
-    ∃ output, bitcastValue source target input = .ok output ∧ valueSnapshot target output = some bytes := by
+    ∃ output, bitcastValue source target input = .ok output ∧
+      valueSnapshot target output = some bytes := by
   have known : input.hasUnspecified = false := by
     cases input <;> simp_all [CIL.Value.hasUnspecified, valueSnapshot]
   refine ⟨snapshotValue target bytes, ?_, ?_⟩
@@ -84,6 +96,7 @@ theorem writeSnapshot_cell (m result : Memory) (r : Reference)
   · cases written
     simp [List.getElem?_eq_getElem bound]
 
+/-- Reading back a stored snapshot returns exactly its bytes and flags. -/
 theorem writeSnapshot_readback (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8 × Bool)) (alignment : Nat)
     (written : writeSnapshot m r bytes alignment = .ok result) :

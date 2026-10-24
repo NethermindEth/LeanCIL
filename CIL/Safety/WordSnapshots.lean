@@ -2,6 +2,15 @@ import CIL.Safety.UnknownHomes
 import CIL.Safety.NumericLocals
 import CIL.Safety.AccessBelow
 
+/-!
+# Remembered word locals
+
+`WordSnapshots memory slots known` records that each local whose index has
+`known index = some v` is a word home currently holding `v`. A store updates that one
+entry with `rememberWord` and keeps the rest, so a consumer proof can track word locals
+across a method body and step each load to its exact value.
+-/
+
 namespace CIL.Safety
 
 /-- Only words established by actual writes or checked helper results may be
@@ -12,6 +21,7 @@ def WordSnapshots (memory : Memory) (slots : List LocalSlot)
     ∃ reference, slots[index]? = some (.bytes .word64 reference) ∧
       read memory reference 8 1 = .ok (numberBytes value.toNat 8)
 
+/-- `known` updated so local `index` holds `value`. -/
 def rememberWord (known : Nat → Option (BitVec 64)) (index : Nat) (value : BitVec 64) :
     Nat → Option (BitVec 64) := fun other => if other = index then some value else known other
 
@@ -20,18 +30,21 @@ theorem WordSnapshots.empty (memory : Memory) (slots : List LocalSlot) :
   intro index value impossible
   cases impossible
 
+/-- Different slots of `WritableHomes` live in different allocations. -/
 theorem WritableHomes.distinct {memory : Memory} {lower : Nat} {kinds slots}
     (homes : WritableHomes memory lower kinds slots) (i j : Nat)
     (leftKind rightKind : CIL.LocalKind) (left right : Reference)
     (different : i ≠ j) (first : slots[i]? = some (.bytes leftKind left))
-    (second : slots[j]? = some (.bytes rightKind right)) : left.allocation ≠ right.allocation := by
+    (second : slots[j]? = some (.bytes rightKind right)) :
+    left.allocation ≠ right.allocation := by
   rcases Nat.lt_or_gt_of_ne different with before | after
   · exact Nat.ne_of_lt (homes.ordered i j leftKind rightKind left right before first second)
   · exact Nat.ne_of_gt (homes.ordered j i rightKind leftKind right left after second first)
 
 /-- A helper's checked readback and memory effect update one snapshot while
     preserving every other private word, including across nested frame allocation. -/
-theorem WordSnapshots.after_effect {entered before after : Memory} {boundary : Nat} {kinds slots}
+theorem WordSnapshots.after_effect {entered before after : Memory} {boundary : Nat}
+    {kinds slots}
     {known : Nat → Option (BitVec 64)} (snapshots : WordSnapshots before slots known)
     (homes : WritableHomes entered boundary kinds slots) (wf : before.WellFormed)
     (index : Nat) (reference : Reference) (value : BitVec 64)
@@ -57,9 +70,12 @@ theorem WordSnapshots.after_effect {entered before after : Memory} {boundary : N
     obtain ⟨allocation, requirements⟩ := access_requirements ready
     have old := (wf.1 _ _ requirements.present).1
     have disjoint := homes.distinct other index .word64 .word64 r reference same found slot
-    exact ⟨r, found, authority.read_eq readable old (fun offset _ => outside r.allocation old disjoint _)⟩
+    exact ⟨r, found,
+      authority.read_eq readable old (fun offset _ => outside r.allocation old disjoint _)⟩
 
-theorem WordSnapshots.after_write {entered before after : Memory} {boundary : Nat} {kinds slots}
+/-- Writing `value` to a word home remembers it and keeps every other remembered word. -/
+theorem WordSnapshots.after_write {entered before after : Memory} {boundary : Nat}
+    {kinds slots}
     {known : Nat → Option (BitVec 64)} (snapshots : WordSnapshots before slots known)
     (homes : WritableHomes entered boundary kinds slots) (wf : before.WellFormed)
     (index : Nat) (reference : Reference) (value : BitVec 64)
@@ -104,7 +120,8 @@ theorem WordSnapshots.store {body : CIL.Method} {pc index : Nat} {args stack : L
     .word64 (.i64 value) value.toNat rfl slot ready
   exact ⟨after, stepped, snapshots.after_write homes wf index reference value slot written,
     write_preserves_wellFormed _ _ _ _ _ wf written,
-    write_preserves_memory_below _ _ _ _ _ _ (homes.home_bound index .word64 reference slot) written,
+    write_preserves_memory_below _ _ _ _ _ _ (homes.home_bound index .word64 reference slot)
+      written,
     write_preserves_access_below written _, written⟩
 
 #print axioms WordSnapshots.after_effect

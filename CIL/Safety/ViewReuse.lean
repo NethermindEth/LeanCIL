@@ -1,7 +1,16 @@
 import CIL.Safety.Memory
 
+/-!
+# Reusing readable views
+
+A write records a readable view over the bytes it wrote, unless an existing view already
+covers them (`writeViews`). These lemmas show skipping that redundant view grants exactly
+the same read and write permissions, so the view list grows by at most one per write.
+-/
+
 namespace CIL.Safety
 
+/-- `readableRange` holds exactly when every byte of the range is readable. -/
 theorem readableRange_iff (m : Memory) (r : Reference) (width : Nat) :
     readableRange m r width = true ↔
       ∀ i < width, permitted m false { r with offset := r.offset + i } = true := by
@@ -14,7 +23,8 @@ theorem readableRange_iff (m : Memory) (r : Reference) (width : Nat) :
         simpa only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, and_assoc] using single
       apply List.any_eq_true.mpr
       refine ⟨view, member, ?_⟩
-      simp only [viewContains, Bool.false_eq_true, ↓reduceIte, readable, Bool.and_true, decide_eq_true_eq]
+      simp only [viewContains, Bool.false_eq_true, ↓reduceIte, readable, Bool.and_true,
+        decide_eq_true_eq]
       exact ⟨same, by omega, by omega⟩
     · exact List.all_eq_true.mp fragmented i (List.mem_range.mpr bound)
   · intro covered
@@ -27,12 +37,14 @@ theorem readableRange_iff (m : Memory) (r : Reference) (width : Nat) :
 theorem writeViews_permitted (m : Memory) (r : Reference) (width : Nat)
     (writing : Bool) (q : Reference) :
     permitted { m with views := writeViews m r width } writing q =
-      permitted { m with views := ⟨r.allocation, r.offset, width, true, false⟩ :: m.views } writing q := by
+      permitted { m with views := ⟨r.allocation, r.offset, width, true, false⟩ :: m.views }
+        writing q := by
   unfold writeViews
   split
   · rename_i covered
     cases writing
-    · by_cases inside : r.allocation = q.allocation ∧ r.offset ≤ q.offset ∧ q.offset < r.offset + width
+    · by_cases inside :
+        r.allocation = q.allocation ∧ r.offset ≤ q.offset ∧ q.offset < r.offset + width
       · have permission := (readableRange_iff m r width).mp covered (q.offset - r.offset) (by omega)
         have same : { r with offset := r.offset + (q.offset - r.offset) } = q := by
           cases r; cases q; simp_all <;> omega

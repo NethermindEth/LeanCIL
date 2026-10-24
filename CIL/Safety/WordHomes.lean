@@ -1,16 +1,28 @@
 import CIL.Safety.WordLocals
 
+/-!
+# Word homes
+
+A local recipe `specs` lists, per local, either `some word` (a 64-bit local starting at
+`word`) or `none` (an object reference starting null). `WordHomes` says the frame's slots
+realize that recipe: each word local has a fresh, initialized, writable eight-byte home,
+in strictly increasing allocation order, and each root slot is null.
+-/
+
 namespace CIL.Safety
 
+/-- The local kinds of a recipe: `word64` for a word, `reference` for a root. -/
 def wordKinds (specs : List (Option (BitVec 64))) : List CIL.LocalKind :=
   specs.map fun spec => match spec with | none => .reference | some _ => .word64
 
+/-- The initial values of a recipe: the word itself, or a null reference for a root. -/
 def wordInitializers (specs : List (Option (BitVec 64))) : List CIL.Value :=
   specs.map fun spec => match spec with | none => .nullRef | some word => .i64 word
 
 /-- Initialized word homes in strictly increasing allocation identities, with
     null root slots retained at their actual metadata positions. -/
-inductive WordHomes (memory : Memory) : Nat → List (Option (BitVec 64)) → List LocalSlot → Prop where
+inductive WordHomes (memory : Memory) :
+    Nat → List (Option (BitVec 64)) → List LocalSlot → Prop where
   | nil (lower : Nat) : WordHomes memory lower [] []
   | root {lower specs slots} : WordHomes memory lower specs slots →
       WordHomes memory lower (none :: specs) (.root (some .null) :: slots)
@@ -34,7 +46,8 @@ theorem WordHomes.weaken {memory : Memory} {lower upper : Nat} {specs slots}
 theorem make_word_locals (memory : Memory) (activation : Nat) (specs : List (Option (BitVec 64)))
     (wellFormed : memory.WellFormed) :
     ∃ slots owned result,
-      makeLocals activation (wordKinds specs) (wordInitializers specs) memory = .ok (slots, owned, result) ∧
+      makeLocals activation (wordKinds specs) (wordInitializers specs) memory =
+        .ok (slots, owned, result) ∧
       WordHomes result memory.nextIdentity specs slots := by
   induction specs generalizing memory with
   | nil => exact ⟨[], [], memory, rfl, .nil _⟩
@@ -47,7 +60,8 @@ theorem make_word_locals (memory : Memory) (activation : Nat) (specs : List (Opt
       simp only [wordKinds, wordInitializers, List.map_cons, makeLocals, makeLocal, made,
         Bind.bind, Except.bind, Pure.pure, Except.pure, List.nil_append]
     | some value =>
-      obtain ⟨reference, middle, made, loaded, writable, _⟩ := make_local_word64 memory activation value wellFormed
+      obtain ⟨reference, middle, made, loaded, writable, _⟩ :=
+        make_local_word64 memory activation value wellFormed
       have middleWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made
       obtain ⟨slots, owned, result, rest, homes⟩ := ih middle middleWF
       have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 reference.allocation (by simp)
@@ -61,7 +75,7 @@ theorem make_word_locals (memory : Memory) (activation : Nat) (specs : List (Opt
           (by rw [retained.access reference fresh.2 8 1 true]; exact writable)
           (homes.weaken (Nat.succ_le_of_lt fresh.2))
 
-
+/-- Each word local of the recipe has a home above `lower` holding its initial value. -/
 theorem WordHomes.word_at {memory : Memory} {lower : Nat} {specs slots}
     (homes : WordHomes memory lower specs slots) (index : Nat) (value : BitVec 64)
     (specified : specs[index]? = some (some value)) :
@@ -82,7 +96,8 @@ theorem WordHomes.word_at {memory : Memory} {lower : Nat} {specs slots}
       exact ⟨reference, rfl, fresh, loaded, writable⟩
     | succ index =>
       obtain ⟨r, found, bound, reading, writing⟩ := ih index value (by simpa using specified)
-      exact ⟨r, by simpa using found, Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) bound), reading, writing⟩
+      exact ⟨r, by simpa using found,
+        Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) bound), reading, writing⟩
 
 theorem WordHomes.word_bound {memory : Memory} {lower : Nat} {specs slots}
     (homes : WordHomes memory lower specs slots) (index : Nat) (reference : Reference)
@@ -98,8 +113,10 @@ theorem WordHomes.word_bound {memory : Memory} {lower : Nat} {specs slots}
     | zero =>
       have same : r = reference := by simpa using found
       simpa only [same] using fresh
-    | succ index => exact Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) (ih index (by simpa using found)))
+    | succ index =>
+      exact Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) (ih index (by simpa using found)))
 
+/-- Earlier word homes have strictly smaller allocation identities, so they are distinct. -/
 theorem WordHomes.ordered {memory : Memory} {lower : Nat} {specs slots}
     (homes : WordHomes memory lower specs slots) (i j : Nat) (left right : Reference)
     (order : i < j) (first : slots[i]? = some (.bytes .word64 left))

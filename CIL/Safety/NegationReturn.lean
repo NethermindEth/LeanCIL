@@ -1,5 +1,12 @@
 import CIL.Safety.StepComposition
 
+/-!
+# Boolean negation return
+
+Runs the `ldc.i4.0; ceq; ret` suffix the C# compiler emits for `return !flag;` through the
+checked interpreter, so consumer proofs can close it in one rewrite.
+-/
+
 namespace CIL.Safety
 
 /-- Execute Boolean negation from its actual constant/equality/return suffix. -/

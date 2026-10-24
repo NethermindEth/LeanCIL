@@ -1,6 +1,14 @@
 import CIL.Safety.OutcomeContract
 
-/-! A caller proved over every program linking its own depends on an imported callee only through its contract. -/
+/-!
+# Imported callees
+
+A caller proved over every program that links its own depends on an imported callee only
+through the callee's contract. `Links base linked` says `linked` appends methods after
+`base`; any run of the checked interpreter that never faults `invalidState` (the fault a
+missing method gives) has the same result in every linked program, so method and outcome
+contracts transfer. `HoldsGiven` states a claim that needs the imports' contracts.
+-/
 
 namespace CIL.Safety
 
@@ -22,7 +30,8 @@ theorem Links.trans {first middle last : CIL.Program} :
 
 /-- A method of `base` is found at the same index in every program that links it. -/
 theorem Links.found {base linked : CIL.Program} {index : Nat} {body : CIL.Method}
-    (links : Links base linked) (found : base[index]? = some body) : linked[index]? = some body := by
+    (links : Links base linked)
+    (found : base[index]? = some body) : linked[index]? = some body := by
   obtain ⟨rest, rfl⟩ := links
   obtain ⟨bound, _⟩ := List.getElem?_eq_some_iff.mp found
   rw [List.getElem?_append_left bound]
@@ -73,21 +82,27 @@ theorem run_extend {base linked : CIL.Program} (links : Links base linked) (fuel
               have hlc := links.found hc
               cases he : enterFrame child arguments updated with
               | error fault =>
-                simp only [run, hb, hl, ho, hs, hc, hlc, he, Bind.bind, Except.bind, Except.mapError] at h ⊢
+                simp only [run, hb, hl, ho, hs, hc, hlc, he, Bind.bind, Except.bind,
+                  Except.mapError] at h ⊢
                 exact h
               | ok entered =>
                 obtain ⟨childFrame, childMemory⟩ := entered
                 cases hr : run base fuel callee 0 arguments childFrame [] childMemory with
                 | error fault =>
-                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind, Except.mapError] at h
+                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
+                    Except.mapError] at h
                   subst h
                   have more := ih callee 0 arguments childFrame [] childMemory _ resolved hr
-                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind, Except.mapError]
+                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
+                    Except.mapError]
                 | ok childResult =>
                   obtain ⟨final, values⟩ := childResult
-                  have more := ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) (by intro _ h; cases h) hr
-                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind, Except.mapError] at h
-                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind, Except.mapError]
+                  have more := ih callee 0 arguments childFrame [] childMemory
+                    (.ok (final, values)) (by intro _ h; cases h) hr
+                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
+                    Except.mapError] at h
+                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
+                    Except.mapError]
                   exact ih method (pc + 1) args frame (values ++ rest) final outcome resolved h
           | construct callee arguments rest parentFrame temporary kind updated =>
             cases hc : base[callee]? with
@@ -98,21 +113,27 @@ theorem run_extend {base linked : CIL.Program} (links : Links base linked) (fuel
               have hlc := links.found hc
               cases he : enterFrame child arguments updated with
               | error fault =>
-                simp only [run, hb, hl, ho, hs, hc, hlc, he, Bind.bind, Except.bind, Except.mapError] at h ⊢
+                simp only [run, hb, hl, ho, hs, hc, hlc, he, Bind.bind, Except.bind,
+                  Except.mapError] at h ⊢
                 exact h
               | ok entered =>
                 obtain ⟨childFrame, childMemory⟩ := entered
                 cases hr : run base fuel callee 0 arguments childFrame [] childMemory with
                 | error fault =>
-                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind, Except.mapError] at h
+                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
+                    Except.mapError] at h
                   subst h
                   have more := ih callee 0 arguments childFrame [] childMemory _ resolved hr
-                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind, Except.mapError]
+                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
+                    Except.mapError]
                 | ok childResult =>
                   obtain ⟨final, values⟩ := childResult
-                  have more := ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) (by intro _ h; cases h) hr
-                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind, Except.mapError] at h
-                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind, Except.mapError]
+                  have more := ih callee 0 arguments childFrame [] childMemory
+                    (.ok (final, values)) (by intro _ h; cases h) hr
+                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
+                    Except.mapError] at h
+                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
+                    Except.mapError]
                   cases hn : !values.isEmpty with
                   | true =>
                     simp only [hn, ite_true] at h
@@ -125,7 +146,8 @@ theorem run_extend {base linked : CIL.Program} (links : Links base linked) (fuel
                       exact h
                     | ok value =>
                       simp only [hv] at h ⊢
-                      exact ih method (pc + 1) args parentFrame (value :: rest) final outcome resolved h
+                      exact ih method (pc + 1) args parentFrame
+                        (value :: rest) final outcome resolved h
 
 /-- `run_extend` from a method entry. -/
 theorem invoke_extend {base linked : CIL.Program} (links : Links base linked) (fuel method : Nat)
@@ -155,8 +177,9 @@ theorem invoke_extend {base linked : CIL.Program} (links : Links base linked) (f
         exact run_extend links fuel method 0 checked frame [] entered outcome resolved h
 
 /-- A raised exception is not `invalidState`, so it is raised in every linked program. -/
-theorem Raises.extend {base linked : CIL.Program} {method : Nat} {args : List Value} {memory : Memory}
-    {exception : String} (raised : Raises base method args memory exception) (links : Links base linked) :
+theorem Raises.extend {base linked : CIL.Program} {method : Nat} {args : List Value}
+    {memory : Memory} {exception : String} (raised : Raises base method args memory exception)
+    (links : Links base linked) :
     Raises linked method args memory exception := by
   obtain ⟨fuel, fault, invoked, thrown⟩ := raised
   refine ⟨fuel, fault, invoke_extend links fuel method args memory _ ?_ invoked, thrown⟩
@@ -167,14 +190,17 @@ theorem Raises.extend {base linked : CIL.Program} {method : Nat} {args : List Va
 
 /-- A contract proved on `base` holds at the same index in every program that links it. -/
 theorem MethodContract.Holds.extend {Input Output : Type} {c : MethodContract Input Output}
-    {base linked : CIL.Program} {method : Nat} (holds : c.Holds base method) (links : Links base linked) :
+    {base linked : CIL.Program} {method : Nat} (holds : c.Holds base method)
+    (links : Links base linked) :
     c.Holds linked method := fun input initial permitted =>
   let ⟨fuel, final, values, invoked, framed, returns⟩ := holds input initial permitted
-  ⟨fuel, final, values, invoke_extend links _ _ _ _ _ (fun _ h => nomatch h) invoked, framed, returns⟩
+  ⟨fuel, final, values, invoke_extend links _ _ _ _ _ (fun _ h => nomatch h) invoked,
+    framed, returns⟩
 
 /-- Both outcomes transfer: a normal return as for `MethodContract`, a raise by `Raises.extend`. -/
 theorem OutcomeContract.Holds.extend {Input Output : Type} {c : OutcomeContract Input Output}
-    {base linked : CIL.Program} {method : Nat} (holds : c.Holds base method) (links : Links base linked) :
+    {base linked : CIL.Program} {method : Nat} (holds : c.Holds base method)
+    (links : Links base linked) :
     c.Holds linked method := by
   intro input initial permitted
   have outcome := holds input initial permitted
@@ -183,20 +209,25 @@ theorem OutcomeContract.Holds.extend {Input Output : Type} {c : OutcomeContract 
   | some exception => exact fun raised => raised.extend links
   | none =>
     exact fun ⟨fuel, final, values, invoked, framed, returns⟩ =>
-      ⟨fuel, final, values, invoke_extend links _ _ _ _ _ (fun _ h => nomatch h) invoked, framed, returns⟩
+      ⟨fuel, final, values, invoke_extend links _ _ _ _ _ (fun _ h => nomatch h) invoked,
+        framed, returns⟩
 
-/-- A call to a method the program lacks, such as an unlinked import, faults `invalidState` at the call. -/
+/-- A call to a method the program lacks, such as an unlinked import, faults `invalidState`
+    at the call. -/
 theorem run_call_unlinked {program : CIL.Program} {fuel method pc callee : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (missing : program[callee]? = none) :
-    run program (fuel + 1) method pc args frame stack memory = .error ⟨method, pc, .invalidState⟩ := by
-  simp only [run, methodFound, instructionFound, stepped, missing, Except.mapError, Bind.bind, Except.bind]
+    run program (fuel + 1) method pc args frame stack memory =
+      .error ⟨method, pc, .invalidState⟩ := by
+  simp only [run, methodFound, instructionFound, stepped, missing, Except.mapError, Bind.bind,
+    Except.bind]
 
 /-- Invoking a method the program lacks faults `invalidState` at its entry. -/
-theorem invoke_unlinked {program : CIL.Program} {fuel method : Nat} {args : List Value} {memory : Memory}
+theorem invoke_unlinked {program : CIL.Program} {fuel method : Nat} {args : List Value}
+    {memory : Memory}
     (missing : program[method]? = none) :
     invoke program fuel method args memory = .error ⟨method, 0, .invalidState⟩ := by
   simp only [invoke, missing]

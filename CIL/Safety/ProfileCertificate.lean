@@ -1,9 +1,19 @@
 import CIL.Safety.ProfileEquivalence
 import CIL.Safety.Certificate
 
+/-!
+# Invocation certificates across feature profiles
+
+An `InvocationCertificate` proved for a program under one hardware feature profile also holds
+under another profile, provided every instruction of the program agrees on both
+(`CIL.Program.ProfileAgreement`). Builds on the run equivalence in
+`CIL.Safety.ProfileEquivalence`.
+-/
+
 namespace CIL.Safety
 
-@[simp] theorem programStaticDescriptors_reprofile (program : CIL.Program) (p : CIL.FeatureProfile) :
+@[simp] theorem programStaticDescriptors_reprofile (program : CIL.Program)
+    (p : CIL.FeatureProfile) :
     programStaticDescriptors (CIL.reprofile program p) = programStaticDescriptors program := by
   simp [programStaticDescriptors, CIL.reprofile, List.flatMap_map]
 
@@ -13,9 +23,11 @@ execution, not from an assumption that only the final result matters. -/
 theorem invocationCertificate_reprofile (program : CIL.Program) (p q : CIL.FeatureProfile)
     (agreement : program.ProfileAgreement p q) (method : Nat) (args : List Value)
     (initial : Memory) (fuel : Nat) (final : Memory) (values : List Value)
-    (certificate : InvocationCertificate (CIL.reprofile program p) method args initial fuel final values) :
+    (certificate :
+      InvocationCertificate (CIL.reprofile program p) method args initial fuel final values) :
     InvocationCertificate (CIL.reprofile program q) method args initial fuel final values := by
-  obtain ⟨_, actual, frame, entered, lookup, checked, setup, finished, live, _, _⟩ := certificate
+  obtain ⟨_, actual, frame, entered, lookup, checked, setup, finished, live, _, _⟩ :=
+    certificate
   cases hb : program[method]? with
   | none => simp [hb] at lookup
   | some body =>
@@ -32,6 +44,8 @@ theorem invocationCertificate_reprofile (program : CIL.Program) (p q : CIL.Featu
     · rw [← run_reprofile_eq program p q agreement]
       exact finished
 
+/-- A certificate for a program whose methods all use profile `p` carries over to the same
+    program reprofiled to `q`. -/
 theorem invocationCertificate_uniform_reprofile (program : CIL.Program) (p q : CIL.FeatureProfile)
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (method : Nat) (args : List Value) (initial : Memory) (fuel : Nat)

@@ -1,13 +1,27 @@
 import CIL.Safety.StaticMemoryLemmas
+
+/-!
+# Static worlds
+
+`StaticWorldValid descriptors m` says the readonly statics a program may load are
+consistent with the memory's static registry: identities are unique, every registered
+binding is a live immutable-static allocation, and a cached binding holds exactly the
+descriptor's bytes. Under it `staticReference` never fails, which is what lets contracts
+step over static loads without a fault case.
+-/
+
 namespace CIL.Safety
 
 /-- Loaded readonly field storage, described independently of executing a lookup. -/
-def StaticBindingValid (m : Memory) (descriptor : CIL.StaticDescriptor) (reference : Reference) : Prop :=
+def StaticBindingValid (m : Memory) (descriptor : CIL.StaticDescriptor) (reference : Reference) :
+    Prop :=
   reference.offset = 0 ∧ ∃ allocation,
     m.allocations reference.allocation = some allocation ∧ allocation.live = true ∧
     allocation.kind = .immutableStatic ∧ allocation.layout.size = descriptor.bytes.length ∧
     read m reference descriptor.bytes.length 1 = .ok descriptor.bytes
 
+/-- The static registry binds each identity once, to distinct allocations that are all live
+    immutable statics. -/
 def StaticRegistryValid (m : Memory) : Prop :=
   m.staticBindings.Pairwise (fun left right =>
     left.1 ≠ right.1 ∧ left.2.allocation ≠ right.2.allocation) ∧
@@ -15,6 +29,8 @@ def StaticRegistryValid (m : Memory) : Prop :=
     m.allocations binding.2.allocation = some allocation ∧
       allocation.live = true ∧ allocation.kind = .immutableStatic
 
+/-- The descriptors fit native sizes and have unique identities, the registry is valid, and
+    every registered binding for a descriptor holds that descriptor's bytes. -/
 def StaticWorldValid (descriptors : List CIL.StaticDescriptor) (m : Memory) : Prop :=
   (∀ descriptor ∈ descriptors, descriptor.bytes.length < nativeLimit) ∧
   (∀ left ∈ descriptors, ∀ right ∈ descriptors,
@@ -23,9 +39,11 @@ def StaticWorldValid (descriptors : List CIL.StaticDescriptor) (m : Memory) : Pr
   ∀ descriptor ∈ descriptors, ∀ binding ∈ m.staticBindings,
     descriptor.identity = binding.1 → StaticBindingValid m descriptor binding.2
 
+/-- A cached binding that is valid for the descriptor is returned without allocating. -/
 theorem cached_static_reference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor)
     (key : Nat) (reference : Reference)
-    (cache : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) = some (key, reference))
+    (cache : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) =
+      some (key, reference))
     (valid : StaticBindingValid m descriptor reference) :
     staticReference descriptor m = .ok (m, reference) := by
   obtain ⟨offset, allocation, present, live, kind, size, bytes⟩ := valid
@@ -40,6 +58,8 @@ theorem wellFormed_next_unused (m : Memory) (hm : m.WellFormed) :
     have bad := (hm.1 m.nextIdentity allocation h).1
     exact False.elim (Nat.lt_irrefl _ bad)
 
+/-- In a valid static world, loading any of its descriptors succeeds: from the cache if bound,
+    otherwise by allocating a fresh immutable static. -/
 theorem staticReference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor)
     (descriptors : List CIL.StaticDescriptor) (hm : m.WellFormed)
     (world : StaticWorldValid descriptors m) (member : descriptor ∈ descriptors) :
@@ -82,9 +102,11 @@ theorem static_registry_fields_live (descriptors : List CIL.StaticDescriptor) (m
       allocation.live = true ∧ allocation.kind = .immutableStatic := by
   exact world.2.2.1.2 binding member
 
+/-- None of `identities` is bound in the static registry yet. -/
 def StaticIdentitiesAbsent (identities : List Nat) (m : Memory) : Prop :=
   ∀ binding ∈ m.staticBindings, binding.1 ∉ identities
 
+/-- A valid registry with none of the descriptors bound yet gives a valid static world. -/
 theorem StaticWorldValid.of_absent (descriptors : List CIL.StaticDescriptor) (m : Memory)
     (sizes : ∀ descriptor ∈ descriptors, descriptor.bytes.length < nativeLimit)
     (identities : ∀ left ∈ descriptors, ∀ right ∈ descriptors,

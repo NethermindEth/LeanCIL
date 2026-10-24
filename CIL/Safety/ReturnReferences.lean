@@ -1,7 +1,16 @@
 import CIL.Safety.LiveValues
 
+/-!
+# Returned references are valid
+
+Every value a successful run or invocation returns passed `checkedValue` against the final
+memory, after the returning frame was torn down, so the results are `ValuesValid` in the
+memory the caller receives.
+-/
+
 namespace CIL.Safety
 
+/-- Values that pass the result check, under any fault relocation, are valid in that memory. -/
 theorem checkedValues_mapError_valid (m : Memory) (values result : List Value)
     (locate : ExecutionFault → α)
     (h : (values.mapM (checkedValue m)).mapError locate = .ok result) : ValuesValid m result := by
@@ -12,7 +21,6 @@ theorem checkedValues_mapError_valid (m : Memory) (values result : List Value)
 
 /-- Normal results have passed the reference check after frame expiration.
     This includes results returning through arbitrary nested call chains. -/
-
 theorem run_result_valid (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value)

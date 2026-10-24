@@ -1,6 +1,14 @@
 import CIL.Safety.AllocationExtension
 import CIL.Safety.StaticWorld
 
+/-!
+# Immutable statics survive writes and allocation
+
+`PreservesImmutable` says a memory step leaves every immutable static allocation, its bytes
+and its read permissions alone. Writes, snapshot writes and allocations all preserve it, so
+a valid static world stays valid across them while the binding registry is unchanged.
+-/
+
 namespace CIL.Safety
 
 /-- Existing immutable storage retains its allocation, contents, initialization
@@ -28,7 +36,8 @@ theorem PreservesImmutable.read {m result : Memory} (preserves : PreservesImmuta
     (kind : a.kind = .immutableStatic) (width alignment : Nat) :
     read result r width alignment = read m r width alignment := by
   obtain ⟨found, cells, permissions⟩ := preserves _ _ present kind
-  simp only [CIL.Safety.read, CIL.Safety.access, CIL.Safety.form, CIL.Safety.liveAllocation, found, present]
+  simp only [CIL.Safety.read, CIL.Safety.access, CIL.Safety.form, CIL.Safety.liveAllocation,
+    found, present]
   simp only [cells, permissions]
 
 theorem PreservesImmutable.binding {m result : Memory} (preserves : PreservesImmutable m result)
@@ -39,9 +48,12 @@ theorem PreservesImmutable.binding {m result : Memory} (preserves : PreservesImm
   exact ⟨offset, a, (preserves _ _ present kind).1, live, kind, size,
     (preserves.read reference a present kind _ _).trans bytes⟩
 
+/-- A static world stays valid across any step that preserves immutable storage and leaves
+    the binding registry unchanged. -/
 theorem PreservesImmutable.world {m result : Memory} (preserves : PreservesImmutable m result)
     (descriptors : List CIL.StaticDescriptor) (world : StaticWorldValid descriptors m)
-    (registry : result.staticBindings = m.staticBindings) : StaticWorldValid descriptors result := by
+    (registry : result.staticBindings = m.staticBindings) :
+    StaticWorldValid descriptors result := by
   refine ⟨world.1, world.2.1, ?_, ?_⟩
   · constructor
     · rw [registry]
@@ -54,6 +66,7 @@ theorem PreservesImmutable.world {m result : Memory} (preserves : PreservesImmut
     rw [registry] at member
     exact preserves.binding _ _ (world.2.2.2 descriptor selected binding member key)
 
+/-- A successful write cannot target immutable storage, so it preserves it. -/
 theorem write_preserves_immutable (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat)
     (h : write m r bytes alignment = .ok result) : PreservesImmutable m result := by

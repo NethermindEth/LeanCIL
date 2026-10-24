@@ -1,5 +1,13 @@
 import CIL.Safety.Relocation
 
+/-!
+# Concrete addresses under a placement
+
+Under any valid placement, concrete addresses of live references are nonzero and do not
+wrap, interior addresses of distinct allocations never collide, and every access the checked
+interpreter accepts is aligned. None of this depends on a particular placement.
+-/
+
 namespace CIL.Safety
 
 /-- A legal placement gives a non-null, non-wrapping address even for an
@@ -49,6 +57,7 @@ theorem concreteAddress_injective (p : Placement) (m : Memory) (hp : p.Valid m)
 
 #print axioms concreteAddress_bounds
 #print axioms concreteAddress_injective
+
 /-- An accepted access uses runtime-guaranteed alignment, rather than a
 stronger alignment that happens to hold before relocation. -/
 theorem access_guaranteed_alignment (m : Memory) (r : Reference)
@@ -78,7 +87,8 @@ theorem checked_access_aligned_at_placement (p : Placement) (m : Memory)
     (hp : p.Valid m) (r : Reference) (width alignment : Nat) (writing : Bool)
     (checked : access m r width alignment writing = .ok ()) :
     (concreteAddress p r).toNat % alignment = 0 := by
-  obtain ⟨a, ha, hlive, _, hsize⟩ := access_guaranteed_alignment m r width alignment writing checked
+  obtain ⟨a, ha, hlive, _, hsize⟩ :=
+    access_guaranteed_alignment m r width alignment writing checked
   obtain ⟨b, hb, _, bounds⟩ := access_within_allocation m r width alignment writing checked
   have same : b = a := Option.some.inj (hb.symm.trans ha)
   subst b

@@ -1,5 +1,13 @@
 import CIL.Safety.AccessSlices
 
+/-!
+# Reads covered by smaller reads
+
+A wide checked read succeeds when every byte it touches lies inside some narrower read that
+already succeeded, and the wide access passes its own layout and extent checks. Lets proofs
+assemble a full read from facts about its slices.
+-/
+
 namespace CIL.Safety
 
 /-- Full-range layout and extent checks plus initialized readable slices justify
@@ -11,14 +19,18 @@ theorem read_of_cover {memory : Memory} {reference : Reference} {width : Nat}
       start ≤ i ∧ i < start + count ∧
       read memory { reference with offset := reference.offset + start } count 1 = .ok bytes) :
     read memory reference width 1 =
-      .ok ((List.range width).map fun i => (memory.cells reference.allocation (reference.offset + i)).bits) := by
+      .ok ((List.range width).map fun i =>
+        (memory.cells reference.allocation (reference.offset + i)).bits) := by
   have covered (i : Nat) (bound : i < width) :
       permitted memory false { reference with offset := reference.offset + i } = true ∧
       (memory.cells reference.allocation (reference.offset + i)).initialized = true := by
     obtain ⟨start, count, bytes, lower, upper, loaded⟩ := cover i bound
-    have accessOK : access memory { reference with offset := reference.offset + start } count 1 false = .ok () := by
+    have accessOK :
+        access memory { reference with offset := reference.offset + start } count 1 false =
+          .ok () := by
       unfold read at loaded
-      cases h : access memory { reference with offset := reference.offset + start } count 1 false with
+      cases h :
+          access memory { reference with offset := reference.offset + start } count 1 false with
       | error fault => simp [h, Bind.bind, Except.bind] at loaded
       | ok value => cases value; rfl
     obtain ⟨_, slice⟩ := access_requirements accessOK
