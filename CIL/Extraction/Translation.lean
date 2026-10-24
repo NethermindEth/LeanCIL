@@ -109,18 +109,21 @@ private instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     Decidable (MethodAtValid rawLayouts layouts all imports item method) := by
   cases method <;> dsimp [MethodAtValid] <;> infer_instance
 
+/-- The architecture layouts are computed for: the first method's profile, or `.scalar` for
+    an empty program. -/
+abbrev programArchitecture (program : Program) : Architecture :=
+  ((program.head?).map fun method => method.profile.architecture).getD .scalar
+
 /-- The certificate covers the entire emitted program, with no optional method list; calls
     past it must match `imports`. -/
 def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) : Prop :=
-  LayoutsValid rawLayouts layouts
-      (((program.head?).map fun method => method.profile.architecture).getD .scalar) ∧
+  LayoutsValid rawLayouts layouts (programArchitecture program) ∧
     evidence.length = program.length ∧
   (∀ index : Fin evidence.length,
     MethodAtValid rawLayouts layouts evidence imports evidence[index] program[index.val]?) ∧
   StaticValuesValid program ∧
-  ImportedLayoutsValid imports
-    (((program.head?).map fun method => method.profile.architecture).getD .scalar)
+  ImportedLayoutsValid imports (programArchitecture program)
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) :
@@ -140,11 +143,9 @@ inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array Computed
 /-- Assembles `TranslationValid` from the program-wide checks and per-method proofs. -/
 theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}
-    (layout : LayoutsValid rawLayouts layouts
-      (((program.head?).map fun method => method.profile.architecture).getD .scalar))
+    (layout : LayoutsValid rawLayouts layouts (programArchitecture program))
     (statics : StaticValuesValid program)
-    (importLayouts : ImportedLayoutsValid imports
-      (((program.head?).map fun method => method.profile.architecture).getD .scalar))
+    (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (methods : MethodsChecked rawLayouts layouts evidence imports evidence program) :
     TranslationValid rawLayouts layouts evidence imports program := by
   have compose {items code}
