@@ -513,8 +513,8 @@ encoding, `contract.forward forwarded`, without stepping either body:
 ```lean
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
   add_public.forward (indices := [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ member => member) (fun _ _ _ => rfl)
-    (fun _ _ _ _ _ => trivial)
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ _ member => .inl member)
+    (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 ```
 
 `Forwards body calleeBody indices callee narrow` fixes the body to
@@ -522,8 +522,8 @@ theorem sum_forwards : sumContract.Holds Extracted.program sum :=
 parameter homes, so frame entry and exit leave memory unchanged and the callee's
 precondition, footprint and postcondition carry over verbatim. The argument order
 is data: the callee's arguments must be the forwarder's at `indices`, every
-forwarder argument must reach the callee (the forwarder's own invocation checks
-them all), the call must expose no unspecified vector bits, and a narrowed
+forwarder argument must reach the callee or be valid under the precondition (the
+forwarder's own invocation checks them all), the call must expose no unspecified vector bits, and a narrowed
 `ret (some kind)` must not change the callee's result (`ReturnsUnchanged`), which
 holds for a boolean. Use `Holds.weaken` afterwards to export a different contract.
 

@@ -8,8 +8,8 @@ import CIL.Safety.Forwarders
 
 /-! Synthetic extraction: `Root(v) => Percent(v) + 1`, a throwing `Percent`,
     `AddTo(in a, in b, out res)`, `Sum` and `SumSwapped(in b, in a, out res)` forwarding to it,
-    `SumDiscard(in a, in b)` forwarding with a discarded out local, and `IsZero(v)` with its
-    forwarder `IsZeroForward(v)`. -/
+    `AddFlag(in a, in b, out res)` and `SumDiscard(in a, in b)` forwarding to it with a
+    discarded out local, and `IsZero(v)` with its forwarder `IsZeroForward(v)`. -/
 namespace Extracted
 
 open CIL
@@ -18,12 +18,19 @@ def method0Signature : String := "System.UInt64 Consequence.Calls::Root(System.U
 def method1Signature : String := "System.UInt64 Consequence.Calls::Percent(System.UInt64)"
 def method2Signature : String := "System.Void Consequence.Calls::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"
 def method3Signature : String := "System.Void Consequence.Calls::Sum(System.UInt64&,System.UInt64&,System.UInt64&)"
+/-- `SumSwapped(in b, in a, out res) => AddTo(in a, in b, out res)`. -/
 def method4Signature : String :=
   "System.Void Consequence.Calls::SumSwapped(System.UInt64&,System.UInt64&,System.UInt64&)"
+/-- `SumDiscard(in a, in b) => AddFlag(in a, in b, out _)`. -/
 def method5Signature : String :=
-  "System.Void Consequence.Calls::SumDiscard(System.UInt64&,System.UInt64&)"
+  "System.Boolean Consequence.Calls::SumDiscard(System.UInt64&,System.UInt64&)"
+/-- `IsZero(v) => v == 0`. -/
 def method6Signature : String := "System.Boolean Consequence.Calls::IsZero(System.UInt64)"
+/-- `IsZeroForward(v) => IsZero(v)`. -/
 def method7Signature : String := "System.Boolean Consequence.Calls::IsZeroForward(System.UInt64)"
+/-- `AddFlag(in a, in b, out res) { res = a + b; return true; }`. -/
+def method8Signature : String :=
+  "System.Boolean Consequence.Calls::AddFlag(System.UInt64&,System.UInt64&,System.UInt64&)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
@@ -33,20 +40,28 @@ def method7Signature : String := "System.Boolean Consequence.Calls::IsZeroForwar
   [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ret] }
 @[cil_code] def method3 : Method := { returnsValue := false, locals := [], code :=
   [.arg 0, .arg 1, .arg 2, .call 2 3, .ret] }
+/-- `SumSwapped`: loads its arguments in the order `AddTo` takes them. -/
 @[cil_code] def method4 : Method := { returnsValue := false, locals := [], code :=
   [.arg 1, .arg 0, .arg 2, .call 2 3, .ret] }
+/-- `SumDiscard`: passes its local's address as `AddFlag`'s `res` and returns the flag. -/
 @[cil_code] def method5 : Method :=
-  { returnsValue := false, locals := [.unmodeled], localKinds := [.word64], code :=
-    [.arg 0, .arg 1, .localAddr 0, .call 2 3, .ret] }
+  { returnsValue := true, locals := [.unmodeled], localKinds := [.word64], code :=
+    [.arg 0, .arg 1, .localAddr 0, .call 8 3, .ret (some .unsigned8)] }
+/-- `IsZero`: a comparison returned as a narrowed boolean. -/
 @[cil_code] def method6 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .const32 0, .convI8, .eq, .ret (some .unsigned8)] }
+/-- `IsZeroForward`: re-narrows `IsZero`'s boolean through its own `ret`. -/
 @[cil_code] def method7 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .call 6 1, .ret (some .unsigned8)] }
+/-- `AddFlag`: `AddTo`'s store followed by a constant `true`. -/
+@[cil_code] def method8 : Method := { returnsValue := true, locals := [], code :=
+  [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .const32 1,
+    .ret (some .unsigned8)] }
 @[cil_code] def program : Program :=
-  [method0, method1, method2, method3, method4, method5, method6, method7]
+  [method0, method1, method2, method3, method4, method5, method6, method7, method8]
 def signatures : List String :=
   [method0Signature, method1Signature, method2Signature, method3Signature, method4Signature,
-    method5Signature, method6Signature, method7Signature]
+    method5Signature, method6Signature, method7Signature, method8Signature]
 
 end Extracted
 
@@ -63,7 +78,9 @@ bind_call addSite := addTo from sumBody
 bind_method swapped swappedBody :=
   "System.Void Consequence.Calls::SumSwapped(System.UInt64&,System.UInt64&,System.UInt64&)"
 bind_method discard discardBody :=
-  "System.Void Consequence.Calls::SumDiscard(System.UInt64&,System.UInt64&)"
+  "System.Boolean Consequence.Calls::SumDiscard(System.UInt64&,System.UInt64&)"
+bind_method addFlag addFlagBody :=
+  "System.Boolean Consequence.Calls::AddFlag(System.UInt64&,System.UInt64&,System.UInt64&)"
 bind_method isZero isZeroBody := "System.Boolean Consequence.Calls::IsZero(System.UInt64)"
 bind_method isZeroForward isZeroForwardBody :=
   "System.Boolean Consequence.Calls::IsZeroForward(System.UInt64)"
@@ -259,8 +276,8 @@ theorem sum_correct : sumContract.Holds Extracted.program sum := sum_holds add_p
 /-- `Sum` passes its arguments through in order, so it meets `addPublic` itself. -/
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
   add_public.forward (indices := [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ member => member) (fun _ _ _ => rfl)
-    (fun _ _ _ _ _ => trivial)
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ _ member => .inl member)
+    (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 
 #print axioms sum_forwards
 
@@ -274,10 +291,10 @@ def swappedArgs (input : AddInput) : List Value :=
 theorem swapped_forwards : (addPublic.forward swappedArgs).Holds Extracted.program swapped :=
   add_public.forward (indices := [1, 0, 2]) (narrow := none) (forwarded := swappedArgs)
     swapped.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
-    (fun _ _ member => by
+    (fun _ _ _ _ member => .inl (by
       simp only [swappedArgs, addPublic, addArgs, List.mem_cons, List.not_mem_nil, or_false]
         at member ⊢
-      rcases member with same | same | same <;> simp [same])
+      rcases member with same | same | same <;> simp [same]))
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 
 #print axioms swapped_forwards
@@ -299,6 +316,42 @@ theorem duplicated_not_selected :
 
 #print axioms duplicated_not_selected
 
+/-- `AddFlag`: `AddTo`'s contract, returning `true` as a narrowed boolean. -/
+def addFlagContract : MethodContract AddInput Bool where
+  args := addArgs
+  results flag := [.scalar (.i32 (if flag then 1 else 0))]
+  pre := addPre
+  footprint input := [(input.res, 8)]
+  post input _ final flag := flag = true ∧
+    read final input.res 8 1 = .ok (numberBytes (input.x + input.y).toNat 8)
+
+/-- `AddFlag` meets its contract by stepping its body. -/
+theorem add_flag_holds : addFlagContract.Holds Extracted.program addFlag := by
+  rintro ⟨a, b, res, region, x, y⟩ memory ⟨readA, readB, writable⟩
+  dsimp only [addFlagContract, addArgs] at *
+  have length : (numberBytes (x + y).toNat 8).length = 8 := by simp [numberBytes]
+  obtain ⟨stored, wrote⟩ := write_succeeds (bytes := numberBytes (x + y).toNat 8)
+    (by simpa only [length] using writable)
+  have readback := write_readback _ _ _ _ _ wrote
+  rw [length] at readback
+  have store : storeValue memory (.address res) (.i64 (x + y)) = .ok stored := by
+    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
+      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+  have formedA := access_reference_valid _ _ _ _ _ (read_access readA)
+  have formedB := access_reference_valid _ _ _ _ _ (read_access readB)
+  have formedRes := access_reference_valid _ _ _ _ _ writable
+  have loadA := load_word64_of_read readA
+  have loadB := load_word64_of_read readB
+  have narrowed : CIL.NarrowKind.unsigned8.extend 1 = 1 := by decide
+  refine ⟨11, stored, [.scalar (.i32 1)], ?_, Confined.write wrote (by simp [numberBytes]),
+    true, rfl, rfl, readback⟩
+  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction,
+    memoryInstruction, observerCount, unspecifiedOperands, Value.hasUnspecified,
+    CIL.Value.hasUnspecified, formedA, formedB, formedRes, loadA, loadB, store, narrowed,
+    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms add_flag_holds
+
 /-- `SumDiscard(a, b)` reads the words at `a` and `b`, which hold `x` and `y`. -/
 structure DiscardInput where
   a : Reference
@@ -306,37 +359,37 @@ structure DiscardInput where
   x : CIL.W64
   y : CIL.W64
 
-/-- `SumDiscard`'s contract: `AddTo`'s write lands in the forwarder's own local, so callers
-    see an empty footprint and `a` unchanged. -/
-def discardContract : MethodContract DiscardInput where
+/-- `SumDiscard`'s contract: `AddFlag`'s write lands in the forwarder's own local, so callers
+    see an empty footprint and `a` unchanged, and the flag it returns survives the local. -/
+def discardContract : MethodContract DiscardInput Bool where
   args input := [.reference (.address input.a), .reference (.address input.b)]
-  pre input m := m.WellFormed ∧ read m input.a 8 1 = .ok (numberBytes input.x.toNat 8) ∧
-    read m input.b 8 1 = .ok (numberBytes input.y.toNat 8)
+  results flag := [.scalar (.i32 (if flag then 1 else 0))]
+  pre input memory := memory.WellFormed ∧
+    read memory input.a 8 1 = .ok (numberBytes input.x.toNat 8) ∧
+    read memory input.b 8 1 = .ok (numberBytes input.y.toNat 8)
   footprint _ := []
-  post input _ final values := values = [] ∧
+  post input _ final flag := flag = true ∧
     read final input.a 8 1 = .ok (numberBytes input.x.toNat 8)
 
-/-- The out local is fresh, so `AddTo`'s footprint drops out and `a` keeps its bytes; the
-    forwarder's frame is never stepped by hand. -/
+/-- The out local is fresh, so `AddFlag`'s footprint drops out, `a` keeps its bytes and the
+    returned flag outlives the local; the forwarder's frame is never stepped by hand. -/
 theorem discard_forwards : discardContract.Holds Extracted.program discard :=
-  add_internal.forward_out (indices := [0, 1]) (narrow := none) (kind := .word64)
+  add_flag_holds.forward_out (indices := [0, 1]) (narrow := some .unsigned8) (kind := .word64)
     (fun input home => ⟨input.a, input.b, home, home, input.x, input.y⟩)
-    discard.found addTo.found ⟨rfl, rfl, rfl, nofun, rfl, rfl, rfl, rfl⟩ (fun _ _ => rfl)
+    discard.found addFlag.found ⟨rfl, rfl, rfl, nofun, rfl, rfl, rfl, rfl⟩ (fun _ _ => rfl)
     (fun _ _ ⟨formed, readA, readB⟩ => ⟨formed, fun value member => by
       simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
       · exact access_reference_valid _ _ _ _ _ (read_access readA)
       · exact access_reference_valid _ _ _ _ _ (read_access readB)⟩)
-    (fun _ _ => rfl) (fun _ _ _ _ _ => trivial) (fun _ => rfl)
-    (fun _ _ _ _ ⟨empty, _⟩ value member => by
-      dsimp only [addInternal] at empty member
-      subst empty; cases member)
+    (fun _ _ _ _ => rfl) (fun _ _ _ flag _ => ⟨_, rfl, by cases flag <;> decide⟩)
+    (fun _ => rfl) (fun _ _ _ _ _ _ member => ⟨_, List.mem_singleton.mp member⟩)
     (fun _ _ _ _ ⟨formed, readA, readB⟩ below _ _ writable => ⟨
       (below.read _ (formed.access_bound (read_access readA)) 8 1).trans readA,
       (below.read _ (formed.access_bound (read_access readB)) 8 1).trans readB, writable⟩)
     (fun _ _ _ _ fresh _ member => Or.inl (List.mem_singleton.mp member ▸ fresh))
-    (fun _ _ _ _ _ _ _ ⟨formed, readA, _⟩ _ _ _ _ confined ⟨empty, _⟩ =>
-      ⟨empty, confined.read_apart formed readA nofun⟩)
+    (fun _ _ _ _ _ _ _ ⟨formed, readA, _⟩ _ _ _ _ confined ⟨flag, _⟩ =>
+      ⟨flag, confined.read_apart formed readA nofun⟩)
 
 #print axioms discard_forwards
 
@@ -348,9 +401,10 @@ def isZeroContract : MethodContract CIL.W64 Bool where
   footprint _ := []
   post v _ _ zero := zero = decide (v = 0)
 
+/-- `IsZero` meets its contract by stepping its body. -/
 theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
-  intro v m _
-  refine ⟨6, m, isZeroContract.results (decide (v = 0)), ?_, Confined.refl _ m,
+  intro v memory _
+  refine ⟨6, memory, isZeroContract.results (decide (v = 0)), ?_, Confined.refl _ memory,
     decide (v = 0), rfl, rfl⟩
   simp only [isZeroContract, decide_eq_true_eq]
   cil_checked_steps [NarrowKind.extend_ite_ofNat_one_zero]
@@ -362,7 +416,8 @@ theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
 theorem is_zero_forwards :
     (isZeroContract.forward isZeroContract.args).Holds Extracted.program isZeroForward :=
   is_zero_holds.forward (indices := [0]) (narrow := some .unsigned8) isZeroForward.found
-    isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ member => member)
+    isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
 
 #print axioms is_zero_forwards

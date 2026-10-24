@@ -217,9 +217,9 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
 
 /-- A forwarder inherits its callee's contract: it meets `pre`, `footprint` and `post`
     unchanged, with arguments encoded by `forwarded`. The callee's arguments must be the
-    forwarder's at `indices`, every forwarder argument must reach the callee (the forwarder
-    checks them all), the call must expose no unspecified vector bits, and a narrowed
-    return must not change the callee's result. -/
+    forwarder's at `indices`; each forwarder argument must reach the callee or be valid
+    under `pre`, since the forwarder checks them all; the call must expose no unspecified
+    vector bits; and a narrowed return must not change the callee's result. -/
 theorem MethodContract.Holds.forward {Input Output : Type}
     {contract : MethodContract Input Output}
     {program : CIL.Program} {method callee : Nat} {body calleeBody : CIL.Method}
@@ -229,7 +229,8 @@ theorem MethodContract.Holds.forward {Input Output : Type}
     (forwards : Forwards body calleeBody indices callee narrow)
     (selected : ∀ input,
       indices.map (fun index => (forwarded input)[index]?) = (contract.args input).map some)
-    (covered : ∀ input, ∀ value ∈ forwarded input, value ∈ contract.args input)
+    (covered : ∀ input initial, contract.pre input initial → ∀ value ∈ forwarded input,
+      value ∈ contract.args input ∨ value.Valid initial)
     (known : ∀ input initial, contract.pre input initial →
       (contract.args input).any Value.hasUnspecified = false)
     (unchanged : ∀ input initial final out, contract.post input initial final out →
@@ -241,7 +242,8 @@ theorem MethodContract.Holds.forward {Input Output : Type}
   have forwardedValid : ValuesValid initial (forwarded input) := by
     obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ calleeChecked
     subst same
-    exact fun value member => valid value (covered input value member)
+    exact fun value member =>
+      (covered input initial permitted value member).elim (valid value) id
   have length : (contract.args input).length = indices.length := by
     simpa using (congrArg List.length (selected input)).symm
   have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode indices callee narrow)[pc]? := by
@@ -342,7 +344,8 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
         (inner.args (extend input home)).map some)
     (checked : ∀ input initial, outer.pre input initial →
       initial.WellFormed ∧ ValuesValid initial (outer.args input))
-    (known : ∀ input home, (inner.args (extend input home)).any Value.hasUnspecified = false)
+    (known : ∀ input initial home, outer.pre input initial →
+      (inner.args (extend input home)).any Value.hasUnspecified = false)
     (unchanged : ∀ input entered final out, inner.post input entered final out →
       ReturnsUnchanged narrow (inner.results out))
     (results : ∀ out, outer.results out = inner.results out)
@@ -421,7 +424,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       rw [fetched, outForwarderCode, List.getElem?_append_right (by simp; omega)]
       simp [show indices.length + 1 + 1 - indices.length = 2 by omega])
     forwards.returnsValue (unchanged (extend input home) memory) calleePre
-    (known input home) (fun final values valid returns => ?_)
+    (known input initial home permitted) (fun final values valid returns => ?_)
     (fun final values framed returns => ?_)
   · obtain ⟨out, encoded, satisfied⟩ := returns
     intro value member
