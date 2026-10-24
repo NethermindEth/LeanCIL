@@ -5,6 +5,14 @@ affect the public proof API. PRs changing them should describe the migration,
 provide equations for the previous default case where it remains sound, and
 report the pinned consumer check separately from upstream tests.
 
+The advisory `Consumer compatibility` workflow checks out an immutable int256
+revision, substitutes the committed LeanCIL candidate as its Lake dependency,
+builds its extraction-independent library, and verifies Add/ARM64 AdvSimd and
+Subtract/x64 SSE4.2. Its summary distinguishes library builds from compiled
+certificates. Update the consumer revision through a reviewed PR when adopting
+API migrations. Logs are diagnostic evidence; the workflow does not publish
+portable trusted consumer artifacts.
+
 ## Vector128 locals and unspecified lanes
 
 Opaque Vector128 locals are selected only when a method's reachable extracted
@@ -39,6 +47,16 @@ reasoning. In custom dispatch tactics, inspect the operation before trying step
 lemmas for other operations; unifying an unrelated step equation may unfold
 large symbolic stacks. No global heartbeat increase or weakened safety condition
 is part of this migration.
+
+## Checked method boundaries
+
+`step_newAggregate`, `step_newVector256` and `run_newAggregate_of_contract`
+also require `arguments.any Value.hasUnspecified = false`. Prove this from the
+actual argument encodings. The `checkedValue` and `numericValue` premises alone
+allow partially specified internal vectors and therefore cannot justify it.
+Generic consumer forwarding lemmas must carry the corresponding known-argument
+premise; concrete integer and managed-reference callers discharge it by reduction.
+The caller's arithmetic and memory contracts do not need to change.
 
 The runtime-profile migration is separate: see [RUNTIME-PROFILES](RUNTIME-PROFILES.md).
 Changing a feature profile can change the selected code and requires fresh

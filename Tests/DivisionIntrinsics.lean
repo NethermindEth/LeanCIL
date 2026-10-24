@@ -128,7 +128,8 @@ example : ¬ OpaqueLocalsValid withLocal { localBody with code := [] } := by dec
 example : ¬ OpaqueLocalsValid withLocal { localBody with opaqueVectorLocals := [] } := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 18, .local 0⟩] } localBody := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 65037, .local 0⟩] } localBody := by decide +kernel
-example : ¬ OpaqueLocalsValid withLocal { localBody with code := [.localAddr 0] } := by decide +kernel
+example : ¬ OpaqueLocalsValid withLocal
+    { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1, .localAddr 0] } := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal { localBody with localKinds := [.word64] } := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with locals := [.atom runtimeScope "System.UInt64"] } localBody := by decide +kernel
 

@@ -1,0 +1,79 @@
+name: Consumer compatibility
+
+on:
+  pull_request:
+    paths: ['CIL/**', 'CIL.lean', 'Extractor/**', 'scripts/**', 'lean-toolchain', 'lakefile.toml', '.github/workflows/consumer.yml']
+  push:
+    branches: [main]
+    paths: ['CIL/**', 'CIL.lean', 'Extractor/**', 'scripts/**', 'lean-toolchain', 'lakefile.toml', '.github/workflows/consumer.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  int256:
+    name: int256 library and accelerated certificates (advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: NethermindEth/int256
+          ref: dc945cbc4935a363ba3d3015311097bdc818f255
+          path: consumer
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Bind the pinned consumer to this committed candidate
+        run: dotnet run --file scripts/PrepareConsumer.cs -- consumer .
+      - name: Build the extraction-independent consumer library
+        id: library
+        working-directory: consumer/verification
+        run: |
+          set -o pipefail
+          lake update
+          lake build 2>&1 | tee ../../consumer-library.log
+          ! grep -q sorryAx ../../consumer-library.log
+      - name: Certify Add on ARM64 AdvSimd
+        id: arm
+        if: always() && steps.library.outcome == 'success'
+        working-directory: consumer
+        run: |
+          set -o pipefail
+          dotnet run --file verification/Verify.cs -- --action verify --method Add --profile arm64-advsimd 2>&1 | tee ../consumer-arm.log
+      - name: Certify Subtract on x64 SSE4.2
+        id: x64
+        if: always() && steps.library.outcome == 'success'
+        working-directory: consumer
+        run: |
+          set -o pipefail
+          dotnet run --file verification/Verify.cs -- --action verify --method Subtract --profile x64-sse42 2>&1 | tee ../consumer-x64.log
+      - name: Report consumer status separately from upstream verification
+        if: always()
+        env:
+          LIBRARY: ${{ steps.library.outcome }}
+          ARM: ${{ steps.arm.outcome }}
+          X64: ${{ steps.x64.outcome }}
+        run: |
+          printf '### Pinned int256 compatibility (advisory)\n\nLibrary: %s\n\nAdd/arm64-advsimd: %s\n\nSubtract/x64-sse42: %s\n' "$LIBRARY" "$ARM" "$X64" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: int256-compatibility-logs
+          path: consumer-*.log
+          if-no-files-found: ignore
