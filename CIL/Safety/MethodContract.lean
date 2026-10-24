@@ -447,7 +447,7 @@ macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
           run_tac do
             let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
             let operation := (target.getArg! 1).getArg! 1
-            if operation.isAppOf ``CIL.Op.ret then
+            if (← CIL.Safety.cilReducedOp? operation).any (·.isAppOf ``CIL.Op.ret) then
               throwError "Return requires run_return_exists"
           cil_checked_step_normalized [$[$facts:term],*]) ?_
        cil_stack_cleanup)

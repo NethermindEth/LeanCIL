@@ -116,4 +116,28 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_count_nullRef : CIL.MemoryOp.nullRef.argumentCount = 0 := rfl
 @[cil_guard] theorem guard_count_isNullRef : CIL.MemoryOp.isNullRef.argumentCount = 1 := rfl
 
+
+-- A loaded local must reach a bare value constructor, or no value-step equation matches its consumer.
+@[cil_guard] theorem localResult_narrow_i32 (kind : CIL.NarrowKind) (bits : CIL.W32) :
+    localResult (.narrow kind) (.i32 bits) = .i32 (kind.extend bits) := rfl
+@[cil_guard] theorem localResult_aggregate (size : Fin (2^64)) (value : CIL.Value) :
+    localResult (.aggregate size) value = value := rfl
+@[cil_guard] theorem localResult_byte (value : CIL.Value) : localResult .byte value = value := rfl
+@[cil_guard] theorem localResult_word32 (value : CIL.Value) : localResult .word32 value = value := rfl
+@[cil_guard] theorem localResult_word64 (value : CIL.Value) : localResult .word64 value = value := rfl
+@[cil_guard] theorem localResult_vector128 (value : CIL.Value) : localResult .vector128 value = value := rfl
+@[cil_guard] theorem localResult_vector256 (value : CIL.Value) : localResult .vector256 value = value := rfl
+@[cil_guard] theorem localResult_vector512 (value : CIL.Value) : localResult .vector512 value = value := rfl
+@[cil_guard] theorem localResult_reference (value : CIL.Value) : localResult .reference value = value := rfl
+
+#print axioms localResult_narrow_i32
+#print axioms localResult_aggregate
+#print axioms localResult_byte
+#print axioms localResult_word32
+#print axioms localResult_word64
+#print axioms localResult_vector128
+#print axioms localResult_vector256
+#print axioms localResult_vector512
+#print axioms localResult_reference
+
 end CIL.Safety
