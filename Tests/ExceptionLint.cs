@@ -81,7 +81,7 @@ foreach ((string Selector, string Profile, string[] Expected) item in new (strin
     ("Examples.ExceptionDocumentation::CheckedAdd(long,long)", "scalar", ["System.OverflowException"]),
     ("Examples.ExceptionDocumentation::CheckedNarrow(long)", "scalar", ["System.OverflowException"]),
     ("Examples.ExceptionDocumentation::SpanItem(int)", "scalar", ["System.IndexOutOfRangeException"]),
-    ("Examples.ExceptionDocumentation::DivRem(ulong,ulong,ulong)", "x64-bmi2", ["System.DivideByZeroException", "System.OverflowException"])
+    ("Examples.ExceptionDocumentation::DivRem(ulong,ulong,ulong)", "x64-v3", ["System.DivideByZeroException", "System.OverflowException"])
 })
 {
     Extract(item.Selector, item.Profile);

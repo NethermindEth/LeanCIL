@@ -49,7 +49,7 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
         new { signature = "Fixture::First(int)", profile = "scalar" },
         new { signature = "Fixture::Second(int)", profile = "scalar" },
         new { signature = "Fixture::Excluded(ulong,ulong)", profile = "scalar" },
-        new { signature = "Fixture::Excluded(ulong,ulong)", profile = "x64-avx2" },
+        new { signature = "Fixture::Excluded(ulong,ulong)", profile = "x64-v3" },
         new { signature = "Fixture::Missing(int)", profile = "scalar" },
         new { signature = "Fixture::Admitted(ulong,ulong)", profile = "x64-unknown" },
         new { signature = "Fixture::External(int)", profile = "scalar" }
@@ -94,7 +94,7 @@ Require(Reached(allocation).SequenceEqual([
 Require(Reached(length).SequenceEqual([
     $"scalar System.Int32 Fixture::First(System.Int32) -> {helper}",
     $"scalar System.Int32 Fixture::Second(System.Int32) -> {helper}",
-    $"x64-avx2 {excluded}"]), "ldlen not shared across methods and profiles: " + string.Join("; ", Reached(length)));
+    $"x64-v3 {excluded}"]), "ldlen not shared across methods and profiles: " + string.Join("; ", Reached(length)));
 Require(length.GetProperty("sites").EnumerateArray().Select(s => s.GetProperty("method").GetString()).Order(StringComparer.Ordinal)
     .SequenceEqual([helper, excluded]), "ldlen sites not kept per method");
 Require(Ids(1).Order(StringComparer.Ordinal).SequenceEqual(new[] { Id(allocation), Id(length) }.Order(StringComparer.Ordinal)) &&
@@ -114,7 +114,7 @@ Require(Ids(3).Length == 0, "Excluded branch reported under the scalar profile")
 var live = Blocker("Unsupported instruction: newarr System.Int64");
 var liveSite = live.GetProperty("sites").EnumerateArray().Single();
 Require(Ids(4).Order(StringComparer.Ordinal).SequenceEqual(new[] { Id(live), Id(length) }.Order(StringComparer.Ordinal)) &&
-    Reached(live).SequenceEqual([$"x64-avx2 {excluded}"]) && liveSite.GetProperty("method").GetString() == excluded &&
+    Reached(live).SequenceEqual([$"x64-v3 {excluded}"]) && liveSite.GetProperty("method").GetString() == excluded &&
     liveSite.GetProperty("source").GetString()!.StartsWith($"Fixture.cs:{LineOf("Avx2.IsSupported")}:", StringComparison.Ordinal),
     "Live AVX2 branch not reported");
 

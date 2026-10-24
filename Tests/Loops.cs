@@ -366,7 +366,7 @@ foreach (var name in new[] { "Countdown", "WrongCountdown" })
 // operation is unreachable under scalar, and must be rejected under AVX2.
 Prove(assembly, "Loops::FeatureCountdown(uint)", "FeatureLoop",
     "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 3)] Examples.empty).map Prod.snd = .ok [.scalar (.i32 0)] := rfl");
-var feature = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)", Path.Combine(root, "FeatureReject"), "x64-avx2"));
+var feature = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)", Path.Combine(root, "FeatureReject"), "x64-v3"));
 if (feature.Code == 0 || !feature.Output.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Feature loop failed to reject reachable array: " + feature.Output);
 Console.WriteLine("PASS fixed feature selection inside a loop");

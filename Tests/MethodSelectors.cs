@@ -144,7 +144,7 @@ InvalidArguments(inferred, "Stale or mismatched");
 InvalidArguments(recordedCheck, "Stale or mismatched");
 
 // Recover the recorded non-default capabilities and validate them again.
-Run(Extract("extract", renamed, null, canonical, output, "x64-avx2"));
+Run(Extract("extract", renamed, null, canonical, output, "x64-v3"));
 Run(recordedCheck);
 var profileManifest = File.ReadAllText(Path.Combine(output, "identity.json"));
 File.WriteAllText(Path.Combine(output, "identity.json"), profileManifest.Replace("\"NativeWidth\": 64", "\"NativeWidth\": 32"));

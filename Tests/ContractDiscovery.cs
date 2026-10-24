@@ -189,7 +189,7 @@ File.WriteAllText(hostileGraph, """{"runtimes":{"linux-x64":{"#import":["win-x86
 Rejected("cross-architecture fallback", "Cross-architecture RID fallback", Resolve("linux-x64", ridGraph: hostileGraph));
 File.WriteAllText(hostileGraph, """{"runtimes":{"linux-x64":{"imports":["linux"]}}}""");
 Rejected("malformed graph", "Invalid RID graph entry", Resolve("linux-x64", ridGraph: hostileGraph));
-Rejected("profile/RID mismatch", "Runtime identifier does not match the execution profile: linux-x64", Resolve("linux-x64", "", "", "", "--profile", "arm64-armbase"));
+Rejected("profile/RID mismatch", "Runtime identifier does not match the execution profile: linux-x64", Resolve("linux-x64", "", "", "", "--profile", "arm64-advsimd"));
 
 string Write(string name, JsonNode document)
 {

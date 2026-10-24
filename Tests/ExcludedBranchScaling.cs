@@ -49,7 +49,7 @@ Console.WriteLine($"PASS {excluded} excluded sites validate at the default heart
 
 // Live under AVX2, the same branch is reachable; elaborator `decide` exceeded the budget on bodies this long.
 var liveOutput = Path.Combine(directory, "Live");
-Run(Extract("extract", assembly, "Excluded", "Excluded::Accumulate(ulong,ulong)", liveOutput, "x64-avx2"));
+Run(Extract("extract", assembly, "Excluded", "Excluded::Accumulate(ulong,ulong)", liveOutput, "x64-v3"));
 var liveExtracted = File.ReadAllText(Path.Combine(liveOutput, "Extracted.lean"));
 var liveSites = liveExtracted.Split('\n').Single(l => l.StartsWith("def method0Reachable ", StringComparison.Ordinal)).Split("true").Length - 1;
 if (liveSites < 800 || liveExtracted.Contains("set_option maxHeartbeats"))

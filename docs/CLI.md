@@ -82,7 +82,7 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
   "initializedTypes": ["Namespace.Type"],
   "entries": [
     { "signature": "Type::Method(ulong)", "profile": "scalar" },
-    { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-bmi2.json" }
+    { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-v3.json" }
   ]
 }
 ```
