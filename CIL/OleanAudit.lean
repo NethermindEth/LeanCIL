@@ -211,7 +211,9 @@ def namespacePrefix (p : String) : Except String Name :=
 
 /-- Every `theorem` declared in `modules` whose name, or user name if private, lies under a prefix. -/
 def namespaces (env : Environment) (modules : Array Name) (req : Json) : IO Json := do
-  let prefixes ← IO.ofExcept <| (req.getObjValAs? (Array String) "prefixes").bind (·.mapM namespacePrefix)
+  let given ← IO.ofExcept <| (req.getObjValAs? (Array String) "prefixes").bind (·.mapM namespacePrefix)
+  -- `A.` and `A` name one namespace; a duplicate would count each theorem twice under one key.
+  let prefixes := given.foldl (fun acc p => if acc.contains p then acc else acc.push p) #[]
   let allowed := names req "axioms"
   let kernel := env.toKernelEnv
   if prefixes.isEmpty then return Json.mkObj [("error", toJson "No namespace prefixes to audit")]
