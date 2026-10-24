@@ -30,7 +30,9 @@ internal static class ExportVerificationSuites
         Entry("exportsmutationsource", "consumer-source", "consumer caller source mutation", ["full.consumer-source"]),
         Entry("exportsmutationshadow", "consumer-shadow", "original caller root shadow mutation", ["full.consumer-shadow"]),
         new("exportsstatics", "statics", "Tests/ModularStaticExports.cs", [], "independent modular static exports",
-            [], ["Tests/ModularStaticExports.cs"], Standalone: true)
+            [], ["Tests/ModularStaticExports.cs"], Standalone: true),
+        new("exportstransitive", "transitive", "Tests/TransitiveImports.cs", [], "independent transitive contract imports",
+            [], ["Tests/TransitiveImports.cs"], Standalone: true)
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>

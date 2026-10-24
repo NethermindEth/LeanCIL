@@ -521,7 +521,8 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
     ("Unsupported contract interface format", value => value["formatVersion"] = 2),
     ("Unsupported contract interface format", value => value["semanticsVersion"] = 2),
     ("framework key mismatch", value => value["frameworkKey"] = new string('0', 64)),
-    ("does not support dependencies", value => value["dependencies"] = new JsonArray("Other")),
+    ("Invalid or duplicate contract dependency", value => value["dependencies"] = new JsonArray(new JsonObject
+        { ["assemblyIdentity"] = "Other", ["implementationSha256"] = "bad", ["interfaceDigest"] = "bad" })),
     ("certified SHA-256 mismatch", value => value["implementationSha256"] = new string('0', 64)),
     ("assembly identity mismatch", value =>
     {

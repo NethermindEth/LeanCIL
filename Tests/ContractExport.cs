@@ -221,7 +221,7 @@ JsonObject RestrictedManifest(string assembly, string method, string folder)
     return manifest;
 }
 const string shape = "Contract exports require a public or protected static, non-virtual, non-generic method.";
-const string assumptions = "Contract export version 1 rejects imports and static/initialization assumptions: ";
+const string assumptions = "Contract export rejects static/initialization assumptions: ";
 foreach ((string Name, string Method, string Marker) restriction in new[]
 {
     ("internal", "ImportFixture.Library::Hidden(ulong)", shape),
@@ -268,10 +268,11 @@ RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
     Restriction("initialized", library, "ImportFixture.Library::AddOne(ulong)", "--assume-initialized", "ImportFixture.Seeded")),
     assumptions + "initializedTypes", restricted);
 completed.CompleteCase("core.initialized");
+// Conditional exports are supported, but their producer sources must not shadow a published dependency.
 RejectExport(RestrictedManifest(app, "ImportFixture.Application::Entry(ulong)",
     Restriction("imports", app, "ImportFixture.Application::Entry(ulong)", "--import", sidecar, "--import-implementation", "ImportFixture.Lib=" + library,
         "--import-sha256", "ImportFixture.Lib=" + Sha(library), "--import-interface-sha256", "ImportFixture.Lib=" + interfaceDigest)),
-    assumptions + "imports", restricted);
+    "Contract interface module shadows a consumer source: PublishedArithmetic", restricted);
 completed.CompleteCase("core.imports");
 string customProfile = Path.Combine(root, "custom-profile.json");
 JsonObject profile = JsonNode.Parse(JsonSerializer.Serialize(new

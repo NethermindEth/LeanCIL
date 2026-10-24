@@ -70,12 +70,15 @@ protected, non-P/Invoke, and non-generic. Instance, constructor, function pointe
 and virtual call sites are rejected. Import signatures must use supported
 parameter and result types with matching assembly-scoped type identities.
 Profiles must name an exact built-in profile; custom profiles are not admitted.
-For an implementation DLL, the selected export must satisfy the closed v1
-producer's admission rules without external initialization assumptions. Its
-reachable static identity set must match the selected certification exactly.
+For an implementation DLL, the selected export is validated with its independently
+pinned direct dependencies and without external initialization assumptions. Its
+own reachable static identity set must match the selected certification exactly.
 This checks metadata and serialization; it does not verify the imported theorem.
-Static identities from App and all selected imports are checked together before
-output. A collision reports both scoped field names.
+Each node's static identities are checked with those of its direct imports before
+output. A collision reports both scoped field names. Full verification uses
+`linkChecked` to check all descriptors in its linked program, but currently rejects
+transitive dependency graphs. Conditional transitive proofs retain the
+`StaticWorldValid` premises; extraction does not compare every pair of graph nodes.
 
 The framework manifest lists `CIL.lean`, all `CIL/**/*.lean`, and `lean-toolchain`
 in ordinal relative-path order. Paths use `/`. Each line is `path=sha256(bytes)`.
@@ -168,3 +171,11 @@ be regenerated to acquire these records.
 
 Run `dotnet run --file scripts/Test.cs -- --suite imports` for the Lib/App
 fixture, conditional caller proof, stale DLL/source checks and rejecting cases.
+
+For transitive imports, each dependency node must have its own independently
+pinned implementation and interface digest. The graph rejects cycles before
+method validation. Each library implementation is checked against its declared
+direct dependencies with separate call slots. Validation compares its actual
+static identity set with its certification record. A supplied library does not
+authorize an undeclared dependency. Application slots contain only calls made
+by the selected application methods.

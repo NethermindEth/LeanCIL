@@ -14,13 +14,24 @@ internal sealed class ImportResolution : IDisposable
         string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly,
         StaticIdentityRecord[] StaticIdentities);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
+    internal sealed record Node(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest,
+        string SidecarPath, string ImplementationPath, string ExpectedInterfaceDigest, bool IsReferenceAssembly,
+        ContractDependency[] Dependencies);
     readonly List<Library> libraries = [];
+    readonly Dictionary<(string Identity, string Profile), int> implementationState = [];
+    readonly HashSet<string>? allowedDependencies;
+    readonly string? validatingAssembly;
+    readonly bool ownsLibraries = true;
     readonly HashSet<Library> used = [];
-    readonly HashSet<(string Identity, string Profile)> validatedImplementations = [];
     readonly Dictionary<string, Source> discovered = new(StringComparer.Ordinal);
     readonly List<Binding> bindings = [];
     readonly Dictionary<Instruction, int> sites = [];
     internal IReadOnlyList<Binding> Bindings => bindings;
+    internal Node[] Nodes => libraries.OrderBy(library => library.Interface.AssemblyIdentity, StringComparer.Ordinal)
+        .Select(library => new Node(library.Interface.AssemblyIdentity, library.Interface.ImplementationSha256,
+            library.Interface.InterfaceDigest, Path.GetFullPath(library.Source.SidecarPath),
+            Path.GetFullPath(library.Source.ImplementationPath), library.Source.ExpectedInterfaceDigest,
+            library.Interface.IsReferenceAssembly, library.Interface.Dependencies)).ToArray();
 
     internal ImportResolution(IEnumerable<Source> sources)
     {
@@ -31,7 +42,7 @@ internal sealed class ImportResolution : IDisposable
                 if (source.Discovered) discovered[Path.GetFileName(source.SidecarPath)[..^".leancil.contracts".Length]] = source;
                 else Load(source);
             }
-            Modules(libraries);
+            ValidateGraph();
         }
         catch { Dispose(); throw; }
     }
@@ -67,11 +78,44 @@ internal sealed class ImportResolution : IDisposable
                         attribute.AttributeType.FullName == "System.Runtime.Versioning.TargetFrameworkAttribute")?.ConstructorArguments.Single().Value as string;
                     if (framework != contract.TargetFramework || framework != ".NETCoreApp,Version=v10.0")
                         throw new InvalidDataException("Import target framework mismatch.");
+                    Library? existing = libraries.SingleOrDefault(library => library.Interface.AssemblyIdentity == contract.AssemblyIdentity);
+                    if (existing is not null)
+                    {
+                        if (existing.Interface.ImplementationSha256 != contract.ImplementationSha256)
+                            throw new InvalidDataException("Conflicting contract dependency implementation hashes: " + contract.AssemblyIdentity);
+                        if (existing.Interface.InterfaceDigest != contract.InterfaceDigest || existing.SidecarSha256 != ContractInterface.Hash(sidecar))
+                            throw new InvalidDataException("Conflicting contract dependency interface or certification: " + contract.AssemblyIdentity);
+                        module.Dispose();
+                        return;
+                    }
                     if (libraries.Any(library => library.Module.Assembly.Name.Name == module.Assembly.Name.Name))
-                        throw new InvalidDataException("Duplicate import assembly: " + module.Assembly.Name.Name);
+                        throw new InvalidDataException("Ambiguous import assembly simple name: " + module.Assembly.Name.Name);
                     libraries.Add(new(source, contract, ContractInterface.Hash(sidecar), module));
                 }
                 catch { module.Dispose(); throw; }
+    }
+
+    void ValidateGraph()
+    {
+        for (int index = 0; index < libraries.Count; index++)
+            foreach (ContractDependency dependency in libraries[index].Interface.Dependencies)
+            {
+                if (libraries.Any(library => library.Interface.AssemblyIdentity == dependency.AssemblyIdentity)) continue;
+                string name = AssemblyNameReference.Parse(dependency.AssemblyIdentity).Name;
+                if (discovered.Remove(name, out Source? pending)) Load(pending);
+            }
+        ContractDependencyGraph.Validate(libraries.Select(library => library.Interface));
+        Modules(libraries);
+    }
+
+    ImportResolution(List<Library> libraries, Dictionary<(string Identity, string Profile), int> implementationState,
+        ContractInterface contract)
+    {
+        this.libraries = libraries;
+        this.implementationState = implementationState;
+        allowedDependencies = contract.Dependencies.Select(dependency => dependency.AssemblyIdentity).ToHashSet(StringComparer.Ordinal);
+        validatingAssembly = contract.AssemblyIdentity;
+        ownsLibraries = false;
     }
 
     internal static bool External(MethodReference reference, ModuleDefinition module) =>
@@ -87,11 +131,13 @@ internal sealed class ImportResolution : IDisposable
         if (reference.DeclaringType.Scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" or "System.Private.CoreLib" or "mscorlib" or "netstandard")
             throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Contract imports from framework assemblies are not supported.");
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
+        if (allowedDependencies is not null && !allowedDependencies.Contains(assembly))
+            throw new InvalidDataException("Undeclared contract dependency: " + assembly + " required by " + validatingAssembly);
         if (!libraries.Any(candidate => candidate.Interface.AssemblyIdentity == assembly) &&
             discovered.Remove(reference.DeclaringType.Scope.Name, out Source? pending))
         {
             Load(pending);
-            Modules(libraries);
+            ValidateGraph();
         }
         Library? library = libraries.SingleOrDefault(candidate => candidate.Interface.AssemblyIdentity == assembly);
         if (library is null)
@@ -128,16 +174,9 @@ internal sealed class ImportResolution : IDisposable
             certification.InterfaceDigest != library.Interface.InterfaceDigest || certification.ClosureDigest != export.ClosureDigest)
             throw new InvalidDataException("Contract import certification binding mismatch.");
         StaticIdentity.ValidateFields(certification.StaticIdentities, library.Module);
-        if (!library.Interface.IsReferenceAssembly && !validatedImplementations.Contains((identity, profile.Name)))
-        {
-            MethodDefinition[] implementation = MetadataValidation.Validate(library.Module, assembly, export.Signature, profile);
-            StaticIdentityRecord[] actualStatics = LeanEmitter.StaticIdentities(implementation, profile);
-            StaticIdentityRecord[] certifiedStatics = certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal).ToArray();
-            if (!actualStatics.SequenceEqual(certifiedStatics))
-                throw new InvalidDataException("Contract import static identities differ from the selected implementation.");
-            validatedImplementations.Add((identity, profile.Name));
-        }
-        used.Add(library);
+        if (!library.Interface.IsReferenceAssembly)
+            ValidateImplementation(library, export, certification, profile);
+        MarkUsed(library);
         int slot = bindings.FindIndex(binding => binding.Identity == identity);
         if (slot < 0)
         {
@@ -149,6 +188,44 @@ internal sealed class ImportResolution : IDisposable
                 certification.StaticIdentities));
         }
         sites[instruction] = slot;
+    }
+
+    void MarkUsed(Library library)
+    {
+        Stack<Library> pending = new();
+        pending.Push(library);
+        while (pending.TryPop(out Library? selected))
+        {
+            if (!used.Add(selected)) continue;
+            foreach (ContractDependency dependency in selected.Interface.Dependencies)
+                pending.Push(libraries.Single(candidate => candidate.Interface.AssemblyIdentity == dependency.AssemblyIdentity));
+        }
+    }
+
+    void ValidateImplementation(Library library, ContractExport export, ContractCertification certification, FeatureProfile profile)
+    {
+        (string Identity, string Profile) key = (export.Identity, profile.Name);
+        int state = implementationState.GetValueOrDefault(key);
+        if (state == 2) return;
+        if (state == 1) throw new InvalidDataException("Recursive contract implementation validation: " + export.Identity);
+        implementationState[key] = 1;
+        try
+        {
+            using ImportResolution imports = new(libraries, implementationState, library.Interface);
+            MethodDefinition[] implementation = MetadataValidation.Validate(library.Module, library.Interface.AssemblyIdentity,
+                export.Signature, profile, imports: imports);
+            StaticIdentityRecord[] actualStatics = LeanEmitter.StaticIdentities(implementation, profile);
+            StaticIdentityRecord[] certifiedStatics = certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal).ToArray();
+            if (!actualStatics.SequenceEqual(certifiedStatics))
+                throw new InvalidDataException("Contract import static identities differ from the selected implementation.");
+            imports.ValidateStatics(actualStatics);
+            implementationState[key] = 2;
+        }
+        catch
+        {
+            implementationState.Remove(key);
+            throw;
+        }
     }
 
     internal void ValidateStatics(IEnumerable<StaticIdentityRecord> application) =>
@@ -174,7 +251,7 @@ internal sealed class ImportResolution : IDisposable
         return false;
     }
 
-    // Only libraries with a bound call site contribute modules to the extraction.
+    // Bound libraries and their declared dependencies contribute modules to the extraction.
     internal SortedDictionary<string, string> InterfaceModules() => Modules(libraries.Where(used.Contains));
 
     static SortedDictionary<string, string> Modules(IEnumerable<Library> selected)
@@ -203,6 +280,7 @@ internal sealed class ImportResolution : IDisposable
 
     public void Dispose()
     {
+        if (!ownsLibraries) return;
         foreach (Library library in libraries) library.Module.Dispose();
         libraries.Clear();
         used.Clear();

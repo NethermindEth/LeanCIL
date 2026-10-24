@@ -156,6 +156,19 @@ internal static class Program
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
             List<ImportResolution.Source> importSources = [];
+            if (recorded is { } recordedGraph && recordedGraph.TryGetProperty("importGraph", out JsonElement graphNodes))
+                foreach (JsonElement node in graphNodes.EnumerateArray())
+                {
+                    string name = AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name;
+                    string sidecar = global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("sidecarPath").GetString()!);
+                    string implementation = implementationPaths.GetValueOrDefault(name) ??
+                        global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
+                    string expected = importHashes.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
+                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
+                        (node.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
+                            throw new InvalidDataException("Import graph has no independent interface digest; extract again with --import-interface-sha256."));
+                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
+                }
             if (recorded is { } recordedImports && recordedImports.TryGetProperty("imports", out JsonElement importRecords))
                 foreach (JsonElement binding in importRecords.EnumerateArray())
                 {
@@ -226,6 +239,11 @@ internal static class Program
                 {
                     ImplementationPath = Path.GetRelativePath(output, binding.ImplementationPath).Replace('\\', '/'),
                     SidecarPath = Path.GetRelativePath(output, binding.SidecarPath).Replace('\\', '/')
+                }, ContractInterface.Json)),
+                importGraph = imports.Nodes.Select(node => JsonSerializer.SerializeToElement(node with
+                {
+                    SidecarPath = Path.GetRelativePath(output, node.SidecarPath).Replace('\\', '/'),
+                    ImplementationPath = Path.GetRelativePath(output, node.ImplementationPath).Replace('\\', '/')
                 }, ContractInterface.Json)),
                 importModules = importModuleHashes,
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()

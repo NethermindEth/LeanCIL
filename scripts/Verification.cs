@@ -941,6 +941,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     internal sealed record ExtractionIdentity(string Output, string Sha256, JsonElement Root, SortedDictionary<string, string> Sources)
     {
         internal JsonElement[] Imports => Root.TryGetProperty("imports", out JsonElement imports) ? [.. imports.EnumerateArray()] : [];
+        internal JsonElement[] Graph => Root.TryGetProperty("importGraph", out JsonElement graph) ? [.. graph.EnumerateArray()] : [];
 
         internal static string Resolve(string output, string recorded) => Path.GetFullPath(recorded, output);
 
@@ -1077,8 +1078,23 @@ unsafe def main (args : List String) : IO Unit := do
         }
     }
 
+    static JsonElement[] ImportedBindings(string output) => ExtractionIdentity.Read(output).Imports;
+
+    static JsonElement[] ImportGraph(string output) => ExtractionIdentity.Read(output).Graph;
+
+    sealed record DeploymentDependency(string assemblyIdentity, string implementationSha256, string interfaceDigest,
+        string[] dependencies, bool conditional);
+
+    static DeploymentDependency[] DeploymentDependencies(JsonElement identity) =>
+        identity.TryGetProperty("importGraph", out JsonElement graph) ? graph.EnumerateArray().Select(node =>
+            new DeploymentDependency(node.GetProperty("assemblyIdentity").GetString()!,
+                node.GetProperty("implementationSha256").GetString()!, node.GetProperty("interfaceDigest").GetString()!,
+                node.GetProperty("dependencies").EnumerateArray().Select(dependency => dependency.GetProperty("assemblyIdentity").GetString()!).ToArray(),
+                node.GetProperty("dependencies").GetArrayLength() > 0)).ToArray() : [];
+
     static bool ReferenceOnlyImports(ExtractionIdentity extraction) =>
-        extraction.Imports.Any(import => import.GetProperty("isReferenceAssembly").GetBoolean());
+        extraction.Imports.Any(import => import.GetProperty("isReferenceAssembly").GetBoolean()) ||
+        extraction.Graph.Any(node => node.GetProperty("isReferenceAssembly").GetBoolean());
 
     static void RequireImplementationImports(ExtractionIdentity extraction)
     {
@@ -1089,10 +1105,16 @@ unsafe def main (args : List String) : IO Unit := do
     static string SemanticExtractionIdentity(ExtractionIdentity extraction)
     {
         JsonElement identity = extraction.Root;
+        JsonElement[] graph = extraction.Graph;
         return ContentKey(JsonSerializer.Serialize(new
         {
             assembly = identity.GetProperty("assemblySha256"), generated = identity.GetProperty("generatedSha256"),
             profile = identity.GetProperty("profile"), interfaces = extraction.Sources,
+            dependencyGraph = graph.Any(node => node.GetProperty("dependencies").GetArrayLength() > 0) ? graph.Select(node => new
+            {
+                assemblyIdentity = node.GetProperty("assemblyIdentity"), implementationSha256 = node.GetProperty("implementationSha256"),
+                interfaceDigest = node.GetProperty("interfaceDigest"), dependencies = node.GetProperty("dependencies")
+            }).ToArray() : [],
             imports = extraction.Imports.Select(import => new
             {
                 slot = import.GetProperty("slot"), identity = import.GetProperty("identity"),
@@ -1106,8 +1128,9 @@ unsafe def main (args : List String) : IO Unit := do
     // Certification fields are sidecar text outside every pinned digest; sidecarSha256 names the bytes they came from.
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
-        string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation, string? sidecarSha256 = null, bool certificationAuthenticated = false,
-        string? sourceBundleDigest = null);
+        string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation,
+        string? sidecarSha256 = null, bool certificationAuthenticated = false, string? sourceBundleDigest = null);
+
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1119,7 +1142,7 @@ unsafe def main (args : List String) : IO Unit := do
             "This conditional caller proof is not a deployment guarantee: an unsatisfiable imported contract can make it vacuous. " +
             "Deployment must use these exact implementation bytes and discharge the published contract at this identity, signature and profile. " +
             "Published interface sources execute code with verifier permissions during compilation.",
-            import.GetProperty("sidecarSha256").GetString()!)).ToArray()
+            sidecarSha256: import.GetProperty("sidecarSha256").GetString()!)).ToArray()
         : [];
 
     static bool HasContractImports(ExtractionIdentity extraction) =>
@@ -1183,7 +1206,7 @@ unsafe def main (args : List String) : IO Unit := do
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
         string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
-        string? compositionTheorem = null, string? compositionAudit = null);
+        DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null);
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -1506,7 +1529,10 @@ unsafe def main (args : List String) : IO Unit := do
                 ? assumptions.Deserialize<string[]>() : [];
             RequireImplementationImports(extraction);
             var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-                staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root), imports: fullResult?.Imports ?? PublishedImports(extraction.Root),
+                staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root),
+                imports: fullResult?.Imports ?? PublishedImports(extraction.Root),
+                contractDependencies: DeploymentDependencies(extraction.Root),
+
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");

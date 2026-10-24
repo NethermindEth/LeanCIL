@@ -126,7 +126,8 @@ partial class Program
                     ? assumptions.Deserialize<string[]>() : [];
                 reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
                     libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(source), theorem,
-                    staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction));
+                    staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction),
+                    contractDependencies: DeploymentDependencies(extraction));
             }
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)

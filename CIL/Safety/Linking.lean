@@ -246,6 +246,20 @@ theorem OutcomeContract.Holds.relocate {Input Output : Type} {c : OutcomeContrac
     rw [invoke_relocate closed relocates fuel method _ initial bound, invoked]
     rfl
 
+theorem MethodContract.relocateGiven {Input Output : Type} {c : MethodContract Input Output}
+    {base completion target : CIL.Program} {imports : CIL.Program -> Prop} {method : Nat} {f : Nat -> Nat}
+    (given : HoldsGiven base imports (fun linked => c.Holds linked method))
+    (linkedPrefix : Links base completion) (met : imports completion) (closed : Closed completion)
+    (relocates : RelocatesInto completion target f) : c.Holds target (f method) :=
+  (given completion linkedPrefix met).relocate closed relocates
+
+theorem OutcomeContract.relocateGiven {Input Output : Type} {c : OutcomeContract Input Output}
+    {base completion target : CIL.Program} {imports : CIL.Program -> Prop} {method : Nat} {f : Nat -> Nat}
+    (given : HoldsGiven base imports (fun linked => c.Holds linked method))
+    (linkedPrefix : Links base completion) (met : imports completion) (closed : Closed completion)
+    (relocates : RelocatesInto completion target f) : c.Holds target (f method) :=
+  (given completion linkedPrefix met).relocate closed relocates
+
 /-- A separately extracted library: its exported method at index 0, then its private helpers. -/
 structure Library where
   entry : CIL.Method
@@ -359,6 +373,8 @@ theorem HoldsGiven.mono {base : CIL.Program} {weak strong claim : CIL.Program â†
 #print axioms Raises.relocate
 #print axioms MethodContract.Holds.relocate
 #print axioms OutcomeContract.Holds.relocate
+#print axioms MethodContract.relocateGiven
+#print axioms OutcomeContract.relocateGiven
 #print axioms link_relocates
 #print axioms composed
 

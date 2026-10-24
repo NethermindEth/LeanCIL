@@ -106,7 +106,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 14 leaves and 46 base cases", () =>
+Test("independent export cohort map preserves 15 leaves and 46 base cases", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -128,7 +128,8 @@ Test("independent export cohort map preserves 14 leaves and 46 base cases", () =
         ["exportsmutationconsumer"] = ("consumer-artifact", ["full.consumer-artifact"]),
         ["exportsmutationsource"] = ("consumer-source", ["full.consumer-source"]),
         ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"]),
-        ["exportsstatics"] = ("statics", [])
+        ["exportsstatics"] = ("statics", []),
+        ["exportstransitive"] = ("transitive", [])
     };
     void ExactPlan(IEnumerable<ExportSuite> plan)
     {
@@ -138,16 +139,17 @@ Test("independent export cohort map preserves 14 leaves and 46 base cases", () =
         {
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
-            Require(entry.Standalone == (entry.Cohort == "statics"), "Wrong standalone fixture kind: " + entry.Name);
+            Require(entry.Standalone == (entry.Cohort is "statics" or "transitive"), "Wrong standalone fixture kind: " + entry.Name);
             string script = entry.Cohort switch
             {
                 "resolution" => "Tests/FullModuleResolution.cs",
                 "statics" => "Tests/ModularStaticExports.cs",
+                "transitive" => "Tests/TransitiveImports.cs",
                 _ => "Tests/ContractExport.cs"
             };
             Require(entry.Script == script,
                 "Wrong fixture: " + entry.Name);
-            Equal(entry.Arguments, entry.Cohort is "resolution" or "statics" ? [] : ["--cohort", entry.Cohort]);
+            Equal(entry.Arguments, entry.Cohort is "resolution" or "statics" or "transitive" ? [] : ["--cohort", entry.Cohort]);
         }
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
@@ -175,7 +177,7 @@ Test("export coverage detects each omitted completion and invalid selection", ()
         "Default standalone must aggregate leaves");
     foreach (string[] invalid in new string[][] {
         ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"],
-        ["--cohort", "resolution"], ["--cohort", "statics"] })
+        ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "transitive"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     foreach (string cohort in new[] { "core", "audit", "resolution", "statics", "transitive", "discovery", "typed", "unknown" })
     {
@@ -219,6 +221,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
         Require(VerificationSelection.Select(["Tests/FullImportVerification.cs"]).Contains(entry.Name, StringComparer.Ordinal), "Full change lost " + entry.Name);
     Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
     Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]), ["exportsstatics"]);
+    Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
     string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
     Require(runner.Contains(".. arguments", StringComparison.Ordinal) &&
@@ -229,6 +232,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
     string standalone = File.ReadAllText(Path.Combine(root, "Tests/ContractExport.cs"));
     Require(standalone.Contains("foreach (ExportSuite entry in ExportVerificationSuites.Plan())", StringComparison.Ordinal) &&
         standalone.Contains(".. entry.Arguments", StringComparison.Ordinal), "Standalone lost exact leaf dispatch");
+    Require(!standalone.Contains("\"Tests/TransitiveImports.cs\"", StringComparison.Ordinal), "Old nested transitive suite remains");
 });
 Test("a missing registered export fixture fails selection", () =>
 {
@@ -250,6 +254,12 @@ Test("a missing registered export fixture fails selection", () =>
         catch (InvalidDataException error) { rejection = error.Message; }
         Require(rejection == "Missing registered export fixture: Tests/ModularStaticExports.cs",
             "A missing standalone static fixture was silently skipped: " + rejection);
+        File.WriteAllText(Path.Combine(isolated, "Tests/ModularStaticExports.cs"), "");
+        rejection = null;
+        try { VerificationSelection.SuiteInputs(isolated); }
+        catch (InvalidDataException error) { rejection = error.Message; }
+        Require(rejection == "Missing registered export fixture: Tests/TransitiveImports.cs",
+            "A missing standalone transitive fixture was silently skipped: " + rejection);
     }
     finally { Directory.Delete(isolated, recursive: true); }
 });
