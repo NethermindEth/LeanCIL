@@ -4,8 +4,12 @@ import CIL.Safety.OutcomeContract
 import CIL.Safety.WordMemory
 import CIL.Safety.WordFootprint
 import CIL.Safety.ReturnMemory
+import CIL.Safety.Forwarders
 
-/-! Synthetic extraction: `Root(v) => Percent(v) + 1`, a throwing `Percent`, `AddTo(in a, in b, out res)` and `Sum` calling it. -/
+/-! Synthetic extraction: `Root(v) => Percent(v) + 1`, a throwing `Percent`,
+    `AddTo(in a, in b, out res)`, `Sum` and `SumSwapped(in b, in a, out res)` forwarding to it,
+    `SumDiscard(in a, in b)` forwarding with a discarded out local, and `IsZero(v)` with its
+    forwarder `IsZeroForward(v)`. -/
 namespace Extracted
 
 open CIL
@@ -14,6 +18,12 @@ def method0Signature : String := "System.UInt64 Consequence.Calls::Root(System.U
 def method1Signature : String := "System.UInt64 Consequence.Calls::Percent(System.UInt64)"
 def method2Signature : String := "System.Void Consequence.Calls::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"
 def method3Signature : String := "System.Void Consequence.Calls::Sum(System.UInt64&,System.UInt64&,System.UInt64&)"
+def method4Signature : String :=
+  "System.Void Consequence.Calls::SumSwapped(System.UInt64&,System.UInt64&,System.UInt64&)"
+def method5Signature : String :=
+  "System.Void Consequence.Calls::SumDiscard(System.UInt64&,System.UInt64&)"
+def method6Signature : String := "System.Boolean Consequence.Calls::IsZero(System.UInt64)"
+def method7Signature : String := "System.Boolean Consequence.Calls::IsZeroForward(System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
@@ -23,8 +33,20 @@ def method3Signature : String := "System.Void Consequence.Calls::Sum(System.UInt
   [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ret] }
 @[cil_code] def method3 : Method := { returnsValue := false, locals := [], code :=
   [.arg 0, .arg 1, .arg 2, .call 2 3, .ret] }
-@[cil_code] def program : Program := [method0, method1, method2, method3]
-def signatures : List String := [method0Signature, method1Signature, method2Signature, method3Signature]
+@[cil_code] def method4 : Method := { returnsValue := false, locals := [], code :=
+  [.arg 1, .arg 0, .arg 2, .call 2 3, .ret] }
+@[cil_code] def method5 : Method :=
+  { returnsValue := false, locals := [.unmodeled], localKinds := [.word64], code :=
+    [.arg 0, .arg 1, .localAddr 0, .call 2 3, .ret] }
+@[cil_code] def method6 : Method := { returnsValue := true, locals := [], code :=
+  [.arg 0, .const32 0, .convI8, .eq, .ret (some .unsigned8)] }
+@[cil_code] def method7 : Method := { returnsValue := true, locals := [], code :=
+  [.arg 0, .call 6 1, .ret (some .unsigned8)] }
+@[cil_code] def program : Program :=
+  [method0, method1, method2, method3, method4, method5, method6, method7]
+def signatures : List String :=
+  [method0Signature, method1Signature, method2Signature, method3Signature, method4Signature,
+    method5Signature, method6Signature, method7Signature]
 
 end Extracted
 
@@ -38,6 +60,13 @@ bind_call percentSite := percent from rootBody
 bind_method sum sumBody := "System.Void Consequence.Calls::Sum(System.UInt64&,System.UInt64&,System.UInt64&)"
 bind_callee addTo addBody := "System.Void Consequence.Calls::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)" from sumBody
 bind_call addSite := addTo from sumBody
+bind_method swapped swappedBody :=
+  "System.Void Consequence.Calls::SumSwapped(System.UInt64&,System.UInt64&,System.UInt64&)"
+bind_method discard discardBody :=
+  "System.Void Consequence.Calls::SumDiscard(System.UInt64&,System.UInt64&)"
+bind_method isZero isZeroBody := "System.Boolean Consequence.Calls::IsZero(System.UInt64)"
+bind_method isZeroForward isZeroForwardBody :=
+  "System.Boolean Consequence.Calls::IsZeroForward(System.UInt64)"
 
 /-! Outcome contracts: the exact internal contract and a public one that only bounds the result. -/
 
@@ -223,6 +252,130 @@ theorem sum_correct : sumContract.Holds Extracted.program sum := sum_holds add_p
 
 #print axioms add_public
 #print axioms sum_correct
+
+/-! Forwarders: each inherits its callee's contract without stepping either body, the
+    argument order given by the indices the forwarder loads. -/
+
+/-- `Sum` passes its arguments through in order, so it meets `addPublic` itself. -/
+theorem sum_forwards : sumContract.Holds Extracted.program sum :=
+  add_public.forward (indices := [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ member => member) (fun _ _ _ => rfl)
+    (fun _ _ _ _ _ => trivial)
+
+#print axioms sum_forwards
+
+/-- `SumSwapped(b, a, res)` encodes the same input with its first two arguments swapped. -/
+def swappedArgs (input : AddInput) : List Value :=
+  [.reference (.address input.b), .reference (.address input.a),
+    .reference (.address input.res)]
+
+/-- The swapped forwarder meets `addPublic` over its own argument order: the frame fact
+    about `a` follows from `AddTo`'s footprint although `a` is now the second argument. -/
+theorem swapped_forwards : (addPublic.forward swappedArgs).Holds Extracted.program swapped :=
+  add_public.forward (indices := [1, 0, 2]) (narrow := none) (forwarded := swappedArgs)
+    swapped.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ member => by
+      simp only [swappedArgs, addPublic, addArgs, List.mem_cons, List.not_mem_nil, or_false]
+        at member ⊢
+      rcases member with same | same | same <;> simp [same])
+    (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
+
+#print axioms swapped_forwards
+
+/-- The indices are checked against the body: `SumSwapped` is not an in-order forwarder. -/
+theorem swapped_not_in_order :
+    ¬ Forwards swappedBody addBody [0, 1, 2] addTo none := fun forwards => by
+  have code := forwards.code
+  simp [swappedBody, Extracted.method4, forwarderCode] at code
+
+#print axioms swapped_not_in_order
+
+/-- Each argument must reach `AddTo`: one passing `b` twice would not supply `a`. -/
+theorem duplicated_not_selected :
+    ¬ ∀ input : AddInput, [0, 0, 2].map (fun index => (swappedArgs input)[index]?) =
+      (addPublic.args input).map some := fun selected => by
+  have same := selected ⟨⟨0, 0⟩, ⟨1, 0⟩, ⟨2, 0⟩, ⟨2, 0⟩, 0, 0⟩
+  simp [swappedArgs, addPublic, addArgs] at same
+
+#print axioms duplicated_not_selected
+
+/-- `SumDiscard(a, b)` reads the words at `a` and `b`, which hold `x` and `y`. -/
+structure DiscardInput where
+  a : Reference
+  b : Reference
+  x : CIL.W64
+  y : CIL.W64
+
+/-- `SumDiscard`'s contract: `AddTo`'s write lands in the forwarder's own local, so callers
+    see an empty footprint and `a` unchanged. -/
+def discardContract : MethodContract DiscardInput where
+  args input := [.reference (.address input.a), .reference (.address input.b)]
+  pre input m := m.WellFormed ∧ read m input.a 8 1 = .ok (numberBytes input.x.toNat 8) ∧
+    read m input.b 8 1 = .ok (numberBytes input.y.toNat 8)
+  footprint _ := []
+  post input _ final values := values = [] ∧
+    read final input.a 8 1 = .ok (numberBytes input.x.toNat 8)
+
+/-- The out local is fresh, so `AddTo`'s footprint drops out and `a` keeps its bytes; the
+    forwarder's frame is never stepped by hand. -/
+theorem discard_forwards : discardContract.Holds Extracted.program discard :=
+  add_internal.forward_out (indices := [0, 1]) (narrow := none) (kind := .word64)
+    (fun input home => ⟨input.a, input.b, home, home, input.x, input.y⟩)
+    discard.found addTo.found ⟨rfl, rfl, rfl, nofun, rfl, rfl, rfl, rfl⟩ (fun _ _ => rfl)
+    (fun _ _ ⟨formed, readA, readB⟩ => ⟨formed, fun value member => by
+      simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
+      rcases member with same | same <;> subst same
+      · exact access_reference_valid _ _ _ _ _ (read_access readA)
+      · exact access_reference_valid _ _ _ _ _ (read_access readB)⟩)
+    (fun _ _ => rfl) (fun _ _ _ _ _ => trivial) (fun _ => rfl)
+    (fun _ _ _ _ ⟨empty, _⟩ value member => by
+      dsimp only [addInternal] at empty member
+      subst empty; cases member)
+    (fun _ _ _ _ ⟨formed, readA, readB⟩ below _ _ writable => ⟨
+      (below.read _ (formed.access_bound (read_access readA)) 8 1).trans readA,
+      (below.read _ (formed.access_bound (read_access readB)) 8 1).trans readB, writable⟩)
+    (fun _ _ _ _ fresh _ member => Or.inl (List.mem_singleton.mp member ▸ fresh))
+    (fun _ _ _ _ _ _ _ ⟨formed, readA, _⟩ _ _ _ _ confined ⟨empty, _⟩ =>
+      ⟨empty, confined.read_apart formed readA nofun⟩)
+
+#print axioms discard_forwards
+
+/-- `IsZero(v)` returns `v == 0` as a narrowed boolean. -/
+def isZeroContract : MethodContract CIL.W64 Bool where
+  args v := [.scalar (.i64 v)]
+  results zero := [.scalar (.i32 (if zero then 1 else 0))]
+  pre _ _ := True
+  footprint _ := []
+  post v _ _ zero := zero = decide (v = 0)
+
+theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
+  intro v m _
+  refine ⟨6, m, isZeroContract.results (decide (v = 0)), ?_, Confined.refl _ m,
+    decide (v = 0), rfl, rfl⟩
+  simp only [isZeroContract, decide_eq_true_eq]
+  cil_checked_steps [NarrowKind.extend_ite_ofNat_one_zero]
+
+#print axioms is_zero_holds
+
+/-- `IsZeroForward` re-narrows `IsZero`'s boolean through its own `ret`, which is the
+    identity on 0 and 1, so it inherits the contract. -/
+theorem is_zero_forwards :
+    (isZeroContract.forward isZeroContract.args).Holds Extracted.program isZeroForward :=
+  is_zero_holds.forward (indices := [0]) (narrow := some .unsigned8) isZeroForward.found
+    isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ member => member)
+    (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
+
+#print axioms is_zero_forwards
+
+/-- A narrowed return of a value outside the narrow range would change it, so such a callee
+    result is not accepted as unchanged. -/
+theorem wide_result_changes : ¬ ReturnsUnchanged (some .unsigned8) [.scalar (.i32 256)] := by
+  rintro ⟨bits, same, extended⟩
+  simp only [List.cons.injEq, Value.scalar.injEq, CIL.Value.i32.injEq, and_true] at same
+  subst same
+  exact absurd extended (by decide)
+
+#print axioms wide_result_changes
 
 /-! Rejected derivations: each premise fails on a concrete input, and the derived contract is false. -/
 namespace Rejected

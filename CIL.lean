@@ -71,6 +71,7 @@ import CIL.Safety.ExecutionLemmas
 import CIL.Safety.ExecutionLifetime
 import CIL.Safety.ExecutionPrefixes
 import CIL.Safety.ExecutionStaticWorld
+import CIL.Safety.Forwarders
 import CIL.Safety.FrameAllocations
 import CIL.Safety.FrameLemmas
 import CIL.Safety.FrameMemoryBelow

@@ -158,7 +158,11 @@ exception never satisfy an expected loop exception.
 internal ones without re-executing the callee, composes callers through the derived
 contracts, and proves that an unjustified stronger postcondition, a weaker
 precondition, a smaller footprint and a changed exception type each fail both the
-refinement premises and the derived contract on a concrete input.
+refinement premises and the derived contract on a concrete input. Its forwarders inherit
+`AddTo`'s and `IsZero`'s contracts through `MethodContract.Holds.forward` and
+`forward_out`, in order, permuted, with a discarded out local and through a narrowed return;
+a body whose indices differ, an argument list missing one, and a result outside the narrow
+range are rejected.
 
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
 `Confined`. `Tests.BufferContents` checks typed buffer contents: fills and

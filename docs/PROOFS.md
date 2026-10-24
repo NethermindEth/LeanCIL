@@ -503,6 +503,41 @@ Its rejections are proved negations: an unjustified stronger postcondition, a
 weaker precondition, a smaller footprint and a changed exception type each
 refute the `Refines` premise and the derived `Holds` on a concrete input.
 
+## Inherit a callee's contract in a forwarder
+
+Overload forwarders and instance-to-static wrappers compile to
+`ldarg*; call k; ret`. `MethodContract.Holds.forward` (`CIL.Safety.Forwarders`)
+gives such a method its callee's contract with the forwarder's own argument
+encoding, `contract.forward forwarded`, without stepping either body:
+
+```lean
+theorem sum_forwards : sumContract.Holds Extracted.program sum :=
+  add_public.forward (indices := [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ member => member) (fun _ _ _ => rfl)
+    (fun _ _ _ _ _ => trivial)
+```
+
+`Forwards body calleeBody indices callee narrow` fixes the body to
+`forwarderCode indices callee narrow` with no locals, vector argument homes or
+parameter homes, so frame entry and exit leave memory unchanged and the callee's
+precondition, footprint and postcondition carry over verbatim. The argument order
+is data: the callee's arguments must be the forwarder's at `indices`, every
+forwarder argument must reach the callee (the forwarder's own invocation checks
+them all), the call must expose no unspecified vector bits, and a narrowed
+`ret (some kind)` must not change the callee's result (`ReturnsUnchanged`), which
+holds for a boolean. Use `Holds.weaken` afterwards to export a different contract.
+
+`MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which
+passes the address of a fresh `.unmodeled` local as a last out argument and drops
+it. The callee runs in the memory after frame entry and the result is read after
+the local expires, so the forwarder's contract `outer` is related to the callee's
+`inner` through `extend input home` and premises over those memories: `inner.pre`
+from `outer.pre` with the home fresh and writable, an `inner` footprint that names
+fresh storage or lies inside `outer.footprint`, and `outer.post` from `inner.post`
+once the frame has expired. The footprint is checked by the lemma
+(`Confined.across_frame`); returned values must be scalars, which survive the
+local's expiry.
+
 ## Compose through imported contracts
 
 A callee from another assembly has no body in the caller's extraction. Give it
