@@ -53,14 +53,14 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_divide (signed remainder : Bool) : observerCount (.divide signed remainder) = 2 := rfl
 @[cil_guard] theorem guard_arg (index : Nat) (narrow : Option CIL.NarrowKind) :
     observerCount (.arg index narrow) = 0 := rfl
-@[cil_guard] theorem guard_call (callee argc : Nat) : observerCount (.call callee argc) = 0 := rfl
-@[cil_guard] theorem guard_newVector256 (callee argc : Nat) : observerCount (.newVector256 callee argc) = 0 := rfl
+@[cil_guard] theorem guard_call (callee argc : Nat) : observerCount (.call callee argc) = argc := rfl
+@[cil_guard] theorem guard_newVector256 (callee argc : Nat) : observerCount (.newVector256 callee argc) = argc := rfl
 @[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
-    observerCount (.newAggregate callee argc size) = 0 := rfl
+    observerCount (.newAggregate callee argc size) = argc := rfl
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) : observerCount (.memory op) = op.argumentCount := rfl
 @[cil_guard] theorem guard_throw (exception : String) : observerCount (.throw exception) = 0 := rfl
 @[cil_guard] theorem guard_unsupported (description : String) : observerCount (.unsupported description) = 0 := rfl
-@[cil_guard] theorem guard_ret : observerCount (.ret none) = 0 := rfl
+@[cil_guard] theorem guard_ret : observerCount (.ret none) = 1 := rfl
 @[cil_guard] theorem guard_ret_narrow (kind : CIL.NarrowKind) : observerCount (.ret (some kind)) = 1 := rfl
 @[cil_guard] theorem guard_loadAggregate (size : Nat) : observerCount (.loadAggregate size) = 1 := rfl
 @[cil_guard] theorem guard_storeAggregate (size : Nat) : observerCount (.storeAggregate size) = 2 := rfl

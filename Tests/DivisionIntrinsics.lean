@@ -146,6 +146,36 @@ example (memory : Safety.Memory) : Safety.makeArgumentHomes 0 [0] [.scalar (.v12
     .error (.unsupported "Argument home observes unspecified vector bits") := rfl
 example (memory : Safety.Memory) : Safety.instruction .eq [.scalar (.v128Low64 7), .scalar (.v128Low64 7)] memory =
     .error (.unsupported "Instruction observes unspecified vector bits") := rfl
+
+theorem unspecified_return (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
+    Safety.step body .ret 0 [] frame [.scalar (.v128Low64 7)] memory =
+      .error (.unsupported "Instruction observes unspecified vector bits") := rfl
+#print axioms unspecified_return
+
+theorem unspecified_call (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
+    Safety.step body (.call 1 2) 0 [] frame [.scalar (.i64 0), .scalar (.v128Low64 7)] memory =
+      .error (.unsupported "Instruction observes unspecified vector bits") := rfl
+#print axioms unspecified_call
+
+theorem unspecified_call_rest (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
+    Safety.step body (.call 1 1) 0 [] frame [.scalar (.i64 3), .scalar (.v128Low64 7)] memory =
+      .ok (.call 1 [.scalar (.i64 3)] [.scalar (.v128Low64 7)] memory) := rfl
+#print axioms unspecified_call_rest
+
+theorem defined_vector_return (memory : Safety.Memory) (frame : Safety.Frame) (bits : BitVec 128) :
+    Safety.step { code := [], locals := [], returnsValue := true } .ret 0 [] frame [.scalar (.v128 bits)] memory =
+      .ok (.returned [.scalar (.v128 bits)] memory) := rfl
+#print axioms defined_vector_return
+
+theorem unspecified_constructor (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
+    Safety.step body (.newAggregate 1 1 16) 0 [] frame [.scalar (.v128Low64 7)] memory =
+      .error (.unsupported "Instruction observes unspecified vector bits") := rfl
+#print axioms unspecified_constructor
+
+theorem unspecified_store (memory : Safety.Memory) (destination : Safety.ManagedReference) :
+    Safety.storeValue memory destination (.v128Low64 7) =
+      .error (.unsupported "Store observes unspecified vector bytes") := rfl
+#print axioms unspecified_store
 example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 0) 3 = 1 := by decide +kernel
 example : Vector.lane64 (Vector.shiftRightCount64 (Vector.pack256 1 1 1 1) 0) 3 = 1 := by decide +kernel
 example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 1) 3 = 2 := by decide +kernel

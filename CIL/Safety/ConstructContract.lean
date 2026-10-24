@@ -113,6 +113,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
     (instructionFound : body.code[pc]? = some (.newAggregate callee argc size))
     (positive : 0 < size.val) (formed : memory.WellFormed) (enough : argc ≤ stack.length)
     (checked : (stack.take argc).reverse.mapM (checkedValue memory) = .ok arguments)
+    (known : arguments.any Value.hasUnspecified = false)
     (located : ∀ temporary, this (input temporary) = temporary)
     (encoded : ∀ temporary, c.args (input temporary) = .reference (.address temporary) :: arguments)
     (permitted : ∀ temporary updated, ConstructStorage memory updated temporary size →
@@ -136,7 +137,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
   rw [same] at checked
   obtain ⟨temporary, updated, stepped, zeroed, writable, preserved, fresh⟩ :=
     step_newAggregate (body := body) (pc := pc) (callee := callee) size positive args arguments
-      (stack.drop argc) frame memory formed (by rw [same]; exact checked)
+      (stack.drop argc) frame memory formed (by rw [same]; exact checked) known
   rw [length, split] at stepped
   have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed
     ⟨body, _, methodFound, instructionFound, stepped⟩
@@ -165,6 +166,7 @@ macro_rules
       (by decide) ?_ (by simp)
       (by first | rfl | (simp [CIL.Safety.checkedValue, CIL.Safety.numericValue, $[$facts:term],*] <;>
         (repeat constructor) <;> rfl))
+      (by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified, $[$facts:term],*])
       (by intro _; rfl) (by intro _; rfl) ?_ ?_))
 
 end CIL.Safety

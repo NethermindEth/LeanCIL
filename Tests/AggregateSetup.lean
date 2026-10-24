@@ -33,7 +33,7 @@ theorem composed_constructor (size : Fin (2^64)) (positive : 0 < size.val)
       MemoryBelow memory.nextIdentity memory updated := by
   obtain ⟨temporary, updated, stepped, loaded, _, preserved, _⟩ :=
     step_newAggregate (body := ((constructor size)[0]'(by simp [constructor]))) (pc := 0) (callee := 1)
-      size positive [] [] [] frame memory wf rfl
+      size positive [] [] [] frame memory wf rfl rfl
   refine ⟨temporary, updated, ?_, preserved⟩
   exact run_construct_of_invoke (body := ((constructor size)[0]'(by simp [constructor]))) rfl rfl stepped
     (child temporary updated stepped) (load_local_aggregate_of_read loaded)
