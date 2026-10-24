@@ -94,11 +94,12 @@ flags together. ARM64 profiles must set ArmBase/AdvSimd/Vector128 together and
 cannot enable Vector256 acceleration. A reduced-width x64 profile may retain
 `vector256Accelerated: false` with the full AVX2 group enabled.
 
-In the int256 revision pinned by the consumer workflow, 161 of 256 gates need
-profile migration: all 14 custom profiles and the retired built-ins. The 95
-already valid gates cover scalar, ARM64 AdvSimd and x64 SSE4.2 only; they do not
-establish v3/v4 correctness. Migration must add realistic v3/v4 proofs, including
-reduced vector width where required, and may consolidate split-group variants.
+int256 migrated under these constraints. Before migration, 161 of its 256 gates
+used invalid profiles (all 14 custom profiles and the retired built-ins), and none
+covered v3/v4. The revision pinned by the consumer workflow has 188 gates, all on
+valid profiles: scalar, ARM64 AdvSimd, x64 SSE4.2, x64-v3, x64-v4, and custom
+`x64-v3-v128`/`x64-v4-v128` reduced-width profiles. Split-group variants collapsed
+into v3/v4, and each method is gated once per distinct reachable body.
 
 These changes can select different CIL branches. Regenerate extraction, reprove
 each affected method/profile, re-export interfaces and rebuild full-verification

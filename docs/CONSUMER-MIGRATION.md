@@ -67,7 +67,7 @@ compiled-method certificates even when the supporting library builds.
 The pinned int256 workflow builds its full supporting Lean library and certifies
 four selected gates: Add/ARM64 AdvSimd, Subtract/x64 SSE4.2, Multiply/scalar and
 LeUInt256UInt256/scalar. This covers SIMD byte homes, embedding and comparison,
-not all 256 registered gates. 161 gates still need runtime-profile migration.
+not all 188 registered gates.
 Failures show red; keep this advisory check out of required branch-protection
 checks. The summary records elapsed library update/build time and the baseline
 revision, runner and run ID. Hosted-runner timings vary, so this is diagnostic
