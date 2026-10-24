@@ -43,8 +43,7 @@ theorem makeParameterHomes_references_valid (m result : Memory) (activation : Na
     (List.mem_map.mpr ⟨home, member, rfl⟩)
 
 /-- Every reference held by the frame's local slots and argument homes is valid in `m`. -/
-def Frame.ReferencesValid
- (m : Memory) (frame : Frame) : Prop :=
+def Frame.ReferencesValid (m : Memory) (frame : Frame) : Prop :=
   SlotsReferencesValid m frame.locals ∧ ∀ home ∈ frame.arguments, home.2.ReferencesValid m
 
 theorem enterFrame_references_valid (body : CIL.Method) (args : List Value)

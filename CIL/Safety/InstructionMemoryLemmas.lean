@@ -355,7 +355,6 @@ theorem storeValue_preserves_wellFormed (m result : Memory) (reference : Managed
 set_option maxHeartbeats 800000 in
 theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp)
     (stack values : List Value)
-
     (m result : Memory) (hm : m.WellFormed)
     (h : memoryInstruction operation stack m = .ok (result, values)) : result.WellFormed := by
   exact (memoryInstruction_effect _ _ _ _ _ h).wellFormed hm

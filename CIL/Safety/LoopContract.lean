@@ -89,7 +89,6 @@ elab_rules : tactic
 
 /-- Apply a contract at the fetched loop call or a `bind_call` site; leaves `pre`, then the
     continuation. -/
-
 syntax "cil_loop_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
 macro_rules

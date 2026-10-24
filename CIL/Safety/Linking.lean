@@ -408,7 +408,6 @@ theorem composed {app : CIL.Program} {libs : List Library} {specs : List Relocat
     (closed : ∀ j (bound : j < libs.length), Closed libs[j].program)
     (proved : ∀ j (bound : j < libs.length) (spec : j < specs.length),
       specs[j].holds libs[j].program 0) :
-
     claim (link app libs) :=
   given.discharge (link_links app libs) (link_imports length closed proved)
 

@@ -222,7 +222,6 @@ theorem run_call_unlinked {program : CIL.Program} {fuel method pc callee : Nat}
     (missing : program[callee]? = none) :
     run program (fuel + 1) method pc args frame stack memory =
       .error ⟨method, pc, .invalidState⟩ := by
-
   simp only [run, methodFound, instructionFound, stepped, missing, Except.mapError, Bind.bind,
     Except.bind]
 

@@ -244,7 +244,6 @@ macro_rules
 
 /-- Exit with the exception the callee's contract names at a `bind_call` site; leaves `pre`
     and the `raises` equation. -/
-
 syntax "cil_loop_outcome_raise" term:max term:max " at " ident "[" term,* "]" : tactic
 
 macro_rules
