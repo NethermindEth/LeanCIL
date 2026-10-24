@@ -115,7 +115,7 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
 
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    simp only [cil_step, cil_guard, CIL.Intrinsic.available, CIL.Intrinsic.requiredFeatures, List.length_cons, List.length_nil,
+    simp only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
       Nat.reduceAdd, Nat.reduceLT, Bool.not_true, Bool.not_false, Bool.false_eq_true,
       ite_false, ite_true, List.take_succ_cons, List.take_zero, List.take_nil,
       List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append, List.append_nil,
