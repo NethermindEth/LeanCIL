@@ -281,15 +281,16 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
     | cil_checked_step_by_equations [$[$facts:term],*]
     | cil_checked_step_by_unfolding [$[$facts:term],*])
 
-/-- Closes a `.memory` step through the generic `step_memory_eq`. A fact stated at the
-    `memoryInstruction` level fails once a per-shape memory equation rewrites past it, so
-    the stepping tactics retry such facts here. -/
+/-- Closes a `.memory` step through the generic `step_memory_eq`, unfolding
+    `staticInstruction` so a fact stated at the `memoryInstruction` level applies. Such a fact
+    fails once a per-shape memory equation rewrites past it, so the stepping tactics retry it
+    here. -/
 macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        rw [CIL.Safety.step_memory_eq]
        try simp only [cil_guard]
-       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue,
-         CIL.Safety.numericValue, CIL.Safety.scalars,
+       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.staticInstruction,
+         CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null,
          CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
          Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
@@ -395,13 +396,14 @@ def cilReducedOp? (op : Expr) : MetaM (Option Expr) := do
 
 /-- One checked `step` goal, with facts already normalised: a supplied step fact for the
     fetched op, as given or with its `@[cil_code]` bodies unfolded, or else a strategy chosen
-    by opcode (scalar, intrinsic, memory with its fallbacks, or the generic equations). -/
+    by opcode (scalar, intrinsic, memory with its retry, or the generic equations). -/
 syntax "cil_checked_step_normalized" "[" term,* "]" : tactic
 
 open Lean Elab Tactic Meta in
 /-- The supplied facts that state a `step` result for the goal's op, or for any op. -/
 def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
-  let target ← instantiateMVars target
+  -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
+  let target := (← instantiateMVars target).consumeMData
   let some (_, lhs, _) := target.eq? | return #[]
   unless lhs.isAppOfArity ``CIL.Safety.step 7 do return #[]
   let head := (← whnfR lhs.getAppArgs[1]!).getAppFn.constName?
@@ -482,17 +484,14 @@ elab_rules : tactic
         let attempt := fun (tactic : Syntax) => do
           try withoutRecover (evalTactic tactic); return none
           catch error => saved.restore; return some error
+        -- `step_memory_eq` matches every `.memory` step, so the unfolding fallback, which runs
+        -- only when no equation applies, cannot apply here.
         let some equationError ←
             attempt (← `(tactic| cil_checked_memory_by_equations [$facts:term,*])) | return
-        let progressed := (← attempt (← `(tactic| simp only [cil_step]))).isNone
-        saved.restore
-        let unfolding ← `(tactic| cil_checked_step_by_unfolding [$facts:term,*])
-        let some unfoldingError ←
-            (if progressed then pure (some equationError) else attempt unfolding) | return
         if ← mentionsMemoryInstruction facts.getElems then
           if (← attempt (← `(tactic| cil_checked_memory_retry [$facts:term,*]))).isNone then return
         -- Report the per-shape goal, where facts belong, rather than the whole-instruction retry's.
-        throw unfoldingError
+        throw equationError
       else
         `(tactic| cil_checked_step_equations [$facts:term,*])
     evalTactic strategy

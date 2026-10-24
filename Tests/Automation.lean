@@ -403,7 +403,8 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
 
 @[cil_code] def permuteStoreProgram : CIL.Program := [permuteStoreMethod]
 
--- A store fact stated at the `memoryInstruction` level, as consumers wrote before per-shape equations, still applies.
+-- A store fact stated at the `memoryInstruction` level, as consumers wrote before per-shape
+-- equations, still applies without `staticInstruction` passed to unfold.
 open CIL.Safety in
 theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory final : Memory)
     (stored : ∀ rest, memoryInstruction .store256
@@ -412,7 +413,20 @@ theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory
     run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
       [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 (CIL.Vector.pack256 a b c d)),
         .reference (.address destination)] memory = .ok (final, []) := by
-  cil_checked_steps [staticInstruction, stored]
+  cil_checked_steps [stored]
+
+-- The same fact closes the single store step.
+open CIL.Safety in
+theorem store_from_instruction_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+    (bits : BitVec 256) (destination : Reference) (memory final : Memory)
+    (stored : memoryInstruction .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [stored]
+
+#print axioms store_from_instruction_fact
 
 -- The same store from a `storeValue` fact: the per-shape memory equation exposes it without unfolding a dispatcher.
 open CIL.Safety in
@@ -767,6 +781,20 @@ theorem quantified_body_step_facts (frame stored : Frame) (memory written : Memo
 /-- info: 'Tests.Automation.quantified_body_step_facts' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms quantified_body_step_facts
 
+-- An earlier tactic `have` wraps the target in metadata; the store fact must still be found, since
+-- the `setLocal` equation alone cannot read the abstract frame's slot.
+open CIL.Safety in
+theorem step_fact_after_have (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
+    (store : step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written)) :
+    step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written) := by
+  have unchanged : value = value := rfl
+  cil_checked_step [store]
+
+/-- info: 'Tests.Automation.step_fact_after_have' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms step_fact_after_have
+
 @[cil_code] def nonzeroMethod : CIL.Method := {
   code := [.arg 0, .brnonzero 4, .arg 1, .ret, .arg 0, .ret]
   locals := [], returnsValue := true }
@@ -844,7 +872,7 @@ theorem evaluated_then_stored (v : CIL.Vector.V256) (destination : Reference) (m
     run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
       [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 v), .reference (.address destination)] memory =
       .ok (final, []) := by
-  cil_checked_steps [staticInstruction, stored, eval_reverse_lanes]
+  cil_checked_steps [stored, eval_reverse_lanes]
 
 #print axioms evaluated_then_stored
 
