@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using System.Runtime.Loader;
@@ -9,6 +10,7 @@ using var verification = new Program();
 var assembly = At("Examples/FSharp/bin/Examples.FSharp.dll");
 var root = At("artifacts/FSharp");
 Directory.CreateDirectory(root);
+var queue = new GeneratedQueue(verification, assembly, "Examples.FSharp");
 
 // Resolve the example's pinned F# runtime when invoking compiled functions.
 AssemblyLoadContext.Default.Resolving += (_, name) => name.Name == "FSharp.Core"
@@ -53,15 +55,19 @@ foreach (var name in new[] { "Add", "Minimum", "Calls", "Mutate", "Store" })
     {
         "Add" or "Minimum" => "ulong,ulong", "Store" => "ulong&,ulong", _ => "ulong"
     };
-    verification.Verify(assembly, "Examples.FSharp", $"Arithmetic::{name}({parameters})", proof, output);
-    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (name is "Calls" or "Mutate" && !extracted.Contains(".call "))
-        throw new InvalidOperationException($"{name} no longer exercises compiled method calls");
-    if (name == "Mutate" && !extracted.Contains(".newAggregate "))
-        throw new InvalidOperationException("Mutate no longer exercises struct construction");
-    cases += claims.Count;
-    Console.WriteLine($"PASS F# {name}: {claims.Count} runtime comparisons");
+    queue.Add(new($"Arithmetic::{name}({parameters})", proof, output), () =>
+    {
+        var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+        if (name is "Calls" or "Mutate" && !extracted.Contains(".call "))
+            throw new InvalidOperationException($"{name} no longer exercises compiled method calls");
+        if (name == "Mutate" && !extracted.Contains(".newAggregate "))
+            throw new InvalidOperationException("Mutate no longer exercises struct construction");
+        cases += claims.Count;
+        Console.WriteLine($"PASS F# {name}: {claims.Count} runtime comparisons");
+    });
 }
+
+queue.Flush();
 
 // The same language-independent contracts apply to C# and F# assemblies.
 foreach (var (selector, contract, name) in new[]

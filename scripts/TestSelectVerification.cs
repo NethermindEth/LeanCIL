@@ -268,10 +268,12 @@ Test("export leaf selection, strict files and shared inputs", () =>
         "Imported-layout model evidence lost its existing suite owner");
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
     string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
-    Require(runner.Contains(".. arguments", StringComparison.Ordinal) &&
-        runner.Contains("ExportVerificationSuites.Plan()", StringComparison.Ordinal) &&
+    Require(runner.Contains("FixtureCommand(script, arguments, preparedFixtures.Contains(script))",
+            StringComparison.Ordinal),
+        "Runner lost fixture argument forwarding; command behavior is covered by Tests/BuildReuse.cs");
+    Require(runner.Contains("ExportVerificationSuites.Plan()", StringComparison.Ordinal) &&
         runner.Contains("projects.Distinct(StringComparer.Ordinal)", StringComparison.Ordinal),
-        "Runner lost leaf arguments or build deduplication");
+        "Runner lost export leaf registration or build deduplication");
     Require(!runner.Contains("if (name == \"exports\")", StringComparison.Ordinal) &&
         !runner.Contains("projects.Add(\"Tests/ModularStaticExports.cs\")", StringComparison.Ordinal),
         "Old nested static suite remains");

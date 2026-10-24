@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -19,6 +21,51 @@ partial class Program : IDisposable
     string? library;
     string? resolvedToolchain;
     bool extractorBuilt;
+
+    const string ExtractorBuildEnvironment = "LEANCIL_PREPARED_EXTRACTOR";
+
+    static string[] FixtureCommand(string script, string[] arguments, bool prepared)
+    {
+        string[] buildArguments = prepared
+            ? ["-c", "Release", "--no-build", "-p:EnforceCodeStyleInBuild=true",
+                "-p:GenerateDocumentationFile=true"]
+            : [];
+        return ["dotnet", "run", "--file", script, .. buildArguments, "--", .. arguments];
+    }
+
+    // A parent build can be reused only while its sources and complete output still match.
+    static string ExtractorBuildIdentity()
+    {
+        if (!File.Exists(ExtractorPath)) return "";
+        var inputs = CommonInputs();
+        foreach (var path in Directory.EnumerateFiles(Root))
+            inputs["root:" + Path.GetFileName(path)] = Sha(path);
+        foreach (var path in Directory.EnumerateFiles(At("Extractor"), "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
+            if (!relative.Split('/').Any(part => part is "bin" or "obj"))
+                inputs[relative] = Sha(path);
+        }
+        foreach (var path in Directory.EnumerateFiles(Path.GetDirectoryName(ExtractorPath)!, "*",
+                     SearchOption.AllDirectories))
+            inputs["output:" + Path.GetRelativePath(Root, path)] = Sha(path);
+        return ContentKey(Root + JsonSerializer.Serialize(inputs));
+    }
+
+    static bool PreparedExtractorMatches()
+    {
+        var prepared = Environment.GetEnvironmentVariable(ExtractorBuildEnvironment);
+        return !string.IsNullOrEmpty(prepared) && prepared == ExtractorBuildIdentity();
+    }
+
+    void EnsureExtractorBuilt()
+    {
+        if (extractorBuilt) return;
+        if (!PreparedExtractorMatches())
+            Run(["dotnet", "build", "Extractor", "-c", "Release",
+                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
+        extractorBuilt = true;
+    }
     int extractionCacheHits;
     int proofCacheHits;
     int supportCacheHits;
@@ -261,9 +308,34 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     }
 
     static SortedDictionary<string, string> ModuleArtifacts(string session) =>
-        new(Directory.EnumerateFiles(Path.Combine(session, ".lake/build/lib/lean"), "*", SearchOption.AllDirectories)
+        HashFiles(Directory.EnumerateFiles(Path.Combine(session, ".lake/build/lib/lean"), "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-            .ToDictionary(path => Path.GetRelativePath(Path.Combine(session, ".lake/build/lib/lean"), path).Replace('\\', '/'), Sha), StringComparer.Ordinal);
+            .Select(path => (Path.GetRelativePath(Path.Combine(session, ".lake/build/lib/lean"), path)
+                .Replace('\\', '/'), path)));
+
+    // Publish a deterministic manifest only after every file has been hashed successfully.
+    static SortedDictionary<string, string> HashFiles(IEnumerable<(string Name, string Path)> files)
+    {
+        var entries = files.ToArray();
+        var hashes = new string[entries.Length];
+        var failures = new ExceptionDispatchInfo?[entries.Length];
+        const int maximumWorkers = 4;
+        Parallel.For(0, entries.Length,
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Min(maximumWorkers, Environment.ProcessorCount) },
+            index =>
+            {
+                try { hashes[index] = Sha(entries[index].Path); }
+                catch (Exception error) { failures[index] = ExceptionDispatchInfo.Capture(error); }
+            });
+        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        for (var index = 0; index < entries.Length; index++)
+        {
+            // Preserve ordinary I/O exceptions so invalid-cache handling still applies.
+            failures[index]?.Throw();
+            result.Add(entries[index].Name, hashes[index]);
+        }
+        return result;
+    }
 
     static string ModuleName(string artifact) => artifact.Split(".olean", 2)[0].Replace('/', '.');
 
@@ -272,7 +344,34 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
 
     static string At(string path) => Path.Combine(Root, path);
 
-    static string Sha(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+    static string Sha(string path)
+    {
+        const int bufferSize = 64 * 1024;
+        using var file = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var length = RandomAccess.GetLength(file);
+        if (length > Array.MaxLength) throw new IOException("The file is too long to read.");
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+        try
+        {
+            // A positive initial length bounds the read; premature EOF must fail.
+            var offset = 0L;
+            while (length == 0 || offset < length)
+            {
+                var count = length == 0 ? bufferSize : (int)Math.Min(bufferSize, length - offset);
+                var read = RandomAccess.Read(file, buffer.AsSpan(0, count), offset);
+                if (read == 0)
+                {
+                    if (length != 0) throw new EndOfStreamException();
+                    break;
+                }
+                hash.AppendData(buffer, 0, read);
+                offset += read;
+            }
+            return Convert.ToHexStringLower(hash.GetHashAndReset());
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
+    }
 
     static void CacheProgress(string message)
     {
@@ -443,6 +542,9 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     }
 
     static SortedDictionary<string, string> Inputs(string proof, string? settings = null)
+        => Inputs(CommonInputs(), proof, settings);
+
+    static SortedDictionary<string, string> CommonInputs()
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
 
@@ -465,6 +567,13 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                     result[relative] = Sha(path);
             }
 
+        return result;
+    }
+
+    static SortedDictionary<string, string> Inputs(SortedDictionary<string, string> common, string proof,
+        string? settings = null)
+    {
+        var result = new SortedDictionary<string, string>(common, StringComparer.Ordinal);
         result["proof:" + proof] = Sha(proof);
         if (settings is not null)
             result["settings:" + settings] = Sha(settings);
@@ -484,9 +593,9 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             p.Key is "CIL.lean" or "lakefile.toml" or "lake-manifest.json" or "lean-toolchain").ToDictionary(), StringComparer.Ordinal);
 
     static SortedDictionary<string, string> CacheFiles(string directory) =>
-        new(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+        HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path) is not ("cache-manifest.json" or "cache-receipt.hmac"))
-            .ToDictionary(path => Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha), StringComparer.Ordinal);
+            .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
 
     static bool ValidCache(string directory)
     {
@@ -929,12 +1038,18 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     string? auditExecutable;
     string? auditExecutableSha;
 
+    string CheckedAuditExecutable()
+    {
+        if (auditExecutable is null || !File.Exists(auditExecutable) || Sha(auditExecutable) != auditExecutableSha)
+            throw new InvalidOperationException("Theorem audit executable is missing or changed during verification");
+        return auditExecutable;
+    }
+
     // Reads the kernel-replayed oleans only: no imported elaborator, notation, extension or initializer runs.
     AuditedOleans AuditOleans(string leanPath, string[] modules, AuditRequest[] theorems, AuditConstantRequest[]? constants = null,
         string[]? interfaces = null, string[]? closures = null, AuditNamespaces? namespaces = null)
     {
-        if (auditExecutable is null || !File.Exists(auditExecutable) || Sha(auditExecutable) != auditExecutableSha)
-            throw new InvalidOperationException("Theorem audit executable is missing or changed during verification");
+        var executable = CheckedAuditExecutable();
         var request = Path.Combine(Path.GetTempPath(), "leancil-audit-" + Guid.NewGuid().ToString("N") + ".json");
         var result = Path.ChangeExtension(request, ".result.json");
         try
@@ -944,7 +1059,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             closures ??= [];
             File.WriteAllText(request, JsonSerializer.Serialize(new { modules, theorems, constants, interfaces,
                 closures = closures.Select(name => new { name }), namespaces }, AuditJson));
-            Run([auditExecutable, request, result], leanPath: leanPath, environment: LeanEnvironment);
+            Run([executable, request, result], leanPath: leanPath, environment: LeanEnvironment);
             var audited = JsonSerializer.Deserialize<AuditedOleans>(File.ReadAllText(result))
                 ?? throw new InvalidDataException("Missing theorem audit result");
             if (audited.theorems.Length != theorems.Length || audited.theorems.Zip(theorems).Any(pair => pair.First.name != pair.Second.name) ||
@@ -1090,11 +1205,11 @@ unsafe def main (args : List String) : IO Unit := do
     {
         if (modules.Length == 0) return new(StringComparer.Ordinal);
         HashSet<string> names = new(modules, StringComparer.Ordinal);
-        SortedDictionary<string, string> artifacts = new(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+        var artifacts = HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
             .Select(path => (Relative: Path.GetRelativePath(directory, path).Replace('\\', '/'), Path: path))
             .Where(artifact => names.Contains(ModuleName(artifact.Relative)))
-            .ToDictionary(artifact => artifact.Relative, artifact => Sha(artifact.Path)), StringComparer.Ordinal);
+            .Select(artifact => (artifact.Relative, artifact.Path)));
         foreach (string module in modules)
             if (!artifacts.ContainsKey(module.Replace('.', '/') + ".olean"))
                 throw new InvalidDataException("Published contract interface artifact is missing: " + module);
@@ -1306,11 +1421,7 @@ unsafe def main (args : List String) : IO Unit := do
         stage?.Invoke("extraction integrity");
         if (existingArtifacts)
             Run(["dotnet", ExtractorPath, "check", output]);
-        else if (!extractorBuilt)
-        {
-            Run(["dotnet", "build", "Extractor", "-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
-            extractorBuilt = true;
-        }
+        else EnsureExtractorBuilt();
 
         if (!existingArtifacts)
             Run(Extract("extract", assembly, identity, entry, output, profile));

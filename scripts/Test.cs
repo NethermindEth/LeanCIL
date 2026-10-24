@@ -15,6 +15,13 @@ string suite = args switch
 
 using var verification = new Program();
 var results = new List<string>();
+var preparedFixtures = new HashSet<string>(StringComparer.Ordinal);
+
+void RunFixture(string script, string[] arguments, bool streamOutput = false, string? progress = null)
+{
+    Run(FixtureCommand(script, arguments, preparedFixtures.Contains(script)),
+        streamOutput: streamOutput, progress: progress);
+}
 
 var independentSuites = new Dictionary<string, (string Script, string Description)>
 {
@@ -74,7 +81,7 @@ void RunSuite(string name)
     (string script, string description) = independentSuites[name];
     ExportSuite? export = ExportVerificationSuites.Plan().FirstOrDefault(entry => entry.Name == name);
     string[] arguments = export?.Arguments ?? [];
-    Run(["dotnet", "run", "--file", script, "--", .. arguments], streamOutput: true, progress: "Suite " + name);
+    RunFixture(script, arguments, streamOutput: true, progress: "Suite " + name);
     Passed(description);
 }
 
@@ -118,7 +125,7 @@ var signatures = new Dictionary<string, string>
 // Each suite can run in its own checkout, with only the projects it needs.
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
 if (suite is "all" or "core")
-    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "scripts/Verify.cs"]);
+    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
@@ -145,7 +152,12 @@ foreach (string project in projects.Distinct(StringComparer.Ordinal))
 
     if (log.Contains("IDE0005"))
         throw new InvalidOperationException("Unused imports: " + log);
+
+    if (project.EndsWith(".cs", StringComparison.Ordinal) && project != "Examples/Hardware/Hardware.cs")
+        preparedFixtures.Add(project);
 }
+
+Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, ExtractorBuildIdentity());
 
 if (suite is "all" or "core" or "unsafe" or "evidence" or "scaling" or "excluded")
 {
@@ -163,26 +175,32 @@ if (suite is not ("all" or "core"))
 }
 
 // Check method selection before starting the longer Lean verification run.
-Run(["dotnet", "run", "--file", "Tests/LibraryCache.cs"], streamOutput: true, progress: "Library cache checks");
+RunFixture("Tests/LibraryCache.cs", [], streamOutput: true, progress: "Library cache checks");
 Passed("library cache integrity and source keys");
 
-Run(["dotnet", "run", "--file", "Tests/VerificationCache.cs"], streamOutput: true, progress: "Certified verification cache checks");
+RunFixture("Tests/BuildReuse.cs", [], streamOutput: true, progress: "Prepared build reuse checks");
+Passed("prepared extractor source and output identity");
+
+RunFixture("Tests/VerificationCache.cs", [], streamOutput: true, progress: "Certified verification cache checks");
 Passed("certified artifact receipts and cache tampering rejection");
 
-Run(["dotnet", "run", "--file", "Tests/VerificationReuse.cs"], streamOutput: true, progress: "Certified verification reuse checks");
+RunFixture("Tests/VerificationReuse.cs", [], streamOutput: true, progress: "Certified verification reuse checks");
 Passed("cold and warm verification, proof-edit invalidation and unchecked helper rejection");
 
-Run(["dotnet", "run", "--file", "Tests/BatchVerification.cs"], streamOutput: true, progress: "Generated verification batch checks");
+RunFixture("Tests/ExtractionBatch.cs", [], streamOutput: true, progress: "Extraction batch checks");
+Passed("batched extraction identities, input freshness and failure isolation");
+
+RunFixture("Tests/BatchVerification.cs", [], streamOutput: true, progress: "Generated verification batch checks");
 Passed("batched extraction and proof checking, independent identities and negative regressions");
 
-Run(["dotnet", "run", "--file", "Tests/JointReplay.cs"], streamOutput: true, progress: "Joint kernel replay checks");
+RunFixture("Tests/JointReplay.cs", [], streamOutput: true, progress: "Joint kernel replay checks");
 Passed("joint kernel replay, untargeted-import fallback and forged declaration attribution");
 
-Run(["dotnet", "run", "--file", "Tests/InitializedTypes.cs"], streamOutput: true, progress: "Initialization assumptions");
+RunFixture("Tests/InitializedTypes.cs", [], streamOutput: true, progress: "Initialization assumptions");
 Passed("explicit type initialization assumptions and identity");
-Run(["dotnet", "run", "--file", "Tests/ConsumerVerification.cs"], streamOutput: true, progress: "Consumer proof packages");
+RunFixture("Tests/ConsumerVerification.cs", [], streamOutput: true, progress: "Consumer proof packages");
 Passed("external consumer proof package and transitive source identity");
-Run(["dotnet", "run", "--file", "Tests/MethodSelectors.cs"], streamOutput: true, progress: "Method selector checks");
+RunFixture("Tests/MethodSelectors.cs", [], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
 Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding", "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels", "Tests.DebugNames", "Tests.MethodContract", "Tests.ConstructContract", "Tests.OutcomeContract", "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints", "Tests.ContractConsequence", "Tests.BufferContents", "Tests.Linking", "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
@@ -265,7 +283,7 @@ foreach (var (mutation, marker) in markers)
 {
     var dll = At($"artifacts/mutations/{mutation}.dll");
 
-    Run(["dotnet", "run", "--file", "Tests/MetadataMutator.cs", "--", assembly, dll, mutation]);
+    RunFixture("Tests/MetadataMutator.cs", [assembly, dll, mutation]);
     Rejected(Extract("extract", dll, identity, signatures[mutation == "field" ? "Struct" : "Add"], At($"artifacts/mutations/{mutation}")), marker);
     Passed("metadata rejection: " + mutation);
 }
@@ -273,14 +291,14 @@ foreach (var (mutation, marker) in markers)
 // A short selector must not allow a rebuilt assembly to reuse an old report.
 var changedVersionDll = At("artifacts/mutations/version.dll");
 
-Run(["dotnet", "run", "--file", "Tests/MetadataMutator.cs", "--", assembly, changedVersionDll, "version"]);
+RunFixture("Tests/MetadataMutator.cs", [assembly, changedVersionDll, "version"]);
 Rejected(Extract("check", changedVersionDll, identity, signatures["Add"], At("artifacts/Add")), "Stale or mismatched");
 Passed("changed assembly version rejected with short selector");
 
 // Verify static data from an assembly with a generated RVA field.
 var staticDll = At("artifacts/mutations/static.dll");
 
-Run(["dotnet", "run", "--file", "Tests/MetadataMutator.cs", "--", assembly, staticDll, "static-data"]);
+RunFixture("Tests/MetadataMutator.cs", [assembly, staticDll, "static-data"]);
 verification.Verify(staticDll, identity, signatures["Add"], At("Examples/Proofs/StaticData.lean"), At("artifacts/StaticData"));
 Passed("identity-bound static RVA data");
 

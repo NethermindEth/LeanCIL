@@ -20,9 +20,9 @@ partial class Program
     string ConsumerToolchainIdentity()
     {
         var directory = Path.Combine(Toolchain, "lib", "lean");
-        var files = new SortedDictionary<string, string>(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+        var files = HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-            .ToDictionary(path => Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha), StringComparer.Ordinal);
+            .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
         return ContentKey(JsonSerializer.Serialize(files));
     }
 
@@ -43,26 +43,6 @@ partial class Program
         Directory.CreateDirectory(temporary);
         try
         {
-            var probe = Path.Combine(temporary, "Fingerprint.lean");
-            File.WriteAllText(probe, """
-import Lean
-@[noinline] def fingerprintModule (name : String) (sources destinations : Array String) :
-    IO (Array Lean.CompactedRegion) := do
-  let parts ← Lean.readModuleDataParts (sources.map System.FilePath.mk)
-  let filtered := parts.map fun (data, _) =>
-    { data with entries := data.entries.filter (fun entry => entry.1 != `Lean.Linter.lintLogExt) }
-  Lean.saveModuleDataParts name.toName (destinations.map System.FilePath.mk |>.zip filtered)
-  return parts.map Prod.snd
-unsafe def main (args : List String) : IO Unit := do
-  let [input] := args | throw (IO.userError "Expected fingerprint manifest")
-  let modules : Array (String × Array String × Array String) ←
-    IO.ofExcept <| (Lean.Json.parse (← IO.FS.readFile input)).bind Lean.fromJson?
-  for (name, sources, destinations) in modules do
-    -- Drop the reconstructed data before unmapping its referenced objects.
-    let regions ← fingerprintModule name sources destinations
-    for region in regions.reverse do
-      region.free
-""");
             var paths = modules.Select((pair, index) => (pair.Key, Source: pair.Value,
                 Destination: Path.Combine(temporary, index + ".olean"))).ToArray();
             var input = Path.Combine(temporary, "modules.json");
@@ -75,8 +55,8 @@ unsafe def main (args : List String) : IO Unit := do
                     new[] { "", ".server", ".private" }.Where(suffix => File.Exists(item.Source + suffix)).Select(suffix => item.Destination + suffix).ToArray()
                 }
             })));
-            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean"),
-                "-j2", "--run", probe, input], session, progress: "Fingerprinting portable consumer modules");
+            Run([CheckedAuditExecutable(), "--fingerprints", input], session,
+                progress: "Fingerprinting portable consumer modules");
             return paths.ToDictionary(item => item.Key, item => ConsumerModuleParts(item.Destination));
         }
         finally { Directory.Delete(temporary, true); }
@@ -549,29 +529,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         // Read Lean's compiled import headers, not a regex over source text. This
         // also handles public/private imports and transitive package dependencies.
-        var probe = Path.Combine(session, "LeanCILImports" + Guid.NewGuid().ToString("N") + ".lean");
-        var input = probe + ".json";
+        var input = Path.Combine(Path.GetTempPath(), "leancil-imports-" + Guid.NewGuid().ToString("N") + ".json");
+        var output = Path.ChangeExtension(input, ".result.json");
         try
         {
-            File.WriteAllText(probe, """
-import Lean
-unsafe def main (args : List String) : IO Unit := do
-  let [input] := args | throw (IO.userError "Expected module manifest")
-  let paths : Array String ← IO.ofExcept <| (Lean.Json.parse (← IO.FS.readFile input)).bind Lean.fromJson?
-  for path in paths do
-    let (data, region) ← Lean.readModuleData path
-    IO.println (Lean.Json.arr (data.imports.map fun i => Lean.Json.str i.module.toString)).compress
-    region.free
-""");
             var paths = modules.Values.ToArray();
             File.WriteAllText(input, JsonSerializer.Serialize(paths));
-            var result = Run([LeanExecutable, "--run", probe, input], session, environment: LeanEnvironment);
-            var lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            if (lines.Length != paths.Length) throw new InvalidDataException("Incomplete consumer compiled import graph.");
-            return modules.Keys.Zip(lines).ToDictionary(pair => pair.First,
-                pair => JsonSerializer.Deserialize<string[]>(pair.Second) ?? throw new InvalidDataException("Invalid import graph."));
+            Run([CheckedAuditExecutable(), "--imports", input, output], session, environment: LeanEnvironment);
+            var imports = File.ReadAllLines(output).Select(line => JsonSerializer.Deserialize<string[]>(line)).ToArray();
+            if (imports.Length != paths.Length || imports.Any(items => items is null))
+                throw new InvalidDataException("Incomplete consumer compiled import graph.");
+            return modules.Keys.Zip(imports).ToDictionary(pair => pair.First, pair => pair.Second!);
         }
-        finally { File.Delete(probe); File.Delete(input); }
+        finally { File.Delete(input); File.Delete(output); }
     }
 
     static HashSet<string> ImportClosure(Dictionary<string, string[]> graph, IEnumerable<string> roots)
@@ -876,6 +846,24 @@ unsafe def main (args : List String) : IO Unit := do
             (_, value) => stage?.Invoke(value), batch: false)[0];
         if (outcome.Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
         return outcome.Report!;
+    }
+
+    // Capture all artifact names, including unknown parts used by module discovery.
+    static SortedDictionary<string, string> ConsumerArtifactSnapshot(string directory) =>
+        HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
+            .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
+
+    // The replay manifest binds exactly the parts consumed by Lean.
+    static SortedDictionary<string, string> ConsumerSnapshotParts(
+        IReadOnlyDictionary<string, string> artifacts, string modulePath, string path)
+    {
+        var parts = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var suffix in new[] { "", ".server", ".private" })
+            if (artifacts.TryGetValue(modulePath + suffix, out var hash)) parts[".olean" + suffix] = hash;
+            // Filesystem lookup can resolve case variants absent from the ordinal snapshot.
+            else if (File.Exists(path + suffix)) parts[".olean" + suffix] = Sha(path + suffix);
+        return parts;
     }
 
     // Verifies requests against one consumer snapshot. Each request gets its own
@@ -1257,19 +1245,20 @@ unsafe def main (args : List String) : IO Unit := do
                 File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             var frameworkModules = Path.GetFullPath(Path.Combine(frameworkCopy, ".lake/build/lib/lean"));
-            var currentBase = ModuleArtifacts(frameworkCopy).Where(pair =>
+            // No external commands run between this snapshot and the replay manifest.
+            var artifactSnapshots = importDirectories.Where(Directory.Exists)
+                .Select(directory => (Directory: directory, Artifacts: ConsumerArtifactSnapshot(directory))).ToArray();
+            var frameworkArtifacts = artifactSnapshots.FirstOrDefault(snapshot =>
+                snapshot.Directory.Equals(frameworkModules, comparison)).Artifacts;
+            var currentBase = (frameworkArtifacts ?? ConsumerArtifactSnapshot(frameworkModules)).Where(pair =>
                 ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
             var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison)) &&
                 certifiedBase.Count == currentBase.Count &&
                 certifiedBase.All(pair => currentBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
             var moduleNames = new HashSet<string>(StringComparer.Ordinal);
             var discovered = new List<(string Name, bool Certified)>();
-            foreach (var directory in importDirectories)
+            foreach (var (directory, artifacts) in artifactSnapshots)
             {
-                if (!Directory.Exists(directory)) continue;
-                var artifacts = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-                    .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-                    .Select(path => new KeyValuePair<string, string>(Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha(path)));
                 foreach (var module in artifacts.GroupBy(pair => ModuleName(pair.Key)))
                 {
                     if (!moduleNames.Add(module.Key)) throw new InvalidDataException("Ambiguous consumer module: " + module.Key);
@@ -1295,12 +1284,15 @@ unsafe def main (args : List String) : IO Unit := do
             if (!moduleNames.Contains("Extracted") || !moduleNames.Contains("ExtractionAudit") ||
                 proceeding.Any(i => !moduleNames.Contains(names[Array.IndexOf(members, i)])))
                 throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
-            var currentArtifacts = importDirectories.Where(Directory.Exists).SelectMany(directory =>
-                Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
-                    (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
+            var mainArtifacts = artifactSnapshots.SelectMany(snapshot =>
+                Directory.EnumerateFiles(snapshot.Directory, "*.olean", SearchOption.AllDirectories)
+                    .Select(path => (Name: ModuleName(Path.GetRelativePath(snapshot.Directory, path)
+                        .Replace('\\', '/')), Path: path, Parts: ConsumerSnapshotParts(snapshot.Artifacts,
+                            Path.GetRelativePath(snapshot.Directory, path).Replace('\\', '/'), path)))).ToArray();
+            var currentArtifacts = mainArtifacts
                 .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
-            var checkedArtifacts = JsonSerializer.Serialize(currentArtifacts.OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                .ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)));
+            var checkedArtifacts = JsonSerializer.Serialize(mainArtifacts.OrderBy(pair => pair.Name, StringComparer.Ordinal)
+                .ToDictionary(pair => pair.Name, pair => pair.Parts));
             var portableSupport = ImportedConsumerSupport(session, trusted, currentArtifacts);
             var graph = members.Length > 1 || share || UseSuccessCache || exporting || restoredArtifacts.Count > 0 || symbolHash is not null
                 ? ConsumerModuleImports(session, currentArtifacts) : null;

@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -12,6 +13,7 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Throws");
 Directory.CreateDirectory(root);
+var queue = new GeneratedQueue(verification, assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Throws")!;
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.Safety.Execution"]);
 
@@ -41,8 +43,8 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var proof = Path.Combine(folder, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", selector, proof, Path.Combine(root, name + "-Verified"));
-    Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons, {label} located at method {method} pc {pc}");
+    queue.Add(new(selector, proof, Path.Combine(root, name + "-Verified")), () =>
+        Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons, {label} located at method {method} pc {pc}"));
 
     // A forged type must fail the feature certificate, independently of the instruction lemma.
     var forged = source.Replace($".throw \"{label}\"", ".throw \"System.InvalidOperationException\"");
@@ -53,6 +55,8 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         throw new InvalidOperationException($"Forged raised type was accepted for {name}\n{result.Output}");
     Console.WriteLine($"PASS {name}: forged raised type rejected by the feature certificate");
 }
+
+queue.Flush();
 
 // Anything other than the exact encoding without handlers stays unsupported.
 foreach (var (mutation, marker) in new[]

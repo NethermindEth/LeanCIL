@@ -26,12 +26,28 @@ partial class Program
         }
     }
 
+    static void ExtractGeneratedBatch(string mode, string identity, IReadOnlyList<GeneratedVerification> requests,
+        string profile)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "leancil-extractions-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(requests.Select(request => new
+            {
+                assembly = request.Assembly, identity, entry = request.Entry, output = request.Output, profile
+            })));
+            Run(["dotnet", ExtractorPath, "generated-extraction-batch", mode, path]);
+        }
+        finally { File.Delete(path); }
+    }
+
     void VerifyGeneratedBatch(string assembly, string identity, IReadOnlyList<GeneratedVerification> requests,
         string profile = "scalar")
     {
         if (requests.Count == 0) return;
         assembly = Path.GetFullPath(assembly);
-        requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof), Output = Path.GetFullPath(r.Output),
+        requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof),
+            Output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(r.Output)),
             Assembly = Path.GetFullPath(r.Assembly ?? assembly) }).ToArray();
         if (requests.Select(r => Path.GetFullPath(r.Output)).Distinct(StringComparer.OrdinalIgnoreCase).Count() != requests.Count)
             throw new ArgumentException("Batch outputs must be distinct");
@@ -42,13 +58,9 @@ partial class Program
             Directory.CreateDirectory(request.Output);
             File.Delete(Path.Combine(request.Output, "verified.json"));
         }
-        if (!extractorBuilt)
-        {
-            Run(["dotnet", "build", "Extractor", "-c", "Release",
-                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
-            extractorBuilt = true;
-        }
-        var before = requests.Select(r => Inputs(r.Proof)).ToArray();
+        EnsureExtractorBuilt();
+        var commonBefore = CommonInputs();
+        var before = requests.Select(r => Inputs(commonBefore, r.Proof)).ToArray();
         var session = Library(before[0]);
         var imports = new SortedSet<string>(StringComparer.Ordinal);
         string Body(string source)
@@ -62,10 +74,10 @@ partial class Program
         }
         var bodies = new StringBuilder();
         var hashes = new string[requests.Count];
+        ExtractGeneratedBatch("extract", identity, requests, profile);
         for (var i = 0; i < requests.Count; i++)
         {
             var request = requests[i];
-            Run(Extract("extract", request.Assembly!, identity, request.Entry, request.Output, profile));
             if (HasContractImports(ExtractionIdentity.Read(request.Output)))
                 throw new InvalidDataException("Generated batch verification does not support contract imports.");
             hashes[i] = Sha(Path.Combine(request.Output, "identity.json"));
@@ -111,6 +123,9 @@ partial class Program
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
             RequireAuditedModule(audited, "Batch", Path.Combine(fresh, "Batch.olean"));
+            ExtractGeneratedBatch("check", identity, requests, profile);
+            // Every input is checked after the last subprocess, including inputs for earlier fixtures.
+            var commonAfter = CommonInputs();
             var reports = new Report[requests.Count];
             for (var i = 0; i < requests.Count; i++)
             {
@@ -118,8 +133,8 @@ partial class Program
                 var theorem = $"BatchCase{i}.{request.Theorem}";
                 var axioms = AuditedAxioms(audited.theorems[2 * i]);
                 AuditedAxioms(audited.theorems[2 * i + 1]);
-                Run(Extract("check", request.Assembly!, identity, request.Entry, request.Output, profile));
-                if (!Same(before[i], Inputs(request.Proof)) || hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
+                if (!Same(before[i], Inputs(commonAfter, request.Proof)) ||
+                    hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
                     throw new InvalidOperationException("Batch inputs changed during verification");
                 var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)

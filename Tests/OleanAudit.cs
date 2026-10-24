@@ -7,6 +7,7 @@
 
 using System.Text.Json;
 
+Run(["dotnet", "run", "--file", "Tests/ConsumerInspection.cs"]);
 using var verification = new Program();
 var root = At("artifacts/OleanAudit");
 if (Directory.Exists(root)) Directory.Delete(root, true);

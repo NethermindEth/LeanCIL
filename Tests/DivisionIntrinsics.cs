@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -16,6 +17,16 @@ Dictionary<string, string> selectors = metadata.GetType("Examples.DivisionIntrin
     .ToDictionary(method => method.Name, method => method.FullName);
 Type runtime = Assembly.LoadFile(assembly).GetType("Examples.DivisionIntrinsics")!;
 string root = At("artifacts/DivisionIntrinsics");
+var pending = new List<(GeneratedVerification Request, string Profile, Action Passed)>();
+void Flush()
+{
+    foreach (var group in pending.GroupBy(item => item.Profile))
+    {
+        verification.VerifyGeneratedBatch(assembly, "Examples", group.Select(item => item.Request).ToArray(), group.Key);
+        foreach (var item in group) item.Passed();
+    }
+    pending.Clear();
+}
 
 foreach (var name in new[] { "DefinedLocal", "PrunedUnsafeLocal" })
 {
@@ -42,8 +53,8 @@ theorem correctness :
 #print axioms correctness
 end ExampleProof
 """);
-    verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: "x64-sse42");
-    Console.WriteLine("PASS byte-home compatibility and forged opaque rejection: " + name);
+    pending.Add((new(selectors[name], proof, output), "x64-sse42",
+        () => Console.WriteLine("PASS byte-home compatibility and forged opaque rejection: " + name)));
     if (name == "PrunedUnsafeLocal")
     {
         var reachableOutput = Path.Combine(root, name + "-reachable");
@@ -58,8 +69,8 @@ theorem correctness : Extracted.method0.opaqueVectorLocals = [{{local}}] := rfl
 #print axioms correctness
 end ExampleProof
 """);
-        verification.Verify(assembly, "Examples", selectors[name], reachableProof, reachableOutput, profile: "x64-v3");
-        Console.WriteLine("PASS reachable unsafe intrinsic selects the eligible opaque local");
+        pending.Add((new(selectors[name], reachableProof, reachableOutput), "x64-v3",
+            () => Console.WriteLine("PASS reachable unsafe intrinsic selects the eligible opaque local")));
     }
 }
 
@@ -86,8 +97,8 @@ theorem correctness :
 #print axioms correctness
 end ExampleProof
 """);
-    verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: "x64-v3");
-    Console.WriteLine("PASS unspecified vector boundary rejection: " + name);
+    pending.Add((new(selectors[name], proof, output), "x64-v3",
+        () => Console.WriteLine("PASS unspecified vector boundary rejection: " + name)));
 }
 
 foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in new (string, ulong, ulong, ulong, bool)[]
@@ -112,16 +123,20 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
         "theorem correctness : (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 " + left +
         "), .scalar (.i64 " + right + ")] Examples.empty).map Prod.snd = .ok [.scalar (." + word + " " + expected +
         ")] := by " + (wide ? "\n  apply ok_of_toOption\n  decide +kernel" : "rfl") + "\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: wide ? "x64-v4" : "x64-v3");
-    RequireRuntimeGroups(output, wide);
+    pending.Add((new(selectors[name], proof, output), wide ? "x64-v4" : "x64-v3", () =>
+    {
+        RequireRuntimeGroups(output, wide);
+        Console.WriteLine("PASS compiled division intrinsic: " + name);
+    }));
     if (wide ? Avx512DQ.IsSupported && Avx512F.IsSupported : Avx2.IsSupported)
     {
         object result = runtime.GetMethod(name)!.Invoke(null, [left, right])!;
         ulong actual = wide ? (ulong)(int)result : (ulong)result;
         if (actual != expected) throw new InvalidOperationException("Runtime mismatch: " + name);
     }
-    Console.WriteLine("PASS compiled division intrinsic: " + name);
 }
+
+Flush();
 
 string rejectedEncoding = Path.Combine(root, "Reject-Vector512Encoding");
 Directory.CreateDirectory(rejectedEncoding);
@@ -170,7 +185,8 @@ theorem correctness :
   exact ⟨rfl, rfl⟩
 end ExampleProof
 """);
-    verification.Verify(assembly, "Examples", selectors[name], proof, output);
+    pending.Add((new(selectors[name], proof, output), "scalar",
+        () => Console.WriteLine("PASS vector initialization, exact zero bytes and bounds: " + name)));
     object[] arguments = [initial];
     runtime.GetMethod(name)!.Invoke(null, arguments);
     bool zero = arguments[0] switch
@@ -181,8 +197,9 @@ end ExampleProof
         _ => false
     };
     if (!zero) throw new InvalidOperationException("Runtime vector initialization did not clear every lane: " + name);
-    Console.WriteLine("PASS vector initialization, exact zero bytes and bounds: " + name);
 }
+
+Flush();
 
 // .NET 10 reports AVX2 only with BMI1/BMI2 and AVX-512 F/DQ/VL only together; any other profile certifies no runtime.
 static void RequireRuntimeGroups(string output, bool wide)

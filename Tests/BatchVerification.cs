@@ -68,6 +68,41 @@ try
     File.WriteAllText(batchPath, batchSource);
     Console.WriteLine("PASS modified batch source rejected");
 
+    var firstProof = File.ReadAllText(requests[0].Proof);
+    var lastProof = File.ReadAllText(requests[^1].Proof);
+    var commonMutation = At("Tests/BatchMutation" + Guid.NewGuid().ToString("N") + ".lean");
+    try
+    {
+        foreach (var target in new[] { requests[0].Proof, commonMutation })
+        {
+            File.WriteAllText(requests[^1].Proof, lastProof + $$"""
+
+                open Lean Elab Command in
+                run_cmd do
+                  IO.FS.writeFile {{JsonSerializer.Serialize(target.Replace('\\', '/'))}} "-- changed by proof code\n"
+                """);
+            rejected = false;
+            try
+            {
+                verification.VerifyGeneratedBatch(assembly, "Examples", requests);
+            }
+            catch (InvalidOperationException error) when (error.Message == "Batch inputs changed during verification")
+            {
+                rejected = true;
+            }
+            if (!rejected || requests.Any(r => File.Exists(Path.Combine(r.Output, "verified.json"))))
+                throw new InvalidOperationException("Proof code mutated batch inputs without rejecting every report");
+            File.WriteAllText(requests[0].Proof, firstProof);
+        }
+        Console.WriteLine("PASS proof code changing an earlier proof or adding common inputs rejects every report");
+    }
+    finally
+    {
+        File.WriteAllText(requests[0].Proof, firstProof);
+        File.WriteAllText(requests[^1].Proof, lastProof);
+        File.Delete(commonMutation);
+    }
+
     // One failing fixture invalidates the whole attempt, including old reports.
     var wrong = requests.Select((r, i) => i == requests.Length - 1
         ? r with { Entry = "Arithmetic::WrongAdd(ulong,ulong)" } : r).ToArray();

@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using System.Reflection.Emit;
@@ -25,6 +26,7 @@ using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
 Dictionary<string, string> selectors = metadata.GetType("Examples.VectorFields").Methods
     .ToDictionary(method => method.Name, method => method.FullName);
 Run(["lake", "build", "+Tests.VectorFields:olean"]);
+var pending = new List<(GeneratedVerification Request, string Name, string Profile)>();
 
 int Size(Type type)
 {
@@ -59,8 +61,8 @@ void Prove(string name, List<string> claims, string definitions = "")
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + definitions +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by exact ⟨" +
         string.Join(", ", claims.Select(_ => "by rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: name == "WritePacked" ? "scalar" : profile);
-    Console.WriteLine("PASS vector fields: " + name);
+    pending.Add((new GeneratedVerification(selectors[name], proof, output), name,
+        name == "WritePacked" ? "scalar" : profile));
 }
 
 foreach ((string name, string holder, int width, bool write) in new[]
@@ -129,6 +131,13 @@ Prove("Address256", [
     $"(CIL.Safety.invoke Extracted.program 16 0 [Examples.reference] memory).map Prod.snd = .ok [.reference (.address ⟨0, {addressOffset}⟩)]",
     $"Extracted.layout0.size = {addressSize}"],
     $"def memory : CIL.Safety.Memory := {{ Examples.empty with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{addressSize}, 1, []⟩, true, [{addressSize}]⟩ else none, nextIdentity := 1 }}\n");
+
+// The extraction files remain available for the evidence mutations below.
+foreach (var group in pending.GroupBy(item => item.Profile))
+{
+    verification.VerifyGeneratedBatch(assembly, "Examples", group.Select(item => item.Request).ToArray(), group.Key);
+    foreach (var item in group) Console.WriteLine("PASS vector fields: " + item.Name);
+}
 
 foreach (string mutation in new[] { "element", "width", "scope", "version", "token", "arity", "encoding", "reference", "packing", "default-packing" })
 {

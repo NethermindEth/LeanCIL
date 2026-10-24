@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Numerics;
 using System.Reflection;
@@ -12,6 +13,7 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/CheckedArithmetic");
 Directory.CreateDirectory(root);
+var queue = new GeneratedQueue(verification, assembly);
 var cases = 0;
 
 // The universal contracts require no overflow, with no restriction beyond the sum fitting.
@@ -97,10 +99,14 @@ foreach (var operation in new[] { OpCodes.Add_Ovf, OpCodes.Add_Ovf_Un, OpCodes.S
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {operation.Name} {width}: {claims.Count} runtime comparisons and proofs");
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {operation.Name} {width}: {claims.Count} runtime comparisons and proofs");
+    });
 }
+
+queue.Flush();
 
 // A different actual implementation must not satisfy the same universal contract.
 var wrongOutput = Path.Combine(root, "WrongCheckedAdd");
