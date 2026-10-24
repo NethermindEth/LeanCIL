@@ -49,7 +49,9 @@ constructors so additions identify the missing field directly.
 `StepComposition` re-exports `GuardNormalization`. Use `simp only [cil_guard]`
 to normalize guards on known scalar/reference/vector constructors without
 evaluating their BitVec payloads. Use the `cil_step` equations for instruction
-reasoning. In custom dispatch tactics, inspect the operation before trying step
+reasoning. A `.memory` step now rewrites to `formValue`, `loadValue`, `storeValue`
+or `add`, so state memory facts at that level; facts about `memoryInstruction`
+still apply, through a slower retry. In custom dispatch tactics, inspect the operation before trying step
 lemmas for other operations; unifying an unrelated step equation may unfold
 large symbolic stacks. No global heartbeat increase or weakened safety condition
 is part of this migration.
