@@ -4,9 +4,10 @@ import CIL.Extraction.Generics
 # Vector initialization
 
 `initobj` (0xFE15) zeroes its target, so its emitted `initAggregate` must zero exactly the
-type's width. `VectorInitializationsValid` binds each live `initobj` of a struct, a
-`Vector128/256/512<ulong>` or a primitive to an `initAggregate` of the right width, and
-forbids any other emission for an `initobj` of a vector type.
+type's width. `VectorInitializationsValid` checks that an `initAggregate` emitted for a live
+`initobj` of a struct, a `Vector128/256/512<ulong>` or a primitive has the right width, and
+forbids any other emission for an `initobj` of a vector type. Aggregate widths themselves are
+bound by the layout checks.
 -/
 
 namespace CIL.Extraction

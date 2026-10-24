@@ -17,7 +17,7 @@ import CIL.SIMD.X86Base
 The hardware and runtime intrinsics an extracted method may call, grouped by ISA family,
 and `evalIntrinsic`, their meaning on evaluation-stack values. The per-ISA files define the
 bit-level operations; whether a profile may call an intrinsic is `Intrinsic.available`, and
-`ProfileEquivalence` lists the features each one needs.
+`Intrinsic.requiredFeatures` in `CIL/SIMD/Availability.lean` lists the features each needs.
 -/
 
 namespace CIL

@@ -78,7 +78,7 @@ def read512 (memory : Memory) : Address → Option Value
   | .static bytes base => do return .v512 (BitVec.ofNat 512 (← readStaticBytes bytes base 64))
   | .home .. => none
 
-/-- Writes a 512-bit vector; read-only data and homes cannot hold one. -/
+/-- Writes a 512-bit vector; read-only data cannot be written and a home is too small. -/
 def write512 (memory : Memory) (address : Address) (bits : BitVec 512) : Option Memory :=
   match address with
   | .byte base => some (writeBytes memory base bits.toNat 64)

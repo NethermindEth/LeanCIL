@@ -298,8 +298,9 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
     | .call .. | .newAggregate .. | .newVector256 .. => false
     | _ => true
 
-/-- Every live call site of `raw` binds to the method table or an import slot, and no
-    other instruction emits a call. -/
+/-- Every call emitted at a live call site of `raw` binds to the method table or an import
+    slot, and no other instruction emits a call. An external site may instead emit a
+    non-call translation, which other validators check. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧

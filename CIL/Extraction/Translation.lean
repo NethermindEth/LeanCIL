@@ -9,11 +9,11 @@ import CIL.Extraction.ImportLayouts
 /-!
 # Translation validity
 
-The top of the extraction checks. `TranslationValid` says the emitted program is a
-faithful translation of the raw assembly metadata it was extracted from: layouts recompute,
-every emitted method passes all per-method validators against its evidence record, static
-values are reproduced by their initializers, and import layouts agree. Proofs about the
-emitted program then rest on these kernel-checked facts instead of on the extractor.
+The top of the extraction checks. `TranslationValid` conjoins the kernel-checked validators
+for one extraction: layouts recompute, every emitted method passes the per-method validators
+against its evidence record, static values are reproduced by their initializers, and import
+layouts agree. It is not a simulation proof for every raw opcode; general instruction
+translation and metadata decoding stay trusted, as `docs/SOUNDNESS.md` describes.
 
 Generated modules prove each method's evidence separately and assemble it with
 `translation_of_methods`, so no validator is reduced twice.

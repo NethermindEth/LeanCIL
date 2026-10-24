@@ -3,8 +3,8 @@ import CIL.Safety.Memory
 /-!
 # Reusing readable views
 
-A write records a readable view over the bytes it wrote, unless an existing view already
-covers them (`writeViews`). These lemmas show skipping that redundant view grants exactly
+A write records a readable view over the bytes it wrote, unless the existing views already
+make the range readable, together or because it is empty (`writeViews`). These lemmas show skipping that redundant view grants exactly
 the same read and write permissions, so the view list grows by at most one per write.
 -/
 

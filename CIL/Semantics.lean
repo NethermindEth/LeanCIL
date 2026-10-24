@@ -279,9 +279,10 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
   | .ret narrow, _ => returnFromStack narrow returns stack memory
   | _, _ => none
 
-/-- Runs `method` from `pc` until it returns. Each instruction, including each one inside a
-    callee, spends one unit of fuel; running out is failure, not a result. A callee gets
-    frame `frame + 1`, and a constructor must return nothing. -/
+/-- Runs `method` from `pc` until it returns. Each instruction spends one unit of fuel, and a
+    callee and the caller's continuation each get what remains at the call, so fuel bounds
+    every path, not the total. Running out is failure, not a result. A callee gets frame
+    `frame + 1`, and a constructor must return nothing. -/
 def run (program : Program) : Nat → Nat → Nat → List Value → Nat → List Value → Memory →
     Option (Memory × List Value)
   | 0, _, _, _, _, _, _ => none

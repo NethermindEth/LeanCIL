@@ -5,8 +5,9 @@ import CIL.Safety.Frames
 # Frame operations respect memory equivalence
 
 Every frame operation in `CIL/Safety/Frames.lean` (load, store, address, allocation, entry
-and exit) gives equal results, or equal faults, on `Memory.Equivalent` memories, which may
-differ only in how their view lists are represented. The checked interpreter's equivalence
+and exit) gives equivalent results, or equal faults, on `Memory.Equivalent` memories, which
+may differ only in how their view lists are represented. Values agree exactly; returned
+memories are again `Memory.Equivalent`. The checked interpreter's equivalence
 proof in `CIL/Safety/ExecutionEquivalence.lean` is assembled from these.
 -/
 

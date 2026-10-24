@@ -43,7 +43,8 @@ theorem AccessBelow.weaken {lower upper : Nat} {before after : Memory}
     fun id old => h.permissions id (Nat.lt_of_lt_of_le old bound),
     fun id old => h.initialized id (Nat.lt_of_lt_of_le old bound)⟩
 
-/-- A checked write keeps `AccessBelow` at every watermark: it changes only byte values. -/
+/-- A checked write keeps `AccessBelow` at every watermark: it adds no allocation and never
+    revokes a permission or clears an initialized cell. -/
 theorem write_preserves_access_below {memory result : Memory} {reference : Reference}
     {bytes : List (BitVec 8)} {alignment : Nat}
     (written : write memory reference bytes alignment = .ok result) (watermark : Nat) :
