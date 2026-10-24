@@ -561,7 +561,9 @@ elab_rules : tactic
     let prepared ← normaliseStepFacts config facts.getElems
     withMainContext <| evalTactic (← `(tactic| (
       cil_contract_prepare [$[$prepared:term],*]
-      cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts" cil_contract_step [$[$prepared:term],*])))
+      cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the \
+        first step, did not close; pass the lookup hypothesis, feature facts or step facts"
+        cil_contract_step [$[$prepared:term],*])))
   | `(tactic| cil_contract_steps $count:num [$facts:term,*]) => do
     let config ← `(Lean.Parser.Tactic.optConfig|)
     let prepared ← normaliseStepFacts config facts.getElems

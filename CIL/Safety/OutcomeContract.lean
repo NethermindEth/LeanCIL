@@ -412,7 +412,8 @@ macro_rules
            (by cil_lookup [$[$facts:term],*])
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
-    cil_steps_from "cil_raise_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts"
+    cil_steps_from "cil_raise_steps took no step: the method or instruction lookup, or the \
+      first step, did not close; pass the lookup hypothesis, feature facts or step facts"
       cil_raise_run_step [$[$facts:term],*]))
 
 /-- Step a `Raises` or `RunRaises` goal to a `throw`, after normalising the step facts. Use on
