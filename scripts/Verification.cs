@@ -413,18 +413,21 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         var error = stderr.GetAwaiter().GetResult();
         if (progress is not null)
             Console.WriteLine($"END {progress} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
-        if (!string.IsNullOrWhiteSpace(traceDirectory))
-        {
-            // Concurrent commands in one process append to the same trace file.
-            lock (TraceGate)
-                File.AppendAllText(Path.Combine(traceDirectory, $"{Environment.ProcessId}.jsonl"), JsonSerializer.Serialize(new {
-                stage = traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, processId = Environment.ProcessId,
-                cwd = start.WorkingDirectory, durationSeconds = elapsed.Elapsed.TotalSeconds,
-                exitCode = process.ExitCode, transcript, command = args,
-                suite = Environment.GetEnvironmentVariable("LEANCIL_SUITE")
-            }) + "\n");
-        }
+        Trace(traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, start.WorkingDirectory, elapsed.Elapsed, process.ExitCode, transcript, args);
         return (process.ExitCode, output + error, output, error);
+    }
+
+    static void Trace(string stage, DateTimeOffset startedAtUtc, string cwd, TimeSpan elapsed, int exitCode, string transcript, string[] command)
+    {
+        var traceDirectory = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+        if (string.IsNullOrWhiteSpace(traceDirectory)) return;
+        Directory.CreateDirectory(traceDirectory);
+        // Concurrent commands in one process append to the same trace file.
+        lock (TraceGate)
+            File.AppendAllText(Path.Combine(traceDirectory, $"{Environment.ProcessId}.jsonl"), JsonSerializer.Serialize(new {
+            stage, startedAtUtc, processId = Environment.ProcessId, cwd, durationSeconds = elapsed.TotalSeconds,
+            exitCode, transcript, command, suite = Environment.GetEnvironmentVariable("LEANCIL_SUITE")
+        }) + "\n");
     }
 
     static string Run(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
@@ -503,12 +506,17 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     {
         try
         {
-            return !string.IsNullOrWhiteSpace(trustedDigest) &&
-                Sha(Path.Combine(directory, "cache-manifest.json")) == trustedDigest && ValidCache(directory) &&
-                File.ReadAllText(Path.Combine(directory, "library-key.txt")) == key &&
-                Same(sources, LibrarySources(CacheFiles(directory)));
+            var bytes = File.ReadAllBytes(Path.Combine(directory, "cache-manifest.json"));
+            if (string.IsNullOrWhiteSpace(trustedDigest) || Convert.ToHexStringLower(SHA256.HashData(bytes)) != trustedDigest ||
+                File.ReadAllText(Path.Combine(directory, "library-key.txt")) != key)
+                return false;
+            // Hash the tree once; the pinned manifest and the source binding must describe the same bytes.
+            var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(bytes);
+            var files = CacheFiles(directory);
+            return manifest is not null && manifest.ContainsKey(".lake/build/lib/lean/CIL.olean") && Same(manifest, files) &&
+                Same(sources, LibrarySources(files));
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return false; }
     }
 
     bool CertifiedLocalLibrary(string directory, string key)
@@ -621,6 +629,18 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         }
     }
 
+    (string Key, SortedDictionary<string, string> Sources) LibraryIdentity(SortedDictionary<string, string> common)
+    {
+        var sources = LibrarySources(common);
+        // Include the resolved toolchain, platform and cache format, not the selected proof.
+        var toolchain = Toolchain;
+        var compiler = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
+        return (Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+            "leancil-library-v3-kernel-replayed\n" + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
+            Sha(Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" + Sha(compiler) + "\n" + JsonSerializer.Serialize(sources)))),
+            sources);
+    }
+
     string Library(SortedDictionary<string, string> snapshot)
     {
         var common = new SortedDictionary<string, string>(snapshot.Where(p =>
@@ -632,13 +652,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             return library;
         }
 
-        var sources = LibrarySources(common);
-        // Include the resolved toolchain, platform and cache format, not the selected proof.
+        (libraryKey, var sources) = LibraryIdentity(common);
         var toolchain = Toolchain;
-        var compiler = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
-        libraryKey = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-            "leancil-library-v3-kernel-replayed\n" + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
-            Sha(Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" + Sha(compiler) + "\n" + JsonSerializer.Serialize(sources))));
         library = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(library);
         var fresh = freshLibrary ||
@@ -663,14 +678,18 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             }
             var supplied = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY");
             var suppliedDigest = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256");
-            if (!freshLibrary && !string.IsNullOrWhiteSpace(supplied))
+            // A supplied certified library is not a local cache, so --fresh still uses it.
+            if (!string.IsNullOrWhiteSpace(supplied))
             {
+                var copyStarted = DateTimeOffset.UtcNow;
+                var copyElapsed = Stopwatch.StartNew();
                 if (!ValidCertifiedLibrary(supplied, suppliedDigest, libraryKey, sources))
                     throw new InvalidOperationException("Certified library identity or integrity mismatch");
                 CopyTree(supplied, library);
                 if (!ValidCertifiedLibrary(library, suppliedDigest, libraryKey, sources))
                     throw new InvalidOperationException("Certified library changed while copying");
                 libraryBuild = "certified-artifact";
+                Trace("Copying certified Lean verification library", copyStarted, library, copyElapsed.Elapsed, 0, "", [supplied, library]);
             }
             else if (!fresh && CertifiedLocalLibrary(cached, libraryKey) && ValidCache(cached) && Same(sources, LibrarySources(CacheFiles(cached))))
             {
@@ -742,6 +761,26 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         File.WriteAllText(Path.Combine(destination, "library-key.txt"), libraryKey);
         File.WriteAllText(Path.Combine(destination, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(destination), Json));
         return Sha(Path.Combine(destination, "cache-manifest.json"));
+    }
+
+    // Restored files are self-describing, so reuse needs an identical key and file set and a fresh kernel replay.
+    string? ReusePreparedLibrary(string directory)
+    {
+        // Replay runs inside the library, so a relative Lean path would resolve below it.
+        directory = Path.GetFullPath(directory);
+        var manifest = Path.Combine(directory, "cache-manifest.json");
+        if (!File.Exists(manifest)) return null;
+        var snapshot = Inputs(At("CIL.lean"));
+        var (key, sources) = LibraryIdentity(new(snapshot.Where(p => !p.Key.StartsWith("proof:", StringComparison.Ordinal) &&
+            !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal));
+        var digest = Sha(manifest);
+        if (!ValidCertifiedLibrary(directory, digest, key, sources)) return null;
+        var compiled = Path.Combine(directory, ".lake/build/lib/lean");
+        if (!ReplayModulesJointly(directory, [.. ModuleArtifacts(directory).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
+            compiled, "Joint kernel replay of reused Lean verification library"))
+            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), "CIL"], directory, compiled,
+                streamOutput: true, progress: "Kernel replay of reused Lean verification library");
+        return ValidCertifiedLibrary(directory, digest, key, sources) ? digest : null;
     }
 
     SortedDictionary<string, string> SupportInputs(string session, string[] roots, SortedDictionary<string, string> snapshot)
