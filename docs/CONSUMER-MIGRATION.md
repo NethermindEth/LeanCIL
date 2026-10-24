@@ -49,7 +49,21 @@ constructors so additions identify the missing field directly.
 `StepComposition` re-exports `GuardNormalization`. Use `simp only [cil_guard]`
 to normalize guards on known scalar/reference/vector constructors without
 evaluating their BitVec payloads. Use the `cil_step` equations for instruction
-reasoning. In custom dispatch tactics, inspect the operation before trying step
+reasoning. A `.memory` step now rewrites to `formValue`, `loadValue`, `storeValue`
+or `add`, so state memory facts at that level; facts about `memoryInstruction`
+or `staticInstruction` still apply, through a slower retry in `cil_checked_step`,
+`cil_checked_steps`, `cil_contract_steps` and the loop tactics; a hand-written step
+or `cil_checked_step_equations` call with such a fact must
+`rw [CIL.Safety.step_memory_eq]` first or restate it at the per-shape level. Through
+`cil_checked_step_equations`, an `add`, `spanItem`, `copyBlock` or `initBlock` step
+needs `CIL.Safety.referenceAt_address` passed (or use `cil_checked_step`). A `referenceAt r = .ok a`
+fact about a symbolic `ManagedReference` applies. A `.feature` step
+pushes the profile field, such as `body.profile.avx2`, which is the canonical
+fact form. Those checked-step tactics normalize a fact stated through
+`FeatureProfile.evaluate` or on a method's profile projection (local, proof term, global theorem
+or quantified over every feature) to it; elsewhere, including `simp only [cil_step, facts]` and
+`cil_checked_step_equations`, state it on the field or run
+`simp only [CIL.Safety.reduceMethodProfile, CIL.FeatureProfile.evaluate] at h` first. In custom dispatch tactics, inspect the operation before trying step
 lemmas for other operations; unifying an unrelated step equation may unfold
 large symbolic stacks. No global heartbeat increase or weakened safety condition
 is part of this migration.

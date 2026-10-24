@@ -3,6 +3,7 @@ import CIL.StepEquations
 import CIL.Safety.Equations
 import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
+import CIL.Safety.MemorySteps
 import CIL.Safety.CallComposition
 
 namespace CIL.Safety
@@ -30,6 +31,26 @@ syntax "cil_fact_simp" Lean.Parser.Tactic.optConfig " [" term,* "]" " [" term,* 
 initialize Lean.registerTraceClass `CIL.factNormalize
 
 open Lean Elab Tactic Meta in
+/-- `proof` and, for a fact over `Fin n` (n <= 64) or over every `Feature`, its instance at each value:
+    the profile fields and indexed lemmas are reached only through concrete arguments. -/
+def factInstances (proof : Expr) : TermElabM (Array Expr) := do
+  let mut instances := #[proof]
+  if let .forallE _ domain _ _ := ← whnf (← instantiateMVars (← inferType proof)) then
+    let domain ← whnf domain
+    if domain.isAppOfArity ``Fin 1 then
+      if let some size ← getNatValue? domain.appArg! then
+        if size <= 64 then
+          for index in [:size] do
+            let numeral : Term := ⟨Syntax.mkNumLit (toString index)⟩
+            let bound : Term := ⟨Syntax.mkNumLit (toString size)⟩
+            let value ← Term.elabTerm (← `(term| ($numeral : Fin $bound))) (some domain)
+            instances := instances.push (mkApp proof value)
+    else if domain.isConstOf ``CIL.Feature then
+      for ctor in (← getConstInfoInduct ``CIL.Feature).ctors do
+        instances := instances.push (mkApp proof (mkConst ctor))
+  return instances
+
+open Lean Elab Tactic Meta in
 def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
     (facts : Array Term) : TacticM (Array Term) := withMainContext do
     let isLocal (fact : Term) : TacticM Bool :=
@@ -37,38 +58,58 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
     let locals ← facts.filterM isLocal
     let supplied ← facts.filterM fun fact => return !(← isLocal fact)
     let mut normalised : Array Term := #[]
+    -- Asserts each instance of `proof` in the normaliser's form; the unchanged original is already a fact.
+    let assertInstances (proof : Expr) (base : Name) (ctx : Simp.Context) (simprocs : Simp.SimprocsArray) :
+        TacticM (Array Term) := withMainContext do
+      let mut names := #[]
+      for instanceProof in ← factInstances proof do
+        let type ← instantiateMVars (← inferType instanceProof)
+        let (result, _) ← simp type ctx simprocs
+        if result.expr.consumeMData.isConstOf ``True then continue
+        if result.expr == type && instanceProof == proof then continue
+        let normalisedProof ← match result.proof? with
+          | some eq => mkEqMP eq instanceProof
+          | none => mkExpectedTypeHint instanceProof result.expr
+        let name ← mkFreshUserName base
+        let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
+        replaceMainGoal [goal]
+        names := names.push (mkIdent name)
+      return names
     if !locals.isEmpty then
+      -- `cil_step` reduces a pushed `evaluate` and a method's profile projection, so facts must land there too.
       let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat,
-        $[$supplied:term],*])
+        CIL.FeatureProfile.evaluate, CIL.Safety.reduceMethodProfile, $[$supplied:term],*])
       let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
       for fact in locals do
         let some decl := (← getLCtx).findFromUserName? fact.raw.getId | continue
-        let type ← instantiateMVars decl.type
-        unless ← isProp type do continue
+        unless ← isProp (← instantiateMVars decl.type) do continue
         trace[CIL.factNormalize] "{decl.userName}"
-        let mut instances := #[decl.toExpr]
-        if let .forallE _ domain _ _ := ← whnf type then
-          let domain ← whnf domain
-          if domain.isAppOfArity ``Fin 1 then
-            if let some size ← getNatValue? domain.appArg! then
-              if size <= 64 then
-                for index in [:size] do
-                  let numeral : Term := ⟨Syntax.mkNumLit (toString index)⟩
-                  let bound : Term := ⟨Syntax.mkNumLit (toString size)⟩
-                  let value ← Term.elabTerm (← `(term| ($numeral : Fin $bound))) (some domain)
-                  instances := instances.push (mkApp decl.toExpr value)
-        for instanceProof in instances do
-          let type ← inferType instanceProof
-          let (result, _) ← simp type ctx simprocs
-          if result.expr.consumeMData.isConstOf ``True then continue
-          if result.expr == type && instanceProof == decl.toExpr then continue
-          let proof ← match result.proof? with
-            | some eq => mkEqMP eq instanceProof
-            | none => mkExpectedTypeHint instanceProof result.expr
-          let name ← mkFreshUserName decl.userName
-          let (_, goal) ← (← (← getMainGoal).assert name result.expr proof).intro1P
-          replaceMainGoal [goal]
-          normalised := normalised.push (mkIdent name)
+        normalised := normalised ++ (← assertInstances decl.toExpr decl.userName ctx simprocs)
+    -- A proof term such as `(show p from h)` is normalised like a local fact, without itself as a lemma,
+    -- which would rewrite its own statement to `True`. Global names stay as given (most are unfolds),
+    -- except theorems about `evaluate` or a method's profile, which `cil_step` rewrites past.
+    for fact in supplied do
+      if fact.raw.isIdent then
+        let some name ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw | continue
+        let info ← getConstInfo name
+        let mentions := (info.type.find? fun e =>
+          e.isConstOf ``CIL.FeatureProfile.evaluate || e.isConstOf ``CIL.Method.profile).isSome
+        unless mentions && (← isProp info.type) do continue
+      let saved ← saveState
+      let some proof ← (try
+          let proof ← Term.withoutErrToSorry <| Term.elabTerm fact none
+          Term.synthesizeSyntheticMVarsNoPostponing
+          let proof ← instantiateMVars proof
+          pure (if proof.hasMVar then none else some proof)
+        catch _ => pure none) | saved.restore; continue
+      unless ← isProp (← instantiateMVars (← inferType proof)) do saved.restore; continue
+      let others := supplied.filter (· != fact)
+      let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat,
+        CIL.FeatureProfile.evaluate, CIL.Safety.reduceMethodProfile, $[$others:term],*])
+      let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
+      let names ← assertInstances proof `supplied ctx simprocs
+      if names.isEmpty then saved.restore; continue
+      normalised := normalised ++ names
     return facts ++ normalised
 
 open Lean Elab Tactic Meta in
@@ -101,17 +142,59 @@ macro "cil_stack_cleanup" : tactic =>
     List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
     List.nil_append, List.cons_append, List.append_nil])
 
-macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
-  `(tactic| first
-    | (simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
+macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
        try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
-         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
-         Pure.pure, Except.pure, $[$facts:term],*]
-       all_goals ((repeat constructor) <;> rfl))
-    | (fail_if_success simp only [cil_step]
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
+         Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
+
+-- Only memory equations expose `referenceAt`; its equations in the generic list would slow every other step.
+macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
+       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null, CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
+         Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
+
+macro "cil_checked_step_by_unfolding " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       fail_if_success simp only [cil_step]
        simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
         CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
         $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+
+macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
+  `(tactic| first
+    | cil_checked_step_by_equations [$[$facts:term],*]
+    | cil_checked_step_by_unfolding [$[$facts:term],*])
+
+-- A fact at the `memoryInstruction` level fails once a per-shape memory equation rewrites past it,
+-- so the elaborator retries such facts through the generic `step_memory_eq`.
+macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       rw [CIL.Safety.step_memory_eq]
+       try simp only [cil_guard]
+       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null, CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
+         Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
+
+open Lean Elab Tactic Meta in
+/-- Whether a supplied fact is, or is stated about, `memoryInstruction` or `staticInstruction`;
+    a compound term is assumed to be. -/
+def mentionsMemoryInstruction (facts : Array Term) : TacticM Bool := withMainContext do
+  let legacy := fun (e : Expr) => (e.find? fun sub =>
+    sub.isConstOf ``CIL.Safety.memoryInstruction || sub.isConstOf ``CIL.Safety.staticInstruction).isSome
+  facts.anyM fun fact => do
+    unless fact.raw.isIdent do return true
+    if let some decl := (← getLCtx).findFromUserName? fact.raw.getId then
+      return legacy (← instantiateMVars decl.type)
+    let some name ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw | return true
+    let info ← getConstInfo name
+    return name == ``CIL.Safety.memoryInstruction || name == ``CIL.Safety.staticInstruction || legacy info.type
 
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
@@ -166,6 +249,21 @@ elab_rules : tactic
         `(tactic| first | rfl | cil_checked_step_equations [$facts:term,*])
       else if operation == ``CIL.Op.intrinsic then
         `(tactic| cil_checked_intrinsic [$facts:term,*])
+      else if operation == ``CIL.Op.memory then
+        let saved ← saveState
+        -- Without recovery, `all_goals` throws its error instead of logging it and aborting.
+        let attempt := fun (tactic : Syntax) => do
+          try withoutRecover (evalTactic tactic); return none
+          catch error => saved.restore; return some error
+        let some equationError ← attempt (← `(tactic| cil_checked_memory_by_equations [$facts:term,*])) | return
+        let progressed := (← attempt (← `(tactic| simp only [cil_step]))).isNone
+        saved.restore
+        let unfolding ← `(tactic| cil_checked_step_by_unfolding [$facts:term,*])
+        let some unfoldingError ← (if progressed then pure (some equationError) else attempt unfolding) | return
+        if ← mentionsMemoryInstruction facts.getElems then
+          if (← attempt (← `(tactic| cil_checked_memory_retry [$facts:term,*]))).isNone then return
+        -- Report the per-shape goal, where facts belong, rather than the legacy retry's.
+        throw unfoldingError
       else
         `(tactic| cil_checked_step_equations [$facts:term,*])
     evalTactic strategy
