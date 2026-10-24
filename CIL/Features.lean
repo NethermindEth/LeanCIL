@@ -1,6 +1,13 @@
 import Std
 
-/- Supported deployment policy: .NET 10 CoreCLR on 64-bit little-endian hosts.
+/-!
+# Feature profiles
+
+The hardware capabilities a method can observe through `IsSupported` and
+`IsHardwareAccelerated`. A `FeatureProfile` fixes them for a whole execution; `step` reads
+it for feature tests and intrinsic availability.
+
+Supported deployment policy: .NET 10 CoreCLR on 64-bit little-endian hosts.
 IsSupported includes OS support and runtime disabling, not just CPU capability.
 The runtime enables SSE4.2, AVX2/BMI and AVX-512 capabilities in whole groups;
 ARM64 enables ArmBase and AdvSimd together. Vector128 acceleration follows the
@@ -10,16 +17,19 @@ Pinned runtime sources, measured x64/ARM64 versions, and migration guidance:
 docs/RUNTIME-PROFILES.md
 https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/vm/codeman.cpp
 https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt
-Operation prerequisites remain explicit alongside the runtime group constraints. -/
+Operation prerequisites remain explicit alongside the runtime group constraints.
+-/
 
 namespace CIL
 
+/-- A capability flag a method can test; each names one `FeatureProfile` field. -/
 inductive Feature where
   | advSimd | sse2 | ssse3 | sse42 | avx | avx2 | avx512F | avx512FVL | bmi1
   | sse41 | avx512DQ | avx512DQVL | bmi2 | armBase64 | vector256Accelerated
   | x86Base64 | vector128Accelerated
   deriving DecidableEq, Repr
 
+/-- The target instruction set; `scalar` is a profile with no ISA-specific capability. -/
 inductive Architecture where
   | scalar | arm64 | x64
   deriving DecidableEq, Repr
@@ -49,8 +59,10 @@ structure FeatureProfile where
   vector128Accelerated : Bool := false
   deriving DecidableEq, Repr
 
+/-- The profile with every capability off, so only portable code paths run. -/
 def FeatureProfile.scalar : FeatureProfile := {}
 
+/-- The result of testing a feature under this profile. -/
 def FeatureProfile.evaluate (p : FeatureProfile) : Feature → Bool
   | .advSimd => p.advSimd
   | .sse2 => p.sse2
@@ -76,7 +88,8 @@ an explicit domain, rather than a claim to enumerate every possible CLR host. -/
 def FeatureProfile.Valid (p : FeatureProfile) : Prop :=
   p.nativeWidth = 64 ∧ p.littleEndian = true ∧
   (p.advSimd = true → p.architecture = .arm64) ∧
-  ((p.sse2 || p.ssse3 || p.sse42 || p.avx || p.avx2 || p.avx512F || p.avx512FVL || p.bmi1 || p.sse41 || p.avx512DQ || p.avx512DQVL || p.bmi2) = true →
+  ((p.sse2 || p.ssse3 || p.sse42 || p.avx || p.avx2 || p.avx512F || p.avx512FVL || p.bmi1 ||
+      p.sse41 || p.avx512DQ || p.avx512DQVL || p.bmi2) = true →
     p.x86Base64 = true) ∧
   (p.x86Base64 = true → p.architecture = .x64) ∧
   (p.ssse3 = true → p.sse2 = true) ∧
@@ -104,6 +117,5 @@ instance (p : FeatureProfile) : Decidable p.Valid := inferInstanceAs (Decidable 
   cases f <;> rfl
 
 theorem FeatureProfile.scalar_valid : scalar.Valid := by decide
-
 
 end CIL

@@ -1,22 +1,32 @@
 import CIL.Memory
 
-namespace CIL
+/-!
+# Vector homes
 
--- Generic home-byte lemmas and fixed 256-bit vector snapshots.
--- General aggregate storage is in CIL.Safety.Frames/InstructionMemory.
+The 32-byte private homes that hold 256-bit vector locals, arguments and construction
+temporaries in the reference interpreter, and the byte lemmas behind them. A home is
+disjoint from caller bytes and scalar locals. General aggregate storage belongs to the
+checked interpreter, in `CIL.Safety.Frames` and `CIL.Safety.InstructionMemory`.
+-/
+
+namespace CIL
 
 /-- Allocation invalidates all previous bytes in the reused private home.
     Unknown fields remain absent until the actual body writes them. -/
-def clearHome (m : Memory) (frame kind index : Nat) : Memory :=
+def clearHome (memory : Memory) (frame kind index : Nat) : Memory :=
   fun address => match address with
-  | .home f k i offset => if f = frame ∧ k = kind ∧ i = index ∧ offset < 32 then none else m address
-  | _ => m address
+  | .home otherFrame otherKind otherIndex offset =>
+    if otherFrame = frame ∧ otherKind = kind ∧ otherIndex = index ∧ offset < 32 then none
+    else memory address
+  | _ => memory address
 
-def readVectorHome (m : Memory) (frame kind index : Nat) : Option Value := do
-  return .v256 (BitVec.ofNat 256 (← readHomeBytes m frame kind index 0 32))
+/-- The 256-bit vector in a home; `none` unless all 32 bytes hold `i8` values. -/
+def readVectorHome (memory : Memory) (frame kind index : Nat) : Option Value := do
+  return .v256 (BitVec.ofNat 256 (← readHomeBytes memory frame kind index 0 32))
 
-def writeVectorHome (m : Memory) (frame kind index : Nat) (bits : BitVec 256) : Memory :=
-  writeHomeBytes m frame kind index 0 bits.toNat 32
+/-- Stores a 256-bit vector little-endian in all 32 bytes of a home. -/
+def writeVectorHome (memory : Memory) (frame kind index : Nat) (bits : BitVec 256) : Memory :=
+  writeHomeBytes memory frame kind index 0 bits.toNat 32
 
 @[simp] theorem clearHome_caller (m : Memory) (frame kind index address : Nat) :
     clearHome m frame kind index (.byte address) = m (.byte address) := by rfl
@@ -47,6 +57,7 @@ theorem writeHomeBytes_outside (m : Memory) (frame kind index offset value count
       omega
     · rfl
 
+/-- Reading back the bytes just written gives the stored number truncated to their width. -/
 theorem readHomeBytes_after_write (m : Memory) (frame kind index offset number count : Nat) :
     readHomeBytes (writeHomeBytes m frame kind index offset number count)
       frame kind index offset count = some (number % 256^count) := by
@@ -67,7 +78,8 @@ theorem readHomeBytes_after_write (m : Memory) (frame kind index offset number c
 
 @[simp] theorem vector_snapshot_after_write (m : Memory)
     (frame kind index : Nat) (bits : BitVec 256) :
-    readVectorHome (writeVectorHome m frame kind index bits) frame kind index = some (.v256 bits) := by
+    readVectorHome (writeVectorHome m frame kind index bits) frame kind index =
+      some (.v256 bits) := by
   simp only [readVectorHome, writeVectorHome, readHomeBytes_after_write,
     show (256 : Nat)^32 = 2^256 from rfl, Nat.mod_eq_of_lt bits.isLt]
   simp
@@ -81,7 +93,8 @@ theorem readHomeBytes_write_disjoint (m : Memory)
   | zero => rfl
   | succ count ih =>
     rw [readHomeBytes, readHomeBytes,
-      writeHomeBytes_outside _ frame kind index writtenOffset number writtenCount offset (by omega),
+      writeHomeBytes_outside _ frame kind index writtenOffset number writtenCount offset
+        (by omega),
       ih (offset + 1) (by omega)]
 
 theorem readHomeBytes_append (m : Memory) (frame kind index offset low high : Nat) :

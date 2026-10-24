@@ -1,9 +1,15 @@
 import CIL.Semantics
 
+/-!
+# Fuel and determinism of the reference interpreter
+
+`run` takes fuel, so a proof picks some amount. These lemmas show the choice does not
+matter: more fuel never changes a successful result, and any two successful runs agree.
+-/
+
 namespace CIL
 
--- Increasing fuel preserves every successful execution, including nested calls.
-
+/-- Increasing fuel preserves every successful execution, including nested calls. -/
 theorem run_mono (program : Program) (fuel extra method pc : Nat)
     (args : List Value) (frame : Nat) (stack : List Value) (memory : Memory)
     (result : Memory × List Value)
@@ -70,9 +76,10 @@ theorem run_of_le (program : Program) (fuel larger method pc : Nat)
     (h : run program fuel method pc args frame stack memory = some result) :
     run program larger method pc args frame stack memory = some result := by
   have he : fuel + (larger - fuel) = larger := by omega
-  simpa only [he] using run_mono program fuel (larger - fuel) method pc args frame stack memory result h
+  simpa only [he] using
+    run_mono program fuel (larger - fuel) method pc args frame stack memory result h
 
--- Any two successful finite executions have the same observable result.
+/-- Any two successful finite executions have the same observable result. -/
 theorem run_result_unique (program : Program) (first second method pc : Nat)
     (args : List Value) (frame : Nat) (stack : List Value) (memory : Memory)
     (a b : Memory × List Value)
@@ -95,7 +102,6 @@ theorem invoke_result_unique (program : Program) (first second method : Nat)
     exact run_result_unique _ _ _ _ _ _ _ _ _ _ _ ha hb
 
 /-- One mapped witness fixes the observation of every successful fuel. -/
-
 theorem invoke_observation_unique {α : Type} (p : Program)
     (fuel witnessFuel entry : Nat) (args : List Value) (memory : Memory)
     (observe : Memory × List Value → α) (outcome : Memory × List Value) (observed : α)

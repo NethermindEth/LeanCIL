@@ -1,5 +1,14 @@
 import CIL.Semantics
 
+/-!
+# Profile equivalence
+
+Shows when a method's result does not depend on the hardware it runs on. Two feature
+profiles agree on a program when every feature test and intrinsic availability check in it
+gives the same answer under both; agreeing profiles then give identical `run` and `invoke`
+results, so one proof covers every such deployment.
+-/
+
 namespace CIL
 
 /-- Replace only the fixed execution profile; instructions, arguments, local
@@ -7,12 +16,15 @@ layout, static data and return conventions remain exactly the same. -/
 def reprofile (program : Program) (profile : FeatureProfile) : Program :=
   program.map fun body => { body with profile := profile }
 
+/-- `p` and `q` answer the profile query `op` makes, if any, the same way: a feature test or
+    an intrinsic's availability. -/
 def Op.ProfileAgreement (op : Op) (p q : FeatureProfile) : Prop :=
   match op with
   | .feature featureId => p.evaluate featureId = q.evaluate featureId
   | .intrinsic operation _ => operation.available p = operation.available q
   | _ => True
 
+/-- `p` and `q` agree on every instruction of every method. -/
 def Program.ProfileAgreement (program : Program) (p q : FeatureProfile) : Prop :=
   ∀ body ∈ program, ∀ op ∈ body.code, op.ProfileAgreement p q
 
@@ -24,6 +36,7 @@ def Op.profileIndependentCheck : Op → Bool
   | .intrinsic _ _ => false
   | _ => true
 
+/-- Whether no instruction in the program observes the profile. -/
 def Program.profileIndependentCheck (program : Program) : Bool :=
   program.all fun body => body.code.all Op.profileIndependentCheck
 
@@ -37,10 +50,12 @@ theorem Program.profile_independent_agreement (program : Program)
   case intrinsic operation _ =>
     cases operation <;> simp [Intrinsic.available] at *
 
+/-- A step under agreeing profiles has the same outcome. -/
 theorem step_profile_eq (op : Op) (p q : FeatureProfile)
     (h : op.ProfileAgreement p q) (returns : Bool) (pc : Nat) (args : List Value)
     (frame : Nat) (stack : List Value) (memory : Memory) :
-    step op returns pc args frame stack memory p = step op returns pc args frame stack memory q := by
+    step op returns pc args frame stack memory p =
+      step op returns pc args frame stack memory q := by
   cases op <;> try rfl
   case feature id =>
     change p.evaluate id = q.evaluate id at h
@@ -64,9 +79,11 @@ theorem step_profile_eq (op : Op) (p q : FeatureProfile)
         | cons b rest => first | rfl | (cases a <;> first | rfl | (cases b <;> rfl))
 
 @[simp] theorem reprofile_lookup (program : Program) (profile : FeatureProfile) (index : Nat) :
-    (reprofile program profile)[index]? = program[index]?.map (fun body => { body with profile := profile }) := by
+    (reprofile program profile)[index]? =
+      program[index]?.map (fun body => { body with profile := profile }) := by
   simp [reprofile]
 
+/-- Running a program under either of two agreeing profiles gives the same result. -/
 theorem run_reprofile_eq (program : Program) (p q : FeatureProfile)
     (h : program.ProfileAgreement p q) (fuel method pc : Nat) (args : List Value)
     (frame : Nat) (stack : List Value) (memory : Memory) :
@@ -83,33 +100,40 @@ theorem run_reprofile_eq (program : Program) (p q : FeatureProfile)
       | some op =>
         have hb : body ∈ program := List.mem_of_getElem? hbody
         have ho : op ∈ body.code := List.mem_of_getElem? hop
-        have he := step_profile_eq op p q (h body hb op ho) body.returnsValue pc args frame stack memory
-        simp only [run, reprofile_lookup, hbody, Option.map_some, Option.bind_eq_bind, Option.bind_some, hop]
+        have he :=
+          step_profile_eq op p q (h body hb op ho) body.returnsValue pc args frame stack memory
+        simp only [run, reprofile_lookup, hbody, Option.map_some, Option.bind_eq_bind,
+          Option.bind_some, hop]
         rw [he]
         cases hs : step op body.returnsValue pc args frame stack memory q with
         | none => rfl
         | some action =>
           cases action with
-          | next target values updated => simpa only [Option.bind_eq_bind, Option.bind_some] using ih method target args frame values updated
+          | next target values updated =>
+            simpa only [Option.bind_eq_bind, Option.bind_some] using
+              ih method target args frame values updated
           | returned values final => rfl
           | call callee childArgs rest updated =>
             cases hc : program[callee]? with
             | none => simp [hc]
             | some child =>
               simp only [hc, Option.map_some, Option.bind_some, initFrame_profile]
-              rw [ih callee 0 childArgs (frame + 1) [] (initFrame updated (frame + 1) child childArgs)]
+              rw [ih callee 0 childArgs (frame + 1) []
+                (initFrame updated (frame + 1) child childArgs)]
               cases hr : run (reprofile program q) fuel callee 0 childArgs (frame + 1) []
                   (initFrame updated (frame + 1) child childArgs) with
               | none => rfl
               | some result =>
                 obtain ⟨final, values⟩ := result
-                simpa only [Option.bind_eq_bind, Option.bind_some] using ih method (pc + 1) args frame (values ++ rest) final
+                simpa only [Option.bind_eq_bind, Option.bind_some] using
+                  ih method (pc + 1) args frame (values ++ rest) final
           | construct callee childArgs rest updated =>
             cases hc : program[callee]? with
             | none => simp [hc]
             | some child =>
               simp only [hc, Option.map_some, Option.bind_some, initFrame_profile]
-              rw [ih callee 0 childArgs (frame + 1) [] (initFrame updated (frame + 1) child childArgs)]
+              rw [ih callee 0 childArgs (frame + 1) []
+                (initFrame updated (frame + 1) child childArgs)]
               cases hr : run (reprofile program q) fuel callee 0 childArgs (frame + 1) []
                   (initFrame updated (frame + 1) child childArgs) with
               | none => rfl
@@ -131,8 +155,8 @@ theorem invoke_reprofile_eq (program : Program) (p q : FeatureProfile)
   cases hb : program[method]? with
   | none => simp [invoke, hb]
   | some body =>
-    simpa only [invoke, reprofile_lookup, hb, Option.map_some, Option.bind_eq_bind, Option.bind_some,
-      initFrame_profile] using
+    simpa only [invoke, reprofile_lookup, hb, Option.map_some, Option.bind_eq_bind,
+      Option.bind_some, initFrame_profile] using
       run_reprofile_eq program p q h fuel method 0 args 0 [] (initFrame memory 0 body args)
 
 theorem reprofile_eq_of_uniform (program : Program) (p : FeatureProfile)
@@ -158,14 +182,18 @@ theorem uniform_of_profile_map (program : Program) (p : FeatureProfile)
   rw [h] at hm
   exact (List.mem_replicate.mp hm).2
 
+/-- A program whose methods all carry profile `p` behaves the same under any profile that
+    agrees with `p`. -/
 theorem invoke_uniform_reprofile_eq (program : Program) (p q : FeatureProfile)
     (hu : ∀ body ∈ program, body.profile = p) (ha : program.ProfileAgreement p q)
     (fuel method : Nat) (args : List Value) (memory : Memory) :
-    invoke program fuel method args memory = invoke (reprofile program q) fuel method args memory := by
+    invoke program fuel method args memory =
+      invoke (reprofile program q) fuel method args memory := by
   have he := invoke_reprofile_eq program p q ha fuel method args memory
   rw [reprofile_eq_of_uniform program p hu] at he
   exact he
 
+/-- The features an intrinsic needs; `available_of_required` shows they suffice. -/
 def Intrinsic.requiredFeatures : Intrinsic → List Feature
   | .scalar _ => []
   | .vector _ => []
@@ -186,9 +214,12 @@ def Intrinsic.requiredFeatures : Intrinsic → List Feature
 theorem Intrinsic.available_of_required (operation : Intrinsic) (p : FeatureProfile)
     (h : ∀ featureId ∈ operation.requiredFeatures, p.evaluate featureId = true) :
     operation.available p = true := by
-  cases operation <;> simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
+  cases operation <;>
+    simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
   case sse operation => cases operation <;> simp_all
-  case avx512 operation => cases operation <;> simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
+  case avx512 operation =>
+    cases operation <;>
+      simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
   case avx512DQ operation => cases operation <;> simp_all
 
 theorem Op.ProfileAgreement.symm (op : Op) (p q : FeatureProfile)
@@ -201,6 +232,5 @@ theorem Op.ProfileAgreement.trans (op : Op) (p q r : FeatureProfile)
     op.ProfileAgreement p r := by
   cases op <;> try trivial
   all_goals exact Eq.trans hpq hqr
-
 
 end CIL
