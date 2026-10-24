@@ -206,6 +206,15 @@ theorem frame_confined (m entered home stored final : Memory) (frame : Frame) (s
   exact (body.forget_fresh (by simpa using fresh)).then_below
     (leaveFrame_preserves_memory_below frame stored _ owned) (Nat.le_of_eq (leaveFrame_nextIdentity frame stored).symm)
 
+-- A callee that writes only its own frame cannot change what the caller reads after the call.
+theorem call_keeps_caller_read (body : CIL.Method) (args : List Value) (m entered home : Memory) (frame : Frame)
+    (slot r : Reference) (bytes : List (BitVec 8)) (width alignment : Nat)
+    (enter : enterFrame body args m = .ok (frame, entered)) (fresh : m.nextIdentity ≤ slot.allocation)
+    (wrote : write entered slot bytes 1 = .ok home) (old : r.allocation < m.nextIdentity) :
+    read (leaveFrame frame home) r width alignment = read m r width alignment :=
+  (MemoryBelow.frame_round_trip enter (write_preserves_memory_below _ _ _ _ _ _ fresh wrote)).read r old width alignment
+
+#print axioms call_keeps_caller_read
 #print axioms root_holds
 #print axioms root_correct
 #print axioms frame_confined
