@@ -32,6 +32,8 @@ import CIL.SIMD.Evaluation256Lemmas
 import CIL.SIMD.EvaluationLemmas
 import CIL.SIMD.Incoming128
 import CIL.SIMD.Intrinsics
+import CIL.SIMD.LaneCarry
+import CIL.SIMD.PackedLanes
 import CIL.SIMD.SSE
 import CIL.SIMD.Vector
 import CIL.SIMD.VectorLemmas
