@@ -1,0 +1,59 @@
+name: PR cache cleanup
+
+on:
+  pull_request_target:
+    types: [closed]
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: pr-cache-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Use only the trusted workflow and GitHub API; never check out PR code.
+      - name: Delete caches for the closed or merged PR
+        if: github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: gh cache delete --all --ref "$PR_REF" --succeed-on-no-caches
+
+      # Also catches caches saved by a run that finishes after its PR closes.
+      - name: Remove expired PR caches and sweep closed PRs
+        if: github.event_name != 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate --slurp "repos/$GH_REPO/actions/caches?per_page=100" > "$RUNNER_TEMP/caches.json"
+          jq -r '[.[].actions_caches[] | select(.ref | test("^refs/pull/[0-9]+/merge$"))] | group_by(.ref)[] | .[0].ref' \
+            "$RUNNER_TEMP/caches.json" > "$RUNNER_TEMP/pr-refs.txt"
+          while IFS= read -r ref; do
+            number=${ref#refs/pull/}
+            number=${number%/merge}
+            state=$(gh api "repos/$GH_REPO/pulls/$number" --jq '.state')
+            if [[ "$state" == closed ]]; then
+              gh cache delete --all --ref "$ref" --succeed-on-no-caches
+            else
+              jq -r --arg ref "$ref" --arg cutoff "$cutoff" \
+                '.[].actions_caches[] | select(.ref == $ref and .last_accessed_at < $cutoff) | .id' \
+                "$RUNNER_TEMP/caches.json" > "$RUNNER_TEMP/expired-caches.txt"
+              while IFS= read -r id; do
+                gh cache delete "$id"
+              done < "$RUNNER_TEMP/expired-caches.txt"
+            fi
+          done < "$RUNNER_TEMP/pr-refs.txt"
