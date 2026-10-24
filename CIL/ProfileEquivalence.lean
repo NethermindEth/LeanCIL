@@ -50,6 +50,26 @@ theorem Program.profile_independent_agreement (program : Program)
   case intrinsic operation _ =>
     cases operation <;> simp [Intrinsic.available] at *
 
+/-- A feature test pushes the profile's answer as `1` or `0`. -/
+theorem step_feature (id : Feature) (returns : Bool) (pc : Nat) (args : List Value)
+    (frame : Nat) (stack : List Value) (memory : Memory) (profile : FeatureProfile) :
+    step (.feature id) returns pc args frame stack memory profile =
+      some (.next (pc + 1) (.i32 (if profile.evaluate id then 1 else 0) :: stack) memory) :=
+  rfl
+
+/-- An intrinsic step observes the profile only through the intrinsic's availability. -/
+theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool) (pc : Nat)
+    (args : List Value) (frame : Nat) (stack : List Value) (memory : Memory)
+    (profile : FeatureProfile) :
+    step (.intrinsic operation argc) returns pc args frame stack memory profile =
+      if stack.length < argc || !operation.available profile then none else do
+        return .next (pc + 1)
+          ((← evalIntrinsic operation (stack.take argc).reverse) :: stack.drop argc) memory :=
+  rfl
+
+#print axioms step_feature
+#print axioms step_intrinsic
+
 /-- A step under agreeing profiles has the same outcome. -/
 theorem step_profile_eq (op : Op) (p q : FeatureProfile)
     (h : op.ProfileAgreement p q) (returns : Bool) (pc : Nat) (args : List Value)
@@ -59,15 +79,10 @@ theorem step_profile_eq (op : Op) (p q : FeatureProfile)
   cases op <;> try rfl
   case feature id =>
     change p.evaluate id = q.evaluate id at h
-    change some (Action.next (pc + 1) (.i32 (if p.evaluate id then 1 else 0) :: stack) memory) =
-      some (Action.next (pc + 1) (.i32 (if q.evaluate id then 1 else 0) :: stack) memory)
-    rw [h]
+    rw [step_feature, step_feature, h]
   case intrinsic operation argc =>
     change operation.available p = operation.available q at h
-    exact congrArg (fun available =>
-      if stack.length < argc || !available then none else do
-        return Action.next (pc + 1)
-          ((← evalIntrinsic operation (stack.take argc).reverse) :: stack.drop argc) memory) h
+    rw [step_intrinsic, step_intrinsic, h]
   all_goals
     cases stack with
     | nil => rfl
