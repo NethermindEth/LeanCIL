@@ -161,12 +161,12 @@ if (cohort == "pair")
     JsonElement[] pairImports = pairReport.GetProperty("imports").EnumerateArray().ToArray();
     string pairBundle = Path.GetFileName(pairContract["fullVerificationLocator"]!.GetValue<string>());
     string[] pairStages = TraceStages(pairTrace);
-    // The caller and the shared bundle each build the fresh library once; a per-slot build would add a third.
+    // The caller and the shared bundle each obtain the library once; a per-slot build would add a third.
     if (pairImports.Length != 2 || pairImports.Any(import => import.GetProperty("acceptedVia").GetString() != "independently-verified" ||
             import.GetProperty("sourceBundleDigest").GetString() != pairBundle) ||
         pairStages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
         pairStages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
-        pairStages.Count(stage => stage == "Building fresh Lean verification library") != 2)
+        pairStages.Count(stage => stage is "Building fresh Lean verification library" or "Copying certified Lean verification library") != 2)
         throw new InvalidOperationException("Two imports from one bundle were not verified with one library build: " + string.Join(", ", pairStages));
     completed.CompleteCase("full.pair");
     Console.WriteLine("PASS two imports from one source bundle share one independent library build");
