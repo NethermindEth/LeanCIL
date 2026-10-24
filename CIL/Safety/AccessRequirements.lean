@@ -60,6 +60,14 @@ theorem read_snapshot {m : Memory} {r : Reference} {width alignment : Nat}
   simp [read, ready.access, cells, List.map_map, Function.comp_def,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
+/-- A successful read implies its read access check succeeded. -/
+theorem read_access {m : Memory} {r : Reference} {width alignment : Nat} {bytes : List (BitVec 8)}
+    (h : read m r width alignment = .ok bytes) : access m r width alignment false = .ok () := by
+  unfold CIL.Safety.read at h
+  cases ha : access m r width alignment false with
+  | error fault => simp [ha, Bind.bind, Except.bind] at h
+  | ok value => rfl
+
 theorem read_result_snapshot {m : Memory} {r : Reference} {width alignment : Nat}
     {bytes : List (BitVec 8)} (h : read m r width alignment = .ok bytes) :
     bytes = (List.range width).map (fun i => (m.cells r.allocation (r.offset + i)).bits) := by
@@ -75,5 +83,6 @@ theorem read_result_snapshot {m : Memory} {r : Reference} {width alignment : Nat
 #print axioms read_snapshot
 #print axioms read_result_snapshot
 #print axioms permitted_by_view
+#print axioms read_access
 
 end CIL.Safety
