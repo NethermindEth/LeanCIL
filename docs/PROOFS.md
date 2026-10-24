@@ -109,8 +109,9 @@ tactics rewrites `referenceAt` on `.null` and `.address r`, so pointer
 arithmetic on a known reference needs no extra fact, and a `referenceAt r = .ok a`
 fact about a symbolic `ManagedReference` applies; through `cil_checked_step_equations`
 an `add`, `spanItem`, `copyBlock` or `initBlock` step needs
-`CIL.Safety.referenceAt_address` passed as a fact. A `.feature f` step pushes `body.profile.evaluate f`. `cil_step`
-reduces that expression to the profile field. It unfolds a method definition or
+`CIL.Safety.referenceAt_address` passed as a fact. A `.feature f` step pushes `body.profile.evaluate f`. For a known feature,
+`cil_step` reduces that expression to the profile field; a symbolic `f` stays
+`body.profile.evaluate f`, so a fact about it applies as stated. `cil_step` unfolds a method definition or
 literal only as far as its profile, so a fact such as `profile.avx2 = true`
 decides the test. Inside `cil_checked_step`, `cil_checked_steps`,
 `cil_contract_steps` and the loop tactics, a local fact, proof term or global
@@ -118,7 +119,7 @@ theorem stated through `evaluate` or a method's profile projection, including on
 quantified over every feature, is normalized to that form. Elsewhere, including
 `simp only [cil_step, facts]` and `cil_checked_step_equations`, state the fact on
 the field or first run
-`simp only [CIL.Safety.reduceMethodProfile, CIL.FeatureProfile.evaluate] at h`.
+`simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h`.
 
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
 by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup

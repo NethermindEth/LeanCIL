@@ -63,7 +63,7 @@ fact form. Those checked-step tactics normalize a fact stated through
 `FeatureProfile.evaluate` or on a method's profile projection (local, proof term, global theorem
 or quantified over every feature) to it; elsewhere, including `simp only [cil_step, facts]` and
 `cil_checked_step_equations`, state it on the field or run
-`simp only [CIL.Safety.reduceMethodProfile, CIL.FeatureProfile.evaluate] at h` first. In custom dispatch tactics, inspect the operation before trying step
+`simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h` first; a fact about a symbolic feature `body.profile.evaluate f` applies as stated. In custom dispatch tactics, inspect the operation before trying step
 lemmas for other operations; unifying an unrelated step equation may unfold
 large symbolic stacks. No global heartbeat increase or weakened safety condition
 is part of this migration.

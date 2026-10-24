@@ -100,8 +100,7 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
       -- `cil_step` reduces a pushed `evaluate` and a method's profile projection, so facts
       -- must land there too.
       let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three,
-        CIL.fin_mk_ofNat, CIL.FeatureProfile.evaluate, CIL.Safety.reduceMethodProfile,
-        $[$supplied:term],*])
+        CIL.fin_mk_ofNat, cil_feature, CIL.Safety.reduceMethodProfile, $[$supplied:term],*])
       let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
       for fact in locals do
         let some decl := (← getLCtx).findFromUserName? fact.raw.getId | continue
@@ -129,8 +128,7 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
       unless ← isProp (← instantiateMVars (← inferType proof)) do saved.restore; continue
       let others := supplied.filter (· != fact)
       let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three,
-        CIL.fin_mk_ofNat, CIL.FeatureProfile.evaluate, CIL.Safety.reduceMethodProfile,
-        $[$others:term],*])
+        CIL.fin_mk_ofNat, cil_feature, CIL.Safety.reduceMethodProfile, $[$others:term],*])
       let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
       let names ← assertInstances proof `supplied ctx simprocs
       if names.isEmpty then saved.restore; continue
