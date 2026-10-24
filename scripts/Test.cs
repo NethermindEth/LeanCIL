@@ -1,12 +1,14 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include ExportVerificationSuites.cs
 
 using System.Text.Json;
 
-var suite = args switch
+string suite = args switch
 {
     [] => "all",
+    ["--suite", string name] when ExportVerificationSuites.Plan().Any(entry => entry.Name == name) => name,
     ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem" or "imports" or "exports" or "exceptionlint" or "intrinsics" or "audit"] => args[1],
     _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|exports|exceptionlint|intrinsics|audit]")
 };
@@ -16,7 +18,6 @@ var results = new List<string>();
 
 var independentSuites = new Dictionary<string, (string Script, string Description)>
 {
-    ["exports"] = ("Tests/ContractExport.cs", "verified contract sidecar production, source bundles and consumer reuse"),
     ["imports"] = ("Tests/ContractImports.cs", "implementation-bound contract imports and conditional caller verification"),
     ["exceptionlint"] = ("Tests/ExceptionLint.cs", "diagnostic XML exception drift without proof claims"),
     ["contracts"] = ("Tests/UniversalContracts.cs", "universal checked contracts, caller memory preservation and incorrect implementations"),
@@ -59,6 +60,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["blockers"] = ("Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains and profile-excluded branches"),
     ["audit"] = ("Tests/OleanAudit.cs", "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge")
 };
+foreach (ExportSuite entry in ExportVerificationSuites.Plan())
+    independentSuites.Add(entry.Name, (entry.Script, entry.Description));
 
 void Passed(string name)
 {
@@ -68,8 +71,10 @@ void Passed(string name)
 
 void RunSuite(string name)
 {
-    var (script, description) = independentSuites[name];
-    Run(["dotnet", "run", "--file", script], streamOutput: true, progress: "Suite " + name);
+    (string script, string description) = independentSuites[name];
+    ExportSuite? export = ExportVerificationSuites.Plan().FirstOrDefault(entry => entry.Name == name);
+    string[] arguments = export?.Arguments ?? [];
+    Run(["dotnet", "run", "--file", script, "--", .. arguments], streamOutput: true, progress: "Suite " + name);
     Passed(description);
 }
 
@@ -121,8 +126,11 @@ if (suite is "all" or "unsafe") projects.AddRange(["Tests/SkipInitialization.cs"
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);
+foreach (ExportSuite entry in ExportVerificationSuites.Plan())
+    if (suite == "all" || suite == entry.Name)
+        projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal)));
 
-foreach (var project in projects)
+foreach (string project in projects.Distinct(StringComparer.Ordinal))
 {
     var command = new List<string>
     {

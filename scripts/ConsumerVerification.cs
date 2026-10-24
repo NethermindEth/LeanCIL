@@ -379,6 +379,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
+    ConsumerDependency[]? fullBundleDependencies { get; init; }
 
     static string Within(string root, string relative)
     {
@@ -428,10 +429,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }).ToArray();
     }
 
-    static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output)
+    static SortedDictionary<string, string> ConsumerSnapshot(string root, string? output, ConsumerDependency[]? bundled = null)
     {
         var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var dependencies = ConsumerDependencies(root);
+        ConsumerDependency[] dependencies = bundled ?? ConsumerDependencies(root);
         foreach (var directory in new[] { root }.Concat(dependencies.Select(d => d.Directory)))
             foreach (var path in ConsumerSources(directory, output)) inputs["consumer:" + path] = Sha(path);
         foreach (var dependency in dependencies) inputs["revision:" + dependency.Name] = dependency.Revision;
@@ -762,8 +763,12 @@ unsafe def main (args : List String) : IO Unit := do
         {
             var destination = Within(session, Path.GetRelativePath(root, dependency.Directory));
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            Run(["git", "clone", "--no-hardlinks", "--no-checkout", dependency.Directory, destination]);
-            Run(["git", "remote", "set-url", "origin", dependency.Url], destination);
+            if (fullBundleDependencies is null)
+            {
+                Run(["git", "clone", "--no-hardlinks", "--no-checkout", dependency.Directory, destination]);
+                Run(["git", "remote", "set-url", "origin", dependency.Url], destination);
+            }
+            else Directory.CreateDirectory(destination);
         }
         foreach (var (key, hash) in snapshot.Where(p => p.Key.StartsWith("consumer:", StringComparison.Ordinal)))
         {
@@ -950,7 +955,7 @@ unsafe def main (args : List String) : IO Unit := do
         Stage(live, "consumer source snapshot");
         try
         {
-            snapshot = ConsumerSnapshot(root, excluded);
+            snapshot = ConsumerSnapshot(root, excluded, fullBundleDependencies);
             var common = Common(snapshot);
             foreach (var i in live)
                 try
@@ -987,7 +992,7 @@ unsafe def main (args : List String) : IO Unit := do
             if (members.Length == 0) return;
             try
             {
-                var common = Common(ConsumerSnapshot(root, excluded));
+                SortedDictionary<string, string> common = Common(ConsumerSnapshot(root, excluded, fullBundleDependencies));
                 foreach (var i in members)
                     if (!Same(before[i], BoundRequestInputs(i, common)) ||
                         identities[i] != Sha(Path.Combine(outputs[i], "identity.json")) ||
@@ -1010,7 +1015,7 @@ unsafe def main (args : List String) : IO Unit := do
             certifiedLibrary = Library(Inputs(proofs[live[0]], requests[live[0]].Settings));
             certifiedBase = ModuleArtifacts(certifiedLibrary).Where(pair =>
                 ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
-            dependencies = ConsumerDependencies(root);
+            dependencies = fullBundleDependencies ?? ConsumerDependencies(root);
             trusted = TrustedConsumerSupport(root, before[live[0]]);
             // Resolve lazily initialized identities before any parallel work.
             _ = VerificationPolicy;
@@ -1082,7 +1087,7 @@ unsafe def main (args : List String) : IO Unit := do
         var ordered = groups.Values.Select(group => group.ToArray())
             .OrderByDescending(group => group.Count(i => !requests[i].ExpectRejection)).ToArray();
         var sources = ConsumerSourceHashes(snapshot, root);
-        var exporting = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
+        bool exporting = !forceFullVerification && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
         var export = new ConsumerSupportExport();
         string supportKey = "";
         string[] relativeImportDirectories = [];
@@ -1357,20 +1362,26 @@ unsafe def main (args : List String) : IO Unit := do
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
             foreach (int i in proceeding)
                 requests[i].ExportAudit?.Checked(session, names[Array.IndexOf(members, i)], leanPath);
+            Dictionary<int, FullImportResult> fullResults = new();
+            foreach (int i in proceeding)
+                if (fullImportAudit is not null)
+                    fullResults.Add(i, fullImportAudit(outputs[i], session, names[Array.IndexOf(members, i)], leanPath));
             Recheck(proceeding);
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
-            if (proceeding.Any(i => requests[i].ExportAudit is not null))
+            bool contractExportAudit = proceeding.Any(i => requests[i].ExportAudit is not null);
+            if (contractExportAudit || fullImportAudit is not null)
             {
+                string auditKind = contractExportAudit ? "contract export audit" : "full import audit";
                 if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
-                    throw new InvalidOperationException("Sources changed during contract export audit");
+                    throw new InvalidOperationException("Sources changed during " + auditKind);
                 Dictionary<string, SortedDictionary<string, string>> exportArtifacts = importDirectories.Where(Directory.Exists)
                     .SelectMany(directory => Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
                         .Select(path => (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
                     .OrderBy(pair => pair.Name, StringComparer.Ordinal)
                     .ToDictionary(pair => pair.Name, pair => ConsumerModuleParts(pair.Path));
                 if (checkedArtifacts != JsonSerializer.Serialize(exportArtifacts))
-                    throw new InvalidOperationException("Compiled artifacts changed during contract export audit");
+                    throw new InvalidOperationException("Compiled artifacts changed during " + auditKind);
             }
             // Publish only after the complete declaration replay, exact theorem
             // audit, extraction recheck and source-stability checks succeeded.
@@ -1417,11 +1428,13 @@ unsafe def main (args : List String) : IO Unit := do
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
                 RequireImplementationImports(extractions[i]);
+                fullResults.TryGetValue(i, out FullImportResult? fullResult);
                 var report = new Report(4, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
                     audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
-                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: PublishedImports(extraction));
+                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: fullResult?.Imports ?? PublishedImports(extraction),
+                    compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));

@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include VerificationSelection.cs
+#:include ExportVerificationSuites.cs
 
 using System.Diagnostics;
 using System.Text.RegularExpressions;
@@ -88,13 +89,145 @@ Test("multiple changes and deleted paths", () =>
 });
 Test("every registered suite has its entry point", () =>
 {
-    var runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
-    var accepted = Regex.Match(runner, """\["--suite", (.*?)\] =>""").Groups[1].Value;
-    var names = Regex.Matches(accepted, @"""([a-z]+)""").Select(match => match.Groups[1].Value)
-        .Where(name => name != "all").Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
+    string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
+    string accepted = Regex.Match(runner, """\["--suite", (.*?)\] =>""").Groups[1].Value;
+    IEnumerable<string> names = Regex.Matches(accepted, @"""([a-z]+)""").Select(match => match.Groups[1].Value)
+        .Where(name => name != "all").Concat(ExportVerificationSuites.Plan().Select(entry => entry.Name))
+        .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
     Equal(names, All());
     foreach (var (suite, inputs) in VerificationSelection.SuiteInputs())
         Require(inputs.Count > 0, "No entry point: " + suite);
+});
+void MustReject(Action action)
+{
+    try { action(); }
+    catch (ArgumentException) { return; }
+    catch (InvalidDataException) { return; }
+    catch (InvalidOperationException) { return; }
+    throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
+}
+Test("independent export cohort map preserves all 46 real cases", () =>
+{
+    Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
+    {
+        ["exports"] = ("core", ["core.unrelated", "core.definition", "core.wrapper-true", "core.publication", "core.caller",
+            "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
+            "core.initialized", "core.imports", "core.profile", "core.reference",
+            "core.bundle-location", "core.framework-change", "core.interface-text", "core.duplicate",
+            "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post"]),
+        ["exportsaudit"] = ("audit", ["audit.proof-source", "audit.wrapper-artifact"]),
+        ["exportsresolution"] = ("resolution", ["resolution.same-files", "resolution.changed-file"]),
+        ["exportsfullconsumer"] = ("consumer", ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode"]),
+        ["exportsfullordinary"] = ("ordinary", ["full.ordinary"]),
+        ["exportsfullpair"] = ("pair", ["full.pair"]),
+        ["exportsfullchecks"] = ("checks", ["full.missing-bundle", "full.inventory-bytes", "full.producer-bytes",
+            "full.unrecorded-olean", "full.deployed-dll", "full.stale-closure", "full.statement-digest", "full.extra-premise"]),
+        ["exportsfulltheorems"] = ("theorems", ["full.producer-true", "full.producer-definition"]),
+        ["exportsfullcomposition"] = ("composition", ["full.composition-true"]),
+        ["exportsmutationordinary"] = ("ordinary-artifact", ["full.ordinary-artifact"]),
+        ["exportsmutationconsumer"] = ("consumer-artifact", ["full.consumer-artifact"]),
+        ["exportsmutationsource"] = ("consumer-source", ["full.consumer-source"]),
+        ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"])
+    };
+    void ExactPlan(IEnumerable<ExportSuite> plan)
+    {
+        ExportSuite[] actual = plan.ToArray();
+        Equal(actual.Select(entry => entry.Name).Order(StringComparer.Ordinal), expected.Keys.Order(StringComparer.Ordinal));
+        foreach (ExportSuite entry in actual)
+        {
+            Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
+            Equal(entry.Cases, expected[entry.Name].Cases);
+            Require(entry.Script == (entry.Cohort == "resolution" ? "Tests/FullModuleResolution.cs" : "Tests/ContractExport.cs"),
+                "Wrong fixture: " + entry.Name);
+            Equal(entry.Arguments, entry.Cohort == "resolution" ? [] : ["--cohort", entry.Cohort]);
+        }
+    }
+    ExportSuite[] all = ExportVerificationSuites.Plan();
+    ExactPlan(all);
+    Require(all.SelectMany(entry => entry.Cases).Count() == 46 &&
+        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 46, "Lost or duplicate base behavior");
+    foreach (ExportSuite omitted in all)
+        MustReject(() => ExactPlan(all.Where(entry => entry.Name != omitted.Name)));
+    Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Name),
+        all.Where(entry => entry.Cases.All(id => id.StartsWith("full.", StringComparison.Ordinal))).Select(entry => entry.Name));
+    Equal(ExportVerificationSuites.FullPlan().Select(entry => entry.Cohort).Order(StringComparer.Ordinal),
+        new[] { "composition", "consumer", "ordinary", "pair", "checks", "theorems",
+            "ordinary-artifact", "consumer-artifact", "consumer-source", "consumer-shadow" }.Order(StringComparer.Ordinal));
+    foreach (ExportSuite entry in all)
+    {
+        if (entry.Cohort != "resolution")
+            Require(ExportVerificationSuites.Select(entry.Arguments) == entry.Cohort, "Wrong ContractExport dispatch");
+        if (entry.Cases.All(id => id.StartsWith("full.", StringComparison.Ordinal)))
+            Require(ExportVerificationSuites.Select(["--cohort", entry.Cohort], full: true) == entry.Cohort, "Wrong full dispatch");
+    }
+});
+Test("export coverage detects each omitted completion and invalid selection", () =>
+{
+    Require(ExportVerificationSuites.Select([]) is null && ExportVerificationSuites.Select([], full: true) is null,
+        "Default standalone must aggregate leaves");
+    foreach (string[] invalid in new string[][] {
+        ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"], ["--cohort", "resolution"] })
+        MustReject(() => ExportVerificationSuites.Select(invalid));
+    foreach (string cohort in new[] { "core", "audit", "resolution", "statics", "transitive", "discovery", "typed", "unknown" })
+    {
+        Require(!ExportVerificationSuites.IsFull(cohort), "Standalone or unknown cohort entered full verification: " + cohort);
+        MustReject(() => ExportVerificationSuites.Select(["--cohort", cohort], full: true));
+    }
+    ExportSuite[] all = ExportVerificationSuites.Plan();
+    MustReject(() => ExportVerificationSuites.Validate([]));
+    MustReject(() => ExportVerificationSuites.Validate(all.Append(all[0])));
+    MustReject(() => ExportVerificationSuites.Validate([all[0] with { Cases = [] }]));
+    foreach (ExportSuite entry in all)
+    {
+        foreach (string omitted in entry.Cases)
+        {
+            ExportCaseLedger incomplete = new(entry.Cohort);
+            foreach (string id in entry.Cases.Where(id => id != omitted)) incomplete.CompleteCase(id);
+            MustReject(incomplete.Finish);
+        }
+        ExportCaseLedger complete = new(entry.Cohort);
+        foreach (string id in entry.Cases) complete.CompleteCase(id);
+        complete.Finish();
+        MustReject(() => complete.CompleteCase(entry.Cases[0]));
+        MustReject(() => complete.CompleteCase("not-a-registered-case"));
+    }
+});
+Test("export leaf selection, strict files and shared inputs", () =>
+{
+    string[] exports = ExportVerificationSuites.Plan().Select(entry => entry.Name).Order(StringComparer.Ordinal).ToArray();
+    string[] bootstrap = ExportVerificationSuites.Plan().Where(entry => entry.Cohort != "resolution")
+        .Select(entry => entry.Name).Order(StringComparer.Ordinal).ToArray();
+    foreach (string name in exports) Require(All().Contains(name, StringComparer.Ordinal), "Missing selected export leaf: " + name);
+    foreach (string name in bootstrap)
+        Require(VerificationSelection.Select(["Tests/ContractExport.cs"]).Contains(name, StringComparer.Ordinal), "Bootstrap change lost " + name);
+    foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
+        Require(VerificationSelection.Select(["Tests/FullImportVerification.cs"]).Contains(entry.Name, StringComparer.Ordinal), "Full change lost " + entry.Name);
+    Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
+    Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
+    string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
+    Require(runner.Contains(".. arguments", StringComparison.Ordinal) &&
+        runner.Contains("ExportVerificationSuites.Plan()", StringComparison.Ordinal) &&
+        runner.Contains("projects.Distinct(StringComparer.Ordinal)", StringComparison.Ordinal), "Runner lost leaf arguments or build deduplication");
+    string standalone = File.ReadAllText(Path.Combine(root, "Tests/ContractExport.cs"));
+    Require(standalone.Contains("foreach (ExportSuite entry in ExportVerificationSuites.Plan())", StringComparison.Ordinal) &&
+        standalone.Contains(".. entry.Arguments", StringComparison.Ordinal), "Standalone lost exact leaf dispatch");
+});
+Test("a missing registered export fixture fails selection", () =>
+{
+    string isolated = Path.Combine(root, "artifacts", "MissingExportFixture-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(Path.Combine(isolated, "scripts"));
+    Directory.CreateDirectory(Path.Combine(isolated, "Tests"));
+    try
+    {
+        File.Copy(Path.Combine(root, "scripts/Test.cs"), Path.Combine(isolated, "scripts/Test.cs"));
+        File.WriteAllText(Path.Combine(isolated, "Tests/ContractExport.cs"), "");
+        string? rejection = null;
+        try { VerificationSelection.SuiteInputs(isolated); }
+        catch (InvalidDataException error) { rejection = error.Message; }
+        Require(rejection == "Missing registered export fixture: Tests/FullModuleResolution.cs",
+            "A missing resolution fixture was silently skipped: " + rejection);
+    }
+    finally { Directory.Delete(isolated, recursive: true); }
 });
 Test("required gate, all 192 actual Bash status combinations", () =>
 {
@@ -135,17 +268,18 @@ Test("required gate, all 192 actual Bash status combinations", () =>
 });
 Test("same-run certified library binding and observability", () =>
 {
-    var workflow = File.ReadAllText(Path.Combine(root, ".github/workflows/verification.yml"));
+    string workflow = File.ReadAllText(Path.Combine(root, ".github/workflows/verification.yml"));
     const string dollar = "$";
-    foreach (var text in new[] {
+    foreach (string text in new[] {
         "needs: [select, prepare]", "needs: [select, prepare, suites]",
         "LEANCIL_CERTIFIED_LIBRARY_SHA256: " + dollar + "{{ needs.prepare.outputs.manifest-sha256 }}",
         "artifact-ids: " + dollar + "{{ needs.prepare.outputs.artifact-id }}",
         "artifact-id: " + dollar + "{{ steps.library-artifact.outputs.artifact-id }}",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
-        "include-hidden-files: true", "max-parallel: 8", "artifacts/verification-traces/" })
+        "include-hidden-files: true", "max-parallel: 8", "artifacts/verification-traces/",
+        "matrix.suite == 'imports' && 90", "startsWith(matrix.suite, 'exports') && 120 || 30" })
         Require(workflow.Contains(text, StringComparison.Ordinal), "Missing workflow binding: " + text);
-    var name = "name: certified-library-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}";
+    string name = "name: certified-library-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}";
     Require(workflow.Split(name, StringSplitOptions.None).Length == 2, "Producer artifact name must appear exactly once");
 });
 Console.WriteLine($"All {checks} selection checks passed.");

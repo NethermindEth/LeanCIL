@@ -30,6 +30,9 @@ partial class Program : IDisposable
     string VerificationPolicy => verificationPolicy ??= Sha(typeof(Program).Assembly.Location);
     readonly Dictionary<string, SortedDictionary<string, string>> supportSourceKeys = new(StringComparer.Ordinal);
 
+    bool forceFullVerification { get; init; }
+    sealed record FullImportResult(string Theorem, string Audit, PublishedImport[] Imports);
+    Func<string, string, string, string, FullImportResult>? fullImportAudit { get; set; }
     readonly AsyncLocal<bool> referenceOnlyContext = new();
     bool referenceOnlyAuthoring { get => referenceOnlyContext.Value; set => referenceOnlyContext.Value = value; }
     bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
@@ -1103,7 +1106,8 @@ unsafe def main (args : List String) : IO Unit := do
     // Certification fields are sidecar text outside every pinned digest; sidecarSha256 names the bytes they came from.
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
-        string certificationStatementDigest, string deploymentObligation, string? sidecarSha256 = null, bool certificationAuthenticated = false);
+        string certificationStatementDigest, string deploymentObligation, string? sidecarSha256 = null, bool certificationAuthenticated = false,
+        string? sourceBundleDigest = null);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1177,7 +1181,8 @@ unsafe def main (args : List String) : IO Unit := do
         string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
-        string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null);
+        string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
+        string? compositionTheorem = null, string? compositionAudit = null);
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -1309,6 +1314,7 @@ unsafe def main (args : List String) : IO Unit := do
         string audit;
         string extractionAudit = "";
         string[] axioms;
+        FullImportResult? fullResult = null;
         string stagedProof = Path.Combine(fresh, "Proof.lean");
         string stagedSymbols = Path.Combine(fresh, "ExtractedSymbols.lean");
         void RequireStagedProofSources()
@@ -1485,6 +1491,7 @@ unsafe def main (args : List String) : IO Unit := do
                 File.WriteAllText(Path.Combine(extractionPublication, "extraction-audit.txt"), extractionAudit);
                 PublishSuccess(extractedKey, extractionPublication);
             }
+            fullResult = fullImportAudit?.Invoke(output, fresh, "Proof", leanPath);
 
             // Bind the report only after confirming inputs stayed unchanged.
             stage?.Invoke("extraction integrity");
@@ -1498,7 +1505,8 @@ unsafe def main (args : List String) : IO Unit := do
                 ? assumptions.Deserialize<string[]>() : [];
             RequireImplementationImports(extraction);
             var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-                staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root), imports: PublishedImports(extraction.Root));
+                staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root), imports: fullResult?.Imports ?? PublishedImports(extraction.Root),
+                compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 
