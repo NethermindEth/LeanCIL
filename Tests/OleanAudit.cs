@@ -238,13 +238,12 @@ File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
 File.WriteAllText(Path.Combine(package, "lakefile.toml"), "name = \"lib\"\n\n[[lean_lib]]\nname = \"Lib\"\n");
 File.WriteAllText(Path.Combine(package, "Lib.lean"), "import Lib.Core\ntheorem Lib.top : Lib.base = 1 := rfl\n");
 void Core(string source) => File.WriteAllText(Path.Combine(package, "Lib", "Core.lean"), source);
-Core("def Lib.base : Nat := 1\ntheorem Lib.Core.fact : Lib.base = 1 := rfl\n");
-var library = verification.AuditLibrary(package, ["Lib"], ["Lib."], ApprovedAxioms);
-if (library.Result is not { error: null, count: 2 } || !library.Modules.SequenceEqual(["Lib", "Lib.Core"]))
-    throw new InvalidOperationException("Library audit: " + JsonSerializer.Serialize(library));
+// The planted axiom lies outside the prefix and in an imported module, so only the axiom closure walk finds it.
 Core("def Lib.base : Nat := 1\naxiom bogus : False\ntheorem Lib.Core.fact : Lib.base = 1 := bogus.elim\n");
-if (verification.AuditLibrary(package, ["Lib"], ["Lib"], ApprovedAxioms).Result.rejected is not [{ name: "Lib.Core.fact", axioms: ["bogus"] }])
-    throw new InvalidOperationException("Library audit accepted a planted axiom");
+var library = verification.AuditLibrary(package, ["Lib"], ["Lib."], ApprovedAxioms);
+if (library.Result is not { error: not null, count: 2, rejected: [{ name: "Lib.Core.fact", axioms: ["bogus"] }] } ||
+    !library.Modules.SequenceEqual(["Lib", "Lib.Core"]))
+    throw new InvalidOperationException("Library audit accepted a planted axiom: " + JsonSerializer.Serialize(library));
 Core("""
     import Lean
     def Lib.base : Nat := 1
