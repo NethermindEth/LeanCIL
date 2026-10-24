@@ -879,6 +879,7 @@ lookup rewrites by one equation instead of unfolding the body:
 
 ```lean
 import CIL.InstructionEquations
+import CIL.Safety.SymbolicExecution
 
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
@@ -891,9 +892,10 @@ cil_instruction_equations body
 
 -- body_instruction2 (sse42 avx2 : Bool) (callee : Nat) :
 --   (body sse42 avx2 callee).code[2]? = some (if avx2 = true then .call callee 0 else ...)
+-- cil_lookup fetches through the equation and decides the `if` from the fact.
 example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
-    (body sse42 avx2 callee).code[2]? = some (.call callee 0) := by
-  simp only [body_instruction2, wide, ↓reduceIte]
+    ∃ op, (body sse42 avx2 callee).code[2]? = some op ∧ op = .call callee 0 :=
+  ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
 ```
 
 A body whose code length depends on a parameter, such as an `if` around a
@@ -902,4 +904,5 @@ kernel checks the equations: 100 instructions take about 0.1 s, 400 take 2.4 s
 and 1,500 take 32 s, growing with the square of the length like the extractor's
 own equations, and about eight times faster than writing each `:= rfl` by hand.
 `Tests/InstructionEquations.lean` covers lookups on symbolic flags and on
-concrete profiles, with the body sealed so only the equations can fetch.
+concrete profiles, with the body sealed so only the equations can fetch, and a
+`cil_checked_steps` run decided by a fact about a symbolic flag.

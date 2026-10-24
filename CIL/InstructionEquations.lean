@@ -11,8 +11,8 @@ proved by `rfl` and tagged `@[cil_code ↓]`. These are the equations the extrac
 `method{n}_instruction{pc}` for extracted bodies, so `cil_lookup` fetches from a parametric
 body, such as `def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method`, by one rewrite
 instead of unfolding the body and walking its code list. An instruction that depends on a
-parameter is stated as written, for example `if avx2 then op else .unsupported ...`; rewriting
-with its equation and a fact or literal for the flag decides it. The kernel checks every
+parameter is stated as written, for example `if avx2 then op else .unsupported ...`, and
+`cil_lookup` decides it from the caller's facts or literal flags. The kernel checks every
 equation, so the command proves nothing about the body beyond what its definition says.
 -/
 

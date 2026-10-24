@@ -71,31 +71,47 @@ example (sse42 avx2 : Bool) (callee : Nat) :
     ∃ op, (dispatchBody sse42 avx2 callee).code[1]? = some op ∧ op = .brzero 6 :=
   ⟨_, by (fail_if_success rfl); cil_lookup [], by with_reducible rfl⟩
 
--- Symbolic flags: a fact about each flag decides the instruction's feature test.
+-- Symbolic flags: a fact about each flag decides the fetched instruction's feature test.
 example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
-    (dispatchBody sse42 avx2 callee).code[4]? = some (.call callee 2) := by
-  simp only [dispatchBody_instruction4, wide, ↓reduceIte]
+    ∃ op, (dispatchBody sse42 avx2 callee).code[4]? = some op ∧ op = .call callee 2 :=
+  ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
 
 example (sse42 avx2 : Bool) (callee : Nat) (scalar : avx2 = false) (narrow : sse42 = true) :
-    (dispatchBody sse42 avx2 callee).code[6]? = some (.arg 1) := by
-  simp only [dispatchBody_instruction6, scalar, narrow, Bool.false_eq_true, ↓reduceIte]
+    ∃ op, (dispatchBody sse42 avx2 callee).code[6]? = some op ∧ op = .arg 1 :=
+  ⟨_, by cil_lookup [scalar, narrow], by with_reducible rfl⟩
 
 -- Concrete profiles: literal flags decide the test with no fact.
-example : (dispatchBody true false 3).code[6]? = some (.arg 1) := by
-  simp only [cil_code, Bool.false_eq_true, ↓reduceIte]
+example : ∃ op, (dispatchBody true false 3).code[6]? = some op ∧ op = .arg 1 :=
+  ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
-example : (dispatchBody false true 3).code[4]? = some (.call 3 2) := by
-  simp only [cil_code, ↓reduceIte]
+example : ∃ op, (dispatchBody false false 3).code[6]? = some op ∧ op = .arg 0 :=
+  ⟨_, by cil_lookup [], by with_reducible rfl⟩
+
+example : ∃ op, (dispatchBody false true 3).code[4]? = some op ∧ op = .call 3 2 :=
+  ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
 end Sealed
 
-/-- The scalar path, proved once over the SSE4.2 flag and the callee index. -/
-theorem scalar_returns (program : CIL.Program) (index callee : Nat) (sse42 : Bool)
-    (found : program[index]? = some (dispatchBody sse42 false callee))
+/-- The scalar path from a fact about a symbolic AVX2 flag: the `.ret` at pc 7 is fetched
+    decided, so the run returns instead of stopping on an undecided `if`. -/
+theorem sse42_returns (program : CIL.Program) (index callee : Nat) (avx2 : Bool)
+    (scalar : avx2 = false) (found : program[index]? = some (dispatchBody true avx2 callee))
+    (memory : CIL.Safety.Memory) (left right : CIL.W32) :
+    CIL.Safety.invoke program 5 index [.scalar (.i32 left), .scalar (.i32 right)] memory =
+      .ok (memory, [.scalar (.i32 right)]) := by
+  cil_checked_steps [scalar]
+
+/-- info: 'Tests.InstructionEquations.sse42_returns' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms sse42_returns
+
+/-- The scalar path over both flags and the callee index; only the result's own `if` on the
+    SSE4.2 flag is split. -/
+theorem scalar_returns (program : CIL.Program) (index callee : Nat) (sse42 avx2 : Bool)
+    (scalar : avx2 = false) (found : program[index]? = some (dispatchBody sse42 avx2 callee))
     (memory : CIL.Safety.Memory) (left right : CIL.W32) :
     CIL.Safety.invoke program 5 index [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (if sse42 then right else left))]) := by
-  cases sse42 <;> cil_checked_steps
+  cases sse42 <;> cil_checked_steps [scalar]
 
 /-- info: 'Tests.InstructionEquations.scalar_returns' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms scalar_returns
@@ -105,13 +121,13 @@ example (memory : CIL.Safety.Memory) (left right : CIL.W32) :
     CIL.Safety.invoke [dispatchBody false false 0] 5 0
       [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 left)]) :=
-  scalar_returns _ 0 0 false rfl memory left right
+  scalar_returns _ 0 0 false false rfl rfl memory left right
 
 example (memory : CIL.Safety.Memory) (left right : CIL.W32) :
     CIL.Safety.invoke [dispatchBody true false 0] 5 0
       [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 right)]) :=
-  scalar_returns _ 0 0 true rfl memory left right
+  scalar_returns _ 0 0 true false rfl rfl memory left right
 
 /-- A body composed from a padding block and a helper list, as transcriptions are written. -/
 def composedBody (avx2 : Bool) : CIL.Method :=
