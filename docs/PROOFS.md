@@ -43,10 +43,18 @@ and [CallComposition](../CIL/Safety/CallComposition.lean) for manual proofs.
 At a return, the tactic leaves the equation between the computed checked result
 and the stated result as a proof goal. It closes that equation automatically
 only when `with_reducible rfl` succeeds after frame cleanup, list normalization
-and literal shift-count reduction. A mathematical result can need a separate
-`simp` or case split, especially when a narrow return extends a Boolean value.
-The remaining goal contains the returned values, rather than an unexecuted
-`run`. `cil_contract_steps` likewise leaves the return postcondition as a goal.
+and literal shift-count reduction. Cleanup also drops the narrowing of an
+`if p then 1 else 0` result, so a narrow Boolean return needs no unfolding of
+`NarrowKind.extend`; other mathematical results can need a separate `simp` or
+case split. The remaining goal contains the returned values, rather than an
+unexecuted `run`. `cil_contract_steps` likewise leaves the return postcondition
+as a goal.
+
+A run-to-run goal `run p (fuel + n) m 0 .. = run p fuel m n ..` closes with
+`cil_checked_steps` when the stepped state is syntactically the target: symbolic
+`fuel` stops stepping there. With literal fuel and a target equal only up to
+rewriting, `cil_checked_steps n [facts]` takes exactly `n` steps and leaves the
+residual `run` equation.
 
 The single-step helper, `cil_checked_step [facts]`, selects its closing strategy
 from the opcode. Pure scalar operations try `rfl` even when facts are supplied.

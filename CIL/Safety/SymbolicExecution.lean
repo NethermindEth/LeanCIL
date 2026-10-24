@@ -276,4 +276,20 @@ elab_rules : tactic
 
 macro "cil_checked_steps" : tactic => `(tactic| cil_checked_steps [])
 
+/-- Exactly `n` fetched steps of the left-hand `run`, for run-to-run goals whose target state is not
+    syntactically the stepped one; unbounded stepping would run past it when the fuel is a literal. -/
+syntax "cil_checked_steps " num " [" term,* "]" : tactic
+
+open Lean Elab Tactic in
+elab_rules : tactic
+  | `(tactic| cil_checked_steps $count:num [$facts:term,*]) => do
+    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) facts.getElems
+    for taken in [:count.getNat] do
+      if (← getGoals).isEmpty then
+        throwError "cil_checked_steps {count.getNat}: the goal closed after {taken} steps"
+      withMainContext <| evalTactic (← `(tactic| cil_checked_run_step [$[$prepared:term],*]))
+    -- Fold the stepped pc (`2 + 1`) so the residual matches a target stated with a numeral.
+    unless (← getGoals).isEmpty do
+      evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))
+
 end CIL.Safety

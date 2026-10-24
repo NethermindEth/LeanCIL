@@ -93,6 +93,53 @@ theorem checked_plain_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Fr
 
 #print axioms checked_plain_return
 
+/-! Run-to-run goals: a prefix of a method rewritten to the `run` it continues with. -/
+
+@[cil_code] def prefixMethod : CIL.Method := {
+  code := [.arg 0, .arg 1, .add, .arg 0, .add, .ret]
+  locals := [], returnsValue := true }
+
+-- Symbolic remaining fuel stops the unbounded stepper at the target, which cleanup closes.
+theorem run_prefix (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (fuel : Nat) (a b : CIL.W64) :
+    CIL.Safety.run [prefixMethod] (fuel + 3) 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+      CIL.Safety.run [prefixMethod] fuel 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+        [.scalar (.i64 (a + b))] memory := by
+  cil_checked_steps
+
+-- A literal-fuel target the stepped state reaches syntactically is closed there, not run past.
+theorem run_prefix_literal (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (a b : CIL.W64) :
+    CIL.Safety.run [prefixMethod] 10 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+      CIL.Safety.run [prefixMethod] 7 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+        [.scalar (.i64 (a + b))] memory := by
+  cil_checked_steps
+
+-- A target equal only up to commutativity: the bounded form stops at pc 3 instead of running past it.
+theorem run_prefix_bounded (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (a b : CIL.W64) :
+    CIL.Safety.run [prefixMethod] 10 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+      CIL.Safety.run [prefixMethod] 7 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+        [.scalar (.i64 (b + a))] memory := by
+  -- Unbounded stepping runs on to the return, past the target state.
+  fail_if_success (cil_checked_steps; rw [BitVec.add_comm]; done)
+  cil_checked_steps 3 []
+  run_tac do
+    let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
+    let some (_, lhs, _) := target.eq? | throwError "Expected a run equation"
+    unless lhs.isAppOf ``CIL.Safety.run && lhs.getAppArgs[3]!.nat? == some 3 do
+      throwError "cil_checked_steps 3 did not stop at pc 3"
+  rw [BitVec.add_comm]
+
+/-- error: cil_checked_steps 4: the goal closed after 3 steps -/
+#guard_msgs in
+example (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (fuel : Nat) (a b : CIL.W64) :
+    CIL.Safety.run [prefixMethod] (fuel + 3) 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+      CIL.Safety.run [prefixMethod] fuel 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+        [.scalar (.i64 (a + b))] memory := by
+  cil_checked_steps 4 []
+
+#print axioms run_prefix
+#print axioms run_prefix_literal
+#print axioms run_prefix_bounded
+
 def deferredReturnValue (value : CIL.W32) : CIL.W32 := value
 
 theorem checked_plain_return_preserves_semireducible_goal
