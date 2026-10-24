@@ -755,7 +755,8 @@ unsafe def main (args : List String) : IO Unit := do
 
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
         SortedDictionary<string, string> snapshot, string certifiedLibrary, ExtractionIdentity extraction,
-        IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols)
+        IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
+        IReadOnlyDictionary<string, string>? exportAudits = null)
     {
         foreach (var dependency in dependencies)
         {
@@ -826,19 +827,31 @@ unsafe def main (args : List String) : IO Unit := do
             .Append(extractionAuditPath).ToList();
         copied.AddRange(importModules.Select(module => Path.Combine(frameworkCopy, module.Replace('.', Path.DirectorySeparatorChar) + ".lean")));
         if (symbols is not null) copied.Add(symbolsPath);
-        foreach (var (module, proof, _) in proofs)
+        foreach ((string module, string proof, string _) in proofs)
         {
-            if (File.Exists(Path.Combine(session, module + ".lean")))
-                throw new InvalidDataException(module + " is reserved for the selected proof.");
-            File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), Path.Combine(session, module + ".lean"));
+            string target = Path.Combine(session, module + ".lean");
+            if (File.Exists(target)) throw new InvalidDataException(module + " is reserved for the selected proof.");
+            if (exportAudits is not null && exportAudits.TryGetValue(module, out string? audit))
+            {
+                string author = module + "Author";
+                string authorPath = Path.Combine(session, author + ".lean");
+                if (File.Exists(authorPath)) throw new InvalidDataException(author + " is reserved for the export author proof.");
+                File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), authorPath);
+                AddConsumerLibrary(session, author);
+                copied.Add(authorPath);
+                File.WriteAllText(target, "import " + author + "\n" + audit);
+            }
+            else File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), target);
             AddConsumerLibrary(session, module);
-            copied.Add(Path.Combine(session, module + ".lean"));
+            copied.Add(target);
         }
         return new(frameworkCopy, copied.ToDictionary(path => path, Sha));
     }
 
+    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked, AuditRequest[]? Theorems = null);
+
     sealed record ConsumerRequest(string Assembly, string Output, string Proof, string Theorem, string? Settings,
-        bool ExpectRejection = false);
+        bool ExpectRejection = false, ConsumerExportAudit? ExportAudit = null);
 
     sealed class ConsumerOutcome
     {
@@ -868,6 +881,8 @@ unsafe def main (args : List String) : IO Unit := do
         Action<int, string>? stage, bool batch, int parallelism = 1, Action<int, ConsumerOutcome>? finished = null)
     {
         root = Path.GetFullPath(root);
+        if (requests.Any(request => request.ExportAudit is not null) && !freshLibrary)
+            throw new InvalidDataException("Contract exports require fresh independent verification.");
         var outcomes = requests.Select(_ => new ConsumerOutcome()).ToArray();
         bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected && outcomes[i].Report is null;
         int[] Pending(IEnumerable<int> members) => members.Where(Live).ToArray();
@@ -892,6 +907,12 @@ unsafe def main (args : List String) : IO Unit := do
         var symbols = new string?[requests.Count];
         var outputs = requests.Select(request => Path.GetFullPath(request.Output)).ToArray();
         var proofs = new string[requests.Count];
+        SortedDictionary<string, string> BoundRequestInputs(int index, SortedDictionary<string, string> common)
+        {
+            SortedDictionary<string, string> inputs = RequestInputs(common, proofs[index], requests[index].Settings);
+            if (requests[index].ExportAudit is { } audit) inputs["export-audit"] = ContentKey(audit.Source);
+            return inputs;
+        }
         foreach (var i in all)
             try { proofs[i] = Within(root, Path.GetRelativePath(root, Path.GetFullPath(requests[i].Proof))); }
             catch (Exception error) { Fail([i], error); }
@@ -938,7 +959,7 @@ unsafe def main (args : List String) : IO Unit := do
                     if (batch && snapshot.Keys.Any(key => key.StartsWith("consumer:" + output, OperatingSystem.IsWindows()
                         ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
                         throw new InvalidDataException("Batch outputs must lie outside the consumer sources, for example under artifacts/: " + outputs[i]);
-                    before[i] = RequestInputs(common, proofs[i], requests[i].Settings);
+                    before[i] = BoundRequestInputs(i, common);
                     if (!before[i].ContainsKey("consumer:" + proofs[i]))
                         throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
                     if (ConsumerImportsSymbols(proofs[i], snapshot, root))
@@ -968,7 +989,7 @@ unsafe def main (args : List String) : IO Unit := do
             {
                 var common = Common(ConsumerSnapshot(root, excluded));
                 foreach (var i in members)
-                    if (!Same(before[i], RequestInputs(common, proofs[i], requests[i].Settings)) ||
+                    if (!Same(before[i], BoundRequestInputs(i, common)) ||
                         identities[i] != Sha(Path.Combine(outputs[i], "identity.json")) ||
                         (symbols[i] is not null && (!File.Exists(Path.Combine(outputs[i], "Symbols.lean")) ||
                             symbols[i] != Sha(Path.Combine(outputs[i], "Symbols.lean")))))
@@ -1079,7 +1100,9 @@ unsafe def main (args : List String) : IO Unit := do
             // Groups share one Symbols.lean hash or none.
             var symbolHash = symbols[members[0]];
             var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, extractions[members[0]],
-                members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash);
+                members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash,
+                members.Where(i => requests[i].ExportAudit is not null).ToDictionary(
+                    i => names[Array.IndexOf(members, i)], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal));
             var frameworkCopy = prepared.FrameworkCopy;
             string[] interfaceModules = extractions[members[0]].Sources.Keys.Where(module => module != "ExtractedImports").ToArray();
             Dictionary<string, string> InterfaceArtifacts() => ModuleArtifacts(frameworkCopy)
@@ -1309,9 +1332,11 @@ unsafe def main (args : List String) : IO Unit := do
                 {
                     var module = names[Array.IndexOf(members, i)];
                     string[] auditModules = [module, .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
-                    var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
+                    var audited = AuditOleans(leanPath, auditModules,
+                        requests[i].ExportAudit?.Theorems ?? [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
                     RequireAuditedConstants(audited);
+                    foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
                     audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]));
                 }
                 catch (Exception error) { Fail([i], error); }
@@ -1330,6 +1355,23 @@ unsafe def main (args : List String) : IO Unit := do
                 .ToDictionary(pair => pair.Name, pair => ConsumerModuleParts(pair.Path));
             if (checkedArtifacts != JsonSerializer.Serialize(finalArtifacts))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
+            foreach (int i in proceeding)
+                requests[i].ExportAudit?.Checked(session, names[Array.IndexOf(members, i)], leanPath);
+            Recheck(proceeding);
+            proceeding = Pending(proceeding);
+            if (proceeding.Length == 0) return;
+            if (proceeding.Any(i => requests[i].ExportAudit is not null))
+            {
+                if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
+                    throw new InvalidOperationException("Sources changed during contract export audit");
+                Dictionary<string, SortedDictionary<string, string>> exportArtifacts = importDirectories.Where(Directory.Exists)
+                    .SelectMany(directory => Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
+                        .Select(path => (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
+                    .OrderBy(pair => pair.Name, StringComparer.Ordinal)
+                    .ToDictionary(pair => pair.Name, pair => ConsumerModuleParts(pair.Path));
+                if (checkedArtifacts != JsonSerializer.Serialize(exportArtifacts))
+                    throw new InvalidOperationException("Compiled artifacts changed during contract export audit");
+            }
             // Publish only after the complete declaration replay, exact theorem
             // audit, extraction recheck and source-stability checks succeeded.
             if (failures.Count == 0 && graph is not null)

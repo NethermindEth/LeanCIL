@@ -226,6 +226,14 @@ the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
 
+## Export contracts
+
+`leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]`
+checks a library's selected contracts and writes their bound sidecar. See
+[Publishing verified contracts](CONSUMERS.md#publishing-verified-contracts) for
+the manifest, exact theorem guarantee, version-1 restrictions and source bundle.
+All exports must pass before the sidecar is published.
+
 ## Verify with imported contracts
 
 After import-aware extraction, `leancil verify output --proof Caller.lean` checks
@@ -235,9 +243,9 @@ library implementation proof source, artifact or full bundle is required.
 
 The sidecar export adds `kind` (`method` or `outcome`). Each selected certification
 record requires `theorem`, `statement` and `statementDigest`. The driver checks
-the actual exported contract type and canonical closure. `statementDigest` is the
-publisher's digest of its canonical certification type, not a hash of its pretty
-printed statement. The consumer records this provenance without obtaining the
+the actual exported contract type structurally and computes its canonical closure
+from replayed oleans. `statementDigest` hashes the UTF-8 `statement` returned by
+that audit. The consumer records this provenance without obtaining the
 implementation proof. See [Contract interfaces](CONTRACT-INTERFACES.md).
 
 A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to

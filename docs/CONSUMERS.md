@@ -213,6 +213,94 @@ Place handwritten proofs outside them.
 among consumer sources. Lake configuration and Lean elaborators are executable
 code, so use this mode with packages you trust.
 
+## Publishing verified contracts
+
+A library producer runs `leancil export-contracts manifest.json`. The command
+checks every selected export with fresh ordinary verification, an exact canonical
+contract theorem, extraction-certificate audit and independent kernel replay. It
+publishes a sidecar only after every export and the final input checks succeed.
+
+```json
+{
+  "schema": 1,
+  "assembly": "bin/Lib.dll",
+  "proofRoot": "proofs",
+  "interface": [{ "module": "Lib.Contracts", "source": "proofs/Lib/Contracts.lean" }],
+  "exports": [{
+    "method": "Lib.Library::AddOne(ulong)",
+    "artifact": "artifacts/AddOne",
+    "contract": "Lib.Contracts.addOne",
+    "theorem": "Lib.Proof.addOne_correct"
+  }]
+}
+```
+
+Paths are relative to the manifest. Each artifact must already contain an
+extraction identity and `verification.json` naming the author's proof source.
+The recorded method must be the export entry, its DLL must match `assembly`, and
+its execution profile must be an exact built-in profile. The consumer package
+under `proofRoot` must have resolved pinned dependencies. One method may list
+several artifact entries for different profiles; duplicate method/profile pairs
+fail. Unknown and duplicate JSON properties are rejected. Each `interface` source
+must be byte-identical to the module of that name under `proofRoot`, the module
+the author proof compiled against, so the published text is what was audited.
+
+The contract constant must have type `CIL.Safety.MethodContract` or
+`CIL.Safety.OutcomeContract`. The named author declaration must be a theorem with
+the exact canonical `Holds` proposition for the extracted program at entry zero.
+An unrelated theorem, a proof definition, user-defined field notation or extra
+assumptions do not establish this guarantee. The generated ExportAudit module
+imports the exact author proof copy in the same fresh verification session.
+
+Published interface modules must check with only the declared interface sources
+and the bundled framework/toolchain. They cannot require private implementation
+proofs or an `Extracted` module. Canonical contract closures are checked both in
+this isolated interface and in the actual proof environment. Their exact results
+must agree. Custom axioms, sorry and valueless opaque interface declarations are
+not exportable. Contract predicates and their reachable definitions determine the
+closure digest; the name alone does not determine it.
+
+Version 1 supports public or protected static, non-virtual, non-generic exports
+without imports or static sites. It also rejects recorded static-value and
+initialization assumptions because this sidecar version does not transport them.
+This restriction does not weaken the extractor's admission or profile rules.
+
+The default output is `<assembly-simple-name>.leancil.contracts` next to the DLL.
+Use `--output path.leancil.contracts` to select another path. Publication is atomic
+and a failed command preserves an existing sidecar unchanged. The old sidecar
+still binds the old DLL hash and cannot certify a changed implementation. A
+body-only rebuild can retain the same public interface and contract closure
+digests while its implementation hash and certification change. Consumers still
+check the selected deployment bytes and independently pin the interface with
+`--import-interface-sha256 Lib=<digest>`.
+
+`--bundle directory` also writes an immutable content-addressed source bundle.
+Its inventory binds the original producer inputs, complete consumer/dependency
+source closure, exact bundled framework sources, generated extraction and audit
+sources, and checked export statement metadata. The consumer's own
+`.lake/packages/leancil` copy is omitted because `framework/` already pins those
+sources. Every bundled file must still match the hash taken in the export's input
+snapshot, which includes the framework sources; a change fails the export
+before the bundle or sidecar is published. It contains no compiled DLL,
+`.olean`, local receipt or build cache. The selected implementation DLL remains a
+separate input. The bundle publishes before the sidecar, and its source locator
+is recorded in the sidecar. A source bundle is not proof certification and is not
+accepted as a trusted cache. Independent verification of a published library is
+a separate workflow.
+
+`bundle.json` also records `frameworkKey`, the strict compatibility key that the
+sidecar carries, and `leanCilRevision`, the leancil revision pinned by the
+producer's `proofRoot`. The revision is diagnostic: it names the sources to
+rebuild with, while acceptance compares only the framework key and file hashes.
+Any LeanCIL change to `CIL/` or the toolchain changes the framework key, so
+sidecars and bundles exported with an older framework are rejected by a newer
+verifier. Publishers re-export with the new LeanCIL; consumers that cannot upgrade
+the publisher keep the LeanCIL revision the bundle records.
+
+Run `dotnet run --file scripts/Test.cs -- --suite exports` for the producer/App
+round trip, unchanged caller after a library rebuild, rejecting exports and
+source-only bundle checks.
+
 ## Published contract imports
 
 A consumer can verify a caller against an imported contract without the library's
