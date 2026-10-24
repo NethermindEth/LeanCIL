@@ -505,6 +505,19 @@ theorem feature_step_evaluate_free_body (program : CIL.Program) (index : Nat) (b
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
   cil_checked_steps [wide, code, returns]
 
+-- A supplied proof term, not just a local name, is normalized to the profile field.
+theorem feature_step_evaluate_term (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
+    (wide : body.profile.evaluate .avx2 = true) :
+    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+      .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
+  cil_checked_step [(show body.profile.evaluate .avx2 = true from wide)]
+
+theorem feature_steps_evaluate_term (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (wide : profile.evaluate .avx2 = true) (found : program[index]? = some (featureTestBody profile))
+    (memory : CIL.Safety.Memory) :
+    CIL.Safety.invoke program 3 index [] memory = .ok (memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps [(show profile.evaluate .avx2 = true from wide)]
+
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
 @[cil_code] def addBody : CIL.Method :=
   { returnsValue := true, locals := [], code := [.arg 0, .const32 8, .memory (.add 8 true), .pop, .const32 1, .ret] }
@@ -581,6 +594,10 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 #guard_msgs in #print axioms feature_step_evaluate_fact
 /-- info: 'Tests.Automation.feature_step_evaluate_free_body' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms feature_step_evaluate_free_body
+/-- info: 'Tests.Automation.feature_step_evaluate_term' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_evaluate_term
+/-- info: 'Tests.Automation.feature_steps_evaluate_term' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_steps_evaluate_term
 /-- info: 'Tests.Automation.add_run' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms add_run
 

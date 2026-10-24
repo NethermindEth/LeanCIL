@@ -71,6 +71,32 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
           let (_, goal) ← (← (← getMainGoal).assert name result.expr proof).intro1P
           replaceMainGoal [goal]
           normalised := normalised.push (mkIdent name)
+    -- A proof term such as `(show p from h)` is normalised like a local fact, without itself as a lemma,
+    -- which would rewrite its own statement to `True`. Global names stay as given: most are unfolds.
+    for fact in supplied do
+      if fact.raw.isIdent then continue
+      let saved ← saveState
+      let some proof ← (try
+          let proof ← Term.withoutErrToSorry <| Term.elabTerm fact none
+          Term.synthesizeSyntheticMVarsNoPostponing
+          let proof ← instantiateMVars proof
+          pure (if proof.hasMVar then none else some proof)
+        catch _ => pure none) | saved.restore; continue
+      let type ← instantiateMVars (← inferType proof)
+      unless ← isProp type do saved.restore; continue
+      let others := supplied.filter (· != fact)
+      let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat,
+        CIL.FeatureProfile.evaluate, $[$others:term],*])
+      let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
+      let (result, _) ← simp type ctx simprocs
+      if result.expr.consumeMData.isConstOf ``True || result.expr == type then saved.restore; continue
+      let normalisedProof ← match result.proof? with
+        | some eq => mkEqMP eq proof
+        | none => mkExpectedTypeHint proof result.expr
+      let name ← mkFreshUserName `supplied
+      let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
+      replaceMainGoal [goal]
+      normalised := normalised.push (mkIdent name)
     return facts ++ normalised
 
 open Lean Elab Tactic Meta in
@@ -107,6 +133,15 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
        try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
+         Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
+
+-- Only memory equations expose `referenceAt`; unfolding it in the generic list slows every other step.
+macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
+       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
          Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
@@ -124,10 +159,9 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
     | cil_checked_step_by_unfolding [$[$facts:term],*])
 
 -- A fact at the `memoryInstruction` level fails once a per-shape memory equation rewrites past it,
--- so the step is retried through `step_memory_eq` only for such facts.
+-- so the elaborator retries such facts through the generic `step_memory_eq`.
 macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       fail_if_success fail_if_success simp only [cil_step, -CIL.Safety.step_memory_eq]
        rw [CIL.Safety.step_memory_eq]
        try simp only [cil_guard]
        try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
@@ -208,7 +242,7 @@ elab_rules : tactic
         let attempt := fun (tactic : Syntax) => do
           try withoutRecover (evalTactic tactic); return none
           catch error => saved.restore; return some error
-        let some equationError ← attempt (← `(tactic| cil_checked_step_by_equations [$facts:term,*])) | return
+        let some equationError ← attempt (← `(tactic| cil_checked_memory_by_equations [$facts:term,*])) | return
         let progressed := (← attempt (← `(tactic| simp only [cil_step]))).isNone
         saved.restore
         let unfolding ← `(tactic| cil_checked_step_by_unfolding [$facts:term,*])
