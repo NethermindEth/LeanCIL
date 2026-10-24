@@ -13,6 +13,24 @@ LeanCIL extracts .NET CIL into Lean and proves properties of the compiled code. 
 - Stepping, return and contract tactics are shared by `Tests/Automation`, `Tests/StoreFacts`,
   `Tests/MethodContract`, the `loops` suite and the examples. A tactic change must pass all of them.
 
+## Writing code
+
+Write for the next reader; [Semantics.lean](./CIL/Semantics.lean) is the model.
+
+- Open each Lean file with a `/-! -/` docstring saying what it defines and where it fits. Give each
+  definition, structure, tactic and non-obvious theorem a `/-- -/` docstring stating what it means
+  or guarantees, not how it is computed.
+- Keep lines under 100 characters in Lean and 120 in C#. Group a long `match` by instruction
+  family under one-line comments; reorder only arms whose patterns are disjoint.
+- Name values for what they hold (`memory`, `frame`, `width`), not `m`, `h1` or `x'`, and give
+  magic numbers and repeated literals a name. In C#, split a method that does several things and
+  name long conditions as locals or helpers.
+- Comments are one or two lines stating an invariant or failure mode, not the mechanism. No plan
+  vocabulary (phases, gates, option labels) in code, comments or PR text.
+- Do not rewrite a definition's terms or a theorem statement to tidy it. Generated step equations
+  and the goals consumers see after stepping are built from those exact terms; propose the change
+  as its own PR instead.
+
 ## Proofs and tests
 
 - Never weaken a contract, precondition or soundness check to make a proof go through. Report an
