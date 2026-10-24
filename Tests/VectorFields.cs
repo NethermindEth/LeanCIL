@@ -17,8 +17,8 @@ Assembly runtime = Assembly.LoadFile(assembly);
 Type owner = runtime.GetType("Examples.VectorFields")!;
 string profile = RuntimeInformation.ProcessArchitecture switch
 {
-    Architecture.Arm64 => "arm64-armbase",
-    Architecture.X64 => "x64-vector256",
+    Architecture.Arm64 => "arm64-advsimd",
+    Architecture.X64 => "x64-v3",
     _ => throw new InvalidOperationException("Vector layout comparisons require ARM64 or x64")
 };
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
