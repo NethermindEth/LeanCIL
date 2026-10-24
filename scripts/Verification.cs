@@ -21,6 +21,51 @@ partial class Program : IDisposable
     string? library;
     string? resolvedToolchain;
     bool extractorBuilt;
+
+    const string ExtractorBuildEnvironment = "LEANCIL_PREPARED_EXTRACTOR";
+
+    static string[] FixtureCommand(string script, string[] arguments, bool prepared)
+    {
+        string[] buildArguments = prepared
+            ? ["-c", "Release", "--no-build", "-p:EnforceCodeStyleInBuild=true",
+                "-p:GenerateDocumentationFile=true"]
+            : [];
+        return ["dotnet", "run", "--file", script, .. buildArguments, "--", .. arguments];
+    }
+
+    // A parent build can be reused only while its sources and complete output still match.
+    static string ExtractorBuildIdentity()
+    {
+        if (!File.Exists(ExtractorPath)) return "";
+        var inputs = CommonInputs();
+        foreach (var path in Directory.EnumerateFiles(Root))
+            inputs["root:" + Path.GetFileName(path)] = Sha(path);
+        foreach (var path in Directory.EnumerateFiles(At("Extractor"), "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
+            if (!relative.Split('/').Any(part => part is "bin" or "obj"))
+                inputs[relative] = Sha(path);
+        }
+        foreach (var path in Directory.EnumerateFiles(Path.GetDirectoryName(ExtractorPath)!, "*",
+                     SearchOption.AllDirectories))
+            inputs["output:" + Path.GetRelativePath(Root, path)] = Sha(path);
+        return ContentKey(Root + JsonSerializer.Serialize(inputs));
+    }
+
+    static bool PreparedExtractorMatches()
+    {
+        var prepared = Environment.GetEnvironmentVariable(ExtractorBuildEnvironment);
+        return !string.IsNullOrEmpty(prepared) && prepared == ExtractorBuildIdentity();
+    }
+
+    void EnsureExtractorBuilt()
+    {
+        if (extractorBuilt) return;
+        if (!PreparedExtractorMatches())
+            Run(["dotnet", "build", "Extractor", "-c", "Release",
+                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
+        extractorBuilt = true;
+    }
     int extractionCacheHits;
     int proofCacheHits;
     int supportCacheHits;
@@ -1376,11 +1421,7 @@ unsafe def main (args : List String) : IO Unit := do
         stage?.Invoke("extraction integrity");
         if (existingArtifacts)
             Run(["dotnet", ExtractorPath, "check", output]);
-        else if (!extractorBuilt)
-        {
-            Run(["dotnet", "build", "Extractor", "-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
-            extractorBuilt = true;
-        }
+        else EnsureExtractorBuilt();
 
         if (!existingArtifacts)
             Run(Extract("extract", assembly, identity, entry, output, profile));
