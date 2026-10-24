@@ -766,6 +766,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     // Restored files are self-describing, so reuse needs an identical key and file set and a fresh kernel replay.
     string? ReusePreparedLibrary(string directory)
     {
+        // Replay runs inside the library, so a relative Lean path would resolve below it.
+        directory = Path.GetFullPath(directory);
         var manifest = Path.Combine(directory, "cache-manifest.json");
         if (!File.Exists(manifest)) return null;
         var snapshot = Inputs(At("CIL.lean"));
