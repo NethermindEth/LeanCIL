@@ -198,10 +198,10 @@ theorem makeSelectedLocalsFrom_succeeds (m : Memory) (activation : Nat) (indices
           have compatible : InitializerFits .vector128 initial := fits.1
           rcases compatible with unknown | known
           · subst initial
-            exact ⟨.opaque128 none, [], m, by rw [if_pos member]; rfl, wellFormed⟩
+            exact ⟨.opaque128 none, [], m, by rw [ite_eq_left member]; rfl, wellFormed⟩
           · cases initial with
             | v128 bits =>
-              exact ⟨.opaque128 (some (.known bits)), [], m, by rw [if_pos member]; rfl, wellFormed⟩
+              exact ⟨.opaque128 (some (.known bits)), [], m, by rw [ite_eq_left member]; rfl, wellFormed⟩
             | _ => cases known
         · obtain ⟨slot, ids, memory, made⟩ :=
             makeLocal_succeeds m activation kind initial wellFormed fits.1

@@ -73,7 +73,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
     cases value with
     | scalar value =>
       cases value <;> simp only [CIL.Safety.storeLocal, Value.hasUnspecified,
-        CIL.Value.hasUnspecified, Bool.false_and, Bool.true_and, Bool.not_false, Bool.and_true,
+        CIL.Value.hasUnspecified, Bool.not_false, Bool.and_true,
         Bool.false_eq_true, ↓reduceIte]
       all_goals first
         | exact .error _
@@ -187,7 +187,7 @@ theorem Memory.Equivalent.makeSelectedLocalsFrom {m n : Memory} (same : m.Equiva
       · by_cases width : (kind == .vector128) = true
         · simp only [member, width, ite_true]
           exact finish _ _ (same.makeOpaque128 initial)
-        · simp only [member, width, ite_true, ite_false, Bind.bind, Except.bind]
+        · simp only [member, width, ite_true, Bind.bind, Except.bind]
           exact .error _
       · simp only [member, ite_false]
         exact finish _ _ (same.makeLocal _ _ _)
@@ -212,10 +212,11 @@ theorem Memory.Equivalent.makeArgumentHomes {m n : Memory} (same : m.Equivalent 
   | cons index indices ih =>
     simp only [CIL.Safety.makeArgumentHomes]
     cases found : args[index]? with
-    | none => simp only [found, Option.map_none, Option.getD_none, Bool.false_eq_true,
-        ite_false]; exact .error _
+    | none =>
+      simp only [Option.map_none, Option.getD_none, Bool.false_eq_true, ite_false]
+      exact .error _
     | some value =>
-      simp only [found, Option.map_some, Option.getD_some]
+      simp only [Option.map_some, Option.getD_some]
       cases value with
       | reference reference => exact .error _
       | span reference length => exact .error _

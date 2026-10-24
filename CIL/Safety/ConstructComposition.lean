@@ -39,7 +39,7 @@ theorem run_construct_of_invoke {program : CIL.Program} {fuel method pc callee :
         obtain ⟨childFrame, childMemory⟩ := entered
         simp only [invoke, hb, ha, he, Except.mapError, Bind.bind, Except.bind] at child
         simp only [run, methodFound, instructionFound, stepped, hb, he, child,
-          loaded, localWidth, List.isEmpty_nil, Bool.not_true, Bool.false_eq_true, ite_false,
+          loaded, List.isEmpty_nil, Bool.not_true, Bool.false_eq_true, ite_false,
           continuation, Except.mapError, Bind.bind, Except.bind]
 
 /-- Independently sufficient budgets combine without requiring equal proof fuel. -/
