@@ -192,6 +192,8 @@ internal static class Program
             using ImportResolution imports = new(importSources);
             stage = "metadata and CIL validation";
             MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports);
+            StaticIdentityRecord[] staticIdentities = LeanEmitter.StaticIdentities(methods, profile);
+            imports.ValidateStatics(staticIdentities);
             string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             if (recorded is { } prior)
             {
@@ -203,7 +205,7 @@ internal static class Program
             }
             stage = "metadata and CIL validation";
             using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly));
-            string source = LeanEmitter.Emit(methods, profile, originalModule, imports);
+            string source = LeanEmitter.Emit(methods, profile, originalModule, imports, staticIdentities);
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
                 .Where(i => i.OpCode.Code == Code.Ldsfld)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);
@@ -230,6 +232,7 @@ internal static class Program
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)).Replace('\\', '/'),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
                 assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile, initializedTypes, staticValues,
+                staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),

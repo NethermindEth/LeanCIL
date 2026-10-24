@@ -464,9 +464,19 @@ run_cmd do
         if (current.Count != expected.Count) throw new InvalidDataException("Full-verification module resolution lost a checked module.");
     }
 
-    static object FullCompositionType() => new { app = new object[] {
-        AuditConstant("LeanCILFullComposition.fullCallerClaim"), new { app = new[] {
-            AuditConstant("CIL.Safety.link"), AuditConstant("Extracted.program"), AuditConstant("LeanCILFullComposition.libraries") } } } };
+    static object FullCompositionType()
+    {
+        static object App(params object[] parts) => new { app = parts };
+        object program = AuditConstant("CIL.Program");
+        object app = AuditConstant("Extracted.program");
+        object libraries = AuditConstant("LeanCILFullComposition.libraries");
+        object linked = App(AuditConstant("CIL.Safety.link"), app, libraries);
+        object except = App(new { @const = "Except", levels = new[] { 0, 0 } }, AuditConstant("String"), program);
+        object success = App(new { @const = "Except.ok", levels = new[] { 0, 0 } }, AuditConstant("String"), program, linked);
+        object checkedLink = App(new { @const = "Eq", levels = new[] { 1 } }, except,
+            App(AuditConstant("CIL.Safety.linkChecked"), app, libraries), success);
+        return App(AuditConstant("And"), checkedLink, App(AuditConstant("LeanCILFullComposition.fullCallerClaim"), linked));
+    }
 
     static AuditConstantRequest[] FullCompositionConstants(string callerTheorem, IReadOnlyList<FullLibrary> libraries)
     {
@@ -499,7 +509,7 @@ run_cmd do
 
     static string FullCompositionSource(string callerModule, string callerTheorem, IReadOnlyList<FullLibrary> libraries)
     {
-        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Interface.Closure\n");
+        StringBuilder source = new("import " + callerModule + "\nimport CIL.Safety.Linking\nimport CIL.Safety.StaticLinking\nimport CIL.Interface.Closure\n");
         foreach (FullLibrary library in libraries) source.AppendLine("import " + library.Module).AppendLine("import " + library.ExpectedModule);
         source.AppendLine("namespace LeanCILFullComposition\nopen CIL.Safety");
         foreach (FullLibrary library in libraries)
@@ -520,6 +530,8 @@ run_cmd do
         source.AppendLine("def specifications : List Relocatable := [" + string.Join(", ", libraries.Select(library =>
             "_root_.CIL.Safety." + (library.Kind == "method" ? "MethodContract" : "OutcomeContract") + ".relocatable _root_." + library.Contract)) + "]");
         source.AppendLine("theorem app_prefix : Links Extracted.program (link Extracted.program libraries) := link_links _ _");
+        // Equal static identities must name equal descriptors across the whole linked program.
+        source.AppendLine("theorem staticLink : linkChecked Extracted.program libraries = .ok (link Extracted.program libraries) :=\n  linkChecked_of_compatible (by decide +kernel)");
         foreach (FullLibrary library in libraries)
             source.AppendLine("theorem relocation" + library.Slot + " : RelocatesInto library" + library.Slot + ".program " +
                 "(link Extracted.program libraries) (linkSlot Extracted.program libraries " + library.Slot + ") := link_relocates Extracted.program libraries (j := " + library.Slot + ") (by decide)");
@@ -529,7 +541,7 @@ run_cmd do
         source.AppendLine(FiniteLibraryProof(libraries.Count, "closed", false));
         source.AppendLine(FiniteLibraryProof(libraries.Count, "holds", true));
         source.AppendLine(FullClaimSelector(callerTheorem));
-        source.AppendLine("theorem certified : fullCallerClaim (link Extracted.program libraries) := discharge _root_." + callerTheorem);
+        source.AppendLine("theorem certified : linkChecked Extracted.program libraries = .ok (link Extracted.program libraries) /\\\n    fullCallerClaim (link Extracted.program libraries) :=\n  And.intro staticLink (discharge _root_." + callerTheorem + ")");
         source.AppendLine("#print axioms certified");
         source.AppendLine("end LeanCILFullComposition");
         return source.ToString();

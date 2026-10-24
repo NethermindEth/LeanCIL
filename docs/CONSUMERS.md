@@ -261,9 +261,33 @@ not exportable. Contract predicates and their reachable definitions determine th
 closure digest; the name alone does not determine it.
 
 Version 1 supports public or protected static, non-virtual, non-generic exports
-without imports or static sites. It also rejects recorded static-value and
+without imports. RVA static sites are supported. Each certification records the
+exact scoped static identities, and the producer checks their set against the
+generated program in Lean. It rejects recorded static-value and
 initialization assumptions because this sidecar version does not transport them.
 This restriction does not weaken the extractor's admission or profile rules.
+
+Static identities are stable across separate extractions and body-only rebuilds.
+They use the full assembly identity and full field name. `StaticWorldValid`
+describes the fields in its descriptor list and permits other loaded immutable
+fields in the same valid registry. Its `append`, `left`, `right` and `mono` lemmas
+support worlds over the same memory. Append requires equal identities to name equal
+descriptors, so two exports that read one shared table compose.
+
+An export that can run after its tables are loaded, including a repeated call,
+should take `StaticWorldValid published memory` as its precondition and restate it
+for the final memory in its postcondition. `published` lists literal descriptors
+(identity, assembly identity, field name and bytes) in an interface module. A
+published descriptor that differs from the extracted one leaves the author proof
+unprovable, so no separate equality audit is needed. `StaticIdentitiesAbsent`
+suits only a first-use contract: after the first call the field is loaded and the
+premise is false.
+
+Full verification proves `linkChecked` for the composed program inside
+`LeanCILFullComposition.certified`, which rejects conflicting descriptors and
+names both fields. A published-certification import has no linked program; there
+the extractor's static identity checks and the `StaticWorldValid` premises guard
+collisions. The raw `link` API remains a pure construction without that check.
 
 The default output is `<assembly-simple-name>.leancil.contracts` next to the DLL.
 Use `--output path.leancil.contracts` to select another path. Publication is atomic

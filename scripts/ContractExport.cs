@@ -5,7 +5,8 @@ using Nethermind.LeanCIL;
 partial class Program
 {
     sealed record PreparedContractExport(ContractExportRequest Request, string Proof, string Profile,
-        string Identity, string Signature, int ParameterCount, bool ReturnsValue, string Visibility);
+        string Identity, string Signature, int ParameterCount, bool ReturnsValue, string Visibility,
+        StaticIdentityRecord[] StaticIdentities);
     sealed record ExportClosure(string Contract, string Kind, string Digest, string Canonical);
     sealed record CheckedContractExport(PreparedContractExport Export, ExportClosure Closure,
         string StatementDigest, string Statement, string AuditSource, string AuthorModule);
@@ -189,8 +190,12 @@ partial class Program
             throw new InvalidDataException("Export artifact proofRoot differs from the producer manifest.");
         string proof = Path.GetFullPath(settings.proof, request.Artifact);
         Within(manifest.ProofRoot, Path.GetRelativePath(manifest.ProofRoot, proof));
+        StaticIdentityRecord[] statics = identity.GetProperty("staticIdentities").Deserialize<StaticIdentityRecord[]>(ContractInterface.Json)
+            ?? throw new InvalidDataException("Missing export static identities.");
+        StaticIdentity.Validate(statics);
+        StaticIdentity.ValidateFields(statics, module);
         return new(request, proof, profile.Name, module.Assembly.Name.FullName + "::" + method.FullName, method.FullName,
-            method.Parameters.Count, method.ReturnType.MetadataType != MetadataType.Void, method.IsPublic ? "public" : "protected");
+            method.Parameters.Count, method.ReturnType.MetadataType != MetadataType.Void, method.IsPublic ? "public" : "protected", statics);
     }
 
     static AuditRequest ExportTheoremRequest(string contract, string kind) => new(ExportTheorem,
@@ -289,7 +294,8 @@ theorem LeanCILExportAudit.certified :
             Certifications = exports.OrderBy(result => result.Export.Identity, StringComparer.Ordinal)
                 .ThenBy(result => result.Export.Profile, StringComparer.Ordinal)
                 .Select(result => new ContractCertification(result.Export.Identity, result.Export.Profile, sidecar.ImplementationSha256,
-                    sidecar.InterfaceDigest, result.Closure.Digest, ExportTheorem, result.Statement, result.StatementDigest)).ToArray()
+                    sidecar.InterfaceDigest, result.Closure.Digest, ExportTheorem, result.Statement, result.StatementDigest,
+                    result.Export.StaticIdentities)).ToArray()
         };
 
     static void PublishContractSidecar(string output, byte[] bytes)

@@ -1098,7 +1098,7 @@ unsafe def main (args : List String) : IO Unit := do
                 slot = import.GetProperty("slot"), identity = import.GetProperty("identity"),
                 profile = import.GetProperty("profile"), interfaceDigest = import.GetProperty("interfaceDigest"),
                 closureDigest = import.GetProperty("closureDigest"), constant = import.GetProperty("contractConstant"),
-                kind = import.GetProperty("contractKind")
+                kind = import.GetProperty("contractKind"), staticIdentities = import.GetProperty("staticIdentities")
             })
         }));
     }
@@ -1106,7 +1106,7 @@ unsafe def main (args : List String) : IO Unit := do
     // Certification fields are sidecar text outside every pinned digest; sidecarSha256 names the bytes they came from.
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
-        string certificationStatementDigest, string deploymentObligation, string? sidecarSha256 = null, bool certificationAuthenticated = false,
+        string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation, string? sidecarSha256 = null, bool certificationAuthenticated = false,
         string? sourceBundleDigest = null);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
@@ -1115,6 +1115,7 @@ unsafe def main (args : List String) : IO Unit := do
             import.GetProperty("implementationSha256").GetString()!, import.GetProperty("interfaceDigest").GetString()!,
             "published-certification", import.GetProperty("certificationTheorem").GetString()!,
             import.GetProperty("certificationStatement").GetString()!, import.GetProperty("certificationStatementDigest").GetString()!,
+            import.GetProperty("staticIdentities"),
             "This conditional caller proof is not a deployment guarantee: an unsatisfiable imported contract can make it vacuous. " +
             "Deployment must use these exact implementation bytes and discharge the published contract at this identity, signature and profile. " +
             "Published interface sources execute code with verifier permissions during compilation.",
