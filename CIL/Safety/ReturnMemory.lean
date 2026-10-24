@@ -24,8 +24,8 @@ theorem leaveFrame_preserves_memory_below (frame : Frame) (memory : Memory) (wat
 
 #print axioms leaveFrame_preserves_memory_below
 
-/-- A call keeps caller memory exactly when its body does: frame entry and teardown touch
-    only fresh identities. -/
+/-- A call keeps caller memory if its body does: frame entry and teardown touch only fresh
+    identities. -/
 theorem MemoryBelow.frame_round_trip {body : CIL.Method} {args : List Value}
     {m entered updated : Memory} {frame : Frame}
     (enter : enterFrame body args m = .ok (frame, entered))

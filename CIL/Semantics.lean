@@ -8,8 +8,8 @@ import CIL.IntegerArithmetic
 
 The executable meaning of an extracted method. `step` runs one instruction on an
 evaluation stack and says what happens next (an `Action`); `run` drives a method body
-with fuel, entering callees with a fresh frame; `invoke` starts a method from empty
-memory homes.
+with fuel, entering callees with a fresh frame; `invoke` starts a method in frame 0 on
+caller-supplied memory, after initializing that frame's locals and vector homes.
 
 Every function returns `none` for a stuck state: an ill-typed stack, a missing value,
 an uninitialized read, or exhausted fuel. There is no undefined behaviour to reason

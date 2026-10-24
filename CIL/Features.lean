@@ -17,7 +17,7 @@ Pinned runtime sources, measured x64/ARM64 versions, and migration guidance:
 docs/RUNTIME-PROFILES.md
 https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/vm/codeman.cpp
 https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt
-Operation prerequisites remain explicit alongside the runtime group constraints.
+`FeatureProfile.valid_iff_prerequisites` spells out every operation prerequisite `Valid` implies.
 -/
 
 namespace CIL

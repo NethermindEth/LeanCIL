@@ -158,8 +158,9 @@ def emittedDivisionIntrinsic : Op → Option (Intrinsic × Nat)
     | _ => none
   | _ => none
 
-/-- At every live pc, a resembling call or an emitted admitted intrinsic requires an exact
-    match between the two, and every emitted one is available under the profile. -/
+/-- The profile is valid, the three lists have equal length, and at every live pc a
+    resembling call or an emitted admitted intrinsic requires an exact match between the two,
+    and every emitted one is available under the profile. -/
 def DivisionIntrinsicsValid (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Prop :=
   method.profile.Valid ∧ closed.code.length = reachable.length ∧

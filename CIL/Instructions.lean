@@ -160,9 +160,10 @@ structure Method where
   locals : List Value
   localKinds : List LocalKind := []
   staticSites : List (Nat × StaticDescriptor) := []
-  /-- Locals and arguments kept in 256-bit vector homes rather than scalar slots. -/
+  /-- Locals kept in 256-bit vector homes rather than scalar slots. -/
   vectorLocals : List Nat := []
   opaqueVectorLocals : List Nat := []
+  /-- Arguments kept in 256-bit vector homes rather than scalar slots. -/
   vectorArgs : List Nat := []
   parameterHomes : List (Nat × LocalKind) := []
   returnsValue : Bool

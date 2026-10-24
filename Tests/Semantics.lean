@@ -28,6 +28,10 @@ theorem add_wraps_at_width :
 theorem write_overwrites (m : CIL.Memory) (a : CIL.Address) (x y : CIL.Value) :
     CIL.write (CIL.write m a x) a y a = some y := by simp [CIL.write]
 
+#print axioms unsigned_compare_wraps
+#print axioms add_wraps_at_width
+#print axioms write_overwrites
+
 -- New value-only instructions must reject invalid operands in the checked dispatcher.
 private def scalarBody : CIL.Method := { code := [], locals := [], returnsValue := true }
 private def scalarFrame : Frame := { activation := 0, locals := [], owned := [] }

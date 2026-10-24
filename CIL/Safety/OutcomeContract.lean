@@ -89,8 +89,8 @@ theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : 
   rw [Nat.add_comm] at down
   exact up.symm.trans down
 
-/-- A callee fault reaches the caller unchanged; only frame-entry faults are relocated to the
-    call. -/
+/-- A callee fault reaches the caller with the same fault kind; its location may be
+    relocated to the call. -/
 theorem run_call_error {program : CIL.Program} {fuel method pc callee : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {fault : LocatedFault}
