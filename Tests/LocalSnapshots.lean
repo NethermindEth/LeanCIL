@@ -2,9 +2,10 @@ import CIL.Safety.LocalSnapshots
 import CIL.Safety.ConfinedSnapshots
 import CIL.Safety.SymbolicExecution
 
-/-! Remembered locals of every numeric kind, checked without an extraction: vector and int32
-    locals stay known across stores, writes elsewhere and confined calls, so their loads step
-    to the stored values. -/
+/-! Remembered locals of every numeric kind, checked without an extraction: vector, int32,
+    byte and narrow locals stay known across stores, overwrites, writes elsewhere, frame
+    round trips and confined calls, so their loads step to the stored values; word stores
+    carry across the bridges between `WordSnapshots` and `LocalSnapshots`. -/
 namespace Tests.LocalSnapshots
 
 open CIL.Safety
@@ -81,13 +82,22 @@ theorem narrow_store_loads_extended {body : CIL.Method} {pc : Nat} {args stack :
 
 #print axioms narrow_store_loads_extended
 
-/-- Remembered words survive a conversion to locals and back. -/
-theorem word_round_trip {memory : Memory} {slots : List LocalSlot}
-    {known : Nat → Option (BitVec 64)} (snapshots : WordSnapshots memory slots known) :
-    WordSnapshots memory slots known :=
-  localWords_wordLocals known ▸ snapshots.toLocalSnapshots.toWordSnapshots
+/-- A word stored through `WordSnapshots` loads as that `.i64` once viewed as locals: the
+    view commutes with remembering the word. -/
+theorem word_store_loads_as_local {body : CIL.Method} {pc index : Nat}
+    {args stack : List Value} {frame : Frame} {entered before after : Memory}
+    {boundary : Nat} {kinds} {known : Nat → Option (BitVec 64)} {home : Reference}
+    (snapshots : WordSnapshots before frame.locals known)
+    (homes : WritableHomes entered boundary kinds frame.locals) (formed : before.WellFormed)
+    (word : BitVec 64) (slot : frame.locals[index]? = some (.bytes .word64 home))
+    (written : write before home (numberBytes word.toNat 8) 1 = .ok after) :
+    step body (.local index) pc args frame stack after =
+      .ok (.next (pc + 1) (.scalar (.i64 word) :: stack) frame after) := by
+  have locals := (snapshots.after_write homes formed index home word slot written).toLocalSnapshots
+  rw [wordLocals_rememberWord] at locals
+  exact locals.load (.i64 word) (by simp [rememberLocal])
 
-#print axioms word_round_trip
+#print axioms word_store_loads_as_local
 
 /-- A word store made through `LocalSnapshots` comes back as the same word store: both
     bridges commute with remembering. -/
@@ -108,13 +118,14 @@ theorem word_store_through_locals {entered before after : Memory} {boundary : Na
 
 /-- A vector and an int32 local, each apart from every footprint entry, keep their values
     across a call confined to a carry and an output word. -/
-theorem locals_survive_call {before after : Memory} {carry output first second : Reference}
+theorem locals_survive_call {before after : Memory} {carry output vectorHome intHome : Reference}
     {known : Nat → Option CIL.Value}
-    (snapshots : LocalSnapshots before [.bytes .vector128 first, .bytes .word32 second] known)
+    (snapshots :
+      LocalSnapshots before [.bytes .vector128 vectorHome, .bytes .word32 intHome] known)
     (framed : Confined [(carry, 8), (output, 8)] before after) (formed : before.WellFormed)
-    (firstApart : ∀ entry ∈ [(carry, 8), (output, 8)], Apart first 16 entry)
-    (secondApart : ∀ entry ∈ [(carry, 8), (output, 8)], Apart second 4 entry) :
-    LocalSnapshots after [.bytes .vector128 first, .bytes .word32 second] known :=
+    (vectorApart : ∀ entry ∈ [(carry, 8), (output, 8)], Apart vectorHome 16 entry)
+    (intApart : ∀ entry ∈ [(carry, 8), (output, 8)], Apart intHome 4 entry) :
+    LocalSnapshots after [.bytes .vector128 vectorHome, .bytes .word32 intHome] known :=
   snapshots.after_confined framed formed fun index _ _ _ _ slot => by
     rcases index with _ | _ | _ <;> simp at slot <;> obtain ⟨rfl, rfl⟩ := slot <;> assumption
 
