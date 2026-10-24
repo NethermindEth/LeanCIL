@@ -7,8 +7,8 @@ import CIL.Instructions
 so the instruction at `start + index` is `segment[index]`. It replaces the positional
 hypotheses `body.code = leading ++ segment ++ tail` and `leading.length = start` that segment
 theorems would otherwise thread: it is decidable, so a concrete placement closes by
-`decide +kernel`, and `CodeAt.lookup` turns it into the `body.code[pc]? = some op` facts that the stepping
-tactics consume. Placements split and compose along `++`, `drop` and `take` of the segment.
+`decide +kernel`, and `CodeAt.lookup` turns it into the `body.code[pc]? = some op` facts that
+the stepping tactics consume. Placements split and compose along `++`, `drop` and `take`.
 -/
 
 namespace CIL.Safety
