@@ -161,7 +161,8 @@ precondition, a smaller footprint and a changed exception type each fail both th
 refinement premises and the derived contract on a concrete input.
 
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
-`Confined`. `Tests.BufferContents` checks typed buffer contents: fills and
+`Confined`. `Tests.LocalSnapshots` keeps vector, int32 and narrow locals known across
+stores, writes elsewhere and confined calls, and steps a load from a snapshot fact. `Tests.BufferContents` checks typed buffer contents: fills and
 in-place transforms of any length, unchanged neighbouring bytes and sibling
 slices of one allocation, a producer that extends its prefix while its room
 stays unreadable, empty buffers at invalid and sentinel positions, and rejection
@@ -174,7 +175,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
