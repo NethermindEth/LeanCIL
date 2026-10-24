@@ -21,7 +21,10 @@ def sample : Memory := {
 /-- `sample` after a callee revokes read authority over the whole allocation. -/
 def revoked : Memory := { sample with views := [⟨0, 0, 24, false, true⟩] }
 
+/-- The input: bytes 0 to 7 of the allocation. -/
 def source : ArgumentView := ⟨⟨0, 0⟩, 8⟩
+
+/-- The output: bytes 16 to 23, apart from the input. -/
 def target : ArgumentView := ⟨⟨0, 16⟩, 8⟩
 
 /-- Well-formed whenever the only view lies inside the only allocation. -/
@@ -37,6 +40,7 @@ theorem formed_of_view {views : List View} (inside : views = [⟨0, 0, 24, true,
   · rcases inside with rfl | rfl <;> simp only [List.mem_singleton] at member <;> subst member <;>
       exact ⟨_, rfl, by decide⟩
 
+/-- The caller passes a readable input and a writable output. -/
 theorem sample_valid : ValidCall sample [source] [target] := by
   refine ⟨formed_of_view (.inl rfl), fun input member => ?_, fun output member => ?_⟩
   · simp only [List.mem_singleton] at member
@@ -93,6 +97,8 @@ theorem valid_after_confined {result : Memory}
     subst member inside
     exact Or.inr (Or.inl (by decide))
 
+#print axioms formed_of_view
+#print axioms sample_valid
 #print axioms valid_after_output_write
 #print axioms valid_after_input_write
 #print axioms valid_after_enterFrame
@@ -116,6 +122,7 @@ theorem revoke_confined : Confined [(source.reference, 24)] sample revoked := by
     have outsideView : ¬ offset < 24 := by omega
     simp [permitted, viewContains, revoked, sample, outsideView]
 
+/-- With read authority revoked, the input can no longer be read. -/
 theorem revoked_invalid : ¬ ValidCall revoked [source] [target] := fun valid => by
   obtain ⟨bytes, loaded⟩ := valid.2.1 source (List.mem_singleton_self _)
   rw [show read revoked source.reference source.width 1 = .error .unreadable from rfl] at loaded
@@ -127,6 +134,8 @@ theorem confined_needs_apart :
       revoked.WellFormed ∧ ¬ ValidCall revoked [source] [target] :=
   ⟨sample_valid, revoke_confined, formed_of_view (.inr rfl), revoked_invalid⟩
 
+#print axioms revoke_confined
+#print axioms revoked_invalid
 #print axioms confined_needs_apart
 
 end Tests.ValidCallTransport

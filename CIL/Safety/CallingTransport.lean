@@ -16,35 +16,37 @@ transport premises name.
 
 namespace CIL.Safety
 
-/-- Every input buffer lies in an allocation that exists before `m.nextIdentity`. -/
-theorem ValidCall.input_bound {m : Memory} {inputs outputs : List ArgumentView}
-    (valid : ValidCall m inputs outputs) {input : ArgumentView} (member : input ∈ inputs) :
-    input.reference.allocation < m.nextIdentity := by
+/-- Every input buffer lies in an allocation that exists before `memory.nextIdentity`. -/
+theorem ValidCall.input_bound {memory : Memory} {inputs outputs : List ArgumentView}
+    (valid : ValidCall memory inputs outputs) {input : ArgumentView} (member : input ∈ inputs) :
+    input.reference.allocation < memory.nextIdentity := by
   obtain ⟨bytes, loaded⟩ := valid.2.1 input member
   exact valid.1.access_bound (read_access loaded)
 
-/-- Every output buffer lies in an allocation that exists before `m.nextIdentity`. -/
-theorem ValidCall.output_bound {m : Memory} {inputs outputs : List ArgumentView}
-    (valid : ValidCall m inputs outputs) {output : ArgumentView} (member : output ∈ outputs) :
-    output.reference.allocation < m.nextIdentity :=
+/-- Every output buffer lies in an allocation that exists before `memory.nextIdentity`. -/
+theorem ValidCall.output_bound {memory : Memory} {inputs outputs : List ArgumentView}
+    (valid : ValidCall memory inputs outputs) {output : ArgumentView}
+    (member : output ∈ outputs) :
+    output.reference.allocation < memory.nextIdentity :=
   valid.1.access_bound (valid.2.2 output member)
 
 /-- A call valid for some buffers is valid for any of them. -/
-theorem ValidCall.mono {m : Memory} {inputs outputs fewerInputs fewerOutputs : List ArgumentView}
-    (valid : ValidCall m inputs outputs)
+theorem ValidCall.mono {memory : Memory}
+    {inputs outputs fewerInputs fewerOutputs : List ArgumentView}
+    (valid : ValidCall memory inputs outputs)
     (inputsCovered : ∀ input ∈ fewerInputs, input ∈ inputs)
     (outputsCovered : ∀ output ∈ fewerOutputs, output ∈ outputs) :
-    ValidCall m fewerInputs fewerOutputs :=
+    ValidCall memory fewerInputs fewerOutputs :=
   ⟨valid.1, fun input member => valid.2.1 input (inputsCovered input member),
     fun output member => valid.2.2 output (outputsCovered output member)⟩
 
 /-- Well-formed memory that keeps the descriptors, authority and initialization of every
-    allocation older than `m.nextIdentity` keeps the call valid; byte values may change. -/
-theorem ValidCall.after_below {m result : Memory} {inputs outputs : List ArgumentView}
-    {watermark : Nat} (valid : ValidCall m inputs outputs)
-    (retained : AccessBelow watermark m result) (covers : m.nextIdentity ≤ watermark)
+    allocation older than `memory.nextIdentity` keeps the call valid; byte values may change. -/
+theorem ValidCall.after_below {memory result : Memory} {inputs outputs : List ArgumentView}
+    {watermark : Nat} (valid : ValidCall memory inputs outputs)
+    (retained : AccessBelow watermark memory result) (covers : memory.nextIdentity ≤ watermark)
     (formed : result.WellFormed) : ValidCall result inputs outputs := by
-  have old : ∀ {id}, id < m.nextIdentity → id < watermark :=
+  have old : ∀ {id}, id < memory.nextIdentity → id < watermark :=
     fun bound => Nat.lt_of_lt_of_le bound covers
   refine ⟨formed, fun input member => ?_, fun output member => ?_⟩
   · obtain ⟨bytes, loaded⟩ := valid.2.1 input member
@@ -53,19 +55,20 @@ theorem ValidCall.after_below {m result : Memory} {inputs outputs : List Argumen
 
 /-- A checked write keeps the call valid, even one into an input or output buffer: it
     revokes no authority and clears no initialized byte. -/
-theorem ValidCall.after_write {m result : Memory} {inputs outputs : List ArgumentView}
+theorem ValidCall.after_write {memory result : Memory} {inputs outputs : List ArgumentView}
     {reference : Reference} {bytes : List (BitVec 8)} {alignment : Nat}
-    (valid : ValidCall m inputs outputs)
-    (written : write m reference bytes alignment = .ok result) :
+    (valid : ValidCall memory inputs outputs)
+    (written : write memory reference bytes alignment = .ok result) :
     ValidCall result inputs outputs :=
-  valid.after_below (write_preserves_access_below written m.nextIdentity) (Nat.le_refl _)
+  valid.after_below (write_preserves_access_below written memory.nextIdentity) (Nat.le_refl _)
     (write_preserves_wellFormed _ _ _ _ _ valid.1 written)
 
 /-- Entering a frame keeps the caller's call valid: it only adds fresh allocations. -/
-theorem ValidCall.after_enterFrame {m entered : Memory} {inputs outputs : List ArgumentView}
+theorem ValidCall.after_enterFrame {memory entered : Memory}
+    {inputs outputs : List ArgumentView}
     {body : CIL.Method} {args : List Value} {frame : Frame}
-    (valid : ValidCall m inputs outputs)
-    (setup : enterFrame body args m = .ok (frame, entered)) :
+    (valid : ValidCall memory inputs outputs)
+    (setup : enterFrame body args memory = .ok (frame, entered)) :
     ValidCall entered inputs outputs :=
   valid.after_below (enterFrame_preserves_caller_memory _ _ _ _ _ setup).accessBelow
     (Nat.le_refl _) (enterFrame_preserves_wellFormed _ _ _ _ _ valid.1 setup)
@@ -73,9 +76,9 @@ theorem ValidCall.after_enterFrame {m entered : Memory} {inputs outputs : List A
 /-- A call confined to `footprint` keeps the call valid for inputs apart from the footprint;
     inside it `Confined` may revoke read authority, so those inputs are excluded. Outputs
     need no premise, since `Confined` keeps write authority everywhere. -/
-theorem ValidCall.after_confined {m result : Memory} {inputs outputs : List ArgumentView}
-    {footprint : List (Reference × Nat)} (valid : ValidCall m inputs outputs)
-    (framed : Confined footprint m result) (formed : result.WellFormed)
+theorem ValidCall.after_confined {memory result : Memory} {inputs outputs : List ArgumentView}
+    {footprint : List (Reference × Nat)} (valid : ValidCall memory inputs outputs)
+    (framed : Confined footprint memory result) (formed : result.WellFormed)
     (apart : ∀ input ∈ inputs, ∀ entry ∈ footprint, Apart input.reference input.width entry) :
     ValidCall result inputs outputs := by
   refine ⟨formed, fun input member => ?_, fun output member => ?_⟩

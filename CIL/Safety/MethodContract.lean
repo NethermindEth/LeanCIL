@@ -436,8 +436,9 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
   rw [Nat.add_comm] at down
   exact Except.ok.inj (up.symm.trans down)
 
-/-- One computed observation of a successful invocation fixes that observation at every fuel,
-    so a refutation compares only the observed part, such as the returned values. -/
+/-- One computed observation of a successful invocation fixes that observation for every fuel
+    whose invocation succeeds, so a refutation compares only the observed part, such as the
+    returned values. -/
 theorem invoke_observation_unique {α : Type} {program : CIL.Program}
     {method fuel witnessFuel : Nat}
     {args : List Value} {memory : Memory} (observe : Memory × List Value → α)
