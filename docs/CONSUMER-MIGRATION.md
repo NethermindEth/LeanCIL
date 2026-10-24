@@ -3,9 +3,15 @@
 Changes to `Method`, `Embeds`, `BodyRefines`, `enterFrame`, `step` and `invoke`
 affect the public proof API. PRs changing them should describe the migration,
 provide equations for the previous default case where it remains sound, and
-report the pinned consumer check separately from upstream tests.
+cover supported consumer APIs with self-contained regression fixtures.
 
-The advisory `Consumer compatibility` workflow checks out an immutable int256
+The advisory `Consumer compatibility` workflow runs daily at 04:37 UTC against
+LeanCIL main, or manually against a selected ref. It does not run on pull requests
+or pushes. Downstream int256 proofs therefore do not determine the status of
+LeanCIL's normal PR checks. int256's own CI should verify its proofs against its
+pinned LeanCIL version.
+
+The compatibility workflow checks out an immutable int256
 revision, substitutes the committed LeanCIL candidate as its Lake dependency,
 builds its extraction-independent library, and verifies Add/ARM64 AdvSimd and
 Subtract/x64 SSE4.2. Its summary distinguishes library builds from compiled
@@ -68,9 +74,9 @@ The pinned int256 workflow builds its full supporting Lean library and certifies
 four selected gates: Add/ARM64 AdvSimd, Subtract/x64 SSE4.2, Multiply/scalar and
 LeUInt256UInt256/scalar. This covers SIMD byte homes, embedding and comparison,
 not the full gate registry; the job summary reports the pinned registry's size.
-Failures show red; keep this advisory check out of required branch-protection
-checks. The summary records elapsed library update/build time and the baseline
-revision, runner and run ID. Hosted-runner timings vary, so this is diagnostic
+Failures show red in the scheduled or manually dispatched run; keep this advisory
+check out of required branch-protection checks. The summary records elapsed
+library update/build time. Hosted-runner timings vary, so this is diagnostic
 rather than a performance threshold.
 
 The immutable consumer pin currently names the unmerged int256#141 head. Advance

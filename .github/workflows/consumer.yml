@@ -1,11 +1,9 @@
 name: Consumer compatibility
 
 on:
-  pull_request:
-    paths: ['CIL/**', 'CIL.lean', 'Extractor/**', 'scripts/Verification.cs', 'scripts/ConsumerVerification.cs', 'scripts/ContractExport.cs', 'scripts/FullImportVerification.cs', 'scripts/FullModuleResolution.cs', 'scripts/LeanDiagnostics.cs', 'scripts/FailureReports.cs', 'scripts/PrepareConsumer.cs', 'lean-toolchain', 'lakefile.toml', 'lake-manifest.json', 'global.json', 'Directory.*.props', 'Directory.*.targets', '.github/workflows/consumer.yml']
-  push:
-    branches: [main]
-    paths: ['CIL/**', 'CIL.lean', 'Extractor/**', 'scripts/Verification.cs', 'scripts/ConsumerVerification.cs', 'scripts/ContractExport.cs', 'scripts/FullImportVerification.cs', 'scripts/FullModuleResolution.cs', 'scripts/LeanDiagnostics.cs', 'scripts/FailureReports.cs', 'scripts/PrepareConsumer.cs', 'lean-toolchain', 'lakefile.toml', 'lake-manifest.json', 'global.json', 'Directory.*.props', 'Directory.*.targets', '.github/workflows/consumer.yml']
+  # Downstream compatibility is monitored separately from LeanCIL's PR checks.
+  schedule:
+    - cron: '37 4 * * *'
   workflow_dispatch:
 
 permissions:
