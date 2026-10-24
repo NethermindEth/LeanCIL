@@ -59,12 +59,14 @@ inductive RunningVisits (program : CIL.Program) : Nat → Nat → Nat → List V
   | initial {fuel method pc args frame stack m} :
       RunningVisits program fuel method pc args frame stack m args frame stack m
   /-- A visit after one ordinary step in the same method. -/
-  | next {fuel method pc args frame stack m target values nextFrame updated oa of os om}
+  | next {fuel method pc args frame stack m target values nextFrame updated
+        observedArgs observedFrame observedStack observed}
       (step : ProgramStep program method pc args frame stack m
         (.next target values nextFrame updated))
       (later : RunningVisits program fuel method target args nextFrame values updated
-        oa of os om) :
-      RunningVisits program (fuel + 1) method pc args frame stack m oa of os om
+        observedArgs observedFrame observedStack observed) :
+      RunningVisits program (fuel + 1) method pc args frame stack m
+        observedArgs observedFrame observedStack observed
   /-- The caller as it is suspended across a call, with the arguments popped. -/
   | suspendedCall {fuel method pc args frame stack m callee arguments rest updated}
       (step : ProgramStep program method pc args frame stack m
@@ -78,16 +80,17 @@ inductive RunningVisits (program : CIL.Program) : Nat → Nat → Nat → List V
       RunningVisits program (fuel + 1) method pc args frame stack m args nextFrame rest updated
   /-- A visit inside a callee or constructor entered by the step. -/
   | child {fuel method pc args frame stack m action callee arguments child childFrame
-        childMemory oa of os om}
+        childMemory observedArgs observedFrame observedStack observed}
       (step : ProgramStep program method pc args frame stack m action)
       (call : action.child callee arguments) (lookup : program[callee]? = some child)
       (enter : enterFrame child arguments action.memory = .ok (childFrame, childMemory))
       (later : RunningVisits program fuel callee 0 arguments childFrame [] childMemory
-        oa of os om) :
-      RunningVisits program (fuel + 1) method pc args frame stack m oa of os om
+        observedArgs observedFrame observedStack observed) :
+      RunningVisits program (fuel + 1) method pc args frame stack m
+        observedArgs observedFrame observedStack observed
   /-- A visit in the caller after a call returned and its results were pushed. -/
   | callContinue {fuel method pc args frame stack m callee arguments rest updated child
-        childFrame childMemory returned result oa of os om}
+        childFrame childMemory returned result observedArgs observedFrame observedStack observed}
       (step : ProgramStep program method pc args frame stack m
         (.call callee arguments rest updated))
       (lookup : program[callee]? = some child)
@@ -95,11 +98,13 @@ inductive RunningVisits (program : CIL.Program) : Nat → Nat → Nat → List V
       (finish : run program fuel callee 0 arguments childFrame [] childMemory =
         .ok (returned, result))
       (later : RunningVisits program fuel method (pc + 1) args frame (result ++ rest) returned
-        oa of os om) :
-      RunningVisits program (fuel + 1) method pc args frame stack m oa of os om
+        observedArgs observedFrame observedStack observed) :
+      RunningVisits program (fuel + 1) method pc args frame stack m
+        observedArgs observedFrame observedStack observed
   /-- A visit in the caller after a constructor returned and its value was loaded. -/
   | constructContinue {fuel method pc args frame stack m callee arguments rest nextFrame
-        temporary kind updated child childFrame childMemory returned value oa of os om}
+        temporary kind updated child childFrame childMemory returned value
+        observedArgs observedFrame observedStack observed}
       (step : ProgramStep program method pc args frame stack m
         (.construct callee arguments rest nextFrame temporary kind updated))
       (lookup : program[callee]? = some child)
@@ -108,8 +113,9 @@ inductive RunningVisits (program : CIL.Program) : Nat → Nat → Nat → List V
         .ok (returned, []))
       (load : loadLocal returned (.bytes kind temporary) = .ok value)
       (later : RunningVisits program fuel method (pc + 1) args nextFrame (value :: rest)
-        returned oa of os om) :
-      RunningVisits program (fuel + 1) method pc args frame stack m oa of os om
+        returned observedArgs observedFrame observedStack observed) :
+      RunningVisits program (fuel + 1) method pc args frame stack m
+        observedArgs observedFrame observedStack observed
 
 /-- Every running or suspended state reached from a live state is live. -/
 theorem runningVisits_live_state {program : CIL.Program} {fuel method pc : Nat}
