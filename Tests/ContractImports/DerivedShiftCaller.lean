@@ -17,6 +17,7 @@ def shiftContract : OutcomeContract CIL.W64 CIL.W64 where
   post _ _ _ output := output ≤ 101
   raises value _ := DerivedInterface.percentRaises value
 
+/-- Every outcome of the caller follows from the imported public contract. -/
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => shiftContract.Holds linked 0) := by
   intro linked links imported value memory formed

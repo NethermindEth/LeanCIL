@@ -8,6 +8,7 @@ import ExtractedImports
 namespace DerivedSumCaller
 open CIL.Safety
 
+/-- Every outcome of the caller follows from the imported public contract. -/
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => DerivedInterface.addPublic.Holds linked 0) := by
   rintro linked links imported ⟨left, right, sum, region, leftValue, rightValue⟩ memory
@@ -32,10 +33,10 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (by cil_checked_step [formValue, leftForm, rightForm, sumForm, DerivedInterface.addPublic,
       DerivedInterface.addArguments, Except.mapError]) rfl
     ⟨formed, readLeft, readRight, writable, apart, within⟩ ?_
-  rintro final values _ framed ⟨output, rfl, satisfied⟩
+  rintro final values _ framed ⟨output, rfl, rfl, stored, kept⟩
   refine run_return_exists found Extracted.method0_instruction4 (by cil_checked_step [])
     (by rfl) ?_
-  exact ⟨framed, output, rfl, satisfied⟩
+  exact ⟨framed, [], rfl, rfl, stored, kept⟩
 
 #print axioms correctness
 

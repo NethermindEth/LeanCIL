@@ -22,6 +22,7 @@ def percentExact : OutcomeContract CIL.W64 CIL.W64 where
   post value _ _ output := output = value
   raises value _ := DerivedInterface.percentRaises value
 
+/-- Stepped on the actual extraction: each input returns itself or throws as named. -/
 theorem percent_exact : percentExact.Holds Extracted.program 0 := by
   rintro value memory -
   by_cases within : value ≤ 100
@@ -66,6 +67,7 @@ def empty : Memory :=
   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [],
     nextIdentity := 0 }
 
+/-- `empty` meets the public precondition. -/
 theorem empty_formed : empty.WellFormed := by
   simp [Memory.WellFormed, empty]
 
@@ -107,11 +109,13 @@ theorem percent_above : Raises Extracted.program 0 [.scalar (.i64 101)] empty
 def percentTooStrong : OutcomeContract CIL.W64 CIL.W64 :=
   { DerivedInterface.percentBounded with post := fun _ _ _ output => output < 100 }
 
+/-- The exact contract does not refine the stronger post. -/
 theorem stronger_post_not_refines : ¬ percentExact.Refines percentTooStrong := fun refines => by
   have bound : (100 : CIL.W64) < 100 :=
     refines.post 100 empty empty 100 empty_formed (by decide) (Confined.refl _ _) rfl
   exact absurd bound (by decide)
 
+/-- No proof of the stronger post exists for the actual extraction. -/
 theorem stronger_post_rejected : ¬ percentTooStrong.Holds Extracted.program 0 := fun holds => by
   obtain ⟨fuel, final, values, invoked, -, output, rfl, bound⟩ :=
     holds.returning (input := 100) (initial := empty) empty_formed (by decide)
@@ -130,10 +134,12 @@ def percentInRange : MethodContract CIL.W64 CIL.W64 :=
 def percentUnguarded : MethodContract CIL.W64 CIL.W64 :=
   { percentInRange with pre := fun _ _ => True }
 
+/-- The in-range contract does not refine the unguarded one. -/
 theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := fun refines => by
   have bound : (101 : CIL.W64) ≤ 100 := refines.pre 101 empty trivial
   exact absurd bound (by decide)
 
+/-- No proof of the weaker pre exists for the actual extraction. -/
 theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program 0 := fun holds => by
   obtain ⟨fuel, final, values, invoked, -⟩ := holds 101 empty trivial
   exact raises_not_returns percent_above invoked
@@ -144,9 +150,11 @@ def percentRenamed : OutcomeContract CIL.W64 CIL.W64 :=
   { DerivedInterface.percentBounded with
     raises := fun value _ => if value ≤ 100 then none else some "System.ArgumentException" }
 
+/-- The exact contract does not refine a renamed exception. -/
 theorem changed_exception_not_refines : ¬ percentExact.Refines percentRenamed :=
   fun refines => absurd (refines.raises 101 empty empty_formed) (by decide)
 
+/-- No proof of the renamed exception exists for the actual extraction. -/
 theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program 0 :=
   fun holds => by
     have renamed : Raises Extracted.program 0 [.scalar (.i64 101)] empty

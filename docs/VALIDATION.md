@@ -224,6 +224,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
+| `exportsderived` | Standalone derived-contract fixture: exact internal method and outcome contracts proved on the actual extraction, public ones exported only through `Holds.weaken`, callers verified from the sidecar on normal and named-exception paths; a stronger post or smaller footprint is not published |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -233,8 +234,8 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, transitive, discovery and typed suites cannot enter that plan.
-The registry now has 17 leaves. `exportsstatics`, `exportstransitive` and `exportstyped` run
+statics, transitive, discovery, typed and derived suites cannot enter that plan.
+The registry now has 18 leaves. `exportsstatics`, `exportstransitive`, `exportstyped` and `exportsderived` run
 directly, with no core export bootstrap or nested post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
@@ -246,6 +247,8 @@ caller. It needs no baseline caller artifact or verified report. The discovery
 leaf runs no core caller verification, restrictions, callbacks or full cases.
 The typed leaf explicitly owns its fixture and five input proof/interface
 modules. Shared model and proof dependencies retain their existing owners.
+The derived leaf likewise owns its fixture and the five `Derived*` interface,
+producer and caller modules in `Tests/ContractImports`.
 
 New cohort durations are unmeasured. The existing CI caps remain 90 minutes
 for imports, 120 for each exports leaf, and 30 for other suites. The matrix

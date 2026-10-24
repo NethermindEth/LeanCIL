@@ -3,6 +3,10 @@ internal sealed record ExportSuite(string Name, string Cohort, string Script, st
 
 internal static class ExportVerificationSuites
 {
+    // The derived fixture's Lean modules; declared before Entries, which reads them during static initialization.
+    internal static readonly string[] DerivedFixtures =
+        ["DerivedInterface", "DerivedPercentProof", "DerivedAddProof", "DerivedShiftCaller", "DerivedSumCaller"];
+
     internal static readonly ExportSuite[] Entries =
     [
         Entry("exports", "core", "contract production, restrictions and caller reuse",
@@ -38,7 +42,11 @@ internal static class ExportVerificationSuites
         new("exportstyped", "typed", "Tests/GenericLayoutImports.cs", [], "independent typed generic and layout imports", [],
             ["Tests/GenericLayoutImports.cs", "Tests/ContractImports/TypedImportInterface.lean",
              "Tests/ContractImports/TypedIdentityProof.lean", "Tests/ContractImports/TypedCopyProof.lean",
-             "Tests/ContractImports/TypedIdentityCaller.lean", "Tests/ContractImports/TypedCopyCaller.lean"], Standalone: true)
+             "Tests/ContractImports/TypedIdentityCaller.lean", "Tests/ContractImports/TypedCopyCaller.lean"], Standalone: true),
+        new("exportsderived", "derived", "Tests/DerivedContractExports.cs", [],
+            "derived public contracts through DLL export and import", [],
+            ["Tests/DerivedContractExports.cs", .. DerivedFixtures.Select(name => "Tests/ContractImports/" + name + ".lean")],
+            Standalone: true)
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>

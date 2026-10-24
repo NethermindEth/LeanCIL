@@ -26,6 +26,7 @@ def addInternal : MethodContract DerivedInterface.AddInput where
   post input _ final values := values = [] ∧
     read final input.sum 8 1 = .ok (numberBytes (input.leftValue + input.rightValue).toNat 8)
 
+/-- Stepped on the actual extraction: `AddTo` writes the sum into `sum` and nothing else. -/
 theorem add_internal : addInternal.Holds Extracted.program 0 := by
   rintro ⟨left, right, sum, region, leftValue, rightValue⟩ memory ⟨readLeft, readRight, writable⟩
   dsimp only [addInternal, DerivedInterface.addArguments] at *
@@ -86,17 +87,20 @@ def sample : Memory := {
 /-- `left` and `right` are the words 1 at offsets 0 and 8; `sum` is the word at 16. -/
 def sampleInput : DerivedInterface.AddInput := ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 16⟩, ⟨0, 0⟩, 1, 1⟩
 
+/-- The sample meets the internal precondition. -/
 theorem sample_pre : addPre sampleInput sample := ⟨rfl, rfl, rfl⟩
 
 /-- A smaller footprint: `AddTo` changes `sum`, which an empty footprint would keep. -/
 def addUnframed : MethodContract DerivedInterface.AddInput :=
   { addInternal with footprint := fun _ => [] }
 
+/-- The exact contract does not refine an empty footprint. -/
 theorem smaller_footprint_not_refines : ¬ addInternal.Refines addUnframed := fun refines => by
   obtain ⟨_, member, _⟩ :=
     refines.footprint sampleInput sample sample_pre _ (List.mem_singleton_self _)
   exact nomatch member
 
+/-- No proof of the empty footprint exists for the actual extraction. -/
 theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program 0 := fun holds => by
   obtain ⟨_, final, values, invoked, framed, -⟩ := holds sampleInput sample sample_pre
   obtain ⟨_, otherFinal, otherValues, otherInvoked, -, _, rfl, -, readback⟩ :=
