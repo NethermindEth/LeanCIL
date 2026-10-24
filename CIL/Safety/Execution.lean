@@ -2,8 +2,20 @@ import CIL.Safety.Frames
 import CIL.Safety.StaticMemory
 import CIL.NativeEvaluation
 
+/-!
+# Checked interpreter
+
+The interpreter that safety proofs reason about. It runs the same instructions as
+`CIL.step`, but over allocation-aware memory and checked values, and it reports why it
+stopped: every fault is an `ExecutionFault` located at a method and pc instead of `none`.
+Value-only instructions are delegated to `CIL.step` through `pureArity`, so the two
+interpreters cannot disagree on arithmetic.
+-/
+
 namespace CIL.Safety
 
+/-- Whether a value has a well-formed numeric representation; a snapshot must hold
+    exactly as many bytes as its shape. -/
 def numericValue : CIL.Value → Bool
   | .snapshot shape bytes => bytes.length == shape.width
   | .aggregate _ | .i8 _ | .i32 _ | .i64 _ | .v128 _ | .v128Low64 _ | .v256 _ | .v512 _ => true
@@ -45,6 +57,8 @@ theorem bitcastValue_numeric {source target : CIL.SnapshotShape} {input value : 
         exact length.trans sizes
       · cases h
 
+/-- Checks that a value may be pushed: a reference or span base must form in memory and a
+    scalar must be numeric. -/
 def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .reference r => formValue m r
   | .span r length => do
@@ -68,12 +82,15 @@ def pureArity : CIL.Op → Option Nat
   | .intrinsic _ argc => some argc
   | _ => none
 
+/-- The operands of a value-only instruction, all of which must be numeric scalars. -/
 def scalars : List Value → ExecutionResult (List CIL.Value)
   | [] => .ok []
   | .scalar value :: rest => do
     if numericValue value then return value :: (← scalars rest) else .error .invalidState
   | _ => .error .invalidState
 
+/-- What a checked step asks the driver to do next. A constructor carries the caller-owned
+    temporary it builds into and that temporary's layout. -/
 inductive FrameAction where
   | next (pc : Nat) (stack : List Value) (frame : Frame) (memory : Memory)
   | call (callee : Nat) (args rest : List Value) (memory : Memory)
@@ -81,6 +98,8 @@ inductive FrameAction where
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
+/-- Evaluates an intrinsic. Operands with unspecified bits are allowed only where the
+    result does not observe them; arithmetic faults are reported, not swallowed. -/
 def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : ExecutionResult CIL.Value :=
   if operands.any CIL.Value.hasUnspecified then
     match CIL.evalUnspecifiedIntrinsic operation operands with
@@ -94,6 +113,8 @@ def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : E
     | some value => .ok value
     | none => .error .invalidState
 
+/-- Executes one instruction of `body`. Instructions that would observe unspecified vector
+    bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   let unknownArgument := match op with
@@ -221,6 +242,7 @@ def run (program : CIL.Program) : Nat → Nat → Nat → List Value → Frame �
       let result ← (result.mapM (checkedValue memory)).mapError fun fault => ⟨method, pc, fault⟩
       return (memory, result)
 
+/-- Calls `method` with checked `args` in a fresh frame. -/
 def invoke (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : Memory) :
     Except LocatedFault (Memory × List Value) := do
   let some body := program[method]? | .error ⟨method, 0, .invalidState⟩
