@@ -1,8 +1,17 @@
 import CIL.Safety.Linking
 import CIL.Safety.ExecutionStaticWorld
 
+/-!
+# Static-checked linking
+
+`linkChecked` links an application with its libraries and accepts the result only if no two
+distinct static descriptors share an identity, so the linked program has one static world.
+On a collision it reports the two conflicting fields.
+-/
+
 namespace CIL.Safety
 
+/-- Descriptors with the same identity are equal, so an identity names one static field. -/
 def StaticDescriptorsCompatible (descriptors : List CIL.StaticDescriptor) : Prop :=
   descriptors.Pairwise (fun left right => left.identity = right.identity → left = right)
 
@@ -10,13 +19,17 @@ instance (descriptors : List CIL.StaticDescriptor) :
     Decidable (StaticDescriptorsCompatible descriptors) :=
   inferInstanceAs (Decidable (descriptors.Pairwise _))
 
+/-- The error message for incompatible descriptors, naming the first colliding pair found. -/
 def staticCollision (descriptors : List CIL.StaticDescriptor) : String :=
   let pairs := descriptors.flatMap fun left => descriptors.map fun right => (left, right)
-  match pairs.find? (fun (left, right) => left.identity == right.identity && !(left == right)) with
+  match
+    pairs.find? (fun (left, right) => left.identity == right.identity && !(left == right))
+  with
   | none => "Static identity collision"
   | some (left, right) =>
     s!"Static identity collision {left.identity}: {left.assemblyIdentity}::{left.fieldName} and {right.assemblyIdentity}::{right.fieldName}"
 
+/-- Links `app` with `libraries`, failing when two static descriptors collide. -/
 def linkChecked (app : CIL.Program) (libraries : List Library) : Except String CIL.Program :=
   let linked := link app libraries
   let descriptors := programStaticDescriptors linked
@@ -25,7 +38,8 @@ def linkChecked (app : CIL.Program) (libraries : List Library) : Except String C
 
 theorem linkChecked_sound {app : CIL.Program} {libraries : List Library} {linked : CIL.Program}
     (checked : linkChecked app libraries = .ok linked) :
-    linked = link app libraries ∧ StaticDescriptorsCompatible (programStaticDescriptors linked) := by
+    linked = link app libraries ∧
+      StaticDescriptorsCompatible (programStaticDescriptors linked) := by
   dsimp only [linkChecked] at checked
   split at checked
   next compatible =>
@@ -46,9 +60,12 @@ theorem linkChecked_links {app : CIL.Program} {libraries : List Library} {linked
   rw [(linkChecked_sound checked).1]
   exact link_links app libraries
 
+/-- Compatibility in the form `StaticWorldValid` asks for: any two members with the same
+    identity are equal. -/
 theorem StaticDescriptorsCompatible.identities {descriptors : List CIL.StaticDescriptor}
     (compatible : StaticDescriptorsCompatible descriptors) :
-    ∀ left ∈ descriptors, ∀ right ∈ descriptors, left.identity = right.identity → left = right := by
+    ∀ left ∈ descriptors, ∀ right ∈ descriptors,
+      left.identity = right.identity → left = right := by
   induction descriptors with
   | nil => simp
   | cons descriptor rest ih =>

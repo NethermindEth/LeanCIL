@@ -1,5 +1,14 @@
 import CIL.Safety.InstructionMemory
 
+/-!
+# Readonly statics in the checked interpreter
+
+`staticReference` resolves an extracted readonly static field to immutable storage, creating
+it on first use and revalidating a cached binding on every later use. `staticInstruction`
+runs the static and span instructions on top of it and hands every other memory instruction
+to `memoryInstruction`.
+-/
+
 namespace CIL.Safety
 
 /-- Static initialization occurs before exposing the readonly view. Existing
@@ -31,6 +40,8 @@ def staticReference (descriptor : CIL.StaticDescriptor) (m : Memory) :
       views := ⟨id, 0, descriptor.bytes.length, true, false⟩ :: memory.views
       staticBindings := (descriptor.identity, reference) :: memory.staticBindings }, reference)
 
+/-- Runs a memory instruction at `pc`. Static loads use the field identity extracted for that
+    pc; span constructors over raw pointers are accepted only inside extracted static data. -/
 def staticInstruction (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) := do
   match operation, stack with

@@ -1,5 +1,13 @@
 import CIL.Safety.StaticInitialization
 
+/-!
+# Memory instructions preserve the static world
+
+Writes cannot reach immutable static storage, so every memory instruction keeps
+`StaticWorldValid`. Static instructions keep it too, provided each static site of the method
+names one of the world's descriptors (`StaticSitesValid`).
+-/
+
 namespace CIL.Safety
 
 set_option maxHeartbeats 800000
@@ -68,7 +76,8 @@ def StaticSitesValid (descriptors : List CIL.StaticDescriptor) (body : CIL.Metho
   ∀ site ∈ body.staticSites, site.2 ∈ descriptors
 
 theorem selected_static_site (descriptors : List CIL.StaticDescriptor) (body : CIL.Method)
-    (pc site : Nat) (descriptor : CIL.StaticDescriptor) (sites : StaticSitesValid descriptors body)
+    (pc site : Nat) (descriptor : CIL.StaticDescriptor)
+    (sites : StaticSitesValid descriptors body)
     (found : body.staticSites.find? (fun site => site.1 == pc) = some (site, descriptor)) :
     descriptor ∈ descriptors := sites _ (List.mem_of_find?_eq_some found)
 
@@ -82,6 +91,8 @@ theorem StaticInstructionEffect.staticWorld {body : CIL.Method} {m result : Memo
     exact staticReference_preserves_static_world _ _ _ _ _ hm world
       (selected_static_site _ _ _ _ _ sites selected) h
 
+/-- A static or memory instruction keeps the static world valid when the method's static
+    sites all name descriptors of that world. -/
 theorem staticInstruction_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     (stack values : List Value) (m result : Memory) (hm : m.WellFormed)

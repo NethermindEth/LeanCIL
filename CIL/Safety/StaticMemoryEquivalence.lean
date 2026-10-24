@@ -2,8 +2,17 @@ import CIL.Safety.FrameEquivalence
 import CIL.Safety.StaticMemory
 import CIL.Safety.InstructionMemoryEquivalence
 
+/-!
+# Static instructions respect memory equivalence
+
+Equivalent memories (same allocations, bytes, bindings and permissions, however the access
+views are listed) give equivalent results for static field resolution and for the static
+and span instructions.
+-/
+
 namespace CIL.Safety
 
+/-- Equivalent memories resolve a static to the same reference in equivalent memories. -/
 theorem Memory.Equivalent.staticReference {m n : Memory} (same : m.Equivalent n)
     (descriptor : CIL.StaticDescriptor) :
     ResultEquivalent MemoryFirstEquivalent (CIL.Safety.staticReference descriptor m)
@@ -32,6 +41,7 @@ theorem Memory.Equivalent.staticReference {m n : Memory} (same : m.Equivalent n)
     · exact (equivalent.prependView _).permissions
     · simp only [equivalent.staticBindings]
 
+/-- Equivalent memories give equivalent results for every static or span instruction. -/
 theorem Memory.Equivalent.staticInstruction {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (CIL.Safety.staticInstruction body pc operation stack m)
