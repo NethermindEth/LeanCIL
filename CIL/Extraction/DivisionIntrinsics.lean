@@ -127,14 +127,11 @@ def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat)
   if instruction.opcode != 40 then none else
   let .call site := instruction.operand | none
   if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
-  let (owner, name, signature, intrinsic, arity) ←
+  let (_, _, _, intrinsic, arity) ←
     divisionSignatures.find? fun (owner, name, signature, _, arity) =>
       site.declaringType == .atom intrinsicsScope owner && site.name == name &&
       site.parameterCount == arity &&
       site.target == .external (intrinsicsScope ++ "::" ++ signature)
-  let _ := owner
-  let _ := name
-  let _ := signature
   let (returnType, parameterTypes) ← divisionCallTypes intrinsic
   if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
   return (intrinsic, arity)

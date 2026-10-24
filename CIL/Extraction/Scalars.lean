@@ -332,8 +332,7 @@ private def externalParametersMatch (site : CallSite) (identity : String) : Bool
   ((do
     let original := identity.toByteArray.data.toList
     if !balancedParentheses 0 original then none else
-    let head :: rest := splitBytes original [40] | none
-    let _ := head
+    let _ :: rest := splitBytes original [40] | none
     let rawTail ← rest.getLast?
     let tail ← normalizeExternalIdentity site rawTail
     if !balancedParentheses 1 tail || tail.reverse.head? != some 41 then none else
