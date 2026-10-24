@@ -719,6 +719,22 @@ theorem step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.Fe
 /-- info: 'Tests.Automation.step_facts_first' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms step_facts_first
 
+-- An applied lemma or a parenthesised proof is a step fact too, so it is also tried before the equation.
+open CIL.Safety in
+theorem applied_step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (slotBody profile)) (args : List Value) (frame stored : Frame)
+    (memory written : Memory) (value : CIL.W32)
+    (store : ∀ value : CIL.W32, step (slotBody profile) (.setLocal 0) 0 args frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written))
+    (load : ∀ stack, step (slotBody profile) (.local 0) 1 args stored stack written =
+      .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
+    run program 3 index 0 args frame [.scalar (.i32 value)] memory =
+      .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
+  cil_checked_steps [store value, (load)]
+
+/-- info: 'Tests.Automation.applied_step_facts_first' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms applied_step_facts_first
+
 @[cil_code] def nonzeroMethod : CIL.Method := {
   code := [.arg 0, .brnonzero 4, .arg 1, .ret, .arg 0, .ret]
   locals := [], returnsValue := true }
@@ -735,7 +751,24 @@ theorem nonzero_branch_from_nonzero (memory : CIL.Safety.Memory) (condition valu
       [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 condition)]) := by
   cil_checked_steps [nonzero]
 
+theorem branch_from_zero (memory : CIL.Safety.Memory) (condition value : CIL.W32) (zero : condition = 0) :
+    CIL.Safety.invoke branchProgram (CIL.executionBound branchProgram 0) 0
+      [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps [zero]
+
+-- A literal condition is decided by evaluation, with no fact at all.
+@[cil_code] def literalBranchMethod : CIL.Method := {
+  code := [.const32 5, .brnonzero 4, .arg 0, .ret, .arg 1, .ret]
+  locals := [], returnsValue := true }
+
+theorem literal_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) :
+    CIL.Safety.invoke [literalBranchMethod] 9 0
+      [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps []
+
 #print axioms branch_from_nonzero
+#print axioms branch_from_zero
+#print axioms literal_branch
 #print axioms nonzero_branch_from_nonzero
 
 /-- A body whose instructions, not its code list, depend on a feature. -/
@@ -782,5 +815,20 @@ theorem evaluated_then_stored (v : CIL.Vector.V256) (destination : Reference) (m
   cil_checked_steps [staticInstruction, stored, eval_reverse_lanes]
 
 #print axioms evaluated_then_stored
+
+-- Literal operands are respelled for the evaluation fact; a symbolic slot below them keeps its form.
+open CIL.Safety in
+theorem evaluated_keeps_symbolic_slot (v : CIL.Vector.V256) (destination : Reference) (memory : Memory) (x : Nat)
+    (k : Except LocatedFault (Memory × List Value))
+    (rest : run permuteStoreProgram 2 0 1 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 (reverseLanes v)), .reference (.address destination), .scalar (.i32 (BitVec.ofNat 32 x))]
+      memory = k) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 v), .reference (.address destination),
+        .scalar (.i32 (BitVec.ofNat 32 x))] memory = k := by
+  cil_checked_run_step [eval_reverse_lanes]
+  with_reducible exact rest
+
+#print axioms evaluated_keeps_symbolic_slot
 
 end Tests.Automation

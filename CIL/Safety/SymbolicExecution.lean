@@ -164,17 +164,18 @@ elab_rules : tactic
     catch _ => fetched.restore
 
 -- Reducible `assumption` keeps a failed candidate lookup from unfolding every hypothesis.
--- A branch leaves `(v != 0) = true` in the pc; the branch lemmas decide it from `v = 0`, its negation or a literal.
+-- A branch leaves `(v != 0) = true` in the pc: the negation lemmas decide it from `Not (v = 0)`, and the trailing
+-- `rfl` decides it once `v = 0` or a literal makes the condition closed.
 macro_rules
   | `(tactic| cil_lookup [$facts:term,*]) =>
   `(tactic| first
     | with_reducible assumption
     | (simp only [cil_code, Nat.reduceAdd]; cil_lookup_rfl [$[$facts:term],*])
     | cil_lookup_rfl [$[$facts:term],*]
-    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true, not_true_eq_false,
-        eq_self_iff_true, Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, BitVec.reduceEq, $[$facts:term],*]; done)
-    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true, not_true_eq_false,
-        eq_self_iff_true, Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, BitVec.reduceEq, $[$facts:term],*]; rfl))
+    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
+        Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; done)
+    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
+        Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; rfl))
 
 macro "cil_stack_cleanup" : tactic =>
   `(tactic| try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
@@ -204,6 +205,14 @@ macro "cil_checked_step_by_unfolding " "[" facts:term,* "]" : tactic =>
        simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
         CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step, CIL.Safety.formValue,
         CIL.Safety.checkedAt, Except.mapError, $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+
+open Lean Meta in
+/-- Spell a literal `BitVec.ofNat n k` as the numeral `k`, as an evaluation fact with a literal operand states it;
+    a symbolic `BitVec.ofNat n x` keeps its spelling so later facts on it still match. -/
+dsimproc_decl bitVecOfNatLiteral (BitVec.ofNat _ _) := fun e => do
+  let_expr BitVec.ofNat width operand ← e | return .continue
+  let some value ← getNatValue? operand | return .continue
+  return .done (← mkNumeral (mkApp (mkConst ``BitVec) width) value)
 
 /-- Succeed only when the goal still mentions intrinsic evaluation. -/
 elab "cil_intrinsic_pending" : tactic => Lean.Elab.Tactic.withMainContext do
@@ -258,7 +267,7 @@ macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
     -- arrive as `BitVec.ofNat n k`, which an evaluation fact stated with a literal `k` matches only as `OfNat`.
     all_goals (first
       | (cil_intrinsic_pending
-         simp only [← BitVec.ofNat_eq_ofNat, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval, $[$facts:term],*,
+         simp only [bitVecOfNatLiteral, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval, $[$facts:term],*,
            List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
            Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
            Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -285,19 +294,25 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
   let some (_, lhs, _) := target.eq? | return #[]
   unless lhs.isAppOfArity ``CIL.Safety.step 7 do return #[]
   let head := (← whnfR lhs.getAppArgs[1]!).getAppFn.constName?
+  let states (type : Expr) : MetaM Bool := forallTelescope type fun _ conclusion => do
+    let some (_, factLhs, _) := conclusion.eq? | return false
+    unless factLhs.isAppOfArity ``CIL.Safety.step 7 do return false
+    match (← whnfR factLhs.getAppArgs[1]!).getAppFn.constName?, head with
+    | some factHead, some goalHead => return factHead == goalHead
+    | _, _ => return true
   facts.filterM fun fact => do
-    unless fact.raw.isIdent do return false
-    let type ← match (← getLCtx).findFromUserName? fact.raw.getId with
-      | some decl => instantiateMVars decl.type
+    if fact.raw.isIdent then
+      match (← getLCtx).findFromUserName? fact.raw.getId with
+      | some decl => states (← instantiateMVars decl.type)
       | none =>
-        try pure (← getConstInfo (← resolveGlobalConstNoOverload fact.raw)).type
+        try states (← getConstInfo (← resolveGlobalConstNoOverload fact.raw)).type
         catch _ => return false
-    forallTelescope type fun _ conclusion => do
-      let some (_, factLhs, _) := conclusion.eq? | return false
-      unless factLhs.isAppOfArity ``CIL.Safety.step 7 do return false
-      match (← whnfR factLhs.getAppArgs[1]!).getAppFn.constName?, head with
-      | some factHead, some goalHead => return factHead == goalHead
-      | _, _ => return true
+    else
+      -- An applied lemma or a projection; `apply` elaborates it again, so this copy is discarded.
+      let saved ← saveState
+      try states (← instantiateMVars (← inferType (← Term.withoutErrToSorry (Term.elabTerm fact none))))
+      catch _ => return false
+      finally saved.restore
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
