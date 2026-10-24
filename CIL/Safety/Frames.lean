@@ -305,7 +305,7 @@ def leaveFrame (frame : Frame) (m : Memory) : Memory :=
 
 /-- The pre-opaque frame equation, under its explicit default-metadata premise. -/
 theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Memory)
-    (none : body.opaqueVectorLocals = []) :
+    (noOpaque : body.opaqueVectorLocals = []) :
     enterFrame body args m = (do
       let activation := m.nextIdentity
       let (locals, owned, memory) ← makeLocals activation body.localKinds body.locals m
@@ -315,7 +315,7 @@ theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Mem
         makeParameterHomes activation body.parameterHomes args memory
       return (⟨activation, locals ++ parameters.map Prod.snd,
         (owned ++ argumentIds) ++ parameterIds, arguments⟩, memory)) := by
-  simp only [enterFrame, none, makeSelectedLocals_nil]
+  simp only [enterFrame, noOpaque, makeSelectedLocals_nil]
 #print axioms enterFrame_of_no_opaque
 
 end CIL.Safety

@@ -80,9 +80,9 @@ theorem run_success_trace (program : CIL.Program) (fuel method pc : Nat)
           have actual : ProgramStep program method pc args frame stack m action :=
             ⟨body, op, hb, ho, hs⟩
           cases action with
-          | next target stack' frame' memory =>
+          | next target nextStack nextFrame memory =>
             simp only [run, hb, ho, hs, Except.mapError, Bind.bind, Except.bind] at h
-            exact .next actual (ih method target args frame' stack' memory final values h)
+            exact .next actual (ih method target args nextFrame nextStack memory final values h)
           | returned result memory =>
             cases hr : result.mapM (checkedValue (leaveFrame frame memory)) <;>
               simp only [run, hb, ho, hs, hr, Except.mapError, Bind.bind, Except.bind,
@@ -103,13 +103,13 @@ theorem run_success_trace (program : CIL.Program) (fuel method pc : Nat)
                 | error fault =>
                   simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                 | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
+                  obtain ⟨childFinal, result⟩ := returned
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
                     Except.bind] at h
                   exact .call actual hc he hr
-                    (ih callee 0 arguments childFrame [] childMemory memory' result hr)
-                    (ih method (pc + 1) args frame (result ++ rest) memory' final values h)
-          | construct callee arguments rest frame' temporary kind memory =>
+                    (ih callee 0 arguments childFrame [] childMemory childFinal result hr)
+                    (ih method (pc + 1) args frame (result ++ rest) childFinal final values h)
+          | construct callee arguments rest parentFrame temporary kind memory =>
             cases hc : program[callee]? with
             | none => simp [run, hb, ho, hs, hc, Except.mapError, Bind.bind, Except.bind] at h
             | some child =>
@@ -122,20 +122,20 @@ theorem run_success_trace (program : CIL.Program) (fuel method pc : Nat)
                 | error fault =>
                   simp [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind, Except.bind] at h
                 | ok returned =>
-                  obtain ⟨memory', result⟩ := returned
+                  obtain ⟨childFinal, result⟩ := returned
                   simp only [run, hb, ho, hs, hc, he, hr, Except.mapError, Bind.bind,
                     Except.bind] at h
                   cases result with
                   | cons value rest' => simp at h
                   | nil =>
                     simp only [List.isEmpty_nil, Bool.not_true, Bool.false_eq_true, ite_false] at h
-                    cases hl : loadLocal memory' (.bytes kind temporary) <;>
+                    cases hl : loadLocal childFinal (.bytes kind temporary) <;>
                       simp only [hl] at h
                     · cases h
                     · rename_i value
                       exact .construct actual hc he hr
-                        (ih callee 0 arguments childFrame [] childMemory memory' [] hr) hl
-                        (ih method (pc + 1) args frame' (value :: rest) memory' final values h)
+                        (ih callee 0 arguments childFrame [] childMemory childFinal [] hr) hl
+                        (ih method (pc + 1) args parentFrame (value :: rest) childFinal final values h)
 
 /-- The trace characterizes the existing interpreter, rather than replacing its
     semantics with a weaker execution relation. -/
