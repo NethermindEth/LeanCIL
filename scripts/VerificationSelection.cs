@@ -120,6 +120,8 @@ internal static class VerificationSelection
         foreach (var path in paths)
         {
             if (path.EndsWith(".md", StringComparison.Ordinal) || path == "LICENSE") continue;
+            // Other workflows run in their own jobs; only this workflow's definition feeds the suites.
+            if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
             if (path == "scripts/ExportVerificationSuites.cs") return all;
             if (new[] { "CIL/", "Extractor/", "Examples/Assembly/", "Examples/FSharp/" }
                     .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Examples/Support.lean")

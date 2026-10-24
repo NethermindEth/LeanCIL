@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: NethermindEth/int256
-          ref: dc945cbc4935a363ba3d3015311097bdc818f255
+          ref: 00fcecf53e22b5c9090052779e14b3ba246fb117
           path: consumer
           persist-credentials: false
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -81,8 +81,10 @@ jobs:
           SCALAR: ${{ steps.scalar.outcome }}
           LIBRARY_SECONDS: ${{ steps.library.outputs.seconds }}
         run: |
+          # Read the registry size from the pinned revision so re-pinning needs no edit here.
+          GATES=$(jq '.gates | length' consumer/verification/manifests/gates.json 2>/dev/null || echo unknown)
           printf '### Pinned int256 compatibility (advisory)\n\nLibrary: %s\n\nAdd/arm64-advsimd: %s\n\nSubtract/x64-sse42: %s\n' "$LIBRARY" "$ARM" "$X64" >> "$GITHUB_STEP_SUMMARY"
-          printf '\nMultiply and LeUInt256UInt256/scalar: %s\n\nLibrary update/build: %s seconds. Baseline: 369 seconds on ubuntu-24.04, LeanCIL 972881d, int256 dc945cbc (run 40069778642); hosted-runner timings vary.\n\nCoverage: 4 selected gates out of 256 in the pinned revision. 161 gates require runtime-profile migration; this job does not certify the full registry.\n\nFailures remain red. Keep this advisory check out of required branch-protection checks.\n' "$SCALAR" "$LIBRARY_SECONDS" >> "$GITHUB_STEP_SUMMARY"
+          printf '\nMultiply and LeUInt256UInt256/scalar: %s\n\nLibrary update/build: %s seconds; compare with earlier runs of this workflow, as hosted-runner timings vary.\n\nCoverage: 4 selected gates out of %s in the pinned revision; this job does not certify the full registry.\n\nFailures remain red. Keep this advisory check out of required branch-protection checks.\n' "$SCALAR" "$LIBRARY_SECONDS" "$GATES" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
