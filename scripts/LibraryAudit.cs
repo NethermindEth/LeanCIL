@@ -67,9 +67,10 @@ partial class Program
         var artifacts = LibraryArtifacts(directories);
         if (modules.FirstOrDefault(module => !artifacts.ContainsKey(module)) is { } missing)
             throw new InvalidDataException("Library module is missing from the resolved import paths: " + missing);
+        // Hash the artifacts before reading their import headers, so a swap after the hash fails the closing check.
+        var parts = Parts(artifacts);
         var graph = ConsumerModuleImports(Path.GetTempPath(), artifacts);
         var closure = ImportClosure(graph, modules).Where(artifacts.ContainsKey).Order(StringComparer.Ordinal).ToArray();
-        var parts = Parts();
         var reusable = ReusableCertified(graph, parts, certifiedModules!);
         var replayed = closure.Where(module => !reusable.Contains(module)).ToArray();
         var failures = ReplayConsumerModules(project, replayed, leanPath);
@@ -78,12 +79,12 @@ partial class Program
                 string.Join("\n", failures.Values));
         var audited = AuditOleans(leanPath, closure, [], namespaces: new(prefixes, axioms));
         foreach (var module in closure) RequireAuditedModule(audited, module, artifacts[module]);
-        if (JsonSerializer.Serialize(Parts()) != JsonSerializer.Serialize(parts))
+        if (JsonSerializer.Serialize(Parts(LibraryArtifacts(directories))) != JsonSerializer.Serialize(parts))
             throw new InvalidOperationException("Compiled artifacts changed during the library audit");
         return new(closure, replayed, audited.namespaces!);
 
-        SortedDictionary<string, SortedDictionary<string, string>> Parts() =>
-            new(LibraryArtifacts(directories).ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)), StringComparer.Ordinal);
+        static SortedDictionary<string, SortedDictionary<string, string>> Parts(Dictionary<string, string> found) =>
+            new(found.ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)), StringComparer.Ordinal);
     }
 
     // A certified proof holds only against the definitions it was checked with, so a CIL module skips replay
