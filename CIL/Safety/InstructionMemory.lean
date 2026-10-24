@@ -61,6 +61,13 @@ def referenceAt : ManagedReference → ExecutionResult Reference
   | .null => .error (.memory .nullDereference .null 0)
   | .address r => .ok r
 
+-- Constructor equations, so stepping keeps a symbolic `referenceAt r` for the caller's fact.
+theorem referenceAt_null : referenceAt .null = .error (.memory .nullDereference .null 0) := rfl
+theorem referenceAt_address (r : Reference) : referenceAt (.address r) = .ok r := rfl
+
+#print axioms referenceAt_null
+#print axioms referenceAt_address
+
 /-- Byte order is explicit; vector/aggregate values are snapshots. -/
 def byteNumber (bytes : List (BitVec 8)) : Nat :=
   bytes.foldr (fun byte high => byte.toNat + 256 * high) 0
