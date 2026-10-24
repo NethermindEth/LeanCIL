@@ -48,6 +48,9 @@ name = "Tests.ContractConsequence"
 name = "Tests.InvocationCertificates"
 
 [[lean_lib]]
+name = "Tests.ValidCallTransport"
+
+[[lean_lib]]
 name = "Tests.BufferContents"
 
 [[lean_lib]]

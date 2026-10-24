@@ -320,6 +320,15 @@ from those two premises, and `InvocationCertificate.of_run` certifies a run of
 the frame that checked arguments enter. `Tests/InvocationCertificates.lean`
 uses each of them.
 
+`ValidCall memory inputs outputs` states that memory is well formed, every input
+buffer is readable and every output buffer writable. `CIL.Safety.CallingTransport`
+carries it to later memory so a caller can pass the same buffers again:
+`ValidCall.after_write` after any checked write, `after_enterFrame` after frame
+entry, `after_below` across memory that keeps old allocations' access
+(`AccessBelow`, or `MemoryBelow.accessBelow`), and `after_confined` across a call
+whose footprint the inputs lie `Apart` from. `mono` drops buffers, and
+`input_bound` / `output_bound` give the identity bound those relations take.
+
 ## Describe buffer contents
 
 `CIL.Safety.BufferContents` states what a contiguous run of integer elements

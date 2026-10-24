@@ -163,6 +163,9 @@ refinement premises and the derived contract on a concrete input.
 `Tests.InvocationCertificates` builds invocation certificates from a computed
 invocation and from a computed run, keeps them through a certified contract and
 its refinement, and refutes a contract from the returned values of a computed run.
+`Tests.ValidCallTransport` carries `ValidCall` through writes, frame entry, memory
+kept below a watermark and a call confined apart from the inputs, and shows that a
+confined call over an input can revoke its read authority.
 
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
 `Confined`. `Tests.BufferContents` checks typed buffer contents: fills and
@@ -178,7 +181,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
