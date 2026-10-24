@@ -201,7 +201,8 @@ theorem makeSelectedLocalsFrom_succeeds (m : Memory) (activation : Nat) (indices
             exact ⟨.opaque128 none, [], m, by rw [ite_eq_left member]; rfl, wellFormed⟩
           · cases initial with
             | v128 bits =>
-              exact ⟨.opaque128 (some (.known bits)), [], m, by rw [ite_eq_left member]; rfl, wellFormed⟩
+              exact ⟨.opaque128 (some (.known bits)), [], m,
+                by rw [ite_eq_left member]; rfl, wellFormed⟩
             | _ => cases known
         · obtain ⟨slot, ids, memory, made⟩ :=
             makeLocal_succeeds m activation kind initial wellFormed fits.1

@@ -135,7 +135,8 @@ theorem run_success_trace (program : CIL.Program) (fuel method pc : Nat)
                     · rename_i value
                       exact .construct actual hc he hr
                         (ih callee 0 arguments childFrame [] childMemory childFinal [] hr) hl
-                        (ih method (pc + 1) args parentFrame (value :: rest) childFinal final values h)
+                        (ih method (pc + 1) args parentFrame (value :: rest) childFinal final values
+                          h)
 
 /-- The trace characterizes the existing interpreter, rather than replacing its
     semantics with a weaker execution relation. -/
