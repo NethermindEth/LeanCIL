@@ -29,6 +29,7 @@ private theorem mod_two_pow_add_lane (n a : Nat) :
     n % 2 ^ (a + 64) = n % 2 ^ a + 2 ^ a * (n / 2 ^ a % 2 ^ 64) := by
   rw [Nat.pow_add]
   exact Nat.mod_mul
+#print axioms mod_two_pow_add_lane
 
 /-- Comparing whole multiples of `scale` against a value whose remainder is below `scale`. -/
 private theorem scale_le_iff {scale low needed held : Nat} (small : low < scale) :
@@ -43,6 +44,7 @@ private theorem scale_le_iff {scale low needed held : Nat} (small : low < scale)
   · intro bound
     have := Nat.mul_le_mul_left scale bound
     omega
+#print axioms scale_le_iff
 
 /-- The carry out of digit `i` given the carry into it. -/
 theorem carry_lane_succ (x y : BitVec w) (i : Nat) :
@@ -96,6 +98,7 @@ private theorem add_div_scale (x y scale : Nat) (positive : 0 < scale) :
   rw [show x % scale + scale * (x / scale) + (y % scale + scale * (y / scale)) =
     (x % scale + y % scale) + scale * (x / scale + y / scale) by rw [Nat.mul_add]; omega,
     Nat.add_mul_div_left _ _ positive]
+#print axioms add_div_scale
 
 /-- The quotient of a sum of two remainders is the carry bit between them. -/
 private theorem low_sum_div (xLow yLow scale : Nat) (xSmall : xLow < scale)
@@ -104,11 +107,13 @@ private theorem low_sum_div (xLow yLow scale : Nat) (xSmall : xLow < scale)
   split
   · exact Nat.div_eq_of_lt_le (by omega) (by omega)
   · exact Nat.div_eq_of_lt (by omega)
+#print axioms low_sum_div
 
 /-- A 0-or-1 word built from a condition. -/
 private theorem toNat_bit (condition : Bool) :
     (if condition then (1 : W64) else 0).toNat = if condition then 1 else 0 := by
   cases condition <;> rfl
+#print axioms toNat_bit
 
 /-- Lane `i` of a wide sum is the lane sum plus the carry out of the lanes below it. -/
 theorem lane64_add (x y : BitVec w) (i : Nat) (fits : 64 * i + 64 ≤ w) :
@@ -148,6 +153,7 @@ private theorem digits_lt_iff {scale xLow yLow xHigh yHigh : Nat} (xSmall : xLow
   · have := Nat.mul_le_mul_left scale (Nat.succ_le_of_lt above)
     rw [Nat.mul_succ] at this
     omega
+#print axioms digits_lt_iff
 
 /-- The borrow out of digit `i` given the borrow into it. -/
 theorem subBorrow_lane_succ (x y : BitVec w) (i : Nat) :
@@ -355,8 +361,8 @@ private theorem cascade_carry (generate propagate : BitVec w) (i : Nat) (inWord 
       rippleCarry generate propagate i := by
   induction i with
   | zero => simp [rippleCarry]
-  | succ i ih =>
-    obtain ⟨apart, together⟩ := ih (by omega) (fun j below => disjoint j (by omega))
+  | succ i previous =>
+    obtain ⟨apart, together⟩ := previous (by omega) (fun j below => disjoint j (by omega))
     have shifted : (generate <<< 1).getLsbD (i + 1) = generate.getLsbD i := by
       rw [BitVec.getLsbD_shiftLeft]
       simp [show i + 1 < w from inWord]
@@ -370,6 +376,7 @@ private theorem cascade_carry (generate propagate : BitVec w) (i : Nat) (inWord 
     generalize BitVec.carry i propagate (generate <<< 1) false = carried
     cases generated <;> cases propagated <;> cases incoming <;> cases carried <;>
       simp [Bool.atLeastTwo]
+#print axioms cascade_carry
 
 /-- Carry lookahead by one addition: when no position both generates and propagates, bit `i` of
     `propagate ^^^ (propagate + (generate <<< 1))` is the ripple carry into position `i`. -/
@@ -391,44 +398,51 @@ theorem two_mul_eq_shiftLeft (x : BitVec w) : 2 * x = x <<< 1 := by
 
 /-- Lane flags from a wide sum drive the ripple to the true lane carries: when bit `j` of
     `generate` says lane `j` wraps and bit `j` of `propagate` says its sum is all ones. -/
-theorem rippleCarry_eq_carry (x y : BitVec w) (generate propagate : BitVec m) (n : Nat)
-    (generated : ∀ j < n, generate.getLsbD j = (lane64 x j + lane64 y j).ult (lane64 x j))
-    (propagated : ∀ j < n,
+theorem rippleCarry_eq_carry (x y : BitVec w) (generate propagate : BitVec flagWidth)
+    (laneCount : Nat)
+    (generated : ∀ j < laneCount,
+      generate.getLsbD j = (lane64 x j + lane64 y j).ult (lane64 x j))
+    (propagated : ∀ j < laneCount,
       propagate.getLsbD j = (lane64 x j + lane64 y j == BitVec.allOnes 64))
-    (i : Nat) (covered : i ≤ n) :
+    (i : Nat) (covered : i ≤ laneCount) :
     rippleCarry generate propagate i = BitVec.carry (64 * i) x y false := by
   induction i with
   | zero => simp [rippleCarry]
-  | succ i ih =>
+  | succ i previous =>
     rw [rippleCarry, carry_lane_succ, generated i (by omega), propagated i (by omega),
-      ih (by omega)]
+      previous (by omega)]
 #print axioms rippleCarry_eq_carry
 
 /-- Lane flags from a wide difference drive the ripple to the true lane borrows: when bit `j`
     of `generate` says lane `j` of `x` is below that of `y` and bit `j` of `propagate` says they
     are equal. -/
-theorem rippleCarry_eq_subBorrow (x y : BitVec w) (generate propagate : BitVec m) (n : Nat)
-    (generated : ∀ j < n, generate.getLsbD j = (lane64 x j).ult (lane64 y j))
-    (propagated : ∀ j < n, propagate.getLsbD j = (lane64 x j == lane64 y j))
-    (i : Nat) (covered : i ≤ n) :
+theorem rippleCarry_eq_subBorrow (x y : BitVec w) (generate propagate : BitVec flagWidth)
+    (laneCount : Nat)
+    (generated : ∀ j < laneCount,
+      generate.getLsbD j = (lane64 x j).ult (lane64 y j))
+    (propagated : ∀ j < laneCount,
+      propagate.getLsbD j = (lane64 x j == lane64 y j))
+    (i : Nat) (covered : i ≤ laneCount) :
     rippleCarry generate propagate i = subBorrow (64 * i) x y := by
   induction i with
   | zero => simp [rippleCarry, subBorrow, Nat.mod_one]
-  | succ i ih =>
+  | succ i previous =>
     rw [rippleCarry, subBorrow_lane_succ, generated i (by omega), propagated i (by omega),
-      ih (by omega)]
+      previous (by omega)]
 #print axioms rippleCarry_eq_subBorrow
 
 /-- The packed-flag cascade of an addition yields the carry into each lane. -/
-theorem cascade_add_flags (x y : BitVec w) (generate propagate : BitVec m) (n : Nat)
-    (generated : ∀ j < n, generate.getLsbD j = (lane64 x j + lane64 y j).ult (lane64 x j))
-    (propagated : ∀ j < n,
+theorem cascade_add_flags (x y : BitVec w) (generate propagate : BitVec flagWidth)
+    (laneCount : Nat)
+    (generated : ∀ j < laneCount,
+      generate.getLsbD j = (lane64 x j + lane64 y j).ult (lane64 x j))
+    (propagated : ∀ j < laneCount,
       propagate.getLsbD j = (lane64 x j + lane64 y j == BitVec.allOnes 64))
-    (i : Nat) (covered : i ≤ n) (inWord : i < m) :
+    (i : Nat) (covered : i ≤ laneCount) (inWord : i < flagWidth) :
     (propagate ^^^ (propagate + (generate <<< 1))).getLsbD i =
       BitVec.carry (64 * i) x y false := by
   rw [getLsbD_cascade _ _ i inWord,
-    rippleCarry_eq_carry x y _ _ n generated propagated i covered]
+    rippleCarry_eq_carry x y _ _ laneCount generated propagated i covered]
   intro j below wraps
   rw [propagated j (by omega)]
   rw [generated j (by omega)] at wraps
@@ -436,13 +450,16 @@ theorem cascade_add_flags (x y : BitVec w) (generate propagate : BitVec m) (n : 
 #print axioms cascade_add_flags
 
 /-- The packed-flag cascade of a subtraction yields the borrow into each lane. -/
-theorem cascade_sub_flags (x y : BitVec w) (generate propagate : BitVec m) (n : Nat)
-    (generated : ∀ j < n, generate.getLsbD j = (lane64 x j).ult (lane64 y j))
-    (propagated : ∀ j < n, propagate.getLsbD j = (lane64 x j == lane64 y j))
-    (i : Nat) (covered : i ≤ n) (inWord : i < m) :
+theorem cascade_sub_flags (x y : BitVec w) (generate propagate : BitVec flagWidth)
+    (laneCount : Nat)
+    (generated : ∀ j < laneCount,
+      generate.getLsbD j = (lane64 x j).ult (lane64 y j))
+    (propagated : ∀ j < laneCount,
+      propagate.getLsbD j = (lane64 x j == lane64 y j))
+    (i : Nat) (covered : i ≤ laneCount) (inWord : i < flagWidth) :
     (propagate ^^^ (propagate + (generate <<< 1))).getLsbD i = subBorrow (64 * i) x y := by
   rw [getLsbD_cascade _ _ i inWord,
-    rippleCarry_eq_subBorrow x y _ _ n generated propagated i covered]
+    rippleCarry_eq_subBorrow x y _ _ laneCount generated propagated i covered]
   intro j below borrows
   rw [propagated j (by omega)]
   rw [generated j (by omega)] at borrows

@@ -1,3 +1,4 @@
+import CIL.Safety.SymbolicExecution
 import CIL.SIMD.PackedLanes
 
 /-!
@@ -5,8 +6,8 @@ import CIL.SIMD.PackedLanes
 
 Checks the lane lemmas the way a multi-limb vector routine uses them: the carry cascade built
 from intrinsic comparison masks reproduces the 256-bit sum and difference on concrete inputs
-where a single repair hop is wrong and on symbolic inputs; and stepped intrinsic results on
-packed lanes rewrite to their lane values.
+where a single repair hop is wrong and on symbolic inputs; intrinsic results on packed lanes
+rewrite to their lane values; and a method steps through shift and multiply with them as facts.
 -/
 
 open CIL CIL.Vector
@@ -46,8 +47,9 @@ private def singleHopSum (x y : V256) : V256 :=
       (mask64 ((lane64 x 1 + lane64 y 1).ult (lane64 x 1)))
       (mask64 ((lane64 x 2 + lane64 y 2).ult (lane64 x 2))))
 
-/-- A carry out of lane 0 that must cross the all-ones lane 1 into lane 2. -/
+/-- Two all-ones low lanes: a carry into lane 0 must cross lane 1 to reach lane 2. -/
 private def cascading : V256 := pack256 ones ones 5 0
+/-- One, which carries out of lane 0 of `cascading`. -/
 private def increment : V256 := pack256 1 0 0 0
 
 -- The cascade reaches lane 2, which the single hop misses: the lookahead is what is correct.
@@ -160,7 +162,7 @@ theorem even_product_exact (x y : V256) {i : Nat} (lane : i < 4) :
   rw [lane64_multiplyEven32 x y lane, toNat_even_product]
 #print axioms even_product_exact
 
--- The top halves multiply to more than 2^63, so the product uses the full 64-bit lane.
+-- The low 32-bit halves multiply to more than 2^63, so the product fills the 64-bit lane.
 example : multiplyEven32 (pack256 0xFFFFFFFF 0 0 0) (pack256 0xFFFFFFFF 0 0 0) =
     pack256 0xFFFFFFFE00000001 0 0 0 := by decide
 
@@ -184,5 +186,38 @@ example (sum : W64) (a b : W64) :
     sum - mask64 ((a + b).ult a) = sum + bit (decide (2 ^ 64 ≤ a.toNat + b.toNat)) := by
   rw [sub_mask64, add_ult_eq_overflow]
   rfl
+
+/-! ### Stepping a method through the intrinsics -/
+
+/-- Shifts the high halves of one vector down and multiplies them by the low halves of
+    another: one partial-product row of a multi-limb multiply. -/
+@[cil_code] def partialProductMethod : CIL.Method := {
+  profile := { architecture := .x64, avx2 := true }
+  code := [.intrinsic (.avx2 .shr64) 2, .intrinsic (.avx2 .multiplyEven32) 2, .ret]
+  locals := [], returnsValue := true }
+
+/-- The program holding `partialProductMethod`. -/
+@[cil_code] def partialProductProgram : CIL.Program := [partialProductMethod]
+
+/-- Stepping the method on packed lanes with the lane lemmas as facts leaves the lanewise
+    products of low halves by shifted high halves on the stack. -/
+theorem partial_product_steps (a0 a1 a2 a3 b0 b1 b2 b3 : W64) (memory : CIL.Safety.Memory)
+    (finish : Except CIL.Safety.LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value))
+    (rest : CIL.Safety.run partialProductProgram 1 0 2 []
+      { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 (pack256
+        ((a0.setWidth 32).zeroExtend 64 * ((b0 >>> 32).setWidth 32).zeroExtend 64)
+        ((a1.setWidth 32).zeroExtend 64 * ((b1 >>> 32).setWidth 32).zeroExtend 64)
+        ((a2.setWidth 32).zeroExtend 64 * ((b2 >>> 32).setWidth 32).zeroExtend 64)
+        ((a3.setWidth 32).zeroExtend 64 * ((b3 >>> 32).setWidth 32).zeroExtend 64)))]
+      memory = finish) :
+    CIL.Safety.run partialProductProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 32)), .scalar (.v256 (pack256 b0 b1 b2 b3)),
+        .scalar (.v256 (pack256 a0 a1 a2 a3))] memory = finish := by
+  cil_checked_run_step [intrinsic_shr256 (pack256 b0 b1 b2 b3) (count := 32) (by decide),
+    map256_pack256]
+  cil_checked_run_step [intrinsic_multiplyEven32, multiplyEven32_pack256]
+  with_reducible exact rest
+#print axioms partial_product_steps
 
 end Tests.SimdLanes

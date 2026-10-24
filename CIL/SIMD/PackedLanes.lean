@@ -131,7 +131,7 @@ private theorem getLsbD_signFold (flags : Nat → Bool) (count : Nat) (fits : co
       (decide (i < count) && flags i) := by
   induction count with
   | zero => simp
-  | succ count ih =>
+  | succ count previous =>
     have shifted : (BitVec.ofNat 32 (if flags count then 1 else 0) <<< count).getLsbD i =
         (decide (i = count) && flags count) := by
       cases flags count
@@ -147,13 +147,14 @@ private theorem getLsbD_signFold (flags : Nat → Bool) (count : Nat) (fits : co
           rw [show i - count = (i - count - 1) + 1 by omega, Nat.testBit_add_one]
           simp
     rw [List.range_succ, List.foldl_append, List.foldl_cons, List.foldl_nil, BitVec.getLsbD_or,
-      ih (by omega), shifted]
+      previous (by omega), shifted]
     by_cases atCount : i = count
     · subst atCount
       simp
     · have below : decide (i < count + 1) = decide (i < count) :=
         decide_eq_decide.mpr (by omega)
       simp [atCount, below]
+#print axioms getLsbD_signFold
 
 /-- Bit `i` of `moveMask64` is the sign bit of lane `i`; bits 4 and above are clear. -/
 theorem getLsbD_moveMask64_eq (x : V256) (i : Nat) :
@@ -398,6 +399,7 @@ private theorem immediate_byte {count : Nat} (small : count < 256) :
   simp only [narrow, small, ↓reduceIte, Option.some.injEq]
   apply BitVec.eq_of_toNat_eq
   rw [BitVec.toNat_setWidth, narrow, BitVec.toNat_ofNat]
+#print axioms immediate_byte
 
 /-- `Avx2.ShiftLeftLogical` by an immediate shifts every lane; counts of 64 or more clear it. -/
 theorem intrinsic_shl256 (x : V256) {count : Nat} (small : count < 256) :

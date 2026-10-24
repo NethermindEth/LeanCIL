@@ -174,8 +174,9 @@ naming `CIL.step.eq_def` elaborates.
 `Tests.SimdLanes` checks the SIMD lane lemmas as a multi-limb routine uses them: the
 carry and borrow cascades built from intrinsic comparison masks reproduce 256-bit sums
 and differences for every input, including a carry that crosses an all-ones lane where a
-single repair hop is wrong, and stepped shift, permute, sum and multiply results on packed
-lanes rewrite to their lane values.
+single repair hop is wrong; shift, permute, sum and multiply results on packed lanes
+rewrite to their lane values, and a method steps through a shift and an even-lane multiply
+with those lemmas as facts.
 
 Run the focused Lean targets and extracted-loop suite with:
 
