@@ -95,12 +95,11 @@ goal. That fallback is part of `cil_checked_step`, `cil_checked_steps` and
 memory step, or `cil_checked_step_equations`, with such a fact must
 `rw [CIL.Safety.step_memory_eq]` first or restate the fact at the `formValue`,
 `loadValue`, `storeValue` or `add` level. The memory step simp set of those
-tactics unfolds `referenceAt`, like `formValue` and `checkedAt`, so pointer
-arithmetic needs no extra fact; through `cil_checked_step_equations` an `add`,
-`spanItem`, `copyBlock` or `initBlock` step needs `CIL.Safety.referenceAt`
-passed as a fact. In either case a `referenceAt` fact about a symbolic `ManagedReference` never
-fires; state it at the `memoryInstruction` level or write the reference as
-`.address r`. A `.feature f` step pushes `body.profile.evaluate f`. `cil_step`
+tactics rewrites `referenceAt` on `.null` and `.address r`, so pointer
+arithmetic on a known reference needs no extra fact, and a `referenceAt r = .ok a`
+fact about a symbolic `ManagedReference` applies; through `cil_checked_step_equations`
+an `add`, `spanItem`, `copyBlock` or `initBlock` step needs
+`CIL.Safety.referenceAt_address` passed as a fact. A `.feature f` step pushes `body.profile.evaluate f`. `cil_step`
 reduces that expression to the profile field. It unfolds a method definition or
 literal only as far as its profile, so a fact such as `profile.avx2 = true`
 decides the test. Inside `cil_checked_step`, `cil_checked_steps`,

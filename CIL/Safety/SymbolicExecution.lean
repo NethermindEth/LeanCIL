@@ -150,12 +150,12 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
          Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
--- Only memory equations expose `referenceAt`; unfolding it in the generic list slows every other step.
+-- Only memory equations expose `referenceAt`; its equations in the generic list would slow every other step.
 macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
        try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
-         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null, CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
          Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
@@ -178,7 +178,7 @@ macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
        rw [CIL.Safety.step_memory_eq]
        try simp only [cil_guard]
        try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
-         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null, CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
          Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 

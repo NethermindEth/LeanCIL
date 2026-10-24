@@ -56,9 +56,8 @@ or `staticInstruction` still apply, through a slower retry in `cil_checked_step`
 or `cil_checked_step_equations` call with such a fact must
 `rw [CIL.Safety.step_memory_eq]` first or restate it at the per-shape level. Through
 `cil_checked_step_equations`, an `add`, `spanItem`, `copyBlock` or `initBlock` step
-needs `CIL.Safety.referenceAt` passed (or use `cil_checked_step`). `referenceAt` is unfolded like
-`formValue`, so a `referenceAt` fact about a symbolic `ManagedReference` does not
-apply; use the `memoryInstruction` level or the `.address r` form. A `.feature` step
+needs `CIL.Safety.referenceAt_address` passed (or use `cil_checked_step`). A `referenceAt r = .ok a`
+fact about a symbolic `ManagedReference` applies. A `.feature` step
 pushes the profile field, such as `body.profile.avx2`, which is the canonical
 fact form. Those checked-step tactics normalize a fact stated through
 `FeatureProfile.evaluate` or on a method's profile projection (local, proof term, global theorem

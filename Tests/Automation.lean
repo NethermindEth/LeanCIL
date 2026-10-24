@@ -481,6 +481,20 @@ theorem add_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (
   · cil_checked_step [moved]
   · rfl
 
+-- A symbolic managed reference stays `referenceAt reference`, so the caller's fact about it applies.
+open CIL.Safety in
+theorem add_symbolic_reference (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory)
+    (reference : ManagedReference) (base result : Reference) (offset : CIL.W32)
+    (addressed : referenceAt reference = .ok base)
+    (moved : add memory base 8 (BitVec.ofInt 64 offset.toInt) = .ok result) :
+    ∃ stack, step body (.memory (.add 8 true)) 0 args frame
+      [.scalar (.i32 offset), .reference reference] memory =
+      .ok (.next 1 stack frame memory) ∧ stack = [.reference (.address result)] := by
+  refine ⟨?_, ?_, ?_⟩
+  rotate_left
+  · cil_checked_step [addressed, moved]
+  · rfl
+
 -- An unknown scalar keeps its guard: the equation exposes it rather than assuming it away.
 open CIL.Safety in
 example (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory) (value : CIL.Value) :
@@ -656,6 +670,8 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 #guard_msgs in #print axioms load128_fact_stack
 /-- info: 'Tests.Automation.add_fact_stack' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms add_fact_stack
+/-- info: 'Tests.Automation.add_symbolic_reference' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms add_symbolic_reference
 /-- info: 'Tests.Automation.feature_step_evaluate_fact' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms feature_step_evaluate_fact
 /-- info: 'Tests.Automation.feature_step_evaluate_free_body' depends on axioms: [propext, Quot.sound] -/
