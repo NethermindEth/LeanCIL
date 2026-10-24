@@ -241,7 +241,8 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | Checked integer conversions | Partial | Integer inputs; signed/unsigned bounds, narrow extension and native-width destinations |
 | Checked integer arithmetic | Partial | Signed/unsigned 32-/64-bit add, subtract and multiply; explicit overflow faults |
 | Integer division and remainder | Partial | Signed/unsigned 32-/64-bit operands; explicit zero-divisor and overflow faults |
-| All other opcodes | Unsupported | Includes `callvirt`, arrays and instruction prefixes |
+| `constrained.` + `callvirt` | Partial | Concrete same-assembly structs, including direct interface implementations; checked static target resolution, no boxing |
+| All other opcodes | Unsupported | Includes unconstrained `callvirt`, arrays and unsupported instruction prefixes |
 
 The extractor rejects unmodelled instructions, recursive managed calls, exception handling, class instance/virtual dispatch, managed object construction, reference-bearing aggregates, general arrays, unsupported packing, floating-point arithmetic, arbitrary external calls, static constructors, and unsupported signatures. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
 

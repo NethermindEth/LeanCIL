@@ -114,6 +114,12 @@ F# validation: 324 comparisons with actual .NET execution passed for addition, u
 
 ## Contracts and extraction evidence
 
+`Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls, including
+mutation through the receiver, and rejects forged generated call targets and malformed prefix,
+branch and interface-constraint metadata. `Tests/ConstrainedResolution.cs` checks the extractor's
+resolution rules; `Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target,
+signature, ambiguity and prefix rejection. These run in the `evidence` suite.
+
 The core and universal-contract suites cover checked execution and memory preservation. Choose and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect compiled implementation. Countdown validation covers original instructions, inserted NOPs and reordered blocks, and rejects wrong results and nontermination.
 
 Extraction evidence validation passed 74 Lean regressions, 34 compiled certificate fixtures, 29 generated-evidence mutation rejections, and mandatory-certificate positive/negative checks. All six CLI checks passed, including kernel replay of imported helpers and rejection of unchecked direct/transitive proofs. `Tests/ImportEvidence.lean` accepts an external call into a matching import slot and rejects a forged identity, parameter count, receiver or result shape, a wrong emitted argument count, a slot index inside the program or past the table, constructor and generic sites, and managed or non-call sites reaching the import range; the certificate audit also rejects a certificate over a different import table. These tests do not establish full raw-CIL/runtime correspondence.

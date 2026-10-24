@@ -275,6 +275,12 @@ internal static class MetadataValidation
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
+                if (instruction.OpCode.Code == Code.Callvirt)
+                {
+                    var resolved = ConstrainedCalls.Resolve(method, instruction, profile.Architecture);
+                    Enter(resolved.Target, reference, instruction);
+                    return;
+                }
                 if (ImportResolution.External(reference, module))
                 {
                     if (imports is null)

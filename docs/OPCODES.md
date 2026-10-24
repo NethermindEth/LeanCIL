@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 153 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 155 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -67,6 +67,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also the explicitly modelled `ReadOnlySpan<byte>(void*, int)` runtime constructor. Class construction, generic constructors and cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Only `throw new E(...)` with `ldstr`/`ldnull` arguments (see below): it raises a located `thrown "E"` fault. Other throws are rejected. |
+| `constrained.`, `callvirt` | Partial | Adjacent prefix and call resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
 | `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. |
 | `initblk`, `cpblk` | Partial | Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
 | `unaligned.` | Partial | Values 1, 2 and 4 before supported ordinary or block memory accesses; malformed prefix sequences and interior branch targets are rejected. |
@@ -87,12 +88,12 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 
 | Area | Examples rejected by extraction |
 | --- | --- |
-| Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`, `constrained.` |
+| Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`; `constrained.` outside the checked struct-call subset |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*`, `localloc` |
 | Objects, arrays and metadata | `ldnull` and `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` of other fields, `ldsflda` of constructor-initialized fields |
-| Dispatch and exceptions | `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
+| Dispatch and exceptions | Unconstrained `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
 
 ### Type tests
@@ -102,6 +103,20 @@ In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof
 ### Throws
 
 `throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of `E`'s constructor and `throw`. When `E` is a `System.Runtime` type, the loads and `newobj` emit `nop` and `throw` emits `.throw "E"`, which ends execution with a fault located at the `throw`. A `[DoesNotReturn]` helper containing only this pattern is an ordinary call. Other arguments, any instruction between the parts, a branch past the first part, rethrowing a stored exception and exception handlers remain rejected.
+
+### Constrained struct calls
+
+An adjacent `constrained. T; callvirt` pair supports a concrete, reference-free same-assembly
+struct `T` and a method declared on that struct or a directly implemented same-assembly interface.
+Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
+overrides take precedence. Closed generic helpers can use a directly implemented interface constraint.
+The original managed-reference receiver is passed to the resolved implementation, so mutations
+remain visible to the caller without boxing.
+
+The Lean certificate independently resolves serialized type, interface and method metadata and
+checks the selected method token, signature and argument count. A branch cannot bypass the prefix.
+Reference receivers, boxing fallbacks, inherited or default-interface dispatch, generic declaring
+types and ordinary unconstrained virtual calls remain unsupported.
 
 ### Static span tables
 
@@ -136,7 +151,7 @@ Release configuration is required, but it does not guarantee that a compiler emi
 
 Reachable same-assembly generic methods are specialized for supported primitive, enum, reference-free aggregate and vector type arguments. This substitutes types in the original CIL parameters, locals, type operands and nested generic calls; it does not replace method bodies with functional summaries. Repeated uses share a specialization, while different type arguments retain separate bodies. The call graph must remain acyclic, and extraction rejects more than 256 distinct specializations.
 
-Select a non-generic entry method whose compiled calls supply the concrete type arguments. Generic declaring types, generic constructors, reference-type/interface constraints, boxing, constrained dispatch and unsupported storage types remain rejected. Unconstrained parameters and admitted value-type/default-constructor/unmanaged constraints are supported for the reference-free value types above. Every specialized body's instructions undergo the normal validation.
+Select a non-generic entry method whose compiled calls supply the concrete type arguments. Generic declaring types, generic constructors, reference-type constraints, boxing, general runtime dispatch and unsupported storage types remain rejected. A same-assembly interface constraint is admitted when the concrete struct directly declares that interface; constrained calls are checked as described below. Unconstrained parameters and admitted value-type/default-constructor/unmanaged constraints are supported for the reference-free value types above. Every specialized body's instructions undergo the normal validation.
 
 See the [per-family intrinsic tables](SIMD.md) for the exact Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, operand types and profile requirements.
 

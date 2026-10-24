@@ -111,9 +111,9 @@ internal sealed class FeatureConstants
                     Code.Ceq => a == b ? 1 : 0, _ => null
                 } : null);
                 return;
-            case Code.Call: case Code.Newobj:
+            case Code.Call: case Code.Callvirt: case Code.Newobj:
                 MethodReference callee = (MethodReference)instruction.Operand;
-                for (int i = 0; i < callee.Parameters.Count + (code == Code.Call && callee.HasThis ? 1 : 0); i++) Pop();
+                for (int i = 0; i < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); i++) Pop();
                 if (FeatureProfile.Getter(callee) is Feature feature)
                     _stack.Add(profile.Get(feature) ? 1 : 0);
                 else if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)

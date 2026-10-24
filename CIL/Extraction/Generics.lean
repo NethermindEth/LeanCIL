@@ -163,13 +163,18 @@ def substituteOperand (arguments : List TypeExpr) : RawOperand → Option RawOpe
       parameterTypes := ← site.parameterTypes.mapM (substituteType arguments) }
   | operand => some operand
 
-/-- Only the `struct`, `new()` and `allows ref struct` flags, constraining at most to
-    `ValueType` or `unmanaged`. -/
-private def allowedConstraint (constraint : GenericConstraint) : Bool :=
+/-- Admit value-type constraints and interfaces declared directly by the concrete aggregate.
+    Only the `struct`, `new()` and `allows ref struct` flags are supported. -/
+private def allowedConstraint (layouts : List RawLayout) (argument : TypeExpr)
+    (constraint : GenericConstraint) : Bool :=
   constraint.flags &&& 56 == constraint.flags && constraint.types.all fun type =>
     type == runtimeScope ++ "::System.ValueType" ||
     type == runtimeScope ++ "::System.Runtime.InteropServices.UnmanagedType!" ++ runtimeScope ++
-      "::System.ValueType"
+      "::System.ValueType" || match argument with
+    | .aggregate identity index => match layouts[index]? with
+      | some layout => layout.identity == identity && layout.interfaces.contains type
+      | none => false
+    | _ => false
 
 /-- A closed, non-reference type argument with a known storage. -/
 private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : Bool :=
@@ -182,7 +187,8 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
     (arguments : List TypeExpr) : Option RawMethod := do
   if arguments.length != original.genericParameters.length ||
       !arguments.all (admittedTypeArgument layouts) ||
-      !original.genericParameters.all allowedConstraint then none
+      !(original.genericParameters.zip arguments).all
+        (fun (constraint, argument) => allowedConstraint layouts argument constraint) then none
   else
     let returnType ← substituteType arguments original.returnType
     let parameters ← original.parameters.mapM (substituteType arguments)
