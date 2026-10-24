@@ -518,6 +518,34 @@ theorem feature_steps_evaluate_term (program : CIL.Program) (index : Nat) (profi
     CIL.Safety.invoke program 3 index [] memory = .ok (memory, [.scalar (.i32 1)]) := by
   cil_checked_steps [(show profile.evaluate .avx2 = true from wide)]
 
+-- A fact over every feature is instantiated at each constructor, so it still decides the field test.
+theorem feature_step_evaluate_forall (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
+    (all : ∀ f, body.profile.evaluate f = true) :
+    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+      .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
+  cil_checked_step [all]
+
+theorem feature_steps_evaluate_forall (program : CIL.Program) (index : Nat) (body : CIL.Method)
+    (all : ∀ f, body.profile.evaluate f = false) (code : body.code = [.feature .avx2, .ret])
+    (returns : body.returnsValue = true) (found : program[index]? = some body)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
+    CIL.Safety.run program 3 index 0 [] frame [] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
+  cil_checked_steps [all, code, returns]
+
+-- A global theorem stated through `evaluate` is normalized like a local fact.
+def wideProfile : CIL.FeatureProfile := { avx2 := true }
+
+theorem wideProfile_avx2 : wideProfile.evaluate .avx2 = true := rfl
+
+attribute [irreducible] wideProfile
+
+theorem feature_step_evaluate_global (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
+    (profile : body.profile = wideProfile) :
+    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+      .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
+  cil_checked_step [profile, wideProfile_avx2]
+
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
 @[cil_code] def addBody : CIL.Method :=
   { returnsValue := true, locals := [], code := [.arg 0, .const32 8, .memory (.add 8 true), .pop, .const32 1, .ret] }
@@ -598,6 +626,12 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 #guard_msgs in #print axioms feature_step_evaluate_term
 /-- info: 'Tests.Automation.feature_steps_evaluate_term' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms feature_steps_evaluate_term
+/-- info: 'Tests.Automation.feature_step_evaluate_forall' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_evaluate_forall
+/-- info: 'Tests.Automation.feature_steps_evaluate_forall' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_steps_evaluate_forall
+/-- info: 'Tests.Automation.feature_step_evaluate_global' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_evaluate_global
 /-- info: 'Tests.Automation.add_run' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms add_run
 

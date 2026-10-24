@@ -59,6 +59,10 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
                   let bound : Term := ⟨Syntax.mkNumLit (toString size)⟩
                   let value ← Term.elabTerm (← `(term| ($numeral : Fin $bound))) (some domain)
                   instances := instances.push (mkApp decl.toExpr value)
+          -- A fact over every feature reaches the profile fields only through each constructor.
+          else if domain.isConstOf ``CIL.Feature then
+            for ctor in (← getConstInfoInduct ``CIL.Feature).ctors do
+              instances := instances.push (mkApp decl.toExpr (mkConst ctor))
         for instanceProof in instances do
           let type ← inferType instanceProof
           let (result, _) ← simp type ctx simprocs
@@ -72,9 +76,13 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
           replaceMainGoal [goal]
           normalised := normalised.push (mkIdent name)
     -- A proof term such as `(show p from h)` is normalised like a local fact, without itself as a lemma,
-    -- which would rewrite its own statement to `True`. Global names stay as given: most are unfolds.
+    -- which would rewrite its own statement to `True`. Global names stay as given (most are unfolds),
+    -- except theorems about `evaluate`, which `cil_step` rewrites past.
     for fact in supplied do
-      if fact.raw.isIdent then continue
+      if fact.raw.isIdent then
+        let some name ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw | continue
+        let info ← getConstInfo name
+        unless (info.type.find? (·.isConstOf ``CIL.FeatureProfile.evaluate)).isSome && (← isProp info.type) do continue
       let saved ← saveState
       let some proof ← (try
           let proof ← Term.withoutErrToSorry <| Term.elabTerm fact none
