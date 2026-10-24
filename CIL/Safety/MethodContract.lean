@@ -176,19 +176,6 @@ theorem Confined.read_eq {footprint : List (Reference × Nat)} {before after : M
     exact framed.cells _ old _ (outside i (List.mem_range.mp member))
   simp only [CIL.Safety.read, CIL.Safety.access, form, liveAllocation, framed.allocations _ old, authority, cells]
 
-theorem read_access {m : Memory} {r : Reference} {width alignment : Nat} {bytes : List (BitVec 8)}
-    (h : read m r width alignment = .ok bytes) : access m r width alignment false = .ok () := by
-  unfold CIL.Safety.read at h
-  cases ha : access m r width alignment false with
-  | error fault => simp [ha, Bind.bind, Except.bind] at h
-  | ok value => rfl
-
-/-- Any reference a well-formed memory admits names an allocation below its watermark. -/
-theorem Memory.WellFormed.access_bound {m : Memory} {r : Reference} {width alignment : Nat} {writing : Bool}
-    (formed : m.WellFormed) (h : access m r width alignment writing = .ok ()) : r.allocation < m.nextIdentity := by
-  obtain ⟨_, ready⟩ := access_requirements h
-  exact (formed.1 _ _ ready.present).1
-
 /-- A word disjoint from `r` is outside the one-word footprint at `r`. -/
 theorem WordsDisjoint.outside {r q : Reference} (disjoint : WordsDisjoint r q) :
     ∀ i < 8, Outside [(r, 8)] q.allocation (q.offset + i) := by

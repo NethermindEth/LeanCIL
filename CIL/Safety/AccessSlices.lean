@@ -38,6 +38,12 @@ theorem access_requirements {m : Memory} {r : Reference} {width alignment : Nat}
       · simp at h
     · simp at h
 
+/-- Any reference a well-formed memory admits names an allocation below its watermark. -/
+theorem Memory.WellFormed.access_bound {m : Memory} {r : Reference} {width alignment : Nat} {writing : Bool}
+    (formed : m.WellFormed) (h : access m r width alignment writing = .ok ()) : r.allocation < m.nextIdentity := by
+  obtain ⟨_, ready⟩ := access_requirements h
+  exact (formed.1 _ _ ready.present).1
+
 /-- A nonempty subinterval of an admitted access is itself accessible with
     byte alignment. Formation, GC layout and API authority are retained. -/
 theorem AccessRequirements.slice {m : Memory} {r : Reference} {width alignment : Nat}
@@ -66,12 +72,7 @@ theorem read_slice {m : Memory} {r : Reference} {width alignment : Nat} {bytes :
     (start count : Nat) (nonempty : 0 < count) (within : start + count ≤ width) :
     read m { r with offset := r.offset + start } count 1 =
       .ok ((List.range count).map fun i => (m.cells r.allocation (r.offset + start + i)).bits) := by
-  have accessOK : access m r width alignment false = .ok () := by
-    unfold read at h
-    cases ha : access m r width alignment false with
-    | error fault => simp [ha, Bind.bind, Except.bind] at h
-    | ok value => cases value; rfl
-  obtain ⟨allocation, ready⟩ := access_requirements accessOK
+  obtain ⟨allocation, ready⟩ := access_requirements (read_access h)
   apply read_snapshot (ready.slice wellFormed start count nonempty within)
   intro i bound
   have initialized := read_requires_initialization _ _ _ _ _ h (start + i) (List.mem_range.mpr (by omega))
@@ -156,6 +157,7 @@ theorem read_append {m : Memory} {r : Reference} {left right : Nat} {writing : B
 #print axioms read_slice_bytes
 #print axioms read_append
 #print axioms access_requirements
+#print axioms Memory.WellFormed.access_bound
 #print axioms AccessRequirements.slice
 #print axioms read_slice
 #print axioms AccessRequirements.add_slice
