@@ -478,7 +478,7 @@ theorem add_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (
       .ok (.next 1 stack frame memory) ∧ stack = [.reference (.address result)] := by
   refine ⟨?_, ?_, ?_⟩
   rotate_left
-  · cil_checked_step [moved, referenceAt]
+  · cil_checked_step [moved]
   · rfl
 
 -- An unknown scalar keeps its guard: the equation exposes it rather than assuming it away.
@@ -489,6 +489,69 @@ example (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory
         let cast ← bitcastValue (.aggregate 32) .vector256 value
         return .next 1 [.scalar cast] frame memory := by
   simp only [cil_step]
+
+-- `cil_step` reduces the pushed `evaluate` to the field; a fact stated through `evaluate` still decides the test.
+theorem feature_step_evaluate_fact (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (wide : profile.evaluate .avx2 = true) (found : program[index]? = some (featureTestBody profile))
+    (memory : CIL.Safety.Memory) :
+    CIL.Safety.invoke program 3 index [] memory = .ok (memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps [wide]
+
+theorem feature_step_evaluate_free_body (program : CIL.Program) (index : Nat) (body : CIL.Method)
+    (wide : body.profile.evaluate .avx2 = false) (code : body.code = [.feature .avx2, .ret])
+    (returns : body.returnsValue = true) (found : program[index]? = some body)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
+    CIL.Safety.run program 3 index 0 [] frame [] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
+  cil_checked_steps [wide, code, returns]
+
+-- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
+@[cil_code] def addBody : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.arg 0, .const32 8, .memory (.add 8 true), .pop, .const32 1, .ret] }
+
+open CIL.Safety in
+theorem add_run (memory : Memory) (source moved : Reference)
+    (formed : form memory source = .ok source)
+    (shifted : add memory source 8 (BitVec.ofInt 64 (BitVec.ofInt 32 8).toInt) = .ok moved) :
+    invoke [addBody] 6 0 [.reference (.address source)] memory = .ok (memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps [checkedValue, formValue, checkedAt, formed, shifted]
+
+-- A missing memory fact reports the per-shape goal, not the legacy `staticInstruction` match.
+open CIL.Safety in
+/--
+error: Tactic `rfl` failed: The left-hand side
+  match
+    match
+      match form memory reference with
+      | Except.error err => Except.error (ExecutionFault.memory err (ManagedReference.address reference) 0)
+      | Except.ok v => Except.ok v with
+    | Except.error err => Except.error err
+    | Except.ok v => Except.ok (Value.reference (ManagedReference.address v)) with
+  | Except.error err => Except.error err
+  | Except.ok v => Except.ok (FrameAction.next 1 [v] frame memory)
+is not definitionally equal to the right-hand side
+  Except.ok (FrameAction.next 1 [Value.reference (ManagedReference.address reference)] frame memory)
+
+body : CIL.Method
+frame : Frame
+memory : Memory
+reference : Reference
+⊢ (match
+      match
+        match form memory reference with
+        | Except.error err => Except.error (ExecutionFault.memory err (ManagedReference.address reference) 0)
+        | Except.ok v => Except.ok v with
+      | Except.error err => Except.error err
+      | Except.ok v => Except.ok (Value.reference (ManagedReference.address v)) with
+    | Except.error err => Except.error err
+    | Except.ok v => Except.ok (FrameAction.next 1 [v] frame memory)) =
+    Except.ok (FrameAction.next 1 [Value.reference (ManagedReference.address reference)] frame memory)
+-/
+#guard_msgs in
+example (body : CIL.Method) (frame : Frame) (memory : Memory) (reference : Reference) :
+    step body (.memory .asRef) 0 [] frame [.reference (.address reference)] memory =
+      .ok (.next 1 [.reference (.address reference)] frame memory) := by
+  cil_checked_step []
 
 open CIL.Safety in
 theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : Memory)
@@ -514,5 +577,11 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 #guard_msgs in #print axioms load128_fact_stack
 /-- info: 'Tests.Automation.add_fact_stack' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms add_fact_stack
+/-- info: 'Tests.Automation.feature_step_evaluate_fact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_evaluate_fact
+/-- info: 'Tests.Automation.feature_step_evaluate_free_body' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_evaluate_free_body
+/-- info: 'Tests.Automation.add_run' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms add_run
 
 end Tests.Automation

@@ -39,8 +39,9 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
     let supplied ← facts.filterM fun fact => return !(← isLocal fact)
     let mut normalised : Array Term := #[]
     if !locals.isEmpty then
+      -- `cil_step` reduces a pushed `evaluate` to its profile field, so facts must land there too.
       let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat,
-        $[$supplied:term],*])
+        CIL.FeatureProfile.evaluate, $[$supplied:term],*])
       let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
       for fact in locals do
         let some decl := (← getLCtx).findFromUserName? fact.raw.getId | continue
@@ -102,30 +103,51 @@ macro "cil_stack_cleanup" : tactic =>
     List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
     List.nil_append, List.cons_append, List.append_nil])
 
-macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
-  `(tactic| first
-    | (simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
+macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
        try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
-         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
-         Pure.pure, Except.pure, $[$facts:term],*]
-       all_goals ((repeat constructor) <;> rfl))
-    | (fail_if_success simp only [cil_step]
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
+         Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
+
+macro "cil_checked_step_by_unfolding " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       fail_if_success simp only [cil_step]
        simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
         CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
         $[$facts:term],*] <;> (repeat constructor) <;> rfl))
 
--- A fact at the `memoryInstruction` level fails once a per-shape memory equation rewrites past it,
--- so only then is the step retried through `step_memory_eq`.
-macro "cil_checked_memory_step " "[" facts:term,* "]" : tactic =>
+macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| first
-    | cil_checked_step_equations [$[$facts:term],*]
-    | (fail_if_success fail_if_success simp only [cil_step, -CIL.Safety.step_memory_eq]
+    | cil_checked_step_by_equations [$[$facts:term],*]
+    | cil_checked_step_by_unfolding [$[$facts:term],*])
+
+-- A fact at the `memoryInstruction` level fails once a per-shape memory equation rewrites past it,
+-- so the step is retried through `step_memory_eq` only for such facts.
+macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       fail_if_success fail_if_success simp only [cil_step, -CIL.Safety.step_memory_eq]
        rw [CIL.Safety.step_memory_eq]
        try simp only [cil_guard]
        try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
-         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
-         Pure.pure, Except.pure, $[$facts:term],*]
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
+         Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
+
+open Lean Elab Tactic Meta in
+/-- Whether a supplied fact is, or is stated about, `memoryInstruction` or `staticInstruction`;
+    a compound term is assumed to be. -/
+def mentionsMemoryInstruction (facts : Array Term) : TacticM Bool := withMainContext do
+  let legacy := fun (e : Expr) => (e.find? fun sub =>
+    sub.isConstOf ``CIL.Safety.memoryInstruction || sub.isConstOf ``CIL.Safety.staticInstruction).isSome
+  facts.anyM fun fact => do
+    unless fact.raw.isIdent do return true
+    if let some decl := (← getLCtx).findFromUserName? fact.raw.getId then
+      return legacy (← instantiateMVars decl.type)
+    let some name ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw | return true
+    let info ← getConstInfo name
+    return name == ``CIL.Safety.memoryInstruction || name == ``CIL.Safety.staticInstruction || legacy info.type
 
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
@@ -181,7 +203,20 @@ elab_rules : tactic
       else if operation == ``CIL.Op.intrinsic then
         `(tactic| cil_checked_intrinsic [$facts:term,*])
       else if operation == ``CIL.Op.memory then
-        `(tactic| cil_checked_memory_step [$facts:term,*])
+        let saved ← saveState
+        -- Without recovery, `all_goals` throws its error instead of logging it and aborting.
+        let attempt := fun (tactic : Syntax) => do
+          try withoutRecover (evalTactic tactic); return none
+          catch error => saved.restore; return some error
+        let some equationError ← attempt (← `(tactic| cil_checked_step_by_equations [$facts:term,*])) | return
+        let progressed := (← attempt (← `(tactic| simp only [cil_step]))).isNone
+        saved.restore
+        let unfolding ← `(tactic| cil_checked_step_by_unfolding [$facts:term,*])
+        let some unfoldingError ← (if progressed then pure (some equationError) else attempt unfolding) | return
+        if ← mentionsMemoryInstruction facts.getElems then
+          if (← attempt (← `(tactic| cil_checked_memory_retry [$facts:term,*]))).isNone then return
+        -- Report the per-shape goal, where facts belong, rather than the legacy retry's.
+        throw unfoldingError
       else
         `(tactic| cil_checked_step_equations [$facts:term,*])
     evalTactic strategy

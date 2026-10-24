@@ -88,10 +88,13 @@ Each `.memory` operation has one equation per operand shape in
 `formValue`, `loadValue`, `storeValue` or `add`, so state facts at that level
 rather than passing `staticInstruction` or `memoryInstruction` to unfold. Only
 the static-field operations still go through `staticInstruction`. A fact stated
-at the `memoryInstruction` level is still accepted, through a slower fallback.
-A `.feature f` step pushes `body.profile.evaluate f`. `cil_step` reduces that
-expression to the profile field. It unfolds a method definition or literal only
-as far as its profile, so a fact such as `profile.avx2 = true` decides the test.
+at the `memoryInstruction` level is still accepted, through a slower fallback
+that runs only when such a fact is supplied; a failed step reports the per-shape
+goal. The step simp set unfolds `referenceAt`, so pointer arithmetic needs no
+extra fact. A `.feature f` step pushes `body.profile.evaluate f`. `cil_step`
+reduces that expression to the profile field. It unfolds a method definition or
+literal only as far as its profile, so a fact such as `profile.avx2 = true`
+decides the test; a fact stated through `evaluate` is normalized to that form.
 
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
 by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
