@@ -1,4 +1,5 @@
 import CIL.Safety.SnapshotMemory
+import CIL.Safety.SpanViews
 import CIL.Semantics
 
 /-!
@@ -21,6 +22,10 @@ inductive Value where
   | scalar (value : CIL.Value)
   | reference (value : ManagedReference)
   | span (reference : ManagedReference) (length : Nat)
+  /-- A typed primitive buffer view, including whether writes through it are permitted. -/
+  | bufferSpan (view : SpanView)
+  /-- A reference obtained through a readonly view; scalar loads preserve this restriction. -/
+  | readOnlyReference (reference : ManagedReference)
   deriving DecidableEq, Repr
 
 /-- Why the checked interpreter stopped. -/
@@ -304,6 +309,40 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     let _ ← formValue memory r
     return (memory, rest)
   -- Spans
+  | .spanFromReference width writable, .scalar (.i32 length) :: .reference reference :: rest =>
+    if length.toInt < 0 then .error (.thrown "System.ArgumentOutOfRangeException") else pure ()
+    let view : SpanView := ⟨reference, length.toNat, width, writable⟩
+    let _ ← checkedAt reference (length.toNat * width) (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
+  | .spanFromReference width false,
+      .scalar (.i32 length) :: .readOnlyReference reference :: rest =>
+    if length.toInt < 0 then .error (.thrown "System.ArgumentOutOfRangeException") else pure ()
+    let view : SpanView := ⟨reference, length.toNat, width, false⟩
+    let _ ← checkedAt reference (length.toNat * width) (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
+  | .spanReadOnly, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    return (memory, .bufferSpan view.asReadOnly :: rest)
+  | .spanSlice true, .scalar (.i32 length) :: .scalar (.i32 start) :: .bufferSpan view :: rest =>
+    if start.toNat ≤ view.length && length.toNat ≤ view.length - start.toNat then pure ()
+      else .error (.thrown "System.ArgumentOutOfRangeException")
+    let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat length.toNat)
+    return (memory, .bufferSpan sliced :: rest)
+  | .spanSlice false, .scalar (.i32 start) :: .bufferSpan view :: rest =>
+    if start.toNat ≤ view.length then pure ()
+      else .error (.thrown "System.ArgumentOutOfRangeException")
+    let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat (view.length - start.toNat))
+    return (memory, .bufferSpan sliced :: rest)
+  | .spanItem width, .scalar (.i32 index) :: .bufferSpan view :: rest =>
+    if width == view.width then pure () else .error .invalidState
+    if index.toNat < view.length then pure ()
+      else .error (.thrown "System.IndexOutOfRangeException")
+    let reference ← checkedAt view.reference width (view.element memory index.toNat)
+    return (memory, (if view.writable then .reference (.address reference)
+      else .readOnlyReference (.address reference)) :: rest)
+  | .spanLength, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    return (memory, .scalar (.i32 (BitVec.ofNat 32 view.length)) :: rest)
   | .spanReference, .span r _ :: rest =>
     return (memory, (← formValue memory r) :: rest)
   -- Unsigned comparison: a negative index is out of range, as in `ReadOnlySpan<T>.this[int]`.
@@ -343,7 +382,8 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     else
       let bytes ← checkedAt source size (read m src size ordinaryAccessAlignment)
       return (← checkedAt destination size (write m dst bytes ordinaryAccessAlignment), rest)
-  | .loadScalar width signed, .reference r :: rest =>
+  | .loadScalar width signed, .reference r :: rest
+  | .loadScalar width signed, .readOnlyReference r :: rest =>
     if width = 1 || width = 2 || width = 4 || width = 8 then
       return (m, .scalar (← loadValue m r width signed) :: rest)
     else .error (.unsupported "Scalar memory width")
@@ -355,6 +395,8 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     let address ← referenceAt r
     return (← checkedAt r width
       (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
+  | .storeScalar width, _ :: .readOnlyReference r :: _ =>
+    .error (.memory .unwritable r width)
   | .loadAggregate size, .reference r :: rest =>
     if let .error .uninitialized := dereference m r size ordinaryAccessAlignment then
       return (m, .scalar (← loadSnapshot m r (.aggregate size)) :: rest)
@@ -444,9 +486,11 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .memory operation, _ => memoryInstruction operation stack m
   | .const32 bits, _ => return (m, .scalar (.i32 bits) :: stack)
   | .const64 bits, _ => return (m, .scalar (.i64 bits) :: stack)
-  | .load64, .reference r :: rest => return (m, .scalar (← loadValue m r 8) :: rest)
+  | .load64, .reference r :: rest | .load64, .readOnlyReference r :: rest =>
+    return (m, .scalar (← loadValue m r 8) :: rest)
   | .store64, .scalar (.i64 bits) :: .reference r :: rest =>
     return (← storeValue m r (.i64 bits), rest)
+  | .store64, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r 8)
   -- Vector lanes
   | .lane index, .reference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 8 (BitVec.ofNat 64 index.val))
@@ -504,6 +548,12 @@ def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
       | .reference reference => formValue m reference
       | .scalar value => if value.initialized then .ok (.scalar value) else .error .invalidState
       | .span reference length => .ok (.span reference length)
+      | .bufferSpan view => do
+        let _ ← checkedAt view.reference 0 (view.validate m)
+        pure (.bufferSpan view)
+      | .readOnlyReference reference => do
+        let _ ← formValue m reference
+        pure (.readOnlyReference reference)
     block returns args rest (value :: stack) m
   | .ret none :: _ =>
     if stack.length = (if returns then 1 else 0) then return (m, stack)

@@ -45,7 +45,9 @@ def SpanView.slice (view : SpanView) (memory : Memory) (start length : Nat) : Ch
   let reference := match view.reference with
     | .null => .null
     | .address reference => .address { reference with offset := reference.offset + start * view.width }
-  return { view with reference, length }
+  let result := { view with reference, length }
+  result.validate memory
+  return result
 
 /-- An element address retains allocation provenance and needs no read or write authority. -/
 def SpanView.element (view : SpanView) (memory : Memory) (index : Nat) : Checked Reference := do

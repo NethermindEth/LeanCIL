@@ -235,8 +235,6 @@ def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted :
       return match emitted with
         | .feature actual => instruction.opcode == 40 && feature == actual
         | _ => false
-  -- A span local has no storage; outside a receiver fold it has no translation.
-  if spanLocalOp raw.locals instruction then return false
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036, 10, 11, 12, 13, 19, 65038] then
     let some index := localIndex instruction | return false
     let narrow := match raw.locals[index]? with
@@ -252,11 +250,14 @@ def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted :
   if instruction.opcode ∈ [18, 65037] then
     return match localIndex instruction, emitted with
       | some index, .localAddr actual => index == actual
+      | some index, .local actual none => index == actual && spanLocalOp raw.locals instruction
       | _, _ => false
   -- Argument homes are appended after all raw locals. Their precise mapping is
   -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
   if instruction.opcode ∈ [15, 65034] then
-    return match emitted with | .localAddr index => raw.locals.length <= index | _ => false
+    return match emitted with
+      | .localAddr index | .local index none => raw.locals.length <= index
+      | _ => false
   if instruction.opcode ∈ [16, 65035] then
     return match emitted with | .setLocal index none => raw.locals.length <= index | _ => false
   -- A native-width wrapper is looked through only for `and`, `or`, `xor`, `ceq` and

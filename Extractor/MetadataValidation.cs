@@ -149,7 +149,7 @@ internal static class MetadataValidation
     {
         if (type is ByReferenceType byRef)
         {
-            if (byRef.ElementType is ByReferenceType)
+            if (byRef.ElementType is ByReferenceType || Spans.Width(byRef.ElementType) is not null)
                 throw new InvalidDataException("Unsupported nested managed reference");
             Type(byRef.ElementType, module, architecture: architecture);
             return;
@@ -160,8 +160,7 @@ internal static class MetadataValidation
             ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char") &&
             !(type is GenericInstanceType && type.FullName.StartsWith("System.Runtime.Intrinsics.Vector", StringComparison.Ordinal) && RuntimeModels.SupportedType(type)) &&
-            // Spans are admitted only as by-value returns and folded receivers; elsewhere their reference field would sit in unmodelled storage.
-            !((returns || span) && Spans.Width(type) is not null))
+            Spans.Width(type) is null)
             throw new InvalidDataException($"Unsupported type: {type.FullName}");
         RuntimeModels.ValidateTypeIdentity(type, module, architecture);
     }

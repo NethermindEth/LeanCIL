@@ -282,6 +282,7 @@ theorem opaque128_store_memory_identity (memory result : Memory) (before : Optio
     | _ => cases stored
   | reference _ => cases stored
   | span _ _ => cases stored
+  | bufferSpan _ | readOnlyReference _ => cases stored
 
 theorem opaque128_init_zero (memory : Memory) :
     makeOpaque128 (.v128 0) memory = .ok (.opaque128 (some (.known 0)), [], memory) := rfl

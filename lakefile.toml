@@ -117,6 +117,12 @@ name = "Tests.ThrowEvidence"
 name = "Tests.SpanEvidence"
 
 [[lean_lib]]
+name = "Tests.SpanViews"
+
+[[lean_lib]]
+name = "Tests.MemorySpanExecution"
+
+[[lean_lib]]
 name = "Tests.StaticValueEvidence"
 
 [[lean_lib]]

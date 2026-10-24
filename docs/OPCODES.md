@@ -105,7 +105,16 @@ In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof
 
 ### Static span tables
 
-A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda` rules, packing 1, 2, 4 or 8). The span covers the whole field and has `size / sizeof(T)` elements, for any primitive integer `T`. A caller reads it as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with `System.IndexOutOfRangeException` at the call when the index is out of range, compared unsigned as in .NET. `MemoryMarshal.GetReference` also accepts these spans. Any other use of the span local, an index that is not a single load or constant, a branch to the `ldloca`, span parameters and byref spans remain rejected.
+Primitive integer `Span<T>` and `ReadOnlySpan<T>` also have typed, allocation-relative storage
+for by-value parameters and reusable locals. Their length, indexing, slicing and readonly
+conversion retain element width and allocation lifetime. `MemoryMarshal.CreateSpan` and
+`CreateReadOnlySpan` form views over existing storage; they do not grant access authority or
+initialize bytes. Readonly element references reject stores, while other writable aliases
+can still update the same backing memory. Slicing checks signed input ranges and permits an
+empty view at the allocation end. Byref span parameters and general ref structs remain outside
+this support.
+
+A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda` rules, packing 1, 2, 4 or 8). The span covers the whole field and has `size / sizeof(T)` elements, for any primitive integer `T`. A caller reads it as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with `System.IndexOutOfRangeException` at the call when the index is out of range, compared unsigned as in .NET. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a single-use receiver with a single-load or constant index; other supported uses retain typed span storage. Branches into a folded receiver and byref spans remain rejected.
 
 ### Static readonly values
 

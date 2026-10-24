@@ -4,15 +4,16 @@ using Mono.Cecil.Cil;
 namespace Nethermind.LeanCIL;
 
 // Folds `stloc s; ldloca s` over a primitive ReadOnlySpan<T> local so the span stays on the stack
-// as the receiver of the next span call. Mirrors CIL.Extraction.receiverFold; Lean rejects other uses of s.
+// as the receiver of the next span call. Reused locals retain their typed span storage.
 internal static class Spans
 {
-    // Locals holds the folded span locals; an unused span local stays an unsupported type.
+    // Locals records the single-use receivers eliminated by folding.
     internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior, HashSet<int> Locals);
 
-    // Element width of ReadOnlySpan<T> for a primitive integer T; scopes are checked by ValidateTypeIdentity.
+    // Primitive span element width; scopes are checked by ValidateTypeIdentity.
     internal static int? Width(TypeReference type) =>
-        type is GenericInstanceType { ElementType.FullName: "System.ReadOnlySpan`1" } span && span.GenericArguments.Count == 1
+        type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
+            span.GenericArguments.Count == 1
             ? span.GenericArguments[0].FullName switch
             {
                 "System.Byte" or "System.SByte" => 1,
@@ -22,6 +23,9 @@ internal static class Spans
                 _ => null
             }
             : null;
+
+    internal static bool Writable(TypeReference type) =>
+        type is GenericInstanceType { ElementType.FullName: "System.Span`1" };
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Analysis> cache = new();
 
@@ -44,10 +48,14 @@ internal static class Spans
             if (!(Store(i) || Address(i) || Load(i)) || Width(method.Body.Variables[FeatureConstants.Local(i)].VariableType) is null ||
                 analysis.Operands.Contains(i))
                 continue;
+            var local = FeatureConstants.Local(i);
+            if (method.Body.Instructions.Count(other => (Store(other) || Address(other) || Load(other)) &&
+                    FeatureConstants.Local(other) == local) != 2)
+                continue;
             // The receiver is read once: by get_Length, or by get_Item after one index push.
             if (!Store(i) || i.Next is not { } address || !Address(address) || FeatureConstants.Local(address) != FeatureConstants.Local(i) ||
                 !(Member(address.Next, "get_Length") || (Push(address.Next) && Member(address.Next!.Next, "get_Item"))))
-                throw new InvalidDataException($"Unsupported span local use: {i} (expected stloc; ldloca; [index;] get_Item or get_Length)");
+                continue;
             analysis.Operands.Add(i);
             analysis.Operands.Add(address);
             analysis.Interior.Add(address);

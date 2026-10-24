@@ -217,7 +217,10 @@ def foldRolesFrom (locals : List TypeExpr) :
 
 /-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
-  foldRolesFrom locals [] code
+  let singleUse := locals.zipIdx.map fun (type, index) =>
+    if (code.filter fun instruction => localIndex instruction == some index).length == 2
+      then type else .void
+  foldRolesFrom singleUse [] code
 
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
 def foldEntry (roles : List (Option FoldRole)) (target : Nat) : Bool :=

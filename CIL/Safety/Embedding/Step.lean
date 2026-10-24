@@ -413,6 +413,8 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
         cases rest <;> fallback_vacuous
       | span reference length =>
         cases rest <;> fallback_vacuous
+      | bufferSpan _ | readOnlyReference _ =>
+        cases rest <;> fallback_vacuous
 
 theorem step_relabel_unsupported (description : String) :
     StepRelabel (.unsupported description) := by
@@ -772,6 +774,8 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
       | reference reference =>
         cases rest <;> fallback_raise_vacuous
       | span reference length =>
+        cases rest <;> fallback_raise_vacuous
+      | bufferSpan _ | readOnlyReference _ =>
         cases rest <;> fallback_raise_vacuous
 
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/

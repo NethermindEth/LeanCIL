@@ -59,6 +59,8 @@ def narrowValue (kind : Option NarrowKind) (value : Value) : Option Value :=
 inductive LocalKind where
   | narrow (kind : NarrowKind)
   | aggregate (size : Fin (2^64))
+  /-- A span root stores provenance rather than serializing a managed pointer into bytes. -/
+  | span (width : Nat) (writable : Bool)
   | byte | word32 | word64 | vector128 | vector256 | vector512 | reference
   deriving DecidableEq, Repr
 
