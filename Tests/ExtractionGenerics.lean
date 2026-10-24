@@ -25,7 +25,9 @@ example : instantiateMethod [] raw [word] ≠ some { closed with code := [⟨0, 
 example : instantiateMethod [] raw [word] ≠ some { closed with
     code := [⟨0, 2, .none⟩, ⟨1, 65045, .type word⟩, ⟨7, 43, .target 1⟩, ⟨9, 42, .none⟩] } := by decide
 example : typeStorage [] (.atom "attacker" "System.UInt64") = none := by decide
-example : typeStorage [⟨"A", false, 0, 0, [], false⟩] (.aggregate "B" 0) = none := by decide
+example : typeStorage [{
+    identity := "A", explicit := false, packing := 0, declaredSize := 0, fields := []
+  }] (.aggregate "B" 0) = none := by decide
 example : substituteType [word] (.apply (.constructor "scope" "Box`1") (.parameter 0)) =
     some (.apply (.constructor "scope" "Box`1") word) := by decide
 end Tests.ExtractionGenerics
