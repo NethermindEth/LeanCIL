@@ -160,6 +160,10 @@ contracts, and proves that an unjustified stronger postcondition, a weaker
 precondition, a smaller footprint and a changed exception type each fail both the
 refinement premises and the derived contract on a concrete input.
 
+`Tests.InvocationCertificates` builds invocation certificates from a computed
+invocation and from a computed run, keeps them through a certified contract and
+its refinement, and refutes a contract from the returned values of a computed run.
+
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
 `Confined`. `Tests.BufferContents` checks typed buffer contents: fills and
 in-place transforms of any length, unchanged neighbouring bytes and sibling
@@ -174,7 +178,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

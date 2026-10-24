@@ -436,6 +436,21 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
   rw [Nat.add_comm] at down
   exact Except.ok.inj (up.symm.trans down)
 
+/-- One computed observation of a successful invocation fixes that observation at every fuel,
+    so a refutation compares only the observed part, such as the returned values. -/
+theorem invoke_observation_unique {α : Type} {program : CIL.Program}
+    {method fuel witnessFuel : Nat}
+    {args : List Value} {memory : Memory} (observe : Memory × List Value → α)
+    {outcome : Memory × List Value} {observed : α}
+    (witness : (invoke program witnessFuel method args memory).map observe = .ok observed)
+    (normal : invoke program fuel method args memory = .ok outcome) :
+    observe outcome = observed := by
+  cases execution : invoke program witnessFuel method args memory with
+  | error fault => simp [execution, Except.map] at witness
+  | ok actual =>
+    rw [invoke_ok_unique normal execution]
+    simpa [execution, Except.map] using witness
+
 theorem Within.refl (entry : Reference × Nat) : Within entry entry :=
   ⟨rfl, Nat.le_refl _, Nat.le_refl _⟩
 
@@ -512,6 +527,7 @@ theorem MethodContract.Holds.weaken {Input Output : Type}
 #print axioms call_frame_invariants
 #print axioms run_call_of_contract_formed
 #print axioms invoke_ok_unique
+#print axioms invoke_observation_unique
 
 /-- Opens a contract goal: tidies the stack and, for an `invoke` goal, enters the frame via
     `invoke_exists_of_run` so stepping can start at pc 0. Used by `cil_contract_steps`. -/

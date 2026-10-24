@@ -306,7 +306,19 @@ stores and rejects a wrong value, address or memory state.
 either callee. `Tests/MethodContract.cs` verifies that caller proof unedited
 against a build whose helpers are reimplemented and renumbered, and refutes
 each contract with a concrete run on builds with an arithmetic or an aliasing
-bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
+bug; `invoke_ok_unique` ties a computed run to the contract's existential one,
+and `invoke_observation_unique` does so for one observation of it, such as the
+returned values, so the refutation never compares memories.
+
+A contract whose precondition implies well-formed memory and a valid static
+world can also keep the `InvocationCertificate` of each call:
+`MethodContract.Holds.certified` turns `Holds` into `MethodContract.Certified`,
+whose clause adds the certificate with its visited-state and returned-state
+invariants; `Certified.holds` and `Certified.weaken` return to `Holds` and
+refinement. `InvocationCertificate.of_invoke` certifies any successful `invoke`
+from those two premises, and `InvocationCertificate.of_run` certifies a run of
+the frame that checked arguments enter. `Tests/InvocationCertificates.lean`
+uses each of them.
 
 ## Describe buffer contents
 
