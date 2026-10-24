@@ -48,6 +48,6 @@ try
         if (Manifest(Snapshot()) != JsonSerializer.Serialize(ConsumerModuleParts(path)))
             throw new Exception("Snapshot changed case-insensitive part resolution.");
     }
-    Console.WriteLine("Consumer artifact snapshots preserve manifests and detect changed, removed and added artifacts.");
+    Console.WriteLine("PASS consumer snapshots preserve manifests and detect changed, removed and added artifacts");
 }
 finally { Directory.Delete(root, true); }
