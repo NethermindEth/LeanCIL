@@ -1,5 +1,12 @@
 import CIL.SIMD.EvaluationLemmas
 
+/-!
+# 256-bit intrinsic evaluation lemmas
+
+`evalIntrinsic` on concrete 256-bit operations, as `rfl` simp lemmas, and bitwise
+operations distributed over `pack256` lanes.
+-/
+
 open CIL
 
 namespace CIL.Vector

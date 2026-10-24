@@ -157,4 +157,4 @@ import CIL.Safety.ExecutionEquivalence
 import CIL.Interface.Closure
 import CIL.Safety.StaticLinking
 import CIL.Interface.FullTransfer
-import CIL.SIMD.DivisionLemmas
+import CIL.SIMD.UnspecifiedLanes

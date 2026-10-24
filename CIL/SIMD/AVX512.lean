@@ -1,5 +1,11 @@
 import CIL.SIMD.Vector
 
+/-!
+# AVX-512
+
+Lane alignment and three-input bitwise logic on 256-bit vectors (AVX-512F with VL).
+-/
+
 namespace CIL.Vector
 
 /-- VALIGNQ's immediate is masked to the lane-count minus one. -/

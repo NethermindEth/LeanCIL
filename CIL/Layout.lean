@@ -1,5 +1,13 @@
 import Std
 
+/-!
+# Aggregate layouts
+
+The byte layout of a value type as the extractor admits it: a size and the offset and
+width of each field. `AggregateLayout.Valid` is the well-formedness condition that
+`LayoutsValid` requires of every computed layout.
+-/
+
 namespace CIL
 
 /-- A reference-free field admitted by the initial extractor. Offsets are bytes,
@@ -10,11 +18,14 @@ structure FieldLayout where
   aggregate : Bool := false
   deriving DecidableEq, Repr
 
+/-- The byte size of a value type and its fields. -/
 structure AggregateLayout where
   size : Nat
   fields : List FieldLayout
   deriving DecidableEq, Repr
 
+/-- A nonempty layout smaller than `2^64` bytes in which every field lies inside it; a scalar
+    field is 1, 2, 4, 8, 16 or 32 bytes wide and a nested aggregate is nonempty. -/
 def AggregateLayout.Valid (layout : AggregateLayout) : Prop :=
   0 < layout.size ∧ layout.size < 2^64 ∧
   ∀ field ∈ layout.fields,

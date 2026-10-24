@@ -1,5 +1,14 @@
 import CIL.Semantics
 
+/-!
+# Mixed-width native operands
+
+Binary instructions whose operands are an `i32` and a native-width `i64`, as CoreCLR
+accepts them. The `i32` operand is widened the way the runtime widens it, then the
+instruction runs through the ordinary `step`, `divideValues` or `checkedValues`, so the
+mixed path adds no arithmetic of its own. The checked interpreter dispatches here.
+-/
+
 namespace CIL
 
 /-- Only mixed integer arithmetic, comparisons and branches may use this path.
@@ -18,6 +27,8 @@ def widenNativeOperand (op : Op) (bits : W32) : W64 :=
   | .checkedArithmetic _ false => bits.zeroExtend 64
   | _ => bits.signExtend 64
 
+/-- Runs a mixed `i32`/`i64` binary instruction at `pc`: the next pc and the values it
+    pushes, or the arithmetic fault. Any other operand pair is `invalidOperands`. -/
 def nativeBinaryValues (op : Op) (pc : Nat) (x y : Value) :
     Except ArithmeticFault (Nat × List Value) := do
   let (x, y) ← match x, y with
