@@ -1,13 +1,22 @@
 import CIL.Safety.ArgumentHomeValues
 import CIL.Safety.ByteRoundTrip
 
+/-!
+# Aggregate homes
+
+Loads, stores and allocation of by-value struct (`.aggregate`) storage. An aggregate home
+holds the struct's bytes verbatim, with no SIMD encoding. These lemmas back the stepping
+lemmas for aggregate locals and parameters in `AggregateLocals`.
+-/
+
 namespace CIL.Safety
 
 /-- Aggregate homes store exactly the supplied bytes, without a SIMD encoding. -/
 theorem load_local_aggregate_of_read {memory : Memory} {reference : Reference}
     {size : Fin (2^64)} {bytes : List (BitVec 8)}
     (loaded : read memory reference size 1 = .ok bytes) :
-    loadLocal memory (.bytes (.aggregate size) reference) = .ok (.scalar (.aggregate bytes)) := by
+    loadLocal memory (.bytes (.aggregate size) reference) =
+      .ok (.scalar (.aggregate bytes)) := by
   exact loadLocal_of_read loaded
 
 /-- Full-width checked aggregate stores need write access, not initialized bytes.
@@ -29,8 +38,9 @@ theorem store_local_aggregate {memory : Memory} {reference : Reference}
     write_allocations _ _ _ _ _ written⟩
   have encoded : numberBytes (byteNumber bytes) size = bytes := by
     rw [← length, numberBytes_byteNumber]
-  simp [storeLocal, Value.hasUnspecified, CIL.Value.hasUnspecified, localNumber, localWidth, length, encoded, written, checkedAt,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp [storeLocal, Value.hasUnspecified, CIL.Value.hasUnspecified, localNumber, localWidth,
+    length, encoded, written, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+    Except.pure]
 
 /-- Fresh aggregate storage is initialized, readable and writable at its exact
     width, and preserves every older allocation, cell and permission. -/
@@ -48,7 +58,8 @@ theorem allocate_initialized_aggregate (memory : Memory) (activation : Nat)
   obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds (alignment := 1)
     memory activation size wellFormed size.isLt (by decide)
   have ready := allocateHome_write_access _ _ _ _ _ home
-  obtain ⟨result, written, stored, loaded, _, _⟩ := store_local_aggregate size bytes length ready.access
+  obtain ⟨result, written, stored, loaded, _, _⟩ :=
+    store_local_aggregate size bytes length ready.access
   have created : makeLocal activation (.aggregate size) (.aggregate bytes) memory =
       .ok (.bytes (.aggregate size) reference, [reference.allocation], result) := by
     simp [makeLocal, localWidth, localAlignment, home, stored,

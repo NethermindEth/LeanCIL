@@ -1,8 +1,19 @@
 import CIL.Safety.AccessRequirements
 import CIL.Safety.StaticReferences
 
+/-!
+# Access checks and their slices
+
+`access_requirements` is the converse of `AccessRequirements.access`: a successful checked
+access yields its requirements. From those, the file derives that any nonempty byte range
+inside an admitted access is itself accessible, that sub-reads return the matching bytes of
+the whole read, and that adjacent reads compose.
+-/
+
 namespace CIL.Safety
 
+/-- The requirements are necessary: a successful checked access meets them for the
+    allocation it names. -/
 theorem access_requirements {m : Memory} {r : Reference} {width alignment : Nat}
     {writing : Bool} (h : access m r width alignment writing = .ok ()) :
     ∃ allocation, AccessRequirements m r width alignment writing allocation := by
@@ -29,7 +40,8 @@ theorem access_requirements {m : Memory} {r : Reference} {width alignment : Nat}
             · intro slot member overlap
               apply slots
               exact List.any_eq_true.mpr ⟨slot, member, by simp [overlap]⟩
-            · simpa only [Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq, and_assoc] using aligned
+            · simpa only [Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq, and_assoc]
+                using aligned
             · intro writes immutable
               simp [writes, immutable] at mutable
             · intro i bound
@@ -39,8 +51,9 @@ theorem access_requirements {m : Memory} {r : Reference} {width alignment : Nat}
     · simp at h
 
 /-- Any reference a well-formed memory admits names an allocation below its watermark. -/
-theorem Memory.WellFormed.access_bound {m : Memory} {r : Reference} {width alignment : Nat} {writing : Bool}
-    (formed : m.WellFormed) (h : access m r width alignment writing = .ok ()) : r.allocation < m.nextIdentity := by
+theorem Memory.WellFormed.access_bound {m : Memory} {r : Reference} {width alignment : Nat}
+    {writing : Bool} (formed : m.WellFormed) (h : access m r width alignment writing = .ok ()) :
+    r.allocation < m.nextIdentity := by
   obtain ⟨_, ready⟩ := access_requirements h
   exact (formed.1 _ _ ready.present).1
 
@@ -67,17 +80,21 @@ theorem AccessRequirements.slice {m : Memory} {r : Reference} {width alignment :
     have permission := ready.permission (start + i) (by omega)
     simpa only [Nat.add_assoc] using permission
 
-theorem read_slice {m : Memory} {r : Reference} {width alignment : Nat} {bytes : List (BitVec 8)}
-    (wellFormed : m.WellFormed) (h : read m r width alignment = .ok bytes)
+/-- A byte-aligned sub-read of a successful read succeeds and returns the cells it covers. -/
+theorem read_slice {m : Memory} {r : Reference} {width alignment : Nat}
+    {bytes : List (BitVec 8)} (wellFormed : m.WellFormed) (h : read m r width alignment = .ok bytes)
     (start count : Nat) (nonempty : 0 < count) (within : start + count ≤ width) :
     read m { r with offset := r.offset + start } count 1 =
       .ok ((List.range count).map fun i => (m.cells r.allocation (r.offset + start + i)).bits) := by
   obtain ⟨allocation, ready⟩ := access_requirements (read_access h)
   apply read_snapshot (ready.slice wellFormed start count nonempty within)
   intro i bound
-  have initialized := read_requires_initialization _ _ _ _ _ h (start + i) (List.mem_range.mpr (by omega))
+  have initialized :=
+    read_requires_initialization _ _ _ _ _ h (start + i) (List.mem_range.mpr (by omega))
   simpa only [Nat.add_assoc] using initialized
 
+/-- Pointer `add` of `size * index` stays exact when the element at that offset lies inside
+    the admitted access. -/
 theorem AccessRequirements.add_slice {m : Memory} {r : Reference} {width alignment : Nat}
     {writing : Bool} {allocation : Allocation}
     (ready : AccessRequirements m r width alignment writing allocation) (wellFormed : m.WellFormed)
@@ -112,13 +129,15 @@ theorem read_slice_bytes {m : Memory} {r : Reference} {width alignment : Nat}
   · intro i hi hj
     simp [Nat.add_assoc]
 
-/-- Adjacent byte-aligned reads inside one admitted interval compose into one read of the whole interval. -/
+/-- Adjacent byte-aligned reads inside one admitted interval compose into one read of the
+    whole interval. -/
 theorem read_append {m : Memory} {r : Reference} {left right : Nat} {writing : Bool}
     {first second : List (BitVec 8)} (covered : access m r (left + right) 1 writing = .ok ())
     (low : read m r left 1 = .ok first)
     (high : read m { r with offset := r.offset + left } right 1 = .ok second) :
     read m r (left + right) 1 = .ok (first ++ second) := by
-  have readable : ∀ {q width bytes}, read m q width 1 = .ok bytes → access m q width 1 false = .ok () := by
+  have readable : ∀ {q width bytes},
+      read m q width 1 = .ok bytes → access m q width 1 false = .ok () := by
     intro q width bytes h
     unfold read at h
     cases ha : access m q width 1 false with
@@ -128,18 +147,21 @@ theorem read_append {m : Memory} {r : Reference} {left right : Nat} {writing : B
   obtain ⟨_, lower⟩ := access_requirements (readable low)
   obtain ⟨_, upper⟩ := access_requirements (readable high)
   have ready : AccessRequirements m r (left + right) 1 false allocation := by
-    refine ⟨whole.present, whole.live, whole.position, whole.layout, whole.extent, whole.aligned, by simp, ?_⟩
+    refine ⟨whole.present, whole.live, whole.position, whole.layout, whole.extent,
+      whole.aligned, by simp, ?_⟩
     intro i bound
     by_cases inside : i < left
     · exact lower.permission i inside
     · have permission := upper.permission (i - left) (by omega)
       simp only at permission
       rwa [show r.offset + left + (i - left) = r.offset + i by omega] at permission
-  have initialized : ∀ i < left + right, (m.cells r.allocation (r.offset + i)).initialized = true := by
+  have initialized :
+      ∀ i < left + right, (m.cells r.allocation (r.offset + i)).initialized = true := by
     intro i bound
     by_cases inside : i < left
     · exact read_requires_initialization _ _ _ _ _ low i (List.mem_range.mpr inside)
-    · have cell := read_requires_initialization _ _ _ _ _ high (i - left) (List.mem_range.mpr (by omega))
+    · have cell :=
+        read_requires_initialization _ _ _ _ _ high (i - left) (List.mem_range.mpr (by omega))
       simp only at cell
       rwa [show r.offset + left + (i - left) = r.offset + i by omega] at cell
   rw [read_snapshot ready initialized, read_result_snapshot low, read_result_snapshot high]

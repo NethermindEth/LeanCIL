@@ -1,5 +1,13 @@
 import CIL.Safety.MemoryLemmas
 
+/-!
+# Allocation extension
+
+`AllocationExtension before after` says the identity counter only grows and every existing
+allocation descriptor is unchanged. Allocation and writes establish it; expiry does not, and
+is handled by `expire_preserves_older_allocations` for allocations older than the expired one.
+-/
+
 namespace CIL.Safety
 
 /-- Allocation creates fresh identities; writes leave all existing allocation
@@ -18,6 +26,7 @@ theorem AllocationExtension.trans {first middle last : Memory}
   intro id bound
   rw [right.lookup id (Nat.lt_of_lt_of_le bound left.next), left.lookup id bound]
 
+/-- Allocation only adds a fresh identity. -/
 theorem allocate_extends_allocations (m result : Memory) (a : Allocation) (id : AllocationId)
     (h : allocate m a = .ok (id, result)) : AllocationExtension m result := by
   simp only [allocate] at h
@@ -30,6 +39,7 @@ theorem allocate_extends_allocations (m result : Memory) (a : Allocation) (id : 
       intro other bound
       simp [Nat.ne_of_lt bound]
 
+/-- A checked write changes no allocation descriptor. -/
 theorem write_extends_allocations (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
     (alignment : Nat) (h : write m r bytes alignment = .ok result) :
     AllocationExtension m result := by
@@ -51,8 +61,10 @@ theorem form_allocation_congr (m result : Memory) (r : Reference)
     form result r = form m r := by
   simp only [form, liveAllocation, same]
 
-theorem AllocationExtension.preserves_reference {m result : Memory} (ext : AllocationExtension m result)
-    (hm : m.WellFormed) (r formed : Reference) (h : form m r = .ok formed) :
+/-- A reference that formed before still forms, to the same result, after extension. -/
+theorem AllocationExtension.preserves_reference {m result : Memory}
+    (ext : AllocationExtension m result) (hm : m.WellFormed) (r formed : Reference)
+    (h : form m r = .ok formed) :
     form result r = .ok formed := by
   obtain ⟨a, present, _, _⟩ := formed_reference_live _ _ _ h
   rw [form_allocation_congr _ _ _ (ext.lookup r.allocation (hm.1 _ _ present).1)]

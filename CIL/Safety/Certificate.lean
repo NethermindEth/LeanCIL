@@ -1,5 +1,14 @@
 import CIL.Safety.RunReturnTrace
 
+/-!
+# Invocation certificates
+
+`InvocationCertificate` packages one successful `invoke` with the facts a consumer needs
+about it: the frame it entered, that every running state it visits satisfies `LiveState`,
+and that the returned state satisfies `ReturnedState`. `certify_invocation` builds one from
+a live entry state and a successful `run`.
+-/
+
 namespace CIL.Safety
 
 /-- Evidence for the actual invocation, including nested running/suspended
@@ -20,6 +29,7 @@ def InvocationCertificate (program : CIL.Program) (method : Nat) (args : List Va
       LiveState program observedArgs observedFrame observedStack observed) ∧
     ReturnedState program final values
 
+/-- A successful run from a live entry state certifies the invocation. -/
 theorem certify_invocation (program : CIL.Program) (method : Nat) (body : CIL.Method)
     (args : List Value) (initial : Memory) (frame : Frame) (entered : Memory)
     (fuel : Nat) (final : Memory) (values : List Value)
@@ -30,7 +40,8 @@ theorem certify_invocation (program : CIL.Program) (method : Nat) (body : CIL.Me
     (finished : run program fuel method 0 args frame [] entered = .ok (final, values)) :
     InvocationCertificate program method args initial fuel final values := by
   refine ⟨?_, body, frame, entered, lookup, checked, setup, finished, live, ?_, ?_⟩
-  · simpa only [invoke, lookup, checked, setup, Except.mapError, Bind.bind, Except.bind] using finished
+  · simpa only [invoke, lookup, checked, setup, Except.mapError, Bind.bind, Except.bind]
+      using finished
   · intro observedArgs observedFrame observedStack observed visit
     exact runningVisits_live_state visit live
   · exact run_returned_state _ _ _ _ _ _ _ _ _ _ live finished

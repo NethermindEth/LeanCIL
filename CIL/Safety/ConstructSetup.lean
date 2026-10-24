@@ -2,6 +2,14 @@ import CIL.Safety.ArgumentHomeValues
 import CIL.Safety.AggregateHomeValues
 import CIL.Safety.Execution
 
+/-!
+# Constructor storage setup
+
+The exact checked `step` for `newobj` on a 256-bit vector or an unmanaged struct: it allocates
+fresh zeroed, writable, caller-owned storage and passes its address as the constructor's first
+argument, leaving all older memory unchanged.
+-/
+
 namespace CIL.Safety
 
 /-- The actual new-value step allocates initialized caller-owned storage and
@@ -12,9 +20,11 @@ theorem step_newVector256 {body : CIL.Method} {pc callee : Nat}
     (checked : arguments.mapM (checkedValue memory) = .ok arguments)
     (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
     ∃ temporary updated,
-      step body (.newVector256 callee arguments.length) pc args frame (arguments.reverse ++ rest) memory =
+      step body (.newVector256 callee arguments.length) pc args frame (arguments.reverse ++ rest)
+          memory =
         .ok (.construct callee (.reference (.address temporary) :: arguments) rest
-          { frame with owned := temporary.allocation :: frame.owned } temporary .vector256 updated) ∧
+          { frame with owned := temporary.allocation :: frame.owned } temporary .vector256
+          updated) ∧
       read updated temporary 32 1 = .ok (numberBytes 0 32) ∧
       access updated temporary 32 1 true = .ok () ∧
       MemoryBelow memory.nextIdentity memory updated ∧
@@ -37,9 +47,11 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
     (checked : arguments.mapM (checkedValue memory) = .ok arguments)
     (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
     ∃ temporary updated,
-      step body (.newAggregate callee arguments.length size) pc args frame (arguments.reverse ++ rest) memory =
+      step body (.newAggregate callee arguments.length size) pc args frame
+          (arguments.reverse ++ rest) memory =
         .ok (.construct callee (.reference (.address temporary) :: arguments) rest
-          { frame with owned := temporary.allocation :: frame.owned } temporary (.aggregate size) updated) ∧
+          { frame with owned := temporary.allocation :: frame.owned } temporary (.aggregate size)
+          updated) ∧
       read updated temporary size 1 = .ok (List.replicate size 0) ∧
       access updated temporary size 1 true = .ok () ∧
       MemoryBelow memory.nextIdentity memory updated ∧
@@ -49,8 +61,9 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
       (by simp) wellFormed
   refine ⟨temporary, updated, ?_, loaded, writable, preserved, fresh⟩
   have nonzero : size ≠ 0 := by intro h; have := congrArg Fin.val h; simp at this; omega
-  simp [step, observerCount, unspecifiedOperands, known, nonzero, checked, home, Nat.not_lt_of_ge (Nat.le_add_right arguments.length rest.length),
-    Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp [step, observerCount, unspecifiedOperands, known, nonzero, checked, home,
+    Nat.not_lt_of_ge (Nat.le_add_right arguments.length rest.length), Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
 
   simp only [Nat.reducePow, BitVec.ofNat_eq_ofNat] at stored
   rw [stored]
