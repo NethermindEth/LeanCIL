@@ -14,11 +14,19 @@ partial class Program
         string StatementDigest, string Statement, string AuditSource, string AuthorModule);
 
     const string ExportTheorem = "LeanCILExportAudit.certified";
-    const string ContractExportUsage = "Usage: leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]";
+    const string ContractExportUsage =
+        "Usage: leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]";
+    const string SidecarExtension = ".leancil.contracts";
+    const string ReferenceAssemblyAttribute = "System.Runtime.CompilerServices.ReferenceAssemblyAttribute";
+    const string TargetFrameworkAttribute = "System.Runtime.Versioning.TargetFrameworkAttribute";
+    const string ConsumerKey = "consumer:";
+
+    static string ContractNamespace(string kind) => kind == "method" ? "MethodContract" : "OutcomeContract";
 
     internal static void ExportContracts(string[] args)
     {
-        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException(ContractExportUsage);
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+            throw new ArgumentException(ContractExportUsage);
         string manifestPath = Path.GetFullPath(args[0]);
         string? output = null;
         string? bundle = null;
@@ -34,8 +42,9 @@ partial class Program
         ContractExportManifest manifest = ContractExportManifest.Read(manifestPath);
         byte[] implementation = File.ReadAllBytes(manifest.Assembly);
         using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(implementation));
-        output ??= Path.Combine(Path.GetDirectoryName(manifest.Assembly)!, module.Assembly.Name.Name + ".leancil.contracts");
-        if (!output.EndsWith(".leancil.contracts", StringComparison.Ordinal))
+        output ??= Path.Combine(Path.GetDirectoryName(manifest.Assembly)!,
+            module.Assembly.Name.Name + SidecarExtension);
+        if (!output.EndsWith(SidecarExtension, StringComparison.Ordinal))
             throw new ArgumentException("Contract sidecar output must end in .leancil.contracts.");
         using Program verification = new() { freshLibrary = true };
         verification.ProduceContracts(manifestPath, manifest, module, implementation, output, bundle);
@@ -47,90 +56,68 @@ partial class Program
         SortedDictionary<string, string> before = ExportInputs(manifestPath, manifest);
         if (before["manifest:" + manifestPath] != manifest.SourceSha256 ||
             before["assembly:" + manifest.Assembly] != ContractInterface.Hash(implementation))
-            throw new InvalidDataException("Contract export manifest or implementation changed before its input snapshot.");
-        if (before.ContainsKey("consumer:" + output) || output == manifestPath || output == manifest.Assembly ||
+            throw new InvalidDataException(
+                "Contract export manifest or implementation changed before its input snapshot.");
+        if (before.ContainsKey(ConsumerKey + output) || output == manifestPath || output == manifest.Assembly ||
             manifest.Interface.Any(source => source.Source == output))
             throw new InvalidDataException("Contract sidecar output overlaps an export input.");
         if (bundle is not null) RequireBundleOutput(manifest, bundle);
-        if (module.Assembly.CustomAttributes.Any(attribute => attribute.AttributeType.FullName == "System.Runtime.CompilerServices.ReferenceAssemblyAttribute"))
+        bool referenceAssembly = module.Assembly.CustomAttributes
+            .Any(attribute => attribute.AttributeType.FullName == ReferenceAssemblyAttribute);
+        if (referenceAssembly)
             throw new InvalidDataException("Cannot certify exports from a reference assembly.");
-        PreparedContractExport[] prepared = manifest.Exports.Select(export => PrepareContractExport(manifest, module, export)).ToArray();
+        PreparedContractExport[] prepared =
+            manifest.Exports.Select(export => PrepareContractExport(manifest, module, export)).ToArray();
         if (prepared.Select(export => (export.Identity, export.Profile)).Distinct().Count() != prepared.Length)
             throw new InvalidDataException("Duplicate contract export method/profile pair.");
-        if (prepared.GroupBy(export => export.Identity).Any(group => group.Select(export => export.Request.Contract).Distinct(StringComparer.Ordinal).Count() != 1))
+        bool contractVariesByProfile = prepared.GroupBy(export => export.Identity).Any(group =>
+            group.Select(export => export.Request.Contract).Distinct(StringComparer.Ordinal).Count() != 1);
+        if (contractVariesByProfile)
             throw new InvalidDataException("One exported method must name one contract across its profiles.");
-        InterfaceModule[] interfaces = manifest.Interface.Select(source => new InterfaceModule(source.Module, ProofRootInterface(manifest, source, before))).ToArray();
-        InterfaceModule[] closureInterfaces = MergeContractInterfaces(interfaces, prepared.SelectMany(export => export.ImportedInterfaces));
-        ContractDependency[] dependencies = prepared.SelectMany(export => export.Dependencies)
-            .GroupBy(dependency => dependency.AssemblyIdentity, StringComparer.Ordinal)
-            .OrderBy(group => group.Key, StringComparer.Ordinal).Select(group =>
-            {
-                if (group.Distinct().Count() != 1)
-                    throw new InvalidDataException("Conflicting export dependency requirements: " + group.Key);
-                return group.First();
-            }).ToArray();
-        ContractInterface[] dependencyInterfaces = prepared.SelectMany(export => ImportGraph(export.Request.Artifact)
-                .Select(node => ExtractionIdentity.Resolve(export.Request.Artifact, node.GetProperty("sidecarPath").GetString()!)))
-            .Distinct(StringComparer.Ordinal).Select(path => ContractInterface.Read(File.ReadAllBytes(path))).ToArray();
+        InterfaceModule[] interfaces = manifest.Interface
+            .Select(source => new InterfaceModule(source.Module, ProofRootInterface(manifest, source, before)))
+            .ToArray();
+        InterfaceModule[] closureInterfaces =
+            MergeContractInterfaces(interfaces, prepared.SelectMany(export => export.ImportedInterfaces));
+        ContractDependency[] dependencies = MergeExportDependencies(prepared);
+        ContractInterface[] dependencyInterfaces = DependencyInterfaces(prepared);
 
         string staging = Path.Combine(Path.GetTempPath(), "leancil-contract-export-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
         try
         {
-            Dictionary<string, ExportClosure> publishedClosures = CheckPublishedContractInterfaces(manifest, closureInterfaces, prepared, staging);
+            Dictionary<string, ExportClosure> publishedClosures =
+                CheckPublishedContractInterfaces(manifest, closureInterfaces, prepared, staging);
             List<CheckedContractExport> verified = [];
-            for (int index = 0; index < prepared.Length; index++)
-            {
-                PreparedContractExport export = prepared[index];
-                ExportClosure published = publishedClosures[export.Request.Contract];
-                string audit = ExportAuditSource(export, published.Kind);
-                CheckedContractExport? checkedExport = null;
-                ConsumerExportAudit specification = new(audit, (session, proofModule, leanPath) =>
-                {
-                    ExportClosure actual = CheckExportClosure(session, proofModule, export.Request.Contract, leanPath);
-                    if (actual.Digest != published.Digest || actual.Kind != published.Kind || actual.Canonical != published.Canonical)
-                        throw new InvalidDataException("Export contract differs from its published interface closure: " + export.Request.Contract);
-                    (string digest, string statement) = CheckExportStatement(session, proofModule, leanPath);
-                    checkedExport = new(export, actual, digest, statement, audit, proofModule + "Author");
-                }, [ExportTheoremRequest(export.Request.Contract, published.Kind, export.Conditional),
-                    ExportTheoremRequest(export.Request.Contract, published.Kind, export.Conditional) with { name = export.Request.Theorem },
-                    new("LeanCILExportAudit.publicLayouts", axioms: ApprovedAxioms, type: new { app = new object[] {
-                        AuditConstant("CIL.Extraction.LayoutProjectionValid"), AuditConstant("Extracted.rawLayouts"),
-                        AuditConstant("Extracted.computedLayouts"), "_", "_", "_",
-                        AuditConstant("CIL.Architecture." + FeatureProfile.Select(export.Profile).Architecture) } })]);
-                ConsumerRequest request = new(manifest.Assembly, export.Request.Artifact, export.Proof, ExportTheorem, null,
-                    ExportAudit: specification);
-                ConsumerOutcome outcome = VerifyConsumerRequests(manifest.ProofRoot, [request], null, batch: false)[0];
-                if (outcome.Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
-                if (outcome.Report is null || checkedExport is null)
-                    throw new InvalidDataException("Contract export did not finish its exact theorem audit and replay.");
-                verified.Add(checkedExport);
-            }
-            if (!Same(before, ExportInputs(manifestPath, manifest))) throw new InvalidDataException("Contract export inputs changed during verification.");
+            foreach (PreparedContractExport export in prepared)
+                verified.Add(VerifyContractExport(manifest, export, publishedClosures[export.Request.Contract]));
+            if (!Same(before, ExportInputs(manifestPath, manifest)))
+                throw new InvalidDataException("Contract export inputs changed during verification.");
             string implementationHash = ContractInterface.Hash(implementation);
-            ContractExport[] exports = verified.GroupBy(result => result.Export.Identity).OrderBy(group => group.Key, StringComparer.Ordinal)
-                .Select(group => new ContractExport(group.Key, group.First().Export.Signature, group.First().Export.ParameterCount,
-                    false, group.First().Export.ReturnsValue, group.First().Export.Visibility, group.First().Export.Request.Contract,
-                    group.First().Closure.Digest, group.Select(result => result.Export.Profile).Order(StringComparer.Ordinal).ToArray(),
-                    group.First().Closure.Kind, group.First().Export.DefinitionSignature, group.First().Export.TypeArguments,
-                    group.First().Export.TypedSignature, group.First().Export.Layouts)).ToArray();
-            string target = module.Assembly.CustomAttributes.Single(attribute => attribute.AttributeType.FullName ==
-                "System.Runtime.Versioning.TargetFrameworkAttribute").ConstructorArguments.Single().Value as string
+            ContractExport[] exports = PublishedExports(verified);
+            string target = module.Assembly.CustomAttributes
+                .Single(attribute => attribute.AttributeType.FullName == TargetFrameworkAttribute)
+                .ConstructorArguments.Single().Value as string
                 ?? throw new InvalidDataException("Missing target framework.");
-            ContractInterface sidecar = new(1, 1, 2, ContractInterface.CurrentFrameworkKey(), module.Assembly.Name.FullName,
-                module.Mvid, target, implementationHash, false, interfaces, "", exports, [], dependencies);
+            ContractInterface sidecar = new(1, 1, 2, ContractInterface.CurrentFrameworkKey(),
+                module.Assembly.Name.FullName, module.Mvid, target, implementationHash, false, interfaces, "",
+                exports, [], dependencies);
             sidecar = sidecar with { InterfaceDigest = sidecar.ComputeInterfaceDigest() };
             sidecar = AddExportCertifications(sidecar, verified);
-            ContractDependencyGraph.Validate(dependencyInterfaces.Where(contract => contract.AssemblyIdentity != sidecar.AssemblyIdentity).Append(sidecar));
-            if (!Same(before, ExportInputs(manifestPath, manifest))) throw new InvalidDataException("Contract export inputs changed before publication.");
+            ContractDependencyGraph.Validate(dependencyInterfaces
+                .Where(contract => contract.AssemblyIdentity != sidecar.AssemblyIdentity).Append(sidecar));
+            if (!Same(before, ExportInputs(manifestPath, manifest)))
+                throw new InvalidDataException("Contract export inputs changed before publication.");
 
             if (bundle is not null)
             {
                 string digest = PublishContractSources(bundle, staging, manifestPath, manifest, before, verified);
-                sidecar = sidecar with { FullVerificationLocator = Path.GetRelativePath(Path.GetDirectoryName(output)!,
-                    Path.Combine(Path.GetFullPath(bundle), digest)).Replace('\\', '/') };
+                string locator = Path.GetRelativePath(Path.GetDirectoryName(output)!,
+                    Path.Combine(Path.GetFullPath(bundle), digest)).Replace('\\', '/');
+                sidecar = sidecar with { FullVerificationLocator = locator };
             }
-            if (!Same(before, ExportInputs(manifestPath, manifest))) throw new InvalidDataException("Contract export inputs changed before publication.");
+            if (!Same(before, ExportInputs(manifestPath, manifest)))
+                throw new InvalidDataException("Contract export inputs changed before publication.");
             byte[] sidecarBytes = JsonSerializer.SerializeToUtf8Bytes(sidecar, ContractInterface.Json);
             ContractInterface.Read(sidecarBytes);
             PublishContractSidecar(output, sidecarBytes);
@@ -149,6 +136,75 @@ partial class Program
         }
     }
 
+    // One export, one consumer run: the audit callback binds the checked statement to the published closure.
+    CheckedContractExport VerifyContractExport(ContractExportManifest manifest, PreparedContractExport export,
+        ExportClosure published)
+    {
+        string contract = export.Request.Contract;
+        string audit = ExportAuditSource(export, published.Kind);
+        CheckedContractExport? checkedExport = null;
+        ConsumerExportAudit specification = new(audit, (session, proofModule, leanPath) =>
+        {
+            ExportClosure actual = CheckExportClosure(session, proofModule, contract, leanPath);
+            bool matchesPublished = actual.Digest == published.Digest && actual.Kind == published.Kind &&
+                actual.Canonical == published.Canonical;
+            if (!matchesPublished)
+                throw new InvalidDataException(
+                    "Export contract differs from its published interface closure: " + contract);
+            (string digest, string statement) = CheckExportStatement(session, proofModule, leanPath);
+            checkedExport = new(export, actual, digest, statement, audit, proofModule + "Author");
+        }, [ExportTheoremRequest(contract, published.Kind, export.Conditional),
+            ExportTheoremRequest(contract, published.Kind, export.Conditional) with { name = export.Request.Theorem },
+            PublicLayoutsRequest(export.Profile)]);
+        ConsumerRequest request = new(manifest.Assembly, export.Request.Artifact, export.Proof, ExportTheorem, null,
+            ExportAudit: specification);
+        ConsumerOutcome outcome = VerifyConsumerRequests(manifest.ProofRoot, [request], null, batch: false)[0];
+        if (outcome.Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
+        if (outcome.Report is null || checkedExport is null)
+            throw new InvalidDataException("Contract export did not finish its exact theorem audit and replay.");
+        return checkedExport;
+    }
+
+    static AuditRequest PublicLayoutsRequest(string profile) =>
+        new("LeanCILExportAudit.publicLayouts", axioms: ApprovedAxioms, type: new
+        {
+            app = new object[]
+            {
+                AuditConstant("CIL.Extraction.LayoutProjectionValid"), AuditConstant("Extracted.rawLayouts"),
+                AuditConstant("Extracted.computedLayouts"), "_", "_", "_",
+                AuditConstant("CIL.Architecture." + FeatureProfile.Select(profile).Architecture)
+            }
+        });
+
+    static ContractDependency[] MergeExportDependencies(PreparedContractExport[] prepared) =>
+        prepared.SelectMany(export => export.Dependencies)
+            .GroupBy(dependency => dependency.AssemblyIdentity, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal).Select(group =>
+            {
+                if (group.Distinct().Count() != 1)
+                    throw new InvalidDataException("Conflicting export dependency requirements: " + group.Key);
+                return group.First();
+            }).ToArray();
+
+    static ContractInterface[] DependencyInterfaces(PreparedContractExport[] prepared) =>
+        prepared.SelectMany(export => ImportGraph(export.Request.Artifact).Select(node =>
+                ExtractionIdentity.Resolve(export.Request.Artifact, node.GetProperty("sidecarPath").GetString()!)))
+            .Distinct(StringComparer.Ordinal).Select(path => ContractInterface.Read(File.ReadAllBytes(path))).ToArray();
+
+    static ContractExport[] PublishedExports(IEnumerable<CheckedContractExport> verified) =>
+        verified.GroupBy(result => result.Export.Identity).OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group =>
+            {
+                CheckedContractExport first = group.First();
+                PreparedContractExport export = first.Export;
+                string[] profiles =
+                    group.Select(result => result.Export.Profile).Order(StringComparer.Ordinal).ToArray();
+                return new ContractExport(group.Key, export.Signature, export.ParameterCount, false,
+                    export.ReturnsValue, export.Visibility, export.Request.Contract, first.Closure.Digest, profiles,
+                    first.Closure.Kind, export.DefinitionSignature, export.TypeArguments, export.TypedSignature,
+                    export.Layouts);
+            }).ToArray();
+
     static SortedDictionary<string, string> ExportInputs(string manifestPath, ContractExportManifest manifest)
     {
         SortedDictionary<string, string> inputs = ConsumerSnapshot(manifest.ProofRoot, null);
@@ -165,7 +221,8 @@ partial class Program
         {
             foreach (string file in new[] { "identity.json", "verification.json", "Extracted.lean" })
                 inputs["artifact:" + Path.Combine(export.Artifact, file)] = Sha(Path.Combine(export.Artifact, file));
-            JsonElement extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(export.Artifact, "identity.json")));
+            string identity = Path.Combine(export.Artifact, "identity.json");
+            JsonElement extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(identity));
             if (extraction.TryGetProperty("importGraph", out JsonElement graph))
                 foreach (JsonElement node in graph.EnumerateArray())
                     foreach (string field in new[] { "sidecarPath", "implementationPath" })
@@ -178,76 +235,116 @@ partial class Program
         return inputs;
     }
 
-    static IEnumerable<string> FrameworkBundleSources() => Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
-        .Append(At("CIL.lean")).Append(At("lean-toolchain")).Append(At("lakefile.toml")).Append(At("lake-manifest.json"));
+    static IEnumerable<string> FrameworkBundleSources() =>
+        Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
+            .Append(At("CIL.lean")).Append(At("lean-toolchain")).Append(At("lakefile.toml"))
+            .Append(At("lake-manifest.json"));
 
     static string? SnapshotSource(SortedDictionary<string, string> snapshot, string path)
     {
-        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        StringComparison comparison =
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         path = Path.GetFullPath(path);
-        return snapshot.Where(pair => pair.Key.StartsWith("consumer:", StringComparison.Ordinal) &&
-            Path.GetFullPath(pair.Key["consumer:".Length..]).Equals(path, comparison)).Select(pair => pair.Value).FirstOrDefault();
+        return snapshot.Where(pair => pair.Key.StartsWith(ConsumerKey, StringComparison.Ordinal) &&
+                Path.GetFullPath(pair.Key[ConsumerKey.Length..]).Equals(path, comparison))
+            .Select(pair => pair.Value).FirstOrDefault();
     }
 
     // The published text is the proofRoot module the export proof compiled against, byte for byte.
-    static string ProofRootInterface(ContractExportManifest manifest, ContractSource source, SortedDictionary<string, string> before)
+    static string ProofRootInterface(ContractExportManifest manifest, ContractSource source,
+        SortedDictionary<string, string> before)
     {
-        string module = Path.Combine(manifest.ProofRoot, source.Module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+        string module = Path.Combine(manifest.ProofRoot,
+            source.Module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
         byte[] bytes = File.ReadAllBytes(source.Source);
         string published = ContractInterface.Hash(bytes);
         if (published != before["interface:" + source.Source] || SnapshotSource(before, module) != published)
-            throw new InvalidDataException("Published contract interface source must be byte-identical to its proofRoot module: " + source.Module);
+            throw new InvalidDataException(
+                "Published contract interface source must be byte-identical to its proofRoot module: " + source.Module);
         using StreamReader reader = new(new MemoryStream(bytes));
         return reader.ReadToEnd();
     }
 
-    static PreparedContractExport PrepareContractExport(ContractExportManifest manifest, ModuleDefinition module, ContractExportRequest request)
+    static PreparedContractExport PrepareContractExport(ContractExportManifest manifest, ModuleDefinition module,
+        ContractExportRequest request)
     {
         Run(["dotnet", ExtractorPath, "check", request.Artifact, "--assembly-path", manifest.Assembly]);
         ExtractionIdentity extraction = ExtractionIdentity.Read(request.Artifact);
         JsonElement identity = extraction.Root;
-        FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>() ?? throw new InvalidDataException("Missing export profile.");
-        ContractMethodMetadata.Selection selection = ContractMethodMetadata.Select(module, request.Method, request.TypeArguments ?? [], profile.Architecture);
+        FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>()
+            ?? throw new InvalidDataException("Missing export profile.");
+        ContractMethodMetadata.Selection selection =
+            ContractMethodMetadata.Select(module, request.Method, request.TypeArguments ?? [], profile.Architecture);
         MethodDefinition method = selection.Closed;
         if (identity.GetProperty("entryDefinition").GetString() != selection.Definition.FullName ||
-            !identity.GetProperty("entryTypeArguments").Deserialize<string[]>()!.SequenceEqual(selection.ArgumentNames, StringComparer.Ordinal))
+            !identity.GetProperty("entryTypeArguments").Deserialize<string[]>()!
+                .SequenceEqual(selection.ArgumentNames, StringComparer.Ordinal))
             throw new InvalidDataException("Export closed method selection differs from its artifact.");
         ContractLayout[] layouts = ImportedLayoutMetadata.Signature(selection.Reference, module, profile.Architecture);
         string computedLayouts = ImportedLayoutMetadata.ComputedLean(layouts, module, profile.Architecture);
-        int[] projection = ImportedLayoutMetadata.Projection(layouts, identity.GetProperty("layoutIdentities").Deserialize<string[]>()!);
-        if (FeatureProfile.Select(profile.Name) != profile) throw new InvalidDataException("Contract exports require an exact built-in profile.");
-        if (identity.GetProperty("entry").GetString() != method.FullName || identity.GetProperty("assemblyIdentity").GetString() != module.Assembly.Name.FullName ||
+        string[] layoutIdentities = identity.GetProperty("layoutIdentities").Deserialize<string[]>()!;
+        int[] projection = ImportedLayoutMetadata.Projection(layouts, layoutIdentities);
+        if (FeatureProfile.Select(profile.Name) != profile)
+            throw new InvalidDataException("Contract exports require an exact built-in profile.");
+        if (identity.GetProperty("entry").GetString() != method.FullName ||
+            identity.GetProperty("assemblyIdentity").GetString() != module.Assembly.Name.FullName ||
             identity.GetProperty("assemblySha256").GetString() != Sha(manifest.Assembly))
-            throw new InvalidDataException("Contract export method/entry or implementation differs from its selected artifact.");
+            throw new InvalidDataException(
+                "Contract export method/entry or implementation differs from its selected artifact.");
         foreach (string property in new[] { "initializedTypes", "staticValues" })
             if (identity.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
-                throw new InvalidDataException("Contract export rejects static/initialization assumptions: " + property);
-        if (!method.IsStatic || method.IsVirtual || method.IsPInvokeImpl || method.IsConstructor || method.HasGenericParameters || method.DeclaringType.HasGenericParameters ||
-            !(method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly))
-            throw new InvalidDataException("Contract exports require a public or protected static, non-virtual, closed method.");
-        VerificationSettings settings = JsonSerializer.Deserialize<VerificationSettings>(File.ReadAllText(Path.Combine(request.Artifact, "verification.json")),
-            new JsonSerializerOptions { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow })
-            ?? throw new InvalidDataException("Missing export verification settings.");
-        if (settings.schema != 1 || string.IsNullOrWhiteSpace(settings.proof)) throw new InvalidDataException("Invalid export verification settings.");
-        if (settings.proofRoot is not null && Path.GetFullPath(settings.proofRoot, request.Artifact) != manifest.ProofRoot)
-            throw new InvalidDataException("Export artifact proofRoot differs from the producer manifest.");
-        string proof = Path.GetFullPath(settings.proof, request.Artifact);
-        Within(manifest.ProofRoot, Path.GetRelativePath(manifest.ProofRoot, proof));
-        StaticIdentityRecord[] statics = identity.GetProperty("staticIdentities").Deserialize<StaticIdentityRecord[]>(ContractInterface.Json)
+                throw new InvalidDataException(
+                    "Contract export rejects static/initialization assumptions: " + property);
+        if (!IsExportableMethod(method))
+            throw new InvalidDataException(
+                "Contract exports require a public or protected static, non-virtual, closed method.");
+        string proof = ExportProof(manifest, request);
+        StaticIdentityRecord[] statics = identity.GetProperty("staticIdentities")
+            .Deserialize<StaticIdentityRecord[]>(ContractInterface.Json)
             ?? throw new InvalidDataException("Missing export static identities.");
         StaticIdentity.Validate(statics);
         StaticIdentity.ValidateFields(statics, module);
-        JsonElement[] imports = identity.TryGetProperty("imports", out JsonElement imported) ? imported.EnumerateArray().ToArray() : [];
+        JsonElement[] imports =
+            identity.TryGetProperty("imports", out JsonElement imported) ? imported.EnumerateArray().ToArray() : [];
         ContractDependency[] dependencies = imports.Select(binding => new ContractDependency(
-            binding.GetProperty("identity").GetString()!.Split("::", 2)[0],
-            binding.GetProperty("implementationSha256").GetString()!, binding.GetProperty("interfaceDigest").GetString()!))
+                binding.GetProperty("identity").GetString()!.Split("::", 2)[0],
+                binding.GetProperty("implementationSha256").GetString()!,
+                binding.GetProperty("interfaceDigest").GetString()!))
             .Distinct().OrderBy(dependency => dependency.AssemblyIdentity, StringComparer.Ordinal).ToArray();
         InterfaceModule[] importedInterfaces = extraction.Sources.Where(pair => pair.Key != "ExtractedImports")
             .Select(pair => new InterfaceModule(pair.Key, pair.Value)).ToArray();
+        bool returnsValue = method.ReturnType.MetadataType != MetadataType.Void;
+        string visibility = method.IsPublic ? "public" : "protected";
         return new(request, proof, profile.Name, selection.Identity, method.FullName,
-            method.Parameters.Count, method.ReturnType.MetadataType != MetadataType.Void, method.IsPublic ? "public" : "protected",
+            method.Parameters.Count, returnsValue, visibility,
             imports.Length != 0, dependencies, importedInterfaces, statics, selection.Definition.FullName,
             selection.ArgumentNames, selection.Signature, layouts, computedLayouts, projection);
+    }
+
+    static bool IsExportableMethod(MethodDefinition method)
+    {
+        bool closedStatic = method.IsStatic && !method.IsVirtual && !method.IsPInvokeImpl && !method.IsConstructor &&
+            !method.HasGenericParameters && !method.DeclaringType.HasGenericParameters;
+        bool visible = method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly;
+        return closedStatic && visible;
+    }
+
+    // The proof named by the artifact's verification.json, which must lie under the manifest's proofRoot.
+    static string ExportProof(ContractExportManifest manifest, ContractExportRequest request)
+    {
+        JsonSerializerOptions strict =
+            new() { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow };
+        string settingsJson = File.ReadAllText(Path.Combine(request.Artifact, "verification.json"));
+        VerificationSettings settings = JsonSerializer.Deserialize<VerificationSettings>(settingsJson, strict)
+            ?? throw new InvalidDataException("Missing export verification settings.");
+        if (settings.schema != 1 || string.IsNullOrWhiteSpace(settings.proof))
+            throw new InvalidDataException("Invalid export verification settings.");
+        if (settings.proofRoot is not null &&
+            Path.GetFullPath(settings.proofRoot, request.Artifact) != manifest.ProofRoot)
+            throw new InvalidDataException("Export artifact proofRoot differs from the producer manifest.");
+        string proof = Path.GetFullPath(settings.proof, request.Artifact);
+        Within(manifest.ProofRoot, Path.GetRelativePath(manifest.ProofRoot, proof));
+        return proof;
     }
 
     static InterfaceModule[] MergeContractInterfaces(InterfaceModule[] own, IEnumerable<InterfaceModule> imported)
@@ -264,9 +361,10 @@ partial class Program
 
     static AuditRequest ExportTheoremRequest(string contract, string kind, bool conditional = false)
     {
+        object program = conditional ? new { bvar = 0 } : AuditConstant("Extracted.program");
         object holds = new { app = new object[] {
-            AuditConstant("CIL.Safety." + (kind == "method" ? "MethodContract" : "OutcomeContract") + ".Holds"),
-            "_", "_", AuditConstant(contract), conditional ? new { bvar = 0 } : AuditConstant("Extracted.program"), new { nat = 0 } } };
+            AuditConstant("CIL.Safety." + ContractNamespace(kind) + ".Holds"),
+            "_", "_", AuditConstant(contract), program, new { nat = 0 } } };
         object type = conditional ? new { app = new object[] { AuditConstant("CIL.Safety.HoldsGiven"),
             AuditConstant("Extracted.program"), AuditConstant("Extracted.ImportsHold"),
             new { lam = new[] { AuditConstant("CIL.Program"), holds } } } } : holds;
@@ -275,10 +373,13 @@ partial class Program
 
     static string ExportAuditSource(PreparedContractExport export, string kind)
     {
-        string holds = "_root_.CIL.Safety." + (kind == "method" ? "MethodContract" : "OutcomeContract") + ".Holds _root_." + export.Request.Contract;
+        string holds = "_root_.CIL.Safety." + ContractNamespace(kind) + ".Holds _root_." + export.Request.Contract;
         string statement = export.Conditional
-            ? "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun linked => " + holds + " linked 0)"
+            ? "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold " +
+                "(fun linked => " + holds + " linked 0)"
             : holds + " _root_.Extracted.program 0";
+        string architecture = FeatureProfile.Select(export.Profile).Architecture;
+        string layoutIndices = string.Join(", ", export.LayoutIndices);
         return $$"""
 import CIL.Safety.Linking
 import CIL.Safety.OutcomeContract
@@ -288,7 +389,7 @@ theorem LeanCILExportAudit.certified : {{statement}} := _root_.{{export.Request.
 theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectionValid
     _root_.Extracted.rawLayouts _root_.Extracted.computedLayouts
     {{ImportedLayoutMetadata.RawLean(export.Layouts)}} {{export.ComputedLayouts}}
-    [{{string.Join(", ", export.LayoutIndices)}}] .{{FeatureProfile.Select(export.Profile).Architecture}} := by decide +kernel
+    [{{layoutIndices}}] .{{architecture}} := by decide +kernel
 #print axioms LeanCILExportAudit.publicLayouts
 """;
     }
@@ -326,15 +427,18 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         foreach ((string path, string hash) in baseModules)
             if (!built.TryGetValue(path, out string? current) || current != hash)
                 throw new InvalidDataException("Contract interface changed a certified framework artifact: " + path);
-        if (built.Keys.Any(path => (ModuleName(path) == "CIL" || ModuleName(path).StartsWith("CIL.", StringComparison.Ordinal)) &&
-            !baseModules.ContainsKey(path)))
+        static bool IsFramework(string module) =>
+            module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal);
+        if (built.Keys.Any(path => IsFramework(ModuleName(path)) && !baseModules.ContainsKey(path)))
             throw new InvalidDataException("Contract interface produced an unrecorded framework artifact.");
         string[] modules = built.Keys.Select(ModuleName).Distinct(StringComparer.Ordinal)
             .Where(name => name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal)).ToArray();
         if (modules.Any(name => !interfaces.Any(source => source.Name == name)))
             throw new InvalidDataException("Contract interface produced an undeclared module.");
         Dictionary<string, string> failures = ReplayConsumerModules(isolated, modules, leanPath);
-        if (failures.Count != 0) throw new InvalidDataException("Kernel replay rejected the published interface: " + string.Join(", ", failures.Keys));
+        if (failures.Count != 0)
+            throw new InvalidDataException(
+                "Kernel replay rejected the published interface: " + string.Join(", ", failures.Keys));
         CheckPublishedInterfaceDeclarations(isolated, interfaces.Select(source => source.Name).ToArray(), leanPath);
         Dictionary<string, ExportClosure> closures = new(StringComparer.Ordinal);
         string imports = string.Join("\n", interfaces.Select(source => "import " + source.Name));
@@ -349,7 +453,8 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         if (audited.interfaces?.error is { } error) throw new InvalidDataException(error);
     }
 
-    ExportClosure CheckExportClosure(string session, string import, string contract, string leanPath, bool importsAreSource = false)
+    ExportClosure CheckExportClosure(string session, string import, string contract, string leanPath,
+        bool importsAreSource = false)
     {
         string[] modules = importsAreSource
             ? import.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -364,19 +469,22 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
 
     (string Digest, string Statement) CheckExportStatement(string session, string proofModule, string leanPath)
     {
-        AuditedOleans audited = AuditOleans(leanPath, [proofModule], [new(ExportTheorem, axioms: ApprovedAxioms, statement: true)]);
+        AuditedOleans audited =
+            AuditOleans(leanPath, [proofModule], [new(ExportTheorem, axioms: ApprovedAxioms, statement: true)]);
         AuditedAxioms(audited.theorems[0]);
-        string statement = audited.theorems[0].statement ?? throw new InvalidDataException("Missing checked export statement.");
+        string statement = audited.theorems[0].statement
+            ?? throw new InvalidDataException("Missing checked export statement.");
         return (ContentKey(statement), statement);
     }
-    static ContractInterface AddExportCertifications(ContractInterface sidecar, IReadOnlyList<CheckedContractExport> exports) =>
+    static ContractInterface AddExportCertifications(ContractInterface sidecar,
+        IReadOnlyList<CheckedContractExport> exports) =>
         sidecar with
         {
             Certifications = exports.OrderBy(result => result.Export.Identity, StringComparer.Ordinal)
                 .ThenBy(result => result.Export.Profile, StringComparer.Ordinal)
-                .Select(result => new ContractCertification(result.Export.Identity, result.Export.Profile, sidecar.ImplementationSha256,
-                    sidecar.InterfaceDigest, result.Closure.Digest, ExportTheorem, result.Statement, result.StatementDigest,
-                    result.Export.StaticIdentities)).ToArray()
+                .Select(result => new ContractCertification(result.Export.Identity, result.Export.Profile,
+                    sidecar.ImplementationSha256, sidecar.InterfaceDigest, result.Closure.Digest, ExportTheorem,
+                    result.Statement, result.StatementDigest, result.Export.StaticIdentities)).ToArray()
         };
 
     static void PublishContractSidecar(string output, byte[] bytes)
@@ -393,23 +501,27 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
 
     static void RequireBundleOutput(ContractExportManifest manifest, string bundle)
     {
-        foreach (string source in new[] { manifest.ProofRoot }.Concat(manifest.Exports.Select(export => export.Artifact)))
-        {
-            string relative = Path.GetRelativePath(source, bundle);
-            if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                throw new InvalidDataException("Contract bundle output must be outside proof sources and extraction artifacts.");
-        }
+        IEnumerable<string> sources = manifest.Exports.Select(export => export.Artifact).Prepend(manifest.ProofRoot);
+        foreach (string source in sources)
+            if (Inside(source, bundle))
+                throw new InvalidDataException(
+                    "Contract bundle output must be outside proof sources and extraction artifacts.");
     }
 
-    static string PublishContractSources(string bundle, string staging, string manifestPath, ContractExportManifest manifest,
-        SortedDictionary<string, string> snapshot, IReadOnlyList<CheckedContractExport> verified)
+    static string PublishContractSources(string bundle, string staging, string manifestPath,
+        ContractExportManifest manifest, SortedDictionary<string, string> snapshot,
+        IReadOnlyList<CheckedContractExport> verified)
     {
         // Every bundled file must still hash to the bytes the export audited.
-        SortedDictionary<string, string> sources = new(StringComparer.Ordinal) { ["producer/manifest.json"] = manifestPath };
-        SortedDictionary<string, string> expected = new(StringComparer.Ordinal) { ["producer/manifest.json"] = snapshot["manifest:" + manifestPath] };
-        foreach (string key in snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal)))
+        const string ProducerManifest = "producer/manifest.json";
+        SortedDictionary<string, string> sources = new(StringComparer.Ordinal) { [ProducerManifest] = manifestPath };
+        SortedDictionary<string, string> expected = new(StringComparer.Ordinal)
         {
-            string path = key["consumer:".Length..];
+            [ProducerManifest] = snapshot["manifest:" + manifestPath]
+        };
+        foreach (string key in snapshot.Keys.Where(key => key.StartsWith(ConsumerKey, StringComparison.Ordinal)))
+        {
+            string path = key[ConsumerKey.Length..];
             string relative = Path.GetRelativePath(manifest.ProofRoot, path).Replace('\\', '/');
             // The framework package duplicates framework/, which the bundle already pins.
             if (relative.StartsWith(".lake/packages/leancil/", StringComparison.Ordinal)) continue;
@@ -418,13 +530,15 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         }
         foreach (ContractSource source in manifest.Interface)
         {
-            sources["interface/" + source.Module.Replace('.', '/') + ".lean"] = source.Source;
-            expected["interface/" + source.Module.Replace('.', '/') + ".lean"] = snapshot["interface:" + source.Source];
+            string entry = "interface/" + source.Module.Replace('.', '/') + ".lean";
+            sources[entry] = source.Source;
+            expected[entry] = snapshot["interface:" + source.Source];
         }
         foreach (string path in FrameworkBundleSources())
         {
-            sources["framework/" + Path.GetRelativePath(Root, path).Replace('\\', '/')] = path;
-            expected["framework/" + Path.GetRelativePath(Root, path).Replace('\\', '/')] = snapshot["framework:" + path];
+            string entry = "framework/" + Path.GetRelativePath(Root, path).Replace('\\', '/');
+            sources[entry] = path;
+            expected[entry] = snapshot["framework:" + path];
         }
         for (int index = 0; index < verified.Count; index++)
         {
@@ -447,10 +561,12 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
             : throw new InvalidDataException("Contract bundles require a proofRoot pinned to a leancil revision.");
         JsonElement bindings = JsonSerializer.SerializeToElement(verified.Select(result => new
         {
-            result.Export.Identity, result.Export.Profile, result.Export.Request.Contract, result.Export.Request.Theorem,
+            result.Export.Identity, result.Export.Profile,
+            result.Export.Request.Contract, result.Export.Request.Theorem,
             proofPath = Path.GetRelativePath(manifest.ProofRoot, result.Export.Proof).Replace('\\', '/'),
             result.Closure.Digest, result.StatementDigest, result.Statement
         }).ToArray(), ContractExportManifest.Json);
-        return ContractSourceBundle.Publish(bundle, sources, expected, bindings, ContractInterface.CurrentFrameworkKey(), revision);
+        string framework = ContractInterface.CurrentFrameworkKey();
+        return ContractSourceBundle.Publish(bundle, sources, expected, bindings, framework, revision);
     }
 }
