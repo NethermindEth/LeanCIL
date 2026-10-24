@@ -181,12 +181,7 @@ private def scalarEmission : Op → Bool
 /-- Byte width of a non-aggregate `sizeof` operand on the admitted 64-bit target. -/
 private def primitiveSize (type : TypeExpr) : Option Nat :=
   match typeStorage [] type with
-  | some (.field kind) => match kind with
-    | .signed8 | .unsigned8 | .boolean => some 1
-    | .signed16 | .unsigned16 | .character => some 2
-    | .signed32 | .unsigned32 => some 4
-    | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => some 8
-    | _ => none
+  | some (.field kind) => primitiveFieldWidth kind
   | some .vector128 => some 16
   | some .vector256 => some 32
   | _ => none

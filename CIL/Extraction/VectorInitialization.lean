@@ -27,15 +27,10 @@ private def vectorWidth : TypeExpr → Option Nat
     else none
   | _ => none
 
-/-- The byte width of a primitive integer type. -/
+/-- The byte width of a primitive integer, `bool` or `char` type. -/
 private def primitiveWidth (type : TypeExpr) : Option Nat := do
   let .field kind ← typeStorage [] type | none
-  match kind with
-  | .signed8 | .unsigned8 | .boolean => some 1
-  | .signed16 | .unsigned16 | .character => some 2
-  | .signed32 | .unsigned32 => some 4
-  | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => some 8
-  | _ => none
+  primitiveFieldWidth kind
 
 /-- An emitted `initAggregate` comes from an `initobj` of a struct, whose width the layout
     check binds, or of a vector or primitive of exactly that width; no other emission may

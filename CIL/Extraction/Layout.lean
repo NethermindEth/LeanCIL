@@ -57,6 +57,24 @@ private def fieldStorage (previous : Array ComputedLayout) (architecture : Archi
     let child ← previous[index]?
     return (child.layout.size, child.alignment, true)
 
+/-- Byte width of a primitive integer, `bool` or `char` field; vectors and structs have none. -/
+def primitiveFieldWidth : FieldType → Option Nat
+  | .signed8 | .unsigned8 | .boolean => some 1
+  | .signed16 | .unsigned16 | .character => some 2
+  | .signed32 | .unsigned32 => some 4
+  | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => some 8
+  | _ => none
+
+/-- A primitive's width is the width and natural alignment the layout calculation gives it,
+    so `sizeof` and `initobj` checks agree with field layout on every architecture. -/
+theorem primitiveFieldWidth_layout {kind : FieldType} {width : Nat}
+    (primitive : primitiveFieldWidth kind = some width)
+    (previous : Array ComputedLayout) (architecture : Architecture) :
+    fieldStorage previous architecture kind = some (width, width, false) := by
+  cases kind <;> simp [primitiveFieldWidth] at primitive <;> subst primitive <;> rfl
+
+#print axioms primitiveFieldWidth_layout
+
 /-- The least multiple of `alignment` that is at least `size`. -/
 private def alignUp (size alignment : Nat) : Nat :=
   (size + alignment - 1) / alignment * alignment
