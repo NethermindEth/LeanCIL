@@ -769,21 +769,15 @@ def reverseLanes (v : CIL.Vector.V256) : CIL.Vector.V256 := CIL.Vector.permute4x
 theorem eval_reverse_lanes (v : CIL.Vector.V256) :
     CIL.evalIntrinsic (.avx2 .permute4x64) [.v256 v, .i32 27] = some (.v256 (reverseLanes v)) := rfl
 
-@[cil_code] def reverseStoreMethod : CIL.Method := {
-  profile := { architecture := .x64, avx2 := true }
-  code := [.arg 1, .arg 0, .const32 (BitVec.ofInt 32 27), .intrinsic (.avx2 .permute4x64) 2, .memory .store256, .ret]
-  locals := [], returnsValue := false }
-
 -- The pushed value is the evaluation fact's, so the store fact on `reverseLanes v` applies next.
 open CIL.Safety in
-theorem evaluated_then_stored (v : CIL.Vector.V256) (destination : Reference) (frame : Frame) (memory final : Memory)
-    (formed : form memory destination = .ok destination)
+theorem evaluated_then_stored (v : CIL.Vector.V256) (destination : Reference) (memory final : Memory)
     (stored : ∀ rest, memoryInstruction .store256
       (.scalar (.v256 (reverseLanes v)) :: .reference (.address destination) :: rest) memory = .ok (final, rest)) :
-    run [reverseStoreMethod] 7 0 0 [.scalar (.v256 v), .reference (.address destination)] frame [] memory =
-      .ok (leaveFrame frame final, []) := by
-  cil_checked_steps [staticInstruction, stored, eval_reverse_lanes, checkedValue, formValue, checkedAt,
-    Except.mapError, formed]
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 v), .reference (.address destination)] memory =
+      .ok (final, []) := by
+  cil_checked_steps [staticInstruction, stored, eval_reverse_lanes]
 
 #print axioms evaluated_then_stored
 
