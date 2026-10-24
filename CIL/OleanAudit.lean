@@ -5,6 +5,8 @@ import CIL.Interface.Closure
 # Olean audit
 
 `leancil-audit REQUEST RESULT` audits compiled `.olean` files without elaborating any source.
+`--imports INPUT OUTPUT` reads compiled import headers; `--fingerprints INPUT` writes portable
+module parts with only persisted linter diagnostics removed. Neither mode loads extensions.
 
 It imports `modules` with `loadExts := false`, so no imported environment extension, attribute,
 elaborator, notation or `initialize` runs; only constant declarations are read. The toolchain's
@@ -294,11 +296,49 @@ def namespaces (env : Environment) (modules : Array Name) (req : Json) : IO Json
     ("modules", Json.mkObj perModule.toList), ("axioms", toJson (found.map toString)),
     ("rejected", Json.arr rejected)] ++ (error.map fun e => [("error", toJson e)]).getD []
 
+/-- Writes one import header before the caller releases its backing region. -/
+@[noinline] def writeImportHeader (path : String) (output : IO.FS.Handle) : IO CompactedRegion := do
+  let (data, region) ← readModuleData path
+  output.putStrLn (toJson (data.imports.map fun item => item.module.toString)).compress
+  return region
+
+/-- Writes compiled import headers without loading environment extensions. -/
+unsafe def writeImports (input output : String) : IO Unit := do
+  let paths : Array String ←
+    IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
+  IO.FS.withFile output .write fun handle => do
+    for path in paths do
+      let region ← writeImportHeader path handle
+      region.free
+
+/-- Copies module parts excluding only persisted linter diagnostics. The caller owns the regions. -/
+@[noinline] def fingerprintModule (name : String) (sources destinations : Array String) :
+    IO (Array CompactedRegion) := do
+  let parts ← readModuleDataParts (sources.map System.FilePath.mk)
+  let filtered := parts.map fun (data, _) =>
+    { data with entries := data.entries.filter (fun entry => entry.1 != `Lean.Linter.lintLogExt) }
+  saveModuleDataParts name.toName (destinations.map System.FilePath.mk |>.zip filtered)
+  return parts.map Prod.snd
+
+/-- Writes portable module fingerprints and releases regions after their reconstructed data. -/
+unsafe def writeFingerprints (input : String) : IO Unit := do
+  let modules : Array (String × Array String × Array String) ←
+    IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
+  for (name, sources, destinations) in modules do
+    if sources.size != destinations.size then
+      throw (IO.userError "Fingerprint source and destination counts differ")
+    let regions ← fingerprintModule name sources destinations
+    for region in regions.reverse do region.free
+
 end LeanCILAudit
 
 open Lean LeanCILAudit in
 /-- Reads REQUEST, imports `modules` without running any extension, and writes RESULT. -/
 unsafe def main (args : List String) : IO UInt32 := do
+  match args with
+  | ["--imports", input, output] => writeImports input output; return 0
+  | ["--fingerprints", input] => writeFingerprints input; return 0
+  | _ => pure ()
   let [request, output] := args | throw (IO.userError "Usage: leancil-audit REQUEST RESULT")
   let req ← IO.ofExcept (Json.parse (← IO.FS.readFile request))
   let sysroot ← findSysroot

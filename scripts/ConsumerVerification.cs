@@ -43,26 +43,6 @@ partial class Program
         Directory.CreateDirectory(temporary);
         try
         {
-            var probe = Path.Combine(temporary, "Fingerprint.lean");
-            File.WriteAllText(probe, """
-import Lean
-@[noinline] def fingerprintModule (name : String) (sources destinations : Array String) :
-    IO (Array Lean.CompactedRegion) := do
-  let parts ← Lean.readModuleDataParts (sources.map System.FilePath.mk)
-  let filtered := parts.map fun (data, _) =>
-    { data with entries := data.entries.filter (fun entry => entry.1 != `Lean.Linter.lintLogExt) }
-  Lean.saveModuleDataParts name.toName (destinations.map System.FilePath.mk |>.zip filtered)
-  return parts.map Prod.snd
-unsafe def main (args : List String) : IO Unit := do
-  let [input] := args | throw (IO.userError "Expected fingerprint manifest")
-  let modules : Array (String × Array String × Array String) ←
-    IO.ofExcept <| (Lean.Json.parse (← IO.FS.readFile input)).bind Lean.fromJson?
-  for (name, sources, destinations) in modules do
-    -- Drop the reconstructed data before unmapping its referenced objects.
-    let regions ← fingerprintModule name sources destinations
-    for region in regions.reverse do
-      region.free
-""");
             var paths = modules.Select((pair, index) => (pair.Key, Source: pair.Value,
                 Destination: Path.Combine(temporary, index + ".olean"))).ToArray();
             var input = Path.Combine(temporary, "modules.json");
@@ -75,8 +55,8 @@ unsafe def main (args : List String) : IO Unit := do
                     new[] { "", ".server", ".private" }.Where(suffix => File.Exists(item.Source + suffix)).Select(suffix => item.Destination + suffix).ToArray()
                 }
             })));
-            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean"),
-                "-j2", "--run", probe, input], session, progress: "Fingerprinting portable consumer modules");
+            Run([CheckedAuditExecutable(), "--fingerprints", input], session,
+                progress: "Fingerprinting portable consumer modules");
             return paths.ToDictionary(item => item.Key, item => ConsumerModuleParts(item.Destination));
         }
         finally { Directory.Delete(temporary, true); }
@@ -549,29 +529,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         // Read Lean's compiled import headers, not a regex over source text. This
         // also handles public/private imports and transitive package dependencies.
-        var probe = Path.Combine(session, "LeanCILImports" + Guid.NewGuid().ToString("N") + ".lean");
-        var input = probe + ".json";
+        var input = Path.Combine(Path.GetTempPath(), "leancil-imports-" + Guid.NewGuid().ToString("N") + ".json");
+        var output = Path.ChangeExtension(input, ".result.json");
         try
         {
-            File.WriteAllText(probe, """
-import Lean
-unsafe def main (args : List String) : IO Unit := do
-  let [input] := args | throw (IO.userError "Expected module manifest")
-  let paths : Array String ← IO.ofExcept <| (Lean.Json.parse (← IO.FS.readFile input)).bind Lean.fromJson?
-  for path in paths do
-    let (data, region) ← Lean.readModuleData path
-    IO.println (Lean.Json.arr (data.imports.map fun i => Lean.Json.str i.module.toString)).compress
-    region.free
-""");
             var paths = modules.Values.ToArray();
             File.WriteAllText(input, JsonSerializer.Serialize(paths));
-            var result = Run([LeanExecutable, "--run", probe, input], session, environment: LeanEnvironment);
-            var lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            if (lines.Length != paths.Length) throw new InvalidDataException("Incomplete consumer compiled import graph.");
-            return modules.Keys.Zip(lines).ToDictionary(pair => pair.First,
-                pair => JsonSerializer.Deserialize<string[]>(pair.Second) ?? throw new InvalidDataException("Invalid import graph."));
+            Run([CheckedAuditExecutable(), "--imports", input, output], session, environment: LeanEnvironment);
+            var imports = File.ReadAllLines(output).Select(line => JsonSerializer.Deserialize<string[]>(line)).ToArray();
+            if (imports.Length != paths.Length || imports.Any(items => items is null))
+                throw new InvalidDataException("Incomplete consumer compiled import graph.");
+            return modules.Keys.Zip(imports).ToDictionary(pair => pair.First, pair => pair.Second!);
         }
-        finally { File.Delete(probe); File.Delete(input); }
+        finally { File.Delete(input); File.Delete(output); }
     }
 
     static HashSet<string> ImportClosure(Dictionary<string, string[]> graph, IEnumerable<string> roots)

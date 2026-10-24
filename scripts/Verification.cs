@@ -983,12 +983,18 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     string? auditExecutable;
     string? auditExecutableSha;
 
+    string CheckedAuditExecutable()
+    {
+        if (auditExecutable is null || !File.Exists(auditExecutable) || Sha(auditExecutable) != auditExecutableSha)
+            throw new InvalidOperationException("Theorem audit executable is missing or changed during verification");
+        return auditExecutable;
+    }
+
     // Reads the kernel-replayed oleans only: no imported elaborator, notation, extension or initializer runs.
     AuditedOleans AuditOleans(string leanPath, string[] modules, AuditRequest[] theorems, AuditConstantRequest[]? constants = null,
         string[]? interfaces = null, string[]? closures = null, AuditNamespaces? namespaces = null)
     {
-        if (auditExecutable is null || !File.Exists(auditExecutable) || Sha(auditExecutable) != auditExecutableSha)
-            throw new InvalidOperationException("Theorem audit executable is missing or changed during verification");
+        var executable = CheckedAuditExecutable();
         var request = Path.Combine(Path.GetTempPath(), "leancil-audit-" + Guid.NewGuid().ToString("N") + ".json");
         var result = Path.ChangeExtension(request, ".result.json");
         try
@@ -998,7 +1004,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             closures ??= [];
             File.WriteAllText(request, JsonSerializer.Serialize(new { modules, theorems, constants, interfaces,
                 closures = closures.Select(name => new { name }), namespaces }, AuditJson));
-            Run([auditExecutable, request, result], leanPath: leanPath, environment: LeanEnvironment);
+            Run([executable, request, result], leanPath: leanPath, environment: LeanEnvironment);
             var audited = JsonSerializer.Deserialize<AuditedOleans>(File.ReadAllText(result))
                 ?? throw new InvalidDataException("Missing theorem audit result");
             if (audited.theorems.Length != theorems.Length || audited.theorems.Zip(theorems).Any(pair => pair.First.name != pair.Second.name) ||
