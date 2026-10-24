@@ -56,8 +56,15 @@ internal static class VerificationSelection
             "Examples/Verify.cs", "Examples/Hardware/Hardware.cs", "scripts/Verify.cs",
             "Tests/LibraryCache.cs", "Tests/InitializedTypes.cs", "Tests/ConsumerVerification.cs",
             "Tests/MethodSelectors.cs", "Tests/MetadataMutator.cs", "Tests/Semantics.lean",
-            "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean", "Tests/StructuralLabels.lean", "Tests/DebugNames.lean", "Tests/MethodContract.lean", "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/Imports.lean", "Tests/LoopOutcome.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean", "Tests/ConfinedFootprints.lean", "Tests/ContractConsequence.lean", "Tests/InvocationCertificates.lean", "Tests/ValidCallTransport.lean", "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean", "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
-            "Tests/VerificationReuse.cs", "Tests/RuntimeExceptions.lean"
+            "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean",
+            "Tests/StructuralLabels.lean", "Tests/DebugNames.lean", "Tests/MethodContract.lean",
+            "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/Imports.lean",
+            "Tests/LoopOutcome.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean",
+            "Tests/ConfinedFootprints.lean", "Tests/LocalSnapshots.lean", "Tests/ContractConsequence.lean",
+            "Tests/InvocationCertificates.lean", "Tests/ValidCallTransport.lean",
+            "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean",
+            "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
+            "Tests/VerificationReuse.cs", "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean"
         };
         inputs["core"].UnionWith(new[] { "Add", "Choose", "Calls", "Alias", "Struct", "StructCopy", "LargeStruct",
             "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));

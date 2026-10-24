@@ -101,11 +101,13 @@ import CIL.Safety.Linking
 import CIL.Safety.StepFlow
 import CIL.Safety.RegionRun
 import CIL.Safety.NegationReturn
+import CIL.Safety.LocalSnapshots
 import CIL.Safety.NumericHomes
 import CIL.Safety.NumericLocalLoad
 import CIL.Safety.NumericLocalStore
 import CIL.Safety.NumericLocals
 import CIL.Safety.ProfileCertificate
+import CIL.Safety.ProfileContract
 import CIL.Safety.ProfileEquivalence
 import CIL.Safety.ReadCoverage
 import CIL.Safety.Relocation

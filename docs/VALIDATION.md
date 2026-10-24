@@ -170,11 +170,21 @@ kept below a watermark and a call confined apart from the inputs, and shows that
 confined call over an input can revoke its read authority.
 
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
-`Confined`. `Tests.BufferContents` checks typed buffer contents: fills and
-in-place transforms of any length, unchanged neighbouring bytes and sibling
-slices of one allocation, a producer that extends its prefix while its room
-stays unreadable, empty buffers at invalid and sentinel positions, and rejection
-of uninitialized, past-end, overlapping, unjoined and stale contents.
+`Confined`. `Tests.LocalSnapshots` keeps vector, int32, byte and narrow locals
+known across stores, overwrites, writes elsewhere and confined calls, and steps
+a load from a snapshot fact. `Tests.BufferContents` checks typed buffer
+contents: fills and in-place transforms of any length, unchanged neighbouring
+bytes and sibling slices of one allocation, a producer that extends its prefix
+while its room stays unreadable, empty buffers at invalid and sentinel
+positions, and rejection of uninitialized, past-end, overlapping, unjoined and
+stale contents.
+
+`Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under
+x86-64-v3, and carries it to x86-64-v4, to v3 without 256-bit acceleration and to every
+profile with AVX2 on. A raising method's outcome contract carries over too, in outcome,
+CLR-named and descriptor-indexed forms, with agreement decided from the flags the program
+reads. The baseline profile, with AVX2 off, fails both the agreement check and the contract,
+and turning off one of the four flags an AVX-512 DQ multiply needs fails the check.
 
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
@@ -183,7 +193,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
