@@ -220,6 +220,9 @@ Compile("Spaces", """
 var spaces = Namespaces("Spaces", "Pfx.");
 if (spaces is not { error: null, count: 2, rejected: [] } || spaces.prefixes["Pfx"] != 2 || spaces.modules["Spaces"] != 2)
     throw new InvalidOperationException("Namespace audit scope: " + JsonSerializer.Serialize(spaces));
+var nested = Namespaces("Spaces", "Pfx.", "Pfx.visible");
+if (nested is not { error: null, count: 2 } || nested.prefixes["Pfx"] != 2 || nested.prefixes["Pfx.visible"] != 1)
+    throw new InvalidOperationException("Nested namespace prefixes: " + JsonSerializer.Serialize(nested));
 // A prefix that matches nothing is an error even beside one that matches, so a typo cannot pass silently.
 if (Namespaces("Spaces", "Pfx", "Missing").error is not { } typo || !typo.Contains("Missing", StringComparison.Ordinal) ||
     Namespaces("Spaces", "Pf").error is null)

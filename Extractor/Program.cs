@@ -341,7 +341,7 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            CliDiagnostics.Write(exception, stage, args[0] is "check" or "verify");
+            CliDiagnostics.Write(exception, stage, args[0] is "check" or "verify" or "audit-library");
             return 1;
         }
         return 0;

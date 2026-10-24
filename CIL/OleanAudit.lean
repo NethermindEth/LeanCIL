@@ -225,12 +225,14 @@ def namespaces (env : Environment) (modules : Array Name) (req : Json) : IO Json
     for c in data.constNames do
       if seen.contains c then continue
       let user := (privateToUserName? c).getD c
-      let some p := prefixes.find? (·.isPrefixOf user) | continue
+      let matching := prefixes.filter (·.isPrefixOf user)
+      if matching.isEmpty then continue
       let some (.thmInfo _) := kernel.find? c | continue
       seen := seen.insert c
       roots := roots.push c
       count := count + 1
-      perPrefix := perPrefix.insert p (perPrefix.getD p 0 + 1)
+      -- Nested prefixes each count the theorem, so neither reports zero.
+      for p in matching do perPrefix := perPrefix.insert p (perPrefix.getD p 0 + 1)
     perModule := perModule.push (m.toString, toJson count)
   let found := axiomClosureOf kernel roots
   -- Attribution walks each theorem again, so it runs only when the shared closure is rejected.
