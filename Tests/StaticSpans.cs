@@ -2,11 +2,13 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using Mono.Cecil;
 
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
+var queue = new GeneratedQueue(verification, assembly);
 var root = At("artifacts/StaticSpans");
 void Prove(string name, string dll, string selector, string claim)
 {
@@ -15,8 +17,8 @@ void Prove(string name, string dll, string selector, string claim)
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
         "theorem correctness : " + claim + " := by rfl\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    Console.WriteLine("PASS checked static byte span: " + name);
+    queue.Add(new(selector, proof, output, Assembly: dll),
+        () => Console.WriteLine("PASS checked static byte span: " + name));
 }
 string Result(string value) => $"(CIL.Safety.invoke Extracted.program 16 0 [] Examples.empty).map Prod.snd = {value}";
 Prove("First", assembly, "StaticSpans::First()", Result(".ok [.scalar (.i32 1)]"));
@@ -38,6 +40,8 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     module.Write(tampered);
 }
 Prove("Tampered", tampered, "StaticSpans::First()", Result(".ok [.scalar (.i32 99)]"));
+
+queue.Flush();
 
 // Spans are accepted only as a by-value return; every other position or identity stays rejected.
 var byteSpan = "Unsupported type: System.ReadOnlySpan`1<System.Byte>";
