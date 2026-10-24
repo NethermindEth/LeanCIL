@@ -47,7 +47,7 @@ private def singleHopSum (x y : V256) : V256 :=
       (mask64 ((lane64 x 1 + lane64 y 1).ult (lane64 x 1)))
       (mask64 ((lane64 x 2 + lane64 y 2).ult (lane64 x 2))))
 
-/-- Two all-ones low lanes: a carry into lane 0 must cross lane 1 to reach lane 2. -/
+/-- Two all-ones low lanes: adding one carries out of lane 0, across lane 1, into lane 2. -/
 private def cascading : V256 := pack256 ones ones 5 0
 /-- One, which carries out of lane 0 of `cascading`. -/
 private def increment : V256 := pack256 1 0 0 0
