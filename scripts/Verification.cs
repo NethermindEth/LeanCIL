@@ -763,7 +763,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         return Sha(Path.Combine(destination, "cache-manifest.json"));
     }
 
-    // An earlier producer built and kernel-replayed this library; reuse needs an identical key and file set.
+    // Restored files are self-describing, so reuse needs an identical key and file set and a fresh kernel replay.
     string? ReusePreparedLibrary(string directory)
     {
         var manifest = Path.Combine(directory, "cache-manifest.json");
@@ -772,6 +772,12 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         var (key, sources) = LibraryIdentity(new(snapshot.Where(p => !p.Key.StartsWith("proof:", StringComparison.Ordinal) &&
             !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal));
         var digest = Sha(manifest);
+        if (!ValidCertifiedLibrary(directory, digest, key, sources)) return null;
+        var compiled = Path.Combine(directory, ".lake/build/lib/lean");
+        if (!ReplayModulesJointly(directory, [.. ModuleArtifacts(directory).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
+            compiled, "Joint kernel replay of reused Lean verification library"))
+            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), "CIL"], directory, compiled,
+                streamOutput: true, progress: "Kernel replay of reused Lean verification library");
         return ValidCertifiedLibrary(directory, digest, key, sources) ? digest : null;
     }
 

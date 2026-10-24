@@ -98,7 +98,8 @@ jobs:
           set -o pipefail
           dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library --reuse 2>&1 | tee artifacts/verification.log
       - name: Save the certified library for later runs
-        if: steps.library-cache.outputs.cache-hit != 'true'
+        # Only merged code writes entries; branch-scoped entries could outlive the commit that forged them.
+        if: steps.library-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: artifacts/certified-library
