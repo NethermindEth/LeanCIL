@@ -26,13 +26,16 @@ def narrowProfile : FeatureProfile := { avx2Profile with vector256Accelerated :=
 def baselineProfile : FeatureProfile :=
   { architecture := .x64, x86Base64 := true, sse2 := true, vector128Accelerated := true }
 
-example : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowProfile.Valid ∧
+/-- Every profile the contract is carried between is a supported runtime configuration. -/
+theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowProfile.Valid ∧
     baselineProfile.Valid := by decide
 
-/-- `IsSupported(Avx2) ? 1 : 0`, as one method under `avx2Profile`. -/
+/-- Method 0 is `IsSupported(Avx2) ? 1 : 0`; method 1 always throws. Both use `avx2Profile`. -/
 @[cil_code] def program : Program :=
   [{ profile := avx2Profile, returnsValue := true, locals := [],
-     code := [.feature .avx2, .ret] }]
+     code := [.feature .avx2, .ret] },
+   { profile := avx2Profile, returnsValue := false, locals := [],
+     code := [.throw "System.PlatformNotSupportedException"] }]
 
 /-- Calling with no arguments returns `1` and changes no memory. -/
 def avx2Contract : MethodContract Unit where
@@ -59,10 +62,12 @@ theorem avx512_holds : avx2Contract.Holds (reprofile program avx512Profile) 0 :=
 theorem narrow_holds : avx2Contract.Holds (reprofile program narrowProfile) 0 :=
   avx2_holds.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))
 
-/-- The same body written with its own profile, as a per-profile extraction would be. -/
+/-- The same bodies written with their own profile, as a per-profile extraction would be. -/
 @[cil_code] def avx512Program : Program :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
-     code := [.feature .avx2, .ret] }]
+     code := [.feature .avx2, .ret] },
+   { profile := avx512Profile, returnsValue := false, locals := [],
+     code := [.throw "System.PlatformNotSupportedException"] }]
 
 /-- A per-profile program is certified once it is shown to be the reprofiling. -/
 theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by
@@ -76,28 +81,54 @@ theorem avx2_family_holds (target : FeatureProfile) (wide : target.avx2 = true) 
     simp [Program.profileReads, Op.profileReads, program, avx2Profile, FeatureProfile.evaluate,
       wide]))
 
-/-- The outcome and CLR-named forms carry over the same way. -/
-example : ({ avx2Contract with raises := fun _ _ => none } : OutcomeContract Unit).HoldsCLR
-    (reprofile program avx512Profile) 0 :=
-  avx2_holds.outcomes.clr.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))
-
-example : ({ avx2Contract with raises := fun _ _ => none } : OutcomeContract Unit).Holds
-    (reprofile program narrowProfile) 0 :=
+/-- The normal-return outcome form carries over: method 0 never raises. -/
+theorem outcome_holds :
+    ({ avx2Contract with raises := fun _ _ => none } : OutcomeContract Unit).Holds
+      (reprofile program narrowProfile) 0 :=
   avx2_holds.outcomes.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))
+
+/-- Method 1 raises `PlatformNotSupportedException` and returns nothing. -/
+def throwContract : OutcomeContract Unit where
+  args _ := []
+  pre _ _ := True
+  footprint _ := []
+  post _ _ _ _ := False
+  raises _ _ := some "System.PlatformNotSupportedException"
+
+/-- Under `avx2Profile` method 1 raises the named exception. -/
+theorem throw_holds : throwContract.Holds program 1 := by
+  rintro - memory -
+  cil_raise_steps []
+
+/-- The raising branch carries over, as an outcome and with the CLR-named exception. -/
+theorem throw_transported : throwContract.Holds (reprofile program avx512Profile) 1 ∧
+    throwContract.HoldsCLR (reprofile program narrowProfile) 1 :=
+  ⟨throw_holds.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide)),
+    throw_holds.clr.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))⟩
 
 /-- `avx2Contract` with a precondition that reads the program's static descriptors. -/
 def staticContract (descriptors : List StaticDescriptor) : MethodContract Unit :=
   { avx2Contract with pre := fun _ memory => StaticWorldValid descriptors memory }
 
-/-- A descriptor-indexed contract is stated for the target program's own descriptors. -/
-example : (staticContract (programStaticDescriptors (reprofile program avx512Profile))).Holds
-    (reprofile program avx512Profile) 0 :=
-  MethodContract.Holds.reprofile_statics (contract := staticContract) uniform
-    (Program.ProfileAgreement.of_flags _ _ _ (by decide))
-    (fun input memory _ => avx2_holds input memory trivial)
+/-- `throwContract` with a precondition that reads the program's static descriptors. -/
+def staticThrowContract (descriptors : List StaticDescriptor) : OutcomeContract Unit :=
+  { throwContract with pre := fun _ memory => StaticWorldValid descriptors memory }
+
+/-- Descriptor-indexed contracts are stated for the target program's own descriptors. -/
+theorem statics_transported :
+    (staticContract (programStaticDescriptors (reprofile program avx512Profile))).Holds
+      (reprofile program avx512Profile) 0 ∧
+    (staticThrowContract (programStaticDescriptors (reprofile program avx512Profile))).Holds
+      (reprofile program avx512Profile) 1 :=
+  ⟨MethodContract.Holds.reprofile_statics (contract := staticContract) uniform
+      (Program.ProfileAgreement.of_flags _ _ _ (by decide))
+      (fun input memory _ => avx2_holds input memory trivial),
+    OutcomeContract.Holds.reprofile_statics (contract := staticThrowContract) uniform
+      (Program.ProfileAgreement.of_flags _ _ _ (by decide))
+      (fun input memory _ => throw_holds input memory trivial)⟩
 
 /-- The agreement check is not vacuous: it rejects a profile that answers AVX2 differently. -/
-example : ¬ ∀ featureId ∈ program.profileReads,
+theorem baseline_disagrees : ¬ ∀ featureId ∈ program.profileReads,
     avx2Profile.evaluate featureId = baselineProfile.evaluate featureId := by decide
 
 /-- A memory with no allocations; the method reads none, so it shows the difference. -/
@@ -123,18 +154,20 @@ def intrinsicProgram : Program :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
      code := [.arg 0, .arg 1, .intrinsic (.avx512DQ .mul64) 2, .ret] }]
 
-example : intrinsicProgram.ProfileAgreement avx512Profile
+/-- Profiles that agree on the four flags agree on the multiply. -/
+theorem intrinsic_agrees : intrinsicProgram.ProfileAgreement avx512Profile
     { avx512Profile with vector256Accelerated := false } :=
   Program.ProfileAgreement.of_flags _ _ _ (by decide)
 
 /-- Turning off only the VL extension changes availability, and the check sees it. This
     profile is not `Valid`; it isolates one of the four flags. -/
-example : ¬ ∀ featureId ∈ intrinsicProgram.profileReads,
+theorem intrinsic_check_rejects : ¬ ∀ featureId ∈ intrinsicProgram.profileReads,
     avx512Profile.evaluate featureId =
       ({ avx512Profile with avx512DQVL := false } : FeatureProfile).evaluate featureId := by
   decide
 
-example : ¬ intrinsicProgram.ProfileAgreement avx512Profile
+/-- The rejection is real: the two profiles disagree on the multiply's availability. -/
+theorem intrinsic_disagrees : ¬ intrinsicProgram.ProfileAgreement avx512Profile
     { avx512Profile with avx512DQVL := false } := by
   intro agreement
   have available := agreement _ (List.mem_singleton_self _) (.intrinsic (.avx512DQ .mul64) 2)
@@ -155,5 +188,23 @@ example : ¬ intrinsicProgram.ProfileAgreement avx512Profile
 #guard_msgs in #print axioms avx2_family_holds
 /-- info: 'Tests.ProfileContract.baseline_rejected' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms baseline_rejected
+/-- info: 'Tests.ProfileContract.profiles_valid' does not depend on any axioms -/
+#guard_msgs in #print axioms profiles_valid
+/-- info: 'Tests.ProfileContract.outcome_holds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms outcome_holds
+/-- info: 'Tests.ProfileContract.throw_holds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms throw_holds
+/-- info: 'Tests.ProfileContract.throw_transported' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms throw_transported
+/-- info: 'Tests.ProfileContract.statics_transported' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms statics_transported
+/-- info: 'Tests.ProfileContract.baseline_disagrees' depends on axioms: [propext] -/
+#guard_msgs in #print axioms baseline_disagrees
+/-- info: 'Tests.ProfileContract.intrinsic_agrees' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms intrinsic_agrees
+/-- info: 'Tests.ProfileContract.intrinsic_check_rejects' depends on axioms: [propext] -/
+#guard_msgs in #print axioms intrinsic_check_rejects
+/-- info: 'Tests.ProfileContract.intrinsic_disagrees' depends on axioms: [propext] -/
+#guard_msgs in #print axioms intrinsic_disagrees
 
 end Tests.ProfileContract
