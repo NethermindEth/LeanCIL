@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -15,6 +16,8 @@ var root = At("artifacts/GenericMethods");
 Directory.CreateDirectory(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.GenericMethods")!;
 var comparisons = 0;
+var examples = new GeneratedQueue(verification, assembly);
+var fsharpExamples = new GeneratedQueue(verification, fsharp, "Examples.FSharp");
 
 string LeanValue(object value) => value switch
 {
@@ -69,9 +72,13 @@ foreach (var name in names)
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact " + (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
-    verification.Verify(dll, identity, $"GenericMethods::{name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})", proof, output);
-    comparisons += claims.Count;
-    Console.WriteLine($"PASS {identity} {name}: {claims.Count} runtime comparisons");
+    var selector = $"GenericMethods::{name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
+    var queue = identity == "Examples" ? examples : fsharpExamples;
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        comparisons += claims.Count;
+        Console.WriteLine($"PASS {identity} {name}: {claims.Count} runtime comparisons");
+    });
 }
 
 // Generic loads and reference offsets retain checked memory behaviour.
@@ -90,9 +97,14 @@ foreach (var name in new[] { "Read32", "NextPacked" })
         };
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", name == "Read32" ? "GenericMethods::Read32(int&)" : "GenericMethods::NextPacked(Examples.PackedLeaf&,int)", proof, output);
-    Console.WriteLine($"PASS {name}: {claims.Count} reference checks");
+    var selector = name == "Read32"
+        ? "GenericMethods::Read32(int&)" : "GenericMethods::NextPacked(Examples.PackedLeaf&,int)";
+    examples.Add(new(selector, proof, output),
+        () => Console.WriteLine($"PASS {name}: {claims.Count} reference checks"));
 }
+
+examples.Flush();
+fsharpExamples.Flush();
 
 // Distinct instantiations remain distinct, while repeated calls share one closed body.
 foreach (var (directory, expected) in new[] { ("Repeated", 2), ("Nested", 3), ("Examples-Mixed", 3) })
