@@ -119,10 +119,17 @@ internal static class LeanEmitter
                     if (s.i.OpCode.Code == Code.Ldsfld)
                     {
                         StaticValues.Value value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module, profile.Architecture);
-                        var initializer = Array.IndexOf(methods, value.Initializer);
-                        if (initializer < 0) throw new InvalidDataException($"Missing static initializer: {value.Initializer.FullName}");
+                        var initializer = value.Initializer is null ? 0 : Array.IndexOf(methods, value.Initializer);
+                        if (initializer < 0)
+                            throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
+                        var literal = value.Literal is null ? "" : $", literal := some ({value.Literal})";
                         StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
-                        return $"({s.pc}, {{ identity := {identity.Identity}, assemblyIdentity := {JsonSerializer.Serialize(identity.AssemblyIdentity)}, fieldName := {JsonSerializer.Serialize(value.Field.FullName)}, bytes := {StaticData.LeanBytes(value.Bytes)}, initializer := some {{ method := {initializer}, arguments := [{string.Join(", ", value.Arguments)}] }} }})";
+                        return $"({s.pc}, {{ identity := {identity.Identity}, " +
+                            $"assemblyIdentity := {JsonSerializer.Serialize(identity.AssemblyIdentity)}, " +
+                            $"fieldName := {JsonSerializer.Serialize(value.Field.FullName)}, " +
+                            $"bytes := {StaticData.LeanBytes(value.Bytes)}, scalar := {StaticValues.Scalar(value.Field)}, " +
+                            $"initializer := some {{ method := {initializer}, " +
+                            $"arguments := [{string.Join(", ", value.Arguments)}]{literal} }} }})";
                     }
                     FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
                     StaticIdentityRecord fieldIdentity = StaticIdentity.Of(f);

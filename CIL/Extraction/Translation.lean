@@ -57,14 +57,43 @@ def returnNarrow (layouts : List RawLayout) (type : TypeExpr) : Option NarrowKin
   | .unsigned16 | .character => some .unsigned16
   | _ => none
 
+/-- Integer static-field storage and its narrow-load signedness. -/
+private def staticScalarType : TypeExpr → Option (Nat × Bool)
+  | .enum _ underlying => staticScalarType underlying
+  | .atom scope name =>
+    if scope != runtimeScope then none else
+    match name with
+    | "System.SByte" => some (1, true)
+    | "System.Byte" | "System.Boolean" => some (1, false)
+    | "System.Int16" => some (2, true)
+    | "System.UInt16" | "System.Char" => some (2, false)
+    | "System.Int32" | "System.UInt32" => some (4, false)
+    | "System.Int64" | "System.UInt64" | "System.IntPtr" | "System.UIntPtr" => some (8, false)
+    | _ => none
+  | _ => none
+
+/-- A readonly scalar load has exactly the width and extension of its raw field type. -/
+private def staticLoadMatches (closed : RawMethod) (method : Method) (pc : Nat) : Bool :=
+  match closed.code[pc]?, method.staticSites.find? (fun site => site.1 == pc) with
+  | some instruction, some (_, descriptor) =>
+    if instruction.opcode != 126 then false else
+    match instruction.operand with
+    | .field _ _ type _ =>
+      match staticScalarType type with
+      | some (width, signed) => descriptor.bytes.length == width && descriptor.scalar == some signed
+      | none => descriptor.scalar.isNone
+    | _ => false
+  | _, _ => false
+
 /-- Bind non-instruction method fields that affect frame setup and return behavior. -/
 def MethodShapeValid (layouts : List RawLayout) (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
   method.locals = method.localKinds.map (fun kind =>
     if closed.initLocals then initialLocal kind else .unmodeled) ∧
   method.vectorLocals = [] ∧ method.vectorArgs = [] ∧
-  method.code.all (fun op => match op with
+  method.code.zipIdx.all (fun (op, pc) => match op with
     | .ret narrow => narrow == returnNarrow layouts closed.returnType
+    | .memory (.staticValue _) => staticLoadMatches closed method pc
     | _ => true) = true
 
 instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) :

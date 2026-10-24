@@ -2,6 +2,12 @@
 
 For checked-step and loop tactics, see [proof automation](#proof-automation).
 
+`Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
+covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
+initialization and copies. It rejects missing initialization assumptions, mutable fields,
+repeated stores, branches and address-taking during initialization. Independent Lean checks
+reject forged scalar signedness, width and literal evidence. It runs in the evidence suite.
+
 The repository pins .NET SDK **10.0.402** and Lean **4.35.0**. The checks below cover semantic behavior, extracted contracts, artifact integrity and rejection cases.
 
 ```sh
