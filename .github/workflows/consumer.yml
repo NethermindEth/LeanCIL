@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: NethermindEth/int256
-          ref: dc945cbc4935a363ba3d3015311097bdc818f255
+          ref: 00fcecf53e22b5c9090052779e14b3ba246fb117
           path: consumer
           persist-credentials: false
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
