@@ -91,4 +91,16 @@ cil_value_steps (target : Nat) [branch] 0
 cil_value_steps [nop] 0
 cil_value_steps (id : CIL.Feature) [feature] 0
 
+-- A feature test pushes `body.profile.evaluate id`; these reduce it to the profile field a caller's fact names.
+attribute [cil_step] CIL.FeatureProfile.evaluate
+
+open Lean Meta in
+/-- `(m ..).profile` for a method definition or literal, unfolding only to the structure head;
+    an opaque or case-split body is left for a caller's fact. -/
+dsimproc [cil_step] reduceMethodProfile (CIL.Method.profile _) := fun e => do
+  let_expr CIL.Method.profile body := e | return .continue
+  let head ← withDefault <| whnf body
+  unless head.isAppOf ``CIL.Method.mk do return .continue
+  return .done (← withReducible <| whnf (mkApp (mkConst ``CIL.Method.profile) head))
+
 end CIL.Safety

@@ -3,6 +3,7 @@ import CIL.StepEquations
 import CIL.Safety.Equations
 import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
+import CIL.Safety.MemorySteps
 import CIL.Safety.CallComposition
 
 namespace CIL.Safety
@@ -104,6 +105,12 @@ macro "cil_stack_cleanup" : tactic =>
 macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | (simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
+       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
+         Pure.pure, Except.pure, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl))
+    -- A fact stated at `staticInstruction`/`memoryInstruction` predates the per-shape memory equations.
+    | (simp only [CIL.Safety.step_memory_eq, cil_guard]
        try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
          Pure.pure, Except.pure, $[$facts:term],*]

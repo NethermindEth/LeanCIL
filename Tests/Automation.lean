@@ -386,7 +386,7 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
       stack = [.scalar (.v256 value)] := by
   refine ⟨?_, ?_, ?_⟩
   rotate_left
-  · cil_checked_step [staticInstruction, memoryInstruction, casted]
+  · cil_checked_step [casted]
   · rfl
 
 @[cil_eval] theorem eval_reverse256 (a b c d : CIL.W64) :
@@ -403,6 +403,7 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
 
 @[cil_code] def permuteStoreProgram : CIL.Program := [permuteStoreMethod]
 
+-- A store fact stated at the `memoryInstruction` level, as consumers wrote before per-shape equations, still applies.
 open CIL.Safety in
 theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory final : Memory)
     (stored : ∀ rest, memoryInstruction .store256
@@ -412,6 +413,82 @@ theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory
       [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 (CIL.Vector.pack256 a b c d)),
         .reference (.address destination)] memory = .ok (final, []) := by
   cil_checked_steps [staticInstruction, stored]
+
+-- The same store from a `storeValue` fact: the per-shape memory equation exposes it without unfolding a dispatcher.
+open CIL.Safety in
+theorem permute_then_store_value (a b c d : CIL.W64) (destination : Reference) (memory final : Memory)
+    (stored : storeValue memory (.address destination) (.v256 (CIL.Vector.pack256 d c b a)) = .ok final) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 (CIL.Vector.pack256 a b c d)),
+        .reference (.address destination)] memory = .ok (final, []) := by
+  cil_checked_steps [stored]
+
+/-- A feature test steps from a fact about the profile field, through a body neither unfolded nor tagged. -/
+def featureTestBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := [.feature .avx2, .ret] }
+
+theorem feature_step_from_fact (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (wide : profile.avx2 = true) (found : program[index]? = some (featureTestBody profile))
+    (memory : CIL.Safety.Memory) :
+    CIL.Safety.invoke program 3 index [] memory = .ok (memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps [wide]
+
+theorem feature_step_free_body (program : CIL.Program) (index : Nat) (body : CIL.Method)
+    (wide : body.profile.avx2 = false) (code : body.code = [.feature .avx2, .ret])
+    (returns : body.returnsValue = true) (found : program[index]? = some body)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
+    CIL.Safety.run program 3 index 0 [] frame [] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
+  cil_checked_steps [wide, code, returns]
+
+-- A literal profile decides the test with no fact.
+theorem feature_step_literal_profile (memory : CIL.Safety.Memory) :
+    CIL.Safety.invoke [{ permuteStoreMethod with code := [.feature .avx2, .ret], returnsValue := true }] 3 0 []
+      memory = .ok (memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps
+
+-- Each memory step rewrites by its own equation; no fact names `staticInstruction` or `memoryInstruction`.
+open CIL.Safety in
+theorem asRef_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory)
+    (reference : Reference) (formed : form memory reference = .ok reference) :
+    ∃ stack, step body (.memory .asRef) 0 args frame [.reference (.address reference)] memory =
+      .ok (.next 1 stack frame memory) ∧ stack = [.reference (.address reference)] := by
+  refine ⟨?_, ?_, ?_⟩
+  rotate_left
+  · cil_checked_step [formed]
+  · rfl
+
+open CIL.Safety in
+theorem load128_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory)
+    (source : ManagedReference) (value : BitVec 128)
+    (loaded : loadValue memory source 16 = .ok (.v128 value)) :
+    ∃ stack, step body (.memory .load128) 0 args frame [.reference source] memory =
+      .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.v128 value)] := by
+  refine ⟨?_, ?_, ?_⟩
+  rotate_left
+  · cil_checked_step [loaded]
+  · rfl
+
+open CIL.Safety in
+theorem add_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory)
+    (base result : Reference) (offset : CIL.W32)
+    (moved : add memory base 8 (BitVec.ofInt 64 offset.toInt) = .ok result) :
+    ∃ stack, step body (.memory (.add 8 true)) 0 args frame
+      [.scalar (.i32 offset), .reference (.address base)] memory =
+      .ok (.next 1 stack frame memory) ∧ stack = [.reference (.address result)] := by
+  refine ⟨?_, ?_, ?_⟩
+  rotate_left
+  · cil_checked_step [moved, referenceAt]
+  · rfl
+
+-- An unknown scalar keeps its guard: the equation exposes it rather than assuming it away.
+open CIL.Safety in
+example (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory) (value : CIL.Value) :
+    step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame [.scalar value] memory =
+      if value.hasUnspecified then .error (.unsupported "Instruction observes unspecified vector bits") else do
+        let cast ← bitcastValue (.aggregate 32) .vector256 value
+        return .next 1 [.scalar cast] frame memory := by
+  simp only [cil_step]
 
 open CIL.Safety in
 theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : Memory)
@@ -423,5 +500,19 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 #print axioms scalar_fact_stack
 #print axioms bitcast_fact_stack
 #print axioms permute_then_store
+/-- info: 'Tests.Automation.permute_then_store_value' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms permute_then_store_value
+/-- info: 'Tests.Automation.feature_step_from_fact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_from_fact
+/-- info: 'Tests.Automation.feature_step_free_body' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_free_body
+/-- info: 'Tests.Automation.feature_step_literal_profile' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_literal_profile
+/-- info: 'Tests.Automation.asRef_fact_stack' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms asRef_fact_stack
+/-- info: 'Tests.Automation.load128_fact_stack' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms load128_fact_stack
+/-- info: 'Tests.Automation.add_fact_stack' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms add_fact_stack
 
 end Tests.Automation
