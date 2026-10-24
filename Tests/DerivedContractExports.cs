@@ -104,7 +104,8 @@ foreach ((string method, _, string contract, string kind, _) in exports)
     string expected = "LeanCILExportAudit.certified : CIL.Safety." + holds + " " + contract + " Extracted.program 0";
     if (Text(export, "kind") != kind || statement != expected ||
         Text(certification, "theorem") != "LeanCILExportAudit.certified")
-        throw new InvalidOperationException("Derived export lost its kind or exact statement: " + method + ": " + statement);
+        throw new InvalidOperationException("Derived export lost its kind or exact statement: " + method + ": " +
+            statement);
 }
 if (published["exports"]!.AsArray().Count != 2 || certifications.Count != 2)
     throw new InvalidOperationException("Derived sidecar must certify exactly the two public exports.");
