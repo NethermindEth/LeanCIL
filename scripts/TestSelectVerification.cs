@@ -82,6 +82,11 @@ Test("shared unknown and workflow inputs", () =>
         "scripts/SelectVerification.cs" })
         Equal(VerificationSelection.Select([path]), All());
 });
+Test("other workflows do not rerun suites", () =>
+{
+    Equal(VerificationSelection.Select([".github/workflows/consumer.yml", ".github/workflows/runtime-profiles.yml"]), []);
+    Equal(VerificationSelection.Select([".github/workflows/consumer.yml", "Tests/Loops.cs"]), ["loops"]);
+});
 Test("multiple changes and deleted paths", () =>
 {
     Equal(VerificationSelection.Select(["README.md", "Tests/Loops.cs", "Tests/Division.cs"]), ["division", "loops"]);
