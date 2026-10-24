@@ -57,6 +57,9 @@ A run-to-run goal `run p (fuel + n) m 0 .. = run p fuel m n ..` closes with
 rewriting, `cil_checked_steps n [facts]` takes exactly `n` steps and leaves the
 residual `run` equation. A call counts as one step: the callee runs to its
 return and the residual starts at the caller's next instruction.
+Unlike `cil_contract_steps n`, which takes at most `n` steps and stops silently
+when one fails, it errors unless all `n` steps are taken, since a residual at the
+wrong pc would not match the target.
 `MemoryBelow.frame_round_trip` carries caller memory across `enterFrame` and
 `leaveFrame` when the callee body keeps it.
 
