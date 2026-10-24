@@ -2,6 +2,14 @@ import CIL.Safety.WordMemory
 import CIL.Safety.HomeProgress
 import CIL.Safety.FrameMemoryBelow
 
+/-!
+# Word locals
+
+Creating, loading and storing a 64-bit local held in a private eight-byte home. The step
+lemmas state the exact checked-interpreter result of `ldloc` and `stloc` on such a slot,
+so consumer proofs can step them without unfolding `CIL.Safety.step`.
+-/
+
 namespace CIL.Safety
 
 /-- A fresh initialized word local has exact readback and preserves older memory. -/
@@ -13,24 +21,29 @@ theorem make_local_word64 (memory : Memory) (activation : Nat) (word : BitVec 64
       read result reference 8 1 = .ok (numberBytes word.toNat 8) ∧
       access result reference 8 1 true = .ok () ∧
       MemoryBelow memory.nextIdentity memory result := by
-  obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds (alignment := 8) memory activation 8 wellFormed (by decide) (by decide)
+  obtain ⟨reference, allocated, home⟩ :=
+    allocateHome_succeeds (alignment := 8) memory activation 8 wellFormed (by decide) (by decide)
   have ready := allocateHome_write_access _ _ _ _ _ home
   obtain ⟨result, written, stored, readback, _⟩ := store_local_word64 word ready.access
   have created : makeLocal activation .word64 (.i64 word) memory =
       .ok (.bytes .word64 reference, [reference.allocation], result) := by
-    simp [makeLocal, localWidth, localAlignment, home, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    simp [makeLocal, localWidth, localAlignment, home, stored, Bind.bind, Except.bind, Pure.pure,
+      Except.pure]
   exact ⟨reference, result, created, readback, (ready.after_write written).access,
     makeLocal_preserves_caller_memory _ _ _ _ _ _ _ created⟩
 
+/-- Loading a word local whose home holds `word` pushes `word`. -/
 theorem step_load_word64 {body : CIL.Method} {pc index : Nat} {args stack : List Value}
     {frame : Frame} {memory : Memory} {reference : Reference} {word : BitVec 64}
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (loaded : read memory reference 8 1 = .ok (numberBytes word.toNat 8)) :
     step body (.local index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.i64 word) :: stack) frame memory) := by
-  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or, Bool.false_eq_true, ite_false, slot, load_local_word64_of_read loaded, Bind.bind, Except.bind,
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or,
+    Bool.false_eq_true, ite_false, slot, load_local_word64_of_read loaded, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 
+/-- Storing a word into a writable word local writes its eight bytes and reads back. -/
 theorem step_store_word64 {body : CIL.Method} {pc index : Nat} {args rest : List Value}
     {frame : Frame} {memory : Memory} {reference : Reference} (word : BitVec 64)
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
@@ -43,12 +56,14 @@ theorem step_store_word64 {body : CIL.Method} {pc index : Nat} {args rest : List
       read result reference 8 1 = .ok (numberBytes word.toNat 8) := by
   obtain ⟨result, written, stored, readback, _⟩ := store_local_word64 word ready
   refine ⟨result, ?_, written, readback⟩
-  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or,
+    Bool.false_eq_true, ite_false, slot, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 /-- Storing a numeric local changes its bytes, not the frame's slot identities.
     This lets subsequent calls retain indexed home and separation facts. -/
-theorem step_store_word64_same_frame {body : CIL.Method} {pc index : Nat} {args rest : List Value}
-    {frame : Frame} {memory : Memory} {reference : Reference} (word : BitVec 64)
+theorem step_store_word64_same_frame {body : CIL.Method} {pc index : Nat}
+    {args rest : List Value} {frame : Frame} {memory : Memory} {reference : Reference}
+    (word : BitVec 64)
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (ready : access memory reference 8 1 true = .ok ()) :
     ∃ result,

@@ -1,5 +1,12 @@
 import CIL.Safety.WordSnapshots
 
+/-!
+# Snapshots across other stores
+
+A store into a private home of a different local kind leaves every remembered word in
+`WordSnapshots` intact, so frames that mix word and other locals keep their word facts.
+-/
+
 namespace CIL.Safety
 
 /-- A store into another typed private home cannot change any remembered word.

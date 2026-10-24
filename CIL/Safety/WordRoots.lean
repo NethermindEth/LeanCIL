@@ -1,5 +1,11 @@
 import CIL.Safety.WordHomes
 
+/-!
+# Root locals
+
+The slot of each `none` entry in a `WordHomes` recipe is a null object root.
+-/
+
 namespace CIL.Safety
 
 /-- A reference initializer creates an initialized null root at its metadata index. -/

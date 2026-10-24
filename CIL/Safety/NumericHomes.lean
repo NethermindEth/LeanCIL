@@ -1,5 +1,14 @@
 import CIL.Safety.NumericLocals
 
+/-!
+# Numeric frame homes
+
+Frame setup for methods whose locals are all numeric scalars. `NumericHomes` records that
+each local has its own fresh, initialized, writable home holding its initial value, in
+increasing allocation order above the caller's memory. `numeric_frame_setup` proves that
+`enterFrame` produces such homes, which the load and store step lemmas then consume.
+-/
+
 namespace CIL.Safety
 
 /-- A numeric local initializer whose extracted storage kind accepts the value. -/
@@ -9,11 +18,14 @@ structure NumericLocalSpec where
   number : Nat
   fits : localNumber kind value = .ok number
 
+/-- The storage kinds of the locals, in order. -/
 def numericKinds (specs : List NumericLocalSpec) : List CIL.LocalKind := specs.map (·.kind)
+/-- The initial values of the locals, in order. -/
 def numericInitializers (specs : List NumericLocalSpec) : List CIL.Value := specs.map (·.value)
 
 /-- Initialized writable homes in strictly increasing allocation identities. -/
-inductive NumericHomes (memory : Memory) : Nat → List NumericLocalSpec → List LocalSlot → Prop where
+inductive NumericHomes (memory : Memory) :
+    Nat → List NumericLocalSpec → List LocalSlot → Prop where
   | nil (lower : Nat) : NumericHomes memory lower [] []
   | cons {lower specs slots} (reference : Reference) (spec : NumericLocalSpec)
       (fresh : lower ≤ reference.allocation)
@@ -31,6 +43,8 @@ theorem NumericHomes.weaken {memory : Memory} {lower upper : Nat} {specs slots}
   | cons reference spec fresh loaded writable tail =>
     exact .cons reference spec (Nat.le_trans bound fresh) loaded writable tail
 
+/-- Making the locals of a numeric frame succeeds and yields `NumericHomes` above the
+    caller's next identity. -/
 theorem make_numeric_locals (memory : Memory) (activation : Nat) (specs : List NumericLocalSpec)
     (wellFormed : memory.WellFormed) :
     ∃ slots owned result,
@@ -55,11 +69,14 @@ theorem make_numeric_locals (memory : Memory) (activation : Nat) (specs : List N
         (by rw [retained.access reference fresh.2 (localWidth spec.kind) 1 true]; exact writable)
         (homes.weaken (Nat.succ_le_of_lt fresh.2))
 
+/-- The home of local `index` holds its initial value and is writable. -/
 theorem NumericHomes.home_at {memory : Memory} {lower : Nat} {specs slots}
     (homes : NumericHomes memory lower specs slots) (index : Nat) (spec : NumericLocalSpec)
     (specified : specs[index]? = some spec) :
-    ∃ reference, slots[index]? = some (.bytes spec.kind reference) ∧ lower ≤ reference.allocation ∧
-      read memory reference (localWidth spec.kind) 1 = .ok (numberBytes spec.number (localWidth spec.kind)) ∧
+    ∃ reference, slots[index]? = some (.bytes spec.kind reference) ∧
+      lower ≤ reference.allocation ∧
+      read memory reference (localWidth spec.kind) 1 =
+        .ok (numberBytes spec.number (localWidth spec.kind)) ∧
       access memory reference (localWidth spec.kind) 1 true = .ok () := by
   induction homes generalizing index spec with
   | nil => simp at specified
@@ -71,7 +88,8 @@ theorem NumericHomes.home_at {memory : Memory} {lower : Nat} {specs slots}
       exact ⟨reference, rfl, fresh, loaded, writable⟩
     | succ index =>
       obtain ⟨r, slot, bound, readback, accessOK⟩ := ih index spec (by simpa using specified)
-      exact ⟨r, by simpa using slot, Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) bound), readback, accessOK⟩
+      exact ⟨r, by simpa using slot, Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) bound),
+        readback, accessOK⟩
 
 /-- Every numeric home is above the caller's allocation boundary. -/
 theorem NumericHomes.home_bound {memory : Memory} {lower : Nat} {specs slots}
@@ -115,6 +133,7 @@ theorem NumericHomes.ordered {memory : Memory} {lower : Nat} {specs slots}
 #print axioms NumericHomes.weaken
 #print axioms make_numeric_locals
 #print axioms NumericHomes.home_at
+
 /-- Propose numeric recipes from metadata. Callers must prove both metadata
     lists equal the resulting recipe, so rejected pairs or truncation cannot pass. -/
 def numericSpecs (body : CIL.Method) : List NumericLocalSpec :=
@@ -134,12 +153,14 @@ theorem numeric_frame_setup (body : CIL.Method) (specs : List NumericLocalSpec)
       enterFrame body args memory = .ok (frame, result) ∧
       NumericHomes result memory.nextIdentity specs frame.locals ∧
       MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
-  obtain ⟨slots, owned, result, made, homes⟩ := make_numeric_locals memory memory.nextIdentity specs wellFormed
+  obtain ⟨slots, owned, result, made, homes⟩ :=
+    make_numeric_locals memory memory.nextIdentity specs wellFormed
   simp only [numericKinds, numericInitializers] at made
   let frame : Frame := ⟨memory.nextIdentity, slots, owned, []⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
-      kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes, List.map_nil,
+      kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes,
+      List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl
   exact ⟨frame, result, setup, homes, enterFrame_preserves_caller_memory _ _ _ _ _ setup,

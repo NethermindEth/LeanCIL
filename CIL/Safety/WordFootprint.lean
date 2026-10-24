@@ -1,10 +1,21 @@
 import CIL.Safety.WordMemory
 
+/-!
+# Word footprints
+
+The eight-byte footprint of a 64-bit word store, and the fact that such a store leaves
+every cell outside its footprint unchanged. Frame and loop proofs use these to carry
+facts about other words across a store.
+-/
+
 namespace CIL.Safety
 
+/-- The eight-byte words at `left` and `right` share no byte. -/
 def WordsDisjoint (left right : Reference) : Prop :=
-  left.allocation ≠ right.allocation ∨ left.offset + 8 ≤ right.offset ∨ right.offset + 8 ≤ left.offset
+  left.allocation ≠ right.allocation ∨ left.offset + 8 ≤ right.offset ∨
+    right.offset + 8 ≤ left.offset
 
+/-- Cell `offset` of allocation `id` lies outside the eight-byte word at `reference`. -/
 def OutsideWord (reference : Reference) (id offset : Nat) : Prop :=
   id ≠ reference.allocation ∨ offset < reference.offset ∨ reference.offset + 8 ≤ offset
 
