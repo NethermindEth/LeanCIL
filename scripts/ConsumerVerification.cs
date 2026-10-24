@@ -848,6 +848,24 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return outcome.Report!;
     }
 
+    // Capture all artifact names, including unknown parts used by module discovery.
+    static SortedDictionary<string, string> ConsumerArtifactSnapshot(string directory) =>
+        HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
+            .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
+
+    // The replay manifest binds exactly the parts consumed by Lean.
+    static SortedDictionary<string, string> ConsumerSnapshotParts(
+        IReadOnlyDictionary<string, string> artifacts, string modulePath, string path)
+    {
+        var parts = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var suffix in new[] { "", ".server", ".private" })
+            if (artifacts.TryGetValue(modulePath + suffix, out var hash)) parts[".olean" + suffix] = hash;
+            // Filesystem lookup can resolve case variants absent from the ordinal snapshot.
+            else if (File.Exists(path + suffix)) parts[".olean" + suffix] = Sha(path + suffix);
+        return parts;
+    }
+
     // Verifies requests against one consumer snapshot. Each request gets its own
     // certificate, proof module, theorem audit and failure; requests that share an
     // extraction share one Lake workspace, build and kernel replay.
@@ -1227,19 +1245,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             var frameworkModules = Path.GetFullPath(Path.Combine(frameworkCopy, ".lake/build/lib/lean"));
-            var currentBase = ModuleArtifacts(frameworkCopy).Where(pair =>
+            // No external commands run between this snapshot and the replay manifest.
+            var artifactSnapshots = importDirectories.Where(Directory.Exists)
+                .Select(directory => (Directory: directory, Artifacts: ConsumerArtifactSnapshot(directory))).ToArray();
+            var frameworkArtifacts = artifactSnapshots.FirstOrDefault(snapshot =>
+                snapshot.Directory.Equals(frameworkModules, comparison)).Artifacts;
+            var currentBase = (frameworkArtifacts ?? ConsumerArtifactSnapshot(frameworkModules)).Where(pair =>
                 ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
             var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison)) &&
                 certifiedBase.Count == currentBase.Count &&
                 certifiedBase.All(pair => currentBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
             var moduleNames = new HashSet<string>(StringComparer.Ordinal);
             var discovered = new List<(string Name, bool Certified)>();
-            foreach (var directory in importDirectories)
+            foreach (var (directory, artifacts) in artifactSnapshots)
             {
-                if (!Directory.Exists(directory)) continue;
-                var artifacts = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-                    .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-                    .Select(path => new KeyValuePair<string, string>(Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha(path)));
                 foreach (var module in artifacts.GroupBy(pair => ModuleName(pair.Key)))
                 {
                     if (!moduleNames.Add(module.Key)) throw new InvalidDataException("Ambiguous consumer module: " + module.Key);
@@ -1265,12 +1284,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (!moduleNames.Contains("Extracted") || !moduleNames.Contains("ExtractionAudit") ||
                 proceeding.Any(i => !moduleNames.Contains(names[Array.IndexOf(members, i)])))
                 throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
-            var currentArtifacts = importDirectories.Where(Directory.Exists).SelectMany(directory =>
-                Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
-                    (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
+            var mainArtifacts = artifactSnapshots.SelectMany(snapshot =>
+                Directory.EnumerateFiles(snapshot.Directory, "*.olean", SearchOption.AllDirectories)
+                    .Select(path => (Name: ModuleName(Path.GetRelativePath(snapshot.Directory, path)
+                        .Replace('\\', '/')), Path: path, Parts: ConsumerSnapshotParts(snapshot.Artifacts,
+                            Path.GetRelativePath(snapshot.Directory, path).Replace('\\', '/'), path)))).ToArray();
+            var currentArtifacts = mainArtifacts
                 .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
-            var checkedArtifacts = JsonSerializer.Serialize(currentArtifacts.OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                .ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)));
+            var checkedArtifacts = JsonSerializer.Serialize(mainArtifacts.OrderBy(pair => pair.Name, StringComparer.Ordinal)
+                .ToDictionary(pair => pair.Name, pair => pair.Parts));
             var portableSupport = ImportedConsumerSupport(session, trusted, currentArtifacts);
             var graph = members.Length > 1 || share || UseSuccessCache || exporting || restoredArtifacts.Count > 0 || symbolHash is not null
                 ? ConsumerModuleImports(session, currentArtifacts) : null;
