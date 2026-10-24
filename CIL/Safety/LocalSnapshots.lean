@@ -1,12 +1,13 @@
 import CIL.Safety.WordSnapshots
 import CIL.Safety.NumericHomes
+import CIL.Safety.MethodContract
 
 /-!
 # Remembered numeric locals of every kind
 
 `LocalSnapshots memory slots known` records that each local whose index has
 `known index = some value` is a numeric home whose bytes load as `value`, for every numeric
-`LocalKind`: narrow and 32-bit integers, words, aggregates and vectors. It generalizes
+`LocalKind`: bytes, narrow and 32-bit integers, words, aggregates and vectors. It generalizes
 `WordSnapshots`, which covers `.word64` homes only, and converts to and from it. A store
 updates one entry with `rememberLocal`; writes, frame changes and confined calls that miss
 every remembered home keep the rest, so a consumer proof steps each load to its exact value.
@@ -28,26 +29,28 @@ def LocalSnapshots (memory : Memory) (slots : List LocalSlot)
 def rememberLocal (known : Nat → Option CIL.Value) (index : Nat) (value : CIL.Value) :
     Nat → Option CIL.Value := fun other => if other = index then some value else known other
 
+/-- Remembering nothing holds in any memory. -/
 theorem LocalSnapshots.empty (memory : Memory) (slots : List LocalSlot) :
     LocalSnapshots memory slots (fun _ => none) := by
   intro index value impossible
   cases impossible
 
 /-- Snapshots survive any change that keeps authority and initialization below the watermark
-    and leaves every byte of each remembered home's allocation unchanged. -/
+    and leaves every byte of each remembered home unchanged. -/
 theorem LocalSnapshots.after_unchanged {before after : Memory} {slots : List LocalSlot}
     {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots before slots known)
     (formed : before.WellFormed) (authority : AccessBelow before.nextIdentity before after)
     (unchanged : ∀ index value kind home, known index = some value →
-      slots[index]? = some (.bytes kind home) → ∀ offset,
-        after.cells home.allocation offset = before.cells home.allocation offset) :
+      slots[index]? = some (.bytes kind home) → ∀ offset < localWidth kind,
+        after.cells home.allocation (home.offset + offset) =
+          before.cells home.allocation (home.offset + offset)) :
     LocalSnapshots after slots known := by
   intro index value specified
   obtain ⟨kind, home, stored, number, slot, fits, result, loaded⟩ :=
     snapshots index value specified
   exact ⟨kind, home, stored, number, slot, fits, result,
     authority.read_eq loaded (formed.access_bound (read_access loaded))
-      (fun _ _ => unchanged index value kind home specified slot _)⟩
+      (fun offset bound => unchanged index value kind home specified slot offset bound)⟩
 
 /-- A write that shares no byte with any remembered home keeps every snapshot. The write
     may land in the same allocation as a home, at disjoint offsets. -/
@@ -57,8 +60,7 @@ theorem LocalSnapshots.after_write_apart {before after : Memory} {slots : List L
     (written : write before target bytes alignment = .ok after)
     (apart : ∀ index value kind home, known index = some value →
       slots[index]? = some (.bytes kind home) →
-      home.allocation ≠ target.allocation ∨ home.offset + localWidth kind ≤ target.offset ∨
-        target.offset + bytes.length ≤ home.offset) :
+      Apart home (localWidth kind) (target, bytes.length)) :
     LocalSnapshots after slots known := by
   intro index value specified
   obtain ⟨kind, home, stored, number, slot, fits, result, loaded⟩ :=
@@ -189,6 +191,20 @@ theorem LocalSnapshots.toWordSnapshots {memory : Memory} {slots : List LocalSlot
   obtain ⟨rfl, rfl⟩ := wordHome
   exact ⟨home, slot, loaded⟩
 
+/-- Viewing words as locals and back recovers them exactly. -/
+theorem localWords_wordLocals (known : Nat → Option (BitVec 64)) :
+    localWords (wordLocals known) = known := by
+  funext index
+  cases present : known index <;> simp [localWords, wordLocals, present]
+
+/-- Remembering an `.i64` local and then taking the words is remembering the word. -/
+theorem localWords_rememberLocal (known : Nat → Option CIL.Value) (index : Nat)
+    (word : BitVec 64) :
+    localWords (rememberLocal known index (.i64 word)) =
+      rememberWord (localWords known) index word := by
+  funext other
+  by_cases same : other = index <;> simp [localWords, rememberWord, rememberLocal, same]
+
 /-- Remembering a word and then viewing the words as locals is remembering its value. -/
 theorem wordLocals_rememberWord (known : Nat → Option (BitVec 64)) (index : Nat)
     (word : BitVec 64) :
@@ -232,6 +248,8 @@ theorem NumericHomes.snapshots {memory : Memory} {lower : Nat} {specs slots}
 #print axioms LocalSnapshots.store
 #print axioms WordSnapshots.toLocalSnapshots
 #print axioms LocalSnapshots.toWordSnapshots
+#print axioms localWords_wordLocals
+#print axioms localWords_rememberLocal
 #print axioms wordLocals_rememberWord
 #print axioms NumericHomes.writable
 #print axioms NumericHomes.snapshots

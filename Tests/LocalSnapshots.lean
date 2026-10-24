@@ -81,43 +81,65 @@ theorem narrow_store_loads_extended {body : CIL.Method} {pc : Nat} {args stack :
 
 #print axioms narrow_store_loads_extended
 
-/-- Words convert to locals and back without losing an entry, and a word store commutes with
-    the conversion. -/
+/-- Remembered words survive a conversion to locals and back. -/
 theorem word_round_trip {memory : Memory} {slots : List LocalSlot}
-    {known : Nat → Option (BitVec 64)} (snapshots : WordSnapshots memory slots known)
-    (index : Nat) (word : BitVec 64) :
-    WordSnapshots memory slots known ∧
-      wordLocals (rememberWord known index word) =
-        rememberLocal (wordLocals known) index (.i64 word) := by
-  have back := snapshots.toLocalSnapshots.toWordSnapshots
-  have same : localWords (wordLocals known) = known := by
-    funext other
-    cases present : known other <;> simp [localWords, wordLocals, present]
-  exact ⟨same ▸ back, wordLocals_rememberWord known index word⟩
+    {known : Nat → Option (BitVec 64)} (snapshots : WordSnapshots memory slots known) :
+    WordSnapshots memory slots known :=
+  localWords_wordLocals known ▸ snapshots.toLocalSnapshots.toWordSnapshots
 
 #print axioms word_round_trip
 
-/-- A vector local in its own allocation keeps its value across a call confined to a
-    carry word elsewhere. -/
-theorem vector_survives_call {before after : Memory} {carry home : Reference}
-    {vector : BitVec 128}
-    (snapshots : LocalSnapshots before [.bytes .vector128 home]
-      (rememberLocal (fun _ => none) 0 (.v128 vector)))
-    (framed : Confined [(carry, 8)] before after) (formed : before.WellFormed)
-    (separate : home.allocation ≠ carry.allocation) :
-    LocalSnapshots after [.bytes .vector128 home]
-      (rememberLocal (fun _ => none) 0 (.v128 vector)) :=
-  snapshots.after_confined framed formed fun index _ _ _ _ slot entry member => by
-    rcases index with _ | _ <;> simp at slot member
-    obtain ⟨_, rfl⟩ := slot
-    subst member
-    exact Or.inl separate
+/-- A word store made through `LocalSnapshots` comes back as the same word store: both
+    bridges commute with remembering. -/
+theorem word_store_through_locals {entered before after : Memory} {boundary : Nat}
+    {kinds slots} {known : Nat → Option (BitVec 64)} {home : Reference}
+    (snapshots : WordSnapshots before slots known)
+    (homes : WritableHomes entered boundary kinds slots) (index : Nat) (word : BitVec 64)
+    (slot : slots[index]? = some (.bytes .word64 home))
+    (written : write before home (numberBytes word.toNat 8) 1 = .ok after) :
+    WordSnapshots after slots (rememberWord known index word) := by
+  have stored := snapshots.toLocalSnapshots.after_write homes index .word64 home (.i64 word)
+    word.toNat rfl slot written
+  have words := stored.toWordSnapshots
+  rwa [show localResult .word64 (.i64 word) = .i64 word from rfl, localWords_rememberLocal,
+    localWords_wordLocals] at words
 
-#print axioms vector_survives_call
+#print axioms word_store_through_locals
+
+/-- A vector and an int32 local, each apart from every footprint entry, keep their values
+    across a call confined to a carry and an output word. -/
+theorem locals_survive_call {before after : Memory} {carry output first second : Reference}
+    {known : Nat → Option CIL.Value}
+    (snapshots : LocalSnapshots before [.bytes .vector128 first, .bytes .word32 second] known)
+    (framed : Confined [(carry, 8), (output, 8)] before after) (formed : before.WellFormed)
+    (firstApart : ∀ entry ∈ [(carry, 8), (output, 8)], Apart first 16 entry)
+    (secondApart : ∀ entry ∈ [(carry, 8), (output, 8)], Apart second 4 entry) :
+    LocalSnapshots after [.bytes .vector128 first, .bytes .word32 second] known :=
+  snapshots.after_confined framed formed fun index _ _ _ _ slot => by
+    rcases index with _ | _ | _ <;> simp at slot <;> obtain ⟨rfl, rfl⟩ := slot <;> assumption
+
+#print axioms locals_survive_call
 
 /-- One remembered vector local. -/
 abbrev vectorKnown (vector : BitVec 128) : Nat → Option CIL.Value :=
   rememberLocal (fun _ => none) 0 (.v128 vector)
+
+/-- Storing again to a remembered byte local replaces its value: the load pushes the second
+    value, not the first. -/
+theorem byte_overwrite_loads_latest {body : CIL.Method} {pc : Nat} {args stack : List Value}
+    {frame : Frame} {entered start middle final : Memory} {boundary : Nat} {home : Reference}
+    (homes : WritableHomes entered boundary [.byte] frame.locals)
+    (slot : frame.locals[0]? = some (.bytes .byte home))
+    (first : write start home (numberBytes 7 1) 1 = .ok middle)
+    (second : write middle home (numberBytes 200 1) 1 = .ok final) :
+    step body (.local 0) pc args frame stack final =
+      .ok (.next (pc + 1) (.scalar (.i32 200) :: stack) frame final) := by
+  have once := (LocalSnapshots.empty start frame.locals).after_write homes 0 .byte home
+    (.i32 7) 7 rfl slot first
+  have twice := once.after_write homes 0 .byte home (.i32 200) 200 rfl slot second
+  exact twice.load (.i32 200) rfl
+
+#print axioms byte_overwrite_loads_latest
 
 /-- Writes into the vector's own allocation, ending at its first byte or starting just past
     its last, keep it: apartness is by byte interval, not by allocation. -/
@@ -160,7 +182,7 @@ theorem vector_survives_unchanged_bytes {before after : Memory} {home target : R
     (separate : home.allocation ≠ target.allocation) :
     LocalSnapshots after [.bytes .vector128 home] (vectorKnown vector) :=
   snapshots.after_unchanged formed (write_preserves_access_below written _)
-    fun index _ _ _ _ slot offset => by
+    fun index _ _ _ _ slot offset _ => by
       rcases index with _ | _ <;> simp at slot
       obtain ⟨_, rfl⟩ := slot
       exact write_outside _ _ _ _ _ _ _ written (Or.inl separate)
@@ -170,15 +192,15 @@ theorem vector_survives_unchanged_bytes {before after : Memory} {home target : R
 /-- A write onto the first byte of a remembered vector home is not apart from it, so
     `after_write_apart` cannot keep that snapshot. -/
 theorem overlapping_write_not_apart (home : Reference) (byte : BitVec 8) :
-    ¬ (home.allocation ≠ home.allocation ∨ home.offset + localWidth .vector128 ≤ home.offset ∨
-      home.offset + [byte].length ≤ home.offset) := by
-  simp [localWidth]
+    ¬ Apart home (localWidth .vector128) (home, [byte].length) := by
+  simp [Apart, localWidth]
 
 #print axioms overlapping_write_not_apart
 
 /-- Loads a vector local and returns it. -/
 @[cil_code] def loadVectorBody : CIL.Method := {
-  code := [.local 0, .ret], locals := [], returnsValue := true }
+  code := [.local 0, .ret], locals := [.v128 0], localKinds := [.vector128],
+  returnsValue := true }
 
 /-- The stepping tactics take a snapshot load as a supplied step fact, with no change to the
     tactics: the `.local` step pushes the remembered vector. -/

@@ -161,12 +161,14 @@ precondition, a smaller footprint and a changed exception type each fail both th
 refinement premises and the derived contract on a concrete input.
 
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
-`Confined`. `Tests.LocalSnapshots` keeps vector, int32 and narrow locals known across
-stores, writes elsewhere and confined calls, and steps a load from a snapshot fact. `Tests.BufferContents` checks typed buffer contents: fills and
-in-place transforms of any length, unchanged neighbouring bytes and sibling
-slices of one allocation, a producer that extends its prefix while its room
-stays unreadable, empty buffers at invalid and sentinel positions, and rejection
-of uninitialized, past-end, overlapping, unjoined and stale contents.
+`Confined`. `Tests.LocalSnapshots` keeps vector, int32, byte and narrow locals
+known across stores, overwrites, writes elsewhere and confined calls, and steps
+a load from a snapshot fact. `Tests.BufferContents` checks typed buffer
+contents: fills and in-place transforms of any length, unchanged neighbouring
+bytes and sibling slices of one allocation, a producer that extends its prefix
+while its room stays unreadable, empty buffers at invalid and sentinel
+positions, and rejection of uninitialized, past-end, overlapping, unjoined and
+stale contents.
 
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
