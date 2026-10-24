@@ -73,5 +73,5 @@ checks. The summary records elapsed library update/build time and the baseline
 revision, runner and run ID. Hosted-runner timings vary, so this is diagnostic
 rather than a performance threshold.
 
-The immutable consumer pin currently names the unmerged int256#154 head. Advance
+The immutable consumer pin currently names the unmerged int256#141 head. Advance
 it to the merged revision after that PR lands.
