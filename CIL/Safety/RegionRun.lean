@@ -149,7 +149,8 @@ def inStarts (starts : List (Nat × Nat)) (method pc : Nat) : Bool :=
 def regionClosedCheck (program : CIL.Program) (starts : List (Nat × Nat)) : Bool :=
   starts.all fun start => match program[start.1]? with
     | none => true
-    | some body => (List.range body.code.length).all fun pc => !(start.2 ≤ pc) || match body.code[pc]? with
+    | some body => (List.range body.code.length).all fun pc =>
+      !(start.2 ≤ pc) || match body.code[pc]? with
       | none => true
       | some op => (!op.continues || inStarts starts start.1 (pc + 1)) &&
           op.targets.all (inStarts starts start.1) && op.callees.all (inStarts starts · 0)
