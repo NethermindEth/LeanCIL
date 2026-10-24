@@ -20,10 +20,7 @@ private def vectorFamily : TypeExpr → Bool
 /-- The byte width of an exactly identified `Vector128/256/512<ulong>`. -/
 private def vectorWidth : TypeExpr → Option Nat
   | .apply (.constructor scope name) (.atom elementScope "System.UInt64") =>
-    if scope != "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, \
-        PublicKeyToken=cc7b13ffcd2ddd51" ||
-        elementScope != "System.Runtime, Version=10.0.0.0, Culture=neutral, \
-          PublicKeyToken=b03f5f7f11d50a3a" then none
+    if scope != intrinsicsScope || elementScope != runtimeScope then none
     else if name == "System.Runtime.Intrinsics.Vector128`1" then some 16
     else if name == "System.Runtime.Intrinsics.Vector256`1" then some 32
     else if name == "System.Runtime.Intrinsics.Vector512`1" then some 64

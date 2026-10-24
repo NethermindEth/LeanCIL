@@ -17,9 +17,6 @@ Signature strings below use string gaps, so each literal is one unbroken identit
 
 namespace CIL.Extraction
 
-private def intrinsicScope :=
-  "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-
 /-- Each admitted intrinsic: owner class, method name, full signature, emitted intrinsic and
     arity. -/
 private def divisionSignatures : List (String × String × String × Intrinsic × Nat) := [
@@ -102,13 +99,10 @@ private def divisionSignatures : List (String × String × String × Intrinsic �
       System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
     .avx512DQ .moveMask64, 1)]
 
-private def scalarScope :=
-  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-
 /-- `Vector{width}<ulong>` with exact scopes. -/
 private def divisionVector (width : String) : TypeExpr :=
-  .apply (.constructor intrinsicScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
-    (.atom scalarScope "System.UInt64")
+  .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
+    (.atom runtimeScope "System.UInt64")
 
 /-- The return and parameter types each admitted intrinsic's call site must declare. -/
 private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
@@ -117,14 +111,14 @@ private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
   | .avx2 .shl64Count | .avx2 .shr64Count =>
     some (divisionVector "256", [divisionVector "256", divisionVector "128"])
   | .avx2 .shl64 | .avx2 .shr64 =>
-    some (divisionVector "256", [divisionVector "256", .atom scalarScope "System.Byte"])
+    some (divisionVector "256", [divisionVector "256", .atom runtimeScope "System.Byte"])
   | .avx512 .ltu512 | .avx512 .gtu512 =>
     some (divisionVector "512", [divisionVector "512", divisionVector "512"])
-  | .avx512DQ .moveMask512 => some (.atom scalarScope "System.Int32", [divisionVector "512"])
-  | .avx512DQ .moveMask64 => some (.atom scalarScope "System.Int32", [divisionVector "256"])
+  | .avx512DQ .moveMask512 => some (.atom runtimeScope "System.Int32", [divisionVector "512"])
+  | .avx512DQ .moveMask64 => some (.atom runtimeScope "System.Int32", [divisionVector "256"])
   | .vector .combine256 => some (divisionVector "512", [divisionVector "256", divisionVector "256"])
   | .vector .createScalarUnsafe64 =>
-    some (divisionVector "128", [.atom scalarScope "System.UInt64"])
+    some (divisionVector "128", [.atom runtimeScope "System.UInt64"])
   | _ => none
 
 /-- The intrinsic and arity of a static, non-generic `call` that matches an admitted entry
@@ -135,8 +129,9 @@ def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat)
   if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
   let (owner, name, signature, intrinsic, arity) ←
     divisionSignatures.find? fun (owner, name, signature, _, arity) =>
-      site.declaringType == .atom intrinsicScope owner && site.name == name &&
-      site.parameterCount == arity && site.target == .external (intrinsicScope ++ "::" ++ signature)
+      site.declaringType == .atom intrinsicsScope owner && site.name == name &&
+      site.parameterCount == arity &&
+      site.target == .external (intrinsicsScope ++ "::" ++ signature)
   let _ := owner
   let _ := name
   let _ := signature
@@ -149,7 +144,7 @@ def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat)
 private def divisionCallFamily (instruction : RawInstruction) : Bool :=
   match instruction.operand with
   | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
-      site.target == .external (intrinsicScope ++ "::" ++ signature) ||
+      site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
       site.name == name && match site.declaringType with
         | .atom _ declared => declared == owner
         | _ => false
@@ -190,7 +185,7 @@ private def opaqueEligible (closed : RawMethod) (addressed : List Nat) (index : 
   (match closed.locals[index]? with
   | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
       (.atom elementScope "System.UInt64")) =>
-    scope == intrinsicScope && elementScope == scalarScope
+    scope == intrinsicsScope && elementScope == runtimeScope
   | _ => false) && !addressed.contains index
 
 /-- Every eligible local, in index order; addresses are taken by `ldloca` (18 or 0xFE0D). -/
