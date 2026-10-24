@@ -136,6 +136,28 @@ example (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (fuel : Nat) (a 
         [.scalar (.i64 (a + b))] memory := by
   cil_checked_steps 4
 
+@[cil_code] def identityCallee : CIL.Method := {
+  code := [.arg 0, .ret], locals := [], returnsValue := true }
+
+@[cil_code] def callPrefixMethod : CIL.Method := {
+  code := [.arg 0, .call 1 1, .arg 0, .add, .ret], locals := [], returnsValue := true }
+
+-- A bounded step over a call runs the callee but stops before the caller's continuation.
+theorem run_call_prefix_bounded (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (a : CIL.W64) :
+    CIL.Safety.run [callPrefixMethod, identityCallee] 10 0 0 [.scalar (.i64 a)] frame [] memory =
+      CIL.Safety.run [callPrefixMethod, identityCallee] 8 0 2 [.scalar (.i64 a)] frame
+        [.scalar (.i64 (a + 0))] memory := by
+  -- Unbounded stepping runs through the caller's return, past the target state.
+  fail_if_success (cil_checked_steps; simp; done)
+  cil_checked_steps 2 []
+  run_tac do
+    let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
+    let some (_, lhs, _) := target.eq? | throwError "Expected a run equation"
+    unless lhs.isAppOf ``CIL.Safety.run && lhs.getAppArgs[3]!.nat? == some 2 do
+      throwError "cil_checked_steps 2 did not stop after the call"
+  simp
+
+#print axioms run_call_prefix_bounded
 #print axioms run_prefix
 #print axioms run_prefix_literal
 #print axioms run_prefix_bounded
