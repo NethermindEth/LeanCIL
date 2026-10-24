@@ -292,4 +292,6 @@ elab_rules : tactic
     unless (← getGoals).isEmpty do
       evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))
 
+macro "cil_checked_steps " count:num : tactic => `(tactic| cil_checked_steps $count [])
+
 end CIL.Safety

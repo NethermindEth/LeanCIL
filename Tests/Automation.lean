@@ -134,7 +134,7 @@ example (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (fuel : Nat) (a 
     CIL.Safety.run [prefixMethod] (fuel + 3) 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
       CIL.Safety.run [prefixMethod] fuel 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
         [.scalar (.i64 (a + b))] memory := by
-  cil_checked_steps 4 []
+  cil_checked_steps 4
 
 #print axioms run_prefix
 #print axioms run_prefix_literal

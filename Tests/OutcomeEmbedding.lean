@@ -226,6 +226,8 @@ example : Safety.invoke extracted 0 1 [.scalar (.i64 101)] empty = .error ⟨1, 
 /-- info: 'CIL.MethodEmbeds.holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms MethodEmbeds.holds
 
+#print axioms check_in_range
+
 /-- info: 'CIL.MethodEmbeds.method_holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms MethodEmbeds.method_holds
 

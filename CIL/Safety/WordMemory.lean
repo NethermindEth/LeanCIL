@@ -17,7 +17,7 @@ theorem load_word64_of_read {memory : Memory} {reference : Reference} {word : Bi
   simp [loadValue, dereference, loaded, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure, decode_word64]
 
-/-- What an unsigned `loadValue` of `width` bytes returns for the decoded `number`; other widths fault. -/
+/-- What an unsigned `loadValue` of `width` bytes returns for the decoded `number`; meaningful only at a `ScalarWidth`. -/
 def numericOfWidth (width number : Nat) : CIL.Value :=
   match width with
   | 1 | 2 | 4 => .i32 (BitVec.ofNat 32 number)

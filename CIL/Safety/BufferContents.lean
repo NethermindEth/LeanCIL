@@ -519,6 +519,7 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat} (f : Bi
 
 #print axioms elementBytes_slice
 #print axioms element_value
+#print axioms byteNumber_cons
 #print axioms byteNumber_append
 #print axioms byteNumber_elementBytes_cons
 #print axioms byteNumber_elementBytes
