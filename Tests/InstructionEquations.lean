@@ -43,15 +43,17 @@ info: Tests.InstructionEquations.dispatchBody_instruction4 (sse42 avx2 : Bool) (
 /-- info: 'Tests.InstructionEquations.dispatchBody_instruction4' depends on axioms: [propext] -/
 #guard_msgs in #print axioms dispatchBody_instruction4
 
--- Every pc of the eight-instruction body has its equation, using only the axioms of the
--- list lookup itself.
 open Lean in
-run_cmd do
-  for pc in [0:8] do
-    let name := Name.appendAfter `Tests.InstructionEquations.dispatchBody s!"_instruction{pc}"
+/-- Fails unless `body` has an equation for each of its `length` pcs, each using only the
+    axioms of the list lookup itself. -/
+def auditEquations (body : Name) (length : Nat) : CoreM Unit := do
+  for pc in [0:length] do
+    let name := body.appendAfter s!"_instruction{pc}"
     unless (← getEnv).contains name do throwError "missing {name}"
     let axioms ← collectAxioms name
     unless axioms.all (· == ``propext) do throwError "{name} depends on {axioms}"
+
+run_cmd Lean.Elab.Command.liftCoreM (auditEquations ``dispatchBody 8)
 
 -- One equation per pc and no more: pc 7 is the last instruction.
 example : ∀ sse42 avx2 callee, (dispatchBody sse42 avx2 callee).code[7]? =
@@ -126,6 +128,7 @@ example (avx2 : Bool) :
   composedBody_instruction2 avx2
 example (avx2 : Bool) : (composedBody avx2).code[3]? = some .ret :=
   composedBody_instruction3 avx2
+run_cmd Lean.Elab.Command.liftCoreM (auditEquations ``composedBody 4)
 /-- error: Unknown identifier `composedBody_instruction4` -/
 #guard_msgs in #check composedBody_instruction4
 
