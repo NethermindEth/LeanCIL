@@ -9,13 +9,21 @@ if (args is not [var consumer, var candidate])
     throw new ArgumentException("Usage: PrepareConsumer.cs <consumer checkout> <LeanCIL checkout>");
 
 candidate = Path.GetFullPath(candidate);
-var start = new ProcessStartInfo("git") { RedirectStandardOutput = true, UseShellExecute = false };
-foreach (var argument in new[] { "-C", candidate, "rev-parse", "--verify", "HEAD" })
-    start.ArgumentList.Add(argument);
-using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start git.");
-var revision = process.StandardOutput.ReadToEnd().Trim();
-process.WaitForExit();
-if (process.ExitCode != 0 || !Regex.IsMatch(revision, "^[0-9a-f]{40}$"))
+string Git(params string[] arguments)
+{
+    var start = new ProcessStartInfo("git") { RedirectStandardOutput = true, UseShellExecute = false };
+    foreach (var argument in new[] { "-C", candidate }.Concat(arguments))
+        start.ArgumentList.Add(argument);
+    using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start git.");
+    var output = process.StandardOutput.ReadToEnd().Trim();
+    process.WaitForExit();
+    if (process.ExitCode != 0) throw new InvalidOperationException("Could not inspect the candidate repository.");
+    return output;
+}
+if (Git("rev-parse", "--is-shallow-repository") != "false")
+    throw new InvalidOperationException("Consumer checks require a full candidate checkout; use fetch-depth: 0.");
+var revision = Git("rev-parse", "--verify", "HEAD");
+if (!Regex.IsMatch(revision, "^[0-9a-f]{40}$"))
     throw new InvalidOperationException("Could not identify the candidate commit.");
 
 var path = Path.Combine(Path.GetFullPath(consumer), "verification", "lakefile.toml");
