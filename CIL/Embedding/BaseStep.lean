@@ -140,7 +140,7 @@ theorem base_relabel_nop : BaseRelabel (.nop) :=
 theorem base_relabel_neg : BaseRelabel (.neg) := by base_relabel_unary
 theorem base_relabel_gt : BaseRelabel (.gt) := by base_relabel_binary
 theorem base_relabel_bgt (t : Nat) : BaseRelabel (.bgt t) := by
-  base_relabel_comparison (fun a b => decide (a.toInt > b.toInt)), (fun a b => decide (a.toInt > b.toInt))
+  base_relabel_comparison (fun a b => decide (b.toInt < a.toInt)), (fun a b => decide (b.toInt < a.toInt))
 theorem base_relabel_ble (t : Nat) : BaseRelabel (.ble t) := by
   base_relabel_comparison (fun a b => decide (a.toInt ≤ b.toInt)), (fun a b => decide (a.toInt ≤ b.toInt))
 theorem base_relabel_bleu (t : Nat) : BaseRelabel (.bleu t) := by
@@ -186,7 +186,7 @@ theorem base_relabel_switch (ts : List Nat) : BaseRelabel (.switch ts) := by
 theorem base_relabel_bltu (t : Nat) : BaseRelabel (.bltu t) := by
   base_relabel_comparison (fun a b => decide (a < b)), (fun a b => decide (a < b))
 theorem base_relabel_bgeu (t : Nat) : BaseRelabel (.bgeu t) := by
-  base_relabel_comparison (fun a b => decide (¬a < b)), (fun a b => decide (¬a < b))
+  base_relabel_comparison (fun a b => decide (b ≤ a)), (fun a b => decide (b ≤ a))
 theorem base_relabel_bgtu (t : Nat) : BaseRelabel (.bgtu t) := by
   base_relabel_comparison (fun a b => decide (b < a)), (fun a b => decide (b < a))
 theorem base_relabel_bge (t : Nat) : BaseRelabel (.bge t) := by

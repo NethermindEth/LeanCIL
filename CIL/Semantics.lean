@@ -86,12 +86,12 @@ def binary (op : Op) (a b : Value) : Option Value :=
   | .eq, .i32 x, .i32 y => some (.i32 (if x = y then 1 else 0))
   | .lt, .i64 x, .i64 y => some (.i32 (if x.toInt < y.toInt then 1 else 0))
   | .lt, .i32 x, .i32 y => some (.i32 (if x.toInt < y.toInt then 1 else 0))
-  | .gt, .i64 x, .i64 y => some (.i32 (if x.toInt > y.toInt then 1 else 0))
-  | .gt, .i32 x, .i32 y => some (.i32 (if x.toInt > y.toInt then 1 else 0))
+  | .gt, .i64 x, .i64 y => some (.i32 (if y.toInt < x.toInt then 1 else 0))
+  | .gt, .i32 x, .i32 y => some (.i32 (if y.toInt < x.toInt then 1 else 0))
   | .ltu, .i64 x, .i64 y => some (.i32 (if x < y then 1 else 0))
   | .ltu, .i32 x, .i32 y => some (.i32 (if x < y then 1 else 0))
-  | .gtu, .i64 x, .i64 y => some (.i32 (if x > y then 1 else 0))
-  | .gtu, .i32 x, .i32 y => some (.i32 (if x > y then 1 else 0))
+  | .gtu, .i64 x, .i64 y => some (.i32 (if y < x then 1 else 0))
+  | .gtu, .i32 x, .i32 y => some (.i32 (if y < x then 1 else 0))
   | _ , _, _ => none
 
 /-- One-operand instructions: negation, complement and integer conversions. A narrowing
@@ -224,7 +224,7 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
     return .next (targets[index.toNat]?.getD (pc + 1)) rest memory
   | .brzero target, v :: rest => return .next (if ← truth v then pc + 1 else target) rest memory
   | .brnonzero target, v :: rest => return .next (if ← truth v then target else pc + 1) rest memory
-  -- Compare-and-branch, signed then unsigned; each condition is the one the step equations expose.
+  -- Compare-and-branch: `a` was pushed first, and every condition is stated with `<` or `≤`.
   | .beq target, .i32 b :: .i32 a :: rest => return .next (if a = b then target else pc + 1) rest memory
   | .beq target, .i64 b :: .i64 a :: rest => return .next (if a = b then target else pc + 1) rest memory
   | .bne target, .i32 b :: .i32 a :: rest => return .next (if a ≠ b then target else pc + 1) rest memory
@@ -238,9 +238,9 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
   | .ble target, .i64 b :: .i64 a :: rest =>
     return .next (if a.toInt ≤ b.toInt then target else pc + 1) rest memory
   | .bgt target, .i32 b :: .i32 a :: rest =>
-    return .next (if a.toInt > b.toInt then target else pc + 1) rest memory
+    return .next (if b.toInt < a.toInt then target else pc + 1) rest memory
   | .bgt target, .i64 b :: .i64 a :: rest =>
-    return .next (if a.toInt > b.toInt then target else pc + 1) rest memory
+    return .next (if b.toInt < a.toInt then target else pc + 1) rest memory
   | .bge target, .i32 b :: .i32 a :: rest =>
     return .next (if b.toInt ≤ a.toInt then target else pc + 1) rest memory
   | .bge target, .i64 b :: .i64 a :: rest =>
@@ -251,8 +251,8 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
   | .bleu target, .i64 b :: .i64 a :: rest => return .next (if a ≤ b then target else pc + 1) rest memory
   | .bgtu target, .i32 b :: .i32 a :: rest => return .next (if b < a then target else pc + 1) rest memory
   | .bgtu target, .i64 b :: .i64 a :: rest => return .next (if b < a then target else pc + 1) rest memory
-  | .bgeu target, .i32 b :: .i32 a :: rest => return .next (if ¬a < b then target else pc + 1) rest memory
-  | .bgeu target, .i64 b :: .i64 a :: rest => return .next (if a < b then pc + 1 else target) rest memory
+  | .bgeu target, .i32 b :: .i32 a :: rest => return .next (if b ≤ a then target else pc + 1) rest memory
+  | .bgeu target, .i64 b :: .i64 a :: rest => return .next (if b ≤ a then target else pc + 1) rest memory
   -- Calls; every argument must be initialized. A vector constructor writes into a kind-2 home.
   | .call callee argc, _ =>
     if stack.length < argc || (stack.take argc).any (! ·.initialized) then none else
