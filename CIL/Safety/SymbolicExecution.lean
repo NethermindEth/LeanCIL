@@ -230,7 +230,8 @@ open Lean Elab Tactic Meta in
     with the fetched opcode's constructor. -/
 def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (lookups : Nat)
     (facts : Array Lean.Term) : Lean.Elab.Tactic.TacticM (Lean.Term × Lean.Term × Lean.Name) := do
-  let target ← instantiateMVars (← getMainTarget)
+  -- A tactic `have` leaves the target under `mdata`, which `select` (`Expr.eq?`) does not see through.
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
   let (premises, _, conclusion) ← forallMetaTelescopeReducing (← inferType (← mkConstWithFreshMVarLevels lemma))
   let some goalPart := select target | throwError "The goal does not have the shape of {lemma}"
   let some lemmaPart := select conclusion | throwError "Unexpected statement of {lemma}"

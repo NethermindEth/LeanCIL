@@ -128,6 +128,16 @@ theorem run_prefix_bounded (memory : CIL.Safety.Memory) (frame : CIL.Safety.Fram
       throwError "cil_checked_steps 3 did not stop at pc 3"
   rw [BitVec.add_comm]
 
+-- A tactic `have` wraps the target in metadata; bounded stepping must still see the run equation.
+theorem run_prefix_bounded_after_have (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (a b : CIL.W64) (h : a + b = b + a) :
+    CIL.Safety.run [prefixMethod] 10 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+      CIL.Safety.run [prefixMethod] 7 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+        [.scalar (.i64 (b + a))] memory := by
+  have commuted : a + b = b + a := h
+  cil_checked_steps 3 [commuted]
+  rw [commuted]
+
 /-- error: cil_checked_steps 4: the goal closed after 3 steps -/
 #guard_msgs in
 example (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (fuel : Nat) (a b : CIL.W64) :
@@ -161,6 +171,7 @@ theorem run_call_prefix_bounded (memory : CIL.Safety.Memory) (frame : CIL.Safety
 #print axioms run_prefix
 #print axioms run_prefix_literal
 #print axioms run_prefix_bounded
+#print axioms run_prefix_bounded_after_have
 
 def deferredReturnValue (value : CIL.W32) : CIL.W32 := value
 
