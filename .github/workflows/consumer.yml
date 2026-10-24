@@ -1,0 +1,91 @@
+name: Consumer compatibility
+
+on:
+  pull_request:
+    paths: ['CIL/**', 'CIL.lean', 'Extractor/**', 'scripts/Verification.cs', 'scripts/ConsumerVerification.cs', 'scripts/ContractExport.cs', 'scripts/FullImportVerification.cs', 'scripts/FullModuleResolution.cs', 'scripts/LeanDiagnostics.cs', 'scripts/FailureReports.cs', 'scripts/PrepareConsumer.cs', 'lean-toolchain', 'lakefile.toml', 'lake-manifest.json', 'global.json', 'Directory.*.props', 'Directory.*.targets', '.github/workflows/consumer.yml']
+  push:
+    branches: [main]
+    paths: ['CIL/**', 'CIL.lean', 'Extractor/**', 'scripts/Verification.cs', 'scripts/ConsumerVerification.cs', 'scripts/ContractExport.cs', 'scripts/FullImportVerification.cs', 'scripts/FullModuleResolution.cs', 'scripts/LeanDiagnostics.cs', 'scripts/FailureReports.cs', 'scripts/PrepareConsumer.cs', 'lean-toolchain', 'lakefile.toml', 'lake-manifest.json', 'global.json', 'Directory.*.props', 'Directory.*.targets', '.github/workflows/consumer.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  int256:
+    name: int256 library and selected certificates (advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: NethermindEth/int256
+          ref: dc945cbc4935a363ba3d3015311097bdc818f255
+          path: consumer
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Bind the pinned consumer to this committed candidate
+        run: dotnet run --file scripts/PrepareConsumer.cs -- consumer .
+      - name: Build the extraction-independent consumer library
+        id: library
+        working-directory: consumer/verification
+        run: |
+          set -o pipefail
+          started=$SECONDS
+          lake update
+          lake build 2>&1 | tee ../../consumer-library.log
+          echo "seconds=$((SECONDS - started))" >> "$GITHUB_OUTPUT"
+          if grep -q sorryAx ../../consumer-library.log; then exit 1; fi
+      - name: Certify Add on ARM64 AdvSimd
+        id: arm
+        if: always() && steps.library.outcome == 'success'
+        working-directory: consumer
+        run: |
+          set -o pipefail
+          dotnet run --file verification/Verify.cs -- --action verify --method Add --profile arm64-advsimd 2>&1 | tee ../consumer-arm.log
+      - name: Certify Subtract on x64 SSE4.2
+        id: x64
+        if: always() && steps.library.outcome == 'success'
+        working-directory: consumer
+        run: |
+          set -o pipefail
+          dotnet run --file verification/Verify.cs -- --action verify --method Subtract --profile x64-sse42 2>&1 | tee ../consumer-x64.log
+      - name: Certify scalar embedding and comparison
+        id: scalar
+        if: always() && steps.library.outcome == 'success'
+        working-directory: consumer
+        run: |
+          set -o pipefail
+          dotnet run --file verification/Verify.cs -- --action verify --groups-json '[{"profile":"scalar","methods":["Multiply","LeUInt256UInt256"]}]' --group-parallel 1 2>&1 | tee ../consumer-scalar.log
+      - name: Report consumer status separately from upstream verification
+        if: always()
+        env:
+          LIBRARY: ${{ steps.library.outcome }}
+          ARM: ${{ steps.arm.outcome }}
+          X64: ${{ steps.x64.outcome }}
+          SCALAR: ${{ steps.scalar.outcome }}
+          LIBRARY_SECONDS: ${{ steps.library.outputs.seconds }}
+        run: |
+          printf '### Pinned int256 compatibility (advisory)\n\nLibrary: %s\n\nAdd/arm64-advsimd: %s\n\nSubtract/x64-sse42: %s\n' "$LIBRARY" "$ARM" "$X64" >> "$GITHUB_STEP_SUMMARY"
+          printf '\nMultiply and LeUInt256UInt256/scalar: %s\n\nLibrary update/build: %s seconds. Baseline: 369 seconds on ubuntu-24.04, LeanCIL 972881d, int256 dc945cbc (run 40069778642); hosted-runner timings vary.\n\nCoverage: 4 selected gates out of 256 in the pinned revision. 161 gates require runtime-profile migration; this job does not certify the full registry.\n\nFailures remain red. Keep this advisory check out of required branch-protection checks.\n' "$SCALAR" "$LIBRARY_SECONDS" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: int256-compatibility-logs
+          path: consumer-*.log
+          if-no-files-found: ignore

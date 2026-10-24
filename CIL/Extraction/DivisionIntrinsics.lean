@@ -98,7 +98,10 @@ def opaqueLocalIndices (closed : RawMethod) : List Nat :=
   (List.range closed.locals.length).filter (opaqueEligible closed addressed)
 
 def OpaqueLocalsValid (closed : RawMethod) (method : Method) : Prop :=
-  method.opaqueVectorLocals = opaqueLocalIndices closed ∧
+  method.opaqueVectorLocals = (if method.code.any (fun op =>
+    match op with
+    | .intrinsic (.vector .createScalarUnsafe64) _ => true
+    | _ => false) then opaqueLocalIndices closed else []) ∧
   method.opaqueVectorLocals.all (fun index => method.localKinds[index]? == some .vector128) = true ∧
   method.code.all (fun operation => match operation with
     | .localAddr index => !(index ∈ method.opaqueVectorLocals)

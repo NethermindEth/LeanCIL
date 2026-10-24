@@ -205,6 +205,12 @@ def makeSelectedLocals (activation : Nat) (indices : List Nat) (kinds : List CIL
   if indices.isEmpty then makeLocals activation kinds initializers m
   else makeSelectedLocalsFrom activation indices 0 kinds initializers m
 
+/-- Methods without opaque locals retain the byte-home frame model. -/
+@[simp] theorem makeSelectedLocals_nil (activation : Nat) (kinds : List CIL.LocalKind)
+    (initializers : List CIL.Value) (m : Memory) :
+    makeSelectedLocals activation [] kinds initializers m = makeLocals activation kinds initializers m := rfl
+#print axioms makeSelectedLocals_nil
+
 /-- Aggregate argument instructions operate on a private snapshot home, never
     directly on the caller's by-value source. Their extracted indices identify
     the 256-bit vector representation supported by those CIL operations. -/
@@ -248,5 +254,17 @@ def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) : ExecutionR
 
 def leaveFrame (frame : Frame) (m : Memory) : Memory :=
   frame.owned.foldl expire m
+
+/-- The pre-opaque frame equation, under its explicit default-metadata premise. -/
+theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Memory)
+    (none : body.opaqueVectorLocals = []) :
+    enterFrame body args m = (do
+      let activation := m.nextIdentity
+      let (locals, owned, memory) ← makeLocals activation body.localKinds body.locals m
+      let (arguments, argumentIds, memory) ← makeArgumentHomes activation body.vectorArgs args memory
+      let (parameters, parameterIds, memory) ← makeParameterHomes activation body.parameterHomes args memory
+      return (⟨activation, locals ++ parameters.map Prod.snd, (owned ++ argumentIds) ++ parameterIds, arguments⟩, memory)) := by
+  simp only [enterFrame, none, makeSelectedLocals_nil]
+#print axioms enterFrame_of_no_opaque
 
 end CIL.Safety
