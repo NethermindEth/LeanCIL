@@ -145,11 +145,13 @@ internal static class MetadataValidation
         return new AggregateInfo(fields.Length * width, width, offsets);
     }
 
-    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, bool span = false, string architecture = "scalar")
+    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, string architecture = "scalar")
     {
         if (type is ByReferenceType byRef)
         {
-            if (byRef.ElementType is ByReferenceType || Spans.Width(byRef.ElementType) is not null)
+            if (Spans.Width(byRef.ElementType) is not null)
+                throw new InvalidDataException("Unsupported by-reference span");
+            if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
             Type(byRef.ElementType, module, architecture: architecture);
             return;
@@ -253,10 +255,10 @@ internal static class MetadataValidation
                     if (parameter.ParameterType is ByReferenceType && importedByref?.Invoke(parameter.ParameterType) == true) return;
                     Type(parameter.ParameterType, module, architecture: profile.Architecture);
                 }, named: true);
-            Spans.Analysis? spans = null;
-            if (Check(method, null, () => spans = Spans.Analyze(method), named: true))
+            if (Check(method, null, () => Spans.Analyze(method), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
-                    Check(method, null, () => Type(local.VariableType, module, span: spans!.Locals.Contains(local.Index), architecture: profile.Architecture), named: true);
+                    Check(method, null, () => Type(local.VariableType, module,
+                        architecture: profile.Architecture), named: true);
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;

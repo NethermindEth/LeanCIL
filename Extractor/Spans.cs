@@ -7,8 +7,7 @@ namespace Nethermind.LeanCIL;
 // as the receiver of the next span call. Reused locals retain their typed span storage.
 internal static class Spans
 {
-    // Locals records the single-use receivers eliminated by folding.
-    internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior, HashSet<int> Locals);
+    internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior);
 
     // Primitive span element width; scopes are checked by ValidateTypeIdentity.
     internal static int? Width(TypeReference type) =>
@@ -42,7 +41,7 @@ internal static class Spans
 
     static Analysis Compute(MethodDefinition method)
     {
-        var analysis = new Analysis([], [], []);
+        var analysis = new Analysis([], []);
         foreach (var i in method.Body.Instructions)
         {
             if (!(Store(i) || Address(i) || Load(i)) || Width(method.Body.Variables[FeatureConstants.Local(i)].VariableType) is null ||
@@ -59,7 +58,6 @@ internal static class Spans
             analysis.Operands.Add(i);
             analysis.Operands.Add(address);
             analysis.Interior.Add(address);
-            analysis.Locals.Add(FeatureConstants.Local(i));
         }
         return analysis;
     }

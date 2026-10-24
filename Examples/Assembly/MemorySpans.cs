@@ -5,6 +5,10 @@ namespace Examples;
 
 public static class MemorySpans
 {
+    public static int ByRefSpan(ref Span<int> values) => values.Length;
+
+    public static int FloatingSpan(ReadOnlySpan<double> values) => values.Length;
+
     public static int Read(ReadOnlySpan<int> values, int index) => values[index];
 
     public static int SliceRead(ReadOnlySpan<int> values, int start, int length, int index)

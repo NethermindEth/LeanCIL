@@ -83,11 +83,11 @@ Prove(tampered, "SpanTables::Word(int)", "Tampered",
     () => Console.WriteLine("PASS tampered RVA blob changes the proved word"));
 queue.Flush();
 
-// Any other use of the span local, or entry into the fold, stays unsupported.
+// Reused locals and computed indexes retain storage; entering an erased receiver is invalid.
 foreach (var (mutation, marker) in new[]
 {
-    ("second-read", "Unsupported span local use"),
-    ("computed-index", "Unsupported span local use"),
+    ("second-read", ""),
+    ("computed-index", ""),
     ("interior-branch", "Branch into a folded span receiver")
 })
 {
@@ -118,9 +118,18 @@ foreach (var (mutation, marker) in new[]
         }
         module.Write(dll);
     }
+    if (marker.Length == 0)
+    {
+        var expected = Scalar(runtime.GetMethod("Word")!.Invoke(null, [0])!);
+        Prove(dll, "SpanTables::Word(int)", "Supported-" + mutation,
+            [Claim(dll, "Word", [0], $".ok [{expected}]")],
+            () => Console.WriteLine("PASS stored static span: " + mutation));
+        continue;
+    }
     var result = Execute(Extract("extract", dll, "Examples", "SpanTables::Word(int)", output));
     if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) || !result.Output.Contains(marker))
         throw new InvalidOperationException("Incorrect span rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
-Console.WriteLine("PASS typed static spans, bounds faults, runtime comparisons, forged receivers and exact-pattern rejection");
+queue.Flush();
+Console.WriteLine("PASS typed static spans, bounds faults, reused locals, computed indexes and forged receivers");

@@ -38,6 +38,27 @@ theorem end_empty_slice :
       .ok [.scalar (.i32 0)] := rfl
 #print axioms end_empty_slice
 
+/-- Invalid slice ranges report the specified runtime exception before any element access. -/
+theorem invalid_slice_ranges :
+    memoryInstruction (.spanSlice true)
+      [.scalar (.i32 0), .scalar (.i32 4), .bufferSpan view] memory =
+        .error (.thrown "System.ArgumentOutOfRangeException") ∧
+    memoryInstruction (.spanSlice true)
+      [.scalar (.i32 2), .scalar (.i32 2), .bufferSpan view] memory =
+        .error (.thrown "System.ArgumentOutOfRangeException") ∧
+    memoryInstruction (.spanSlice true)
+      [.scalar (.i32 0), .scalar (.i32 4294967295), .bufferSpan view] memory =
+        .error (.thrown "System.ArgumentOutOfRangeException") := by
+  exact ⟨rfl, rfl, rfl⟩
+#print axioms invalid_slice_ranges
+
+/-- A default empty span can be sliced and queried without a backing allocation. -/
+theorem null_empty_slice :
+    memoryInstruction (.spanSlice true)
+      [.scalar (.i32 0), .scalar (.i32 0), .bufferSpan ⟨.null, 0, 4, false⟩] memory =
+        .ok (memory, [.bufferSpan ⟨.null, 0, 4, false⟩]) := rfl
+#print axioms null_empty_slice
+
 theorem invalid_index :
     (invoke [reader] 16 0 [.bufferSpan view, .scalar (.i32 3)] memory).map Prod.snd =
       .error ⟨0, 2, .thrown "System.IndexOutOfRangeException"⟩ := rfl
