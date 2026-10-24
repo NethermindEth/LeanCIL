@@ -144,7 +144,8 @@ elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
     if (← getGoals).isEmpty then return
-    let mut target ← instantiateMVars (← getMainTarget)
+    -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
+    let mut target := (← instantiateMVars (← getMainTarget)).consumeMData
     let some (_, lhs, rhs) := target.eq? | throwError "Expected a checked step equality"
     let mut args := lhs.getAppArgs
     let mut operation := Name.anonymous
@@ -296,13 +297,15 @@ open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_steps $count:num [$facts:term,*]) => do
     let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) facts.getElems
-    for taken in [:count.getNat] do
-      if (← getGoals).isEmpty then
-        throwError "cil_checked_steps {count.getNat}: the goal closed after {taken} steps"
-      cilRunStep prepared true
-    -- Fold the stepped pc (`2 + 1`) so the residual matches a target stated with a numeral.
-    unless (← getGoals).isEmpty do
-      evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))
+    -- Focus the original goal: an early close must error, not step into an unrelated pending goal.
+    focus do
+      for taken in [:count.getNat] do
+        if (← getGoals).isEmpty then
+          throwError "cil_checked_steps {count.getNat}: the goal closed after {taken} steps"
+        cilRunStep prepared true
+      -- Fold the stepped pc (`2 + 1`) so the residual matches a target stated with a numeral.
+      unless (← getGoals).isEmpty do
+        evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))
 
 macro "cil_checked_steps " count:num : tactic => `(tactic| cil_checked_steps $count [])
 

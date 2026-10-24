@@ -146,6 +146,38 @@ example (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (fuel : Nat) (a 
         [.scalar (.i64 (a + b))] memory := by
   cil_checked_steps 4
 
+-- Bounded stepping is confined to the main goal: an early close errors instead of advancing the next goal.
+/-- error: cil_checked_steps 4: the goal closed after 3 steps -/
+#guard_msgs in
+example (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (fuel : Nat) (a b : CIL.W64) :
+    CIL.Safety.run [prefixMethod] (fuel + 3) 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+        CIL.Safety.run [prefixMethod] fuel 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+          [.scalar (.i64 (a + b))] memory ∧
+      CIL.Safety.run [prefixMethod] (fuel + 3) 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+        CIL.Safety.run [prefixMethod] fuel 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+          [.scalar (.i64 (a + b))] memory := by
+  constructor
+  cil_checked_steps 4
+
+-- Closing the first goal in exactly its steps leaves the second goal at pc 0, unstepped.
+theorem run_prefix_bounded_two_goals (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (fuel : Nat)
+    (a b : CIL.W64) :
+    CIL.Safety.run [prefixMethod] (fuel + 3) 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+        CIL.Safety.run [prefixMethod] fuel 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+          [.scalar (.i64 (a + b))] memory ∧
+      CIL.Safety.run [prefixMethod] (fuel + 3) 0 0 [.scalar (.i64 a), .scalar (.i64 b)] frame [] memory =
+        CIL.Safety.run [prefixMethod] fuel 0 3 [.scalar (.i64 a), .scalar (.i64 b)] frame
+          [.scalar (.i64 (a + b))] memory := by
+  constructor
+  cil_checked_steps 3 []
+  run_tac do
+    let [goal] ← Lean.Elab.Tactic.getGoals | throwError "Expected only the second goal to remain"
+    let target ← Lean.instantiateMVars (← goal.getType)
+    let some (_, lhs, _) := target.consumeMData.eq? | throwError "Expected a run equation"
+    unless lhs.isAppOf ``CIL.Safety.run && lhs.getAppArgs[3]!.nat? == some 0 do
+      throwError "cil_checked_steps 3 advanced the second goal"
+  cil_checked_steps 3 []
+
 @[cil_code] def identityCallee : CIL.Method := {
   code := [.arg 0, .ret], locals := [], returnsValue := true }
 
@@ -172,6 +204,7 @@ theorem run_call_prefix_bounded (memory : CIL.Safety.Memory) (frame : CIL.Safety
 #print axioms run_prefix_literal
 #print axioms run_prefix_bounded
 #print axioms run_prefix_bounded_after_have
+#print axioms run_prefix_bounded_two_goals
 
 def deferredReturnValue (value : CIL.W32) : CIL.W32 := value
 
@@ -304,6 +337,17 @@ theorem guard_i64_step (body : CIL.Method) (args : List CIL.Safety.Value)
     CIL.Safety.step body .neg pc args frame (.scalar (.i64 value) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i64 (-value)) :: rest) frame memory) := by
   simp only [cil_step]
+
+-- A tactic `have` wraps the target in metadata; the single-step helper must still see the step equation.
+theorem checked_step_after_have (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
+    (a b : CIL.W64) (h : a = a) :
+    CIL.Safety.step prefixMethod .add 2 [.scalar (.i64 a), .scalar (.i64 b)] frame
+      [.scalar (.i64 b), .scalar (.i64 a)] memory =
+      .ok (.next 3 [.scalar (.i64 (a + b))] frame memory) := by
+  have unused : a = a := h
+  cil_checked_step [unused]
+
+#print axioms checked_step_after_have
 
 -- A partial vector must still fail before an instruction observes its unknown bits.
 theorem guard_partial_vector_rejected (body : CIL.Method) (args : List CIL.Safety.Value)
