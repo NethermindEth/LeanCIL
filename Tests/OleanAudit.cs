@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/LibraryAudit.cs
 
 using System.Text.Json;
 
@@ -208,3 +211,59 @@ var resolved = verification.AuditOleans(fixtures, ["Init"], []).modules["Init"];
 if (!Path.GetFullPath(resolved).StartsWith(Path.GetFullPath(verification.Toolchain), StringComparison.OrdinalIgnoreCase))
     throw new InvalidOperationException("User module shadowed the toolchain: " + resolved);
 Console.WriteLine("PASS toolchain modules precede user modules on the audit search path");
+
+
+// Namespace audits count every theorem a listed module declares under a prefix, private ones by their user name.
+AuditedNamespaces Namespaces(string module, params string[] prefixes) =>
+    verification.AuditOleans(fixtures, [module], [], namespaces: new(prefixes, ApprovedAxioms)).namespaces!;
+Compile("SpacesBase", "theorem Pfx.imported : True := trivial\n");
+Compile("Spaces", """
+    import SpacesBase
+    theorem Pfx.visible : 1 = 1 := rfl
+    private theorem Pfx.secret : 2 = 2 := rfl
+    def Pfx.value : Nat := 3
+    theorem Other.claim : True := trivial
+    theorem Pfxs.near : True := trivial
+    """);
+var spaces = Namespaces("Spaces", "Pfx.");
+if (spaces is not { error: null, count: 2, rejected: [] } || spaces.prefixes["Pfx"] != 2 || spaces.modules["Spaces"] != 2)
+    throw new InvalidOperationException("Namespace audit scope: " + JsonSerializer.Serialize(spaces));
+// A prefix that matches nothing is an error even beside one that matches, so a typo cannot pass silently.
+if (Namespaces("Spaces", "Pfx", "Missing").error is not { } typo || !typo.Contains("Missing", StringComparison.Ordinal) ||
+    Namespaces("Spaces", "Pf").error is null)
+    throw new InvalidOperationException("Unmatched namespace prefixes were accepted");
+Compile("Planted", "axiom Pfx.bogus : False\ntheorem Pfx.fine : True := trivial\ntheorem Pfx.forged : 1 = 2 := Pfx.bogus.elim\n");
+var planted = Namespaces("Planted", "Pfx");
+if (planted.error is null || planted.count != 2 || planted.rejected is not [{ name: "Pfx.forged", axioms: ["Pfx.bogus"] }] ||
+    !planted.axioms.Contains("Pfx.bogus"))
+    throw new InvalidOperationException("Planted axiom passed the namespace audit: " + JsonSerializer.Serialize(planted));
+Console.WriteLine("PASS namespace audits count module theorems, reject unmatched prefixes and planted axioms");
+
+// The CLI path builds a package, replays its modules and audits those bytes; replay rejects what the audit alone would pass.
+var package = Path.Combine(root, "library");
+Directory.CreateDirectory(Path.Combine(package, "Lib"));
+File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
+File.WriteAllText(Path.Combine(package, "lakefile.toml"), "name = \"lib\"\n\n[[lean_lib]]\nname = \"Lib\"\n");
+File.WriteAllText(Path.Combine(package, "Lib.lean"), "import Lib.Core\ntheorem Lib.top : Lib.base = 1 := rfl\n");
+void Core(string source) => File.WriteAllText(Path.Combine(package, "Lib", "Core.lean"), source);
+Core("def Lib.base : Nat := 1\ntheorem Lib.Core.fact : Lib.base = 1 := rfl\n");
+var library = verification.AuditLibrary(package, ["Lib"], ["Lib."], ApprovedAxioms);
+if (library.Result is not { error: null, count: 2 } || !library.Modules.SequenceEqual(["Lib", "Lib.Core"]))
+    throw new InvalidOperationException("Library audit: " + JsonSerializer.Serialize(library));
+Core("def Lib.base : Nat := 1\naxiom bogus : False\ntheorem Lib.Core.fact : Lib.base = 1 := bogus.elim\n");
+if (verification.AuditLibrary(package, ["Lib"], ["Lib"], ApprovedAxioms).Result.rejected is not [{ name: "Lib.Core.fact", axioms: ["bogus"] }])
+    throw new InvalidOperationException("Library audit accepted a planted axiom");
+Core("""
+    import Lean
+    def Lib.base : Nat := 1
+    set_option debug.skipKernelTC true
+    run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+      name := `Lib.Core.fact, levelParams := [], type := Lean.mkConst ``False, value := Lean.mkConst ``True.intro })
+    """);
+try
+{
+    verification.AuditLibrary(package, ["Lib.Core"], ["Lib"], ApprovedAxioms);
+    throw new InvalidDataException("Library audit accepted an unchecked declaration");
+}
+catch (InvalidOperationException error) when (error.Message.Contains("Kernel replay rejected Lib.Core", StringComparison.Ordinal)) { }
+Console.WriteLine("PASS library audits replay the package before auditing, and reject planted axioms");

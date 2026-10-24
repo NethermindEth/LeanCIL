@@ -207,6 +207,33 @@ Replay explicitly passes `LEAN_NUM_THREADS` to the Lean frontend (default two)
 to bound concurrent imported environments; the frontend otherwise uses hardware
 concurrency even when that environment variable is set.
 
+## Library audits
+
+`leancil audit-library` replaces an elaborated `Audit.lean` (`run_cmd` over `env.constants` with
+`collectAxioms`, or `#print axioms`), which the audited code can forge:
+
+```sh
+leancil audit-library --project . --module MyLib --prefix MyLib. --prefix MyLemmas. \
+  --axioms propext,Quot.sound,Classical.choice
+```
+
+- It runs `lake build` for each `--module` in the package, resolves `LEAN_PATH` with `lake env`, and
+  takes the import closure of the listed modules outside the toolchain.
+- Every module in that closure is kernel-replayed with the pinned `leanchecker` routine. Only CIL modules
+  byte-identical to the verifier's certified library are not replayed again.
+- `leancil-audit` then reads those replayed oleans with `loadExts := false` and audits every `theorem`
+  they declare under a prefix: private theorems by their user name, auto-generated ones included. A prefix
+  names whole components, so `MyLib.` and `MyLib` match `MyLib.foo` but not `MyLibrary.foo`.
+- It fails when any prefix matches no theorem, when an axiom closure leaves `--axioms` (default
+  `propext`, `Quot.sound`, `Classical.choice`), or when an olean changes during the audit.
+  On success it prints the theorem count per prefix and the union of the axioms used.
+- `--results results.json` writes the audited modules, counts, axioms and rejected theorems.
+
+The package must pin the bundled Lean toolchain; it need not depend on `leancil`. Unlike `verify`, the
+audit reads the package's own build directory rather than a fresh copy, so it certifies the replayed bytes,
+not that they were compiled from the current sources. Building runs the package's Lake configuration and
+elaborators; the replay and the audit do not.
+
 ## Limits
 
 This mode supports Lean source packages; local path dependencies, custom Lake

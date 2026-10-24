@@ -894,8 +894,11 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     sealed record AuditConstantRequest(string name, object value, object? type = null, string[]? axioms = null);
     sealed record AuditedInterfaces(string? error);
     sealed record AuditedClosure(string name, string? error, string? kind, string? canonical);
+    sealed record AuditNamespaces(string[] prefixes, string[] axioms);
+    sealed record AuditedNamespaces(int count, Dictionary<string, int> prefixes, Dictionary<string, int> modules, string[] axioms,
+        AuditedTheorem[] rejected, string? error);
     sealed record AuditedOleans(Dictionary<string, string> modules, AuditedTheorem[] theorems, AuditedTheorem[] constants,
-        AuditedInterfaces? interfaces = null, AuditedClosure[]? closures = null);
+        AuditedInterfaces? interfaces = null, AuditedClosure[]? closures = null, AuditedNamespaces? namespaces = null);
 
     static readonly JsonSerializerOptions AuditJson = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
@@ -914,7 +917,7 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
 
     // Reads the kernel-replayed oleans only: no imported elaborator, notation, extension or initializer runs.
     AuditedOleans AuditOleans(string leanPath, string[] modules, AuditRequest[] theorems, AuditConstantRequest[]? constants = null,
-        string[]? interfaces = null, string[]? closures = null)
+        string[]? interfaces = null, string[]? closures = null, AuditNamespaces? namespaces = null)
     {
         if (auditExecutable is null || !File.Exists(auditExecutable) || Sha(auditExecutable) != auditExecutableSha)
             throw new InvalidOperationException("Theorem audit executable is missing or changed during verification");
@@ -926,14 +929,16 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             interfaces ??= [];
             closures ??= [];
             File.WriteAllText(request, JsonSerializer.Serialize(new { modules, theorems, constants, interfaces,
-                closures = closures.Select(name => new { name }) }, AuditJson));
+                closures = closures.Select(name => new { name }), namespaces }, AuditJson));
             Run([auditExecutable, request, result], leanPath: leanPath, environment: LeanEnvironment);
             var audited = JsonSerializer.Deserialize<AuditedOleans>(File.ReadAllText(result))
                 ?? throw new InvalidDataException("Missing theorem audit result");
             if (audited.theorems.Length != theorems.Length || audited.theorems.Zip(theorems).Any(pair => pair.First.name != pair.Second.name) ||
                 audited.constants.Length != constants.Length || audited.constants.Zip(constants).Any(pair => pair.First.name != pair.Second.name) ||
                 modules.Any(module => !audited.modules.ContainsKey(module)) || audited.interfaces is null || audited.closures is null ||
-                audited.closures.Length != closures.Length || audited.closures.Zip(closures).Any(pair => pair.First.name != pair.Second))
+                audited.closures.Length != closures.Length || audited.closures.Zip(closures).Any(pair => pair.First.name != pair.Second) ||
+                (namespaces is not null && (audited.namespaces?.prefixes is null || audited.namespaces.modules is null ||
+                    audited.namespaces.axioms is null || audited.namespaces.rejected is null)))
                 throw new InvalidDataException("Incomplete theorem audit result");
             return audited;
         }
