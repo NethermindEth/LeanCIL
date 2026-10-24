@@ -43,6 +43,8 @@ string lib = Path.Combine(libRoot, "bin", "DerivedFixture.Lib.dll");
 string app = Path.Combine(appRoot, "bin", "DerivedFixture.App.dll");
 string sidecar = Path.Combine(libRoot, "bin", "DerivedFixture.Lib.leancil.contracts");
 
+// The published module must not share a path with any source of the leancil package, this fixture's own included.
+const string interfaceModule = "PublishedDerivedInterface";
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 void Package(string directory, string name, string[] modules)
 {
@@ -54,13 +56,9 @@ void Package(string directory, string name, string[] modules)
     foreach (string module in modules)
         File.WriteAllText(Path.Combine(directory, module + ".lean"), File.ReadAllText(At("Tests/ContractImports/" +
             (module == interfaceModule ? "DerivedInterface" : module) + ".lean"))
-            .Replace("import DerivedInterface
-", "import " + interfaceModule + "
-", StringComparison.Ordinal));
+            .Replace("import DerivedInterface\n", "import " + interfaceModule + "\n", StringComparison.Ordinal));
     Run(["lake", "update"], directory);
 }
-// The published module must not share a path with any source of the leancil package, this fixture's own included.
-const string interfaceModule = "PublishedDerivedInterface";
 string[] producerModules = [interfaceModule, "DerivedPercentProof", "DerivedAddProof"];
 string[] callerModules = ["DerivedShiftCaller", "DerivedSumCaller"];
 Package(package, "derived-proofs", producerModules);
@@ -134,14 +132,13 @@ string AxiomLine(string output, string theorem) => output.Split('\n')
     .Single(line => line.Contains("'" + theorem + "' depends on axioms", StringComparison.Ordinal));
 foreach ((string name, string from, string to, string proof, string exact, string refines) in new[]
 {
-    ("stronger post", "post _ _ _ output := output ≤ 100", "post _ _ _ output := output < 100",
+    ("stronger post", "post _ _ _ output := output \u2264 100", "post _ _ _ output := output < 100",
         "DerivedPercentProof", "percent_exact", "percent_bounded_refines"),
     ("changed exception", "else some \"System.ArgumentOutOfRangeException\"", "else some \"System.ArgumentException\"",
         "DerivedPercentProof", "percent_exact", "percent_bounded_refines"),
     ("smaller footprint", "footprint input := [(input.region, 32)]", "footprint input := []",
         "DerivedAddProof", "add_internal", "add_public_refines"),
-    ("weaker pre", "    access memory input.sum 8 1 true = .ok () ∧
-", "",
+    ("weaker pre", "    access memory input.sum 8 1 true = .ok () \u2227\n", "",
         "DerivedAddProof", "add_internal", "add_public_refines")
 })
 {
