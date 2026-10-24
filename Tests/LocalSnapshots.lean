@@ -115,6 +115,58 @@ theorem vector_survives_call {before after : Memory} {carry home : Reference}
 
 #print axioms vector_survives_call
 
+/-- One remembered vector local. -/
+abbrev vectorKnown (vector : BitVec 128) : Nat → Option CIL.Value :=
+  rememberLocal (fun _ => none) 0 (.v128 vector)
+
+/-- Writes into the vector's own allocation, ending at its first byte or starting just past
+    its last, keep it: apartness is by byte interval, not by allocation. -/
+theorem vector_survives_neighbour_writes {start middle final : Memory} {home : Reference}
+    {vector : BitVec 128} {first second : BitVec 8}
+    (snapshots : LocalSnapshots start [.bytes .vector128 home] (vectorKnown vector))
+    (room : 1 ≤ home.offset)
+    (below : write start ⟨home.allocation, home.offset - 1⟩ [first] 1 = .ok middle)
+    (above : write middle ⟨home.allocation, home.offset + 16⟩ [second] 1 = .ok final) :
+    LocalSnapshots final [.bytes .vector128 home] (vectorKnown vector) := by
+  have ends := snapshots.after_write_apart below fun index _ _ _ _ slot => by
+    rcases index with _ | _ <;> simp at slot
+    obtain ⟨rfl, rfl⟩ := slot
+    exact Or.inr (Or.inr (by simp; omega))
+  exact ends.after_write_apart above fun index _ _ _ _ slot => by
+    rcases index with _ | _ <;> simp at slot
+    obtain ⟨rfl, rfl⟩ := slot
+    exact Or.inr (Or.inl (by simp [localWidth]))
+
+#print axioms vector_survives_neighbour_writes
+
+/-- A remembered local survives a callee's frame entry and exit, which keep every older
+    allocation, and loads its value afterwards. -/
+theorem vector_survives_callee_frame {body : CIL.Method} {pc : Nat} {args stack : List Value}
+    {frame : Frame} {caller returned : Memory} {vector : BitVec 128}
+    (snapshots : LocalSnapshots caller frame.locals (vectorKnown vector))
+    (roundTrip : MemoryBelow caller.nextIdentity caller returned) (formed : caller.WellFormed) :
+    step body (.local 0) pc args frame stack returned =
+      .ok (.next (pc + 1) (.scalar (.v128 vector) :: stack) frame returned) :=
+  (snapshots.after_below roundTrip formed).load (.v128 vector) rfl
+
+#print axioms vector_survives_callee_frame
+
+/-- A write to another allocation keeps the vector through `after_unchanged`, which needs
+    only retained authority and the home's unchanged bytes. -/
+theorem vector_survives_unchanged_bytes {before after : Memory} {home target : Reference}
+    {vector : BitVec 128} {bytes : List (BitVec 8)}
+    (snapshots : LocalSnapshots before [.bytes .vector128 home] (vectorKnown vector))
+    (formed : before.WellFormed) (written : write before target bytes 1 = .ok after)
+    (separate : home.allocation ≠ target.allocation) :
+    LocalSnapshots after [.bytes .vector128 home] (vectorKnown vector) :=
+  snapshots.after_unchanged formed (write_preserves_access_below written _)
+    fun index _ _ _ _ slot offset => by
+      rcases index with _ | _ <;> simp at slot
+      obtain ⟨_, rfl⟩ := slot
+      exact write_outside _ _ _ _ _ _ _ written (Or.inl separate)
+
+#print axioms vector_survives_unchanged_bytes
+
 /-- A write onto the first byte of a remembered vector home is not apart from it, so
     `after_write_apart` cannot keep that snapshot. -/
 theorem overlapping_write_not_apart (home : Reference) (byte : BitVec 8) :

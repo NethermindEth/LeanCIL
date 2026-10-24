@@ -66,8 +66,9 @@ theorem LocalSnapshots.after_write_apart {before after : Memory} {slots : List L
   exact ⟨kind, home, stored, number, slot, fits, result,
     write_preserves_disjoint_read written loaded (apart index value kind home specified slot)⟩
 
-/-- Snapshots survive any change that keeps all memory older than `before`, such as frame
-    entry or exit; well-formedness places every remembered home in that memory. -/
+/-- Snapshots survive any change that keeps all memory older than `before`, such as a
+    callee's frame entry, or its entry and exit together; well-formedness places every
+    remembered home in that memory. -/
 theorem LocalSnapshots.after_below {before after : Memory} {slots : List LocalSlot}
     {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots before slots known)
     (preserved : MemoryBelow before.nextIdentity before after) (formed : before.WellFormed) :
