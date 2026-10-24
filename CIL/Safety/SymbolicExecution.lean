@@ -299,17 +299,17 @@ open Lean Elab Tactic Meta in
 /-- Whether a supplied fact is, or is stated about, `memoryInstruction` or `staticInstruction`;
     a compound term is assumed to be. -/
 def mentionsMemoryInstruction (facts : Array Term) : TacticM Bool := withMainContext do
-  let legacy := fun (e : Expr) => (e.find? fun sub =>
+  let mentions := fun (e : Expr) => (e.find? fun sub =>
     sub.isConstOf ``CIL.Safety.memoryInstruction ||
       sub.isConstOf ``CIL.Safety.staticInstruction).isSome
   facts.anyM fun fact => do
     unless fact.raw.isIdent do return true
     if let some decl := (← getLCtx).findFromUserName? fact.raw.getId then
-      return legacy (← instantiateMVars decl.type)
+      return mentions (← instantiateMVars decl.type)
     let some name ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw | return true
     let info ← getConstInfo name
     return name == ``CIL.Safety.memoryInstruction || name == ``CIL.Safety.staticInstruction ||
-      legacy info.type
+      mentions info.type
 
 open Lean Elab Tactic Meta in
 /-- Whether a supplied fact's type satisfies `test`: a hypothesis, a constant, or an applied
@@ -491,7 +491,7 @@ elab_rules : tactic
             (if progressed then pure (some equationError) else attempt unfolding) | return
         if ← mentionsMemoryInstruction facts.getElems then
           if (← attempt (← `(tactic| cil_checked_memory_retry [$facts:term,*]))).isNone then return
-        -- Report the per-shape goal, where facts belong, rather than the legacy retry's.
+        -- Report the per-shape goal, where facts belong, rather than the whole-instruction retry's.
         throw unfoldingError
       else
         `(tactic| cil_checked_step_equations [$facts:term,*])

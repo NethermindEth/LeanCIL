@@ -91,11 +91,12 @@ theorem checkedAt_ok {reference : ManagedReference} {width : Nat} {result : Chec
 /-- The address behind a managed reference; `null` faults as a null dereference. -/
 def referenceAt : ManagedReference → ExecutionResult Reference
   | .null => .error (.memory .nullDereference .null 0)
-  | .address r => .ok r
+  | .address reference => .ok reference
 
--- Constructor equations, so stepping keeps a symbolic `referenceAt r` for the caller's fact.
+-- Constructor equations, so stepping keeps a symbolic `referenceAt` for the caller's fact.
 theorem referenceAt_null : referenceAt .null = .error (.memory .nullDereference .null 0) := rfl
-theorem referenceAt_address (r : Reference) : referenceAt (.address r) = .ok r := rfl
+theorem referenceAt_address (reference : Reference) :
+    referenceAt (.address reference) = .ok reference := rfl
 
 #print axioms referenceAt_null
 #print axioms referenceAt_address
@@ -163,12 +164,12 @@ theorem valueSnapshot_length {shape : CIL.SnapshotShape} {value : CIL.Value}
       | (rcases h with ⟨length, rfl⟩; simp [length])
       | (rw [← h]; simp)
 
-/-- Reads `shape.width` bytes through `r` with their initialization flags, as the value they
+/-- Reads `shape.width` bytes through `reference` with their initialization flags, as the value they
     denote; uninitialized bytes stay in a snapshot instead of faulting. -/
-def loadSnapshot (m : Memory) (r : ManagedReference) (shape : CIL.SnapshotShape) :
+def loadSnapshot (memory : Memory) (reference : ManagedReference) (shape : CIL.SnapshotShape) :
     ExecutionResult CIL.Value := do
-  let address ← referenceAt r
-  let bytes ← checkedAt r shape.width (readSnapshot m address shape.width 1)
+  let address ← referenceAt reference
+  let bytes ← checkedAt reference shape.width (readSnapshot memory address shape.width 1)
   return snapshotValue shape bytes
 
 /-- The alignment of ordinary reference-free accesses: byte offsets are allowed, as in the
@@ -180,13 +181,14 @@ abbrev ordinaryAccessAlignment : Nat := 1
 /-- Loads a `width`-byte scalar or vector through `reference`, extending a 1- or 2-byte load
     to i32 with sign when `signed`. A 16-, 32- or 64-byte load of uninitialized bytes yields a
     vector snapshot instead of faulting. -/
-def loadValue (m : Memory) (reference : ManagedReference) (width : Nat)
+def loadValue (memory : Memory) (reference : ManagedReference) (width : Nat)
     (signed : Bool := false) : ExecutionResult CIL.Value := do
   if width = 16 || width = 32 || width = 64 then
-    if let .error .uninitialized := dereference m reference width ordinaryAccessAlignment then
-      return ← loadSnapshot m reference
+    if let .error .uninitialized := dereference memory reference width ordinaryAccessAlignment then
+      return ← loadSnapshot memory reference
         (if width = 16 then .vector128 else if width = 32 then .vector256 else .vector512)
-  let bytes ← checkedAt reference width (dereference m reference width ordinaryAccessAlignment)
+  let bytes ← checkedAt reference width
+    (dereference memory reference width ordinaryAccessAlignment)
   let number := byteNumber bytes
   match width with
   | 1 =>
@@ -201,8 +203,9 @@ def loadValue (m : Memory) (reference : ManagedReference) (width : Nat)
   | _ => .error (.unsupported "Memory value width")
 
 /-- Stores an i64 or vector value through `reference`; a vector snapshot of its full width
-    keeps its initialization flags. Any other value is `invalidState`. -/
-def storeValue (m : Memory) (reference : ManagedReference) (value : CIL.Value) :
+    keeps its initialization flags. Unspecified bits are unsupported; any other value is
+    `invalidState`. -/
+def storeValue (memory : Memory) (reference : ManagedReference) (value : CIL.Value) :
     ExecutionResult Memory := do
   if value.hasUnspecified then .error (.unsupported "Store observes unspecified vector bytes") else
   if let .snapshot shape bytes := value then
@@ -210,7 +213,7 @@ def storeValue (m : Memory) (reference : ManagedReference) (value : CIL.Value) :
         bytes.length == shape.width then
       let address ← referenceAt reference
       return ← checkedAt reference shape.width
-        (writeSnapshot m address bytes ordinaryAccessAlignment)
+        (writeSnapshot memory address bytes ordinaryAccessAlignment)
     else .error .invalidState
   let (width, number) ← match value with
     | .i64 bits => .ok (8, bits.toNat)
@@ -219,103 +222,104 @@ def storeValue (m : Memory) (reference : ManagedReference) (value : CIL.Value) :
     | .v512 bits => .ok (64, bits.toNat)
     | _ => .error .invalidState
   let address ← referenceAt reference
-  checkedAt reference width (write m address (numberBytes number width) ordinaryAccessAlignment)
+  checkedAt reference width
+    (write memory address (numberBytes number width) ordinaryAccessAlignment)
 
 /-- `reference` as a stack value, once it forms (a live allocation, a valid offset); `null`
     always forms. -/
-def formValue (m : Memory) (reference : ManagedReference) : ExecutionResult Value := do
+def formValue (memory : Memory) (reference : ManagedReference) : ExecutionResult Value := do
   match reference with
   | .null => return .reference .null
   | .address r =>
-    let result ← checkedAt reference 0 (form m r)
+    let result ← checkedAt reference 0 (form memory r)
     return .reference (.address result)
 
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
     Operands with unspecified bits are rejected first. The static-field and span-construction
     operations need extracted metadata, so `staticInstruction` runs them and they are
     unsupported here; any other operand shape is `invalidState`. -/
-def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (m : Memory) :
+def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   if unspecifiedOperands operation.argumentCount stack then
     .error (.unsupported "Memory operation observes unspecified vector bits") else
   match operation, stack with
   -- Wide multiply, block copy and block initialization
   | .bigMul64, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
-    return (← storeValue m low (.i64 (left * right)),
+    return (← storeValue memory low (.i64 (left * right)),
       .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest)
   | .copyBlock alignment,
       .scalar (.i32 count) :: .reference source :: .reference destination :: rest =>
     let width := count.toNat
-    if width = 0 then return (m, rest) else
+    if width = 0 then return (memory, rest) else
       let src ← referenceAt source
       let dst ← referenceAt destination
       if src.allocation = dst.allocation && src.offset < dst.offset + width &&
           dst.offset < src.offset + width then
         .error (.unsupported "Overlapping block copy")
       else
-        let bytes ← checkedAt source width (read m src width alignment)
-        return (← checkedAt destination width (write m dst bytes alignment), rest)
+        let bytes ← checkedAt source width (read memory src width alignment)
+        return (← checkedAt destination width (write memory dst bytes alignment), rest)
   | .initBlock alignment,
       .scalar (.i32 count) :: .scalar (.i32 value) :: .reference destination :: rest =>
     let width := count.toNat
-    if width = 0 then return (m, rest) else
+    if width = 0 then return (memory, rest) else
       let dst ← referenceAt destination
-      let _ ← checkedAt destination width (access m dst width alignment true)
+      let _ ← checkedAt destination width (access memory dst width alignment true)
       return (← checkedAt destination width
-        (write m dst (List.replicate width (value.setWidth 8)) alignment), rest)
+        (write memory dst (List.replicate width (value.setWidth 8)) alignment), rest)
   -- Vector loads and stores
-  | .load128, .reference r :: rest => return (m, .scalar (← loadValue m r 16) :: rest)
-  | .load256, .reference r :: rest => return (m, .scalar (← loadValue m r 32) :: rest)
-  | .load512, .reference r :: rest => return (m, .scalar (← loadValue m r 64) :: rest)
+  | .load128, .reference r :: rest => return (memory, .scalar (← loadValue memory r 16) :: rest)
+  | .load256, .reference r :: rest => return (memory, .scalar (← loadValue memory r 32) :: rest)
+  | .load512, .reference r :: rest => return (memory, .scalar (← loadValue memory r 64) :: rest)
   | .store512, .scalar (.v512 bits) :: .reference r :: rest =>
-    return (← storeValue m r (.v512 bits), rest)
+    return (← storeValue memory r (.v512 bits), rest)
   | .store512, .scalar (.snapshot .vector512 bytes) :: .reference r :: rest =>
-    return (← storeValue m r (.snapshot .vector512 bytes), rest)
+    return (← storeValue memory r (.snapshot .vector512 bytes), rest)
   | .store128, .scalar (.v128 bits) :: .reference r :: rest =>
-    return (← storeValue m r (.v128 bits), rest)
+    return (← storeValue memory r (.v128 bits), rest)
   | .store256, .scalar (.v256 bits) :: .reference r :: rest =>
-    return (← storeValue m r (.v256 bits), rest)
+    return (← storeValue memory r (.v256 bits), rest)
   | .store128, .scalar (.snapshot .vector128 bytes) :: .reference r :: rest =>
-    return (← storeValue m r (.snapshot .vector128 bytes), rest)
+    return (← storeValue memory r (.snapshot .vector128 bytes), rest)
   | .store256, .scalar (.snapshot .vector256 bytes) :: .reference r :: rest =>
-    return (← storeValue m r (.snapshot .vector256 bytes), rest)
-  | .init256, .reference r :: rest => return (← storeValue m r (.v256 0), rest)
+    return (← storeValue memory r (.snapshot .vector256 bytes), rest)
+  | .init256, .reference r :: rest => return (← storeValue memory r (.v256 0), rest)
   -- References, pointer arithmetic and bit casts
-  | .asRef, .reference r :: rest => return (m, (← formValue m r) :: rest)
+  | .asRef, .reference r :: rest => return (memory, (← formValue memory r) :: rest)
   | .add size signed, .scalar offset :: .reference r :: rest =>
     let some offset := CIL.offsetValue signed offset | .error .invalidState
     let address ← referenceAt r
-    let result ← checkedAt r 0 (add m address size (BitVec.ofInt 64 offset))
-    return (m, .reference (.address result) :: rest)
-  | .bitcast256, .scalar (.v256 bits) :: rest => return (m, .scalar (.v256 bits) :: rest)
+    let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 offset))
+    return (memory, .reference (.address result) :: rest)
+  | .bitcast256, .scalar (.v256 bits) :: rest => return (memory, .scalar (.v256 bits) :: rest)
   | .bitcastValue source target, .scalar value :: rest =>
-    return (m, .scalar (← bitcastValue source target value) :: rest)
+    return (memory, .scalar (← bitcastValue source target value) :: rest)
   | .bitcastByteBool, .scalar (.i32 bits) :: rest =>
-    if bits.toNat ≤ 1 then return (m, .scalar (.i32 bits) :: rest)
+    if bits.toNat ≤ 1 then return (memory, .scalar (.i32 bits) :: rest)
     else .error (.unsupported "Noncanonical Boolean representation")
   | .bitcastByteBool, .scalar (.i8 bits) :: rest =>
-    if bits.toNat ≤ 1 then return (m, .scalar (.i32 (bits.zeroExtend 32)) :: rest)
+    if bits.toNat ≤ 1 then return (memory, .scalar (.i32 (bits.zeroExtend 32)) :: rest)
     else .error (.unsupported "Noncanonical Boolean representation")
   | .skipInit, .reference r :: rest =>
-    let _ ← formValue m r
-    return (m, rest)
+    let _ ← formValue memory r
+    return (memory, rest)
   -- Spans
   | .spanReference, .span r _ :: rest =>
-    return (m, (← formValue m r) :: rest)
+    return (memory, (← formValue memory r) :: rest)
   -- Unsigned comparison: a negative index is out of range, as in `ReadOnlySpan<T>.this[int]`.
   | .spanItem width, .scalar (.i32 index) :: .span r length :: rest =>
     if index.toNat < length then
       let address ← referenceAt r
-      let result ← checkedAt r 0 (add m address width (BitVec.ofNat 64 index.toNat))
-      return (m, .reference (.address result) :: rest)
+      let result ← checkedAt r 0 (add memory address width (BitVec.ofNat 64 index.toNat))
+      return (memory, .reference (.address result) :: rest)
     else .error (.thrown "System.IndexOutOfRangeException")
   | .spanLength, .span _ length :: rest =>
-    return (m, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
+    return (memory, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
   -- Null references
-  | .nullRef, _ => return (m, .reference .null :: stack)
+  | .nullRef, _ => return (memory, .reference .null :: stack)
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
   | .isNullRef, .reference r :: rest =>
-    return (m, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
+    return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
   | .staticAddress _, _ | .staticValue _, _ | .createSpan _, _ | .spanCreate, _ =>
     .error (.unsupported "Extraction-bound static/span allocation metadata")
   | _, _ => .error .invalidState
@@ -462,7 +466,7 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .asRef, .reference r :: rest => return (m, (← formValue m r) :: rest)
   | .dup, value :: rest => return (m, value :: value :: rest)
   | .pop, _ :: rest => return (m, rest)
-  | _, _ => .error (.unsupported "Non-memory instruction requires execution adapter")
+  | _, _ => .error (.unsupported "Not a memory instruction")
 
 /-- Runs `ops` in order with `instruction`, stopping at the first fault. For straight-line
     examples only: it has no branches, calls or frames, which `run` handles. -/
@@ -482,9 +486,9 @@ structure LocatedFault where
   deriving DecidableEq, Repr
 
 /-- `instruction`, with a fault located at `method` and `pc`. -/
-def instructionAt (method pc : Nat) (op : CIL.Op) (stack : List Value) (m : Memory) :
+def instructionAt (method pc : Nat) (op : CIL.Op) (stack : List Value) (memory : Memory) :
     Except LocatedFault (Memory × List Value) :=
-  (instruction op stack m).mapError fun fault => ⟨method, pc, fault⟩
+  (instruction op stack memory).mapError fun fault => ⟨method, pc, fault⟩
 
 /-- Runs a straight-line body. A plain `arg` pushes the checked argument, and `ret` returns
     the stack when it holds exactly the declared number of results; running off the end is
@@ -509,8 +513,8 @@ def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
     block returns args rest values memory
 
 /-- `block` on a method's code, from an empty stack. -/
-def methodBlock (body : CIL.Method) (args : List Value) (m : Memory) :
+def methodBlock (body : CIL.Method) (args : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) :=
-  block body.returnsValue args body.code [] m
+  block body.returnsValue args body.code [] memory
 
 end CIL.Safety

@@ -50,7 +50,7 @@ theorem loadValue_checked_read {m : Memory} {reference : ManagedReference}
 /-- Byte alignment at the supported ordinary value-load boundary imposes no
     hidden natural/vector alignment on a caller offset. Other read obligations
     still come from the actual checked access. This is a model theorem, not a
-    theorem about CLR lowering; see ALIGNMENT.md for that correspondence audit. -/
+    theorem about CLR lowering; `docs/SOUNDNESS.md` states the alignment convention assumed. -/
 theorem loadValue_access_requirements {m : Memory} {reference : ManagedReference}
     {width : Nat} {value : CIL.Value} {signed : Bool}
     (loaded : loadValue m reference width signed = .ok value) :

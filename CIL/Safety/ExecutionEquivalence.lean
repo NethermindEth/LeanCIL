@@ -158,7 +158,7 @@ theorem Memory.Equivalent.invoke {m n : Memory} (same : m.Equivalent n)
   obtain ⟨rfl, entered⟩ := related
   exact entered.run _ _ _ _ _ _ _
 
-/-- Replacing a legacy write by the optimized write preserves every subsequent
+/-- Replacing the reference `writeAlwaysPrepend` by `write` preserves every subsequent
     checked execution, including its exact located failure or returned values. -/
 theorem write_run_equivalent (memory : Memory) (reference : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat) (locate : Fault → LocatedFault)

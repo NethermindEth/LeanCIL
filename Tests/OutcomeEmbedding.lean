@@ -186,9 +186,9 @@ theorem unsupported_embeds : MethodEmbeds extracted 1 unsupportedThrow := by cil
 
 theorem unsupported_faults :
     Safety.invoke (extracted.set 1 unsupportedThrow) 10 1 [.scalar (.i64 101)] empty =
-      .error ⟨1, 6, .unsupported "Non-memory instruction requires execution adapter"⟩ := rfl
+      .error ⟨1, 6, .unsupported "Not a memory instruction"⟩ := rfl
 
-example : ¬ Transported (.error ⟨1, 6, .unsupported "Non-memory instruction requires execution adapter"⟩ :
+example : ¬ Transported (.error ⟨1, 6, .unsupported "Not a memory instruction"⟩ :
     Except LocatedFault (Safety.Memory × List Safety.Value)) := by
   rintro ⟨_, thrown⟩
   cases thrown

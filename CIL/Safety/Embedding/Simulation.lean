@@ -126,7 +126,7 @@ theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.unsupported description) pc args frame stack m = .ok action) : False := by
   change Except.error
-    (ExecutionFault.unsupported "Non-memory instruction requires execution adapter") =
+    (ExecutionFault.unsupported "Not a memory instruction") =
       .ok action at h
   cases h
 
