@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -12,6 +13,7 @@ var root = At("artifacts/RuntimeBits");
 Directory.CreateDirectory(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Bits")!;
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 
 object Value(Type type, ulong bits)
 {
@@ -71,10 +73,14 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     var selector = $"Bits::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
-    verification.Verify(assembly, "Examples", selector, proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {method.Name}: {claims.Count} runtime comparisons");
+    var comparisons = claims.Count;
+    queue.Add(new(selector, proof, output), () =>
+    {
+        cases += comparisons;
+        Console.WriteLine($"PASS {method.Name}: {comparisons} runtime comparisons");
+    });
 }
+queue.Flush();
 
 // A universal identity and a deliberately incorrect inverse use the same contract.
 var contract = At("Examples/Proofs/RotateRoundTrip.lean");
