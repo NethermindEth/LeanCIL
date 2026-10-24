@@ -77,4 +77,31 @@ example {body : CIL.Method} {tail : List CIL.Op}
     CodeAt body 4 sumSegment :=
   CodeAt.of_eq_append positioned rfl
 
+-- Adjacent placements compose, and the parts come back out at the same positions.
+example {body : CIL.Method} (first : CodeAt body 4 sumSegment) (second : CodeAt body 7 [.ret]) :
+    CodeAt body 4 (sumSegment ++ [.ret]) ∧ CodeAt body 5 [.arg 1, .add, .ret] ∧
+      CodeAt body 4 [.arg 0] :=
+  let whole := first.append second
+  ⟨whole, whole.drop 1, whole.take 1⟩
+
+-- Dropping or taking past the end leaves the empty placement, not an out-of-range claim.
+example {body : CIL.Method} (placed : CodeAt body 4 sumSegment) :
+    CodeAt body 9 [] ∧ CodeAt body 4 sumSegment :=
+  ⟨placed.drop 5, placed.take 5⟩
+
+-- Within the code, a placement recovers the positional hypotheses it replaces.
+example {body : CIL.Method} (placed : CodeAt body 4 sumSegment)
+    (inBounds : 4 ≤ body.code.length) :
+    ∃ leading tail, body.code = leading ++ sumSegment ++ tail ∧ leading.length = 4 :=
+  placed.exists_eq_append inBounds
+
+-- The bound is needed: the empty segment is placed past the end of any code.
+example : CodeAt placedMethod 100 [] := CodeAt.nil
+example : ¬ ∃ leading tail : List CIL.Op,
+    placedMethod.code = leading ++ [] ++ tail ∧ leading.length = 100 := by
+  rintro ⟨leading, tail, split, length⟩
+  have total := congrArg List.length split
+  simp [placedMethod] at total
+  omega
+
 end Tests.CodeAt
