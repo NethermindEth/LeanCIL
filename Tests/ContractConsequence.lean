@@ -9,7 +9,8 @@ import CIL.Safety.Forwarders
 /-! Synthetic extraction: `Root(v) => Percent(v) + 1`, a throwing `Percent`,
     `AddTo(in a, in b, out res)`, `Sum` and `SumSwapped(in b, in a, out res)` forwarding to it,
     `AddFlag(in a, in b, out res)` and `SumDiscard(in a, in b)` forwarding to it with a
-    discarded out local, and `IsZero(v)` with its forwarder `IsZeroForward(v)`. -/
+    discarded out local, and `IsZero(v)` with its forwarders `IsZeroForward(v)` and
+    `IsZeroIgnoring(v, unused)`. -/
 namespace Extracted
 
 open CIL
@@ -31,6 +32,9 @@ def method7Signature : String := "System.Boolean Consequence.Calls::IsZeroForwar
 /-- `AddFlag(in a, in b, out res) { res = a + b; return true; }`. -/
 def method8Signature : String :=
   "System.Boolean Consequence.Calls::AddFlag(System.UInt64&,System.UInt64&,System.UInt64&)"
+/-- `IsZeroIgnoring(v, unused) => IsZero(v)`. -/
+def method9Signature : String :=
+  "System.Boolean Consequence.Calls::IsZeroIgnoring(System.UInt64,System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
@@ -57,11 +61,14 @@ def method8Signature : String :=
 @[cil_code] def method8 : Method := { returnsValue := true, locals := [], code :=
   [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .const32 1,
     .ret (some .unsigned8)] }
+/-- `IsZeroIgnoring`: forwards its first argument and never loads its second. -/
+@[cil_code] def method9 : Method := { returnsValue := true, locals := [], code :=
+  [.arg 0, .call 6 1, .ret (some .unsigned8)] }
 @[cil_code] def program : Program :=
-  [method0, method1, method2, method3, method4, method5, method6, method7, method8]
+  [method0, method1, method2, method3, method4, method5, method6, method7, method8, method9]
 def signatures : List String :=
   [method0Signature, method1Signature, method2Signature, method3Signature, method4Signature,
-    method5Signature, method6Signature, method7Signature, method8Signature]
+    method5Signature, method6Signature, method7Signature, method8Signature, method9Signature]
 
 end Extracted
 
@@ -84,6 +91,8 @@ bind_method addFlag addFlagBody :=
 bind_method isZero isZeroBody := "System.Boolean Consequence.Calls::IsZero(System.UInt64)"
 bind_method isZeroForward isZeroForwardBody :=
   "System.Boolean Consequence.Calls::IsZeroForward(System.UInt64)"
+bind_method isZeroIgnoring isZeroIgnoringBody :=
+  "System.Boolean Consequence.Calls::IsZeroIgnoring(System.UInt64,System.UInt64)"
 
 /-! Outcome contracts: the exact internal contract and a public one that only bounds the result. -/
 
@@ -421,6 +430,24 @@ theorem is_zero_forwards :
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
 
 #print axioms is_zero_forwards
+
+/-- `IsZeroIgnoring(v, w)`, with `w` fixed to 7: an argument that never reaches the callee. -/
+def ignoringArgs (v : CIL.W64) : List Value := [.scalar (.i64 v), .scalar (.i64 7)]
+
+/-- The unused argument is not one of `IsZero`'s, but it is a valid scalar, which is all the
+    forwarder's own argument check needs. -/
+theorem is_zero_ignoring_forwards :
+    (isZeroContract.forward ignoringArgs).Holds Extracted.program isZeroIgnoring :=
+  is_zero_holds.forward (indices := [0]) (narrow := some .unsigned8) isZeroIgnoring.found
+    isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ value member => by
+      simp only [ignoringArgs, List.mem_cons, List.not_mem_nil, or_false] at member
+      rcases member with same | same <;> subst same
+      · exact .inl (List.mem_singleton_self _)
+      · exact .inr rfl)
+    (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
+
+#print axioms is_zero_ignoring_forwards
 
 /-- A narrowed return of a value outside the narrow range would change it, so such a callee
     result is not accepted as unchanged. -/

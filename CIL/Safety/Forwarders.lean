@@ -10,8 +10,9 @@ import CIL.Safety.ReturnMemory
 A forwarder loads some of its arguments, calls another method with them and returns that
 method's result: overload forwarders and instance-to-static wrappers compile to
 `ldarg*; call callee; ret`. `MethodContract.Holds.forward` gives such a method the callee's
-contract with the forwarder's own argument encoding, from the callee's `Holds` alone; the
-argument order is data (`indices`), so no forwarder body is stepped by hand. Its frame
+contract with the forwarder's own argument encoding, from the callee's `Holds` and premises
+that the arguments and the returned value pass through unchanged; the argument order is
+data (`indices`), so no forwarder body is stepped by hand. Its frame
 allocates nothing, so the callee's precondition, footprint and postcondition carry over
 verbatim.
 
