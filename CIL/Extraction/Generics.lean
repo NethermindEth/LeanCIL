@@ -15,10 +15,7 @@ Opcodes are numeric ECMA-335 encodings; two-byte opcodes `0xFE nn` appear as `0x
 
 namespace CIL.Extraction
 
-/-- Exact assembly identities of the admitted runtime; every raw-identity check uses these. -/
-def runtimeScope : String :=
-  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-/-- The exact `System.Runtime.Intrinsics` assembly identity. -/
+/-- The exact `System.Runtime.Intrinsics` assembly identity; `runtimeScope` is in `TypeExpr`. -/
 def intrinsicsScope : String :=
   "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 

@@ -33,7 +33,7 @@ structure ImportLayoutCatalog where
     `bool`, `char` and the native integers). -/
 def importPrimitive : TypeExpr → Bool
   | .atom scope name =>
-    scope == systemRuntimeScope &&
+    scope == runtimeScope &&
       name ∈ ["System.SByte", "System.Byte", "System.Boolean", "System.Int16", "System.UInt16",
         "System.Char", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
         "System.IntPtr", "System.UIntPtr"]

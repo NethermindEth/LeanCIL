@@ -10,7 +10,7 @@ slots to compare signatures as values.
 namespace CIL.Extraction
 
 /-- The assembly scope of the .NET 10 reference assembly that defines the primitive types. -/
-def systemRuntimeScope : String :=
+def runtimeScope : String :=
   "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 
 /-- Scoped metadata types shared by extraction and typed import slots. -/

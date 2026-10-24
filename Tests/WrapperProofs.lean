@@ -16,7 +16,7 @@ theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
 
 /-- Simplify one known intrinsic step, without unfolding the recursive interpreter. -/
 macro "math_wrapper_step " evaluated:term : tactic => `(tactic|
-  (simp only [CIL.Safety.step, CIL.Intrinsic.available, Bool.not_true, Bool.false_eq_true,
+  (simp only [CIL.Safety.step, CIL.Intrinsic.available, CIL.Intrinsic.requiredFeatures, Bool.not_true, Bool.false_eq_true,
     List.length_cons, List.length_nil, Nat.reduceAdd, ite_false,
     List.take, List.reverse, List.reverseAux, CIL.Safety.scalars, CIL.Safety.numericValue,
     ite_true, Bind.bind, Except.bind, Pure.pure, Except.pure,
