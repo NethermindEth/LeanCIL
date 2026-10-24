@@ -9,6 +9,7 @@ import CIL.Embedding.BaseStep
 import CIL.Embedding.Tactic
 import CIL.Features
 import CIL.Imports
+import CIL.InstructionEquations
 import CIL.Instructions
 import CIL.Layout
 import CIL.Memory
