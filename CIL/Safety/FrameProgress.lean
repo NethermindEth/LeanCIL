@@ -194,6 +194,21 @@ def FrameSetupFits (body : CIL.Method) (args : List Value) : Prop :=
   InitializersFit body.localKinds body.locals ∧ AggregateArgumentsFit body.vectorArgs args ∧
     ParameterArgumentsFit body.parameterHomes args ∧ SelectedKindsFit body.opaqueVectorLocals 0 body.localKinds
 
+@[simp] theorem selectedKindsFit_nil (index : Nat) (kinds : List CIL.LocalKind) :
+    SelectedKindsFit [] index kinds := by
+  induction kinds generalizing index with
+  | nil => trivial
+  | cons kind kinds ih => exact ⟨by simp, ih (index + 1)⟩
+#print axioms selectedKindsFit_nil
+
+theorem frameSetupFits_of_no_opaque (body : CIL.Method) (args : List Value)
+    (none : body.opaqueVectorLocals = []) :
+    FrameSetupFits body args ↔
+      InitializersFit body.localKinds body.locals ∧ AggregateArgumentsFit body.vectorArgs args ∧
+        ParameterArgumentsFit body.parameterHomes args := by
+  simp only [FrameSetupFits, none, selectedKindsFit_nil, and_true]
+#print axioms frameSetupFits_of_no_opaque
+
 theorem enterFrame_succeeds (body : CIL.Method) (args : List Value) (m : Memory)
     (wellFormed : m.WellFormed) (validArgs : ValuesValid m args) (fits : FrameSetupFits body args) :
     ∃ frame memory, enterFrame body args m = .ok (frame, memory) := by

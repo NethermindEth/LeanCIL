@@ -1,5 +1,6 @@
 import CIL.Safety.Execution
 import CIL.Safety.StepAttribute
+import CIL.Safety.GuardNormalization
 namespace CIL.Safety
 
 section InstructionEquations
