@@ -1,5 +1,16 @@
 import CIL.Safety.Execution
+
+/-!
+# Successful runs start with a successful step
+
+A single inversion lemma on the checked interpreter: a run that succeeds with fuel left
+fetched an instruction and stepped it without a fault.
+-/
+
 namespace CIL.Safety
+
+/-- A successful run fetched a method body and an instruction at `pc`, and that instruction
+    stepped without a fault. -/
 theorem run_success_step (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (result : List Value)
@@ -13,7 +24,9 @@ theorem run_success_step (program : CIL.Program) (fuel method pc : Nat)
     | none => simp [run, hb, ho] at success
     | some op =>
       cases hs : step body op pc args frame stack m with
-      | error fault => simp [run, hb, ho, hs, Bind.bind, Except.bind, Except.mapError] at success
+      | error fault =>
+        simp [run, hb, ho, hs, Bind.bind, Except.bind, Except.mapError] at success
       | ok action => exact ⟨body, op, action, rfl, ho, hs⟩
 #print axioms run_success_step
+
 end CIL.Safety

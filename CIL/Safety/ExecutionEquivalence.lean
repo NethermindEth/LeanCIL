@@ -1,6 +1,15 @@
 import CIL.Safety.StaticMemoryEquivalence
 import CIL.Safety.Execution
 
+/-!
+# The checked interpreter respects memory equivalence
+
+`step`, `run` and `invoke` give equivalent results on `Memory.Equivalent` memories: the same
+faults, the same control flow and values, and equivalent final memory. Memory equivalence
+ignores how the view list is represented, so `write_run_equivalent` lets the optimized
+`write` replace the reference `writeAlwaysPrepend` without changing any checked execution.
+-/
+
 namespace CIL.Safety
 
 theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
@@ -8,7 +17,8 @@ theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
   cases value <;> simp only [CIL.Safety.checkedValue, same.formValue]
 
 theorem Memory.Equivalent.checkedValues {m n : Memory} (same : m.Equivalent n)
-    (values : List Value) : values.mapM (CIL.Safety.checkedValue m) = values.mapM (CIL.Safety.checkedValue n) := by
+    (values : List Value) :
+    values.mapM (CIL.Safety.checkedValue m) = values.mapM (CIL.Safety.checkedValue n) := by
   have equality : CIL.Safety.checkedValue m = CIL.Safety.checkedValue n := funext same.checkedValue
   rw [equality]
 
@@ -75,6 +85,8 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
          obtain ⟨rfl, stored⟩ := related
          exact .ok (.construct stored _ _ _ _ _ _))
 
+/-- Equivalent memories give the same run outcome: the same fault, or equivalent final
+    memory with the same returned values. -/
 theorem Memory.Equivalent.run {m n : Memory} (same : m.Equivalent n)
     (program : CIL.Program) (fuel method pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -157,7 +169,8 @@ theorem write_run_equivalent (memory : Memory) (reference : Reference)
         run program fuel method pc args frame stack updated)
       (((writeAlwaysPrepend memory reference bytes alignment).mapError locate).bind fun updated =>
         run program fuel method pc args frame stack updated) := by
-  apply ResultEquivalent.bind ((write_equivalent_alwaysPrepend memory reference bytes alignment).mapError locate)
+  apply ResultEquivalent.bind
+    ((write_equivalent_alwaysPrepend memory reference bytes alignment).mapError locate)
   intro left right same
   exact same.run program fuel method pc args frame stack
 

@@ -2,6 +2,15 @@ import CIL.Safety.FrameStaticWorld
 import CIL.Safety.ExecutionFrameOwnership
 import CIL.Safety.StaticLifetime
 
+/-!
+# Static data stays valid through execution
+
+`StaticWorldValid` (static bindings and their storage, for the descriptors the program
+declares) is preserved by every checked step, every successful run and invocation, and every
+memory observed along a run. The descriptors come from the program's own metadata through
+`programStaticDescriptors`, so consumers need no separate static-site assumption.
+-/
+
 namespace CIL.Safety
 
 /-- Static selection comes from the actual extracted method metadata. -/
@@ -9,7 +18,8 @@ def programStaticDescriptors (program : CIL.Program) : List CIL.StaticDescriptor
   program.flatMap fun body => body.staticSites.map Prod.snd
 
 theorem program_static_sites_valid (program : CIL.Program) (method : Nat) (body : CIL.Method)
-    (found : program[method]? = some body) : StaticSitesValid (programStaticDescriptors program) body := by
+    (found : program[method]? = some body) :
+    StaticSitesValid (programStaticDescriptors program) body := by
   intro site member
   apply List.mem_flatMap.mpr
   refine ⟨body, List.mem_of_getElem? found, ?_⟩
@@ -47,7 +57,8 @@ theorem programStep_preserves_frame_allocations {program : CIL.Program} {method 
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (step : ProgramStep program method pc args frame stack m action) (hm : m.WellFormed)
     (owns : FrameAllocations m frame.activation frame.owned) :
-    FrameAllocations action.memory (action.frameAfter frame).activation (action.frameAfter frame).owned := by
+    FrameAllocations action.memory (action.frameAfter frame).activation
+      (action.frameAfter frame).owned := by
   obtain ⟨body, op, _, _, success⟩ := step
   exact step_preserves_frame_allocations _ _ _ _ _ _ _ _ hm owns success
 
@@ -93,7 +104,6 @@ theorem invoke_preserves_static_world (program : CIL.Program) (fuel method : Nat
 
 /-- This invariant holds at actual instruction boundaries, nested calls and
     teardown, even when a later instruction faults. -/
-
 theorem runVisits_preserves_static_world {program : CIL.Program} {fuel method pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m observed : Memory}
     (visit : RunVisits program fuel method pc args frame stack m observed) (hm : m.WellFormed)

@@ -1,6 +1,15 @@
 import CIL.Safety.ExecutionAllocations
 import CIL.Safety.ExecutionPrefixes
 
+/-!
+# Callees cannot expire caller storage
+
+A call may allocate and expire its own homes, but every allocation below the caller's
+watermark keeps exactly its lifetime and layout (`AllocationsBelow`). This holds across a
+successful run, a whole invocation, and every observed memory of a run that later faults
+(`runVisits_preserves_caller_allocations`), so a caller's references stay formable.
+-/
+
 namespace CIL.Safety
 
 /-- Calls may expire their own homes. Only identities below the caller's
@@ -15,7 +24,8 @@ theorem AllocationExtension.below {before after : Memory} (ext : AllocationExten
   ⟨ext.next, fun id old => ext.lookup id (Nat.lt_of_lt_of_le old bound)⟩
 
 theorem AllocationsBelow.trans {first middle last : Memory} {watermark : Nat}
-    (left : AllocationsBelow first middle watermark) (right : AllocationsBelow middle last watermark) :
+    (left : AllocationsBelow first middle watermark)
+    (right : AllocationsBelow middle last watermark) :
     AllocationsBelow first last watermark := by
   refine ⟨Nat.le_trans left.next right.next, ?_⟩
   intro id bound
@@ -43,6 +53,8 @@ theorem programStep_ownedAbove {program : CIL.Program} {method pc : Nat}
   obtain ⟨body, op, _, _, h⟩ := h
   exact step_ownedAbove _ _ _ _ _ _ _ _ _ owned bound h
 
+/-- A successful run whose frame owns only allocations at or above `watermark` leaves every
+    allocation below it unchanged. -/
 theorem run_preserves_caller_allocations (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value) (watermark : Nat) (bound : watermark ≤ m.nextIdentity)
@@ -105,7 +117,6 @@ theorem invoke_preserves_caller_reference (program : CIL.Program) (fuel method :
 
 /-- Caller lifetimes are preserved even at prefixes of runs which later fault.
     Each observation uses actual fetched steps and actual nested execution. -/
-
 theorem runVisits_preserves_caller_allocations {program : CIL.Program} {fuel method pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m observed : Memory}
     (visit : RunVisits program fuel method pc args frame stack m observed)
@@ -158,7 +169,8 @@ theorem runVisits_preserves_caller_reference {program : CIL.Program} {fuel metho
     (watermark : Nat) (bound : watermark ≤ m.nextIdentity) (owned : frame.OwnedAbove watermark)
     (r formed : Reference) (old : r.allocation < watermark) (valid : form m r = .ok formed) :
     form observed r = .ok formed :=
-  (runVisits_preserves_caller_allocations visit watermark bound owned).preserves_reference r formed old valid
+  (runVisits_preserves_caller_allocations visit watermark bound owned).preserves_reference
+    r formed old valid
 
 #print axioms run_preserves_caller_allocations
 #print axioms invoke_preserves_caller_allocations

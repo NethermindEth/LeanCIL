@@ -1,5 +1,14 @@
 import CIL.Safety.Execution
 
+/-!
+# Shared interpreter equations
+
+Forces Lean to generate the equation lemmas of the checked interpreter's dispatchers in one
+module. Stepping tactics and contracts downstream unfold `step` and its helpers many times;
+importing this file lets them reuse one copy of each equation instead of regenerating it.
+Nothing here is meant to be referenced by name.
+-/
+
 namespace CIL.Safety
 
 /-- Generates the equations of the interpreter's smaller dispatchers once, so importers that
