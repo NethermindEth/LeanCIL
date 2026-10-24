@@ -41,6 +41,24 @@ theorem OutcomeContract.Holds.of_refines {Input Output : Type} {c : OutcomeContr
     obtain ⟨fuel, final, values, invoked, confined, returns⟩ := outcome
     exact ⟨fuel, final, values, invoke_refines refines invoked, confined, returns⟩
 
+/-- Normal-return contracts transfer by `invoke_refines`; they say nothing about throws. -/
+theorem MethodContract.Holds.of_refines {Input Output : Type} {c : MethodContract Input Output}
+    {expected actual : CIL.Program} {maps : Nat → Nat → Nat} (refines : ProgramRefines expected actual maps)
+    {method : Nat} (holds : c.Holds expected method) : c.Holds actual method := by
+  intro input initial permitted
+  obtain ⟨fuel, final, values, invoked, confined, returns⟩ := holds input initial permitted
+  exact ⟨fuel, final, values, invoke_refines refines invoked, confined, returns⟩
+
+/-- A method contract proved with `expected` in place of method `index` holds for `program`. -/
+theorem _root_.CIL.MethodEmbeds.method_holds {Input Output : Type} {c : MethodContract Input Output}
+    {program : CIL.Program} {index : Nat} {expected : CIL.Method} (embeds : MethodEmbeds program index expected)
+    {method : Nat} (holds : c.Holds (program.set index expected) method) : c.Holds program method := by
+  obtain ⟨_, refines⟩ := embeds.refines
+  exact holds.of_refines refines
+
+#print axioms MethodContract.Holds.of_refines
+#print axioms CIL.MethodEmbeds.method_holds
+
 theorem _root_.CIL.MethodEmbeds.raises {program : CIL.Program} {index : Nat} {expected : CIL.Method}
     (embeds : MethodEmbeds program index expected) {method : Nat} {args : List Value} {memory : Memory}
     {exception : String} (raised : Raises (program.set index expected) method args memory exception) :
