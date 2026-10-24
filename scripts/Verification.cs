@@ -629,6 +629,18 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         }
     }
 
+    (string Key, SortedDictionary<string, string> Sources) LibraryIdentity(SortedDictionary<string, string> common)
+    {
+        var sources = LibrarySources(common);
+        // Include the resolved toolchain, platform and cache format, not the selected proof.
+        var toolchain = Toolchain;
+        var compiler = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
+        return (Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+            "leancil-library-v3-kernel-replayed\n" + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
+            Sha(Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" + Sha(compiler) + "\n" + JsonSerializer.Serialize(sources)))),
+            sources);
+    }
+
     string Library(SortedDictionary<string, string> snapshot)
     {
         var common = new SortedDictionary<string, string>(snapshot.Where(p =>
@@ -640,13 +652,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             return library;
         }
 
-        var sources = LibrarySources(common);
-        // Include the resolved toolchain, platform and cache format, not the selected proof.
+        (libraryKey, var sources) = LibraryIdentity(common);
         var toolchain = Toolchain;
-        var compiler = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
-        libraryKey = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-            "leancil-library-v3-kernel-replayed\n" + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
-            Sha(Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" + Sha(compiler) + "\n" + JsonSerializer.Serialize(sources))));
         library = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(library);
         var fresh = freshLibrary ||
@@ -754,6 +761,18 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         File.WriteAllText(Path.Combine(destination, "library-key.txt"), libraryKey);
         File.WriteAllText(Path.Combine(destination, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(destination), Json));
         return Sha(Path.Combine(destination, "cache-manifest.json"));
+    }
+
+    // An earlier producer built and kernel-replayed this library; reuse needs an identical key and file set.
+    string? ReusePreparedLibrary(string directory)
+    {
+        var manifest = Path.Combine(directory, "cache-manifest.json");
+        if (!File.Exists(manifest)) return null;
+        var snapshot = Inputs(At("CIL.lean"));
+        var (key, sources) = LibraryIdentity(new(snapshot.Where(p => !p.Key.StartsWith("proof:", StringComparison.Ordinal) &&
+            !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal));
+        var digest = Sha(manifest);
+        return ValidCertifiedLibrary(directory, digest, key, sources) ? digest : null;
     }
 
     SortedDictionary<string, string> SupportInputs(string session, string[] roots, SortedDictionary<string, string> snapshot)
