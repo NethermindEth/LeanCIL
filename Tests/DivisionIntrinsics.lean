@@ -121,8 +121,10 @@ example : ¬ DivisionIntrinsicsValid (raw call0) [true]
 
 private def vector128 : TypeExpr := .apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.UInt64")
 private def withLocal : RawMethod := { raw call10 with locals := [vector128], code := [] }
-private def localBody : Method := { body [] with locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0] }
+private def localBody : Method := { body [.intrinsic (.vector .createScalarUnsafe64) 1] with locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0] }
 example : OpaqueLocalsValid withLocal localBody := by decide +kernel
+example : OpaqueLocalsValid withLocal { localBody with code := [], opaqueVectorLocals := [] } := by decide +kernel
+example : ¬ OpaqueLocalsValid withLocal { localBody with code := [] } := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal { localBody with opaqueVectorLocals := [] } := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 18, .local 0⟩] } localBody := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 65037, .local 0⟩] } localBody := by decide +kernel

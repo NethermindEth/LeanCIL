@@ -105,9 +105,12 @@ internal static class LeanEmitter
             HashSet<int> addressedLocals = m.Body.Instructions
                 .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
+            var needsOpaqueLocals = reachable.Any(instruction => instruction.OpCode.Code == Code.Call &&
+                instruction.Operand is MethodReference reference &&
+                reference.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)");
             string opaqueLocals = string.Join(", ", m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
-                    !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index));
+                    needsOpaqueLocals && !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index));
             string kinds = string.Join(", ", m.Body.Variables.Select(v => Kind(v.VariableType, m.Module, profile.Architecture)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>

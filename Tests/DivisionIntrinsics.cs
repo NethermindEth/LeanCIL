@@ -17,6 +17,33 @@ Dictionary<string, string> selectors = metadata.GetType("Examples.DivisionIntrin
 Type runtime = Assembly.LoadFile(assembly).GetType("Examples.DivisionIntrinsics")!;
 string root = At("artifacts/DivisionIntrinsics");
 
+foreach (var name in new[] { "DefinedLocal", "PrunedUnsafeLocal" })
+{
+    var method = metadata.GetType("Examples.DivisionIntrinsics").Methods.Single(method => method.Name == name);
+    var local = method.Body.Variables.First(variable => variable.VariableType.FullName ==
+        "System.Runtime.Intrinsics.Vector128`1<System.UInt64>").Index;
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var proof = Path.Combine(output, "Proof.lean");
+    File.WriteAllText(proof, $$"""
+import Extracted
+import Examples.Support
+namespace ExampleProof
+theorem byte_homes : Extracted.method0.opaqueVectorLocals = [] := rfl
+#print axioms byte_homes
+theorem forged_opaque_rejected : ¬ CIL.Extraction.OpaqueLocalsValid Extracted.method0Closed
+    { Extracted.method0 with opaqueVectorLocals := [{{local}}] } := by decide +kernel
+#print axioms forged_opaque_rejected
+theorem correctness :
+    (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 7)] Examples.empty).map Prod.snd =
+      .ok [.scalar (.i64 14)] := by rfl
+#print axioms correctness
+end ExampleProof
+""");
+    verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: "x64-sse42");
+    Console.WriteLine("PASS byte-home compatibility and forged opaque rejection: " + name);
+}
+
 // Check the boundary fault on actual extracted CIL, including an otherwise valid writable destination.
 foreach (var name in new[] { "UnsafeReturn", "UnsafeCall", "UnsafeStore" })
 {

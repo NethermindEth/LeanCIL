@@ -5,6 +5,16 @@ namespace Examples;
 
 public static class DivisionIntrinsics
 {
+    public static ulong DefinedLocal(ulong value)
+    {
+        var local = Vector128.Create(value);
+        return Sse2.Add(local, local).GetElement(0);
+    }
+    public static ulong PrunedUnsafeLocal(ulong value)
+    {
+        var local = Avx2.IsSupported ? Vector128.CreateScalarUnsafe(value) : Vector128.Create(value);
+        return local.GetElement(0) + local.GetElement(1);
+    }
     public static ulong And(ulong left, ulong right) => Avx2.And(Vector256.Create(left), Vector256.Create(right)).GetElement(0);
     public static ulong Or(ulong left, ulong right) => Avx2.Or(Vector256.Create(left), Vector256.Create(right)).GetElement(1);
     public static ulong Xor(ulong left, ulong right) => Avx2.Xor(Vector256.Create(left), Vector256.Create(right)).GetElement(2);
