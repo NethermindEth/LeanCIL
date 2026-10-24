@@ -48,7 +48,7 @@ theorem Program.profile_independent_agreement (program : Program)
   have instructionCheck := List.all_eq_true.mp bodyCheck op instruction
   cases op <;> simp [Op.profileIndependentCheck, Op.ProfileAgreement] at *
   case intrinsic operation _ =>
-    cases operation <;> simp [Intrinsic.available, Intrinsic.requiredFeatures] at *
+    cases operation <;> simp [Intrinsic.available] at *
 
 /-- A feature test pushes the profile's answer as `1` or `0`. -/
 theorem step_feature (id : Feature) (returns : Bool) (pc : Nat) (args : List Value)
@@ -180,10 +180,34 @@ theorem invoke_uniform_reprofile_eq (program : Program) (p q : FeatureProfile)
   rw [reprofile_eq_of_uniform program p hu] at he
   exact he
 
+/-- The features an intrinsic needs; `available_of_required` shows they suffice. -/
+def Intrinsic.requiredFeatures : Intrinsic → List Feature
+  | .scalar _ => []
+  | .vector _ => []
+  | .advSimd _ => [.advSimd]
+  | .sse .shiftLeftBytes => [.sse2]
+  | .sse .alignBytes => [.ssse3]
+  | .avx _ => [.avx]
+  | .avx2 _ => [.avx2]
+  | .avx512 .ltu512 | .avx512 .gtu512 => [.avx512F]
+  | .avx512 _ => [.avx512F, .avx512FVL]
+  | .bmi1 _ => [.bmi1]
+  | .bmi2 _ => [.bmi2]
+  | .armBase64 _ => [.armBase64]
+  | .x86Base _ => [.x86Base64]
+  | .avx512DQ .moveMask64 | .avx512DQ .moveMask512 => [.avx512DQ]
+  | .avx512DQ .mul64 => [.avx512DQ, .avx512DQVL, .avx512F, .avx512FVL]
+
 theorem Intrinsic.available_of_required (operation : Intrinsic) (p : FeatureProfile)
     (h : ∀ featureId ∈ operation.requiredFeatures, p.evaluate featureId = true) :
-    operation.available p = true :=
-  List.all_eq_true.mpr h
+    operation.available p = true := by
+  cases operation <;>
+    simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
+  case sse operation => cases operation <;> simp_all
+  case avx512 operation =>
+    cases operation <;>
+      simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
+  case avx512DQ operation => cases operation <;> simp_all
 
 theorem Op.ProfileAgreement.symm (op : Op) (p q : FeatureProfile)
     (h : op.ProfileAgreement p q) : op.ProfileAgreement q p := by
