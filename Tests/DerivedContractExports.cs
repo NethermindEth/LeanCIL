@@ -52,14 +52,20 @@ void Package(string directory, string name, string[] modules)
         string.Join("", modules.Select(module => "[[lean_lib]]\nname = \"" + module + "\"\n")));
     File.Copy(At("lean-toolchain"), Path.Combine(directory, "lean-toolchain"));
     foreach (string module in modules)
-        File.Copy(At("Tests/ContractImports/" + module + ".lean"), Path.Combine(directory, module + ".lean"));
+        File.WriteAllText(Path.Combine(directory, module + ".lean"), File.ReadAllText(At("Tests/ContractImports/" +
+            (module == interfaceModule ? "DerivedInterface" : module) + ".lean"))
+            .Replace("import DerivedInterface
+", "import " + interfaceModule + "
+", StringComparison.Ordinal));
     Run(["lake", "update"], directory);
 }
-string[] producerModules = ["DerivedInterface", "DerivedPercentProof", "DerivedAddProof"];
+// The published module must not share a path with any source of the leancil package, this fixture's own included.
+const string interfaceModule = "PublishedDerivedInterface";
+string[] producerModules = [interfaceModule, "DerivedPercentProof", "DerivedAddProof"];
 string[] callerModules = ["DerivedShiftCaller", "DerivedSumCaller"];
 Package(package, "derived-proofs", producerModules);
 Package(callerPackage, "derived-callers", callerModules);
-string interfaceSource = Path.Combine(package, "DerivedInterface.lean");
+string interfaceSource = Path.Combine(package, interfaceModule + ".lean");
 
 (string Method, string Artifact, string Contract, string Kind, string Proof)[] exports =
 [
@@ -81,7 +87,7 @@ string manifest = Path.Combine(root, "export.json");
 File.WriteAllText(manifest, JsonSerializer.Serialize(new
 {
     schema = 1, assembly = lib, proofRoot = package,
-    @interface = new[] { new { module = "DerivedInterface", source = interfaceSource } },
+    @interface = new[] { new { module = interfaceModule, source = interfaceSource } },
     exports = exports.Select(export => new
     {
         method = export.Method, artifact = export.Artifact, contract = export.Contract,
@@ -116,7 +122,7 @@ string[] internalNames =
 JsonNode module = published["interfaceModules"]!.AsArray().Single()!;
 string publishedSource = Text(module, "source");
 bool Internal(string text) => internalNames.Any(name => text.Contains(name, StringComparison.Ordinal));
-if (Text(module, "name") != "DerivedInterface" || publishedSource != File.ReadAllText(interfaceSource) ||
+if (Text(module, "name") != interfaceModule || publishedSource != File.ReadAllText(interfaceSource) ||
     Internal(publishedSource) || certifications.Any(entry => Internal(Text(entry, "statement"))))
     throw new InvalidOperationException("Published interface or statements reached an internal contract or proof.");
 Console.WriteLine("PASS exact internal contracts derive the published MethodContract and OutcomeContract theorems");
