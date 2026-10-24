@@ -30,7 +30,9 @@ partial class Program : IDisposable
     string VerificationPolicy => verificationPolicy ??= Sha(typeof(Program).Assembly.Location);
     readonly Dictionary<string, SortedDictionary<string, string>> supportSourceKeys = new(StringComparer.Ordinal);
 
-    bool UseSuccessCache => !freshLibrary &&
+    readonly AsyncLocal<bool> referenceOnlyContext = new();
+    bool referenceOnlyAuthoring { get => referenceOnlyContext.Value; set => referenceOnlyContext.Value = value; }
+    bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
     static string SuccessCacheRoot => Path.Combine(Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
@@ -848,7 +850,10 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     sealed record AuditRefutation(string contract, int line, int column);
     sealed record AuditedTheorem(string name, string? error, string[]? axioms, string? statement, AuditRefutation? refutes);
     sealed record AuditConstantRequest(string name, object value, object? type = null, string[]? axioms = null);
-    sealed record AuditedOleans(Dictionary<string, string> modules, AuditedTheorem[] theorems, AuditedTheorem[] constants);
+    sealed record AuditedInterfaces(string? error);
+    sealed record AuditedClosure(string name, string? error, string? kind, string? canonical);
+    sealed record AuditedOleans(Dictionary<string, string> modules, AuditedTheorem[] theorems, AuditedTheorem[] constants,
+        AuditedInterfaces? interfaces = null, AuditedClosure[]? closures = null);
 
     static readonly JsonSerializerOptions AuditJson = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
@@ -866,7 +871,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     string? auditExecutableSha;
 
     // Reads the kernel-replayed oleans only: no imported elaborator, notation, extension or initializer runs.
-    AuditedOleans AuditOleans(string leanPath, string[] modules, AuditRequest[] theorems, AuditConstantRequest[]? constants = null)
+    AuditedOleans AuditOleans(string leanPath, string[] modules, AuditRequest[] theorems, AuditConstantRequest[]? constants = null,
+        string[]? interfaces = null, string[]? closures = null)
     {
         if (auditExecutable is null || !File.Exists(auditExecutable) || Sha(auditExecutable) != auditExecutableSha)
             throw new InvalidOperationException("Theorem audit executable is missing or changed during verification");
@@ -875,13 +881,17 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         try
         {
             constants ??= [];
-            File.WriteAllText(request, JsonSerializer.Serialize(new { modules, theorems, constants }, AuditJson));
+            interfaces ??= [];
+            closures ??= [];
+            File.WriteAllText(request, JsonSerializer.Serialize(new { modules, theorems, constants, interfaces,
+                closures = closures.Select(name => new { name }) }, AuditJson));
             Run([auditExecutable, request, result], leanPath: leanPath, environment: LeanEnvironment);
             var audited = JsonSerializer.Deserialize<AuditedOleans>(File.ReadAllText(result))
                 ?? throw new InvalidDataException("Missing theorem audit result");
             if (audited.theorems.Length != theorems.Length || audited.theorems.Zip(theorems).Any(pair => pair.First.name != pair.Second.name) ||
                 audited.constants.Length != constants.Length || audited.constants.Zip(constants).Any(pair => pair.First.name != pair.Second.name) ||
-                modules.Any(module => !audited.modules.ContainsKey(module)))
+                modules.Any(module => !audited.modules.ContainsKey(module)) || audited.interfaces is null || audited.closures is null ||
+                audited.closures.Length != closures.Length || audited.closures.Zip(closures).Any(pair => pair.First.name != pair.Second))
                 throw new InvalidDataException("Incomplete theorem audit result");
             return audited;
         }
@@ -990,6 +1000,11 @@ unsafe def main (args : List String) : IO Unit := do
         SortedDictionary<string, string> sources = extraction.Sources;
         if (sources.Count == 0) return [];
         Dictionary<string, string[]> dependencies = ContractModuleImports(destination, sources);
+        foreach ((string module, string[] imports) in dependencies)
+            if (module != "ExtractedImports")
+                foreach (string dependency in imports)
+                    if ((!sources.ContainsKey(dependency) || dependency == "ExtractedImports") && !TrustedContractModule(dependency))
+                        throw new InvalidDataException("Undeclared contract interface dependency: " + dependency);
         List<string> ordered = [];
         HashSet<string> active = new(StringComparer.Ordinal);
         void Stage(string module)
@@ -1008,6 +1023,99 @@ unsafe def main (args : List String) : IO Unit := do
         foreach (string module in sources.Keys) Stage(module);
         return ordered.ToArray();
     }
+
+    static SortedDictionary<string, string> ContractInterfaceArtifacts(string directory, string[] modules)
+    {
+        if (modules.Length == 0) return new(StringComparer.Ordinal);
+        HashSet<string> names = new(modules, StringComparer.Ordinal);
+        SortedDictionary<string, string> artifacts = new(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
+            .Select(path => (Relative: Path.GetRelativePath(directory, path).Replace('\\', '/'), Path: path))
+            .Where(artifact => names.Contains(ModuleName(artifact.Relative)))
+            .ToDictionary(artifact => artifact.Relative, artifact => Sha(artifact.Path)), StringComparer.Ordinal);
+        foreach (string module in modules)
+            if (!artifacts.ContainsKey(module.Replace('.', '/') + ".olean"))
+                throw new InvalidDataException("Published contract interface artifact is missing: " + module);
+        return artifacts;
+    }
+
+    static void RequireContractInterfaceArtifacts(string directory, string[] modules,
+        SortedDictionary<string, string> accepted)
+    {
+        if (!Same(accepted, ContractInterfaceArtifacts(directory, modules)))
+            throw new InvalidDataException("Published contract interface artifacts changed after their closure audit.");
+    }
+
+    bool TrustedContractModule(string module) =>
+        ((module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal)) && File.Exists(At(module.Replace('.', '/') + ".lean"))) ||
+        File.Exists(Path.Combine(Toolchain, "lib/lean", module.Replace('.', '/') + ".olean"));
+
+    // Validation and closures come from leancil-audit on replayed oleans, so interface code cannot forge them.
+    void CheckContractInterfaces(ExtractionIdentity extraction, string[] modules, string leanPath, Func<string, string> artifact)
+    {
+        string[] interfaces = modules.Where(module => module != "ExtractedImports").ToArray();
+        JsonElement[] imports = extraction.Imports;
+        if (interfaces.Length == 0 && imports.Length == 0) return;
+        if (interfaces.Length == 0) throw new InvalidDataException("Contract imports without a published interface module");
+        string[] constants = imports.Select(import => import.GetProperty("contractConstant").GetString()!).Distinct(StringComparer.Ordinal).ToArray();
+        AuditedOleans audited = AuditOleans(leanPath, interfaces, [], interfaces: interfaces, closures: constants);
+        foreach (string module in interfaces) RequireAuditedModule(audited, module, artifact(module));
+        if (audited.interfaces?.error is { } invalid) throw new InvalidDataException(invalid);
+        Dictionary<string, AuditedClosure> closures = audited.closures!.ToDictionary(closure => closure.name, StringComparer.Ordinal);
+        foreach (JsonElement import in imports)
+        {
+            string constant = import.GetProperty("contractConstant").GetString()!;
+            AuditedClosure closure = closures[constant];
+            if (closure.error is not null) throw new InvalidDataException(closure.error);
+            if (ContentKey(closure.canonical!) != import.GetProperty("closureDigest").GetString())
+                throw new InvalidDataException("Published contract canonical closure digest mismatch: " + constant);
+            if (closure.kind != import.GetProperty("contractKind").GetString())
+                throw new InvalidDataException("Published contract canonical type mismatch: " + constant);
+        }
+    }
+
+    static bool ReferenceOnlyImports(ExtractionIdentity extraction) =>
+        extraction.Imports.Any(import => import.GetProperty("isReferenceAssembly").GetBoolean());
+
+    static void RequireImplementationImports(ExtractionIdentity extraction)
+    {
+        if (ReferenceOnlyImports(extraction))
+            throw new InvalidDataException("Reference-only contract input: caller proof checked for authoring only; no verification report or success receipt is certified.");
+    }
+
+    static string SemanticExtractionIdentity(ExtractionIdentity extraction)
+    {
+        JsonElement identity = extraction.Root;
+        return ContentKey(JsonSerializer.Serialize(new
+        {
+            assembly = identity.GetProperty("assemblySha256"), generated = identity.GetProperty("generatedSha256"),
+            profile = identity.GetProperty("profile"), interfaces = extraction.Sources,
+            imports = extraction.Imports.Select(import => new
+            {
+                slot = import.GetProperty("slot"), identity = import.GetProperty("identity"),
+                profile = import.GetProperty("profile"), interfaceDigest = import.GetProperty("interfaceDigest"),
+                closureDigest = import.GetProperty("closureDigest"), constant = import.GetProperty("contractConstant"),
+                kind = import.GetProperty("contractKind")
+            })
+        }));
+    }
+
+    // Certification fields are sidecar text outside every pinned digest; sidecarSha256 names the bytes they came from.
+    sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
+        string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
+        string certificationStatementDigest, string deploymentObligation, string? sidecarSha256 = null, bool certificationAuthenticated = false);
+
+    static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
+        ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
+            import.GetProperty("identity").GetString()!, import.GetProperty("profile").GetString()!,
+            import.GetProperty("implementationSha256").GetString()!, import.GetProperty("interfaceDigest").GetString()!,
+            "published-certification", import.GetProperty("certificationTheorem").GetString()!,
+            import.GetProperty("certificationStatement").GetString()!, import.GetProperty("certificationStatementDigest").GetString()!,
+            "This conditional caller proof is not a deployment guarantee: an unsatisfiable imported contract can make it vacuous. " +
+            "Deployment must use these exact implementation bytes and discharge the published contract at this identity, signature and profile. " +
+            "Published interface sources execute code with verifier permissions during compilation.",
+            import.GetProperty("sidecarSha256").GetString()!)).ToArray()
+        : [];
 
     static bool HasContractImports(ExtractionIdentity extraction) =>
         extraction.Sources.ContainsKey("ExtractedImports") == (extraction.Imports.Length > 0) ? extraction.Imports.Length > 0
@@ -1069,7 +1177,7 @@ unsafe def main (args : List String) : IO Unit := do
         string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
-        string[]? staticValues = null, string[]? contractImports = null);
+        string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null);
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -1094,7 +1202,7 @@ unsafe def main (args : List String) : IO Unit := do
             var old = JsonSerializer.Deserialize<Report>(File.ReadAllText(reportPath)) ?? throw new InvalidOperationException("Missing report");
             Run(Extract("check", assembly, identity, entry, output, profile));
 
-            if (old.schema != 3 || string.IsNullOrWhiteSpace(old.extractionAudit) || !Same(old.inputs, Inputs(proof, settings)) || old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
+            if (old.schema != 4 || string.IsNullOrWhiteSpace(old.extractionAudit) || !Same(old.inputs, Inputs(proof, settings)) || old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
                 old.theorem != theorem || old.assemblySha256 != Sha(assembly) ||
                 (old.batchSourceSha256 is not null && (string.IsNullOrWhiteSpace(old.batchTheorem) ||
                     old.batchSourceSha256 != Sha(Path.Combine(output, "Batch.lean")))))
@@ -1131,6 +1239,7 @@ unsafe def main (args : List String) : IO Unit := do
         if (before["proof:" + proof] != proofSourceHash)
             throw new InvalidOperationException("Proof inputs changed before their source snapshot");
         ExtractionIdentity extraction = ExtractionIdentity.Read(output);
+        referenceOnlyAuthoring = ReferenceOnlyImports(extraction);
 
         // Retain the selected bytes before support or interface builds can run code.
         void RequireOriginalProofSources()
@@ -1261,7 +1370,7 @@ unsafe def main (args : List String) : IO Unit := do
             }
             // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
             var bound = OleanHashes(fresh, session);
-            foreach (string module in importModules)
+            foreach (string module in importModules.Where(module => module != "ExtractedImports"))
             {
                 string source = Path.Combine(fresh, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
                 Run([LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source], leanPath: leanPath,
@@ -1269,6 +1378,26 @@ unsafe def main (args : List String) : IO Unit := do
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next, module.Replace('.', '/'));
                 bound = next;
+            }
+            if (importModules.Contains("ExtractedImports", StringComparer.Ordinal))
+            {
+                string assumptionsSource = Path.Combine(fresh, "ExtractedImports.lean");
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(assumptionsSource, ".olean"), assumptionsSource],
+                    leanPath: leanPath, progress: "Checking App import assumptions");
+                var next = OleanHashes(fresh, session);
+                RequireOnlyAdded(bound, next, "ExtractedImports");
+                bound = next;
+            }
+            // The audit, the replay and the proof must all read the bytes compiled here.
+            SortedDictionary<string, string> acceptedInterfaceArtifacts = ContractInterfaceArtifacts(fresh, importModules);
+            if (importModules.Length > 0)
+            {
+                stage?.Invoke("kernel replay");
+                Run([checker, .. importModules], leanPath: leanPath, progress: "Kernel replay of published contract interfaces and App import assumptions");
+                CheckContractInterfaces(extraction, importModules, leanPath, module => Path.Combine(fresh, module.Replace('.', '/') + ".olean"));
+                if (!Same(bound, OleanHashes(fresh, session)))
+                    throw new InvalidOperationException("Compiled artifacts changed during verification");
+                RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             }
             if (File.Exists(stagedProof))
                 throw new InvalidOperationException("Proof sources changed during verification: Proof.lean");
@@ -1290,7 +1419,8 @@ unsafe def main (args : List String) : IO Unit := do
             RequireStagedProofSources();
             var proofKey = ContentKey("theorem-audit-v2\n" + extractedKey + "\n" + proofSourceHash + "\n" +
                 (symbols ? symbolsSourceHash + "\n" : "") +
-                JsonSerializer.Serialize(extraction.Sources) + "\n" + theorem);
+                SemanticExtractionIdentity(extraction) + "\n" + JsonSerializer.Serialize(extraction.Sources) + "\n" +
+                JsonSerializer.Serialize(acceptedInterfaceArtifacts) + "\n" + theorem);
             var proofRestored = RestoreSuccess(proofKey, fresh);
             if (proofRestored)
             {
@@ -1306,8 +1436,10 @@ unsafe def main (args : List String) : IO Unit := do
             }
             RequireStagedProofSources();
             var built = OleanHashes(fresh, session);
+            RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
-            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"], .. importModules,
+            // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
+            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"],
                 .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(), .. proofRestored ? Array.Empty<string>() : ["Proof"]];
             if (replay.Length > 0)
             {
@@ -1334,6 +1466,7 @@ unsafe def main (args : List String) : IO Unit := do
             audit = AuditText(audited.theorems[0]);
             RequireOriginalProofSources();
             RequireStagedProofSources();
+            RequireOriginalProofSources();
             if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
                 throw new InvalidOperationException("Inputs changed during verification");
             if (!proofRestored)
@@ -1342,35 +1475,39 @@ unsafe def main (args : List String) : IO Unit := do
                 Directory.CreateDirectory(publication);
                 foreach (var path in Directory.EnumerateFiles(fresh).Where(path => Path.GetFileName(path).StartsWith("Proof.olean", StringComparison.Ordinal)))
                     File.Copy(path, Path.Combine(publication, Path.GetFileName(path)));
+                RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
                 PublishSuccess(proofKey, publication);
             }
+            RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             if (extractionPublication is not null)
             {
                 extractionAudit += AuditText(audited.theorems[1]);
                 File.WriteAllText(Path.Combine(extractionPublication, "extraction-audit.txt"), extractionAudit);
                 PublishSuccess(extractedKey, extractionPublication);
             }
+
+            // Bind the report only after confirming inputs stayed unchanged.
+            stage?.Invoke("extraction integrity");
+            Run(existingArtifacts ? ["dotnet", ExtractorPath, "check", output] : Extract("check", assembly, identity, entry, output, profile));
+
+            RequireOriginalProofSources();
+            if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
+                throw new InvalidOperationException("Inputs changed during verification");
+
+            var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
+                ? assumptions.Deserialize<string[]>() : [];
+            RequireImplementationImports(extraction);
+            var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
+                staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root), imports: PublishedImports(extraction.Root));
+            RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
+            File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
+
+            return report;
         }
         finally
         {
             Directory.Delete(fresh, true);
         }
-
-        // Bind the report only after confirming inputs stayed unchanged.
-        stage?.Invoke("extraction integrity");
-        Run(existingArtifacts ? ["dotnet", ExtractorPath, "check", output] : Extract("check", assembly, identity, entry, output, profile));
-
-        RequireOriginalProofSources();
-        if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
-            throw new InvalidOperationException("Inputs changed during verification");
-
-        var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
-            ? assumptions.Deserialize<string[]>() : [];
-        var report = new Report(3, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-            staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root));
-        File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
-
-        return report;
     }
 
     void IDisposable.Dispose()

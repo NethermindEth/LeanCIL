@@ -234,6 +234,45 @@ Integer logarithms use Lean's natural-number `log2`, including zero mapping to z
 
 The trust boundary includes correspondence between these definitions and the selected .NET 10 `BitOperations` and `BinaryPrimitives` overloads. Exact signature/scope validation and boundary/runtime comparison tests support that correspondence; they do not verify CoreCLR or a JIT. See the [BitOperations API](https://learn.microsoft.com/en-us/dotnet/api/system.numerics.bitoperations?view=net-10.0) and [ReverseEndianness API](https://learn.microsoft.com/en-us/dotnet/api/system.buffers.binary.binaryprimitives.reverseendianness?view=net-10.0).
 
+## Caller proofs and published library contracts
+
+An imported library contract is a hypothesis of the caller theorem. The theorem
+has the form `forall linked, Links Extracted.program linked ->
+Extracted.ImportsHold linked -> claim linked`. Generated import conditions use
+fully qualified canonical contract predicates. The library's implementation
+proofs and full-verification bundle are not needed for this caller check.
+
+The consumer audits the supplied interface sources and their canonical contract
+closures. `leancil-audit` computes both from the kernel-replayed interface oleans,
+in one walk per root that visits each declaration once. The closure representation includes definition values, theorem and
+inductive types, constructor metadata and computational recursor metadata/rules.
+It removes binder names and expression metadata, uses de Bruijn indices, and
+normalizes universe binders. Imported framework/toolchain module identity defines
+the stop boundary. Custom axioms, sorry, unsafe/partial declarations, unbound
+variables and missing opaque values are rejected. The ordinary caller theorem
+axiom allowlist and kernel replay policy are unchanged.
+
+Every supplied interface module is independently kernel-replayed before its
+compiled artifacts enter the accepted snapshot. Published certification does not
+exempt interface declarations from this check. Compilation and an axiom audit
+alone cannot detect an unchecked declaration inserted by an elaborator. This
+replay checks interface source declarations; it does not require a library's
+implementation proof or a full-verification bundle.
+
+The implementation-to-contract assertion is accepted from published certification,
+as schema-4 reports state. This is separate from the kernel-checked caller
+reasoning. Sidecar/DLL hashes establish identity; they do not authenticate a
+publisher or prove a library implementation theorem. The supplied certification
+theorem, statement and statement digest are provenance records here. Full
+implementation verification is a separate producer operation.
+
+Deployment must bind the exact implementation bytes, method/signature/profile
+and a library implementation satisfying the published contracts. A false or
+unsatisfiable published contract can make the caller theorem vacuous. Retaining
+`Links` and `ImportsHold` exposes this condition; it does not prove satisfiability.
+A successful report must be read with that deployment obligation. Reference-only
+authoring checks do not produce a deployment certificate.
+
 ## Exception documentation lint
 
 `lint-exceptions` is a diagnostic experiment. Its potential model sites are

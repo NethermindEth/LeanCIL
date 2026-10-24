@@ -1,4 +1,5 @@
 import Lean
+import CIL.Interface.Closure
 
 /-!
 `leancil-audit REQUEST RESULT` audits compiled `.olean` files without elaborating any source.
@@ -11,9 +12,12 @@ REQUEST (JSON):
   { "modules":   ["Proof", ...],
     "theorems":  [{ "name": N, "type": E?, "levelParams": [u, ...]?, "axioms": [N, ...],
                     "statement": bool?, "refutation": bool? }],
-    "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }] }
+    "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
+    "interfaces": [M, ...]?, "closures": [{ "name": N }]? }
 A theorem must be a `theorem` whose type matches `E` (when given) and whose axiom closure is in
-`axioms`. A constant must be a definition whose value (and type) match. Expected expressions `E`:
+`axioms`. A constant must be a definition whose value (and type) match. Every declaration of the
+`interfaces` modules must pass `CIL.Interface.validateInterfaceDeclarations`, and each `closures` entry
+reports `CIL.Interface.contractClosure`: its contract kind and canonical closure. Expected expressions `E`:
   "_"                                any expression
   {"const": N, "levels": [L, ...]}   constant; `levels` defaults to []
   {"app": [E, E1, ..., En]}          `E` applied to exactly the trailing n arguments
@@ -28,7 +32,8 @@ RESULT (JSON):
   { "modules": { N: olean path },
     "theorems":  [{ "name": N, "error": string?, "axioms": [N, ...], "statement": string?,
                     "refutes": { "contract": N, "line": n, "column": n }? }],
-    "constants": [{ "name": N, "error": string?, "axioms": [N, ...] }] }
+    "constants": [{ "name": N, "error": string?, "axioms": [N, ...] }],
+    "interfaces": { "error": string? }, "closures": [{ "name": N, "error": string?, "kind": string?, "canonical": string? }] }
 Per-item failures are reported in `error`; a missing module or malformed request exits nonzero.
 -/
 
@@ -177,6 +182,17 @@ def constant? (env : Environment) (req : Json) : IO Json := do
       return result (fields ++ [("error", toJson error)])
   return result fields
 
+def interfaces (env : Environment) (req : Json) : Json :=
+  match CIL.Interface.validateInterfaceDeclarations env (names req "interfaces") with
+  | .ok _ => Json.mkObj []
+  | .error error => Json.mkObj [("error", toJson error)]
+
+def closure? (env : Environment) (req : Json) : IO Json := do
+  let c := name (← IO.ofExcept (req.getObjValAs? String "name"))
+  return Json.mkObj <| [("name", toJson c.toString)] ++ match CIL.Interface.contractClosure env c with
+    | .ok (kind, canonical) => [("kind", toJson kind), ("canonical", toJson canonical)]
+    | .error error => [("error", toJson error)]
+
 end LeanCILAudit
 
 open Lean LeanCILAudit in
@@ -193,6 +209,7 @@ unsafe def main (args : List String) : IO UInt32 := do
   let env ← importModules (modules.map ({ module := · })) {} (loadExts := false)
   let theorems ← ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).mapM (theorem? env)
   let constants ← ((req.getObjValAs? (Array Json) "constants").toOption.getD #[]).mapM (constant? env)
+  let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM (closure? env)
   IO.FS.writeFile output (Json.mkObj [("modules", Json.mkObj paths), ("theorems", toJson theorems),
-    ("constants", toJson constants)]).compress
+    ("constants", toJson constants), ("interfaces", interfaces env req), ("closures", toJson closures)]).compress
   return 0

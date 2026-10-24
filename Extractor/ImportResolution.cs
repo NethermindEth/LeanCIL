@@ -10,7 +10,8 @@ internal sealed class ImportResolution : IDisposable
     internal sealed record Source(string SidecarPath, string ImplementationPath, string ExpectedSha256, string ExpectedInterfaceDigest, bool Discovered = false);
     internal sealed record Binding(int Slot, string Identity, string ImplementationPath, string ImplementationSha256,
         string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
-        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ContractKind);
+        string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ContractKind,
+        string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
     readonly List<Library> libraries = [];
     readonly HashSet<Library> used = [];
@@ -52,9 +53,10 @@ internal sealed class ImportResolution : IDisposable
                 ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(implementation));
                 try
                 {
-                    if (contract.IsReferenceAssembly || module.Assembly.CustomAttributes.Any(attribute =>
-                        attribute.AttributeType.FullName == "System.Runtime.CompilerServices.ReferenceAssemblyAttribute"))
-                        throw new InvalidDataException("Reference assembly contract interfaces are authoring-only.");
+                    bool referenceAssembly = module.Assembly.CustomAttributes.Any(attribute =>
+                        attribute.AttributeType.FullName == "System.Runtime.CompilerServices.ReferenceAssemblyAttribute");
+                    if (referenceAssembly && !contract.IsReferenceAssembly)
+                        throw new InvalidDataException("Import reference assembly flag mismatch; reference assemblies are authoring-only.");
                     if (module.Assembly.Name.FullName != contract.AssemblyIdentity)
                         throw new InvalidDataException("Import assembly identity mismatch.");
                     if (module.Mvid != contract.Mvid)
@@ -130,7 +132,8 @@ internal sealed class ImportResolution : IDisposable
             slot = bindings.Count;
             bindings.Add(new(slot, identity, Path.GetFullPath(library.Source.ImplementationPath), library.Interface.ImplementationSha256,
                 Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
-                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, export.Kind));
+                export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, export.Kind,
+                certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly));
         }
         sites[instruction] = slot;
     }

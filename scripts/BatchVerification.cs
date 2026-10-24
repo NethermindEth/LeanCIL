@@ -66,6 +66,8 @@ partial class Program
         {
             var request = requests[i];
             Run(Extract("extract", request.Assembly!, identity, request.Entry, request.Output, profile));
+            if (HasContractImports(ExtractionIdentity.Read(request.Output)))
+                throw new InvalidDataException("Generated batch verification does not support contract imports.");
             hashes[i] = Sha(Path.Combine(request.Output, "identity.json"));
             bodies.AppendLine($"namespace BatchCase{i}");
             bodies.AppendLine(Body(File.ReadAllText(Path.Combine(request.Output, "Extracted.lean"))));
@@ -122,9 +124,9 @@ partial class Program
                 var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
-                reports[i] = new Report(3, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
+                reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
                     libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(source), theorem,
-                    staticValues: StaticValueAssumptions(extraction));
+                    staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction));
             }
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)

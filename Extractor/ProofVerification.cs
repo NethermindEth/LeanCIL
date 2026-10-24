@@ -268,6 +268,13 @@ partial class Program
                     Console.WriteLine($"  Caller assumption: {name.GetString()} keeps the value its static constructor stored.");
             foreach (string assumption in ContractImportAssumptions(manifest))
                 Console.WriteLine("  Conditional verification: assumes " + assumption + "; implementation contracts are not discharged by hashes or certification records.");
+            foreach (PublishedImport import in report.imports ?? [])
+            {
+                Console.WriteLine("  Imported contract accepted via " + import.acceptedVia + ": " + import.identity);
+                Console.WriteLine("  Published certification (unauthenticated sidecar record, sidecar SHA-256 " + import.sidecarSha256 + "): " +
+                    import.certificationTheorem + " : " + import.certificationStatement);
+                Console.WriteLine("  Deployment obligation: " + import.deploymentObligation);
+            }
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
             var refuted = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);

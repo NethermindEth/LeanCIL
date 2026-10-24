@@ -909,6 +909,8 @@ unsafe def main (args : List String) : IO Unit := do
             });
         }
         CheckExtractions(all);
+        // Cache eligibility is local to each request/group, including parallel groups.
+        referenceOnlyAuthoring = false;
         var live = Pending(all);
         if (live.Length == 0) return outcomes;
 
@@ -1006,15 +1008,16 @@ unsafe def main (args : List String) : IO Unit := do
                 extractions[i] = ExtractionIdentity.Read(outputs[i]);
                 identities[i] = extractions[i].Sha256;
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
-                proofKeys[i] = ConsumerCacheKey("proof", before[i], identities[i] + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
+                proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
                     (symbols[i] is null ? "" : "\n" + symbols[i]));
-                if (requests[i].ExpectRejection) continue;
+                if (requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
                 try
                 {
                     if (!RestoreSuccess(proofKeys[i], receipt)) continue;
                     var report = JsonSerializer.Deserialize<Report>(File.ReadAllText(Path.Combine(receipt, "report.json")))!;
+                    if (report.schema != 4) continue;
                     outcomes[i].Detail = JsonSerializer.Serialize(report with { libraryBuild = "consumer-proof-cache" }, Json);
                     cached.Add(i);
                 }
@@ -1028,7 +1031,14 @@ unsafe def main (args : List String) : IO Unit := do
             Recheck([.. cached]);
             foreach (var i in Pending(cached))
             {
-                var report = JsonSerializer.Deserialize<Report>(outcomes[i].Detail!)!;
+                RequireImplementationImports(extractions[i]);
+                JsonElement current = extractions[i].Root;
+                var report = JsonSerializer.Deserialize<Report>(outcomes[i].Detail!)! with
+                {
+                    schema = 4, identitySha256 = identities[i],
+                    assemblySha256 = Sha(requests[i].Assembly), inputs = before[i], imports = PublishedImports(current),
+                    contractImports = ContractImportAssumptions(current)
+                };
                 outcomes[i].Detail = null;
                 if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
@@ -1042,7 +1052,7 @@ unsafe def main (args : List String) : IO Unit := do
             try
             {
                 var key = Sha(Path.Combine(outputs[i], "Extracted.lean")) + (symbols[i] is null ? "" : "\n" + symbols[i]) +
-                    "\n" + JsonSerializer.Serialize(extractions[i].Sources);
+                    "\n" + JsonSerializer.Serialize(extractions[i].Sources) + "\nreferenceOnly=" + ReferenceOnlyImports(extractions[i]);
                 if (!groups.TryGetValue(key, out var members)) groups[key] = members = [];
                 members.Add(i);
             }
@@ -1071,6 +1081,36 @@ unsafe def main (args : List String) : IO Unit := do
             var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, extractions[members[0]],
                 members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash);
             var frameworkCopy = prepared.FrameworkCopy;
+            string[] interfaceModules = extractions[members[0]].Sources.Keys.Where(module => module != "ExtractedImports").ToArray();
+            Dictionary<string, string> InterfaceArtifacts() => ModuleArtifacts(frameworkCopy)
+                .Where(pair => interfaceModules.Contains(ModuleName(pair.Key), StringComparer.Ordinal)).ToDictionary();
+            Dictionary<string, string> acceptedInterfaceArtifacts = new(StringComparer.Ordinal);
+            void RequireInterfaceArtifacts()
+            {
+                Dictionary<string, string> current = InterfaceArtifacts();
+                if (current.Count != acceptedInterfaceArtifacts.Count ||
+                    current.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value))
+                    throw new InvalidDataException("Published contract interface artifacts changed after their closure audit.");
+            }
+            if (interfaceModules.Length > 0)
+            {
+                Stage(members, "contract interface validation");
+                Run(["lake", "build", .. interfaceModules.Select(module => "+" + module + ":olean")], frameworkCopy,
+                    progress: "Compiling published contract interfaces");
+                // The audit, the replay and the proof must all read the bytes compiled here.
+                acceptedInterfaceArtifacts = InterfaceArtifacts();
+                string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
+                Stage(members, "kernel replay");
+                Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
+                if (interfaceFailures.Count > 0)
+                    throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
+                        string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
+                RequireInterfaceArtifacts();
+                // The checker reads only the bytes just replayed.
+                CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
+                    module => Path.Combine(frameworkCopy, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
+                RequireInterfaceArtifacts();
+            }
             string[] initialImportDirectories;
             if (!first && relativeImportDirectories.Length > 0)
                 initialImportDirectories = relativeImportDirectories.Select(path => Path.GetFullPath(path, session)).ToArray();
@@ -1217,7 +1257,11 @@ unsafe def main (args : List String) : IO Unit := do
                         var relative = Path.GetRelativePath(session, Path.Combine(directory, pair.Key));
                         return restoredArtifacts.TryGetValue(relative.Replace('\\', '/'), out var hash) && hash == pair.Value;
                     });
-                    discovered.Add((module.Key, unchanged || certifiedSupport));
+                    bool publishedInterface = directory.Equals(frameworkModules, comparison) && interfaceModules.Contains(module.Key, StringComparer.Ordinal);
+                    if (publishedInterface && (module.Count() != acceptedInterfaceArtifacts.Count(pair => ModuleName(pair.Key) == module.Key) ||
+                        module.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value)))
+                        throw new InvalidDataException("Published contract interface artifacts changed after their closure audit: " + module.Key);
+                    discovered.Add((module.Key, unchanged || certifiedSupport || publishedInterface));
                 }
             }
             if (!moduleNames.Contains("Extracted") || !moduleNames.Contains("ExtractionAudit") ||
@@ -1235,8 +1279,8 @@ unsafe def main (args : List String) : IO Unit := do
             // Cached support was checked against another Extracted or PDB, so its importers are always replayed.
             var extractionDependent = graph is null ? new HashSet<string>(StringComparer.Ordinal)
                 : DependentModules(graph, ["Extracted", "ExtractedSymbols"]);
-            var failures = ReplayConsumerModules(session, discovered.Where(module => !baseUnchanged ||
-                extractionDependent.Contains(module.Name) ||
+            var failures = ReplayConsumerModules(session, discovered.Where(module =>
+                !baseUnchanged || extractionDependent.Contains(module.Name) ||
                 (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name), leanPath);
             foreach (var i in proceeding)
             {
@@ -1330,11 +1374,12 @@ unsafe def main (args : List String) : IO Unit := do
                 var extraction = extractions[i].Root;
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
-                var report = new Report(3, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
+                RequireImplementationImports(extractions[i]);
+                var report = new Report(4, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
                     audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
-                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction));
+                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: PublishedImports(extraction));
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));
@@ -1346,11 +1391,13 @@ unsafe def main (args : List String) : IO Unit := do
 
         void RunGroup(int[] members, bool first, bool share)
         {
+            bool priorReferenceOnly = referenceOnlyAuthoring;
+            referenceOnlyAuthoring = ReferenceOnlyImports(extractions[members[0]]);
             var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(session);
             try { VerifyGroup(members, session, first, share); }
             catch (Exception error) { Fail(members, error); }
-            finally { Directory.Delete(session, true); }
+            finally { referenceOnlyAuthoring = priorReferenceOnly; Directory.Delete(session, true); }
             foreach (var i in members.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
         }
 
