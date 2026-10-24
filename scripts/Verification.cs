@@ -751,36 +751,50 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         return library;
     }
 
-    string PrepareLibrary(string destination)
+    string PrepareLibrary(string destination, string? trustedDigest = null)
     {
-        var session = Library(Inputs(At("CIL.lean")));
+        if (trustedDigest is not null)
+            return ReusePreparedLibrary(destination, trustedDigest) ??
+                throw new InvalidOperationException("Certified library identity or integrity mismatch; destination left unchanged");
+        destination = Path.GetFullPath(destination);
         if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
             throw new InvalidOperationException("Certified library destination must be empty");
-        Directory.CreateDirectory(destination);
-        CopyTree(session, destination);
-        File.WriteAllText(Path.Combine(destination, "library-key.txt"), libraryKey);
-        File.WriteAllText(Path.Combine(destination, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(destination), Json));
-        return Sha(Path.Combine(destination, "cache-manifest.json"));
+        var session = Library(Inputs(At("CIL.lean")));
+        var staging = destination.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "." + Guid.NewGuid().ToString("N");
+        try
+        {
+            CopyTree(session, staging);
+            File.WriteAllText(Path.Combine(staging, "library-key.txt"), libraryKey);
+            File.WriteAllText(Path.Combine(staging, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(staging), Json));
+            var digest = Sha(Path.Combine(staging, "cache-manifest.json"));
+            if (!ValidCertifiedLibrary(staging, digest, libraryKey!, LibrarySources(libraryInputs!)))
+                throw new InvalidOperationException("Certified library changed while copying");
+            // Never recursively delete an existing destination, even if it changed during the build.
+            if (Directory.Exists(destination)) Directory.Delete(destination);
+            Directory.Move(staging, destination);
+            return digest;
+        }
+        finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
 
-    // Restored files are self-describing, so reuse needs an identical key and file set and a fresh kernel replay.
-    string? ReusePreparedLibrary(string directory)
+    // A manifest authenticates contents only when its digest comes independently from a trusted producer.
+    // Kernel replay cannot authenticate the native auditor or establish compiled-to-source correspondence.
+    string? ReusePreparedLibrary(string directory, string? trustedDigest)
     {
         // Replay runs inside the library, so a relative Lean path would resolve below it.
         directory = Path.GetFullPath(directory);
         var manifest = Path.Combine(directory, "cache-manifest.json");
-        if (!File.Exists(manifest)) return null;
+        if (string.IsNullOrWhiteSpace(trustedDigest) || !File.Exists(manifest) || Sha(manifest) != trustedDigest) return null;
         var snapshot = Inputs(At("CIL.lean"));
         var (key, sources) = LibraryIdentity(new(snapshot.Where(p => !p.Key.StartsWith("proof:", StringComparison.Ordinal) &&
             !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal));
-        var digest = Sha(manifest);
-        if (!ValidCertifiedLibrary(directory, digest, key, sources)) return null;
+        if (!ValidCertifiedLibrary(directory, trustedDigest, key, sources)) return null;
         var compiled = Path.Combine(directory, ".lake/build/lib/lean");
         if (!ReplayModulesJointly(directory, [.. ModuleArtifacts(directory).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
             compiled, "Joint kernel replay of reused Lean verification library"))
             Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), "CIL"], directory, compiled,
                 streamOutput: true, progress: "Kernel replay of reused Lean verification library");
-        return ValidCertifiedLibrary(directory, digest, key, sources) ? digest : null;
+        return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
     }
 
     SortedDictionary<string, string> SupportInputs(string session, string[] roots, SortedDictionary<string, string> snapshot)
