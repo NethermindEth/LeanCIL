@@ -4,6 +4,7 @@ import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.DivisionIntrinsics
 import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
+import CIL.Extraction.ImportLayouts
 
 namespace CIL.Extraction
 
@@ -87,12 +88,13 @@ def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayo
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) : Prop :=
   LayoutsValid rawLayouts layouts (((program.head?).map fun method => method.profile.architecture).getD .scalar) ∧ evidence.length = program.length ∧
   (∀ index : Fin evidence.length, MethodAtValid rawLayouts layouts evidence imports evidence[index] program[index.val]?) ∧
-  StaticValuesValid program
+  StaticValuesValid program ∧
+  ImportedLayoutsValid imports (((program.head?).map fun method => method.profile.architecture).getD .scalar)
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) :
     Decidable (TranslationValid rawLayouts layouts evidence imports program) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
@@ -106,6 +108,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
     {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}
     (layout : LayoutsValid rawLayouts layouts (((program.head?).map fun method => method.profile.architecture).getD .scalar))
     (statics : StaticValuesValid program)
+    (importLayouts : ImportedLayoutsValid imports (((program.head?).map fun method => method.profile.architecture).getD .scalar))
     (methods : MethodsChecked rawLayouts layouts evidence imports evidence program) :
     TranslationValid rawLayouts layouts evidence imports program := by
   have compose {items code} (checked : MethodsChecked rawLayouts layouts evidence imports items code) :
@@ -119,7 +122,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
       cases index with
       | zero => exact valid
       | succ index => exact ih.2 ⟨index, Nat.lt_of_succ_lt_succ bound⟩
-  exact ⟨layout, (compose methods).1, (compose methods).2, statics⟩
+  exact ⟨layout, (compose methods).1, (compose methods).2, statics, importLayouts⟩
 
 theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}

@@ -171,7 +171,8 @@ internal static class MetadataValidation
     // With `blocked`, failures after entry selection are recorded and the walk continues past them;
     // without it, the first failure throws. Either way only profile-reachable code is checked.
     internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
-        IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null)
+        IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null,
+        string[]? typeArguments = null, Func<TypeReference, bool>? importedByref = null)
     {
         profile.Validate();
         initializedTypes ??= [];
@@ -186,7 +187,7 @@ internal static class MetadataValidation
             (module.Attributes & ModuleAttributes.ILOnly) == 0 ||
             (module.Attributes & ModuleAttributes.Required32Bit) != 0)
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
-        MethodDefinition entry = MethodSelector.Resolve(module, entrySignature);
+        MethodDefinition entry = ContractMethodMetadata.Select(module, entrySignature, typeArguments ?? [], profile.Architecture).Closed;
         MethodSpecialization specializations = new(module, profile.Architecture);
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
@@ -248,7 +249,11 @@ internal static class MetadataValidation
                 Type(method.ReturnType, module, returns: true, architecture: profile.Architecture);
             }, named: true);
             foreach (ParameterDefinition parameter in method.Parameters)
-                Check(method, null, () => Type(parameter.ParameterType, module, architecture: profile.Architecture), named: true);
+                Check(method, null, () =>
+                {
+                    if (parameter.ParameterType is ByReferenceType && importedByref?.Invoke(parameter.ParameterType) == true) return;
+                    Type(parameter.ParameterType, module, architecture: profile.Architecture);
+                }, named: true);
             Spans.Analysis? spans = null;
             if (Check(method, null, () => spans = Spans.Analyze(method), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)

@@ -182,7 +182,8 @@ partial class Program
         }
         void Compile(string name, string progress, bool untrusted)
         {
-            Run([LeanExecutable, "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, name + ".olean"), Path.Combine(compositionDirectory, name + ".lean")],
+            // Rechecking expanded kernel terms can cost more than elaborating the original tactic proof.
+            Run([LeanExecutable, "-DmaxHeartbeats=2000000", "--root=" + compositionDirectory, "-o", Path.Combine(compositionDirectory, name + ".olean"), Path.Combine(compositionDirectory, name + ".lean")],
                 callerSession, fullLeanPath, progress: progress);
             generatedModules.Add(name);
             if (untrusted) RecheckResolution();
@@ -273,8 +274,10 @@ partial class Program
             string proof = Within(consumer, proofPath);
             if (!File.Exists(proof)) throw new InvalidDataException("Full source bundle is missing its rebased author proof.");
             string artifact = Path.Combine(staging, "regenerated-" + import.Slot);
-            Run(["dotnet", ExtractorPath, "extract", implementation, export.Signature, artifact, certification.Profile],
-                progress: "Fresh extraction of the current imported library DLL");
+            List<string> extraction = ["dotnet", ExtractorPath, "extract", implementation,
+                export.DefinitionSignature ?? export.Signature, artifact, certification.Profile];
+            foreach (string argument in export.TypeArguments ?? []) extraction.AddRange(["--type-argument", argument]);
+            Run(extraction, progress: "Fresh extraction of the current imported library DLL");
             // Composition compiles these exact bytes, which the library run below binds to the DLL.
             byte[] generated = File.ReadAllBytes(Path.Combine(artifact, "Extracted.lean"));
             JsonElement regenerated = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
@@ -284,7 +287,7 @@ partial class Program
             File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(new VerificationSettings(1,
                 Path.GetRelativePath(artifact, proof), author, Path.GetRelativePath(artifact, consumer)), Json));
             slots.Add((import, author, artifact, Encoding.UTF8.GetString(generated), ContractInterface.Hash(generated),
-                new(export.Signature, artifact, export.ContractConstant, author)));
+                new(export.DefinitionSignature ?? export.Signature, artifact, export.ContractConstant, author, export.TypeArguments)));
         }
         ContractExportManifest manifest = new(1, implementation, consumer, interfaces, slots.Select(slot => slot.Request).ToArray());
         using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(implementation)));

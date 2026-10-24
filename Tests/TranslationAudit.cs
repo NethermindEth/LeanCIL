@@ -49,5 +49,5 @@ Audit("unrelated-true", declaration.Replace(baseline, "theorem translation_valid
 Audit("definition-instead-of-theorem", baseline.Replace("theorem translation_valid", "def translation_valid"), false);
 // A certificate over another import table does not certify the emitted `Extracted.imports`.
 Audit("other-import-table", declaration.Replace(baseline,
-    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence [⟨\"forged\", \"\", 0, false, false⟩] program := " +
+    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence [{ identity := \"forged\", closureDigest := \"\", parameterCount := 0, hasThis := false, returnsValue := false }] program := " +
     "by decide +kernel\n"), false);

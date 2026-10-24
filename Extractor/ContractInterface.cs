@@ -8,7 +8,11 @@ namespace Nethermind.LeanCIL;
 
 internal sealed record InterfaceModule(string Name, string Source);
 internal sealed record ContractExport(string Identity, string Signature, int ParameterCount, bool HasThis,
-    bool ReturnsValue, string Visibility, string ContractConstant, string ClosureDigest, string[] Profiles, string Kind);
+    bool ReturnsValue, string Visibility, string ContractConstant, string ClosureDigest, string[] Profiles, string Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DefinitionSignature = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? TypeArguments = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractMethodSignature? TypedSignature = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractLayout[]? Layouts = null);
 internal sealed record ContractCertification(string Identity, string Profile, string ImplementationSha256,
     string InterfaceDigest, string ClosureDigest, string Theorem, string Statement, string StatementDigest,
     StaticIdentityRecord[] StaticIdentities);
@@ -64,7 +68,7 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
             Require(dependency, "assemblyIdentity", "implementationSha256", "interfaceDigest");
         ContractInterface value = document.RootElement.Deserialize<ContractInterface>(Json)
             ?? throw new InvalidDataException("Missing contract interface.");
-        if (value.Schema != 1 || value.SemanticsVersion != 1 || value.FormatVersion != 1)
+        if (value.Schema != 1 || value.SemanticsVersion != 1 || value.FormatVersion is not (1 or 2))
             throw new InvalidDataException("Unsupported contract interface format or semantics version.");
         if (value.Dependencies is null || value.Dependencies.Any(dependency => dependency is null ||
             string.IsNullOrWhiteSpace(dependency.AssemblyIdentity) || !Digest(dependency.ImplementationSha256) ||
@@ -89,6 +93,24 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
                 export.Profiles.Distinct(StringComparer.Ordinal).Count() != export.Profiles.Length) ||
             value.Exports.Select(export => export.Identity).Distinct(StringComparer.Ordinal).Count() != value.Exports.Length)
             throw new InvalidDataException("Invalid or duplicate contract export.");
+        foreach (ContractExport export in value.Exports)
+        {
+            bool metadata = export.DefinitionSignature is not null || export.TypeArguments is not null ||
+                export.TypedSignature is not null || export.Layouts is not null;
+            if (value.FormatVersion == 1 && metadata)
+                throw new InvalidDataException("Legacy contract exports cannot carry typed instance or layout metadata.");
+            if (value.FormatVersion == 2)
+            {
+                if (string.IsNullOrWhiteSpace(export.DefinitionSignature) || export.TypeArguments is null ||
+                    export.TypedSignature is null || export.Layouts is null)
+                    throw new InvalidDataException("Typed contract exports require definition, arguments, signature and layouts.");
+                ContractMethodMetadata.ValidatePublished(export.TypedSignature, export.TypeArguments, export.ParameterCount, export.ReturnsValue);
+                ImportedLayoutMetadata.ValidatePublished(export.Layouts);
+            }
+        }
+        JsonElement[] suppliedExports = document.RootElement.GetProperty("exports").EnumerateArray().ToArray();
+        for (int index = 0; index < suppliedExports.Length; index++)
+            ValidateDescriptorShape(suppliedExports[index], JsonSerializer.SerializeToElement(value.Exports[index], Json));
         if (value.Certifications.Any(record => record is null || !Digest(record.ImplementationSha256) ||
             !Digest(record.InterfaceDigest) || !Digest(record.ClosureDigest) || !Constant(record.Theorem) ||
             string.IsNullOrWhiteSpace(record.Statement) || !Digest(record.StatementDigest) || record.StaticIdentities is null ||
@@ -106,6 +128,30 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
         foreach (string field in fields)
             if (!element.TryGetProperty(field, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
                 throw new InvalidDataException("Missing contract interface field: " + field);
+    }
+
+    // Use the canonical serializer's schema recursively so carriers cannot omit
+    // default-valued metadata or introduce ignored fields through a legacy format.
+    static void ValidateDescriptorShape(JsonElement supplied, JsonElement canonical)
+    {
+        if (supplied.ValueKind != canonical.ValueKind)
+            throw new InvalidDataException("Contract descriptor metadata kind mismatch.");
+        if (canonical.ValueKind == JsonValueKind.Object)
+        {
+            string[] actual = supplied.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
+            string[] expected = canonical.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
+            if (!actual.SequenceEqual(expected, StringComparer.Ordinal))
+                throw new InvalidDataException("Missing or unsupported contract descriptor metadata field.");
+            foreach (JsonProperty property in canonical.EnumerateObject())
+                ValidateDescriptorShape(supplied.GetProperty(property.Name), property.Value);
+        }
+        else if (canonical.ValueKind == JsonValueKind.Array)
+        {
+            JsonElement[] actual = supplied.EnumerateArray().ToArray();
+            JsonElement[] expected = canonical.EnumerateArray().ToArray();
+            if (actual.Length != expected.Length) throw new InvalidDataException("Contract descriptor metadata length mismatch.");
+            for (int index = 0; index < actual.Length; index++) ValidateDescriptorShape(actual[index], expected[index]);
+        }
     }
 
     static void ValidateProperties(JsonElement element)

@@ -1129,8 +1129,8 @@ unsafe def main (args : List String) : IO Unit := do
     sealed record PublishedImport(int slot, string identity, string profile, string implementationSha256,
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
         string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation,
-        string? sidecarSha256 = null, bool certificationAuthenticated = false, string? sourceBundleDigest = null);
-
+        string? sidecarSha256 = null, bool certificationAuthenticated = false, string? sourceBundleDigest = null,
+        JsonElement? typedSignature = null, JsonElement? layouts = null, string[]? typeArguments = null);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1142,7 +1142,10 @@ unsafe def main (args : List String) : IO Unit := do
             "This conditional caller proof is not a deployment guarantee: an unsatisfiable imported contract can make it vacuous. " +
             "Deployment must use these exact implementation bytes and discharge the published contract at this identity, signature and profile. " +
             "Published interface sources execute code with verifier permissions during compilation.",
-            sidecarSha256: import.GetProperty("sidecarSha256").GetString()!)).ToArray()
+            sidecarSha256: import.GetProperty("sidecarSha256").GetString()!,
+            typedSignature: import.TryGetProperty("typedSignature", out JsonElement typed) ? typed : null,
+            layouts: import.TryGetProperty("publishedLayouts", out JsonElement layouts) ? layouts : null,
+            typeArguments: import.TryGetProperty("typeArguments", out JsonElement arguments) ? arguments.Deserialize<string[]>() : null)).ToArray()
         : [];
 
     static bool HasContractImports(ExtractionIdentity extraction) =>

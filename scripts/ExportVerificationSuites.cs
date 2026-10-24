@@ -34,7 +34,11 @@ internal static class ExportVerificationSuites
         new("exportstransitive", "transitive", "Tests/TransitiveImports.cs", [], "independent transitive contract imports",
             [], ["Tests/TransitiveImports.cs"], Standalone: true),
         new("exportsdiscovery", "discovery", "Tests/ContractExport.cs", ["--cohort", "discovery"], "contract discovery with real export bootstrap",
-            ["discovery.fixture"], ["Tests/ContractExport.cs", "Tests/ContractDiscovery.cs"], ChildScript: "Tests/ContractDiscovery.cs")
+            ["discovery.fixture"], ["Tests/ContractExport.cs", "Tests/ContractDiscovery.cs"], ChildScript: "Tests/ContractDiscovery.cs"),
+        new("exportstyped", "typed", "Tests/GenericLayoutImports.cs", [], "independent typed generic and layout imports", [],
+            ["Tests/GenericLayoutImports.cs", "Tests/ContractImports/TypedImportInterface.lean",
+             "Tests/ContractImports/TypedIdentityProof.lean", "Tests/ContractImports/TypedCopyProof.lean",
+             "Tests/ContractImports/TypedIdentityCaller.lean", "Tests/ContractImports/TypedCopyCaller.lean"], Standalone: true)
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>

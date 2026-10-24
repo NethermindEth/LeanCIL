@@ -323,3 +323,16 @@ prose are untrusted. A documented exception absent from this limited model is
 not evidence that the runtime cannot raise it. Lint does not check proof terms,
 alter preconditions or issue a verification receipt. The selected XML bytes
 are recorded but are not independently bound to the DLL build.
+# Typed import metadata
+
+Format 2 imports bind exact closed generic instances and imported byref struct
+layout metadata. `LayoutProjectionValid` checks the signature-scoped raw catalog
+against selected artifact entries, including nested reindexing and computed
+layout equality. Required `ImportedLayoutsValid` evidence checks published versus
+selected raw values, `LayoutsValid`, unique identities and typed signature
+coverage. The extractor also compares those values with the selected pinned DLL
+metadata. These propositions do not verify Cecil decoding or establish CLR
+correspondence beyond the existing admitted layout model. Reference-only
+interfaces and caller proof caches gain no new authority. See
+[TYPED-IMPORTS.md](TYPED-IMPORTS.md) for the supported subset and rejection rules.
+
