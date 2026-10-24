@@ -6,7 +6,7 @@ partial class Program
     internal const string LibraryAuditUsage =
         "Usage: leancil audit-library --project package-directory --module M [--module M]... --prefix P [--prefix P]... [--axioms a,b,c] [--results results.json]";
 
-    sealed record LibraryAudit(string[] Modules, AuditedNamespaces Result);
+    sealed record LibraryAudit(string[] Modules, string[] Replayed, AuditedNamespaces Result);
 
     internal static int AuditLibrary(string[] args)
     {
@@ -43,7 +43,8 @@ partial class Program
         if (result.error is not null)
             throw new InvalidOperationException("Library audit failed: " + result.error +
                 string.Concat(result.rejected.Select(rejected => $"\n  {rejected.name}: {rejected.error}")));
-        Console.WriteLine($"Audited {result.count} theorems in {audit.Modules.Length} replayed modules under " +
+        Console.WriteLine($"Audited {result.count} theorems in {audit.Modules.Length} modules " +
+            $"({audit.Replayed.Length} replayed, {audit.Modules.Length - audit.Replayed.Length} certified CIL) under " +
             string.Join(", ", result.prefixes.Select(pair => $"{pair.Key} ({pair.Value})")));
         Console.WriteLine("  Axioms: " + (result.axioms.Length == 0 ? "none" : string.Join(", ", result.axioms)));
         return 0;
@@ -69,11 +70,9 @@ partial class Program
         var graph = ConsumerModuleImports(Path.GetTempPath(), artifacts);
         var closure = ImportClosure(graph, modules).Where(artifacts.ContainsKey).Order(StringComparer.Ordinal).ToArray();
         var parts = Parts();
-        // Certified CIL artifacts were replayed with the library; any other module, CIL-named or not, is replayed here.
-        bool Certified(string module) => (module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal)) &&
-            parts[module].Count == certifiedModules!.Count(pair => ModuleName(pair.Key) == module) &&
-            parts[module].All(part => certifiedModules!.TryGetValue(module.Replace('.', '/') + part.Key, out var hash) && hash == part.Value);
-        var failures = ReplayConsumerModules(project, closure.Where(module => !Certified(module)), leanPath);
+        var reusable = ReusableCertified(graph, parts, certifiedModules!);
+        var replayed = closure.Where(module => !reusable.Contains(module)).ToArray();
+        var failures = ReplayConsumerModules(project, replayed, leanPath);
         if (failures.Count > 0)
             throw new InvalidOperationException("Kernel replay rejected " + string.Join(", ", failures.Keys.Order(StringComparer.Ordinal)) + ":\n" +
                 string.Join("\n", failures.Values));
@@ -81,10 +80,23 @@ partial class Program
         foreach (var module in closure) RequireAuditedModule(audited, module, artifacts[module]);
         if (JsonSerializer.Serialize(Parts()) != JsonSerializer.Serialize(parts))
             throw new InvalidOperationException("Compiled artifacts changed during the library audit");
-        return new(closure, audited.namespaces!);
+        return new(closure, replayed, audited.namespaces!);
 
         SortedDictionary<string, SortedDictionary<string, string>> Parts() =>
             new(LibraryArtifacts(directories).ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value)), StringComparer.Ordinal);
+    }
+
+    // A certified proof holds only against the definitions it was checked with, so a CIL module skips replay
+    // only when it and every module it transitively imports are byte-identical to the certified library.
+    static HashSet<string> ReusableCertified(Dictionary<string, string[]> graph,
+        SortedDictionary<string, SortedDictionary<string, string>> parts, IReadOnlyDictionary<string, string> certified)
+    {
+        bool Identical(string module) => (module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal)) &&
+            parts[module].Count == certified.Count(pair => ModuleName(pair.Key) == module) &&
+            parts[module].All(part => certified.TryGetValue(module.Replace('.', '/') + part.Key, out var hash) && hash == part.Value);
+        var identical = parts.Keys.Where(Identical).ToHashSet(StringComparer.Ordinal);
+        return identical.Where(module => ImportClosure(graph, [module]).All(import => !parts.ContainsKey(import) || identical.Contains(import)))
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     // Module name to olean path; a module found twice or shadowing the toolchain is rejected.

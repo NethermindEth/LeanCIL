@@ -219,8 +219,8 @@ leancil audit-library --project . --module MyLib --prefix MyLib. --prefix MyLemm
 
 - It runs `lake build` for each `--module` in the package, resolves `LEAN_PATH` with `lake env`, and
   takes the import closure of the listed modules outside the toolchain.
-- Every module in that closure is kernel-replayed with the pinned `leanchecker` routine. Only CIL modules
-  byte-identical to the verifier's certified library are not replayed again.
+- Every module in that closure is kernel-replayed with the pinned `leanchecker` routine. A CIL module skips
+  replay only when it and every module it imports are byte-identical to the verifier's certified library.
 - `leancil-audit` then reads those replayed oleans with `loadExts := false` and audits every `theorem`
   they declare under a prefix: private theorems by their user name, auto-generated ones included. A prefix
   names whole components, so `MyLib.` and `MyLib` match `MyLib.foo` but not `MyLibrary.foo`.
