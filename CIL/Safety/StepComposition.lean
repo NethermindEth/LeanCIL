@@ -15,9 +15,12 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 /-- Expose return validation without expanding the instruction dispatcher. -/
 @[cil_step] theorem step_return_eq (stack : List Value) :
     step body .ret pc args frame stack memory =
-      if stack.length = (if body.returnsValue then 1 else 0) then
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else if stack.length = (if body.returnsValue then 1 else 0) then
         (do return FrameAction.returned (← stack.mapM (checkedValue memory)) memory)
-      else .error .invalidState := rfl
+      else .error .invalidState := by
+  simp only [step, observerCount, Bool.or_false]
 
 /-- A narrowed return of one i32 extends it to the declared width. -/
 @[cil_step] theorem step_return_narrow_eq (kind : CIL.NarrowKind) (bits : CIL.W32) :
