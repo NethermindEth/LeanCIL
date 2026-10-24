@@ -31,6 +31,26 @@ syntax "cil_fact_simp" Lean.Parser.Tactic.optConfig " [" term,* "]" " [" term,* 
 initialize Lean.registerTraceClass `CIL.factNormalize
 
 open Lean Elab Tactic Meta in
+/-- `proof` and, for a fact over `Fin n` (n <= 64) or over every `Feature`, its instance at each value:
+    the profile fields and indexed lemmas are reached only through concrete arguments. -/
+def factInstances (proof : Expr) : TermElabM (Array Expr) := do
+  let mut instances := #[proof]
+  if let .forallE _ domain _ _ := ← whnf (← instantiateMVars (← inferType proof)) then
+    let domain ← whnf domain
+    if domain.isAppOfArity ``Fin 1 then
+      if let some size ← getNatValue? domain.appArg! then
+        if size <= 64 then
+          for index in [:size] do
+            let numeral : Term := ⟨Syntax.mkNumLit (toString index)⟩
+            let bound : Term := ⟨Syntax.mkNumLit (toString size)⟩
+            let value ← Term.elabTerm (← `(term| ($numeral : Fin $bound))) (some domain)
+            instances := instances.push (mkApp proof value)
+    else if domain.isConstOf ``CIL.Feature then
+      for ctor in (← getConstInfoInduct ``CIL.Feature).ctors do
+        instances := instances.push (mkApp proof (mkConst ctor))
+  return instances
+
+open Lean Elab Tactic Meta in
 def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
     (facts : Array Term) : TacticM (Array Term) := withMainContext do
     let isLocal (fact : Term) : TacticM Bool :=
@@ -38,51 +58,43 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
     let locals ← facts.filterM isLocal
     let supplied ← facts.filterM fun fact => return !(← isLocal fact)
     let mut normalised : Array Term := #[]
+    -- Asserts each instance of `proof` in the normaliser's form; the unchanged original is already a fact.
+    let assertInstances (proof : Expr) (base : Name) (ctx : Simp.Context) (simprocs : Simp.SimprocsArray) :
+        TacticM (Array Term) := withMainContext do
+      let mut names := #[]
+      for instanceProof in ← factInstances proof do
+        let type ← instantiateMVars (← inferType instanceProof)
+        let (result, _) ← simp type ctx simprocs
+        if result.expr.consumeMData.isConstOf ``True then continue
+        if result.expr == type && instanceProof == proof then continue
+        let normalisedProof ← match result.proof? with
+          | some eq => mkEqMP eq instanceProof
+          | none => mkExpectedTypeHint instanceProof result.expr
+        let name ← mkFreshUserName base
+        let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
+        replaceMainGoal [goal]
+        names := names.push (mkIdent name)
+      return names
     if !locals.isEmpty then
-      -- `cil_step` reduces a pushed `evaluate` to its profile field, so facts must land there too.
+      -- `cil_step` reduces a pushed `evaluate` and a method's profile projection, so facts must land there too.
       let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat,
-        CIL.FeatureProfile.evaluate, $[$supplied:term],*])
+        CIL.FeatureProfile.evaluate, CIL.Safety.reduceMethodProfile, $[$supplied:term],*])
       let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
       for fact in locals do
         let some decl := (← getLCtx).findFromUserName? fact.raw.getId | continue
-        let type ← instantiateMVars decl.type
-        unless ← isProp type do continue
+        unless ← isProp (← instantiateMVars decl.type) do continue
         trace[CIL.factNormalize] "{decl.userName}"
-        let mut instances := #[decl.toExpr]
-        if let .forallE _ domain _ _ := ← whnf type then
-          let domain ← whnf domain
-          if domain.isAppOfArity ``Fin 1 then
-            if let some size ← getNatValue? domain.appArg! then
-              if size <= 64 then
-                for index in [:size] do
-                  let numeral : Term := ⟨Syntax.mkNumLit (toString index)⟩
-                  let bound : Term := ⟨Syntax.mkNumLit (toString size)⟩
-                  let value ← Term.elabTerm (← `(term| ($numeral : Fin $bound))) (some domain)
-                  instances := instances.push (mkApp decl.toExpr value)
-          -- A fact over every feature reaches the profile fields only through each constructor.
-          else if domain.isConstOf ``CIL.Feature then
-            for ctor in (← getConstInfoInduct ``CIL.Feature).ctors do
-              instances := instances.push (mkApp decl.toExpr (mkConst ctor))
-        for instanceProof in instances do
-          let type ← inferType instanceProof
-          let (result, _) ← simp type ctx simprocs
-          if result.expr.consumeMData.isConstOf ``True then continue
-          if result.expr == type && instanceProof == decl.toExpr then continue
-          let proof ← match result.proof? with
-            | some eq => mkEqMP eq instanceProof
-            | none => mkExpectedTypeHint instanceProof result.expr
-          let name ← mkFreshUserName decl.userName
-          let (_, goal) ← (← (← getMainGoal).assert name result.expr proof).intro1P
-          replaceMainGoal [goal]
-          normalised := normalised.push (mkIdent name)
+        normalised := normalised ++ (← assertInstances decl.toExpr decl.userName ctx simprocs)
     -- A proof term such as `(show p from h)` is normalised like a local fact, without itself as a lemma,
     -- which would rewrite its own statement to `True`. Global names stay as given (most are unfolds),
-    -- except theorems about `evaluate`, which `cil_step` rewrites past.
+    -- except theorems about `evaluate` or a method's profile, which `cil_step` rewrites past.
     for fact in supplied do
       if fact.raw.isIdent then
         let some name ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw | continue
         let info ← getConstInfo name
-        unless (info.type.find? (·.isConstOf ``CIL.FeatureProfile.evaluate)).isSome && (← isProp info.type) do continue
+        let mentions := (info.type.find? fun e =>
+          e.isConstOf ``CIL.FeatureProfile.evaluate || e.isConstOf ``CIL.Method.profile).isSome
+        unless mentions && (← isProp info.type) do continue
       let saved ← saveState
       let some proof ← (try
           let proof ← Term.withoutErrToSorry <| Term.elabTerm fact none
@@ -90,21 +102,14 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
           let proof ← instantiateMVars proof
           pure (if proof.hasMVar then none else some proof)
         catch _ => pure none) | saved.restore; continue
-      let type ← instantiateMVars (← inferType proof)
-      unless ← isProp type do saved.restore; continue
+      unless ← isProp (← instantiateMVars (← inferType proof)) do saved.restore; continue
       let others := supplied.filter (· != fact)
       let normaliser ← `(tactic| simp $config:optConfig [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat,
-        CIL.FeatureProfile.evaluate, $[$others:term],*])
+        CIL.FeatureProfile.evaluate, CIL.Safety.reduceMethodProfile, $[$others:term],*])
       let { ctx, simprocs, .. } ← mkSimpContext normaliser (eraseLocal := false)
-      let (result, _) ← simp type ctx simprocs
-      if result.expr.consumeMData.isConstOf ``True || result.expr == type then saved.restore; continue
-      let normalisedProof ← match result.proof? with
-        | some eq => mkEqMP eq proof
-        | none => mkExpectedTypeHint proof result.expr
-      let name ← mkFreshUserName `supplied
-      let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
-      replaceMainGoal [goal]
-      normalised := normalised.push (mkIdent name)
+      let names ← assertInstances proof `supplied ctx simprocs
+      if names.isEmpty then saved.restore; continue
+      normalised := normalised ++ names
     return facts ++ normalised
 
 open Lean Elab Tactic Meta in

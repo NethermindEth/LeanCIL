@@ -546,6 +546,44 @@ theorem feature_step_evaluate_global (body : CIL.Method) (frame : CIL.Safety.Fra
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
   cil_checked_step [profile, wideProfile_avx2]
 
+-- A fact on a method's profile projection lands where `cil_step` reduces the projection.
+theorem feature_step_projection_fact (profile : CIL.FeatureProfile) (frame : CIL.Safety.Frame)
+    (memory : CIL.Safety.Memory) (wide : (featureTestBody profile).profile.evaluate .avx2 = true) :
+    CIL.Safety.step (featureTestBody profile) (.feature .avx2) 0 [] frame [] memory =
+      .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
+  cil_checked_step [wide]
+
+theorem feature_steps_projection_fact (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (wide : (featureTestBody profile).profile.evaluate .avx2 = true)
+    (found : program[index]? = some (featureTestBody profile)) (memory : CIL.Safety.Memory) :
+    CIL.Safety.invoke program 3 index [] memory = .ok (memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps [wide]
+
+theorem feature_step_projection_field (profile : CIL.FeatureProfile) (frame : CIL.Safety.Frame)
+    (memory : CIL.Safety.Memory) (wide : (featureTestBody profile).profile.avx2 = true) :
+    CIL.Safety.step (featureTestBody profile) (.feature .avx2) 0 [] frame [] memory =
+      .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
+  cil_checked_step [wide]
+
+-- Quantified feature facts given as proof terms or global theorems are instantiated like local ones.
+theorem feature_step_forall_term (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
+    (all : ∀ f, body.profile.evaluate f = true) :
+    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+      .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
+  cil_checked_step [(show ∀ f, body.profile.evaluate f = true from all)]
+
+def bareProfile : CIL.FeatureProfile := {}
+
+theorem bareProfile_none : ∀ f, bareProfile.evaluate f = false := by intro f; cases f <;> rfl
+
+attribute [irreducible] bareProfile
+
+theorem feature_step_forall_global (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
+    (profile : body.profile = bareProfile) :
+    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+      .ok (.next 1 [.scalar (.i32 0)] frame memory) := by
+  cil_checked_step [profile, bareProfile_none]
+
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
 @[cil_code] def addBody : CIL.Method :=
   { returnsValue := true, locals := [], code := [.arg 0, .const32 8, .memory (.add 8 true), .pop, .const32 1, .ret] }
@@ -632,6 +670,16 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 #guard_msgs in #print axioms feature_steps_evaluate_forall
 /-- info: 'Tests.Automation.feature_step_evaluate_global' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms feature_step_evaluate_global
+/-- info: 'Tests.Automation.feature_step_projection_fact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_projection_fact
+/-- info: 'Tests.Automation.feature_steps_projection_fact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_steps_projection_fact
+/-- info: 'Tests.Automation.feature_step_projection_field' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_projection_field
+/-- info: 'Tests.Automation.feature_step_forall_term' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_forall_term
+/-- info: 'Tests.Automation.feature_step_forall_global' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_forall_global
 /-- info: 'Tests.Automation.add_run' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms add_run
 

@@ -94,19 +94,22 @@ goal. That fallback is part of `cil_checked_step`, `cil_checked_steps` and
 `cil_contract_steps` (and the loop tactics built on them) only: a hand-written
 memory step, or `cil_checked_step_equations`, with such a fact must
 `rw [CIL.Safety.step_memory_eq]` first or restate the fact at the `formValue`,
-`loadValue`, `storeValue` or `add` level. The memory step simp set unfolds
-`referenceAt`, like `formValue` and `checkedAt`, so pointer arithmetic needs no
-extra fact, but a `referenceAt` fact about a symbolic `ManagedReference` never
+`loadValue`, `storeValue` or `add` level. The memory step simp set of those
+tactics unfolds `referenceAt`, like `formValue` and `checkedAt`, so pointer
+arithmetic needs no extra fact; through `cil_checked_step_equations` an `add`,
+`spanItem`, `copyBlock` or `initBlock` step needs `CIL.Safety.referenceAt`
+passed as a fact. In either case a `referenceAt` fact about a symbolic `ManagedReference` never
 fires; state it at the `memoryInstruction` level or write the reference as
 `.address r`. A `.feature f` step pushes `body.profile.evaluate f`. `cil_step`
 reduces that expression to the profile field. It unfolds a method definition or
 literal only as far as its profile, so a fact such as `profile.avx2 = true`
 decides the test. Inside `cil_checked_step`, `cil_checked_steps`,
 `cil_contract_steps` and the loop tactics, a local fact, proof term or global
-theorem stated through `evaluate`, including one quantified over every feature, is
-normalized to that form. Elsewhere, including `simp only [cil_step, facts]` and
-`cil_checked_step_equations`, state the fact on the field or first run
-`simp only [CIL.FeatureProfile.evaluate] at h`.
+theorem stated through `evaluate` or a method's profile projection, including one
+quantified over every feature, is normalized to that form. Elsewhere, including
+`simp only [cil_step, facts]` and `cil_checked_step_equations`, state the fact on
+the field or first run
+`simp only [CIL.Safety.reduceMethodProfile, CIL.FeatureProfile.evaluate] at h`.
 
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
 by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
