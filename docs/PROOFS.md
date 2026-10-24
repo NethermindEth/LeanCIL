@@ -90,8 +90,13 @@ rather than passing `staticInstruction` or `memoryInstruction` to unfold. Only
 the static-field operations still go through `staticInstruction`. A fact stated
 at the `memoryInstruction` level is still accepted, through a slower fallback
 that runs only when such a fact is supplied; a failed step reports the per-shape
-goal. The step simp set unfolds `referenceAt`, so pointer arithmetic needs no
-extra fact. A `.feature f` step pushes `body.profile.evaluate f`. `cil_step`
+goal. That fallback is part of `cil_checked_step`, `cil_checked_steps` and
+`cil_contract_steps` only: a hand-written memory step with such a fact must
+`rw [CIL.Safety.step_memory_eq]` first. The memory step simp set unfolds
+`referenceAt`, like `formValue` and `checkedAt`, so pointer arithmetic needs no
+extra fact, but a `referenceAt` fact about a symbolic `ManagedReference` never
+fires; state it at the `memoryInstruction` level or write the reference as
+`.address r`. A `.feature f` step pushes `body.profile.evaluate f`. `cil_step`
 reduces that expression to the profile field. It unfolds a method definition or
 literal only as far as its profile, so a fact such as `profile.avx2 = true`
 decides the test; a fact stated through `evaluate` is normalized to that form.
