@@ -1,25 +1,16 @@
 import Std
 
-/- .NET runtime capability references (model scope .NET 10):
-https://learn.microsoft.com/dotnet/standard/simd
-https://github.com/dotnet/runtime/blob/v10.0.0/docs/design/features/hw-intrinsics.md
-https://github.com/dotnet/runtime/blob/v10.0.0/docs/design/coreclr/botr/vectors-and-intrinsics.md
-IsSupported is a runtime capability, including OS support and runtime disabling;
-it is not just a CPUID bit. Operation prerequisites are retained explicitly.
-The inherited x86 chain in this model is SSE2 <- SSSE3 <- SSE4.1 <- SSE4.2 <- AVX
-<- AVX2 <- AVX512F. AVX512F.VL additionally requires AVX512F; the reverse
-implication is not valid. BMI1 is independent of this chain.
-SSE4.1, AVX512DQ and ARM prerequisites follow the .NET 10 source declarations:
-https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Sse41.cs
-https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/Avx512DQ.cs
-https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/Arm/AdvSimd.cs
-Every x86 ISA class above derives from X86Base, so each implies X86Base.X64 on 64-bit:
-https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/X86/X86Base.cs
-Vector128/256.IsHardwareAccelerated are independent fixed JIT/runtime capabilities in
-this declared domain, including their portable fallbacks:
-https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Runtime/Intrinsics/Vector256.cs
-https://learn.microsoft.com/dotnet/api/system.runtime.intrinsics.x86.avx512f?view=net-10.0
-https://devblogs.microsoft.com/dotnet/hardware-intrinsics-in-net-core/ -/
+/- Supported deployment policy: .NET 10 CoreCLR on 64-bit little-endian hosts.
+IsSupported includes OS support and runtime disabling, not just CPU capability.
+The runtime enables SSE4.2, AVX2/BMI and AVX-512 capabilities in whole groups;
+ARM64 enables ArmBase and AdvSimd together. Vector128 acceleration follows the
+baseline SIMD group; Vector256 acceleration requires AVX2 but may be disabled
+independently by the preferred vector width.
+Pinned runtime sources, measured x64/ARM64 versions, and migration guidance:
+docs/RUNTIME-PROFILES.md
+https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/vm/codeman.cpp
+https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt
+Operation prerequisites remain explicit alongside the runtime group constraints. -/
 
 namespace CIL
 
@@ -33,8 +24,8 @@ inductive Architecture where
   | scalar | arm64 | x64
   deriving DecidableEq, Repr
 
-/-- Runtime-visible flags are fixed throughout an execution. Runtime disabling is
-represented by false flags; BMI1 is independent of the AVX selection. -/
+/-- Runtime-visible flags are fixed throughout an execution. `Valid` constrains
+runtime disabling to the supported .NET 10 CoreCLR capability groups. -/
 structure FeatureProfile where
   architecture : Architecture := .scalar
   nativeWidth : Nat := 64
@@ -99,7 +90,13 @@ def FeatureProfile.Valid (p : FeatureProfile) : Prop :=
   (p.avx512DQ = true → p.avx512F = true) ∧
   (p.avx512DQVL = true → p.avx512DQ = true ∧ p.avx512FVL = true) ∧
   (p.armBase64 = true → p.architecture = .arm64) ∧
-  (p.advSimd = true → p.armBase64 = true)
+  (p.advSimd = true → p.armBase64 = true) ∧
+  -- .NET 10 CoreCLR runtime groups; see docs/RUNTIME-PROFILES.md.
+  p.sse2 = p.x86Base64 ∧ p.ssse3 = p.sse41 ∧ p.sse41 = p.sse42 ∧
+  p.avx2 = p.bmi1 ∧ p.avx2 = p.bmi2 ∧
+  p.avx512F = p.avx512FVL ∧ p.avx512F = p.avx512DQ ∧ p.avx512F = p.avx512DQVL ∧
+  p.advSimd = p.armBase64 ∧ p.vector128Accelerated = (p.sse2 || p.advSimd) ∧
+  (p.vector256Accelerated = true → p.avx2 = true)
 
 instance (p : FeatureProfile) : Decidable p.Valid := inferInstanceAs (Decidable (_ ∧ _))
 

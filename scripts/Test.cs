@@ -344,7 +344,7 @@ finally
 }
 Passed("legacy report without extraction certificate audit rejected");
 
-Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-avx2"), "Stale or mismatched");
+Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-v3"), "Stale or mismatched");
 Passed("different feature profile rejected");
 
 // The default command still runs every suite locally.

@@ -19,9 +19,22 @@ example : featureGetter (intrinsic "Vector128::get_IsHardwareAccelerated") = som
 example : featureGetter (intrinsic "Vector128::get_IsSupported") = none := by decide
 -- Every x86 ISA class derives from X86Base, and X86Base.X64 exists only on x64.
 example : ¬ ({ architecture := .x64, bmi2 := true } : FeatureProfile).Valid := by decide
-example : ({ architecture := .x64, bmi2 := true, x86Base64 := true } : FeatureProfile).Valid := by decide
+example : ¬ ({ architecture := .x64, bmi2 := true, x86Base64 := true } : FeatureProfile).Valid := by decide
 example : ¬ ({ architecture := .arm64, x86Base64 := true } : FeatureProfile).Valid := by decide
-example : ({ architecture := .arm64, vector128Accelerated := true } : FeatureProfile).Valid := by decide
+example : ¬ ({ architecture := .arm64, vector128Accelerated := true } : FeatureProfile).Valid := by decide
+
+private def v3 : FeatureProfile := {
+  architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true, sse42 := true
+  avx := true, avx2 := true, bmi1 := true, bmi2 := true, vector128Accelerated := true, vector256Accelerated := true }
+example : v3.Valid := by decide
+example : { v3 with vector256Accelerated := false }.Valid := by decide
+example : ¬ { v3 with bmi1 := false }.Valid := by decide
+example : ¬ { v3 with bmi2 := false }.Valid := by decide
+example : ¬ { v3 with sse42 := false }.Valid := by decide
+example : ¬ { v3 with avx512F := true, avx512FVL := true }.Valid := by decide
+example : ({ architecture := .arm64, armBase64 := true, advSimd := true, vector128Accelerated := true } : FeatureProfile).Valid := by decide
+example : ¬ ({ architecture := .arm64, armBase64 := true } : FeatureProfile).Valid := by decide
+example : ¬ ({ architecture := .arm64, vector256Accelerated := true } : FeatureProfile).Valid := by decide
 
 private def raw (code : List RawInstruction) (locals : List TypeExpr := [])
     (returnType : TypeExpr := intType) : RawMethod := {

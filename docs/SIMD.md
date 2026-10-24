@@ -103,7 +103,7 @@ The AVX512 operations use **256-bit operands**, including the VL APIs, except th
 | `Avx512F.CompareLessThan`, `Avx512F.CompareGreaterThan` | Two `V512<ulong>` -> `V512<ulong>` | `Avx512F` | Unsigned per-lane masks over eight lanes |
 | `Avx512DQ.MoveMask` | `V512<ulong>` -> `int` | `Avx512DQ` | Collect the eight 64-bit lane sign bits |
 
-The built-in `x64-avx512` profiles enable F/VL, **not DQ/DQ.VL**; `x64-v4` enables all four.
+The built-in `x64-v4` profile enables F, DQ and both VL forms together.
 
 ## BMI
 
@@ -114,7 +114,7 @@ These operations use scalar integer operands, not vectors.
 | `Bmi1.BitFieldExtract` | `uint, byte start, byte length` → `uint` | `Bmi1` | Extract a bit field; start ≥32 yields zero, length is clipped to the remaining bits |
 | `Bmi2.X64.MultiplyNoFlags` | `ulong, ulong` → `ulong` | `Bmi2` | Return the high 64 bits of the unsigned 128-bit product |
 
-The pointer-output `MultiplyNoFlags` overload is not mapped. BMI1 and BMI2 are independent profile flags; enabling AVX2 does not implicitly enable them.
+The pointer-output `MultiplyNoFlags` overload is not mapped. The .NET 10 CoreCLR profile validator requires BMI1, BMI2 and AVX2 to agree.
 
 ## X86Base
 
@@ -140,27 +140,20 @@ Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `S
 | Built-in profile | Enabled capabilities |
 | --- | --- |
 | `scalar` | No hardware feature flags |
-| `x64-vector256` | `Vector256Accelerated` only |
-| `x64-sse41` | `X86Base64`, `Vector128Accelerated`, `Sse2`, `Ssse3`, `Sse41` |
-| `x64-sse42` | The above plus `Sse42` |
-| `x64-avx2` | The above plus `Avx`, `Avx2` |
-| `x64-avx2-bmi1` | The above plus `Bmi1` |
-| `x64-avx512` | `x64-avx2` capabilities plus `Avx512F`, `Avx512FVL` |
-| `x64-avx512-bmi1` | The above plus `Bmi1` |
-| `x64-bmi2` | `X86Base64`, `Bmi2` |
-| `x64-v3` | `x64-avx2` capabilities plus `Bmi1`, `Bmi2`, `Vector256Accelerated` |
-| `x64-v4` | `x64-v3` plus `Avx512F`, `Avx512FVL`, `Avx512DQ`, `Avx512DQVL` |
-| `arm64-armbase` | `ArmBase64` |
+| `x64-sse2` | `X86Base64`, `Sse2`, `Vector128Accelerated` |
+| `x64-sse42` | The above plus `Ssse3`, `Sse41`, `Sse42` |
+| `x64-v3` | The above plus `Avx`, `Avx2`, `Bmi1`, `Bmi2`, `Vector256Accelerated` |
+| `x64-v4` | The above plus `Avx512F`, `Avx512FVL`, `Avx512DQ`, `Avx512DQVL` |
 | `arm64-advsimd` | `ArmBase64`, `AdvSimd`, `Vector128Accelerated` |
 
-On .NET 10 (checked on 10.0.13, x64), the runtime enables x86 ISAs only in groups: SSSE3, SSE4.1 and SSE4.2 together; AVX alone; AVX2 with BMI1, BMI2, LZCNT and FMA; and AVX-512 F, BW, CD, DQ and VL together. A per-ISA knob such as `DOTNET_EnableBMI2=0` or `DOTNET_EnableAVX512DQ=0` changes nothing, `DOTNET_EnableAVX2=0` or `DOTNET_EnableAVX512=0` clears its whole group and every group above it, and `DOTNET_PreferredVectorBitWidth=128` clears only `Vector256Accelerated`. Of the x64 built-ins, `x64-sse42`, `x64-v3` and `x64-v4` describe states a process can report; the others (for example `x64-avx2`, which lacks BMI1 and BMI2) are valid capability sets that no .NET 10 process runs, so their certificates cover no deployment. Prove each method under the level it is deployed on.
+Profiles target .NET 10 CoreCLR. Both the extractor and Lean certificate reject capability sets that split its runtime groups. Custom profiles must supply every field and satisfy the same constraints. A v3/v4 custom profile may disable `vector256Accelerated` for a runtime configured with `PreferredVectorBitWidth=128`; it cannot enable it without AVX2.
 
-Every x86 ISA flag requires `X86Base64`, since each of those classes derives from `X86Base`. `Vector128Accelerated` and `Vector256Accelerated` are independent of the ISA flags: the built-ins set `Vector128Accelerated` with `Sse2` or `AdvSimd`, and `x64-vector256`, `x64-v3` and `x64-v4` set `Vector256Accelerated`. Use an explicit `@profile.json` when a different combination is needed. Custom profiles must supply every capability field and satisfy the architecture and prerequisite checks in [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs). Custom profiles written before `x86Base64` and `vector128Accelerated` existed must add both fields, with `x86Base64` true whenever an x86 ISA flag is set.
+See [runtime-profile evidence and migration](RUNTIME-PROFILES.md) for measured x64/arm64 versions, retired names and consumer migration. Changing a profile requires fresh extraction and proof verification; old certificates do not acquire the new capabilities.
 
 Pass the profile after the extraction output directory, for example:
 
 ```sh
-leancil extract MyAssembly.dll "Operations::Method(ulong)" artifacts/Method x64-avx2
+leancil extract MyAssembly.dll "Operations::Method(ulong)" artifacts/Method x64-v3
 ```
 
 A reachable ISA-specific intrinsic whose required flag is false is rejected. Profile-based reachability can exclude a branch; excluded instructions remain explicit unsupported placeholders, and changing profiles invalidates the artifacts.

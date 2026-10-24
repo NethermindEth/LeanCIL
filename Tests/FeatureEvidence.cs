@@ -1,13 +1,59 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/RuntimeProfileValidation.cs
 
 using System.Text.RegularExpressions;
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 using var verification = new Program();
 var output = At("artifacts/FeatureEvidence");
 Directory.CreateDirectory(output);
+// Exercise the production validator and both old-name and custom-profile migration paths.
+var profileType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
+var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
+object SelectProfile(string name) => selectProfile.Invoke(null, [name])!;
+var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+var sharedCases = RuntimeProfileValidation.Observations(
+    Directory.GetFiles(At("docs/evidence/runtime-profiles"), "*.json")).ToList();
+foreach (var name in new[] { "scalar", "x64-sse2", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
+    sharedCases.Add((JsonSerializer.Serialize(SelectProfile(name), jsonOptions), true));
+foreach (var name in new[] { "x64-avx2", "x64-avx2-bmi1", "x64-avx512", "x64-avx512-bmi1",
+    "x64-bmi2", "x64-vector256", "x64-sse41", "arm64-armbase" })
+{
+    try { _ = SelectProfile(name); throw new InvalidOperationException("Retired profile accepted: " + name); }
+    catch (TargetInvocationException exception) when (exception.InnerException is ArgumentException invalidProfile &&
+        invalidProfile.Message.Contains("Retired execution profile", StringComparison.Ordinal)) { }
+}
+foreach (var (name, flag, value, accepted) in new[]
+{
+    ("x64-v3", "bmi1", false, false), ("x64-v3", "bmi2", false, false),
+    ("x64-v3", "vector256Accelerated", false, true), ("x64-v3", "vector128Accelerated", false, false),
+    ("x64-sse42", "sse42", false, false), ("x64-sse42", "vector256Accelerated", true, false),
+    ("x64-v4", "avx512FVL", false, false), ("x64-v4", "avx512DQ", false, false),
+    ("x64-v4", "avx512DQVL", false, false), ("arm64-advsimd", "advSimd", false, false),
+    ("arm64-advsimd", "vector128Accelerated", false, false), ("arm64-advsimd", "vector256Accelerated", true, false)
+})
+{
+    var profile = JsonSerializer.SerializeToNode(SelectProfile(name), jsonOptions)!;
+    profile[flag] = JsonValue.Create(value);
+    sharedCases.Add((profile.ToJsonString(), accepted));
+    var profilePath = Path.Combine(output, $"{name}-{flag}.json");
+    File.WriteAllText(profilePath, profile.ToJsonString());
+    try
+    {
+        _ = SelectProfile("@" + profilePath);
+        if (!accepted) throw new InvalidOperationException("Split runtime group accepted: " + profilePath);
+    }
+    catch (TargetInvocationException exception) when (!accepted && exception.InnerException is InvalidDataException) { }
+}
+Console.WriteLine("PASS runtime profile groups, retired profiles and reduced vector width");
 Run(["lake", "build", "CIL.Extraction.Features", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
+var sharedEvidence = Path.Combine(output, "RuntimeProfiles.lean");
+RuntimeProfileValidation.Check(sharedCases, ExtractorPath, sharedEvidence);
+Run(["lake", "env", "lean", sharedEvidence]);
 Run(["lake", "env", "lean", "Tests/FeatureEvidence.lean"]);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var folder = Path.Combine(output, "CompiledLoop");
@@ -40,11 +86,11 @@ Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [none], 
 Reject("false-pruned-successor", MutateState(baseline, "set 10 none"));
 Reject("omitted-states", MutateState(baseline, "take 17"));
 var unsupported = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)",
-    Path.Combine(output, "EnabledUnsupported"), "x64-avx2"));
+    Path.Combine(output, "EnabledUnsupported"), "x64-v3"));
 if (unsupported.Code == 0 || !unsupported.Output.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Enabled feature failed to expose unsupported array code: " + unsupported.Output);
 // X86Base.X64 and Vector128 getters decide their branches from the profile alone.
-foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-bmi2", 1), ("arm64-advsimd", 2), ("x64-sse42", 3) })
+foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-advsimd", 2), ("x64-sse42", 3) })
 {
     var capabilities = Path.Combine(output, "Capabilities-" + profile);
     Directory.CreateDirectory(capabilities);

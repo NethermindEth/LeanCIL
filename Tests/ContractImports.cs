@@ -537,7 +537,7 @@ foreach ((string Diagnostic, Action<JsonObject> Change) test in new (string, Act
     ("matching visibility", value => value["exports"]![0]!["visibility"] = "protected"),
     ("signature counts mismatch", value => value["exports"]![0]!["parameterCount"] = 2),
     ("signature counts mismatch", value => value["exports"]![0]!["returnsValue"] = false),
-    ("profile not listed", value => value["exports"]![0]!["profiles"] = new JsonArray("x64-sse41")),
+    ("profile not listed", value => value["exports"]![0]!["profiles"] = new JsonArray("x64-sse42")),
     ("certification not present", value => value["certifications"] = new JsonArray()),
     ("Invalid or duplicate contract export", value => value["exports"] = new JsonArray()),
     ("certification binding mismatch", value => value["certifications"]![0]!["closureDigest"] = new string('0', 64)),

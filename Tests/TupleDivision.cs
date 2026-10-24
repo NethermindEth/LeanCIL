@@ -15,7 +15,7 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/TupleDivision");
 Directory.CreateDirectory(root);
-const string profile = "x64-bmi2";
+const string profile = "x64-v3";
 string Selector(string name) => $"TupleDivision::{name}(ulong,ulong,ulong)";
 
 // ValueTuple`2 is auto layout: equal widths keep declaration order, mixed widths are reordered.
