@@ -1,12 +1,17 @@
 import CIL.Instructions
 
 /-!
+# Method embeddings
+
 An expected method body embeds into an actual one when every live expected
 instruction appears in the actual body at a mapped pc, with every code target
 mapped the same way. Instructions the expected body marks `.unsupported` impose
 nothing, so dead code may be inserted, removed or renumbered. Every condition is a
 list equality or Boolean test the kernel decides by evaluation; no equality
 instance on `Op` is involved.
+
+`CIL.Safety.Embedding` proves that a successful run of the expected body is one of the
+actual body, so a proof about a hand-written body transfers to the extracted method.
 -/
 
 namespace CIL
@@ -30,15 +35,18 @@ def Op.targets : Op → List Nat
   | _ => []
 
 -- Together these fail if a branch constructor is added to one of `relabel` and `targets` only.
-theorem Op.targets_relabel (r : Nat → Nat) (op : Op) : (op.relabel r).targets = op.targets.map r := by
+theorem Op.targets_relabel (r : Nat → Nat) (op : Op) :
+    (op.relabel r).targets = op.targets.map r := by
   induction op <;> simp_all [Op.relabel, Op.targets]
 
-theorem Op.relabel_eq_self (r : Nat → Nat) (op : Op) (fixed : ∀ target ∈ op.targets, r target = target) :
+theorem Op.relabel_eq_self (r : Nat → Nat) (op : Op)
+    (fixed : ∀ target ∈ op.targets, r target = target) :
     op.relabel r = op := by
   induction op <;> simp_all [Op.relabel, Op.targets]
   exact (List.map_congr_left fixed).trans (List.map_id _)
 
-theorem Op.relabel_of_targets_nil (r : Nat → Nat) (op : Op) (none : op.targets = []) : op.relabel r = op :=
+theorem Op.relabel_of_targets_nil (r : Nat → Nat) (op : Op) (none : op.targets = []) :
+    op.relabel r = op :=
   op.relabel_eq_self r (by simp [none])
 
 /-- False only for instructions that never resume at the next pc, including after a call. -/
@@ -71,10 +79,12 @@ structure Site where
 def sites (limit : Nat) : Nat → List Op → List Nat → List Site
   | _, [], _ => []
   | pc, op :: rest, map =>
-    if op.live then ⟨pc, map.headD limit, map.tail.headD limit, op⟩ :: sites limit (pc + 1) rest map.tail
+    if op.live then
+      ⟨pc, map.headD limit, map.tail.headD limit, op⟩ :: sites limit (pc + 1) rest map.tail
     else sites limit (pc + 1) rest map.tail
 
-/-- `code[q]?` for each `q`, walking `code` once while the pcs increase; `rest` is `code.drop start`. -/
+/-- `code[q]?` for each `q`, walking `code` once while the pcs increase; `rest` is
+    `code.drop start`. -/
 def pick (code : List Op) : List Op → Nat → List Nat → List (Option Op)
   | _, _, [] => []
   | rest, start, q :: qs =>
@@ -104,10 +114,13 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   parameterHomes : actual.parameterHomes = expected.parameterHomes
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
   entry : rename map actual.code.length 0 = 0
-  code : pick actual.code actual.code 0 ((sites actual.code.length 0 expected.code map).map Site.image) =
-    (sites actual.code.length 0 expected.code map).map fun site => some (site.op.relabel (rename map actual.code.length))
-  statics : (sites actual.code.length 0 expected.code map).map (fun site => staticAt actual site.image) =
-    (sites actual.code.length 0 expected.code map).map (fun site => staticAt expected site.pc)
+  code : pick actual.code actual.code 0
+      ((sites actual.code.length 0 expected.code map).map Site.image) =
+    (sites actual.code.length 0 expected.code map).map
+      fun site => some (site.op.relabel (rename map actual.code.length))
+  statics :
+    (sites actual.code.length 0 expected.code map).map (fun site => staticAt actual site.image) =
+      (sites actual.code.length 0 expected.code map).map (fun site => staticAt expected site.pc)
   flow : (sites actual.code.length 0 expected.code map).all
     (fun site => !site.op.continues || site.next == site.image + 1) = true
 

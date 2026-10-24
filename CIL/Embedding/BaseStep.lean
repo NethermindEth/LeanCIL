@@ -2,6 +2,8 @@ import CIL.Embedding.Basic
 import CIL.NativeEvaluation
 
 /-!
+# Relabeling value-only steps
+
 Relabeling the targets of a value-only instruction relabels the pc it resumes at.
 These are the instructions the checked interpreter executes through `CIL.step`.
 -/
@@ -10,6 +12,7 @@ namespace CIL.Embedding
 
 open CIL
 
+/-- A successful `Option` bind succeeded at both steps. -/
 theorem option_bind_some {x : Option α} {f : α → Option β} {y : β} (h : x >>= f = some y) :
     ∃ a, x = some a ∧ f a = some y := Option.bind_eq_some_iff.mp h
 
@@ -18,13 +21,16 @@ def BaseRelabel (op : Op) : Prop :=
   ∀ (r : Nat → Nat) (pc q : Nat) (values : List Value) (profile : FeatureProfile) (target : Nat)
     (result : List Value) (memory : Memory), (op.continues = true → r (pc + 1) = q + 1) →
     step op false pc [] 0 values (fun _ => none) profile = some (.next target result memory) →
-    step (op.relabel r) false q [] 0 values (fun _ => none) profile = some (.next (r target) result memory)
+    step (op.relabel r) false q [] 0 values (fun _ => none) profile =
+      some (.next (r target) result memory)
 
 /-- A value-only instruction computes its output independently of the program counter. -/
 def Fallthrough (op : Op) (evaluate : List Value → FeatureProfile → Option (List Value)) : Prop :=
   ∀ pc stack profile, step op false pc [] 0 stack (fun _ => none) profile = do
     return .next (pc + 1) (← evaluate stack profile) (fun _ => none)
 
+/-- A falling-through value-only instruction that relabeling leaves unchanged satisfies
+    `BaseRelabel`. -/
 theorem base_relabel_fallthrough {op : Op} {evaluate}
     (equation : Fallthrough op evaluate) (relabel : ∀ r, op.relabel r = op)
     (continues : op.continues = true) : BaseRelabel op := by
@@ -37,16 +43,19 @@ theorem base_relabel_fallthrough {op : Op} {evaluate}
   rw [evaluated, next continues]
   rfl
 
+/-- The stack after a one-operand instruction. -/
 def unaryValues (op : Op) (stack : List Value) (_ : FeatureProfile) : Option (List Value) := do
   match stack with
   | value :: rest => return (← unary op value) :: rest
   | [] => none
 
+/-- The stack after a two-operand instruction; `a` was pushed first. -/
 def binaryValues (op : Op) (stack : List Value) (_ : FeatureProfile) : Option (List Value) := do
   match stack with
   | b :: a :: rest => return (← binary op a b) :: rest
   | _ => none
 
+/-- Whether a compare-branch is taken on two same-width integers, and the remaining stack. -/
 def comparisonValues (compare32 : W32 → W32 → Bool) (compare64 : W64 → W64 → Bool)
     (stack : List Value) : Option (Bool × List Value) :=
   match stack with
@@ -54,6 +63,7 @@ def comparisonValues (compare32 : W32 → W32 → Bool) (compare64 : W64 → W64
   | .i64 b :: .i64 a :: rest => some (compare64 a b, rest)
   | _ => none
 
+/-- Whether `brnonzero` (or, with `negate`, `brzero`) is taken, and the remaining stack. -/
 def truthValues (negate : Bool) (stack : List Value) : Option (Bool × List Value) := do
   match stack with
   | value :: rest => return ((← truth value) != negate, rest)
@@ -65,6 +75,7 @@ def Branching (op : Nat → Op) (evaluate : List Value → Option (Bool × List 
     let (taken, rest) ← evaluate stack
     return .next (if taken then target else pc + 1) rest (fun _ => none)
 
+/-- A conditional branch family whose relabeling maps its target satisfies `BaseRelabel`. -/
 theorem base_relabel_branching {op : Nat → Op} {evaluate}
     (equation : Branching op evaluate) (relabel : ∀ r t, (op t).relabel r = op (r t))
     (continues : ∀ t, (op t).continues = true) (t : Nat) : BaseRelabel (op t) := by
@@ -78,6 +89,7 @@ theorem base_relabel_branching {op : Nat → Op} {evaluate}
   cases taken <;> simp only [Bool.false_eq_true, ↓reduceIte, next (continues t)] <;> rfl
 
 set_option hygiene false in
+/-- Proves `BaseRelabel` for a compare-branch with the given 32- and 64-bit comparisons. -/
 macro "base_relabel_comparison " compare32:term ", " compare64:term : tactic => `(tactic| (
   apply base_relabel_branching (evaluate := comparisonValues $compare32 $compare64)
   · intro target pc stack profile
@@ -94,6 +106,7 @@ macro "base_relabel_comparison " compare32:term ", " compare64:term : tactic => 
   · intro t; rfl))
 
 set_option hygiene false in
+/-- Proves `BaseRelabel` for a one-operand instruction evaluated by `unary`. -/
 macro "base_relabel_unary" : tactic => `(tactic| (
   apply base_relabel_fallthrough (evaluate := unaryValues _)
   · intro pc stack profile
@@ -106,6 +119,7 @@ macro "base_relabel_unary" : tactic => `(tactic| (
   · rfl))
 
 set_option hygiene false in
+/-- Proves `BaseRelabel` for a two-operand instruction evaluated by `binary`. -/
 macro "base_relabel_binary" : tactic => `(tactic| (
   apply base_relabel_fallthrough (evaluate := binaryValues _)
   · intro pc stack profile
@@ -121,6 +135,7 @@ macro "base_relabel_binary" : tactic => `(tactic| (
   · rfl))
 
 set_option hygiene false in
+/-- Proves `BaseRelabel` for `brzero` (`negate` true) or `brnonzero` (`negate` false). -/
 macro "base_relabel_truth " negate:term : tactic => `(tactic| (
   apply base_relabel_branching (evaluate := truthValues $negate)
   · intro target pc stack profile
@@ -140,9 +155,11 @@ theorem base_relabel_nop : BaseRelabel (.nop) :=
 theorem base_relabel_neg : BaseRelabel (.neg) := by base_relabel_unary
 theorem base_relabel_gt : BaseRelabel (.gt) := by base_relabel_binary
 theorem base_relabel_bgt (t : Nat) : BaseRelabel (.bgt t) := by
-  base_relabel_comparison (fun a b => decide (a.toInt > b.toInt)), (fun a b => decide (a.toInt > b.toInt))
+  base_relabel_comparison (fun a b => decide (a.toInt > b.toInt)),
+    (fun a b => decide (a.toInt > b.toInt))
 theorem base_relabel_ble (t : Nat) : BaseRelabel (.ble t) := by
-  base_relabel_comparison (fun a b => decide (a.toInt ≤ b.toInt)), (fun a b => decide (a.toInt ≤ b.toInt))
+  base_relabel_comparison (fun a b => decide (a.toInt ≤ b.toInt)),
+    (fun a b => decide (a.toInt ≤ b.toInt))
 theorem base_relabel_bleu (t : Nat) : BaseRelabel (.bleu t) := by
   base_relabel_comparison (fun a b => decide (a ≤ b)), (fun a b => decide (a ≤ b))
 theorem base_relabel_convI1 : BaseRelabel (.convI1) := by base_relabel_unary
@@ -190,9 +207,11 @@ theorem base_relabel_bgeu (t : Nat) : BaseRelabel (.bgeu t) := by
 theorem base_relabel_bgtu (t : Nat) : BaseRelabel (.bgtu t) := by
   base_relabel_comparison (fun a b => decide (b < a)), (fun a b => decide (b < a))
 theorem base_relabel_bge (t : Nat) : BaseRelabel (.bge t) := by
-  base_relabel_comparison (fun a b => decide (b.toInt ≤ a.toInt)), (fun a b => decide (b.toInt ≤ a.toInt))
+  base_relabel_comparison (fun a b => decide (b.toInt ≤ a.toInt)),
+    (fun a b => decide (b.toInt ≤ a.toInt))
 theorem base_relabel_blt (t : Nat) : BaseRelabel (.blt t) := by
-  base_relabel_comparison (fun a b => decide (a.toInt < b.toInt)), (fun a b => decide (a.toInt < b.toInt))
+  base_relabel_comparison (fun a b => decide (a.toInt < b.toInt)),
+    (fun a b => decide (a.toInt < b.toInt))
 theorem base_relabel_beq (t : Nat) : BaseRelabel (.beq t) := by
   base_relabel_comparison (fun a b => decide (a = b)), (fun a b => decide (a = b))
 theorem base_relabel_bne (t : Nat) : BaseRelabel (.bne t) := by
@@ -215,7 +234,9 @@ theorem nativePureBinary_relabel (r : Nat → Nat) (op : Op) :
     nativePureBinary (op.relabel r) = nativePureBinary op := by
   cases op <;> rfl
 
-theorem base_relabel_of_nativePure (op : Op) (pure : nativePureBinary op = true) : BaseRelabel op := by
+/-- Every value-only instruction a native-width wrapper may carry satisfies `BaseRelabel`. -/
+theorem base_relabel_of_nativePure (op : Op) (pure : nativePureBinary op = true) :
+    BaseRelabel op := by
   cases op <;> simp only [nativePureBinary, Bool.false_eq_true] at pure
   all_goals first
     | exact base_relabel_add | exact base_relabel_sub | exact base_relabel_mul
