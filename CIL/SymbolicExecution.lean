@@ -80,7 +80,7 @@ macro "cil_steps" facts:term,+ : tactic =>
      -- definitional reductions when checking the resulting execution proof.
      simp (config := { implicitDefEqProofs := false })
       [cil_code, step, binary, truth, write64, initLocals, initFrame, Value.initialized,
-      FeatureProfile.evaluate, Intrinsic.available,
+      FeatureProfile.evaluate, Intrinsic.available, Intrinsic.requiredFeatures,
       fin_val_three, $[$facts:term],*])))
 
 /-- `cil_steps` with no extra facts. -/
