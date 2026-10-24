@@ -1,12 +1,24 @@
 import CIL.Extraction.Layout
 import CIL.Instructions
 
+/-!
+# Layout uses
+
+Emitted instructions carry concrete field offsets, widths and struct sizes. A `LayoutUse`
+names one such site by raw type and field identity only; `MethodLayoutsValid` then checks
+each named site's emitted operands against the independently computed layout table.
+`LayoutCoverage` separately proves that the list of uses names every such site.
+-/
+
 namespace CIL.Extraction
 
+/-- How an instruction uses a struct field. -/
 inductive FieldAccess where
   | load | store | address
   deriving DecidableEq, Repr
 
+/-- How an instruction uses a struct's size: `referenceAdd` is `Unsafe.Add` scaling by
+    the element size. -/
 inductive SizeAccess where
   | load | store | initialize | copy | sizeOf | construct | referenceAdd
   deriving DecidableEq, Repr
@@ -19,14 +31,22 @@ inductive LayoutUse where
   | parameter (slot type : Nat)
   deriving DecidableEq, Repr
 
+/-- The emitted field operation uses exactly the computed offset and width, and the
+    aggregate form exactly when the field is a nested struct. -/
 private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → Op → Bool
   | .address, .fieldAddress offset => offset == layout.offset
-  | .load, .fieldAt offset width actualSigned => !layout.aggregate && offset == layout.offset && width == layout.width && actualSigned == signed
-  | .store, .setFieldAt offset width => !layout.aggregate && offset == layout.offset && width == layout.width
-  | .load, .aggregateFieldAt offset width => layout.aggregate && offset == layout.offset && width == layout.width
-  | .store, .setAggregateFieldAt offset width => layout.aggregate && offset == layout.offset && width == layout.width
+  | .load, .fieldAt offset width actualSigned =>
+    !layout.aggregate && offset == layout.offset && width == layout.width &&
+      actualSigned == signed
+  | .store, .setFieldAt offset width =>
+    !layout.aggregate && offset == layout.offset && width == layout.width
+  | .load, .aggregateFieldAt offset width =>
+    layout.aggregate && offset == layout.offset && width == layout.width
+  | .store, .setAggregateFieldAt offset width =>
+    layout.aggregate && offset == layout.offset && width == layout.width
   | _, _ => false
 
+/-- The emitted size-dependent operation uses exactly the computed struct size. -/
 private def checkSize (size : Nat) : SizeAccess → Op → Bool
   | .load, .loadAggregate width | .store, .storeAggregate width
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
@@ -61,9 +81,12 @@ def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
       | .aggregate size => return size.val == layout.layout.size
       | _ => return false).getD false
 
+/-- The layout table is valid for the method's architecture and every listed use agrees
+    with it. -/
 def MethodLayoutsValid (raw : List RawLayout) (layouts : Array ComputedLayout)
     (method : Method) (uses : List LayoutUse) : Prop :=
-  LayoutsValid raw layouts method.profile.architecture ∧ ∀ use ∈ uses, validateLayoutUse raw layouts method use = true
+  LayoutsValid raw layouts method.profile.architecture ∧
+    ∀ use ∈ uses, validateLayoutUse raw layouts method use = true
 
 instance (raw : List RawLayout) (layouts : Array ComputedLayout) (method : Method)
     (uses : List LayoutUse) : Decidable (MethodLayoutsValid raw layouts method uses) :=

@@ -1,7 +1,17 @@
 import CIL.Instructions
 
+/-!
+# Stack effects of emitted instructions
+
+The feature-flow check in `Features` matches most raw instructions to their emitted
+counterpart only by stack effect. This file gives that effect, as `(pops, pushes)`, for
+each emitted instruction that cannot disturb a tracked local; the rest have none and must
+be matched exactly.
+-/
+
 namespace CIL.Extraction
 
+/-- `(pops, pushes)` of each memory operation. -/
 private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .bigMul64 => (3, 1)
   | .copyBlock _ | .initBlock _ => (3, 0)
@@ -17,28 +27,34 @@ change a local root. Control flow, returns, stores and addresses require exact
 raw-instruction matching instead. No unrecognized instruction is admitted. -/
 def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :=
   match op with
+  -- Pushes and one-operand operations.
   | .nop => some (0, 0)
   | .const32 _ | .const64 _ | .arg .. | .vectorArg _ | .local .. | .vectorLocal _ => some (0, 1)
   | .neg | .bnot | .convI1 | .convI2 | .convU2 | .convI8 | .convI4 | .convU1
   | .convU4 | .convU8 | .convU | .checkedConvert ..
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
   | .aggregateFieldAt .. | .lane _ | .laneAddress _ | .asRef => some (1, 1)
+  -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
   | .lt | .ltu | .gt | .gtu | .eq | .divide .. | .checkedArithmetic .. => some (2, 1)
   | .nativeBinary operation => match operation with
     | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
     | .lt | .ltu | .gt | .gtu | .eq | .divide .. | .checkedArithmetic .. => some (2, 1)
     | _ => none
+  -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .store64 | .copyObject _
   | .setFieldAt .. | .setAggregateFieldAt .. | .setLane _ => some (2, 0)
   | .initAggregate _ | .skipInit | .pop => some (1, 0)
   | .dup => some (1, 2)
+  -- Calls, construction, intrinsics and memory operations.
   | .call _ count => some (count, if returnsValue then 1 else 0)
   | .newAggregate _ count _ | .newVector256 _ count => some (count, 1)
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
+  -- Local writes, local addresses and control flow must match their raw instruction exactly.
   | .localAddr _ | .vectorLocalAddr _ | .vectorArgAddr _ | .setLocal .. | .setVectorLocal _
-  | .feature _ | .ret _ | .throw _ | .unsupported _ | .branch _ | .switch _ | .brzero _ | .brnonzero _
-  | .bgt _ | .ble _ | .bleu _ | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => none
+  | .feature _ | .ret _ | .throw _ | .unsupported _ | .branch _ | .switch _ | .brzero _
+  | .brnonzero _ | .bgt _ | .ble _ | .bleu _ | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _
+  | .beq _ | .bne _ => none
 
 end CIL.Extraction
