@@ -60,8 +60,8 @@ elab_rules : command
         for pc in [0:ops.size] do
           let fetched := lookup.beta #[method, mkNatLit pc]
           let equationName := name.appendAfter s!"_instruction{pc}"
-          -- Only the kernel reduces the body, as for the extractor's `rfl`. Each equation gets
-          -- its own heartbeat budget, as a separate theorem would.
+          -- The kernel checks each equation by conversion, whatever `instructions` read.
+          -- Each equation gets its own heartbeat budget, as a separate theorem would.
           withCurrHeartbeats do
             addDecl <| .thmDecl {
               name := equationName, levelParams := info.levelParams
