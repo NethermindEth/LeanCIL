@@ -229,7 +229,7 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .avx2 .eq64, [.v256 a, .v256 b] =>
     some (.v256 (Vector.zip256 (fun x y => Vector.mask64 (x == y)) a b))
   | .avx2 .signedgt64, [.v256 a, .v256 b] =>
-    some (.v256 (Vector.zip256 (fun x y => Vector.mask64 (decide (x.toInt > y.toInt))) a b))
+    some (.v256 (Vector.zip256 (fun x y => Vector.mask64 (decide (y.toInt < x.toInt))) a b))
   | .avx2 .multiplyEven32, [.v256 a, .v256 b] => some (.v256 (Vector.multiplyEven32 a b))
   | .avx2 .shr64, [.v256 a, i] =>
     let count ← immediate i
