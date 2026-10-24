@@ -1,8 +1,20 @@
 import CIL.Safety.ExecutionTrace
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.StaticMemoryLemmas
+
+/-!
+# What one checked step may change
+
+`step_contract` classifies every successful checked step by its effect on memory and frame
+(`StepEffect`) and shows that it pushes only values valid in the resulting memory. The
+memory-preservation lemmas below, from `step_preserves_wellFormed` up to
+`invoke_preserves_wellFormed`, are all derived from this one dispatcher proof, so a new
+instruction needs a contract here before anything above it can be proved.
+-/
+
 namespace CIL.Safety
 
+/-- The memory a step leaves behind, whatever it asks the driver to do next. -/
 def FrameAction.memory : FrameAction → Memory
   | .next _ _ _ m | .call _ _ _ m | .construct _ _ _ _ _ _ m | .returned _ m => m
 
@@ -15,8 +27,10 @@ def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
 
 /-- A step's memory and frame changes, with successful primitive operations as
     evidence. Value-stack validity is independent of this effect classification. -/
-inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) : Frame → Memory → Prop where
-  | memory {result} (effect : StaticInstructionEffect body m result) : StepEffect body frame m frame result
+inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) :
+    Frame → Memory → Prop where
+  | memory {result} (effect : StaticInstructionEffect body m result) :
+      StepEffect body frame m frame result
   | store {index slot final value result}
       (found : frame.locals[index]? = some slot)
       (stored : storeLocal m slot value = .ok (final, result)) :
@@ -48,10 +62,13 @@ theorem StepEffect.allocations {body : CIL.Method} {frame final : Frame} {m resu
   | memory effect => exact effect.allocations
   | store _ stored => exact storeLocal_extends_allocations _ _ _ _ _ stored
   | valueHome allocated stored =>
-    exact (allocateHome_fresh _ _ _ _ _ allocated).1.trans (storeValue_effect _ _ _ _ stored).allocations
+    exact (allocateHome_fresh _ _ _ _ _ allocated).1.trans
+      (storeValue_effect _ _ _ _ stored).allocations
   | localHome allocated stored =>
-    exact (allocateHome_fresh _ _ _ _ _ allocated).1.trans (storeLocal_extends_allocations _ _ _ _ _ stored)
+    exact (allocateHome_fresh _ _ _ _ _ allocated).1.trans
+      (storeLocal_extends_allocations _ _ _ _ _ stored)
 
+/-- A value loaded from a local is valid in the memory it was loaded from. -/
 theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
     (h : loadLocal m slot = .ok value) : value.Valid m := by
   unfold loadLocal at h
@@ -97,6 +114,8 @@ theorem allocated_storeLocal_reference_valid (m home result : Memory) (activatio
     (allocateHome_preserves_wellFormed _ _ _ _ _ hm allocation) r r
     (allocateHome_reference_valid _ _ _ _ _ allocation)
 
+/-- Every value the action carries is valid in its memory: the new stack, the returned
+    values, or a child's arguments together with the caller stack left behind. -/
 def FrameAction.LiveValues (action : FrameAction) : Prop :=
   match action with
   | .next _ values _ memory | .returned values memory => ValuesValid memory values
@@ -113,7 +132,8 @@ theorem StepContract.of_effect {body : CIL.Method} {frame : Frame} {stack : List
     {m : Memory} {action : FrameAction}
     (effect : StepEffect body frame m (action.frameAfter frame) action.memory)
     (preserve : m.WellFormed → AllocationExtension m action.memory →
-      ValuesValid action.memory stack → action.LiveValues) : StepContract body frame stack m action :=
+      ValuesValid action.memory stack → action.LiveValues) :
+    StepContract body frame stack m action :=
   ⟨effect, fun hm valid => preserve hm effect.allocations (valid.preserve hm effect.allocations)⟩
 
 theorem StepContract.instruction {body : CIL.Method} {frame : Frame} {stack values : List Value}
@@ -121,11 +141,14 @@ theorem StepContract.instruction {body : CIL.Method} {frame : Frame} {stack valu
     StepContract body frame stack m (.next pc values frame result) :=
   ⟨.memory (.ordinary contract.effect), contract.values⟩
 
-theorem StepContract.staticInstruction {body : CIL.Method} {frame : Frame} {stack values : List Value}
-    {m result : Memory} {pc : Nat} (contract : StaticInstructionContract body m result stack values) :
+theorem StepContract.staticInstruction {body : CIL.Method} {frame : Frame}
+    {stack values : List Value} {m result : Memory} {pc : Nat}
+    (contract : StaticInstructionContract body m result stack values) :
     StepContract body frame stack m (.next pc values frame result) :=
   ⟨.memory contract.effect, contract.values⟩
 
+/-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
+    so it is the place that breaks when an instruction is added without an effect. -/
 theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
@@ -193,6 +216,8 @@ theorem programStep_preserves_wellFormed (program : CIL.Program) (method pc : Na
   obtain ⟨body, op, _, _, hs⟩ := hs
   exact step_preserves_wellFormed _ _ _ _ _ _ _ _ hm hs
 
+/-- A successful run, including all nested calls and frame teardowns, ends in well-formed
+    memory. -/
 theorem run_preserves_wellFormed (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value) (hm : m.WellFormed)
@@ -221,4 +246,5 @@ theorem invoke_preserves_wellFormed (program : CIL.Program) (fuel method : Nat)
     (enterFrame_preserves_wellFormed _ _ _ _ _ hm setup) executed
 
 #print axioms invoke_preserves_wellFormed
+
 end CIL.Safety

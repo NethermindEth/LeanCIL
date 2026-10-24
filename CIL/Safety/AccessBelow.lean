@@ -1,10 +1,19 @@
 import CIL.Safety.MemoryBelow
 import CIL.Safety.WriteEffects
 
+/-!
+# Access retained below a watermark
+
+`AccessBelow watermark before after` says that every allocation below `watermark` keeps
+its descriptor, and that authority and initialization present in `before` survive into
+`after`, while byte values may change. It is weaker than `MemoryBelow`, which fixes cells
+and authority exactly, and it is enough for checked reads of old storage to keep succeeding.
+-/
+
 namespace CIL.Safety
 
-/-- Retains old allocation validity, existing authority and initialization;
-    authorized writes may change the byte values. -/
+/-- Allocations below `watermark` keep their validity, existing authority and
+    initialization; authorized writes may change the byte values. -/
 structure AccessBelow (watermark : Nat) (before after : Memory) : Prop where
   allocations : ∀ id, id < watermark → after.allocations id = before.allocations id
   permissions : ∀ id, id < watermark → ∀ offset writing,
@@ -14,15 +23,19 @@ structure AccessBelow (watermark : Nat) (before after : Memory) : Prop where
 
 theorem MemoryBelow.accessBelow {watermark : Nat} {before after : Memory}
     (h : MemoryBelow watermark before after) : AccessBelow watermark before after :=
-  ⟨h.allocations, fun id old offset writing allowed => by rw [h.permissions id old offset writing]; exact allowed,
+  ⟨h.allocations,
+    fun id old offset writing allowed => by
+      rw [h.permissions id old offset writing]; exact allowed,
     fun id old offset initialized => by rw [h.cells id old offset]; exact initialized⟩
 
 theorem AccessBelow.trans {watermark : Nat} {first middle last : Memory}
     (left : AccessBelow watermark first middle) (right : AccessBelow watermark middle last) :
     AccessBelow watermark first last :=
   ⟨fun id old => (right.allocations id old).trans (left.allocations id old),
-    fun id old offset writing allowed => right.permissions id old offset writing (left.permissions id old offset writing allowed),
-    fun id old offset initialized => right.initialized id old offset (left.initialized id old offset initialized)⟩
+    fun id old offset writing allowed =>
+      right.permissions id old offset writing (left.permissions id old offset writing allowed),
+    fun id old offset initialized =>
+      right.initialized id old offset (left.initialized id old offset initialized)⟩
 
 theorem AccessBelow.weaken {lower upper : Nat} {before after : Memory}
     (h : AccessBelow upper before after) (bound : lower ≤ upper) : AccessBelow lower before after :=
@@ -30,6 +43,7 @@ theorem AccessBelow.weaken {lower upper : Nat} {before after : Memory}
     fun id old => h.permissions id (Nat.lt_of_lt_of_le old bound),
     fun id old => h.initialized id (Nat.lt_of_lt_of_le old bound)⟩
 
+/-- A checked write keeps `AccessBelow` at every watermark: it changes only byte values. -/
 theorem write_preserves_access_below {memory result : Memory} {reference : Reference}
     {bytes : List (BitVec 8)} {alignment : Nat}
     (written : write memory reference bytes alignment = .ok result) (watermark : Nat) :
@@ -42,16 +56,19 @@ theorem write_preserves_access_below {memory result : Memory} {reference : Refer
   · intro id _ offset initialized
     exact write_preserves_initialization _ _ _ _ _ _ _ written initialized
 
+/-- Access requirements met on an old allocation are still met after the step. -/
 theorem AccessBelow.requirements {watermark : Nat} {memory result : Memory}
     (retained : AccessBelow watermark memory result) {reference : Reference}
     {width alignment : Nat} {writing : Bool} {allocation : Allocation}
     (ready : AccessRequirements memory reference width alignment writing allocation)
     (old : reference.allocation < watermark) :
     AccessRequirements result reference width alignment writing allocation := by
-  refine ⟨?_, ready.live, ready.position, ready.layout, ready.extent, ready.aligned, ready.mutable, ?_⟩
+  refine ⟨?_, ready.live, ready.position, ready.layout, ready.extent, ready.aligned,
+    ready.mutable, ?_⟩
   · rw [retained.allocations reference.allocation old]; exact ready.present
   · intro i bound
-    exact retained.permissions reference.allocation old (reference.offset + i) writing (ready.permission i bound)
+    exact retained.permissions reference.allocation old (reference.offset + i) writing
+      (ready.permission i bound)
 
 theorem AccessBelow.access {watermark : Nat} {memory result : Memory}
     (retained : AccessBelow watermark memory result) {reference : Reference}
@@ -62,6 +79,8 @@ theorem AccessBelow.access {watermark : Nat} {memory result : Memory}
   obtain ⟨allocation, requirements⟩ := access_requirements ready
   exact (retained.requirements requirements old).access
 
+/-- A read of an old allocation that succeeded before still succeeds, possibly with
+    different bytes. -/
 theorem AccessBelow.readable {watermark : Nat} {memory result : Memory}
     (retained : AccessBelow watermark memory result) {reference : Reference}
     {width alignment : Nat} {bytes : List (BitVec 8)}
@@ -78,7 +97,6 @@ theorem AccessBelow.readable {watermark : Nat} {memory result : Memory}
   intro i bound
   exact retained.initialized reference.allocation old (reference.offset + i)
     (read_requires_initialization _ _ _ _ _ loaded i (List.mem_range.mpr bound))
-
 
 /-- Unchanged cells plus retained authority preserve the exact read result. -/
 theorem AccessBelow.read_eq {watermark : Nat} {memory result : Memory}

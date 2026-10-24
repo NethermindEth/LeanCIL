@@ -1,5 +1,15 @@
 import CIL.Safety.Calling
 
+/-!
+# Access requirements
+
+`AccessRequirements` states, as plain propositions, everything the checked `access` of
+`CIL/Safety/Memory.lean` tests: a live allocation, an in-bounds and aligned range clear of
+reference slots, mutability and per-byte authority. `AccessRequirements.access` turns them
+back into a successful check, so contracts can state storage obligations without
+mentioning the checker.
+-/
+
 namespace CIL.Safety
 
 /-- Ordinary storage requirements for one access. This contains no instruction,
@@ -16,6 +26,7 @@ structure AccessRequirements (m : Memory) (r : Reference) (width alignment : Nat
   mutable : writing = true → allocation.kind ≠ .immutableStatic
   permission : ∀ i < width, permitted m writing { r with offset := r.offset + i } = true
 
+/-- A view that covers the byte with the requested authority permits the access. -/
 theorem permitted_by_view {m : Memory} {r : Reference} {writing : Bool} {view : View}
     (member : view ∈ m.views) (same : view.allocation = r.allocation)
     (start : view.start ≤ r.offset) (finish : r.offset < view.start + view.length)
@@ -25,6 +36,7 @@ theorem permitted_by_view {m : Memory} {r : Reference} {writing : Bool} {view : 
   refine ⟨view, member, ?_⟩
   simp [viewContains, same, start, finish, authority]
 
+/-- The requirements are sufficient: the checked access succeeds. -/
 theorem AccessRequirements.access {m : Memory} {r : Reference} {width alignment : Nat}
     {writing : Bool} {allocation : Allocation}
     (ready : AccessRequirements m r width alignment writing allocation) :
@@ -47,6 +59,8 @@ theorem AccessRequirements.access {m : Memory} {r : Reference} {width alignment 
     Bool.false_eq_true, decide_true, ite_true, ite_false]
   rfl
 
+/-- A read meeting the requirements over initialized cells returns exactly those cells'
+    bits. -/
 theorem read_snapshot {m : Memory} {r : Reference} {width alignment : Nat}
     {allocation : Allocation} (ready : AccessRequirements m r width alignment false allocation)
     (initialized : ∀ i < width, (m.cells r.allocation (r.offset + i)).initialized = true) :
@@ -68,6 +82,7 @@ theorem read_access {m : Memory} {r : Reference} {width alignment : Nat} {bytes 
   | error fault => simp [ha, Bind.bind, Except.bind] at h
   | ok value => rfl
 
+/-- The bytes of any successful read are the cells' current bits. -/
 theorem read_result_snapshot {m : Memory} {r : Reference} {width alignment : Nat}
     {bytes : List (BitVec 8)} (h : read m r width alignment = .ok bytes) :
     bytes = (List.range width).map (fun i => (m.cells r.allocation (r.offset + i)).bits) := by

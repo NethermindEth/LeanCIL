@@ -1,10 +1,21 @@
 import CIL.Safety.ExecutionInvariants
+
+/-!
+# Memories observed along a run
+
+`RunVisits` relates a starting state to every memory a run passes through at an instruction,
+call or teardown boundary, including runs that later fault or exhaust fuel. Invariants proved
+over `RunVisits` (see `ExecutionLifetime` and `ExecutionStaticWorld`) therefore hold at every
+observable point of an execution, not only at its successful end.
+-/
+
 namespace CIL.Safety
 
 /-- A nested call or constructor invokes exactly these captured arguments. -/
 def FrameAction.child (action : FrameAction) (callee : Nat) (arguments : List Value) : Prop :=
   (∃ rest, action = .call callee arguments rest action.memory) ∨
-  ∃ rest frame temporary kind, action = .construct callee arguments rest frame temporary kind action.memory
+  ∃ rest frame temporary kind,
+    action = .construct callee arguments rest frame temporary kind action.memory
 
 /-- Memory observations at CIL boundaries, including prefixes of executions
     which later fault. Continuation requires an actual successful child run. -/
@@ -16,7 +27,8 @@ inductive RunVisits (program : CIL.Program) : Nat → Nat → Nat → List Value
       (step : ProgramStep program method pc args frame stack m action) :
       RunVisits program (fuel + 1) method pc args frame stack m action.memory
   | next {fuel method pc args frame stack m target values nextFrame updated observed}
-      (step : ProgramStep program method pc args frame stack m (.next target values nextFrame updated))
+      (step : ProgramStep program method pc args frame stack m
+        (.next target values nextFrame updated))
       (later : RunVisits program fuel method target args nextFrame values updated observed) :
       RunVisits program (fuel + 1) method pc args frame stack m observed
   | entered {fuel method pc args frame stack m action callee arguments child childFrame childMemory}
@@ -24,7 +36,8 @@ inductive RunVisits (program : CIL.Program) : Nat → Nat → Nat → List Value
       (call : action.child callee arguments) (lookup : program[callee]? = some child)
       (enter : enterFrame child arguments action.memory = .ok (childFrame, childMemory)) :
       RunVisits program (fuel + 1) method pc args frame stack m childMemory
-  | child {fuel method pc args frame stack m action callee arguments child childFrame childMemory observed}
+  | child {fuel method pc args frame stack m action callee arguments child childFrame childMemory
+        observed}
       (step : ProgramStep program method pc args frame stack m action)
       (call : action.child callee arguments) (lookup : program[callee]? = some child)
       (enter : enterFrame child arguments action.memory = .ok (childFrame, childMemory))
@@ -32,26 +45,31 @@ inductive RunVisits (program : CIL.Program) : Nat → Nat → Nat → List Value
       RunVisits program (fuel + 1) method pc args frame stack m observed
   | callContinue {fuel method pc args frame stack m callee arguments rest updated child
         childFrame childMemory returned result observed}
-      (step : ProgramStep program method pc args frame stack m (.call callee arguments rest updated))
+      (step : ProgramStep program method pc args frame stack m
+        (.call callee arguments rest updated))
       (lookup : program[callee]? = some child)
       (enter : enterFrame child arguments updated = .ok (childFrame, childMemory))
-      (finish : run program fuel callee 0 arguments childFrame [] childMemory = .ok (returned, result))
-      (later : RunVisits program fuel method (pc + 1) args frame (result ++ rest) returned observed) :
+      (finish : run program fuel callee 0 arguments childFrame [] childMemory =
+        .ok (returned, result))
+      (later : RunVisits program fuel method (pc + 1) args frame (result ++ rest) returned
+        observed) :
       RunVisits program (fuel + 1) method pc args frame stack m observed
-  | constructContinue {fuel method pc args frame stack m callee arguments rest nextFrame temporary kind
-        updated child childFrame childMemory returned value observed}
+  | constructContinue {fuel method pc args frame stack m callee arguments rest nextFrame
+        temporary kind updated child childFrame childMemory returned value observed}
       (step : ProgramStep program method pc args frame stack m
         (.construct callee arguments rest nextFrame temporary kind updated))
       (lookup : program[callee]? = some child)
       (enter : enterFrame child arguments updated = .ok (childFrame, childMemory))
       (finish : run program fuel callee 0 arguments childFrame [] childMemory = .ok (returned, []))
       (load : loadLocal returned (.bytes kind temporary) = .ok value)
-      (later : RunVisits program fuel method (pc + 1) args nextFrame (value :: rest) returned observed) :
+      (later : RunVisits program fuel method (pc + 1) args nextFrame (value :: rest) returned
+        observed) :
       RunVisits program (fuel + 1) method pc args frame stack m observed
   | expired {fuel method pc args frame stack m result updated}
       (step : ProgramStep program method pc args frame stack m (.returned result updated)) :
       RunVisits program (fuel + 1) method pc args frame stack m (leaveFrame frame updated)
 
+/-- Every memory observed along a run from well-formed memory is well-formed. -/
 theorem runVisits_wellFormed {program : CIL.Program} {fuel method pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m observed : Memory}
     (visit : RunVisits program fuel method pc args frame stack m observed)
@@ -80,6 +98,7 @@ theorem runVisits_wellFormed {program : CIL.Program} {fuel method pc : Nat}
 
 #print axioms runVisits_wellFormed
 
+/-- The final memory of a successful run is one of its observed memories. -/
 theorem run_success_visits (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value)
@@ -95,4 +114,5 @@ theorem run_success_visits (program : CIL.Program) (fuel method pc : Nat)
     exact .constructContinue step lookup enter finish load ih
 
 #print axioms run_success_visits
+
 end CIL.Safety

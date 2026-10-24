@@ -1,10 +1,29 @@
 import CIL.Safety.Execution
+
+/-!
+# More fuel never changes a settled outcome
+
+Fuel only bounds how long the checked interpreter may run. Once a run succeeds or fails with
+any fault other than `fuelExhausted`, giving it more fuel yields the same outcome
+(`run_mono`, `invoke_mono`). Consequently a semantic fault found at one fuel budget refutes
+success at every budget (`invoke_fault_refutes_success`).
+-/
+
 namespace CIL.Safety
+
+/-- An outcome that more fuel cannot change: a success, or any fault except running out of
+    fuel. -/
 def Settled (outcome : Except LocatedFault α) : Prop :=
   match outcome with
   | .ok _ => True
   | .error fault => fault.fault ≠ .fuelExhausted
 
+section
+
+-- Every `run` case unfolds through these monad steps.
+attribute [local simp] Bind.bind Except.bind Except.mapError
+
+/-- Adding fuel to a run with a settled outcome gives the same outcome. -/
 theorem run_mono (program : CIL.Program) (fuel extra method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
     (outcome : Except LocatedFault (Memory × List Value))
@@ -25,66 +44,80 @@ theorem run_mono (program : CIL.Program) (fuel extra method pc : Nat)
       | some op =>
         cases hs : step body op pc args frame stack memory with
         | error fault =>
-          simpa [Nat.succ_add, run, hb, ho, hs, Bind.bind, Except.bind, Except.mapError] using h
+          simpa [Nat.succ_add, run, hb, ho, hs] using h
         | ok action =>
           cases action with
           | next target values nextFrame updated =>
-            simp [run, hb, ho, hs, Bind.bind, Except.bind, Except.mapError] at h
-            simpa [Nat.succ_add, run, hb, ho, hs, Bind.bind, Except.bind, Except.mapError] using
+            simp [run, hb, ho, hs] at h
+            simpa [Nat.succ_add, run, hb, ho, hs] using
               ih method target args nextFrame values updated outcome ready h
           | returned values updated =>
-            simpa [Nat.succ_add, run, hb, ho, hs, Bind.bind, Except.bind, Except.mapError] using h
+            simpa [Nat.succ_add, run, hb, ho, hs] using h
           | call callee arguments rest updated =>
             cases hc : program[callee]? with
-            | none => simpa [Nat.succ_add, run, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] using h
+            | none =>
+              simpa [Nat.succ_add, run, hb, ho, hs, hc] using h
             | some child =>
               cases he : enterFrame child arguments updated with
-              | error fault => simpa [Nat.succ_add, run, hb, ho, hs, hc, he, Bind.bind, Except.bind, Except.mapError] using h
+              | error fault =>
+                simpa [Nat.succ_add, run, hb, ho, hs, hc, he] using h
               | ok entered =>
                 obtain ⟨childFrame, childMemory⟩ := entered
                 cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
                 | error fault =>
-                  simp [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind, Except.mapError] at h
-                  have settled : Settled (.error fault : Except LocatedFault (Memory × List Value)) := by
+                  simp [run, hb, ho, hs, hc, he, hr] at h
+                  have settled :
+                      Settled (.error fault : Except LocatedFault (Memory × List Value)) := by
                     simpa [← h] using ready
-                  have more := ih callee 0 arguments childFrame [] childMemory (.error fault) settled hr
-                  simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more, Bind.bind, Except.bind, Except.mapError] using h
+                  have more :=
+                    ih callee 0 arguments childFrame [] childMemory (.error fault) settled hr
+                  simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more] using h
                 | ok childResult =>
                   obtain ⟨final, values⟩ := childResult
-                  have more := ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) trivial hr
-                  simp [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind, Except.mapError] at h
-                  have parent := ih method (pc + 1) args frame (values ++ rest) final outcome ready h
-                  simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more, Bind.bind, Except.bind, Except.mapError] using parent
+                  have more :=
+                    ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) trivial hr
+                  simp [run, hb, ho, hs, hc, he, hr] at h
+                  have parent :=
+                    ih method (pc + 1) args frame (values ++ rest) final outcome ready h
+                  simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more] using parent
           | construct callee arguments rest parentFrame temporary kind updated =>
             cases hc : program[callee]? with
-            | none => simpa [Nat.succ_add, run, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] using h
+            | none =>
+              simpa [Nat.succ_add, run, hb, ho, hs, hc] using h
             | some child =>
               cases he : enterFrame child arguments updated with
-              | error fault => simpa [Nat.succ_add, run, hb, ho, hs, hc, he, Bind.bind, Except.bind, Except.mapError] using h
+              | error fault =>
+                simpa [Nat.succ_add, run, hb, ho, hs, hc, he] using h
               | ok entered =>
                 obtain ⟨childFrame, childMemory⟩ := entered
                 cases hr : run program fuel callee 0 arguments childFrame [] childMemory with
                 | error fault =>
-                  simp [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind, Except.mapError] at h
-                  have settled : Settled (.error fault : Except LocatedFault (Memory × List Value)) := by
+                  simp [run, hb, ho, hs, hc, he, hr] at h
+                  have settled :
+                      Settled (.error fault : Except LocatedFault (Memory × List Value)) := by
                     simpa [← h] using ready
-                  have more := ih callee 0 arguments childFrame [] childMemory (.error fault) settled hr
-                  simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more, Bind.bind, Except.bind, Except.mapError] using h
+                  have more :=
+                    ih callee 0 arguments childFrame [] childMemory (.error fault) settled hr
+                  simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more] using h
                 | ok childResult =>
                   obtain ⟨final, values⟩ := childResult
-                  have more := ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) trivial hr
+                  have more :=
+                    ih callee 0 arguments childFrame [] childMemory (.ok (final, values)) trivial hr
                   cases values with
                   | cons value tail =>
-                    simpa [Nat.succ_add, run, hb, ho, hs, hc, he, hr, more, Bind.bind, Except.bind, Except.mapError] using h
+                    simpa [Nat.succ_add, run, hb, ho, hs, hc, he, hr, more] using h
                   | nil =>
                     cases hv : loadLocal final (.bytes kind temporary) with
                     | error fault =>
-                      simpa [Nat.succ_add, run, hb, ho, hs, hc, he, hr, more, hv, Bind.bind, Except.bind, Except.mapError] using h
+                      simpa [Nat.succ_add, run, hb, ho, hs, hc, he, hr, more, hv] using h
                     | ok value =>
-                      simp [run, hb, ho, hs, hc, he, hr, hv, Bind.bind, Except.bind, Except.mapError] at h
-                      have parent := ih method (pc + 1) args parentFrame (value :: rest) final outcome ready h
-                      simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more, hv, Bind.bind, Except.bind, Except.mapError] using parent
+                      simp [run, hb, ho, hs, hc, he, hr, hv] at h
+                      have parent :=
+                        ih method (pc + 1) args parentFrame (value :: rest) final outcome ready h
+                      simpa [Nat.succ_add, run, hb, ho, hs, hc, he, more, hv] using parent
 #print axioms run_mono
+
+end
 
 theorem invoke_mono (program : CIL.Program) (fuel extra method : Nat)
     (args : List Value) (memory : Memory) (outcome : Except LocatedFault (Memory × List Value))
@@ -113,7 +146,8 @@ theorem invoke_fault_refutes_success (program : CIL.Program) (observed method : 
     (fuel : Nat) (result : Memory × List Value) :
     invoke program fuel method args memory ≠ .ok result := by
   intro success
-  have failure := invoke_mono program observed fuel method args memory (.error fault) semantic witness
+  have failure :=
+    invoke_mono program observed fuel method args memory (.error fault) semantic witness
   have returned := invoke_mono program fuel observed method args memory (.ok result) trivial success
   rw [Nat.add_comm] at returned
   rw [failure] at returned
@@ -121,4 +155,5 @@ theorem invoke_fault_refutes_success (program : CIL.Program) (observed method : 
 
 #print axioms invoke_mono
 #print axioms invoke_fault_refutes_success
+
 end CIL.Safety
