@@ -162,7 +162,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
           (.scalar (.aggregate (value (input temporary) out)) :: stack.drop argc) final =
             .ok (result, returned) ∧
         post result returned)
-    (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
+    (known : arguments.any Value.hasUnspecified = false := by cil_known_arguments) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
         post result returned := by

@@ -12,13 +12,18 @@ argument, leaving all older memory unchanged.
 
 namespace CIL.Safety
 
+/-- Proves that no constructor argument carries unspecified vector bits, the `known` side
+    condition of the construct steps, when the arguments are concrete. -/
+macro "cil_known_arguments" : tactic =>
+  `(tactic| simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified])
+
 /-- The actual new-value step allocates initialized caller-owned storage and
     passes its checked address to the constructor. -/
 theorem step_newVector256 {body : CIL.Method} {pc callee : Nat}
     (args arguments rest : List Value) (frame : Frame) (memory : Memory)
     (wellFormed : memory.WellFormed)
     (checked : arguments.mapM (checkedValue memory) = .ok arguments)
-    (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
+    (known : arguments.any Value.hasUnspecified = false := by cil_known_arguments) :
     ∃ temporary updated,
       step body (.newVector256 callee arguments.length) pc args frame (arguments.reverse ++ rest)
           memory =
@@ -45,7 +50,7 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
     (args arguments rest : List Value) (frame : Frame) (memory : Memory)
     (wellFormed : memory.WellFormed)
     (checked : arguments.mapM (checkedValue memory) = .ok arguments)
-    (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
+    (known : arguments.any Value.hasUnspecified = false := by cil_known_arguments) :
     ∃ temporary updated,
       step body (.newAggregate callee arguments.length size) pc args frame
           (arguments.reverse ++ rest) memory =
