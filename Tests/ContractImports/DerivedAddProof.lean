@@ -67,7 +67,7 @@ theorem add_public_refines : addInternal.Refines DerivedInterface.addPublic wher
 
 #print axioms add_public_refines
 
-/-- The exported theorem: no instruction of `AddTo` is stepped again. -/
+/-- The exported theorem: the actual `AddTo` meets its public contract. -/
 theorem correctness : DerivedInterface.addPublic.Holds Extracted.program 0 :=
   add_internal.weaken add_public_refines
 
@@ -89,6 +89,8 @@ def sampleInput : DerivedInterface.AddInput := ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 
 
 /-- The sample meets the internal precondition. -/
 theorem sample_pre : addPre sampleInput sample := ⟨rfl, rfl, rfl⟩
+
+#print axioms sample_pre
 
 /-- A smaller footprint: `AddTo` changes `sum`, which an empty footprint would keep. -/
 def addUnframed : MethodContract DerivedInterface.AddInput :=
@@ -113,7 +115,14 @@ theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program 0 :=
   rw [readback, zero] at kept
   exact absurd (Except.ok.inj kept) (by decide)
 
+-- A `sorryAx` here would make a refutation vacuous, so the axiom sets are pinned.
+/-- info: 'DerivedAddProof.Rejected.smaller_footprint_not_refines'
+  depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in
 #print axioms smaller_footprint_not_refines
+/-- info: 'DerivedAddProof.Rejected.smaller_footprint_rejected'
+  depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
 #print axioms smaller_footprint_rejected
 
 end Rejected

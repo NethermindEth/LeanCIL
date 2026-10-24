@@ -20,19 +20,19 @@ def percentExact : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post value _ _ output := output = value
-  raises value _ := DerivedInterface.percentRaises value
+  raises value _ := if value ≤ 100 then none else some "System.ArgumentOutOfRangeException"
 
 /-- Stepped on the actual extraction: each input returns itself or throws as named. -/
 theorem percent_exact : percentExact.Holds Extracted.program 0 := by
   rintro value memory -
   by_cases within : value ≤ 100
   · have bound : value ≤ 100#64 := within
-    simp only [percentExact, DerivedInterface.percentRaises, within, ite_true]
+    simp only [percentExact, within, ite_true]
     refine ⟨CIL.executionBound Extracted.program 0, memory, _, ?_, Confined.refl _ memory, _,
       rfl, rfl⟩
     cil_checked_steps [bound]
   · have bound : ¬ value ≤ 100#64 := within
-    simp only [percentExact, DerivedInterface.percentRaises, within, ite_false]
+    simp only [percentExact, within, ite_false]
     cil_raise_steps [bound]
 
 #print axioms percent_exact
@@ -52,7 +52,7 @@ theorem percent_bounded_refines : percentExact.Refines DerivedInterface.percentB
 
 #print axioms percent_bounded_refines
 
-/-- The exported theorem: no instruction of `Percent` is stepped again. -/
+/-- The exported theorem: the actual `Percent` meets its public contract. -/
 theorem correctness : DerivedInterface.percentBounded.Holds Extracted.program 0 :=
   percent_exact.weaken percent_bounded_refines
 
@@ -71,6 +71,8 @@ def empty : Memory :=
 theorem empty_formed : empty.WellFormed := by
   simp [Memory.WellFormed, empty]
 
+#print axioms empty_formed
+
 /-- Two outcomes of one invocation that both raise name the same exception. -/
 theorem raises_unique {method : Nat} {args : List Value} {memory : Memory}
     {one other : String} (first : Raises Extracted.program method args memory one)
@@ -82,6 +84,8 @@ theorem raises_unique {method : Nat} {args : List Value} {memory : Memory}
   cases otherThrown
   rfl
 
+#print axioms raises_unique
+
 /-- An invocation that raises never also returns. -/
 theorem raises_not_returns {method fuel : Nat} {args : List Value} {memory : Memory}
     {exception : String} {result : Memory × List Value}
@@ -89,6 +93,8 @@ theorem raises_not_returns {method fuel : Nat} {args : List Value} {memory : Mem
     (returned : invoke Extracted.program fuel method args memory = .ok result) : False := by
   obtain ⟨_, fault, ran, thrown⟩ := raised
   cases invoke_unique (second := .ok result) (by simp [Settled, thrown]) trivial ran returned
+
+#print axioms raises_not_returns
 
 /-- `Percent(100)` returns 100. -/
 theorem percent_hundred : ∃ fuel final,
@@ -100,10 +106,14 @@ theorem percent_hundred : ∃ fuel final,
   subst same encoded
   exact ⟨fuel, final, invoked⟩
 
+#print axioms percent_hundred
+
 /-- `Percent(101)` raises `ArgumentOutOfRangeException`. -/
 theorem percent_above : Raises Extracted.program 0 [.scalar (.i64 101)] empty
     "System.ArgumentOutOfRangeException" :=
   percent_exact.raising (input := 101) trivial (by decide)
+
+#print axioms percent_above
 
 /-- An unjustified stronger post: `Percent(100)` returns 100, which is not below 100. -/
 def percentTooStrong : OutcomeContract CIL.W64 CIL.W64 :=
@@ -161,11 +171,30 @@ theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program 0
         "System.ArgumentException" := holds.raising (input := 101) empty_formed (by decide)
     exact absurd (raises_unique renamed percent_above) (by decide)
 
+-- A `sorryAx` here would make a refutation vacuous, so the axiom sets are pinned.
+/-- info: 'DerivedPercentProof.Rejected.stronger_post_not_refines'
+  depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
 #print axioms stronger_post_not_refines
+/-- info: 'DerivedPercentProof.Rejected.stronger_post_rejected'
+  depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
 #print axioms stronger_post_rejected
+/-- info: 'DerivedPercentProof.Rejected.weaker_pre_not_refines'
+  does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in
 #print axioms weaker_pre_not_refines
+/-- info: 'DerivedPercentProof.Rejected.weaker_pre_rejected'
+  depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
 #print axioms weaker_pre_rejected
+/-- info: 'DerivedPercentProof.Rejected.changed_exception_not_refines'
+  depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
 #print axioms changed_exception_not_refines
+/-- info: 'DerivedPercentProof.Rejected.changed_exception_rejected'
+  depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
 #print axioms changed_exception_rejected
 
 end Rejected

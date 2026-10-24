@@ -45,7 +45,8 @@ internal static class ExportVerificationSuites
              "Tests/ContractImports/TypedIdentityCaller.lean", "Tests/ContractImports/TypedCopyCaller.lean"], Standalone: true),
         new("exportsderived", "derived", "Tests/DerivedContractExports.cs", [],
             "derived public contracts through DLL export and import", [],
-            ["Tests/DerivedContractExports.cs", .. DerivedFixtures.Select(name => "Tests/ContractImports/" + name + ".lean")],
+            ["Tests/DerivedContractExports.cs",
+             .. DerivedFixtures.Select(name => "Tests/ContractImports/" + name + ".lean")],
             Standalone: true)
     ];
 

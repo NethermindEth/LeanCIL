@@ -130,7 +130,12 @@ foreach ((string name, string from, string to, string proof, string exact, strin
 {
     ("stronger post", "post _ _ _ output := output ≤ 100", "post _ _ _ output := output < 100",
         "DerivedPercentProof", "percent_exact", "percent_bounded_refines"),
+    ("changed exception", "else some \"System.ArgumentOutOfRangeException\"", "else some \"System.ArgumentException\"",
+        "DerivedPercentProof", "percent_exact", "percent_bounded_refines"),
     ("smaller footprint", "footprint input := [(input.region, 32)]", "footprint input := []",
+        "DerivedAddProof", "add_internal", "add_public_refines"),
+    ("weaker pre", "    access memory input.sum 8 1 true = .ok () ∧
+", "",
         "DerivedAddProof", "add_internal", "add_public_refines")
 })
 {
