@@ -105,6 +105,14 @@ theorem byteNumber_elementBytes_lt (width : Nat) (xs : List (BitVec (8 * width))
     byteNumber (elementBytes width xs) < 256 ^ (width * xs.length) := by
   simpa using byteNumber_lt (elementBytes width xs)
 
+/-- Four limbs decode as one flat sum. Instantiate this at a literal width instead of rewriting
+    `byteNumber_elementBytes` there, which makes the kernel unfold the literal powers. -/
+theorem byteNumber_elementBytes_four (width : Nat) (a b c d : BitVec (8 * width)) :
+    byteNumber (elementBytes width [a, b, c, d]) =
+      a.toNat + b.toNat * 256 ^ width + c.toNat * 256 ^ (width * 2) + d.toNat * 256 ^ (width * 3) := by
+  rw [byteNumber_elementBytes]
+  simp [Nat.add_assoc]
+
 /-- Interval `(r, width)` shares no byte with `entry`, so neither does any subinterval of it. -/
 theorem Apart.sub {r : Reference} {width : Nat} {entry : Reference × Nat} (apart : Apart r width entry)
     {start count : Nat} (within : start + count ≤ width) :
@@ -524,6 +532,7 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat} (f : Bi
 #print axioms byteNumber_elementBytes_cons
 #print axioms byteNumber_elementBytes
 #print axioms byteNumber_elementBytes_lt
+#print axioms byteNumber_elementBytes_four
 #print axioms Reference.element_apart
 #print axioms add_element
 #print axioms Contents.singleton

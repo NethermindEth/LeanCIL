@@ -227,12 +227,21 @@ theorem vector_element_loads {m : Memory} {base : Reference} {xs : List (BitVec 
     loadValue m (.address (base.element 16 i)) 16 = .ok (.v128 x) := by
   simpa [numericOfWidth] using contents.load (by decide) found
 
-/-- Four limbs of any width decode as one number, lowest limb first, each scaled past the lower limbs. -/
-theorem limbs_decode (w : Nat) (a b c d : BitVec (8 * w)) :
-    byteNumber (elementBytes w [a, b, c, d]) =
-      a.toNat + b.toNat * 256 ^ w + c.toNat * 256 ^ (w * 2) + d.toNat * 256 ^ (w * 3) := by
-  rw [byteNumber_elementBytes]
-  simp [Nat.add_assoc]
+/-- Four 64-bit limbs decode as one 256-bit number, lowest limb first: the generic flat sum
+    instantiated at width 8 and folded, which stays fast where rewriting at width 8 does not. -/
+theorem word_limbs_flat (a b c d : BitVec (8 * 8)) :
+    byteNumber (elementBytes 8 [a, b, c, d]) =
+      a.toNat + b.toNat * 2 ^ 64 + c.toNat * 2 ^ 128 + d.toNat * 2 ^ 192 := by
+  have h := byteNumber_elementBytes_four 8 a b c d
+  simp only [Nat.reduceMul, Nat.reducePow] at h
+  exact h
+
+/-- The four-limb decode fits 32 bytes, so it survives a round trip through a 256-bit vector. -/
+theorem word_limbs_fit (a b c d : BitVec (8 * 8)) :
+    (BitVec.ofNat 256 (byteNumber (elementBytes 8 [a, b, c, d]))).toNat =
+      byteNumber (elementBytes 8 [a, b, c, d]) :=
+  Nat.mod_eq_of_lt (Nat.lt_of_lt_of_eq (byteNumber_elementBytes_lt 8 [a, b, c, d])
+    (by simp only [List.length_cons, List.length_nil, Nat.reduceAdd, Nat.reduceMul, Nat.reducePow]))
 
 /-- The 64-bit-limb form peels one limb at a time; it avoids the kernel unfolding `x * 256^(8*k)` literals. -/
 theorem word_limbs_decode (a b c d : BitVec (8 * 8)) :
@@ -249,7 +258,8 @@ example : byteNumber (elementBytes 2 [1, 2]) = 1 + 2 * 2^16 := by
 #print axioms transform_loads
 #print axioms byte_load_zero_extends
 #print axioms vector_element_loads
-#print axioms limbs_decode
+#print axioms word_limbs_flat
+#print axioms word_limbs_fit
 #print axioms word_limbs_decode
 #print axioms transform_increments
 #print axioms fill_loads
