@@ -138,68 +138,88 @@ internal static class RuntimeModels
 
     const string DivRem = ".intrinsic (.x86Base .divRem64) 3";
 
+    private static readonly (string Type, int Width, bool Signed)[] MathIntegers =
+    [
+        ("System.SByte", 8, true), ("System.Byte", 8, false),
+        ("System.Int16", 16, true), ("System.UInt16", 16, false),
+        ("System.Int32", 32, true), ("System.UInt32", 32, false),
+        ("System.Int64", 64, true), ("System.UInt64", 64, false),
+        ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
+    ];
+    private static readonly (string Name, string Operation, int Arity)[] MathOperations =
+    [
+        ("Min", "min", 2), ("Max", "max", 2), ("Clamp", "clamp", 3),
+        ("Abs", "abs", 1), ("Sign", "sign", 1)
+    ];
+    private static readonly (string Type, int Width)[] RotatableWords =
+        [("System.UInt32", 32), ("System.UInt64", 64), ("System.UIntPtr", 64)];
+    private static readonly (string Name, string Operation)[] Rotations =
+        [("RotateLeft", "rotateLeft"), ("RotateRight", "rotateRight")];
+    private static readonly (string Name, string Operation)[] BitCounts =
+    [
+        ("PopCount", "popCount"), ("LeadingZeroCount", "leadingZeroCount"),
+        ("TrailingZeroCount", "trailingZeroCount"), ("Log2", "log2")
+    ];
+    private static readonly (string Type, int Width, bool Signed)[] Pow2Integers =
+    [
+        ("System.Int32", 32, true), ("System.UInt32", 32, false),
+        ("System.Int64", 64, true), ("System.UInt64", 64, false),
+        ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
+    ];
+    private static readonly (string Type, int Width, bool Signed)[] ByteAndNativeIntegers =
+    [
+        ("System.SByte", 8, true), ("System.Byte", 8, false),
+        ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
+    ];
+
     // Match exact non-generic static signatures, including the defining assembly.
     private static string? Scalar(MethodReference reference)
     {
         if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default) return null;
-        var signature = reference.FullName;
-        string scope = reference.DeclaringType.Scope.Name;
-        if (scope == "System.Runtime" &&
-            signature == "System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)")
-            return ".memory .bigMul64";
-        if (scope == "System.Runtime")
-            foreach (var (type, width, signed) in new[]
-            {
-                ("System.SByte", 8, true), ("System.Byte", 8, false),
-                ("System.Int16", 16, true), ("System.UInt16", 16, false),
-                ("System.Int32", 32, true), ("System.UInt32", 32, false),
-                ("System.Int64", 64, true), ("System.UInt64", 64, false),
-                ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
-            })
-            foreach (var (name, operation, arity) in new[]
-            {
-                ("Min", "min", 2), ("Max", "max", 2), ("Clamp", "clamp", 3),
-                ("Abs", "abs", 1), ("Sign", "sign", 1)
-            })
-            {
-                if (!signed && arity == 1) continue;
-                var result = name == "Sign" ? "System.Int32" : type;
-                var parameters = string.Join(",", Enumerable.Repeat(type, arity));
-                if (signature == $"{result} System.Math::{name}({parameters})")
-                    return $".intrinsic (.scalar (.math .{operation} {width} {LeanBool(signed)})) {arity}";
-            }
-        foreach (var (type, width) in new[] { ("System.UInt32", 32), ("System.UInt64", 64), ("System.UIntPtr", 64) })
+        return reference.DeclaringType.Scope.Name switch
         {
-            if (scope != "System.Runtime") continue;
-            foreach (var (name, operation) in new[] { ("RotateLeft", "rotateLeft"), ("RotateRight", "rotateRight") })
+            "System.Runtime" => RuntimeScalar(reference.FullName),
+            "System.Memory" => ReverseEndianness(reference.FullName),
+            _ => null
+        };
+    }
+
+    // System.Math and System.Numerics.BitOperations, both defined in System.Runtime.
+    private static string? RuntimeScalar(string signature)
+    {
+        if (signature == "System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)")
+            return ".memory .bigMul64";
+        foreach (var (type, width, signed) in MathIntegers)
+        foreach (var (name, operation, arity) in MathOperations)
+        {
+            if (!signed && arity == 1) continue;
+            var result = name == "Sign" ? "System.Int32" : type;
+            var parameters = string.Join(",", Enumerable.Repeat(type, arity));
+            if (signature == $"{result} System.Math::{name}({parameters})")
+                return $".intrinsic (.scalar (.math .{operation} {width} {LeanBool(signed)})) {arity}";
+        }
+        foreach (var (type, width) in RotatableWords)
+        {
+            foreach (var (name, operation) in Rotations)
                 if (signature == $"{type} System.Numerics.BitOperations::{name}({type},System.Int32)")
                     return $".intrinsic (.scalar (.{operation} {width})) 2";
-            foreach (var (name, operation) in new[]
-            {
-                ("PopCount", "popCount"), ("LeadingZeroCount", "leadingZeroCount"),
-                ("TrailingZeroCount", "trailingZeroCount"), ("Log2", "log2")
-            })
+            foreach (var (name, operation) in BitCounts)
                 if (signature == $"System.Int32 System.Numerics.BitOperations::{name}({type})")
                     return $".intrinsic (.scalar (.{operation} {width})) 1";
             if (signature == $"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})")
                 return $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1";
         }
-        if (scope == "System.Runtime")
-            foreach (var (type, width, signed) in new[]
-            {
-                ("System.Int32", 32, true), ("System.UInt32", 32, false),
-                ("System.Int64", 64, true), ("System.UInt64", 64, false),
-                ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
-            })
-                if (signature == $"System.Boolean System.Numerics.BitOperations::IsPow2({type})")
-                    return $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1";
-        if (scope != "System.Memory") return null;
-        foreach (var (type, width, signed) in new[]
-        {
-            ("System.SByte", 8, true), ("System.Byte", 8, false),
-            ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
-        })
+        foreach (var (type, width, signed) in Pow2Integers)
+            if (signature == $"System.Boolean System.Numerics.BitOperations::IsPow2({type})")
+                return $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1";
+        return null;
+    }
+
+    // System.Buffers.Binary.BinaryPrimitives, defined in System.Memory.
+    private static string? ReverseEndianness(string signature)
+    {
+        foreach (var (type, width, signed) in ByteAndNativeIntegers)
             if (signature == $"{type} System.Buffers.Binary.BinaryPrimitives::ReverseEndianness({type})")
                 return $".intrinsic (.scalar (.reverseEndianness {width} {LeanBool(signed)})) 1";
         foreach (var width in new[] { 16, 32, 64 })

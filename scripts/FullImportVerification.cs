@@ -249,15 +249,20 @@ partial class Program
         RequireAuditedConstants(audited);
         AuditedAxioms(audited.theorems[0]);
         string audit = AuditText(audited.theorems[0]);
+        return new(FullCompositionTheorem, audit, IndependentlyVerifiedImports(output, libraries));
+    }
+
+    // The caller's published imports, each now accepted through its checked bundle instead of its sidecar.
+    static PublishedImport[] IndependentlyVerifiedImports(string output, List<FullLibrary> libraries)
+    {
         string identity = File.ReadAllText(Path.Combine(output, "identity.json"));
-        PublishedImport[] imported = PublishedImports(JsonSerializer.Deserialize<JsonElement>(identity))
+        return PublishedImports(JsonSerializer.Deserialize<JsonElement>(identity))
             .Select(import => import with
             {
                 acceptedVia = "independently-verified",
                 sourceBundleDigest = libraries[import.slot].BundleDigest,
                 deploymentObligation = FullDeploymentObligation
             }).ToArray();
-        return new(FullCompositionTheorem, audit, imported);
     }
 
     // Pins every binding's sidecar and implementation in original and its bundle identity in bundles.
@@ -464,7 +469,7 @@ partial class Program
         string framework = Within(consumer, ".lake/packages/leancil");
         foreach (string path in FrameworkBundleSources())
         {
-            string relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
+            string relative = PortableRelativePath(Root, path);
             string source = Within(bundle, "framework/" + relative);
             if (File.ReadAllBytes(source).AsSpan().SequenceEqual(File.ReadAllBytes(path)) is false)
                 throw new InvalidDataException(
@@ -474,7 +479,7 @@ partial class Program
             File.Copy(source, target);
         }
         string[] modules = Directory.EnumerateFiles(consumer, "*.lean", SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(consumer, path).Replace('\\', '/'))
+            .Select(path => PortableRelativePath(consumer, path))
             .Where(path => !path.StartsWith(".lake/", StringComparison.Ordinal))
             .Select(path => path[..^5].Replace('/', '.')).Concat(interfaces.Select(module => module.Name))
             .Distinct(StringComparer.Ordinal).ToArray();
@@ -511,9 +516,9 @@ partial class Program
     {
         string toolchainLibrary = Path.Combine(Toolchain, "lib/lean");
         string[] shared = Directory.EnumerateFiles(toolchainLibrary, "*.olean", SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(toolchainLibrary, path).Replace('\\', '/')[..^6].Replace('/', '.'))
+            .Select(path => PortableRelativePath(toolchainLibrary, path)[..^".olean".Length].Replace('/', '.'))
             .Concat(Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
-                .Select(path => Path.GetRelativePath(Root, path).Replace('\\', '/')[..^5].Replace('/', '.')))
+                .Select(path => PortableRelativePath(Root, path)[..^".lean".Length].Replace('/', '.')))
             .Concat(["CIL"]).Concat(interfaces.Select(module => module.Name))
             .Distinct(StringComparer.Ordinal).ToArray();
         string captured = Path.Combine(session, destination + ".transfer");
@@ -553,8 +558,7 @@ run_cmd do
 
     static bool IsOleanFile(string path) => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal);
 
-    static string RelativeModuleName(string root, string path) =>
-        ModuleName(Path.GetRelativePath(root, path).Replace('\\', '/'));
+    static string RelativeModuleName(string root, string path) => ModuleName(PortableRelativePath(root, path));
 
     static SortedDictionary<string, string> FullArtifacts(string leanPath)
     {
@@ -689,7 +693,7 @@ run_cmd do
         {
             string index = library.Slot.ToString(System.Globalization.CultureInfo.InvariantCulture);
             string program = library.ExpectedModule + ".Extracted.program";
-            string holds = "_root_.CIL.Safety." + ContractNamespace(library.Kind) + ".Holds _root_." + library.Contract;
+            string holds = HoldsTerm(library.Kind, library.Contract);
             source.AppendLine("theorem programIdentity" + index + " : " + library.Module + ".Extracted.program = " +
                 program + " := rfl");
             source.AppendLine("theorem extraction" + index + " : CIL.Extraction.TranslationValid " +

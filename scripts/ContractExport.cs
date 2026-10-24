@@ -21,7 +21,16 @@ partial class Program
     const string TargetFrameworkAttribute = "System.Runtime.Versioning.TargetFrameworkAttribute";
     const string ConsumerKey = "consumer:";
 
+    // Files of an extraction artifact that an export pins and bundles.
+    static readonly string[] ExportArtifactFiles = ["identity.json", "verification.json", "Extracted.lean"];
+
     static string ContractNamespace(string kind) => kind == "method" ? "MethodContract" : "OutcomeContract";
+
+    // The Lean term `Holds contract` of a method or outcome contract, applied to no program yet.
+    static string HoldsTerm(string kind, string contract) =>
+        "_root_.CIL.Safety." + ContractNamespace(kind) + ".Holds _root_." + contract;
+
+    static string PortableRelativePath(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 
     internal static void ExportContracts(string[] args)
     {
@@ -219,7 +228,7 @@ partial class Program
 
         foreach (ContractExportRequest export in manifest.Exports)
         {
-            foreach (string file in new[] { "identity.json", "verification.json", "Extracted.lean" })
+            foreach (string file in ExportArtifactFiles)
                 inputs["artifact:" + Path.Combine(export.Artifact, file)] = Sha(Path.Combine(export.Artifact, file));
             string identity = Path.Combine(export.Artifact, "identity.json");
             JsonElement extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(identity));
@@ -373,7 +382,7 @@ partial class Program
 
     static string ExportAuditSource(PreparedContractExport export, string kind)
     {
-        string holds = "_root_.CIL.Safety." + ContractNamespace(kind) + ".Holds _root_." + export.Request.Contract;
+        string holds = HoldsTerm(kind, export.Request.Contract);
         string statement = export.Conditional
             ? "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold " +
                 "(fun linked => " + holds + " linked 0)"
@@ -405,7 +414,7 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         string baseBuild = Path.Combine(certified, ".lake", "build");
         foreach (string path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
         {
-            string relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
+            string relative = PortableRelativePath(baseBuild, path);
             if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
                 .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
             string target = Path.Combine(isolated, ".lake", "build", relative);
@@ -522,7 +531,7 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         foreach (string key in snapshot.Keys.Where(key => key.StartsWith(ConsumerKey, StringComparison.Ordinal)))
         {
             string path = key[ConsumerKey.Length..];
-            string relative = Path.GetRelativePath(manifest.ProofRoot, path).Replace('\\', '/');
+            string relative = PortableRelativePath(manifest.ProofRoot, path);
             // The framework package duplicates framework/, which the bundle already pins.
             if (relative.StartsWith(".lake/packages/leancil/", StringComparison.Ordinal)) continue;
             sources["consumer/" + relative] = path;
@@ -536,7 +545,7 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         }
         foreach (string path in FrameworkBundleSources())
         {
-            string entry = "framework/" + Path.GetRelativePath(Root, path).Replace('\\', '/');
+            string entry = "framework/" + PortableRelativePath(Root, path);
             sources[entry] = path;
             expected[entry] = snapshot["framework:" + path];
         }
@@ -544,7 +553,7 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         {
             CheckedContractExport result = verified[index];
             string prefix = "exports/" + index + "/";
-            foreach (string file in new[] { "Extracted.lean", "identity.json", "verification.json" })
+            foreach (string file in ExportArtifactFiles)
             {
                 sources[prefix + file] = Path.Combine(result.Export.Request.Artifact, file);
                 expected[prefix + file] = snapshot["artifact:" + Path.Combine(result.Export.Request.Artifact, file)];
@@ -563,7 +572,7 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         {
             result.Export.Identity, result.Export.Profile,
             result.Export.Request.Contract, result.Export.Request.Theorem,
-            proofPath = Path.GetRelativePath(manifest.ProofRoot, result.Export.Proof).Replace('\\', '/'),
+            proofPath = PortableRelativePath(manifest.ProofRoot, result.Export.Proof),
             result.Closure.Digest, result.StatementDigest, result.Statement
         }).ToArray(), ContractExportManifest.Json);
         string framework = ContractInterface.CurrentFrameworkKey();
