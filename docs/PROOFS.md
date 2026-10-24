@@ -45,8 +45,9 @@ and the stated result as a proof goal. It closes that equation automatically
 only when `with_reducible rfl` succeeds after frame cleanup, list normalization
 and literal shift-count reduction. Cleanup also drops the narrowing of an
 `if p then 1 else 0` result, so a narrow Boolean return needs no unfolding of
-`NarrowKind.extend`; other mathematical results can need a separate `simp` or
-case split. The remaining goal contains the returned values, rather than an
+`NarrowKind.extend`. A follow-up `simp [leaveFrame, NarrowKind.extend]; split <;> rfl`
+after such a return now fails with "no goals" and must be deleted. Other
+mathematical results can need a separate `simp` or case split. The remaining goal contains the returned values, rather than an
 unexecuted `run`. `cil_contract_steps` likewise leaves the return postcondition
 as a goal.
 
@@ -54,7 +55,10 @@ A run-to-run goal `run p (fuel + n) m 0 .. = run p fuel m n ..` closes with
 `cil_checked_steps` when the stepped state is syntactically the target: symbolic
 `fuel` stops stepping there. With literal fuel and a target equal only up to
 rewriting, `cil_checked_steps n [facts]` takes exactly `n` steps and leaves the
-residual `run` equation.
+residual `run` equation. A call counts as one step: the callee runs to its
+return and the residual starts at the caller's next instruction.
+`MemoryBelow.frame_round_trip` carries caller memory across `enterFrame` and
+`leaveFrame` when the callee body keeps it.
 
 The single-step helper, `cil_checked_step [facts]`, selects its closing strategy
 from the opcode. Pure scalar operations try `rfl` even when facts are supplied.
@@ -268,8 +272,19 @@ bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
 holds, over the checked memory model. `Contents m base width xs` says element `i`
 of `xs : List (BitVec (8 * width))` reads back at `base.element width i` (offset
 `base.offset + width * i`, same allocation) as `numberBytes x.toNat width`, with
-the byte alignment scalar loads and stores use; `Contents.load_word` turns an
-8-byte element into the `loadValue` result. Contents grant no write authority:
+the byte alignment scalar loads and stores use. `Contents.load` (from
+`load_scalar_of_read`) turns an element at any `ScalarWidth` (1, 2, 4, 8, 16, 32
+or 64 bytes) into the `loadValue` result `numericOfWidth width x.toNat`: widths 1
+to 4 zero-extend to `.i32`, 16 and up are vectors, and width 8 yields
+`.i64 (BitVec.ofNat 64 x.toNat)`, so `Contents.load_word` (`load_word64_of_read`)
+stays the direct route to `.i64 x`. `byteNumber_elementBytes` decodes a whole
+buffer as the sum of its elements, element `i` scaled by `256 ^ (width * i)`, and
+`byteNumber_elementBytes_lt` bounds it by `256 ^ (width * xs.length)`. Rewriting
+with it at a literal width such as 8 makes the kernel unfold the powers and can
+hit deep recursion; prove the sum at symbolic width and instantiate, as
+`byteNumber_elementBytes_four` does for four limbs (instantiate, then
+`simp only [Nat.reduceMul, Nat.reducePow] at h`), or peel one limb at a time with
+`byteNumber_elementBytes_cons`. Contents grant no write authority:
 `Writable m base width start count` is write authority alone, and
 `Filled m base width xs room` is an initialized prefix followed by `room`
 writable elements that need not be readable. An empty `Contents` asserts
