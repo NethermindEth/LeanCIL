@@ -699,4 +699,92 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 /-- info: 'Tests.Automation.add_run' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms add_run
 
+/-- A supplied step fact is used before the op's own equation, which here cannot read the frame's slot. -/
+def slotBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := [.setLocal 0, .local 0, .ret] }
+
+open CIL.Safety in
+theorem step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (slotBody profile)) (args : List Value) (frame stored : Frame)
+    (memory written : Memory) (value : CIL.W32)
+    (store : step (slotBody profile) (.setLocal 0) 0 args frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written))
+    (load : ∀ stack, step (slotBody profile) (.local 0) 1 args stored stack written =
+      .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
+    run program 3 index 0 args frame [.scalar (.i32 value)] memory =
+      .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
+  cil_checked_steps [store, load]
+
+/-- info: 'Tests.Automation.step_facts_first' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms step_facts_first
+
+@[cil_code] def nonzeroMethod : CIL.Method := {
+  code := [.arg 0, .brnonzero 4, .arg 1, .ret, .arg 0, .ret]
+  locals := [], returnsValue := true }
+
+-- A branch pc is decided from the condition's own fact, not only from a `CIL.truth` restatement.
+theorem branch_from_nonzero (memory : CIL.Safety.Memory) (condition value : CIL.W32) (nonzero : ¬ condition = 0) :
+    CIL.Safety.invoke branchProgram (CIL.executionBound branchProgram 0) 0
+      [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps [nonzero]
+
+theorem nonzero_branch_from_nonzero (memory : CIL.Safety.Memory) (condition value : CIL.W32)
+    (nonzero : ¬ condition = 0) :
+    CIL.Safety.invoke [nonzeroMethod] 9 0
+      [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 condition)]) := by
+  cil_checked_steps [nonzero]
+
+#print axioms branch_from_nonzero
+#print axioms nonzero_branch_from_nonzero
+
+/-- A body whose instructions, not its code list, depend on a feature. -/
+def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [],
+    code := [if profile.avx2 then .arg 1 else .arg 0, .fieldAt 0 8, .ret] }
+
+-- The lookup decides the feature test, so the fetched op is a constructor with a step equation.
+example (profile : CIL.FeatureProfile) (scalar : profile.avx2 = false) :
+    ∃ op, (featureOpBody profile).code[0]? = some op ∧ op = .arg 0 := by
+  refine ⟨?op, ?found, ?decided⟩
+  case found => cil_lookup [scalar]
+  case decided => with_reducible rfl
+
+open CIL.Safety in
+theorem feature_op_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (scalar : profile.avx2 = false) (found : program[index]? = some (featureOpBody profile))
+    (frame : Frame) (memory : Memory) (left right : Reference) (limb : BitVec 64)
+    (formed : form memory left = .ok left)
+    (field : ∀ rest, instruction (.fieldAt 0 8) (.reference (.address left) :: rest) memory =
+      .ok (memory, .scalar (.i64 limb) :: rest)) :
+    run program 4 index 0 [.reference (.address left), .reference (.address right)] frame [] memory =
+      .ok (leaveFrame frame memory, [.scalar (.i64 limb)]) := by
+  cil_checked_steps [scalar, formed, field]
+
+/-- info: 'Tests.Automation.feature_op_checked' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_op_checked
+
+def reverseLanes (v : CIL.Vector.V256) : CIL.Vector.V256 := CIL.Vector.permute4x64 v 27
+
+-- Stated with a literal control, as a consumer writes it; the operand arrives as `BitVec.ofNat 32 27`.
+theorem eval_reverse_lanes (v : CIL.Vector.V256) :
+    CIL.evalIntrinsic (.avx2 .permute4x64) [.v256 v, .i32 27] = some (.v256 (reverseLanes v)) := rfl
+
+@[cil_code] def reverseStoreMethod : CIL.Method := {
+  profile := { architecture := .x64, avx2 := true }
+  code := [.arg 1, .arg 0, .const32 (BitVec.ofInt 32 27), .intrinsic (.avx2 .permute4x64) 2, .memory .store256, .ret]
+  locals := [], returnsValue := false }
+
+-- The pushed value is the evaluation fact's, so the store fact on `reverseLanes v` applies next.
+open CIL.Safety in
+theorem evaluated_then_stored (v : CIL.Vector.V256) (destination : Reference) (frame : Frame) (memory final : Memory)
+    (formed : form memory destination = .ok destination)
+    (stored : ∀ rest, memoryInstruction .store256
+      (.scalar (.v256 (reverseLanes v)) :: .reference (.address destination) :: rest) memory = .ok (final, rest)) :
+    run [reverseStoreMethod] 7 0 0 [.scalar (.v256 v), .reference (.address destination)] frame [] memory =
+      .ok (leaveFrame frame final, []) := by
+  cil_checked_steps [staticInstruction, stored, eval_reverse_lanes, checkedValue, formValue, checkedAt,
+    Except.mapError, formed]
+
+#print axioms evaluated_then_stored
+
 end Tests.Automation
