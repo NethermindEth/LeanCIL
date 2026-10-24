@@ -7,7 +7,7 @@ import CIL.Safety.SymbolicExecution
 Segment theorems stated over an abstract body with `CodeAt` instead of
 `body.code = leading ++ segment ++ tail`: the checked stepping tactics take the lookups that
 `CodeAt.lookup` derives, placements of a larger region split into the segments a proof steps,
-and a concrete extracted body discharges the placement by `decide +kernel`.
+and a concrete body discharges the placement by `decide +kernel`.
 -/
 
 namespace Tests.CodeAt
@@ -17,8 +17,9 @@ open CIL.Safety
 /-- The segment `left + right` over the first two arguments. -/
 def sumSegment : List CIL.Op := [.arg 0, .arg 1, .add]
 
--- The only facts about `body` are its lookup in the program and the segment's placement, at
--- a start the proof never fixes.
+/-- Placing `sumSegment` at any `start` of a body is enough to run it: from `start` the run
+    reaches `start + 3` with the sum pushed. The only facts about the body are its lookup in
+    the program and the placement. -/
 theorem run_sum_segment {program : CIL.Program} {method fuel start : Nat} {body : CIL.Method}
     (found : program[method]? = some body) (placed : CodeAt body start sumSegment)
     (memory : Memory) (frame : Frame) (left right : CIL.W64) :
@@ -35,7 +36,8 @@ theorem run_sum_segment {program : CIL.Program} {method fuel start : Nat} {body 
 
 #print axioms run_sum_segment
 
--- A caller that places a larger region hands the segment theorem the part it steps.
+/-- A placed region containing `sumSegment` runs it, through the segment theorem applied to
+    the region's middle placement. -/
 theorem run_sum_in_region {program : CIL.Program} {method fuel : Nat} {body : CIL.Method}
     (found : program[method]? = some body)
     (placed : CodeAt body 2 ([.nop, .nop] ++ sumSegment ++ [.ret]))
@@ -48,6 +50,7 @@ theorem run_sum_in_region {program : CIL.Program} {method fuel : Nat} {body : CI
 
 #print axioms run_sum_in_region
 
+/-- A concrete body holding `sumSegment` at pc 4. -/
 @[cil_code] def placedMethod : CIL.Method := {
   code := [.nop, .nop, .nop, .nop, .arg 0, .arg 1, .add, .ret]
   locals := [], returnsValue := true }
@@ -56,7 +59,7 @@ theorem run_sum_in_region {program : CIL.Program} {method fuel : Nat} {body : CI
 example : CodeAt placedMethod 4 sumSegment := by decide +kernel
 example : ¬ CodeAt placedMethod 3 sumSegment := by decide +kernel
 
--- The segment theorem instantiates at an extracted program once its placement is decided.
+/-- The segment theorem instantiates at a concrete program once its placement is decided. -/
 theorem run_placed_method (memory : Memory) (frame : Frame) (left right : CIL.W64) :
     run [placedMethod] 5 0 4 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
       run [placedMethod] 2 0 7 [.scalar (.i64 left), .scalar (.i64 right)] frame
