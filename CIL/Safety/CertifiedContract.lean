@@ -6,8 +6,9 @@ import CIL.Safety.MethodContract
 `MethodContract.Certified` strengthens `MethodContract.Holds` with the
 `InvocationCertificate` of the returning invocation, so a consumer keeps the visited-state
 and returned-state invariants alongside the contract. `Holds.certified` derives it from a
-proved contract whose precondition implies well-formed memory and a valid static world;
-`Certified.holds` and `Certified.weaken` return to the ordinary contract API.
+proved contract whose precondition implies well-formed memory and a valid static world.
+`Certified.holds` recovers the ordinary `Holds`, and `Certified.weaken` derives a certified
+contract from a certified one it refines.
 -/
 
 namespace CIL.Safety

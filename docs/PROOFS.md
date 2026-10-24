@@ -314,8 +314,8 @@ A contract whose precondition implies well-formed memory and a valid static
 world can also keep the `InvocationCertificate` of each call:
 `MethodContract.Holds.certified` turns `Holds` into `MethodContract.Certified`,
 whose clause adds the certificate with its visited-state and returned-state
-invariants; `Certified.holds` and `Certified.weaken` return to `Holds` and
-refinement. `InvocationCertificate.of_invoke` certifies any successful `invoke`
+invariants; `Certified.holds` recovers `Holds`, and `Certified.weaken` keeps the
+certificate through a `Refines`. `InvocationCertificate.of_invoke` certifies any successful `invoke`
 from those two premises, and `InvocationCertificate.of_run` certifies a run of
 the frame that checked arguments enter. `Tests/InvocationCertificates.lean`
 uses each of them.
