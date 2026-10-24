@@ -525,6 +525,16 @@ macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
 
+open Lean Elab Tactic Meta in
+/-- Fails on a `step` goal whose op reduces to `ret`, which only `run_return_exists` takes.
+    Compiled once here: an inline `run_tac` block is elaborated again at every step. -/
+elab "cil_step_not_return" : tactic => withMainContext do
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
+  let some (_, lhs, _) := target.eq? | return
+  unless lhs.isAppOfArity ``CIL.Safety.step 7 do return
+  if (← cilReducedOp? lhs.getAppArgs[1]!).any (·.isAppOf ``CIL.Op.ret) then
+    throwError "Return requires run_return_exists"
+
 /-- One step of a contract goal: a non-return instruction through `run_next_exists`, or a
     `ret` through `run_return_exists`, leaving the postcondition. Fails at a call. -/
 macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
@@ -533,11 +543,7 @@ macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
         (by
-          run_tac do
-            let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
-            let operation := (target.getArg! 1).getArg! 1
-            if (← CIL.Safety.cilReducedOp? operation).any (·.isAppOf ``CIL.Op.ret) then
-              throwError "Return requires run_return_exists"
+          cil_step_not_return
           cil_checked_step_normalized [$[$facts:term],*]) ?_
        cil_stack_cleanup)
     | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)

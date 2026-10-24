@@ -251,13 +251,14 @@ example {program : CIL.Program} {before after : Memory} (kept : FrameInvariants 
   ⟨kept.formed, kept.staticWorld world⟩
 
 -- A loaded local reaches the stack as `localResult kind value`; its consumer must still rewrite by its
--- step equation. The fallback unfolds `CIL.step`, whose match equations alone exceed this budget.
+-- step equation. The fallback unfolds `CIL.step`, whose match equations alone exceed this budget,
+-- and so did re-elaborating an inline tactic block at every contract step.
 def loadedGuardBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := false, locals := [], code :=
     [.local 0, .const32 4, .bltu 7, .local 0, .const32 0, .bge 7, .nop, .ret,
       .local 1, .local 2, .bltu 7, .ret] }
 
-set_option maxHeartbeats 10000 in
+set_option maxHeartbeats 2000 in
 theorem loaded_unsigned_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
     (word : CIL.W32) (home : Reference) (slot : frame.locals[0]? = some (.bytes .word32 home))
@@ -269,7 +270,7 @@ theorem loaded_unsigned_branch (program : CIL.Program) (index : Nat) (profile : 
       post final returned := by
   cil_contract_steps [slot, load] until continuation
 
-set_option maxHeartbeats 10000 in
+set_option maxHeartbeats 2000 in
 theorem loaded_signed_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
     (word : CIL.W32) (home : Reference) (slot : frame.locals[0]? = some (.bytes .word32 home))
@@ -281,7 +282,7 @@ theorem loaded_signed_branch (program : CIL.Program) (index : Nat) (profile : CI
       post final returned := by
   cil_contract_steps [slot, load] until continuation
 
-set_option maxHeartbeats 10000 in
+set_option maxHeartbeats 2000 in
 theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
     (low high : CIL.W64) (lowHome highHome : Reference)
@@ -297,14 +298,15 @@ theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.
   cil_contract_steps [lowSlot, highSlot, lowLoad, highLoad] until continuation
 
 -- A body that selects its widening by a parameter yields `if true = true then ..` from the lookup;
--- the step must reduce it to the opcode so the widening equation applies.
+-- the step must reduce it to the opcode so the widening equation applies, within a budget that
+-- re-elaborating an inline tactic block at every contract step exceeded.
 def widenBody (signed : Bool) : CIL.Method :=
   { returnsValue := true, locals := [], code := [.arg 0, if signed then .convI8 else .convU8, .arg 1, .ret] }
 
 def widenArgs (scalarFirst : Bool) (input : Reference) (value : CIL.Value) : List Value :=
   if scalarFirst then [.scalar value, .reference (.address input)] else [.reference (.address input), .scalar value]
 
-set_option maxHeartbeats 15000 in
+set_option maxHeartbeats 3500 in
 theorem selected_widening (signed : Bool) (program : CIL.Program) (index : Nat)
     (found : program[index]? = some (widenBody signed)) (frame : Frame) (memory : Memory)
     (input : Reference) (word : CIL.W32) (formed : form memory input = .ok input)
