@@ -171,10 +171,16 @@ of uninitialized, past-end, overlapping, unjoined and stale contents.
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
 naming `CIL.step.eq_def` elaborates.
 
+`Tests.SimdLanes` checks the SIMD lane lemmas as a multi-limb routine uses them: the
+carry and borrow cascades built from intrinsic comparison masks reproduce 256-bit sums
+and differences for every input, including a carry that crosses an all-ones lane where a
+single repair hop is wrong, and stepped shift, permute, sum and multiply results on packed
+lanes rewrite to their lane values.
+
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
