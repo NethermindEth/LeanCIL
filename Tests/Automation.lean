@@ -735,6 +735,38 @@ theorem applied_step_facts_first (program : CIL.Program) (index : Nat) (profile 
 /-- info: 'Tests.Automation.applied_step_facts_first' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms applied_step_facts_first
 
+/-- An extracted program's lookup unfolds the body to its literal, so a fact on the named body must still match. -/
+@[cil_code] def slotMethod : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.setLocal 0, .local 0, .ret] }
+@[cil_code] def slotProgram : CIL.Program := [slotMethod]
+
+open CIL.Safety in
+theorem named_body_step_facts (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
+    (store : step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written))
+    (load : ∀ stack, step slotMethod (.local 0) 1 [] stored stack written =
+      .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
+    run slotProgram 3 0 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
+  cil_checked_steps [store, load]
+
+/-- info: 'Tests.Automation.named_body_step_facts' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms named_body_step_facts
+
+-- A fact quantified over the body matches the literal directly.
+open CIL.Safety in
+theorem quantified_body_step_facts (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
+    (store : ∀ body pc args, step body (.setLocal 0) pc args frame [.scalar (.i32 value)] memory =
+      .ok (.next (pc + 1) [] stored written))
+    (load : ∀ body pc args stack, step body (.local 0) pc args stored stack written =
+      .ok (.next (pc + 1) (.scalar (.i32 value) :: stack) stored written)) :
+    run slotProgram 3 0 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
+  cil_checked_steps [store, load]
+
+/-- info: 'Tests.Automation.quantified_body_step_facts' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms quantified_body_step_facts
+
 @[cil_code] def nonzeroMethod : CIL.Method := {
   code := [.arg 0, .brnonzero 4, .arg 1, .ret, .arg 0, .ret]
   locals := [], returnsValue := true }

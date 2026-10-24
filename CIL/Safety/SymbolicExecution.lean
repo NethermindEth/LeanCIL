@@ -341,15 +341,41 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
   facts.filterM (suppliedFactSatisfies · states)
 
 open Lean Elab Tactic Meta in
+/-- Close the goal with `fact` after unfolding the `@[cil_code]` definitions in its type, for a goal whose
+    lookup already replaced a named body by its literal. Fails when the type has no such definition. -/
+def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray) (fact : Term) :
+    TacticM Unit := withMainContext do
+  let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm fact none
+  let type ← instantiateMVars (← inferType proof)
+  let (result, _) ← simp type unfold simprocs
+  if result.expr == type then throwError "The step fact names no cil_code definition"
+  let proof ← match result.proof? with
+    | some eq => mkEqMP eq proof
+    | none => mkExpectedTypeHint proof result.expr
+  let goals ← withTransparency .instances <| (← getMainGoal).apply proof
+  unless goals.isEmpty do throwError "The step fact left goals"
+  replaceMainGoal []
+
+open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
-    -- Before `cil_code` unfolds the body, so a fact stated on the named body still matches.
-    for fact in ← stepFacts (← getMainTarget) facts.getElems do
+    -- A body reached through a lookup hypothesis stays named; one reached by unfolding a `cil_code` program
+    -- is already a literal, so a fact on the named body needs its own `cil_code` unfolded to match it.
+    let candidates ← stepFacts (← getMainTarget) facts.getElems
+    for fact in candidates do
       let saved ← saveState
       try
         evalTactic (← `(tactic| cil_strict ((with_reducible_and_instances apply $fact); done)))
         return
       catch _ => saved.restore
+    if !candidates.isEmpty then
+      let { ctx, simprocs, .. } ← mkSimpContext (← `(tactic| simp only [cil_code])) (eraseLocal := false)
+      for fact in candidates do
+        let saved ← saveState
+        try
+          applyUnfoldedStepFact ctx simprocs fact
+          return
+        catch _ => saved.restore
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
     if (← getGoals).isEmpty then return
     -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.

@@ -67,8 +67,10 @@ The single-step helper, `cil_checked_step [facts]`, first tries each supplied
 step fact for the fetched opcode: a fact whose conclusion is
 `step body op pc args frame stack memory = result`, given as a hypothesis, a
 lemma, or an applied term such as `store value`. It is applied at
-reducible-and-instances transparency before the body's `@[cil_code]` definition
-unfolds, so a fact stated on the named body matches. Otherwise the helper selects
+reducible-and-instances transparency, then retried with the `@[cil_code]`
+definitions in its type unfolded, so a fact stated on the named body matches both
+a body reached through a lookup hypothesis and the literal body that an extracted
+program's lookup produces. Otherwise the helper selects
 its closing strategy from the opcode. Pure scalar operations try `rfl` even when
 facts are supplied. Memory operations, local operations, instruction-dispatcher
 arms and branches use `cil_step` equations and the supplied facts. This keeps
