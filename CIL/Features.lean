@@ -99,7 +99,13 @@ def FeatureProfile.Valid (p : FeatureProfile) : Prop :=
   (p.avx512DQ = true → p.avx512F = true) ∧
   (p.avx512DQVL = true → p.avx512DQ = true ∧ p.avx512FVL = true) ∧
   (p.armBase64 = true → p.architecture = .arm64) ∧
-  (p.advSimd = true → p.armBase64 = true)
+  (p.advSimd = true → p.armBase64 = true) ∧
+  -- .NET 10 CoreCLR runtime groups; see docs/RUNTIME-PROFILES.md.
+  p.sse2 = p.x86Base64 ∧ p.ssse3 = p.sse41 ∧ p.sse41 = p.sse42 ∧
+  p.avx2 = p.bmi1 ∧ p.avx2 = p.bmi2 ∧
+  p.avx512F = p.avx512FVL ∧ p.avx512F = p.avx512DQ ∧ p.avx512F = p.avx512DQVL ∧
+  p.advSimd = p.armBase64 ∧ p.vector128Accelerated = (p.sse2 || p.advSimd) ∧
+  (p.vector256Accelerated = true → p.avx2 = true)
 
 instance (p : FeatureProfile) : Decidable p.Valid := inferInstanceAs (Decidable (_ ∧ _))
 
