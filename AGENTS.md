@@ -27,9 +27,9 @@ Write for the next reader; [Semantics.lean](./CIL/Semantics.lean) is the model.
   name long conditions as locals or helpers.
 - Comments are one or two lines stating an invariant or failure mode, not the mechanism. No plan
   vocabulary (phases, gates, option labels) in code, comments or PR text.
-- Do not rewrite a definition's terms or a theorem statement to tidy it. Generated step equations
-  and the goals consumers see after stepping are built from those exact terms; propose the change
-  as its own PR instead.
+- Shape new definitions and statements well in the PR that introduces them. Once they are on
+  `main`, do not change their terms only to tidy them: generated step equations and the goals
+  consumers see after stepping are built from those exact terms, so such a change is its own PR.
 
 ## Proofs and tests
 
