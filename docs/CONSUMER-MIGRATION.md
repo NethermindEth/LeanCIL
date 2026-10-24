@@ -51,7 +51,7 @@ is part of this migration.
 ## Checked method boundaries
 
 `step_newAggregate`, `step_newVector256` and `run_newAggregate_of_contract`
-also require `arguments.any Value.hasUnspecified = false`. Prove this from the
+also require `arguments.any Value.hasUnspecified = false`, with an automatic proof for concrete arguments. For abstract arguments, prove this from the
 actual argument encodings. The `checkedValue` and `numericValue` premises alone
 allow partially specified internal vectors and therefore cannot justify it.
 Generic consumer forwarding lemmas must carry the corresponding known-argument
@@ -61,3 +61,17 @@ The caller's arithmetic and memory contracts do not need to change.
 The runtime-profile migration is separate: see [RUNTIME-PROFILES](RUNTIME-PROFILES.md).
 Changing a feature profile can change the selected code and requires fresh
 compiled-method certificates even when the supporting library builds.
+
+## Consumer CI coverage
+
+The pinned int256 workflow builds its full supporting Lean library and certifies
+four selected gates: Add/ARM64 AdvSimd, Subtract/x64 SSE4.2, Multiply/scalar and
+LeUInt256UInt256/scalar. This covers SIMD byte homes, embedding and comparison,
+not all 256 registered gates. 161 gates still need runtime-profile migration.
+Failures show red; keep this advisory check out of required branch-protection
+checks. The summary records elapsed library update/build time and the baseline
+revision, runner and run ID. Hosted-runner timings vary, so this is diagnostic
+rather than a performance threshold.
+
+The immutable consumer pin currently names the unmerged int256#154 head. Advance
+it to the merged revision after that PR lands.

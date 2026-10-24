@@ -31,6 +31,8 @@ import Examples.Support
 namespace ExampleProof
 theorem byte_homes : Extracted.method0.opaqueVectorLocals = [] := rfl
 #print axioms byte_homes
+theorem eligible_local : CIL.Extraction.opaqueLocalIndices Extracted.method0Closed = [{{local}}] := by decide +kernel
+#print axioms eligible_local
 theorem forged_opaque_rejected : ¬ CIL.Extraction.OpaqueLocalsValid Extracted.method0Closed
     { Extracted.method0 with opaqueVectorLocals := [{{local}}] } := by decide +kernel
 #print axioms forged_opaque_rejected
@@ -42,6 +44,23 @@ end ExampleProof
 """);
     verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: "x64-sse42");
     Console.WriteLine("PASS byte-home compatibility and forged opaque rejection: " + name);
+    if (name == "PrunedUnsafeLocal")
+    {
+        var reachableOutput = Path.Combine(root, name + "-reachable");
+        Directory.CreateDirectory(reachableOutput);
+        var reachableProof = Path.Combine(reachableOutput, "Proof.lean");
+        File.WriteAllText(reachableProof, $$"""
+import Extracted
+namespace ExampleProof
+theorem eligible_local : CIL.Extraction.opaqueLocalIndices Extracted.method0Closed = [{{local}}] := by decide +kernel
+#print axioms eligible_local
+theorem correctness : Extracted.method0.opaqueVectorLocals = [{{local}}] := rfl
+#print axioms correctness
+end ExampleProof
+""");
+        verification.Verify(assembly, "Examples", selectors[name], reachableProof, reachableOutput, profile: "x64-v3");
+        Console.WriteLine("PASS reachable unsafe intrinsic selects the eligible opaque local");
+    }
 }
 
 // Check the boundary fault on actual extracted CIL, including an otherwise valid writable destination.

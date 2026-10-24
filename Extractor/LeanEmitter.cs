@@ -105,12 +105,13 @@ internal static class LeanEmitter
             HashSet<int> addressedLocals = m.Body.Instructions
                 .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
-            var needsOpaqueLocals = reachable.Any(instruction => instruction.OpCode.Code == Code.Call &&
-                instruction.Operand is MethodReference reference &&
-                reference.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)");
-            string opaqueLocals = string.Join(", ", m.Body.Variables
+            List<string> ops = [];
+            foreach (Instruction i in m.Body.Instructions)
+                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices, importResolution) : ".unsupported \"Unreachable under selected profile\"");
+            var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
+            string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
-                    needsOpaqueLocals && !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index));
+                    !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index)) : "";
             string kinds = string.Join(", ", m.Body.Variables.Select(v => Kind(v.VariableType, m.Module, profile.Architecture)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
@@ -134,9 +135,6 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
             lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], parameterHomes := [{parameters}], staticSites := [{sites}], code := [");
-            List<string> ops = [];
-            foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices, importResolution) : ".unsupported \"Unreachable under selected profile\"");
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
