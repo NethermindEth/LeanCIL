@@ -20,9 +20,9 @@ partial class Program
     string ConsumerToolchainIdentity()
     {
         var directory = Path.Combine(Toolchain, "lib", "lean");
-        var files = new SortedDictionary<string, string>(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+        var files = HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-            .ToDictionary(path => Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha), StringComparer.Ordinal);
+            .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
         return ContentKey(JsonSerializer.Serialize(files));
     }
 

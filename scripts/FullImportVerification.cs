@@ -609,8 +609,7 @@ run_cmd do
     }
 
     static SortedDictionary<string, string> FullModuleArtifacts(string leanPath) =>
-        new(FullModuleArtifactPaths(leanPath).Distinct(StringComparer.Ordinal).ToDictionary(path => path, Sha),
-            StringComparer.Ordinal);
+        HashFiles(FullModuleArtifactPaths(leanPath).Distinct(StringComparer.Ordinal).Select(path => (path, path)));
 
     static void RequireFullModuleArtifactSet(string leanPath, SortedDictionary<string, string> expected)
     {

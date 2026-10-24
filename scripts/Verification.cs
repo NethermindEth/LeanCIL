@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -262,9 +263,34 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     }
 
     static SortedDictionary<string, string> ModuleArtifacts(string session) =>
-        new(Directory.EnumerateFiles(Path.Combine(session, ".lake/build/lib/lean"), "*", SearchOption.AllDirectories)
+        HashFiles(Directory.EnumerateFiles(Path.Combine(session, ".lake/build/lib/lean"), "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-            .ToDictionary(path => Path.GetRelativePath(Path.Combine(session, ".lake/build/lib/lean"), path).Replace('\\', '/'), Sha), StringComparer.Ordinal);
+            .Select(path => (Path.GetRelativePath(Path.Combine(session, ".lake/build/lib/lean"), path)
+                .Replace('\\', '/'), path)));
+
+    // Publish a deterministic manifest only after every file has been hashed successfully.
+    static SortedDictionary<string, string> HashFiles(IEnumerable<(string Name, string Path)> files)
+    {
+        var entries = files.ToArray();
+        var hashes = new string[entries.Length];
+        var failures = new ExceptionDispatchInfo?[entries.Length];
+        const int maximumWorkers = 4;
+        Parallel.For(0, entries.Length,
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Min(maximumWorkers, Environment.ProcessorCount) },
+            index =>
+            {
+                try { hashes[index] = Sha(entries[index].Path); }
+                catch (Exception error) { failures[index] = ExceptionDispatchInfo.Capture(error); }
+            });
+        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        for (var index = 0; index < entries.Length; index++)
+        {
+            // Preserve ordinary I/O exceptions so invalid-cache handling still applies.
+            failures[index]?.Throw();
+            result.Add(entries[index].Name, hashes[index]);
+        }
+        return result;
+    }
 
     static string ModuleName(string artifact) => artifact.Split(".olean", 2)[0].Replace('/', '.');
 
@@ -512,9 +538,9 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             p.Key is "CIL.lean" or "lakefile.toml" or "lake-manifest.json" or "lean-toolchain").ToDictionary(), StringComparer.Ordinal);
 
     static SortedDictionary<string, string> CacheFiles(string directory) =>
-        new(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+        HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path) is not ("cache-manifest.json" or "cache-receipt.hmac"))
-            .ToDictionary(path => Path.GetRelativePath(directory, path).Replace('\\', '/'), Sha), StringComparer.Ordinal);
+            .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
 
     static bool ValidCache(string directory)
     {
@@ -1118,11 +1144,11 @@ unsafe def main (args : List String) : IO Unit := do
     {
         if (modules.Length == 0) return new(StringComparer.Ordinal);
         HashSet<string> names = new(modules, StringComparer.Ordinal);
-        SortedDictionary<string, string> artifacts = new(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+        var artifacts = HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
             .Select(path => (Relative: Path.GetRelativePath(directory, path).Replace('\\', '/'), Path: path))
             .Where(artifact => names.Contains(ModuleName(artifact.Relative)))
-            .ToDictionary(artifact => artifact.Relative, artifact => Sha(artifact.Path)), StringComparer.Ordinal);
+            .Select(artifact => (artifact.Relative, artifact.Path)));
         foreach (string module in modules)
             if (!artifacts.ContainsKey(module.Replace('.', '/') + ".olean"))
                 throw new InvalidDataException("Published contract interface artifact is missing: " + module);
