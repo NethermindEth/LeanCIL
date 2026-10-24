@@ -43,6 +43,16 @@ info: Tests.InstructionEquations.dispatchBody_instruction4 (sse42 avx2 : Bool) (
 /-- info: 'Tests.InstructionEquations.dispatchBody_instruction4' depends on axioms: [propext] -/
 #guard_msgs in #print axioms dispatchBody_instruction4
 
+-- Every pc of the eight-instruction body has its equation, using only the axioms of the
+-- list lookup itself.
+open Lean in
+run_cmd do
+  for pc in [0:8] do
+    let name := Name.appendAfter `Tests.InstructionEquations.dispatchBody s!"_instruction{pc}"
+    unless (← getEnv).contains name do throwError "missing {name}"
+    let axioms ← collectAxioms name
+    unless axioms.all (· == ``propext) do throwError "{name} depends on {axioms}"
+
 -- One equation per pc and no more: pc 7 is the last instruction.
 example : ∀ sse42 avx2 callee, (dispatchBody sse42 avx2 callee).code[7]? =
     some (if avx2 then unreachable else .ret) := dispatchBody_instruction7
@@ -100,6 +110,31 @@ example (memory : CIL.Safety.Memory) (left right : CIL.W32) :
       [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 right)]) :=
   scalar_returns _ 0 0 true rfl memory left right
+
+/-- A body composed from a padding block and a helper list, as transcriptions are written. -/
+def composedBody (avx2 : Bool) : CIL.Method :=
+  { returnsValue := false, locals := [],
+    code := List.replicate 2 unreachable ++ tailCode avx2 }
+where
+  /-- The instructions after the padding. -/
+  tailCode (avx2 : Bool) : List CIL.Op := [if avx2 then .nop else unreachable, .ret]
+
+cil_instruction_equations composedBody
+
+example (avx2 : Bool) :
+    (composedBody avx2).code[2]? = some (if avx2 then .nop else unreachable) :=
+  composedBody_instruction2 avx2
+example (avx2 : Bool) : (composedBody avx2).code[3]? = some .ret :=
+  composedBody_instruction3 avx2
+/-- error: Unknown identifier `composedBody_instruction4` -/
+#guard_msgs in #check composedBody_instruction4
+
+/-- Not a method, so it has no instructions. -/
+def notMethod (_avx2 : Bool) : Nat := 0
+
+/-- error: cil_instruction_equations: Tests.InstructionEquations.notMethod does not define a
+CIL.Method -/
+#guard_msgs (whitespace := lax) in cil_instruction_equations notMethod
 
 /-- A body whose code length depends on a parameter, which has no per-pc equations. -/
 def lengthDependsBody (avx2 : Bool) : CIL.Method :=

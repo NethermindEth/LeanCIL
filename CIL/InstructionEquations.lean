@@ -69,6 +69,7 @@ elab_rules : command
                 (← mkEq fetched (← mkAppM ``Option.some #[ops[pc]!]))
               value := ← mkLambdaFVars parameters (← mkEqRefl fetched) }
             addDeclarationRangesFromSyntax equationName (← getRef) body
+            addDocStringCore equationName s!"The instruction at pc {pc} of `{name}`."
           declared := declared.push equationName
         return declared
     for name in declared do
