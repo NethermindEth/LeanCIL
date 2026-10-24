@@ -205,14 +205,6 @@ if (Execute([leanchecker, "Unchecked"], fixtures, fixtures, environment: environ
     throw new InvalidOperationException("Kernel replay accepted an unchecked declaration");
 Console.WriteLine("PASS unchecked declarations pass the audit alone, so it runs only after kernel replay");
 
-// A user module cannot replace a toolchain module on the audit's search path.
-Compile("Init", "prelude\n");
-var resolved = verification.AuditOleans(fixtures, ["Init"], []).modules["Init"];
-if (!Path.GetFullPath(resolved).StartsWith(Path.GetFullPath(verification.Toolchain), StringComparison.OrdinalIgnoreCase))
-    throw new InvalidOperationException("User module shadowed the toolchain: " + resolved);
-Console.WriteLine("PASS toolchain modules precede user modules on the audit search path");
-
-
 // Namespace audits count every theorem a listed module declares under a prefix, private ones by their user name.
 AuditedNamespaces Namespaces(string module, params string[] prefixes) =>
     verification.AuditOleans(fixtures, [module], [], namespaces: new(prefixes, ApprovedAxioms)).namespaces!;
@@ -267,3 +259,10 @@ try
 }
 catch (InvalidOperationException error) when (error.Message.Contains("Kernel replay rejected Lib.Core", StringComparison.Ordinal)) { }
 Console.WriteLine("PASS library audits replay the package before auditing, and reject planted axioms");
+
+// A user module cannot replace a toolchain module on the audit's search path.
+Compile("Init", "prelude\n");
+var resolved = verification.AuditOleans(fixtures, ["Init"], []).modules["Init"];
+if (!Path.GetFullPath(resolved).StartsWith(Path.GetFullPath(verification.Toolchain), StringComparison.OrdinalIgnoreCase))
+    throw new InvalidOperationException("User module shadowed the toolchain: " + resolved);
+Console.WriteLine("PASS toolchain modules precede user modules on the audit search path");
