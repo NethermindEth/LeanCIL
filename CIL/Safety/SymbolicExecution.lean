@@ -202,9 +202,15 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
 macro "cil_checked_step_by_unfolding " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        fail_if_success simp only [cil_step]
-       simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
-        CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step, CIL.Safety.formValue,
-        CIL.Safety.checkedAt, Except.mapError, $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+       -- Keep established arithmetic proofs compact. Unfolding checkedAt/formValue in the
+       -- first pass can expand return checks enough to exceed the kernel recursion limit.
+       first
+       | (simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+           CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
+           $[$facts:term],*] <;> (repeat constructor) <;> rfl)
+       | (simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+           CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step, CIL.Safety.formValue,
+           CIL.Safety.checkedAt, Except.mapError, $[$facts:term],*] <;> (repeat constructor) <;> rfl)))
 
 open Lean Meta in
 /-- Spell a literal `BitVec.ofNat n k` as the numeral `k`, as an evaluation fact with a literal operand states it;

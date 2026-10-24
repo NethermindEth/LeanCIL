@@ -892,4 +892,26 @@ theorem intrinsic_without_facts (a b c d : CIL.W64) (destination : Reference) (m
 /-- info: 'Tests.Automation.intrinsic_without_facts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms intrinsic_without_facts
 
+@[cil_code] def checkedAdd64Method : CIL.Method := {
+  code := [.arg 0, .arg 1, .checkedArithmetic .add false, .ret]
+  locals := [], returnsValue := true }
+@[cil_code] def checkedAdd64Program : CIL.Program := [checkedAdd64Method]
+
+-- Keep the checked-add/return proof within the default kernel recursion limit.
+-- Eagerly unfolding checkedAt and formValue in the generic fallback made this fail.
+open CIL CIL.Safety in
+theorem checked_add64_return (memory : CIL.Safety.Memory) (x y : W64) (fits : x.toNat + y.toNat < 2^64) :
+    CIL.Safety.invoke checkedAdd64Program (executionBound checkedAdd64Program 0) 0
+      [.scalar (.i64 x), .scalar (.i64 y)] memory =
+        .ok (memory, [.scalar (.i64 (BitVec.ofNat 64 (x.toNat + y.toNat)))]) := by
+  have calculation : checkedValues .add false (.i64 x) (.i64 y) =
+      .ok (.i64 (BitVec.ofNat 64 (x.toNat + y.toNat))) := by
+    have range : 0 ≤ (x.toNat : Int) + y.toNat ∧ (x.toNat : Int) + y.toNat < 2^64 := by omega
+    simp only [checkedValues, checkedBits, Bool.false_eq_true, ite_false]
+    rw [ite_eq_left range]
+    rfl
+  cil_checked_steps [calculation]
+
+#print axioms checked_add64_return
+
 end Tests.Automation
