@@ -229,6 +229,10 @@ or at disjoint offsets of one. `Confined.read_apart` keeps a checked read of old
 apart from every entry, taking the allocation's age from `WellFormed`;
 `Confined.cells_apart` keeps every byte of an allocation no entry names, and
 `WordSnapshots.after_confined` (`CIL.Safety.ConfinedSnapshots`) keeps remembered words.
+`LocalSnapshots` (`CIL.Safety.LocalSnapshots`) remembers locals of every numeric kind, such
+as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a call, and
+`after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
+`snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
 the program does, so a cross-profile contract is a theorem quantified over the
 per-profile extractions.
