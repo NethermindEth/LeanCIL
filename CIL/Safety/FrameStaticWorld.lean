@@ -1,26 +1,36 @@
 import CIL.Safety.StaticInstructionWorld
 import CIL.Safety.FrameSetupLemmas
 
+/-!
+# Frame setup preserves the static world
+
+Building a frame only allocates fresh homes and writes into them, so every valid static
+field binding stays valid. Derived once from `FrameSetup` and projected to each builder.
+-/
+
 namespace CIL.Safety
 
 /-- Setup preserves every existing static binding because it only touches fresh
     homes and retains the registry. No traversal-specific static proof is needed. -/
 theorem FrameSetup.staticWorld {activation : Nat} {before after : Memory}
     {slots : List LocalSlot} {owned : List AllocationId}
-    (setup : FrameSetup activation before after slots owned) (descriptors : List CIL.StaticDescriptor)
+    (setup : FrameSetup activation before after slots owned)
+    (descriptors : List CIL.StaticDescriptor)
     (hm : before.WellFormed) (world : StaticWorldValid descriptors before) :
     StaticWorldValid descriptors after := by
-  apply PreservesImmutable.world (m := before) (result := after) ?_ descriptors world setup.registry
+  apply PreservesImmutable.world (m := before) (result := after) ?_ descriptors world
+    setup.registry
   intro id a present _
   have old := (hm.1 id a present).1
   exact ⟨(setup.below.allocations id old).trans present, setup.below.cells id old,
     fun offset => setup.below.permissions id old offset false⟩
 
-
-theorem allocateHome_preserves_static_world {alignment : Nat} (descriptors : List CIL.StaticDescriptor)
+theorem allocateHome_preserves_static_world {alignment : Nat}
+    (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (activation width : Nat) (r : Reference) (hm : m.WellFormed)
     (world : StaticWorldValid descriptors m)
-    (h : allocateHome m activation width alignment = .ok (r, result)) : StaticWorldValid descriptors result := by
+    (h : allocateHome m activation width alignment = .ok (r, result)) :
+    StaticWorldValid descriptors result := by
   exact (allocateHome_setup _ _ _ _ _ .byte h).staticWorld descriptors hm world
 
 theorem storeLocal_preserves_static_world (descriptors : List CIL.StaticDescriptor)
@@ -32,7 +42,8 @@ theorem storeLocal_preserves_static_world (descriptors : List CIL.StaticDescript
   all_goals
     repeat' first
       | exact world
-      | solve | exact writeSnapshot_preserves_static_world _ _ _ _ _ _ world (checkedAt_ok (by assumption))
+      | solve | exact writeSnapshot_preserves_static_world _ _ _ _ _ _ world
+                    (checkedAt_ok (by assumption))
       | solve | apply checked_write_preserves_static_world _ _ _ _ _ _ _ _ world; assumption
       | cases h
       | split at h

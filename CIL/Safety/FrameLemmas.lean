@@ -1,5 +1,15 @@
 import CIL.Safety.Frames
+
+/-!
+# Frame exit and well-formedness
+
+`leaveFrame` expires exactly the allocations a frame owns, and allocating a home, storing a
+local and leaving a frame all keep memory well formed.
+-/
+
 namespace CIL.Safety
+
+/-- Expiring a list of ids marks exactly those allocations dead and leaves the rest. -/
 theorem expireAll_allocations (ids : List AllocationId) (m : Memory) (id : AllocationId) :
     (ids.foldl expire m).allocations id =
       if id ∈ ids then (m.allocations id).map (fun a => { a with live := false })
@@ -17,9 +27,11 @@ theorem leaveFrame_expires_owned (frame : Frame) (m : Memory) (id : AllocationId
   simp [liveAllocation, leaveFrame, expireAll_allocations, owned, present]
 #print axioms expireAll_allocations
 #print axioms leaveFrame_expires_owned
-theorem allocateHome_preserves_wellFormed {alignment : Nat} (m result : Memory) (activation width : Nat)
-    (reference : Reference) (hm : m.WellFormed)
-    (h : allocateHome m activation width alignment = .ok (reference, result)) : result.WellFormed := by
+
+theorem allocateHome_preserves_wellFormed {alignment : Nat} (m result : Memory)
+    (activation width : Nat) (reference : Reference) (hm : m.WellFormed)
+    (h : allocateHome m activation width alignment = .ok (reference, result)) :
+    result.WellFormed := by
   unfold allocateHome at h
   cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ with
   | error fault => simp [ha, checkedAt, Except.mapError, Bind.bind, Except.bind] at h
@@ -57,7 +69,8 @@ theorem storeLocal_preserves_wellFormed (m result : Memory) (slot final : LocalS
   all_goals repeat' first
     | exact hm
     | solve | exact write_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
-    | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm
+                  (checkedAt_ok (by assumption))
     | cases h
     | split at h
 #print axioms storeLocal_preserves_wellFormed

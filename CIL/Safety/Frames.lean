@@ -1,7 +1,19 @@
 import CIL.Safety.InstructionMemory
 
+/-!
+# Activation frames
+
+How the checked interpreter (`CIL/Safety/Execution.lean`) lays out a method activation.
+Each numeric local, vector argument and written parameter gets its own frame-owned
+allocation of bytes, so unsafe code can address it; managed references live in root slots
+that hold a reference, not bytes. `enterFrame` builds a frame on call and `leaveFrame`
+expires its allocations on return. The `Frame*` lemma files describe these functions.
+-/
+
 namespace CIL.Safety
 
+/-- The number of bytes a local of this kind occupies in its home; references take none
+    because they live in a root slot. -/
 def localWidth : CIL.LocalKind → Nat
   | .narrow kind => kind.width
   | .aggregate size => size
@@ -13,11 +25,14 @@ def localWidth : CIL.LocalKind → Nat
   | .vector512 => 64
   | .reference => 0
 
+/-- The contents of an opaque 128-bit vector local: fully known bits, or only the low 64
+    bits known. -/
 inductive Opaque128Value where
   | known (bits : BitVec 128)
   | low64 (low : CIL.W64)
   deriving DecidableEq, Repr
 
+/-- The stack value an opaque vector local loads as. -/
 def Opaque128Value.value : Opaque128Value → CIL.Value
   | .known bits => .v128 bits
   | .low64 low => .v128Low64 low
@@ -30,6 +45,8 @@ inductive LocalSlot where
   | opaque128 (value : Option Opaque128Value)
   deriving DecidableEq, Repr
 
+/-- A method activation: its identity, local slots, the allocations it owns (expired by
+    `leaveFrame`), and the private homes of vector arguments, keyed by argument index. -/
 structure Frame where
   activation : Nat
   locals : List LocalSlot
@@ -48,6 +65,8 @@ def localAlignment : CIL.LocalKind → Nat
 @[simp] theorem localAlignment_pos (kind : CIL.LocalKind) : 0 < localAlignment kind := by
   cases kind <;> simp [localAlignment]
 
+/-- Allocates a fresh, frame-owned, readable and writable home of `width` bytes for
+    `activation`; its bytes start uninitialized. -/
 def allocateHome (m : Memory) (activation width : Nat) (alignment : Nat := 1) :
     ExecutionResult (Reference × Memory) := do
   let (id, memory) ← checkedAt .null width (allocate m {
@@ -58,6 +77,8 @@ def allocateHome (m : Memory) (activation width : Nat) (alignment : Nat := 1) :
   return (reference, { memory with
     views := ⟨id, 0, width, true, true⟩ :: memory.views })
 
+/-- The little-endian number a scalar stores as in a home of `kind`. Fails on a value of
+    the wrong kind, an out-of-range byte, or unspecified vector bits. -/
 def localNumber (kind : CIL.LocalKind) (value : CIL.Value) : ExecutionResult Nat :=
   if value.hasUnspecified then .error (.unsupported "Unspecified vector bytes") else
   match kind, value with
@@ -78,6 +99,8 @@ def localResult (kind : CIL.LocalKind) (value : CIL.Value) : CIL.Value :=
   | .narrow kind, .i32 bits => .i32 (kind.extend bits)
   | _, value => value
 
+/-- The snapshot shape of an aggregate or vector local, whose bytes may be copied as a
+    snapshot; `none` for scalar and reference kinds. -/
 def localSnapshotShape : CIL.LocalKind → Option CIL.SnapshotShape
   | .aggregate size => some (.aggregate size)
   | .vector128 => some .vector128
@@ -85,10 +108,13 @@ def localSnapshotShape : CIL.LocalKind → Option CIL.SnapshotShape
   | .vector512 => some .vector512
   | _ => none
 
+/-- Stores `value` into a local slot. A byte home takes a scalar of its kind or a snapshot
+    of its exact shape; a root takes a reference that forms in memory. -/
 def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     ExecutionResult (LocalSlot × Memory) := do
   let selectedOpaque := match slot with | .opaque128 _ => true | _ => false
-  if value.hasUnspecified && !selectedOpaque then .error (.unsupported "Byte home observes unspecified vector bits") else
+  if value.hasUnspecified && !selectedOpaque then
+    .error (.unsupported "Byte home observes unspecified vector bits") else
   match slot, value with
   | .opaque128 _, .scalar (.v128 bits) => return (.opaque128 (some (.known bits)), m)
   | .opaque128 _, .scalar (.v128Low64 low) => return (.opaque128 (some (.low64 low)), m)
@@ -96,8 +122,10 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     let _ ← formValue m reference
     return (.root (some reference), m)
   | .bytes kind reference, .scalar (.snapshot shape bytes) =>
-    if localSnapshotShape kind != some shape || bytes.length != localWidth kind then .error .invalidState else
-      let memory ← checkedAt (.address reference) (localWidth kind) (writeSnapshot m reference bytes 1)
+    if localSnapshotShape kind != some shape || bytes.length != localWidth kind then
+      .error .invalidState else
+      let memory ← checkedAt (.address reference) (localWidth kind)
+        (writeSnapshot m reference bytes 1)
       return (slot, memory)
   | .bytes kind reference, .scalar value =>
     let number ← localNumber kind value
@@ -106,6 +134,8 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     return (slot, memory)
   | _, _ => .error .invalidState
 
+/-- Loads a local slot. A fully initialized byte home decodes as its kind; an aggregate or
+    vector home with uninitialized bytes loads as a snapshot instead. -/
 def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
   match slot with
   | .opaque128 none => .error (.unsupported "Uninitialized opaque vector local")
@@ -129,6 +159,8 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
     | .vector512 => return .scalar (.v512 (BitVec.ofNat 512 number))
     | .reference => .error .invalidState
 
+/-- The address of a local's byte home. Root and opaque vector slots have no bytes and
+    cannot be addressed. -/
 def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
   match slot with
   | .bytes _ reference => formValue m (.address reference)
@@ -182,6 +214,7 @@ def makeLocals (activation : Nat) (kinds : List CIL.LocalKind)
     return (slot :: slots, owned ++ other, memory)
   | _, _ => .error .invalidState
 
+/-- Creates an opaque 128-bit vector local, which holds its value outside memory. -/
 def makeOpaque128 (initial : CIL.Value) (m : Memory) :
     ExecutionResult (LocalSlot × List AllocationId × Memory) :=
   match initial with
@@ -189,26 +222,33 @@ def makeOpaque128 (initial : CIL.Value) (m : Memory) :
   | .unmodeled => .ok (.opaque128 none, [], m)
   | _ => .error .invalidState
 
-def makeSelectedLocalsFrom (activation : Nat) (indices : List Nat) : Nat → List CIL.LocalKind →
-    List CIL.Value → Memory → ExecutionResult (List LocalSlot × List AllocationId × Memory)
+/-- `makeLocals` from local number `index` on, except that locals listed in `indices` must
+    be 128-bit vectors and become opaque slots. -/
+def makeSelectedLocalsFrom (activation : Nat) (indices : List Nat) :
+    Nat → List CIL.LocalKind → List CIL.Value → Memory →
+      ExecutionResult (List LocalSlot × List AllocationId × Memory)
   | _, [], [], m => .ok ([], [], m)
   | index, kind :: kinds, initial :: initials, m => do
     let (slot, owned, memory) ← if index ∈ indices then
       if kind == .vector128 then makeOpaque128 initial m else .error .invalidState
       else makeLocal activation kind initial m
-    let (slots, other, memory) ← makeSelectedLocalsFrom activation indices (index + 1) kinds initials memory
+    let (slots, other, memory) ←
+      makeSelectedLocalsFrom activation indices (index + 1) kinds initials memory
     return (slot :: slots, owned ++ other, memory)
   | _, _, _, _ => .error .invalidState
 
+/-- Creates a method's locals, making those listed in `indices` opaque 128-bit vectors. -/
 def makeSelectedLocals (activation : Nat) (indices : List Nat) (kinds : List CIL.LocalKind)
-    (initializers : List CIL.Value) (m : Memory) : ExecutionResult (List LocalSlot × List AllocationId × Memory) :=
+    (initializers : List CIL.Value) (m : Memory) :
+    ExecutionResult (List LocalSlot × List AllocationId × Memory) :=
   if indices.isEmpty then makeLocals activation kinds initializers m
   else makeSelectedLocalsFrom activation indices 0 kinds initializers m
 
 /-- Methods without opaque locals retain the byte-home frame model. -/
 @[simp] theorem makeSelectedLocals_nil (activation : Nat) (kinds : List CIL.LocalKind)
     (initializers : List CIL.Value) (m : Memory) :
-    makeSelectedLocals activation [] kinds initializers m = makeLocals activation kinds initializers m := rfl
+    makeSelectedLocals activation [] kinds initializers m =
+      makeLocals activation kinds initializers m := rfl
 #print axioms makeSelectedLocals_nil
 
 /-- Aggregate argument instructions operate on a private snapshot home, never
@@ -227,6 +267,7 @@ def makeArgumentHomes (activation : Nat) (indices : List Nat) (args : List Value
     let (homes, owned, memory) ← makeArgumentHomes activation rest args memory
     return ((index, slot) :: homes, reference.allocation :: owned, memory)
 
+/-- The private home of vector argument `index`. -/
 def argumentHome (frame : Frame) (index : Nat) : ExecutionResult LocalSlot := do
   let some (_, slot) := frame.arguments.find? (fun home => home.1 == index) | .error .invalidState
   return slot
@@ -245,13 +286,20 @@ def makeParameterHomes (activation : Nat) (parameters : List (Nat × CIL.LocalKi
     let (homes, other, memory) ← makeParameterHomes activation rest args memory
     return ((index, slot) :: homes, owned ++ other, memory)
 
-def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) : ExecutionResult (Frame × Memory) := do
+/-- Sets up a callee activation under a fresh identity: its locals, vector argument homes
+    and parameter homes. Parameter homes are appended to the locals. -/
+def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) :
+    ExecutionResult (Frame × Memory) := do
   let activation := m.nextIdentity
-  let (locals, owned, memory) ← makeSelectedLocals activation body.opaqueVectorLocals body.localKinds body.locals m
+  let (locals, owned, memory) ←
+    makeSelectedLocals activation body.opaqueVectorLocals body.localKinds body.locals m
   let (arguments, argumentIds, memory) ← makeArgumentHomes activation body.vectorArgs args memory
-  let (parameters, parameterIds, memory) ← makeParameterHomes activation body.parameterHomes args memory
-  return (⟨activation, locals ++ parameters.map Prod.snd, (owned ++ argumentIds) ++ parameterIds, arguments⟩, memory)
+  let (parameters, parameterIds, memory) ←
+    makeParameterHomes activation body.parameterHomes args memory
+  return (⟨activation, locals ++ parameters.map Prod.snd, (owned ++ argumentIds) ++ parameterIds,
+    arguments⟩, memory)
 
+/-- Ends an activation by expiring every allocation it owns. -/
 def leaveFrame (frame : Frame) (m : Memory) : Memory :=
   frame.owned.foldl expire m
 
@@ -261,9 +309,12 @@ theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Mem
     enterFrame body args m = (do
       let activation := m.nextIdentity
       let (locals, owned, memory) ← makeLocals activation body.localKinds body.locals m
-      let (arguments, argumentIds, memory) ← makeArgumentHomes activation body.vectorArgs args memory
-      let (parameters, parameterIds, memory) ← makeParameterHomes activation body.parameterHomes args memory
-      return (⟨activation, locals ++ parameters.map Prod.snd, (owned ++ argumentIds) ++ parameterIds, arguments⟩, memory)) := by
+      let (arguments, argumentIds, memory) ←
+        makeArgumentHomes activation body.vectorArgs args memory
+      let (parameters, parameterIds, memory) ←
+        makeParameterHomes activation body.parameterHomes args memory
+      return (⟨activation, locals ++ parameters.map Prod.snd,
+        (owned ++ argumentIds) ++ parameterIds, arguments⟩, memory)) := by
   simp only [enterFrame, none, makeSelectedLocals_nil]
 #print axioms enterFrame_of_no_opaque
 

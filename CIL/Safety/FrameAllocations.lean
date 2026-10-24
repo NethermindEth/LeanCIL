@@ -1,4 +1,13 @@
 import CIL.Safety.FrameOwnership
+
+/-!
+# Frame-owned allocations
+
+The allocations a frame records as owned are live and belong to that activation, for each
+frame builder in `CIL/Safety/Frames.lean` and for `enterFrame` as a whole. Projections of
+`FrameSetup` from `CIL/Safety/FrameSetupLemmas.lean`.
+-/
+
 namespace CIL.Safety
 
 theorem makeLocal_owned (m result : Memory) (activation : Nat) (kind : CIL.LocalKind)
@@ -28,8 +37,8 @@ theorem makeParameterHomes_owned (m result : Memory) (activation : Nat)
     FrameAllocations result activation owned := by
   exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).allocations
 
-theorem enterFrame_owned (body : CIL.Method) (args : List Value) (m result : Memory) (frame : Frame)
-    (h : enterFrame body args m = .ok (frame, result)) :
+theorem enterFrame_owned (body : CIL.Method) (args : List Value) (m result : Memory)
+    (frame : Frame) (h : enterFrame body args m = .ok (frame, result)) :
     FrameAllocations result frame.activation frame.owned := by
   exact (enterFrame_setup _ _ _ _ _ h).allocations
 
