@@ -1,5 +1,5 @@
 internal sealed record ExportSuite(string Name, string Cohort, string Script, string[] Arguments,
-    string Description, string[] Cases, string[] Inputs, bool Standalone = false);
+    string Description, string[] Cases, string[] Inputs, bool Standalone = false, string? ChildScript = null);
 
 internal static class ExportVerificationSuites
 {
@@ -32,7 +32,9 @@ internal static class ExportVerificationSuites
         new("exportsstatics", "statics", "Tests/ModularStaticExports.cs", [], "independent modular static exports",
             [], ["Tests/ModularStaticExports.cs"], Standalone: true),
         new("exportstransitive", "transitive", "Tests/TransitiveImports.cs", [], "independent transitive contract imports",
-            [], ["Tests/TransitiveImports.cs"], Standalone: true)
+            [], ["Tests/TransitiveImports.cs"], Standalone: true),
+        new("exportsdiscovery", "discovery", "Tests/ContractExport.cs", ["--cohort", "discovery"], "contract discovery with real export bootstrap",
+            ["discovery.fixture"], ["Tests/ContractExport.cs", "Tests/ContractDiscovery.cs"], ChildScript: "Tests/ContractDiscovery.cs")
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>
@@ -48,6 +50,10 @@ internal static class ExportVerificationSuites
     internal static ExportSuite[] FullPlan() => Plan().Where(entry => IsFull(entry.Cohort)).ToArray();
     internal static bool IsFull(string cohort) => cohort is "composition" or "consumer" or "ordinary" or "pair" or
         "checks" or "theorems" or "ordinary-artifact" or "consumer-artifact" or "consumer-source" or "consumer-shadow";
+
+    internal static string[] DiscoveryArguments(string sidecar, string callerProof, string callerPackage,
+        string producerPackage, string producerProof, string contractSource) =>
+        [sidecar, callerProof, callerPackage, producerPackage, producerProof, contractSource];
 
     internal static string? Select(string[] args, bool full = false)
     {
@@ -67,6 +73,8 @@ internal static class ExportVerificationSuites
         {
             if (!names.Add(entry.Name) || !cohorts.Add(entry.Cohort) ||
                 (entry.Standalone ? entry.Cases.Length != 0 || IsFull(entry.Cohort) : entry.Cases.Length == 0) ||
+                (entry.ChildScript is not null && (entry.Standalone || IsFull(entry.Cohort) ||
+                    string.IsNullOrWhiteSpace(entry.ChildScript) || !entry.Inputs.Contains(entry.ChildScript, StringComparer.Ordinal))) ||
                 entry.Cases.Any(id => string.IsNullOrWhiteSpace(id) || !cases.Add(id)))
                 throw new InvalidDataException("Invalid or duplicate export suite/case: " + entry.Name);
         }

@@ -1,5 +1,10 @@
 # Consumer packages and batch verification
 
+`leancil resolve-imports` derives `--import` and `--import-implementation` from
+SDK deps/NuGet asset selection; see [resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets).
+It only locates files. Pins, caller audits, kernel replay and deployment
+obligations are unchanged.
+
 The [README](../README.md#consumer-packages-and-batches) shows the commands. This page states what
 consumer and batch verification check, what they reuse, and how support is shared across machines.
 

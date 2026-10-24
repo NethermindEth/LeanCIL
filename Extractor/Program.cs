@@ -16,7 +16,7 @@ internal static class Program
     {
         if (args.Length == 0 || args is ["--help"] or ["-h"])
         {
-            Console.WriteLine(Usage);
+            Console.WriteLine(Usage + "\n       " + ImportResolver.Usage["Usage: ".Length..]);
             return 0;
         }
 
@@ -24,6 +24,11 @@ internal static class Program
         var stage = "arguments";
         try
         {
+            if (args[0] == "resolve-imports")
+            {
+                stage = "import resolution";
+                return ImportResolver.Run(args[1..]);
+            }
             if (args[0] == "list")
             {
                 if (args.Length != 2)

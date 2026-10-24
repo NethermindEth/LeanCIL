@@ -36,6 +36,52 @@ overrides can be supplied again for an explicit recheck. `identity.json` records
 sidecar and implementation paths relative to the output directory, as it does
 `assemblyPath`, so a moved extraction rechecks against the moved files.
 
+## Resolving imports from SDK assets
+
+`resolve-imports` turns SDK output into the explicit `--import` and
+`--import-implementation` arguments above. It only locates files. `extract`
+never reads deps.json or NuGet assets, and the independent pins stay required.
+
+```
+leancil resolve-imports bin/App.dll --library Lib \
+  --assets obj/project.assets.json --runtime-identifier linux-x64 \
+  --rid-graph "$(dotnet msbuild App.csproj -getProperty:RuntimeIdentifierGraphPath)" \
+  --output resolved.json
+```
+
+It reads `App.deps.json` next to the application, or `--deps file`, and
+optionally `--assets file`. Package roots come from the assets `packageFolders`
+and `--package-root directory`. Only `net10.0` targets are accepted. It does not
+restore, use the network, or infer a RID from the host.
+
+Selection follows the .NET 8+ host and NuGet. RID fallback is NuGet's
+breadth-first `RuntimeGraph.ExpandRuntime` over the SDK's
+`PortableRuntimeIdentifierGraph.json`; for `linux-x64` that is `linux-x64`,
+`linux`, `unix-x64`, `unix`, `any`, `base`; the host's built-in list is its prefix
+through `any`. A
+deps.json `runtimes` section is never read; the host ignores it too unless
+`UseRidGraph` is set. A library's best-matching RID group replaces its whole
+portable `runtime` group. With no match, the portable group applies. A library
+with RID-specific runtime assets needs `--runtime-identifier` and `--rid-graph`.
+deps.json assets are probed in the application directory as hostpolicy does: at
+`localPath` (written for executables), else at a RID asset's relative path, else
+at the bare file name. Package assets are probed
+at `<root>/<package path>/<asset path>`. Copies with different bytes are rejected.
+
+The RID must be x64 or arm64. A fallback that ends in another architecture is
+rejected. `--profile` defaults to scalar, as `extract` does; any other profile
+must agree with the RID's architecture. Compile
+assets never become implementations. A reference-only selection fails.
+
+`Nethermind.LeanCIL.LeanCilContractsAttribute(string digest)` on the runtime or
+reference assembly advertises the interface digest; declare it in the library
+source with assembly-only, non-repeatable usage. The resolver looks for
+`Lib.leancil.contracts` and `contracts/<digest>.leancil.contracts` in the
+application, implementation and package directories. The located sidecar must
+name the library and, when advertised, carry that digest. The output lists each
+import's library, asset path, matched RID, implementation and sidecar, plus the
+arguments for `extract`. The attribute is a locator, not a pin.
+
 ## Sidecar schema 1
 
 `Tests/ContractImports/Lib.leancil.contracts` is a hand-written template. The

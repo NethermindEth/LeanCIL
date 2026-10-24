@@ -1,5 +1,11 @@
 # Soundness boundary
 
+`leancil resolve-imports` is untrusted location selection outside extraction.
+deps.json, NuGet assets, the RID graph and the LeanCilContracts attribute only
+choose the sidecar and DLL paths passed to `extract`, which never reads them.
+Extraction hashes the files it is given against the independent implementation
+and interface pins, so a wrong selection can only fail, never certify other bytes.
+
 ## What is defined and proved
 
 `CIL.Safety.RuntimeExceptions` adds a fixed naming view of checked execution
