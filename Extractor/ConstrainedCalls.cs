@@ -12,7 +12,7 @@ internal static class ConstrainedCalls
     {
         if (call.OpCode.Code != Code.Callvirt || call.Operand is not MethodReference reference ||
             call.Previous is not { OpCode.Code: Code.Constrained, Operand: TypeReference receiver })
-            throw new InvalidDataException("Virtual calls require an adjacent concrete constrained receiver");
+            throw new InvalidDataException("callvirt requires an adjacent concrete constrained receiver");
         if (receiver is TypeSpecification or GenericParameter || receiver.Resolve() is not { } concrete ||
             concrete.Module != caller.Module || !concrete.IsValueType || concrete.HasGenericParameters ||
             receiver.FullName != concrete.FullName || LayoutEvidence.Scope(receiver) != LayoutEvidence.Scope(concrete))
