@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -272,7 +273,21 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
 
     static string At(string path) => Path.Combine(Root, path);
 
-    static string Sha(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+    static string Sha(string path)
+    {
+        const int bufferSize = 64 * 1024;
+        using var file = File.OpenRead(path);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+        try
+        {
+            var read = 0;
+            while ((read = file.Read(buffer, 0, bufferSize)) != 0)
+                hash.AppendData(buffer, 0, read);
+            return Convert.ToHexStringLower(hash.GetHashAndReset());
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
+    }
 
     static void CacheProgress(string message)
     {
