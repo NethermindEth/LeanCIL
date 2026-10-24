@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/RuntimeProfileValidation.cs
 
 using System.Text.RegularExpressions;
 using System.Reflection;
@@ -15,8 +16,10 @@ var profileType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.F
 var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
 object SelectProfile(string name) => selectProfile.Invoke(null, [name])!;
 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+var sharedCases = RuntimeProfileValidation.Observations(
+    Directory.GetFiles(At("docs/evidence/runtime-profiles"), "*.json")).ToList();
 foreach (var name in new[] { "scalar", "x64-sse2", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
-    _ = SelectProfile(name);
+    sharedCases.Add((JsonSerializer.Serialize(SelectProfile(name), jsonOptions), true));
 foreach (var name in new[] { "x64-avx2", "x64-avx2-bmi1", "x64-avx512", "x64-avx512-bmi1",
     "x64-bmi2", "x64-vector256", "x64-sse41", "arm64-armbase" })
 {
@@ -36,6 +39,7 @@ foreach (var (name, flag, value, accepted) in new[]
 {
     var profile = JsonSerializer.SerializeToNode(SelectProfile(name), jsonOptions)!;
     profile[flag] = JsonValue.Create(value);
+    sharedCases.Add((profile.ToJsonString(), accepted));
     var profilePath = Path.Combine(output, $"{name}-{flag}.json");
     File.WriteAllText(profilePath, profile.ToJsonString());
     try
@@ -47,6 +51,9 @@ foreach (var (name, flag, value, accepted) in new[]
 }
 Console.WriteLine("PASS runtime profile groups, retired profiles and reduced vector width");
 Run(["lake", "build", "CIL.Extraction.Features", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
+var sharedEvidence = Path.Combine(output, "RuntimeProfiles.lean");
+RuntimeProfileValidation.Check(sharedCases, ExtractorPath, sharedEvidence);
+Run(["lake", "env", "lean", sharedEvidence]);
 Run(["lake", "env", "lean", "Tests/FeatureEvidence.lean"]);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var folder = Path.Combine(output, "CompiledLoop");

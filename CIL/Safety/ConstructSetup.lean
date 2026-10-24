@@ -10,7 +10,7 @@ theorem step_newVector256 {body : CIL.Method} {pc callee : Nat}
     (args arguments rest : List Value) (frame : Frame) (memory : Memory)
     (wellFormed : memory.WellFormed)
     (checked : arguments.mapM (checkedValue memory) = .ok arguments)
-    (known : arguments.any Value.hasUnspecified = false) :
+    (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
     ∃ temporary updated,
       step body (.newVector256 callee arguments.length) pc args frame (arguments.reverse ++ rest) memory =
         .ok (.construct callee (.reference (.address temporary) :: arguments) rest
@@ -35,7 +35,7 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
     (args arguments rest : List Value) (frame : Frame) (memory : Memory)
     (wellFormed : memory.WellFormed)
     (checked : arguments.mapM (checkedValue memory) = .ok arguments)
-    (known : arguments.any Value.hasUnspecified = false) :
+    (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
     ∃ temporary updated,
       step body (.newAggregate callee arguments.length size) pc args frame (arguments.reverse ++ rest) memory =
         .ok (.construct callee (.reference (.address temporary) :: arguments) rest

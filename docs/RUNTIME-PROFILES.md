@@ -71,12 +71,34 @@ Impossible built-ins are retired with an error, not silently remapped:
 `scalar` remains the no-hardware-intrinsics profile. The repo's extraction and
 verification fixtures use the supported names.
 
+The built-in list intentionally does not name every valid configuration. Use
+custom JSON for SSE4.2+AVX without AVX2 and for v3/v4 with
+`vector256Accelerated: false`. The validators accept these observed states;
+their absence from the built-in list is not a deployment restriction.
+
+`Tests/FeatureEvidence.cs` runs the same built-in, mutated and recorded-observation
+cases through the production C# validator and generated kernel-checked Lean
+theorems. The runtime-profile drift workflow probes Linux x64 and ARM64 weekly,
+on demand and on policy changes, using the installed .NET 10 servicing runtime.
+Its artifacts record the actual runtime version and architecture; a successful
+job validates only those observations, not every possible deployment.
+
+Evidence field `bmi2` is `Bmi2.X64.IsSupported`, `x86Base64` is
+`X86Base.X64.IsSupported`, and `armBase64` is `ArmBase.Arm64.IsSupported`.
+These are the model's 64-bit capabilities, not the corresponding base-class flags.
+
 Custom consumer profiles, including int256's historical `x64-avx2-bmi2.json` and
 `x64-avx512dqvl.json`, must obey the same constraints. Set AVX2/BMI1/BMI2 together;
 set all four modeled AVX-512 flags together; set all three modeled SSE4.2-group
 flags together. ARM64 profiles must set ArmBase/AdvSimd/Vector128 together and
 cannot enable Vector256 acceleration. A reduced-width x64 profile may retain
 `vector256Accelerated: false` with the full AVX2 group enabled.
+
+In the int256 revision pinned by the consumer workflow, 161 of 256 gates need
+profile migration: all 14 custom profiles and the retired built-ins. The 95
+already valid gates cover scalar, ARM64 AdvSimd and x64 SSE4.2 only; they do not
+establish v3/v4 correctness. Migration must add realistic v3/v4 proofs, including
+reduced vector width where required, and may consolidate split-group variants.
 
 These changes can select different CIL branches. Regenerate extraction, reprove
 each affected method/profile, re-export interfaces and rebuild full-verification
