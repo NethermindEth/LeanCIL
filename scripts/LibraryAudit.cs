@@ -91,9 +91,10 @@ partial class Program
     static HashSet<string> ReusableCertified(Dictionary<string, string[]> graph,
         SortedDictionary<string, SortedDictionary<string, string>> parts, IReadOnlyDictionary<string, string> certified)
     {
+        // Compares exactly the parts ConsumerModuleParts reads; Lake's .olean.hash trace file is not module content.
         bool Identical(string module) => (module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal)) &&
-            parts[module].Count == certified.Count(pair => ModuleName(pair.Key) == module) &&
-            parts[module].All(part => certified.TryGetValue(module.Replace('.', '/') + part.Key, out var hash) && hash == part.Value);
+            new[] { ".olean", ".olean.server", ".olean.private" }.All(suffix =>
+                certified.TryGetValue(module.Replace('.', '/') + suffix, out var hash) == parts[module].TryGetValue(suffix, out var part) && hash == part);
         var identical = parts.Keys.Where(Identical).ToHashSet(StringComparer.Ordinal);
         return identical.Where(module => ImportClosure(graph, [module]).All(import => !parts.ContainsKey(import) || identical.Contains(import)))
             .ToHashSet(StringComparer.Ordinal);

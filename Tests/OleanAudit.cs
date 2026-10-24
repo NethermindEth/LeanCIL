@@ -279,7 +279,10 @@ try
 }
 catch (InvalidOperationException error) when (error.Message.Contains("Kernel replay rejected Lib.Core", StringComparison.Ordinal)) { }
 // A certified CIL proof skips replay only while every module it imports still matches the certified library.
-var certifiedParts = new SortedDictionary<string, string> { ["CIL/Memory.olean"] = "m", ["CIL/MemoryLemmas.olean"] = "l" };
+var certifiedParts = new SortedDictionary<string, string>
+{
+    ["CIL/Memory.olean"] = "m", ["CIL/Memory.olean.hash"] = "mh", ["CIL/MemoryLemmas.olean"] = "l", ["CIL/MemoryLemmas.olean.hash"] = "lh"
+};
 var importGraph = new Dictionary<string, string[]> { ["CIL.MemoryLemmas"] = ["Init", "CIL.Memory"], ["CIL.Memory"] = ["Init"], ["Lib"] = ["CIL.MemoryLemmas"] };
 SortedDictionary<string, SortedDictionary<string, string>> Packaged(string memory) => new(StringComparer.Ordinal)
 {
@@ -288,6 +291,14 @@ SortedDictionary<string, SortedDictionary<string, string>> Packaged(string memor
 if (!ReusableCertified(importGraph, Packaged("m"), certifiedParts).SetEquals(["CIL.Memory", "CIL.MemoryLemmas"]) ||
     ReusableCertified(importGraph, Packaged("changed"), certifiedParts).Count != 0)
     throw new InvalidOperationException("A certified module skipped replay against changed imports");
+// The certified library's own oleans, in the shape ModuleArtifacts records them, are all reusable.
+var sessionOleans = Path.Combine(verification.Library(Inputs(At("CIL.lean"))), ".lake/build/lib/lean");
+var sessionParts = new SortedDictionary<string, SortedDictionary<string, string>>(
+    Directory.EnumerateFiles(sessionOleans, "*.olean", SearchOption.AllDirectories).ToDictionary(
+        path => ModuleName(Path.GetRelativePath(sessionOleans, path).Replace('\\', '/')), ConsumerModuleParts), StringComparer.Ordinal);
+var cilModules = sessionParts.Keys.Where(module => module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal)).ToArray();
+if (cilModules.Length == 0 || !ReusableCertified(new(), sessionParts, verification.certifiedModules!).IsSupersetOf(cilModules))
+    throw new InvalidOperationException("The certified library's own CIL modules were not reusable");
 Console.WriteLine("PASS library audits replay the package and stale certified imports before auditing, and reject planted axioms");
 
 // A user module cannot replace a toolchain module on the audit's search path.
