@@ -9,7 +9,8 @@ namespace CIL.Safety
 theorem step_newVector256 {body : CIL.Method} {pc callee : Nat}
     (args arguments rest : List Value) (frame : Frame) (memory : Memory)
     (wellFormed : memory.WellFormed)
-    (checked : arguments.mapM (checkedValue memory) = .ok arguments) :
+    (checked : arguments.mapM (checkedValue memory) = .ok arguments)
+    (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
     ∃ temporary updated,
       step body (.newVector256 callee arguments.length) pc args frame (arguments.reverse ++ rest) memory =
         .ok (.construct callee (.reference (.address temporary) :: arguments) rest
@@ -22,7 +23,7 @@ theorem step_newVector256 {body : CIL.Method} {pc callee : Nat}
     allocate_initialized256 memory frame.activation (BitVec.ofNat 256 0) wellFormed
   refine ⟨temporary, updated, ?_, loaded, writable, preserved,
     (allocateHome_fresh _ _ _ _ _ home).2.1⟩
-  simp [step, observerCount, unspecifiedOperands, checked, localWidth, home, stored,
+  simp [step, observerCount, unspecifiedOperands, known, checked, localWidth, home, stored,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_newVector256
@@ -33,7 +34,8 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
     (size : Fin (2^64)) (positive : 0 < size.val)
     (args arguments rest : List Value) (frame : Frame) (memory : Memory)
     (wellFormed : memory.WellFormed)
-    (checked : arguments.mapM (checkedValue memory) = .ok arguments) :
+    (checked : arguments.mapM (checkedValue memory) = .ok arguments)
+    (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
     ∃ temporary updated,
       step body (.newAggregate callee arguments.length size) pc args frame (arguments.reverse ++ rest) memory =
         .ok (.construct callee (.reference (.address temporary) :: arguments) rest
@@ -47,7 +49,7 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
       (by simp) wellFormed
   refine ⟨temporary, updated, ?_, loaded, writable, preserved, fresh⟩
   have nonzero : size ≠ 0 := by intro h; have := congrArg Fin.val h; simp at this; omega
-  simp [step, observerCount, unspecifiedOperands, nonzero, checked, home, Nat.not_lt_of_ge (Nat.le_add_right arguments.length rest.length),
+  simp [step, observerCount, unspecifiedOperands, known, nonzero, checked, home, Nat.not_lt_of_ge (Nat.le_add_right arguments.length rest.length),
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
   simp only [Nat.reducePow, BitVec.ofNat_eq_ofNat] at stored

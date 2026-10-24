@@ -125,7 +125,8 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
       ∃ fuel result returned,
         run program fuel method (pc + 1) args { frame with owned := temporary.allocation :: frame.owned }
           (.scalar (.aggregate (value (input temporary) out)) :: stack.drop argc) final = .ok (result, returned) ∧
-        post result returned) :
+        post result returned)
+    (known : arguments.any Value.hasUnspecified = false := by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧ post result returned := by
   have same := (checkedValues_valid _ _ _ checked).1
@@ -136,7 +137,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
   rw [same] at checked
   obtain ⟨temporary, updated, stepped, zeroed, writable, preserved, fresh⟩ :=
     step_newAggregate (body := body) (pc := pc) (callee := callee) size positive args arguments
-      (stack.drop argc) frame memory formed (by rw [same]; exact checked)
+      (stack.drop argc) frame memory formed (by rw [same]; exact checked) known
   rw [length, split] at stepped
   have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed
     ⟨body, _, methodFound, instructionFound, stepped⟩
@@ -165,6 +166,7 @@ macro_rules
       (by decide) ?_ (by simp)
       (by first | rfl | (simp [CIL.Safety.checkedValue, CIL.Safety.numericValue, $[$facts:term],*] <;>
         (repeat constructor) <;> rfl))
-      (by intro _; rfl) (by intro _; rfl) ?_ ?_))
+      (by intro _; rfl) (by intro _; rfl) ?_ ?_
+      (by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified, $[$facts:term],*])))
 
 end CIL.Safety
