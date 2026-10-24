@@ -6,13 +6,15 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-internal static class Program
+internal static partial class Program
 {
     const string Usage = "Usage: leancil list assembly.dll\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
-    static int Main(string[] args)
+    static int Main(string[] args) => Run(args);
+
+    static int Run(string[] args, ExtractionBatch? batch = null)
     {
         if (args.Length == 0 || args is ["--help"] or ["-h"])
         {
@@ -24,6 +26,11 @@ internal static class Program
         var stage = "arguments";
         try
         {
+            if (args[0] == "generated-extraction-batch")
+            {
+                stage = "extraction batch";
+                return RunExtractionBatch(args[1..]);
+            }
             if (args[0] == "resolve-imports")
             {
                 stage = "import resolution";
@@ -173,10 +180,12 @@ internal static class Program
                 ? recorded!.Value.GetProperty("profile").Deserialize<FeatureProfile>() ?? throw new InvalidDataException("Missing execution profile")
                 : FeatureProfile.Select(positional.Count == 4 ? positional[3] : "scalar");
             stage = "assembly loading";
-            byte[] assembly = File.ReadAllBytes(assemblyPath);
+            var assemblySnapshot = batch?.ReadAssembly(assemblyPath);
+            byte[] assembly = assemblySnapshot?.Bytes ?? File.ReadAllBytes(assemblyPath);
             stage = "metadata and CIL validation";
-            VectorSignatures.Validate(assembly);
-            using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+            if (assemblySnapshot is null) VectorSignatures.Validate(assembly);
+            else assemblySnapshot.ValidateSignatures();
+            using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false));
             var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
@@ -234,16 +243,18 @@ internal static class Program
             StaticIdentityRecord[] staticIdentities = LeanEmitter.StaticIdentities(methods, profile);
             imports.ValidateStatics(staticIdentities);
             string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            var assemblyHash = assemblySnapshot?.Hash ?? Hash(assembly);
+            var extractorHash = batch?.ExtractorHash ?? Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location));
             if (recorded is { } prior)
             {
                 stage = "extraction integrity";
-                if (prior.GetProperty("assemblySha256").GetString() != Hash(assembly))
+                if (prior.GetProperty("assemblySha256").GetString() != assemblyHash)
                     throw new InvalidDataException($"Stale or mismatched verification artifact: assembly has changed since extraction.\n  Assembly: {CliPaths.Display(assemblyPath)}");
-                if (prior.GetProperty("extractorSha256").GetString() != Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)))
+                if (prior.GetProperty("extractorSha256").GetString() != extractorHash)
                     throw new InvalidDataException("Stale or mismatched verification artifact: extractor has changed since extraction.");
             }
             stage = "metadata and CIL validation";
-            using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+            using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false));
             LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, originalModule, imports, staticIdentities);
             string source = emitted.Source;
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
@@ -276,12 +287,12 @@ internal static class Program
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)).Replace('\\', '/'),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
-                assemblySha256 = Hash(assembly), entry = methods[0].FullName,
+                assemblySha256 = assemblyHash, entry = methods[0].FullName,
                 entryDefinition = MethodSpecialization.Definition(methods[0]).FullName, entryTypeArguments,
                 layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes, staticValues,
                 staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
-                extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
+                extractorSha256 = extractorHash,
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
                     specialization = MethodSpecialization.Source(m),
                     locals = m.Body.Variables.Select(v => v.VariableType.FullName),
