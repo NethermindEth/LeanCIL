@@ -1,5 +1,14 @@
 import CIL.Safety.AllocationExtension
 
+/-!
+# Memory below a watermark
+
+`MemoryBelow w before after` says every allocation with identity below `w` looks exactly the
+same after an operation: metadata, bytes and authority. Allocating fresh storage and writing
+into allocations at or above the watermark preserve it, so a caller's memory survives what a
+callee does to its own fresh frame.
+-/
+
 namespace CIL.Safety
 
 /-- Exact preservation of earlier allocation metadata, byte values,
@@ -22,7 +31,8 @@ theorem MemoryBelow.trans {watermark : Nat} {first middle last : Memory}
       (left.permissions id bound offset writing)⟩
 
 theorem MemoryBelow.weaken {lower upper : Nat} {before after : Memory}
-    (preserved : MemoryBelow upper before after) (bound : lower ≤ upper) : MemoryBelow lower before after :=
+    (preserved : MemoryBelow upper before after) (bound : lower ≤ upper) :
+    MemoryBelow lower before after :=
   ⟨fun id old => preserved.allocations id (Nat.lt_of_lt_of_le old bound),
     fun id old => preserved.cells id (Nat.lt_of_lt_of_le old bound),
     fun id old => preserved.permissions id (Nat.lt_of_lt_of_le old bound)⟩
@@ -39,6 +49,7 @@ theorem MemoryBelow.read {watermark : Nat} {m result : Memory}
     (width alignment : Nat) : read result r width alignment = read m r width alignment := by
   simp only [CIL.Safety.read, preserved.access r old, preserved.cells _ old]
 
+/-- Allocation leaves every existing allocation untouched. -/
 theorem allocate_preserves_memory_below (m result : Memory) (a : Allocation) (id : AllocationId)
     (h : allocate m a = .ok (id, result)) : MemoryBelow m.nextIdentity m result := by
   simp only [allocate] at h
@@ -63,6 +74,8 @@ theorem prepend_view_preserves_memory_below (m : Memory) (view : View) (watermar
   have different : id ≠ view.allocation := Nat.ne_of_lt (Nat.lt_of_lt_of_le old fresh)
   simp [permitted, viewContains, Ne.symm different]
 
+/-- A write into an allocation at or above the watermark leaves everything below it
+    untouched. -/
 theorem write_preserves_memory_below (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
     (alignment watermark : Nat) (fresh : watermark ≤ r.allocation)
     (h : write m r bytes alignment = .ok result) : MemoryBelow watermark m result := by

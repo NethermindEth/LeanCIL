@@ -1,5 +1,13 @@
 import CIL.Safety.FrameEquivalence
 
+/-!
+# Equivalent memories run instructions alike
+
+The checked interpreter's memory and value instructions give related results from
+`Memory.Equivalent` memories: the same fault, or equivalent memories with equal values.
+A proof may therefore swap memory for an equivalent one before stepping an instruction.
+-/
+
 namespace CIL.Safety
 
 theorem Memory.Equivalent.loadValue {m n : Memory} (same : m.Equivalent n)
@@ -9,7 +17,8 @@ theorem Memory.Equivalent.loadValue {m n : Memory} (same : m.Equivalent n)
 
 theorem Memory.Equivalent.storeValue {m n : Memory} (same : m.Equivalent n)
     (reference : ManagedReference) (value : CIL.Value) :
-    ResultEquivalent Memory.Equivalent (storeValue m reference value) (storeValue n reference value) := by
+    ResultEquivalent Memory.Equivalent (storeValue m reference value)
+      (storeValue n reference value) := by
   cases value <;> simp only [CIL.Safety.storeValue, Bind.bind, Except.bind]
   all_goals repeat first
     | exact .error _
@@ -46,7 +55,8 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
     ResultEquivalent MemoryFirstEquivalent (instruction operation stack m)
       (instruction operation stack n) := by
   unfold CIL.Safety.instruction
-  split <;> try simp only [same.read, same.dereference, same.loadValue, same.loadSnapshot, same.formValue, same.add]
+  split <;> try simp only [same.read, same.dereference, same.loadValue, same.loadSnapshot,
+    same.formValue, same.add]
   all_goals repeat first
     | exact same.memoryInstruction _ _
     | exact .error _

@@ -1,10 +1,21 @@
 import CIL.Safety.Execution
 
+/-!
+# Instruction effects and value validity
+
+Facts about the checked interpreter's straight-line instructions. `Value.Valid` says a value
+may sit on the stack: a numeric scalar, or a reference that still forms in memory. Every
+successful instruction has an `InstructionContract`: its only memory change is one checked
+write (an `InstructionEffect`), and it maps valid inputs to valid outputs. Well-formedness
+and allocation extension across instructions follow from these.
+-/
+
 namespace CIL.Safety
 
 theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m : Memory) :
     instructions (first ++ second) stack m =
-      (instructions first stack m).bind (fun (memory, values) => instructions second values memory) := by
+      (instructions first stack m).bind
+        (fun (memory, values) => instructions second values memory) := by
   induction first generalizing stack m with
   | nil => rfl
   | cons op first ih =>
@@ -15,6 +26,7 @@ theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m
       rcases result with ⟨memory, values⟩
       exact ih values memory
 
+/-- A fault in a prefix of straight-line code is the fault of the whole sequence. -/
 theorem instruction_fault_cannot_be_erased (first second : List CIL.Op) (stack : List Value)
     (m : Memory) (fault : ExecutionFault) (h : instructions first stack m = .error fault) :
     instructions (first ++ second) stack m = .error fault := by
@@ -39,6 +51,7 @@ def Value.Valid (m : Memory) : Value → Prop
   | .reference .null | .span .null _ => True
   | .reference (.address r) | .span (.address r) _ => form m r = .ok r
 
+/-- Every value in the list is valid in `m`. -/
 def ValuesValid (m : Memory) (values : List Value) : Prop :=
   ∀ value ∈ values, value.Valid m
 
@@ -80,7 +93,8 @@ theorem formValue_returns_input (m : Memory) (r : ManagedReference) (value : Val
   | address r =>
     simp only [formValue] at h
     cases hf : form m r <;>
-      simp only [hf, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+      simp only [hf, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+        Except.pure] at h
     · cases h
     · rename_i formed
       have same := form_returns_input _ _ _ hf
@@ -103,6 +117,7 @@ theorem formValue_result_valid (m : Memory) (r : ManagedReference) (value : Valu
       subst formed
       exact hf
 
+/-- `checkedValue` either faults or returns its input, which is then valid. -/
 theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
   cases value with
@@ -117,7 +132,8 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
     exact ⟨formValue_returns_input _ _ _ h, formValue_result_valid _ _ _ h⟩
   | span r length =>
     simp only [checkedValue] at h
-    cases hf : formValue m r <;> simp only [hf, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    cases hf : formValue m r <;>
+      simp only [hf, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
     · cases h
     · have valid := formValue_result_valid _ _ _ hf
       have same := formValue_returns_input _ _ _ hf
@@ -136,6 +152,7 @@ theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid 
       simp_all [Value.Valid, checkedValue, formValue, checkedAt, Except.mapError,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
 
+/-- Valid values stay valid when memory only gains allocations. -/
 theorem ValuesValid.preserve {m result : Memory} {values : List Value}
     (valid : ValuesValid m values) (hm : m.WellFormed) (ext : AllocationExtension m result) :
     ValuesValid result values := by
@@ -153,7 +170,8 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
     | address r => exact ext.preserves_reference hm r r hv
 
 theorem checkedValues_valid (m : Memory) (values result : List Value)
-    (h : values.mapM (checkedValue m) = .ok result) : result = values ∧ ValuesValid m result := by
+    (h : values.mapM (checkedValue m) = .ok result) :
+    result = values ∧ ValuesValid m result := by
   induction values generalizing result with
   | nil => cases h; exact ⟨rfl, by simp [ValuesValid]⟩
   | cons value values ih =>
@@ -179,7 +197,8 @@ theorem checkedValues_valid (m : Memory) (values result : List Value)
 #print axioms checkedValues_valid
 
 theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
-    {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) : (Value.scalar value).Valid m := by
+    {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) :
+    (Value.scalar value).Valid m := by
   unfold loadValue at h
   repeat' first
     | rfl
@@ -245,12 +264,18 @@ structure InstructionContract (m result : Memory) (stack values : List Value) : 
   effect : InstructionEffect m result
   values : m.WellFormed → ValuesValid m stack → ValuesValid result values
 
+/-- An instruction whose outputs are valid whenever its inputs are valid afterwards meets its
+    contract, since its effect keeps the inputs valid. -/
 theorem InstructionContract.of_effect {m result : Memory} {stack values : List Value}
     (effect : InstructionEffect m result)
-    (preserve : ValuesValid result stack → ValuesValid result values) : InstructionContract m result stack values :=
+    (preserve : ValuesValid result stack → ValuesValid result values) :
+    InstructionContract m result stack values :=
   ⟨effect, fun hm valid => preserve (valid.preserve hm effect.allocations)⟩
 
 set_option hygiene false in
+/-- Closes one success case of the instruction case analysis with `InstructionContract.of_effect`:
+    picks the effect from the hypotheses, then rebuilds the output stack from retained inputs
+    and validity lemmas for each pushed value. Used only by the instruction contract proofs. -/
 macro "instruction_contract_close" : tactic => `(tactic| (
   refine InstructionContract.of_effect ?_ ?_
   · first
@@ -276,7 +301,11 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | apply loadValue_scalar_valid; assumption
             | apply formValue_result_valid; assumption
             | apply checked_add_result_valid; assumption
-          · first | exact retained | exact retained.tail | exact retained.tail.tail | exact retained.tail.tail.tail))
+          · first
+            | exact retained
+            | exact retained.tail
+            | exact retained.tail.tail
+            | exact retained.tail.tail.tail))
 
 set_option maxHeartbeats 800000 in
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
@@ -291,7 +320,8 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
 
 set_option maxHeartbeats 800000 in
 theorem instruction_contract (operation : CIL.Op) (stack values : List Value) (m result : Memory)
-    (h : instruction operation stack m = .ok (result, values)) : InstructionContract m result stack values := by
+    (h : instruction operation stack m = .ok (result, values)) :
+    InstructionContract m result stack values := by
   unfold instruction at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
@@ -323,7 +353,9 @@ theorem storeValue_preserves_wellFormed (m result : Memory) (reference : Managed
 #print axioms storeValue_preserves_wellFormed
 
 set_option maxHeartbeats 800000 in
-theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp) (stack values : List Value)
+theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp)
+    (stack values : List Value)
+
     (m result : Memory) (hm : m.WellFormed)
     (h : memoryInstruction operation stack m = .ok (result, values)) : result.WellFormed := by
   exact (memoryInstruction_effect _ _ _ _ _ h).wellFormed hm

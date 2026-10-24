@@ -1,7 +1,17 @@
 import CIL.Safety.AccessSlices
 
+/-!
+# Write effects
+
+What a successful checked `write` does and does not change: allocations are untouched,
+cells outside the written interval keep their contents, initialized bytes stay
+initialized, existing readable snapshots stay readable (and unchanged when disjoint), and
+the written bytes read back exactly. These are the frame facts every store lemma uses.
+-/
+
 namespace CIL.Safety
 
+/-- Write access to the whole interval is enough for a write to succeed. -/
 theorem write_succeeds {m : Memory} {r : Reference} {bytes : List (BitVec 8)} {alignment : Nat}
     (ready : access m r bytes.length alignment true = .ok ()) :
     ∃ result, write m r bytes alignment = .ok result := by
@@ -17,6 +27,7 @@ theorem write_allocations (m result : Memory) (r : Reference) (bytes : List (Bit
   · cases h
   · cases h; rfl
 
+/-- A write leaves every cell outside its interval unchanged. -/
 theorem write_outside (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
     (alignment id offset : Nat) (h : write m r bytes alignment = .ok result)
     (outside : id ≠ r.allocation ∨ offset < r.offset ∨ r.offset + bytes.length ≤ offset) :
@@ -32,7 +43,8 @@ theorem write_outside (m result : Memory) (r : Reference) (bytes : List (BitVec 
     · have bound : bytes.length ≤ offset - r.offset := by omega
       simp [List.getElem?_eq_none_iff.mpr bound]
 
-theorem write_preserves_initialization (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
+theorem write_preserves_initialization (m result : Memory) (r : Reference)
+    (bytes : List (BitVec 8))
     (alignment id offset : Nat) (h : write m r bytes alignment = .ok result)
     (initialized : (m.cells id offset).initialized = true) :
     (result.cells id offset).initialized = true := by
@@ -43,16 +55,20 @@ theorem write_preserves_initialization (m result : Memory) (r : Reference) (byte
     have same : r.offset + (offset - r.offset) = offset := by omega
     rw [same] at written
     rw [written]
-  · have outside : id ≠ r.allocation ∨ offset < r.offset ∨ r.offset + bytes.length ≤ offset := by omega
+  · have outside : id ≠ r.allocation ∨ offset < r.offset ∨ r.offset + bytes.length ≤ offset := by
+      omega
     rw [write_outside _ _ _ _ _ _ _ h outside]
     exact initialized
 
+/-- A write keeps the requirements of any access satisfied, overlapping it or not. -/
 theorem AccessRequirements.after_write {m result : Memory} {r q : Reference}
-    {bytes : List (BitVec 8)} {writeAlignment width alignment : Nat} {writing : Bool} {allocation : Allocation}
+    {bytes : List (BitVec 8)} {writeAlignment width alignment : Nat} {writing : Bool}
+    {allocation : Allocation}
     (ready : AccessRequirements m q width alignment writing allocation)
     (h : write m r bytes writeAlignment = .ok result) :
     AccessRequirements result q width alignment writing allocation := by
-  refine ⟨?_, ready.live, ready.position, ready.layout, ready.extent, ready.aligned, ready.mutable, ?_⟩
+  refine ⟨?_, ready.live, ready.position, ready.layout, ready.extent, ready.aligned, ready.mutable,
+    ?_⟩
   · rw [write_allocations _ _ _ _ _ h]
     exact ready.present
   · intro i bound
@@ -62,6 +78,7 @@ theorem AccessRequirements.after_write {m result : Memory} {r q : Reference}
     · rw [write_preserves_write_permission _ _ _ _ _ _ h]
       exact ready.permission i bound
 
+/-- A range readable before a write is still readable after it. -/
 theorem write_preserves_readability {m result : Memory} {r q : Reference}
     {bytes old : List (BitVec 8)} {writeAlignment width alignment : Nat}
     (h : write m r bytes writeAlignment = .ok result)
@@ -102,6 +119,7 @@ theorem write_preserves_disjoint_read {m result : Memory} {r q : Reference}
     rw [write_outside _ _ _ _ _ q.allocation (q.offset + i) h outside]
   simpa only [same] using reading
 
+/-- The written bytes read back exactly. -/
 theorem write_readback (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
     (alignment : Nat) (h : write m r bytes alignment = .ok result) :
     read result r bytes.length alignment = .ok bytes := by
@@ -117,10 +135,13 @@ theorem write_readback (m result : Memory) (r : Reference) (bytes : List (BitVec
       exact ready.present
     · intro i bound
       rw [write_read_permission _ _ _ _ _ _ h]
-      simp [show r.offset ≤ r.offset + i by omega, show r.offset + i < r.offset + bytes.length by omega]
+      simp [show r.offset ≤ r.offset + i by omega,
+        show r.offset + i < r.offset + bytes.length by omega]
   have snapshot := read_snapshot canRead (fun i bound => by
     rw [write_initializes _ _ _ _ _ _ h bound])
-  have same : (List.range bytes.length).map (fun i => (result.cells r.allocation (r.offset + i)).bits) = bytes := by
+  have same :
+      (List.range bytes.length).map (fun i => (result.cells r.allocation (r.offset + i)).bits) =
+        bytes := by
     apply List.ext_getElem
     · simp
     · intro i left right
