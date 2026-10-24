@@ -1,6 +1,16 @@
 import CIL.Extraction.LayoutUses
 import CIL.Extraction.Lockstep
 
+/-!
+# Parameter homes
+
+A parameter that the body stores to or takes the address of is given a home: an extra
+local slot appended after the raw locals, because emitted code only ever reads an
+argument. `ParameterHomesValid` derives the home set from the raw body and the
+reachability mask, and checks that every emitted argument and local instruction uses the
+slot that set implies.
+-/
+
 namespace CIL.Extraction
 
 /-- Metadata storage types, before native widths and aggregate sizes are lowered. -/
@@ -17,12 +27,16 @@ inductive ArgumentOp where
   | other
   deriving DecidableEq, Repr
 
+/-- The storage of a method's arguments (`this` first) and locals, and how each raw
+    instruction touches arguments. -/
 structure RawArguments where
   arguments : List StorageType
   locals : List StorageType
   code : List ArgumentOp
   deriving DecidableEq, Repr
 
+/-- The frame slot kind for a storage type; small integers keep their narrowing and a
+    struct takes its computed size, which must be below 2^64. -/
 def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalKind
   | .reference => some .reference
   | .vector128 => some .vector128
@@ -49,12 +63,14 @@ def requiredHomeIndices (raw : RawArguments) (reachable : List Bool) : List Nat 
       | .store argument | .address argument => argument == index
       | _ => false
 
+/-- Each homed argument index with the slot kind of its home, in argument order. -/
 def expectedHomes (layouts : Array ComputedLayout) (raw : RawArguments)
     (reachable : List Bool) : Option (List (Nat × LocalKind)) :=
   (requiredHomeIndices raw reachable).mapM fun index => do
     let type ← raw.arguments[index]?
     return (index, ← storageKind layouts type)
 
+/-- The narrowing a load of a small-integer argument applies. -/
 private def argumentNarrow : StorageType → Option NarrowKind
   | .field .signed8 => some .signed8
   | .field .unsigned8 | .field .boolean => some .unsigned8
@@ -62,6 +78,8 @@ private def argumentNarrow : StorageType → Option NarrowKind
   | .field .unsigned16 | .field .character => some .unsigned16
   | _ => none
 
+/-- The local slot of argument `index`'s home, if it has one: homes follow the raw
+    locals in home-set order. -/
 private def homeSlot (raw : RawArguments) (homes : List Nat) (index : Nat) : Option Nat :=
   if index ∈ homes then some (raw.locals.length + homes.idxOf index) else none
 
@@ -93,10 +111,13 @@ def validateArgumentOpIn (raw : RawArguments) (homes : List Nat)
   | .other => match emitted with
       | .arg .. | .vectorArg .. | .vectorArgAddr .. => false
       | .local index _ | .setLocal index _ | .localAddr index
-      | .vectorLocal index | .vectorLocalAddr index | .setVectorLocal index => index < raw.locals.length
+      | .vectorLocal index | .vectorLocalAddr index | .setVectorLocal index =>
+        index < raw.locals.length
       | _ => true
 
-def validateArgumentOp (raw : RawArguments) (reachable : List Bool) : ArgumentOp → Bool → Op → Bool :=
+/-- `validateArgumentOpIn` with the home set derived from the body. -/
+def validateArgumentOp (raw : RawArguments) (reachable : List Bool) :
+    ArgumentOp → Bool → Op → Bool :=
   validateArgumentOpIn raw (requiredHomeIndices raw reachable)
 
 /-- A complete mapping check, not a list of optional argument-use claims. -/
@@ -107,12 +128,15 @@ def ParameterHomesValid (layouts : Array ComputedLayout) (raw : RawArguments)
   raw.locals.mapM (storageKind layouts) = some method.localKinds ∧
   method.locals.length = raw.locals.length ∧
   expectedHomes layouts raw reachable = some method.parameterHomes ∧
-  all3 (validateArgumentOpIn raw (requiredHomeIndices raw reachable)) raw.code reachable method.code = true
+  all3 (validateArgumentOpIn raw (requiredHomeIndices raw reachable)) raw.code reachable
+    method.code = true
 
 instance (layouts : Array ComputedLayout) (raw : RawArguments)
-    (reachable : List Bool) (method : Method) : Decidable (ParameterHomesValid layouts raw reachable method) :=
+    (reachable : List Bool) (method : Method) :
+    Decidable (ParameterHomesValid layouts raw reachable method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
+/-- `ParameterHomesValid` as a Boolean, for checking by evaluation. -/
 def validateParameterHomes (layouts : Array ComputedLayout) (raw : RawArguments)
     (reachable : List Bool) (method : Method) : Bool :=
   decide (ParameterHomesValid layouts raw reachable method)
@@ -127,8 +151,10 @@ theorem validated_parameter_homes {layouts : Array ComputedLayout} {raw : RawArg
     (valid : ParameterHomesValid layouts raw reachable method) :
     expectedHomes layouts raw reachable = some method.parameterHomes := valid.2.2.2.2.1
 
+/-- Every emitted instruction passes the argument check at its pc. -/
 theorem validated_argument_access {layouts : Array ComputedLayout} {raw : RawArguments}
-    {reachable : List Bool} {method : Method} (valid : ParameterHomesValid layouts raw reachable method)
+    {reachable : List Bool} {method : Method}
+    (valid : ParameterHomesValid layouts raw reachable method)
     (pc : Fin raw.code.length) (operation : ArgumentOp) (live : Bool) (emitted : Op)
     (rawAt : raw.code[pc.val]? = some operation) (reachableAt : reachable[pc.val]? = some live)
     (emittedAt : method.code[pc.val]? = some emitted) :

@@ -1,5 +1,15 @@
 import CIL.Safety.Execution
 
+/-!
+# Static readonly values
+
+A `static readonly` struct field set once by its static constructor loads as a constant.
+The extractor records the call `M(constants)` that produced the value; `StaticValuesValid`
+reruns each such call in the checked interpreter from empty memory and requires exactly
+the emitted bytes. See the static-value section of `docs/SOUNDNESS.md` for what stays
+trusted.
+-/
+
 namespace CIL.Extraction
 
 /-- Initializers run from this memory: no allocations, views or loaded fields. -/
@@ -14,7 +24,8 @@ def initializerFuel : Nat := 65536
 
 /-- Constructor-fixed sites removed, so no initializer can read a value it justifies. -/
 def withoutStaticValues (program : Program) : Program :=
-  program.map fun body => { body with staticSites := body.staticSites.filter (·.2.initializer.isNone) }
+  program.map fun body =>
+    { body with staticSites := body.staticSites.filter (·.2.initializer.isNone) }
 
 /-- The initializer call returns exactly the descriptor's bytes; RVA descriptors have none. -/
 def initializerYields (program : Program) (descriptor : StaticDescriptor) : Bool :=
@@ -28,7 +39,8 @@ def initializerYields (program : Program) (descriptor : StaticDescriptor) : Bool
 
 /-- Every constructor-fixed static value in the program is the result of its initializer. -/
 def StaticValuesValid (program : Program) : Prop :=
-  (program.flatMap fun body => body.staticSites.map Prod.snd).all (initializerYields program) = true
+  (program.flatMap fun body => body.staticSites.map Prod.snd).all (initializerYields program) =
+    true
 
 instance (program : Program) : Decidable (StaticValuesValid program) :=
   inferInstanceAs (Decidable (_ = _))

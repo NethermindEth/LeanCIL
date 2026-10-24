@@ -1,102 +1,199 @@
 import CIL.Extraction.Features
 
+/-!
+# Division intrinsics and opaque vector locals
+
+A fixed set of `Vector128/256/512<ulong>` hardware intrinsic calls, used by vectorized
+division, is emitted as `.intrinsic` operations. `DivisionIntrinsicsValid` recognizes each
+call from its exact raw metadata and requires the matching emitted intrinsic, available
+under the method's profile, and nothing else.
+
+`Vector128.CreateScalarUnsafe` leaves the upper half of its result unspecified, so a
+method that uses it keeps eligible `Vector128<ulong>` locals as opaque whole values rather
+than bytes; `OpaqueLocalsValid` fixes that set from the raw body.
+
+Signature strings below use string gaps, so each literal is one unbroken identity.
+-/
+
 namespace CIL.Extraction
 
-private def intrinsicScope := "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-
+/-- Each admitted intrinsic: owner class, method name, full signature, emitted intrinsic and
+    arity. -/
 private def divisionSignatures : List (String × String × String × Intrinsic × Nat) := [
-  ("System.Runtime.Intrinsics.X86.Avx2", "And", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::And(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)", .avx2 .band, 2),
-  ("System.Runtime.Intrinsics.X86.Avx2", "Or", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::Or(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)", .avx2 .bor, 2),
-  ("System.Runtime.Intrinsics.X86.Avx2", "Xor", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::Xor(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)", .avx2 .bxor, 2),
-  ("System.Runtime.Intrinsics.X86.Avx2", "AndNot", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::AndNot(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)", .avx2 .andNot, 2),
-  ("System.Runtime.Intrinsics.X86.Avx2", "ShiftLeftLogical", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)", .avx2 .shl64Count, 2),
-  ("System.Runtime.Intrinsics.X86.Avx2", "ShiftRightLogical", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)", .avx2 .shr64Count, 2),
-  ("System.Runtime.Intrinsics.X86.Avx512F", "CompareLessThan", "System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx512F::CompareLessThan(System.Runtime.Intrinsics.Vector512`1<System.UInt64>,System.Runtime.Intrinsics.Vector512`1<System.UInt64>)", .avx512 .ltu512, 2),
-  ("System.Runtime.Intrinsics.X86.Avx512F", "CompareGreaterThan", "System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx512F::CompareGreaterThan(System.Runtime.Intrinsics.Vector512`1<System.UInt64>,System.Runtime.Intrinsics.Vector512`1<System.UInt64>)", .avx512 .gtu512, 2),
-  ("System.Runtime.Intrinsics.X86.Avx512DQ", "MoveMask", "System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(System.Runtime.Intrinsics.Vector512`1<System.UInt64>)", .avx512DQ .moveMask512, 1),
-  ("System.Runtime.Intrinsics.Vector512", "Create", "System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.Vector512::Create(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)", .vector .combine256, 2),
-  ("System.Runtime.Intrinsics.Vector128", "CreateScalarUnsafe", "System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)", .vector .createScalarUnsafe64, 1),
-  ("System.Runtime.Intrinsics.X86.Avx2", "ShiftLeftLogical", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)", .avx2 .shl64, 2),
-  ("System.Runtime.Intrinsics.X86.Avx2", "ShiftRightLogical", "System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)", .avx2 .shr64, 2),
-  ("System.Runtime.Intrinsics.X86.Avx512DQ", "MoveMask", "System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(System.Runtime.Intrinsics.Vector256`1<System.UInt64>)", .avx512DQ .moveMask64, 1)]
+  ("System.Runtime.Intrinsics.X86.Avx2", "And",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::And(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
+    .avx2 .band, 2),
+  ("System.Runtime.Intrinsics.X86.Avx2", "Or",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::Or(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
+    .avx2 .bor, 2),
+  ("System.Runtime.Intrinsics.X86.Avx2", "Xor",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::Xor(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
+    .avx2 .bxor, 2),
+  ("System.Runtime.Intrinsics.X86.Avx2", "AndNot",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::AndNot(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
+    .avx2 .andNot, 2),
+  ("System.Runtime.Intrinsics.X86.Avx2", "ShiftLeftLogical",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector128`1<System.UInt64>)",
+    .avx2 .shl64Count, 2),
+  ("System.Runtime.Intrinsics.X86.Avx2", "ShiftRightLogical",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector128`1<System.UInt64>)",
+    .avx2 .shr64Count, 2),
+  ("System.Runtime.Intrinsics.X86.Avx512F", "CompareLessThan",
+    "System.Runtime.Intrinsics.Vector512`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx512F::CompareLessThan(\
+      System.Runtime.Intrinsics.Vector512`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector512`1<System.UInt64>)",
+    .avx512 .ltu512, 2),
+  ("System.Runtime.Intrinsics.X86.Avx512F", "CompareGreaterThan",
+    "System.Runtime.Intrinsics.Vector512`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx512F::CompareGreaterThan(\
+      System.Runtime.Intrinsics.Vector512`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector512`1<System.UInt64>)",
+    .avx512 .gtu512, 2),
+  ("System.Runtime.Intrinsics.X86.Avx512DQ", "MoveMask",
+    "System.Int32 \
+      System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(\
+      System.Runtime.Intrinsics.Vector512`1<System.UInt64>)",
+    .avx512DQ .moveMask512, 1),
+  ("System.Runtime.Intrinsics.Vector512", "Create",
+    "System.Runtime.Intrinsics.Vector512`1<System.UInt64> \
+      System.Runtime.Intrinsics.Vector512::Create(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
+    .vector .combine256, 2),
+  ("System.Runtime.Intrinsics.Vector128", "CreateScalarUnsafe",
+    "System.Runtime.Intrinsics.Vector128`1<System.UInt64> \
+      System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)",
+    .vector .createScalarUnsafe64, 1),
+  ("System.Runtime.Intrinsics.X86.Avx2", "ShiftLeftLogical",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)",
+    .avx2 .shl64, 2),
+  ("System.Runtime.Intrinsics.X86.Avx2", "ShiftRightLogical",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)",
+    .avx2 .shr64, 2),
+  ("System.Runtime.Intrinsics.X86.Avx512DQ", "MoveMask",
+    "System.Int32 \
+      System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
+    .avx512DQ .moveMask64, 1)]
 
-private def scalarScope := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-
+/-- `Vector{width}<ulong>` with exact scopes. -/
 private def divisionVector (width : String) : TypeExpr :=
-  .apply (.constructor intrinsicScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
-    (.atom scalarScope "System.UInt64")
+  .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
+    (.atom runtimeScope "System.UInt64")
 
+/-- The return and parameter types each admitted intrinsic's call site must declare. -/
 private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
   | .avx2 .band | .avx2 .bor | .avx2 .bxor | .avx2 .andNot =>
     some (divisionVector "256", [divisionVector "256", divisionVector "256"])
   | .avx2 .shl64Count | .avx2 .shr64Count =>
     some (divisionVector "256", [divisionVector "256", divisionVector "128"])
   | .avx2 .shl64 | .avx2 .shr64 =>
-    some (divisionVector "256", [divisionVector "256", .atom scalarScope "System.Byte"])
+    some (divisionVector "256", [divisionVector "256", .atom runtimeScope "System.Byte"])
   | .avx512 .ltu512 | .avx512 .gtu512 =>
     some (divisionVector "512", [divisionVector "512", divisionVector "512"])
-  | .avx512DQ .moveMask512 => some (.atom scalarScope "System.Int32", [divisionVector "512"])
-  | .avx512DQ .moveMask64 => some (.atom scalarScope "System.Int32", [divisionVector "256"])
+  | .avx512DQ .moveMask512 => some (.atom runtimeScope "System.Int32", [divisionVector "512"])
+  | .avx512DQ .moveMask64 => some (.atom runtimeScope "System.Int32", [divisionVector "256"])
   | .vector .combine256 => some (divisionVector "512", [divisionVector "256", divisionVector "256"])
-  | .vector .createScalarUnsafe64 => some (divisionVector "128", [.atom scalarScope "System.UInt64"])
+  | .vector .createScalarUnsafe64 =>
+    some (divisionVector "128", [.atom runtimeScope "System.UInt64"])
   | _ => none
 
+/-- The intrinsic and arity of a static, non-generic `call` that matches an admitted entry
+    exactly: owner, name, arity, identity and declared types. -/
 def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat) := do
   if instruction.opcode != 40 then none else
   let .call site := instruction.operand | none
   if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
-  let (owner, name, signature, intrinsic, arity) ← divisionSignatures.find? fun (owner, name, signature, _, arity) =>
-    site.declaringType == .atom intrinsicScope owner && site.name == name &&
-    site.parameterCount == arity && site.target == .external (intrinsicScope ++ "::" ++ signature)
-  let _ := owner
-  let _ := name
-  let _ := signature
+  let (_, _, _, intrinsic, arity) ←
+    divisionSignatures.find? fun (owner, name, signature, _, arity) =>
+      site.declaringType == .atom intrinsicsScope owner && site.name == name &&
+      site.parameterCount == arity &&
+      site.target == .external (intrinsicsScope ++ "::" ++ signature)
   let (returnType, parameterTypes) ← divisionCallTypes intrinsic
   if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
   return (intrinsic, arity)
 
+/-- A call that resembles an admitted entry by identity, or by owner and name; such a call
+    must then match an entry exactly. -/
 private def divisionCallFamily (instruction : RawInstruction) : Bool :=
   match instruction.operand with
   | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
-      site.target == .external (intrinsicScope ++ "::" ++ signature) ||
+      site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
       site.name == name && match site.declaringType with
         | .atom _ declared => declared == owner
         | _ => false
   | _ => false
 
+/-- The intrinsic and arity of an emitted admitted intrinsic. -/
 def emittedDivisionIntrinsic : Op → Option (Intrinsic × Nat)
   | .intrinsic intrinsic arity => match intrinsic with
     | .avx2 .band | .avx2 .bor | .avx2 .bxor | .avx2 .andNot
     | .avx2 .shl64Count | .avx2 .shr64Count | .avx2 .shl64 | .avx2 .shr64
     | .avx512 .ltu512 | .avx512 .gtu512
-    | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256 | .vector .createScalarUnsafe64 => some (intrinsic, arity)
+    | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256
+    | .vector .createScalarUnsafe64 => some (intrinsic, arity)
     | _ => none
   | _ => none
 
-def DivisionIntrinsicsValid (closed : RawMethod) (reachable : List Bool) (method : Method) : Prop :=
-  method.profile.Valid ∧ closed.code.length = reachable.length ∧ closed.code.length = method.code.length ∧
+/-- At every live pc, a resembling call or an emitted admitted intrinsic requires an exact
+    match between the two, and every emitted one is available under the profile. -/
+def DivisionIntrinsicsValid (closed : RawMethod) (reachable : List Bool) (method : Method) :
+    Prop :=
+  method.profile.Valid ∧ closed.code.length = reachable.length ∧
+    closed.code.length = method.code.length ∧
   all3 (fun raw live emitted => !live ||
     (if divisionCallFamily raw || (emittedDivisionIntrinsic emitted).isSome then
-      (divisionIntrinsic raw).isSome && decide (divisionIntrinsic raw = emittedDivisionIntrinsic emitted)
+      (divisionIntrinsic raw).isSome &&
+        decide (divisionIntrinsic raw = emittedDivisionIntrinsic emitted)
      else true) &&
     match emittedDivisionIntrinsic emitted with
     | some (intrinsic, _) => Intrinsic.available method.profile intrinsic
     | none => true) closed.code reachable method.code = true
 
 instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
-    Decidable (DivisionIntrinsicsValid closed reachable method) := inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+    Decidable (DivisionIntrinsicsValid closed reachable method) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
+/-- A `Vector128<ulong>` local whose address is never taken. -/
 private def opaqueEligible (closed : RawMethod) (addressed : List Nat) (index : Nat) : Bool :=
   (match closed.locals[index]? with
-  | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom elementScope "System.UInt64")) =>
-    scope == intrinsicScope && elementScope == scalarScope
+  | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
+      (.atom elementScope "System.UInt64")) =>
+    scope == intrinsicsScope && elementScope == runtimeScope
   | _ => false) && !addressed.contains index
 
+/-- Every eligible local, in index order; addresses are taken by `ldloca` (18 or 0xFE0D). -/
 def opaqueLocalIndices (closed : RawMethod) : List Nat :=
   let addressed := closed.code.filterMap fun instruction =>
     if instruction.opcode == 18 || instruction.opcode == 65037 then localIndex instruction else none
   (List.range closed.locals.length).filter (opaqueEligible closed addressed)
 
+/-- The opaque locals are exactly the eligible ones when the method uses
+    `CreateScalarUnsafe` and none otherwise; each is a 128-bit vector slot whose address the
+    emitted code never takes. -/
 def OpaqueLocalsValid (closed : RawMethod) (method : Method) : Prop :=
   method.opaqueVectorLocals = (if method.code.any (fun op =>
     match op with
