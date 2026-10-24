@@ -109,16 +109,23 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
          Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl))
-    -- A fact stated at `staticInstruction`/`memoryInstruction` predates the per-shape memory equations.
-    | (simp only [CIL.Safety.step_memory_eq, cil_guard]
-       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
-         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
-         Pure.pure, Except.pure, $[$facts:term],*]
-       all_goals ((repeat constructor) <;> rfl))
     | (fail_if_success simp only [cil_step]
        simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
         CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
         $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+
+-- A fact at the `memoryInstruction` level fails once a per-shape memory equation rewrites past it,
+-- so only then is the step retried through `step_memory_eq`.
+macro "cil_checked_memory_step " "[" facts:term,* "]" : tactic =>
+  `(tactic| first
+    | cil_checked_step_equations [$[$facts:term],*]
+    | (fail_if_success fail_if_success simp only [cil_step, -CIL.Safety.step_memory_eq]
+       rw [CIL.Safety.step_memory_eq]
+       try simp only [cil_guard]
+       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind,
+         Pure.pure, Except.pure, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
 
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
@@ -173,6 +180,8 @@ elab_rules : tactic
         `(tactic| first | rfl | cil_checked_step_equations [$facts:term,*])
       else if operation == ``CIL.Op.intrinsic then
         `(tactic| cil_checked_intrinsic [$facts:term,*])
+      else if operation == ``CIL.Op.memory then
+        `(tactic| cil_checked_memory_step [$facts:term,*])
       else
         `(tactic| cil_checked_step_equations [$facts:term,*])
     evalTactic strategy
