@@ -128,6 +128,15 @@ macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
       Bind.bind, Except.bind, Pure.pure, Except.pure]
     all_goals (first | rfl | cil_checked_step_equations [$[$facts:term],*])))
 
+open Lean Meta in
+/-- The opcode constructor `op` denotes, when its head reduces to one: a body that picks an opcode with a
+    decided `if` would otherwise match no step equation and unfold the whole dispatcher. -/
+def cilReducedOp? (op : Expr) : MetaM (Option Expr) := do
+  let reduced ← whnfD (← instantiateMVars op)
+  let some name := reduced.getAppFn.constName? | return none
+  let some (.ctorInfo info) := (← getEnv).find? name | return none
+  return if info.induct == ``CIL.Op then some reduced else none
+
 syntax "cil_checked_step_normalized" "[" term,* "]" : tactic
 
 open Lean Elab Tactic Meta in
@@ -135,13 +144,17 @@ elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
     if (← getGoals).isEmpty then return
-    let target ← instantiateMVars (← getMainTarget)
-    let some (_, lhs, _) := target.eq? | throwError "Expected a checked step equality"
-    let args := lhs.getAppArgs
+    let mut target ← instantiateMVars (← getMainTarget)
+    let some (_, lhs, rhs) := target.eq? | throwError "Expected a checked step equality"
+    let mut args := lhs.getAppArgs
     let mut operation := Name.anonymous
     if lhs.isAppOfArity ``CIL.Safety.step 7 then
-      let op ← withReducible <| whnf args[1]!
-      operation := op.getAppFn.constName?.getD Name.anonymous
+      if let some op ← cilReducedOp? args[1]! then
+        operation := op.getAppFn.constName!
+        unless op == args[1]! do
+          args := args.set! 1 op
+          target ← mkEq (mkAppN lhs.getAppFn args) rhs
+          replaceMainGoal [← (← getMainGoal).replaceTargetDefEq target]
     let scalar := #[``CIL.Op.nop, ``CIL.Op.neg, ``CIL.Op.gt, ``CIL.Op.convI1,
       ``CIL.Op.convI2, ``CIL.Op.convU2, ``CIL.Op.convI8, ``CIL.Op.convI4,
       ``CIL.Op.convU1, ``CIL.Op.convU4, ``CIL.Op.convU8, ``CIL.Op.convU,
@@ -220,7 +233,7 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
     unless remaining.isEmpty do throwError "The method or instruction lookup did not close"
   let fetched ← instantiateMVars (← inferType instructionFound)
   let some (_, _, found) := fetched.eq? | throwError "Unexpected instruction lookup"
-  let operation := (← whnfR found.appArg!).getAppFn.constName?.getD Name.anonymous
+  let operation := ((← cilReducedOp? found.appArg!).bind (·.getAppFn.constName?)).getD Name.anonymous
   return (← Term.exprToSyntax (← instantiateMVars methodFound),
     ← Term.exprToSyntax (← instantiateMVars instructionFound), operation)
 

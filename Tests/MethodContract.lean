@@ -241,4 +241,83 @@ example {program : CIL.Program} {before after : Memory} (kept : FrameInvariants 
     after.WellFormed ∧ StaticWorldValid (programStaticDescriptors program) after :=
   ⟨kept.formed, kept.staticWorld world⟩
 
+-- A loaded local reaches the stack as `localResult kind value`; its consumer must still rewrite by its
+-- step equation. The fallback unfolds `CIL.step`, whose match equations alone exceed this budget.
+def loadedGuardBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := false, locals := [], code :=
+    [.local 0, .const32 4, .bltu 7, .local 0, .const32 0, .bge 7, .nop, .ret,
+      .local 1, .local 2, .bltu 7, .ret] }
+
+set_option maxHeartbeats 10000 in
+theorem loaded_unsigned_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
+    (word : CIL.W32) (home : Reference) (slot : frame.locals[0]? = some (.bytes .word32 home))
+    (load : loadLocal memory (.bytes .word32 home) = .ok (.scalar (localResult .word32 (.i32 word))))
+    (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned, run program fuel index (if word < 4#32 then 7 else 3) [] frame []
+      memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 0 [] frame [] memory = .ok (final, returned) ∧
+      post final returned := by
+  cil_contract_steps [slot, load] until continuation
+
+set_option maxHeartbeats 10000 in
+theorem loaded_signed_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
+    (word : CIL.W32) (home : Reference) (slot : frame.locals[0]? = some (.bytes .word32 home))
+    (load : loadLocal memory (.bytes .word32 home) = .ok (.scalar (localResult .word32 (.i32 word))))
+    (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned, run program fuel index (if 0 ≤ word.toInt then 7 else 6) [] frame []
+      memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 3 [] frame [] memory = .ok (final, returned) ∧
+      post final returned := by
+  cil_contract_steps [slot, load] until continuation
+
+set_option maxHeartbeats 10000 in
+theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
+    (low high : CIL.W64) (lowHome highHome : Reference)
+    (lowSlot : frame.locals[1]? = some (.bytes .word64 lowHome))
+    (highSlot : frame.locals[2]? = some (.bytes .word64 highHome))
+    (lowLoad : loadLocal memory (.bytes .word64 lowHome) = .ok (.scalar (localResult .word64 (.i64 low))))
+    (highLoad : loadLocal memory (.bytes .word64 highHome) = .ok (.scalar (localResult .word64 (.i64 high))))
+    (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned, run program fuel index (if low < high then 7 else 11) [] frame []
+      memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 8 [] frame [] memory = .ok (final, returned) ∧
+      post final returned := by
+  cil_contract_steps [lowSlot, highSlot, lowLoad, highLoad] until continuation
+
+-- A body that selects its widening by a parameter yields `if true = true then ..` from the lookup;
+-- the step must reduce it to the opcode so the widening equation applies.
+def widenBody (signed : Bool) : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.arg 0, if signed then .convI8 else .convU8, .arg 1, .ret] }
+
+def widenArgs (scalarFirst : Bool) (input : Reference) (value : CIL.Value) : List Value :=
+  if scalarFirst then [.scalar value, .reference (.address input)] else [.reference (.address input), .scalar value]
+
+set_option maxHeartbeats 15000 in
+theorem selected_widening (signed : Bool) (program : CIL.Program) (index : Nat)
+    (found : program[index]? = some (widenBody signed)) (frame : Frame) (memory : Memory)
+    (input : Reference) (word : CIL.W32) (formed : form memory input = .ok input)
+    (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned,
+      run program fuel index 3 (widenArgs (true && true) input (.i32 word)) frame
+        [.reference (.address input), .scalar (.i64 (if signed then word.signExtend 64 else word.zeroExtend 64))]
+        memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 0 (widenArgs (true && true) input (.i32 word)) frame [] memory =
+      .ok (final, returned) ∧ post final returned := by
+  cases signed
+  all_goals
+    cil_contract_steps 3 [found, formed, widenArgs]
+    simpa only [ite_true, Bool.false_eq_true, ite_false] using continuation
+
+/-- info: 'Tests.MethodContract.loaded_unsigned_branch' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms loaded_unsigned_branch
+/-- info: 'Tests.MethodContract.loaded_signed_branch' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms loaded_signed_branch
+/-- info: 'Tests.MethodContract.loaded_limb_branch' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms loaded_limb_branch
+/-- info: 'Tests.MethodContract.selected_widening' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms selected_widening
+
 end Tests.MethodContract
