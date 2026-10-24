@@ -32,6 +32,11 @@ public static class DivisionIntrinsics
         return Avx512DQ.MoveMask(Avx512F.CompareGreaterThan(first, second));
     }
     public static ulong UnsafeLow(ulong value) => Vector128.CreateScalarUnsafe(value).GetElement(0);
+    public static Vector128<ulong> UnsafeReturn(ulong value) => Vector128.CreateScalarUnsafe(value);
+    public static ulong UnsafeCall(ulong value) => ReadLow(Vector128.CreateScalarUnsafe(value));
+    private static ulong ReadLow(Vector128<ulong> value) => value.GetElement(0);
+    public static void UnsafeStore(ref Vector128<ulong> destination, ulong value) =>
+        destination = Vector128.CreateScalarUnsafe(value);
     public static ulong UnsafeHigh(ulong value) => Vector128.CreateScalarUnsafe(value).GetElement(1);
     public static bool UnsafeEquals(ulong value) => Vector128.CreateScalarUnsafe(value) == Vector128.CreateScalarUnsafe(value);
     public static void Init128(ref Vector128<ulong> value) => value = default;

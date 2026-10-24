@@ -120,7 +120,12 @@ theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : 
     (h : step body (.ret narrow) pc args frame stack m = .ok action) :
     ∃ values m', action = .returned values m' := by
   cases narrow
-  · change (if stack.length = (if body.returnsValue then 1 else 0) then
+  · have known : unspecifiedOperands 1 stack = false := by
+      cases observed : unspecifiedOperands 1 stack with
+      | false => rfl
+      | true => simp [step, observerCount, observed] at h
+    simp only [step, observerCount, known, Bool.false_or, Bool.false_eq_true, ↓reduceIte] at h
+    change (if stack.length = (if body.returnsValue then 1 else 0) then
         (do return FrameAction.returned (← stack.mapM (checkedValue m)) m)
       else .error .invalidState) = .ok action at h
     by_cases sized : stack.length = (if body.returnsValue then 1 else 0)

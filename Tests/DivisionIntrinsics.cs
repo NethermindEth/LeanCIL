@@ -17,6 +17,33 @@ Dictionary<string, string> selectors = metadata.GetType("Examples.DivisionIntrin
 Type runtime = Assembly.LoadFile(assembly).GetType("Examples.DivisionIntrinsics")!;
 string root = At("artifacts/DivisionIntrinsics");
 
+// Check the boundary fault on actual extracted CIL, including an otherwise valid writable destination.
+foreach (var name in new[] { "UnsafeReturn", "UnsafeCall", "UnsafeStore" })
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var proof = Path.Combine(output, "Proof.lean");
+    var arguments = name == "UnsafeStore"
+        ? "[.reference (.address ⟨0, 0⟩), .scalar (.i64 7)]" : "[.scalar (.i64 7)]";
+    File.WriteAllText(proof, $$"""
+import Extracted
+namespace ExampleProof
+private def memory : CIL.Safety.Memory := {
+  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨16, 1, []⟩, true, [16]⟩ else none
+  cells := fun _ _ => ⟨0, true⟩
+  views := [⟨0, 0, 16, true, true⟩]
+  nextIdentity := 1 }
+theorem correctness :
+    ((CIL.Safety.invoke Extracted.program 64 0 {{arguments}} memory).mapError
+      (fun fault => fault.fault)).map Prod.snd =
+      .error (.unsupported "Instruction observes unspecified vector bits") := by rfl
+#print axioms correctness
+end ExampleProof
+""");
+    verification.Verify(assembly, "Examples", selectors[name], proof, output, profile: "x64-v3");
+    Console.WriteLine("PASS unspecified vector boundary rejection: " + name);
+}
+
 foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in new (string, ulong, ulong, ulong, bool)[]
 {
     ("And", 13, 6, 4, false), ("Or", 13, 6, 15, false),
