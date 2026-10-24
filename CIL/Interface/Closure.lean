@@ -97,13 +97,15 @@ private def trustedModule (name : Name) : Bool :=
   name == `Std || (`Std).isPrefixOf name || name == `Lean || (`Lean).isPrefixOf name
 
 /-- Every constant an expression mentions, with repetitions. -/
-private def dependencies : Expr -> List Name
+def expressionConstants : Expr -> List Name
   | .const name _ => [name]
-  | .app fn argument => dependencies fn ++ dependencies argument
-  | .lam _ type body _ | .forallE _ type body _ => dependencies type ++ dependencies body
-  | .letE _ type value body _ => dependencies type ++ dependencies value ++ dependencies body
-  | .mdata _ value => dependencies value
-  | .proj type _ value => type :: dependencies value
+  | .app fn argument => expressionConstants fn ++ expressionConstants argument
+  | .lam _ type body _ | .forallE _ type body _ =>
+    expressionConstants type ++ expressionConstants body
+  | .letE _ type value body _ =>
+    expressionConstants type ++ expressionConstants value ++ expressionConstants body
+  | .mdata _ value => expressionConstants value
+  | .proj type _ value => type :: expressionConstants value
   | _ => []
 
 /-- The parts of a declaration that determine its meaning: its type, a definition's or
@@ -172,11 +174,11 @@ private def declaration (info : ConstantInfo) : Except String Json := do
 
 /-- The constants a theorem's proof mentions. -/
 private def proofDependencies : ConstantInfo -> List Name
-  | .thmInfo value => dependencies value.value
+  | .thmInfo value => expressionConstants value.value
   | _ => []
 
 private def semanticDependencies (info : ConstantInfo) : List Name :=
-  related info ++ (semanticExpressions info).flatMap dependencies
+  related info ++ (semanticExpressions info).flatMap expressionConstants
 
 /-- One walk over everything `roots` reach, visiting each declaration once. Untrusted
 declarations, and the trusted ones they name, must be `permitted`; every reachable axiom,

@@ -84,16 +84,6 @@ private def exprSource (environment : Environment) (shared : Std.HashSet Name)
       nameSource (<- mapped environment shared targetNamespace type) ++ " " ++
       toString index ++ " " ++ (<- exprSource environment shared targetNamespace value) ++ ")")
 
-/-- Every constant an expression mentions, with repetitions. -/
-private def dependencies : Expr -> List Name
-  | .const name _ => [name]
-  | .app fn argument => dependencies fn ++ dependencies argument
-  | .lam _ type body _ | .forallE _ type body _ => dependencies type ++ dependencies body
-  | .letE _ type value body _ => dependencies type ++ dependencies value ++ dependencies body
-  | .mdata _ value => dependencies value
-  | .proj type _ value => type :: dependencies value
-  | _ => []
-
 /-- The body of a definition, theorem or opaque; unsafe and partial declarations and other
     kinds are rejected. -/
 private def value (info : ConstantInfo) : Except String Expr :=
@@ -154,7 +144,7 @@ private partial def visit (environment : Environment) (shared : Std.HashSet Name
     throw ("Cyclic full-verification declaration: " ++ name.toString)
   let body <- value info
   let mut state := { state with active := state.active.insert name }
-  for dependency in dependencies info.type ++ dependencies body do
+  for dependency in expressionConstants info.type ++ expressionConstants body do
     state <- visit environment shared targetNamespace dependency state
   let source <- declarationSource environment shared targetNamespace info
   return { state with
