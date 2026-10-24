@@ -699,8 +699,9 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 /-- info: 'Tests.Automation.add_run' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms add_run
 
-/-- A supplied step fact is used before the op's own equation, which here cannot read the frame's slot. -/
-def slotBody (profile : CIL.FeatureProfile) : CIL.Method :=
+/-- A supplied step fact is used before the op's own equation, which here cannot read the frame's slot;
+    the body is `cil_code`, so the fact must be tried before the lookup unfolds it. -/
+@[cil_code] def slotBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [], code := [.setLocal 0, .local 0, .ret] }
 
 open CIL.Safety in
@@ -743,11 +744,10 @@ def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
     code := [if profile.avx2 then .arg 1 else .arg 0, .fieldAt 0 8, .ret] }
 
 -- The lookup decides the feature test, so the fetched op is a constructor with a step equation.
+-- A term-mode `by`, as the contract and loop tactics call it, must still assign the op.
 example (profile : CIL.FeatureProfile) (scalar : profile.avx2 = false) :
-    ∃ op, (featureOpBody profile).code[0]? = some op ∧ op = .arg 0 := by
-  refine ⟨?op, ?found, ?decided⟩
-  case found => cil_lookup [scalar]
-  case decided => with_reducible rfl
+    ∃ op, (featureOpBody profile).code[0]? = some op ∧ op = .arg 0 :=
+  ⟨_, by cil_lookup [scalar], by with_reducible rfl⟩
 
 open CIL.Safety in
 theorem feature_op_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -768,6 +768,8 @@ def reverseLanes (v : CIL.Vector.V256) : CIL.Vector.V256 := CIL.Vector.permute4x
 -- Stated with a literal control, as a consumer writes it; the operand arrives as `BitVec.ofNat 32 27`.
 theorem eval_reverse_lanes (v : CIL.Vector.V256) :
     CIL.evalIntrinsic (.avx2 .permute4x64) [.v256 v, .i32 27] = some (.v256 (reverseLanes v)) := rfl
+
+#print axioms eval_reverse_lanes
 
 -- The pushed value is the evaluation fact's, so the store fact on `reverseLanes v` applies next.
 open CIL.Safety in

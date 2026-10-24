@@ -128,7 +128,9 @@ macro "cil_steps_from " message:str tactic:tacticSeq : tactic =>
 syntax "cil_lookup" "[" term,* "]" : tactic
 
 theorem getElem?_eq_some_of_eq {α : Type u} {l : List α} {i : Nat} {a b : α}
-    (found : l[i]? = some a) (reduced : a = b) : l[i]? = some b := reduced ▸ found
+    (found : l[i]? = some a) (reduced : a = b) : l[i]? = some b := by subst reduced; exact found
+
+#print axioms getElem?_eq_some_of_eq
 
 /-- Close `l[i]? = some x` by `rfl`, deciding a fetched feature `if` with `facts` first so the op is a
     constructor and its step equation applies. -/
@@ -139,18 +141,27 @@ elab_rules : tactic
   | `(tactic| cil_lookup_rfl [$facts:term,*]) => withMainContext do
     let goal ← getMainGoal
     let saved ← saveState
-    let decided ← `(tactic| (
-      refine CIL.Safety.getElem?_eq_some_of_eq rfl ?_
-      simp only [Bool.false_eq_true, Bool.true_eq_false, eq_self_iff_true, ite_true, ite_false, dite_true,
-        dite_false, Bool.cond_true, Bool.cond_false, ↓reduceIte, ↓reduceDIte, $[$facts:term],*] <;> rfl))
     evalTactic (← `(tactic| rfl))
-    let some (_, _, found) := (← instantiateMVars (← goal.getType)).eq? | return
+    let some (_, lookup, found) := (← instantiateMVars (← goal.getType)).eq? | return
     unless found.isAppOfArity ``Option.some 2 do return
     let op ← whnfR found.appArg!
-    unless op.isAppOf ``ite || op.isAppOf ``dite || op.isAppOf ``cond do return
+    let isFeatureTest (e : Expr) := e.isAppOf ``ite || e.isAppOf ``dite || e.isAppOf ``cond
+    unless isFeatureTest op do return
     let fetched ← saveState
     saved.restore
-    try evalTactic decided catch _ => fetched.restore
+    -- Built as a term: `refine` cannot assign the caller's op metavariable inside a term-mode `by`.
+    try
+      let decide ← `(tactic| simp only [Bool.false_eq_true, Bool.true_eq_false, eq_self_iff_true, ite_true, ite_false,
+        dite_true, dite_false, Bool.cond_true, Bool.cond_false, ↓reduceIte, ↓reduceDIte, $[$facts:term],*])
+      let { ctx, simprocs, .. } ← mkSimpContext decide (eraseLocal := false)
+      let (reduced, _) ← simp op ctx simprocs
+      if isFeatureTest (← whnfR reduced.expr) then throwError "The feature test was not decided"
+      let some (_, _, pending) := (← instantiateMVars (← goal.getType)).eq? | throwError "Unexpected lookup"
+      unless ← isDefEq pending (← mkAppM ``Option.some #[reduced.expr]) do throwError "Unexpected lookup"
+      let fetchedOp ← mkExpectedTypeHint (← mkEqRefl lookup) (← mkEq lookup (← mkAppM ``Option.some #[op]))
+      goal.assign (← mkAppM ``CIL.Safety.getElem?_eq_some_of_eq #[fetchedOp, ← reduced.getProof])
+      replaceMainGoal []
+    catch _ => fetched.restore
 
 -- Reducible `assumption` keeps a failed candidate lookup from unfolding every hypothesis.
 -- A branch leaves `(v != 0) = true` in the pc; the branch lemmas decide it from `v = 0`, its negation or a literal.
@@ -295,7 +306,7 @@ elab_rules : tactic
     for fact in ← stepFacts (← getMainTarget) facts.getElems do
       let saved ← saveState
       try
-        evalTactic (← `(tactic| ((with_reducible_and_instances apply $fact); done)))
+        evalTactic (← `(tactic| cil_strict ((with_reducible_and_instances apply $fact); done)))
         return
       catch _ => saved.restore
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
