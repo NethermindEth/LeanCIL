@@ -25,11 +25,17 @@ def sample : Memory := {
 /-- `sample` after a callee revokes read authority over the whole allocation. -/
 def revoked : Memory := { sample with views := [⟨0, 0, size, false, true⟩] }
 
-/-- The input: bytes 0 to 7 of the allocation. -/
-def source : ArgumentView := ⟨⟨0, 0⟩, 8⟩
+/-- The width of each buffer. -/
+abbrev width : Nat := 8
 
-/-- The output: bytes 16 to 23, apart from the input. -/
-def target : ArgumentView := ⟨⟨0, 16⟩, 8⟩
+/-- The input: the first `width` bytes of the allocation. -/
+def source : ArgumentView := ⟨⟨0, 0⟩, width⟩
+
+/-- The output: the last `width` bytes, apart from the input. -/
+def target : ArgumentView := ⟨⟨0, size - width⟩, width⟩
+
+/-- The bytes a write stores. -/
+abbrev payload : List (BitVec 8) := numberBytes 5 width
 
 /-- Well-formed whenever the only view lies inside the only allocation. -/
 theorem formed_of_view {views : List View} (inside : views = [⟨0, 0, size, true, true⟩] ∨
@@ -70,13 +76,13 @@ example : ValidCall sample [] [target] :=
 
 /-- Writing the output does not invalidate it or the input. -/
 theorem valid_after_output_write {result : Memory}
-    (written : write sample target.reference (numberBytes 5 8) 1 = .ok result) :
+    (written : write sample target.reference payload 1 = .ok result) :
     ValidCall result [source] [target] :=
   sample_valid.after_write written
 
 /-- Writing the input itself keeps it readable: a write only initializes bytes. -/
 theorem valid_after_input_write {result : Memory}
-    (written : write sample source.reference (numberBytes 5 8) 1 = .ok result) :
+    (written : write sample source.reference payload 1 = .ok result) :
     ValidCall result [source] [target] :=
   sample_valid.after_write written
 
@@ -91,6 +97,13 @@ theorem valid_after_below {result : Memory}
     (preserved : MemoryBelow sample.nextIdentity sample result) (formed : result.WellFormed) :
     ValidCall result [source] [target] :=
   sample_valid.after_below preserved.accessBelow (Nat.le_refl _) formed
+
+/-- Any watermark covering the caller's allocations will do, and only access is kept:
+    byte values below it may change. -/
+theorem valid_after_access_below {watermark : Nat} {result : Memory}
+    (retained : AccessBelow watermark sample result) (covers : sample.nextIdentity ≤ watermark)
+    (formed : result.WellFormed) : ValidCall result [source] [target] :=
+  sample_valid.after_below retained covers formed
 
 /-- A callee confined to the output leaves the input apart from its footprint. -/
 theorem valid_after_confined {result : Memory}
@@ -107,6 +120,7 @@ theorem valid_after_confined {result : Memory}
 #print axioms valid_after_input_write
 #print axioms valid_after_enterFrame
 #print axioms valid_after_below
+#print axioms valid_after_access_below
 #print axioms valid_after_confined
 
 /-! Without `Apart`, a confined callee may revoke the input's read authority. -/
