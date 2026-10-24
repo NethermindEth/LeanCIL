@@ -127,15 +127,55 @@ macro "cil_steps_from " message:str tactic:tacticSeq : tactic =>
     else by rewriting feature tests in a profile-dependent body with the supplied facts. -/
 syntax "cil_lookup" "[" term,* "]" : tactic
 
+theorem getElem?_eq_some_of_eq {α : Type u} {l : List α} {i : Nat} {a b : α}
+    (found : l[i]? = some a) (reduced : a = b) : l[i]? = some b := by subst reduced; exact found
+
+#print axioms getElem?_eq_some_of_eq
+
+/-- Close `l[i]? = some x` by `rfl`, deciding a fetched feature `if` with `facts` first so the op is a
+    constructor and its step equation applies. -/
+syntax "cil_lookup_rfl" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_lookup_rfl [$facts:term,*]) => withMainContext do
+    let goal ← getMainGoal
+    let saved ← saveState
+    evalTactic (← `(tactic| rfl))
+    let some (_, lookup, found) := (← instantiateMVars (← goal.getType)).eq? | return
+    unless found.isAppOfArity ``Option.some 2 do return
+    let op ← whnfR found.appArg!
+    let isFeatureTest (e : Expr) := e.isAppOf ``ite || e.isAppOf ``dite || e.isAppOf ``cond
+    unless isFeatureTest op do return
+    let fetched ← saveState
+    saved.restore
+    -- Built as a term: `refine` cannot assign the caller's op metavariable inside a term-mode `by`.
+    try
+      let decide ← `(tactic| simp only [Bool.false_eq_true, Bool.true_eq_false, eq_self_iff_true, ite_true, ite_false,
+        dite_true, dite_false, Bool.cond_true, Bool.cond_false, ↓reduceIte, ↓reduceDIte, $[$facts:term],*])
+      let { ctx, simprocs, .. } ← mkSimpContext decide (eraseLocal := false)
+      let (reduced, _) ← simp op ctx simprocs
+      if isFeatureTest (← whnfR reduced.expr) then throwError "The feature test was not decided"
+      let some (_, _, pending) := (← instantiateMVars (← goal.getType)).eq? | throwError "Unexpected lookup"
+      unless ← isDefEq pending (← mkAppM ``Option.some #[reduced.expr]) do throwError "Unexpected lookup"
+      let fetchedOp ← mkExpectedTypeHint (← mkEqRefl lookup) (← mkEq lookup (← mkAppM ``Option.some #[op]))
+      goal.assign (← mkAppM ``CIL.Safety.getElem?_eq_some_of_eq #[fetchedOp, ← reduced.getProof])
+      replaceMainGoal []
+    catch _ => fetched.restore
+
 -- Reducible `assumption` keeps a failed candidate lookup from unfolding every hypothesis.
+-- A branch leaves `(v != 0) = true` in the pc: the negation lemmas decide it from `Not (v = 0)`, and the trailing
+-- `rfl` decides it once `v = 0` or a literal makes the condition closed.
 macro_rules
   | `(tactic| cil_lookup [$facts:term,*]) =>
   `(tactic| first
     | with_reducible assumption
-    | (simp only [cil_code, Nat.reduceAdd]; rfl)
-    | rfl
-    | (simp only [cil_code, Nat.reduceAdd, $[$facts:term],*]; done)
-    | (simp only [cil_code, Nat.reduceAdd, $[$facts:term],*]; rfl))
+    | (simp only [cil_code, Nat.reduceAdd]; cil_lookup_rfl [$[$facts:term],*])
+    | cil_lookup_rfl [$[$facts:term],*]
+    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
+        Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; done)
+    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
+        Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; rfl))
 
 macro "cil_stack_cleanup" : tactic =>
   `(tactic| try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
@@ -162,9 +202,29 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
 macro "cil_checked_step_by_unfolding " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        fail_if_success simp only [cil_step]
-       simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
-        CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
-        $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+       -- Keep established arithmetic proofs compact. Unfolding checkedAt/formValue in the
+       -- first pass can expand return checks enough to exceed the kernel recursion limit.
+       first
+       | (simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+           CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
+           $[$facts:term],*] <;> (repeat constructor) <;> rfl)
+       | (simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+           CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step, CIL.Safety.formValue,
+           CIL.Safety.checkedAt, Except.mapError, $[$facts:term],*] <;> (repeat constructor) <;> rfl)))
+
+open Lean Meta in
+/-- Spell a literal `BitVec.ofNat n k` as the numeral `k`, as an evaluation fact with a literal operand states it;
+    a symbolic `BitVec.ofNat n x` keeps its spelling so later facts on it still match. -/
+dsimproc_decl bitVecOfNatLiteral (BitVec.ofNat _ _) := fun e => do
+  let_expr BitVec.ofNat width operand ← e | return .continue
+  let some value ← getNatValue? operand | return .continue
+  return .done (← mkNumeral (mkApp (mkConst ``BitVec) width) value)
+
+/-- Succeed only when the goal still mentions intrinsic evaluation. -/
+elab "cil_intrinsic_pending" : tactic => Lean.Elab.Tactic.withMainContext do
+  let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
+  unless (target.find? fun e => e.isConstOf ``CIL.evalIntrinsic || e.isConstOf ``CIL.Safety.checkedIntrinsic).isSome do
+    Lean.throwError "No pending intrinsic evaluation"
 
 macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| first
@@ -196,6 +256,43 @@ def mentionsMemoryInstruction (facts : Array Term) : TacticM Bool := withMainCon
     let info ← getConstInfo name
     return name == ``CIL.Safety.memoryInstruction || name == ``CIL.Safety.staticInstruction || legacy info.type
 
+open Lean Elab Tactic Meta in
+/-- Whether a supplied fact's type satisfies `test`: a hypothesis, a constant, or an applied term that is
+    elaborated, tested and then discarded, since `test` may meet its fresh metavariables. -/
+def suppliedFactSatisfies (fact : Term) (test : Expr → MetaM Bool) : TacticM Bool := do
+  if fact.raw.isIdent then
+    match (← getLCtx).findFromUserName? fact.raw.getId with
+    | some decl => test (← instantiateMVars decl.type)
+    | none =>
+      try test (← getConstInfo (← resolveGlobalConstNoOverload fact.raw)).type
+      catch _ => return false
+  else
+    let saved ← saveState
+    try test (← instantiateMVars (← inferType (← Term.withoutErrToSorry (Term.elabTerm fact none))))
+    catch _ => return false
+    finally saved.restore
+
+open Lean Meta in
+/-- Whether `e` contains a numeral whose type reduces to `BitVec n`, such as `(27 : W32)`. -/
+partial def hasBitVecNumeral (e : Expr) : MetaM Bool := do
+  if e.isAppOfArity ``OfNat.ofNat 3 && !(e.getArg! 0).hasLooseBVars then
+    if (← whnfR (e.getArg! 0)).isAppOf ``BitVec then return true
+  e.foldlM (fun found child => if found then pure true else hasBitVecNumeral child) false
+
+/-- Succeed only when a supplied fact concludes `evalIntrinsic ... = _` with a numeral `BitVec` operand. -/
+syntax "cil_numeral_eval_fact" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_numeral_eval_fact [$facts:term,*]) => withMainContext do
+    for fact in facts.getElems do
+      let found ← suppliedFactSatisfies fact fun type => forallTelescope type fun _ conclusion => do
+        let some (_, lhs, _) := conclusion.eq? | return false
+        unless lhs.isAppOf ``CIL.evalIntrinsic || lhs.isAppOf ``CIL.Safety.checkedIntrinsic do return false
+        hasBitVecNumeral lhs
+      if found then return
+    throwError "No supplied evaluation fact with a numeral operand"
+
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
     simp only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
@@ -205,11 +302,23 @@ macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
       List.drop_succ_cons, List.drop_zero, List.drop_nil, CIL.Safety.scalars,
       CIL.Safety.numericValue, Bind.bind, Except.bind, Pure.pure, Except.pure,
       BitVec.ofInt_ofNat, cil_eval, $[$facts:term],*]
-    all_goals simp only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval, $[$facts:term],*,
+    all_goals simp only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
       List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
       Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
-      Bind.bind, Except.bind, Pure.pure, Except.pure]
-    all_goals (first | rfl | cil_checked_step_equations [$[$facts:term],*])))
+      Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
+    -- `rfl` would evaluate a residue definitionally and push a value no later fact matches. Operands arrive as
+    -- `BitVec.ofNat n k`, which only a supplied fact stated with a numeral `k` needs respelled; facts are splice-last.
+    all_goals (first
+      | (cil_numeral_eval_fact [$[$facts:term],*]
+         cil_intrinsic_pending
+         simp only [bitVecOfNatLiteral, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
+           List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
+           Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
+           Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
+         fail_if_success cil_intrinsic_pending
+         first | rfl | cil_checked_step_equations [$[$facts:term],*])
+      | rfl
+      | cil_checked_step_equations [$[$facts:term],*])))
 
 open Lean Meta in
 /-- The opcode constructor `op` denotes, when its head reduces to one: a body that picks an opcode with a
@@ -223,8 +332,56 @@ def cilReducedOp? (op : Expr) : MetaM (Option Expr) := do
 syntax "cil_checked_step_normalized" "[" term,* "]" : tactic
 
 open Lean Elab Tactic Meta in
+/-- The supplied facts that state a `step` result for the goal's op, or for any op. -/
+def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
+  let target ← instantiateMVars target
+  let some (_, lhs, _) := target.eq? | return #[]
+  unless lhs.isAppOfArity ``CIL.Safety.step 7 do return #[]
+  let head := (← whnfR lhs.getAppArgs[1]!).getAppFn.constName?
+  let states (type : Expr) : MetaM Bool := forallTelescope type fun _ conclusion => do
+    let some (_, factLhs, _) := conclusion.eq? | return false
+    unless factLhs.isAppOfArity ``CIL.Safety.step 7 do return false
+    match (← whnfR factLhs.getAppArgs[1]!).getAppFn.constName?, head with
+    | some factHead, some goalHead => return factHead == goalHead
+    | _, _ => return true
+  facts.filterM (suppliedFactSatisfies · states)
+
+open Lean Elab Tactic Meta in
+/-- Close the goal with `fact` after unfolding the `@[cil_code]` definitions in its type, for a goal whose
+    lookup already replaced a named body by its literal. Fails when the type has no such definition. -/
+def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray) (fact : Term) :
+    TacticM Unit := withMainContext do
+  let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm fact none
+  let type ← instantiateMVars (← inferType proof)
+  let (result, _) ← simp type unfold simprocs
+  if result.expr == type then throwError "The step fact names no cil_code definition"
+  let proof ← match result.proof? with
+    | some eq => mkEqMP eq proof
+    | none => mkExpectedTypeHint proof result.expr
+  let goals ← withTransparency .instances <| (← getMainGoal).apply proof
+  unless goals.isEmpty do throwError "The step fact left goals"
+  replaceMainGoal []
+
+open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
+    -- A body reached through a lookup hypothesis stays named; one reached by unfolding a `cil_code` program
+    -- is already a literal, so a fact on the named body needs its own `cil_code` unfolded to match it.
+    let candidates ← stepFacts (← getMainTarget) facts.getElems
+    for fact in candidates do
+      let saved ← saveState
+      try
+        evalTactic (← `(tactic| cil_strict ((with_reducible_and_instances apply $fact); done)))
+        return
+      catch _ => saved.restore
+    if !candidates.isEmpty then
+      let { ctx, simprocs, .. } ← mkSimpContext (← `(tactic| simp only [cil_code])) (eraseLocal := false)
+      for fact in candidates do
+        let saved ← saveState
+        try
+          applyUnfoldedStepFact ctx simprocs fact
+          return
+        catch _ => saved.restore
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
     if (← getGoals).isEmpty then return
     -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.

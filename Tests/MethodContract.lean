@@ -346,4 +346,24 @@ theorem feature_load_contract (program : CIL.Program) (index : Nat) (profile : C
 /-- info: 'Tests.MethodContract.feature_load_contract' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms feature_load_contract
 
+/-- A body whose first instruction depends on a feature, stepped as a contract proof steps it. -/
+def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [],
+    code := [if profile.avx2 then .arg 1 else .arg 0, .fieldAt 0 8, .ret] }
+
+open CIL.Safety in
+theorem feature_op_contract_steps (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (scalar : profile.avx2 = false) (found : program[index]? = some (featureOpBody profile))
+    (frame : Frame) (memory : Memory) (left right : Reference) (limb : BitVec 64)
+    (formed : form memory left = .ok left)
+    (field : ∀ rest, instruction (.fieldAt 0 8) (.reference (.address left) :: rest) memory =
+      .ok (memory, .scalar (.i64 limb) :: rest)) :
+    ∃ fuel final values,
+      run program fuel index 0 [.reference (.address left), .reference (.address right)] frame [] memory =
+        .ok (final, values) ∧ final = leaveFrame frame memory ∧ values = [.scalar (.i64 limb)] := by
+  cil_contract_steps [scalar, formed, field]
+  exact ⟨rfl, rfl⟩
+
+#print axioms feature_op_contract_steps
+
 end Tests.MethodContract

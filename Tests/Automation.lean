@@ -699,4 +699,219 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 /-- info: 'Tests.Automation.add_run' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms add_run
 
+/-- A supplied step fact is used before the op's own equation, which here cannot read the frame's slot;
+    the body is `cil_code`, so the fact must be tried before the lookup unfolds it. -/
+@[cil_code] def slotBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := [.setLocal 0, .local 0, .ret] }
+
+open CIL.Safety in
+theorem step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (slotBody profile)) (args : List Value) (frame stored : Frame)
+    (memory written : Memory) (value : CIL.W32)
+    (store : step (slotBody profile) (.setLocal 0) 0 args frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written))
+    (load : ∀ stack, step (slotBody profile) (.local 0) 1 args stored stack written =
+      .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
+    run program 3 index 0 args frame [.scalar (.i32 value)] memory =
+      .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
+  cil_checked_steps [store, load]
+
+/-- info: 'Tests.Automation.step_facts_first' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms step_facts_first
+
+-- An applied lemma or a parenthesised proof is a step fact too, so it is also tried before the equation.
+open CIL.Safety in
+theorem applied_step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (slotBody profile)) (args : List Value) (frame stored : Frame)
+    (memory written : Memory) (value : CIL.W32)
+    (store : ∀ value : CIL.W32, step (slotBody profile) (.setLocal 0) 0 args frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written))
+    (load : ∀ stack, step (slotBody profile) (.local 0) 1 args stored stack written =
+      .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
+    run program 3 index 0 args frame [.scalar (.i32 value)] memory =
+      .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
+  cil_checked_steps [store value, (load)]
+
+/-- info: 'Tests.Automation.applied_step_facts_first' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms applied_step_facts_first
+
+/-- An extracted program's lookup unfolds the body to its literal, so a fact on the named body must still match. -/
+@[cil_code] def slotMethod : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.setLocal 0, .local 0, .ret] }
+@[cil_code] def slotProgram : CIL.Program := [slotMethod]
+
+open CIL.Safety in
+theorem named_body_step_facts (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
+    (store : step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written))
+    (load : ∀ stack, step slotMethod (.local 0) 1 [] stored stack written =
+      .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
+    run slotProgram 3 0 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
+  cil_checked_steps [store, load]
+
+/-- info: 'Tests.Automation.named_body_step_facts' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms named_body_step_facts
+
+-- A fact quantified over the body matches the literal directly.
+open CIL.Safety in
+theorem quantified_body_step_facts (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
+    (store : ∀ body pc args, step body (.setLocal 0) pc args frame [.scalar (.i32 value)] memory =
+      .ok (.next (pc + 1) [] stored written))
+    (load : ∀ body pc args stack, step body (.local 0) pc args stored stack written =
+      .ok (.next (pc + 1) (.scalar (.i32 value) :: stack) stored written)) :
+    run slotProgram 3 0 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
+  cil_checked_steps [store, load]
+
+/-- info: 'Tests.Automation.quantified_body_step_facts' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms quantified_body_step_facts
+
+@[cil_code] def nonzeroMethod : CIL.Method := {
+  code := [.arg 0, .brnonzero 4, .arg 1, .ret, .arg 0, .ret]
+  locals := [], returnsValue := true }
+
+-- A branch pc is decided from the condition's own fact, not only from a `CIL.truth` restatement.
+theorem branch_from_nonzero (memory : CIL.Safety.Memory) (condition value : CIL.W32) (nonzero : ¬ condition = 0) :
+    CIL.Safety.invoke branchProgram (CIL.executionBound branchProgram 0) 0
+      [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps [nonzero]
+
+theorem nonzero_branch_from_nonzero (memory : CIL.Safety.Memory) (condition value : CIL.W32)
+    (nonzero : ¬ condition = 0) :
+    CIL.Safety.invoke [nonzeroMethod] 9 0
+      [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 condition)]) := by
+  cil_checked_steps [nonzero]
+
+theorem branch_from_zero (memory : CIL.Safety.Memory) (condition value : CIL.W32) (zero : condition = 0) :
+    CIL.Safety.invoke branchProgram (CIL.executionBound branchProgram 0) 0
+      [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps [zero]
+
+-- A literal condition is decided by evaluation, with no fact at all.
+@[cil_code] def literalBranchMethod : CIL.Method := {
+  code := [.const32 5, .brnonzero 4, .arg 0, .ret, .arg 1, .ret]
+  locals := [], returnsValue := true }
+
+theorem literal_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) :
+    CIL.Safety.invoke [literalBranchMethod] 9 0
+      [.scalar (.i32 condition), .scalar (.i32 value)] memory = .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps []
+
+#print axioms branch_from_nonzero
+#print axioms branch_from_zero
+#print axioms literal_branch
+#print axioms nonzero_branch_from_nonzero
+
+/-- A body whose instructions, not its code list, depend on a feature. -/
+def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [],
+    code := [if profile.avx2 then .arg 1 else .arg 0, .fieldAt 0 8, .ret] }
+
+-- The lookup decides the feature test, so the fetched op is a constructor with a step equation.
+-- A term-mode `by`, as the contract and loop tactics call it, must still assign the op.
+example (profile : CIL.FeatureProfile) (scalar : profile.avx2 = false) :
+    ∃ op, (featureOpBody profile).code[0]? = some op ∧ op = .arg 0 :=
+  ⟨_, by cil_lookup [scalar], by with_reducible rfl⟩
+
+open CIL.Safety in
+theorem feature_op_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (scalar : profile.avx2 = false) (found : program[index]? = some (featureOpBody profile))
+    (frame : Frame) (memory : Memory) (left right : Reference) (limb : BitVec 64)
+    (formed : form memory left = .ok left)
+    (field : ∀ rest, instruction (.fieldAt 0 8) (.reference (.address left) :: rest) memory =
+      .ok (memory, .scalar (.i64 limb) :: rest)) :
+    run program 4 index 0 [.reference (.address left), .reference (.address right)] frame [] memory =
+      .ok (leaveFrame frame memory, [.scalar (.i64 limb)]) := by
+  cil_checked_steps [scalar, formed, field]
+
+/-- info: 'Tests.Automation.feature_op_checked' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_op_checked
+
+def reverseLanes (v : CIL.Vector.V256) : CIL.Vector.V256 := CIL.Vector.permute4x64 v 27
+
+-- Stated with a literal control, as a consumer writes it; the operand arrives as `BitVec.ofNat 32 27`.
+theorem eval_reverse_lanes (v : CIL.Vector.V256) :
+    CIL.evalIntrinsic (.avx2 .permute4x64) [.v256 v, .i32 27] = some (.v256 (reverseLanes v)) := rfl
+
+#print axioms eval_reverse_lanes
+
+-- The pushed value is the evaluation fact's, so the store fact on `reverseLanes v` applies next.
+open CIL.Safety in
+theorem evaluated_then_stored (v : CIL.Vector.V256) (destination : Reference) (memory final : Memory)
+    (stored : ∀ rest, memoryInstruction .store256
+      (.scalar (.v256 (reverseLanes v)) :: .reference (.address destination) :: rest) memory = .ok (final, rest)) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 v), .reference (.address destination)] memory =
+      .ok (final, []) := by
+  cil_checked_steps [staticInstruction, stored, eval_reverse_lanes]
+
+#print axioms evaluated_then_stored
+
+-- Literal operands are respelled for the evaluation fact; a symbolic slot below them keeps its form.
+open CIL.Safety in
+theorem evaluated_keeps_symbolic_slot (v : CIL.Vector.V256) (destination : Reference) (memory : Memory) (x : Nat)
+    (k : Except LocatedFault (Memory × List Value))
+    (rest : run permuteStoreProgram 2 0 1 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 (reverseLanes v)), .reference (.address destination), .scalar (.i32 (BitVec.ofNat 32 x))]
+      memory = k) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 v), .reference (.address destination),
+        .scalar (.i32 (BitVec.ofNat 32 x))] memory = k := by
+  cil_checked_run_step [eval_reverse_lanes]
+  with_reducible exact rest
+
+#print axioms evaluated_keeps_symbolic_slot
+
+-- An applied hypothesis with a numeral operand also enables the respelling pass.
+open CIL.Safety in
+theorem evaluated_by_applied_hypothesis (v : CIL.Vector.V256) (destination : Reference) (memory : Memory)
+    (k : Except LocatedFault (Memory × List Value))
+    (eval : ∀ w, CIL.evalIntrinsic (.avx2 .permute4x64) [.v256 w, .i32 27] = some (.v256 (reverseLanes w)))
+    (rest : run permuteStoreProgram 2 0 1 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 (reverseLanes v)), .reference (.address destination)] memory = k) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 v), .reference (.address destination)] memory = k := by
+  cil_checked_run_step [eval v]
+  with_reducible exact rest
+
+#print axioms evaluated_by_applied_hypothesis
+
+-- A bare step with no supplied facts still evaluates an intrinsic through the `@[cil_eval]` lemmas.
+open CIL.Safety in
+theorem intrinsic_without_facts (a b c d : CIL.W64) (destination : Reference) (memory : Memory)
+    (k : Except LocatedFault (Memory × List Value))
+    (rest : run permuteStoreProgram 2 0 1 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 (CIL.Vector.pack256 d c b a)), .reference (.address destination)] memory = k) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 (CIL.Vector.pack256 a b c d)),
+        .reference (.address destination)] memory = k := by
+  cil_checked_run_step []
+  with_reducible exact rest
+
+/-- info: 'Tests.Automation.intrinsic_without_facts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms intrinsic_without_facts
+
+@[cil_code] def checkedAdd64Method : CIL.Method := {
+  code := [.arg 0, .arg 1, .checkedArithmetic .add false, .ret]
+  locals := [], returnsValue := true }
+@[cil_code] def checkedAdd64Program : CIL.Program := [checkedAdd64Method]
+
+-- Keep the checked-add/return proof within the default kernel recursion limit.
+-- Eagerly unfolding checkedAt and formValue in the generic fallback made this fail.
+open CIL CIL.Safety in
+theorem checked_add64_return (memory : CIL.Safety.Memory) (x y : W64) (fits : x.toNat + y.toNat < 2^64) :
+    CIL.Safety.invoke checkedAdd64Program (executionBound checkedAdd64Program 0) 0
+      [.scalar (.i64 x), .scalar (.i64 y)] memory =
+        .ok (memory, [.scalar (.i64 (BitVec.ofNat 64 (x.toNat + y.toNat)))]) := by
+  have calculation : checkedValues .add false (.i64 x) (.i64 y) =
+      .ok (.i64 (BitVec.ofNat 64 (x.toNat + y.toNat))) := by
+    have range : 0 ≤ (x.toNat : Int) + y.toNat ∧ (x.toNat : Int) + y.toNat < 2^64 := by omega
+    simp only [checkedValues, checkedBits, Bool.false_eq_true, ite_false]
+    rw [ite_eq_left range]
+    rfl
+  cil_checked_steps [calculation]
+
+#print axioms checked_add64_return
+
 end Tests.Automation

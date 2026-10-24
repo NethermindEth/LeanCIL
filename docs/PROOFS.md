@@ -63,18 +63,28 @@ wrong pc would not match the target.
 `MemoryBelow.frame_round_trip` carries caller memory across `enterFrame` and
 `leaveFrame` when the callee body keeps it.
 
-The single-step helper, `cil_checked_step [facts]`, selects its closing strategy
-from the opcode. Pure scalar operations try `rfl` even when facts are supplied.
-Memory operations, local operations, instruction-dispatcher arms and branches
-first use `cil_step` equations and the supplied facts. This keeps memory results
-in the form named by their facts, and resolves branch conditions before choosing
-the next program counter. Unknown opcode heads use the equation path.
+The single-step helper, `cil_checked_step [facts]`, first tries each supplied
+step fact for the fetched opcode: a fact whose conclusion is
+`step body op pc args frame stack memory = result`, given as a hypothesis, a
+lemma, or an applied term such as `store value`. It is applied at
+reducible-and-instances transparency, then retried with the `@[cil_code]`
+definitions in its type unfolded, so a fact stated on the named body matches both
+a body reached through a lookup hypothesis and the literal body that an extracted
+program's lookup produces. Otherwise the helper selects
+its closing strategy from the opcode. Pure scalar operations try `rfl` even when
+facts are supplied. Memory operations, local operations, instruction-dispatcher
+arms and branches use `cil_step` equations and the supplied facts. This keeps
+memory results in the form named by their facts, and resolves branch conditions
+before choosing the next program counter. Unknown opcode heads use the equation path.
 
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas
 before unfolding the intrinsic evaluator. Register consumer lemmas in the form
 `CIL.evalIntrinsic operation operands = some result`. Nonnegative `BitVec.ofInt`
-literals become `BitVec.ofNat` literals so these equations can match. The tactic
-keeps the lemma's result form. It then removes literal stack `take`, `drop`,
+literals become `BitVec.ofNat` literals so these equations can match, so state
+`@[cil_eval]` lemmas with `BitVec.ofNat` operands. A supplied evaluation fact may
+instead use a numeral operand, such as `.i32 27`: when one is supplied, a second
+pass respells literal `BitVec.ofNat n k` operands as numerals and leaves symbolic
+`BitVec.ofNat n x` values unchanged. The tactic keeps the lemma's result form. It then removes literal stack `take`, `drop`,
 `reverse` and append expressions before the next step. These rewrites do not
 simplify consumer arithmetic or unfold consumer value definitions.
 
@@ -119,9 +129,11 @@ stated over an abstract `program` therefore steps exactly like one over
 `cil_raise_steps` fail when they cannot take a first step, instead of returning
 the goal unchanged.
 
-For steps depending on hypotheses, use `cil_checked_steps [truth, stored]`
-with the relevant proved facts. Branches always use equations before reflexivity,
-so a fact can decide the next program counter before the next lookup.
+For steps depending on hypotheses, use `cil_checked_steps [facts]` with the
+relevant proved facts. Branches always use equations before reflexivity, so a fact
+can decide the next program counter before the next lookup. A branch condition is
+decided from `v = 0` or `Not (v = 0)` on the condition value, or from a literal
+condition, so no `CIL.truth` restatement is needed.
 Both straight-line and loop-exit automation try return proofs only for fetched
 `.ret` instructions, including narrow returns, so other opcodes do not incur
 failed return-step simplification.
