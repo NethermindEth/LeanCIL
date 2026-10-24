@@ -236,6 +236,7 @@ theorem Intrinsic.available_eq_of_required (operation : Intrinsic) (p q : Featur
 def Op.profileReads : Op → List Feature
   | .feature featureId => [featureId]
   | .intrinsic operation _ => operation.requiredFeatures
+  -- A new op that reads the profile breaks `step_profile_eq` until it is listed here.
   | _ => []
 
 /-- Every profile flag an instruction of any method in the program reads, the same scope

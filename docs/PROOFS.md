@@ -231,7 +231,8 @@ apart from every entry, taking the allocation's age from `WellFormed`;
 `WordSnapshots.after_confined` (`CIL.Safety.ConfinedSnapshots`) keeps remembered words.
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
 the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
-`OutcomeContract` and `HoldsCLR` forms) carries a contract proved for a program whose methods
+`OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of the first two for a contract
+indexed by `programStaticDescriptors`) carries a contract proved for a program whose methods
 all use profile `p` to `CIL.reprofile program q` for any `q` that agrees with `p` on the
 program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in
 `program.profileReads`, which `decide` checks for concrete profiles, so one proof covers every

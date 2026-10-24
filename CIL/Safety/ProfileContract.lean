@@ -5,9 +5,12 @@ import CIL.Safety.RuntimeExceptions
 # Method contracts across feature profiles
 
 A contract proved for a program whose methods all use one feature profile also holds for the
-same program reprofiled to any profile that agrees with it on every flag the program reads
-(`CIL.Program.ProfileAgreement`, decided by `CIL.Program.ProfileAgreement.of_flags`). One proof
-then certifies a method on every such profile. Builds on the checked invocation equivalence in
+same program reprofiled to any profile it agrees with on the program: every feature test and
+intrinsic availability check answers the same (`CIL.Program.ProfileAgreement`).
+`CIL.Program.ProfileAgreement.of_flags` derives that agreement from the flags the program reads,
+a hypothesis `decide` closes for concrete profiles. One proof then certifies a method on every
+such profile. Each lemma takes the source profile `p` explicitly, since `uniform` may be a
+`decide` proof that cannot name it. Builds on the checked invocation equivalence in
 `CIL.Safety.ProfileEquivalence`.
 -/
 
@@ -24,7 +27,7 @@ theorem invoke_uniform_reprofile_fun (program : CIL.Program) (p q : CIL.FeatureP
 /-- A contract proved for a program whose methods all use profile `p` holds for the program
     reprofiled to any `q` that agrees with `p` on the program. -/
 theorem MethodContract.Holds.reprofile {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method : Nat} {p q : CIL.FeatureProfile}
+    {program : CIL.Program} {method : Nat} {q : CIL.FeatureProfile} (p : CIL.FeatureProfile)
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (holds : c.Holds program method) : c.Holds (CIL.reprofile program q) method := by
   unfold MethodContract.Holds
@@ -32,21 +35,22 @@ theorem MethodContract.Holds.reprofile {Input Output : Type} {c : MethodContract
   exact holds
 
 /-- `MethodContract.Holds.reprofile` for a contract that reads the program's static
-    descriptors: reprofiling keeps them, so the same contract certifies the target. -/
+    descriptors: reprofiling keeps them, so the same contract certifies the target. `contract`
+    is explicit because unification cannot recover it from its applications. -/
 theorem MethodContract.Holds.reprofile_statics {Input Output : Type}
-    {contract : List CIL.StaticDescriptor → MethodContract Input Output}
-    {program : CIL.Program} {method : Nat} {p q : CIL.FeatureProfile}
+    (contract : List CIL.StaticDescriptor → MethodContract Input Output)
+    {program : CIL.Program} {method : Nat} {q : CIL.FeatureProfile} (p : CIL.FeatureProfile)
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (holds : (contract (programStaticDescriptors program)).Holds program method) :
     (contract (programStaticDescriptors (CIL.reprofile program q))).Holds
       (CIL.reprofile program q) method := by
   rw [programStaticDescriptors_reprofile]
-  exact holds.reprofile uniform agreement
+  exact holds.reprofile p uniform agreement
 
 /-- An outcome contract, exceptions included, carries over to an agreeing profile as
     `MethodContract.Holds.reprofile` does. -/
 theorem OutcomeContract.Holds.reprofile {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method : Nat} {p q : CIL.FeatureProfile}
+    {program : CIL.Program} {method : Nat} {q : CIL.FeatureProfile} (p : CIL.FeatureProfile)
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (holds : c.Holds program method) : c.Holds (CIL.reprofile program q) method := by
   unfold OutcomeContract.Holds Raises
@@ -54,21 +58,21 @@ theorem OutcomeContract.Holds.reprofile {Input Output : Type} {c : OutcomeContra
   exact holds
 
 /-- `OutcomeContract.Holds.reprofile` for a contract that reads the program's static
-    descriptors. -/
+    descriptors, with `contract` explicit as in `MethodContract.Holds.reprofile_statics`. -/
 theorem OutcomeContract.Holds.reprofile_statics {Input Output : Type}
-    {contract : List CIL.StaticDescriptor → OutcomeContract Input Output}
-    {program : CIL.Program} {method : Nat} {p q : CIL.FeatureProfile}
+    (contract : List CIL.StaticDescriptor → OutcomeContract Input Output)
+    {program : CIL.Program} {method : Nat} {q : CIL.FeatureProfile} (p : CIL.FeatureProfile)
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (holds : (contract (programStaticDescriptors program)).Holds program method) :
     (contract (programStaticDescriptors (CIL.reprofile program q))).Holds
       (CIL.reprofile program q) method := by
   rw [programStaticDescriptors_reprofile]
-  exact holds.reprofile uniform agreement
+  exact holds.reprofile p uniform agreement
 
 /-- `OutcomeContract.Holds.reprofile` with exceptions named as the CLR reports them. -/
 theorem OutcomeContract.HoldsCLR.reprofile {Input Output : Type}
     {c : OutcomeContract Input Output} {program : CIL.Program} {method : Nat}
-    {p q : CIL.FeatureProfile}
+    {q : CIL.FeatureProfile} (p : CIL.FeatureProfile)
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (holds : c.HoldsCLR program method) : c.HoldsCLR (CIL.reprofile program q) method := by
   unfold OutcomeContract.HoldsCLR RaisesCLR

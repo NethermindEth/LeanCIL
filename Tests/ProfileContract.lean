@@ -56,11 +56,12 @@ theorem avx2_holds : avx2Contract.Holds program 0 := by
 
 /-- The contract holds on x86-64-v4, with agreement checked by `decide`. -/
 theorem avx512_holds : avx2Contract.Holds (reprofile program avx512Profile) 0 :=
-  avx2_holds.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))
+  avx2_holds.reprofile avx2Profile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))
 
-/-- The contract holds with 256-bit vectors disabled. -/
+/-- The contract holds with 256-bit vectors disabled; the uniformity side is decided inline. -/
 theorem narrow_holds : avx2Contract.Holds (reprofile program narrowProfile) 0 :=
-  avx2_holds.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))
+  avx2_holds.reprofile avx2Profile (by decide)
+      (Program.ProfileAgreement.of_flags _ _ _ (by decide))
 
 /-- The same bodies written with their own profile, as a per-profile extraction would be. -/
 @[cil_code] def avx512Program : Program :=
@@ -77,7 +78,7 @@ theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by
 /-- One statement covers every profile with AVX2 on, whatever else it enables. -/
 theorem avx2_family_holds (target : FeatureProfile) (wide : target.avx2 = true) :
     avx2Contract.Holds (reprofile program target) 0 :=
-  avx2_holds.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by
+  avx2_holds.reprofile avx2Profile uniform (Program.ProfileAgreement.of_flags _ _ _ (by
     simp [Program.profileReads, Op.profileReads, program, avx2Profile, FeatureProfile.evaluate,
       wide]))
 
@@ -85,7 +86,8 @@ theorem avx2_family_holds (target : FeatureProfile) (wide : target.avx2 = true) 
 theorem outcome_holds :
     ({ avx2Contract with raises := fun _ _ => none } : OutcomeContract Unit).Holds
       (reprofile program narrowProfile) 0 :=
-  avx2_holds.outcomes.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))
+  avx2_holds.outcomes.reprofile avx2Profile uniform
+      (Program.ProfileAgreement.of_flags _ _ _ (by decide))
 
 /-- Method 1 raises `PlatformNotSupportedException` and returns nothing. -/
 def throwContract : OutcomeContract Unit where
@@ -103,8 +105,9 @@ theorem throw_holds : throwContract.Holds program 1 := by
 /-- The raising branch carries over, as an outcome and with the CLR-named exception. -/
 theorem throw_transported : throwContract.Holds (reprofile program avx512Profile) 1 ∧
     throwContract.HoldsCLR (reprofile program narrowProfile) 1 :=
-  ⟨throw_holds.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide)),
-    throw_holds.clr.reprofile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide))⟩
+  ⟨throw_holds.reprofile avx2Profile uniform (Program.ProfileAgreement.of_flags _ _ _ (by decide)),
+    throw_holds.clr.reprofile avx2Profile uniform
+        (Program.ProfileAgreement.of_flags _ _ _ (by decide))⟩
 
 /-- `avx2Contract` with a precondition that reads the program's static descriptors. -/
 def staticContract (descriptors : List StaticDescriptor) : MethodContract Unit :=
@@ -120,10 +123,11 @@ theorem statics_transported :
       (reprofile program avx512Profile) 0 ∧
     (staticThrowContract (programStaticDescriptors (reprofile program avx512Profile))).Holds
       (reprofile program avx512Profile) 1 :=
-  ⟨MethodContract.Holds.reprofile_statics (contract := staticContract) uniform
+  ⟨MethodContract.Holds.reprofile_statics staticContract avx2Profile uniform
       (Program.ProfileAgreement.of_flags _ _ _ (by decide))
       (fun input memory _ => avx2_holds input memory trivial),
-    OutcomeContract.Holds.reprofile_statics (contract := staticThrowContract) uniform
+    OutcomeContract.Holds.reprofile_statics staticThrowContract avx2Profile
+      uniform
       (Program.ProfileAgreement.of_flags _ _ _ (by decide))
       (fun input memory _ => throw_holds input memory trivial)⟩
 

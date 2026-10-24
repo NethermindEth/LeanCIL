@@ -170,10 +170,9 @@ of uninitialized, past-end, overlapping, unjoined and stale contents.
 `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under
 x86-64-v3, and carries it to x86-64-v4, to v3 without 256-bit acceleration and to every
 profile with AVX2 on. A raising method's outcome contract carries over too, in outcome,
-CLR-named and descriptor-indexed forms, with
-agreement decided from the flags the program reads. The baseline profile, with AVX2 off,
-fails both the agreement check and the contract, and turning off one of the four flags an
-AVX-512 DQ multiply needs fails the check.
+CLR-named and descriptor-indexed forms, with agreement decided from the flags the program
+reads. The baseline profile, with AVX2 off, fails both the agreement check and the contract,
+and turning off one of the four flags an AVX-512 DQ multiply needs fails the check.
 
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
