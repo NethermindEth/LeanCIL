@@ -1,4 +1,4 @@
-import CIL.Semantics
+import CIL.ExecutionLemmas
 
 /-!
 # Profile equivalence
@@ -107,61 +107,33 @@ theorem run_reprofile_eq (program : Program) (p q : FeatureProfile)
   induction fuel generalizing method pc args frame stack memory with
   | zero => rfl
   | succ fuel ih =>
+    rw [run_succ, run_succ]
+    simp only [reprofile_lookup]
     cases hbody : program[method]? with
-    | none => simp [run, hbody]
+    | none => rfl
     | some body =>
       cases hop : body.code[pc]? with
-      | none => simp [run, hbody, hop]
+      | none => simp [hop]
       | some op =>
-        have hb : body ∈ program := List.mem_of_getElem? hbody
-        have ho : op ∈ body.code := List.mem_of_getElem? hop
-        have he :=
-          step_profile_eq op p q (h body hb op ho) body.returnsValue pc args frame stack memory
-        simp only [run, reprofile_lookup, hbody, Option.map_some, Option.bind_eq_bind,
-          Option.bind_some, hop]
-        rw [he]
-        cases hs : step op body.returnsValue pc args frame stack memory q with
-        | none => rfl
-        | some action =>
-          cases action with
-          | next target values updated =>
-            simpa only [Option.bind_eq_bind, Option.bind_some] using
-              ih method target args frame values updated
-          | returned values final => rfl
-          | call callee childArgs rest updated =>
-            cases hc : program[callee]? with
-            | none => simp [hc]
-            | some child =>
-              simp only [hc, Option.map_some, Option.bind_some, initFrame_profile]
-              rw [ih callee 0 childArgs (frame + 1) []
-                (initFrame updated (frame + 1) child childArgs)]
-              cases hr : run (reprofile program q) fuel callee 0 childArgs (frame + 1) []
-                  (initFrame updated (frame + 1) child childArgs) with
-              | none => rfl
-              | some result =>
-                obtain ⟨final, values⟩ := result
-                simpa only [Option.bind_eq_bind, Option.bind_some] using
-                  ih method (pc + 1) args frame (values ++ rest) final
-          | construct callee childArgs rest updated =>
-            cases hc : program[callee]? with
-            | none => simp [hc]
-            | some child =>
-              simp only [hc, Option.map_some, Option.bind_some, initFrame_profile]
-              rw [ih callee 0 childArgs (frame + 1) []
-                (initFrame updated (frame + 1) child childArgs)]
-              cases hr : run (reprofile program q) fuel callee 0 childArgs (frame + 1) []
-                  (initFrame updated (frame + 1) child childArgs) with
-              | none => rfl
-              | some result =>
-                obtain ⟨final, values⟩ := result
-                cases values with
-                | cons value tail => rfl
-                | nil =>
-                  cases hsnapshot : readVectorHome final frame 2 pc with
-                  | none => simp [hsnapshot]
-                  | some value =>
-                    simpa [hsnapshot] using
-                      ih method (pc + 1) args frame (value :: rest) final
+        have agree := h body (List.mem_of_getElem? hbody) op (List.mem_of_getElem? hop)
+        simp only [Option.map_some, Option.bind_some, hop,
+          step_profile_eq op p q agree body.returnsValue pc args frame stack memory]
+        have callees (source target : FeatureProfile) (callee : Nat) (child : Method)
+            (found : (reprofile program source)[callee]? = some child) :
+            ∃ child', (reprofile program target)[callee]? = some child' ∧
+              ∀ memory frame args, initFrame memory frame child args =
+                initFrame memory frame child' args := by
+          simp only [reprofile_lookup, Option.map_eq_some_iff] at found
+          obtain ⟨original, found, rfl⟩ := found
+          exact ⟨{ original with profile := target }, by simp [found],
+            fun _ _ _ => by simp only [initFrame_profile]⟩
+        congr 1
+        funext action
+        exact Option.ext fun result =>
+          ⟨runAction_transfer (callees p q) (fun _ _ _ _ _ _ _ run => (ih ..).symm.trans run)
+              _ _ _ _ _ _,
+            runAction_transfer (callees q p) (fun _ _ _ _ _ _ _ run => (ih ..).trans run)
+              _ _ _ _ _ _⟩
 
 theorem invoke_reprofile_eq (program : Program) (p q : FeatureProfile)
     (h : program.ProfileAgreement p q) (fuel method : Nat) (args : List Value) (memory : Memory) :
