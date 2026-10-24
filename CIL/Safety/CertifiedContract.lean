@@ -8,10 +8,10 @@ import CIL.Safety.MethodContract
 and returned-state invariants alongside the contract. `Holds.certified` derives it from a
 proved contract whose precondition implies well-formed memory and a valid static world.
 `Certified.holds` recovers the ordinary `Holds`, and `Certified.weaken` derives a certified
-contract from a certified one it refines. At a call site, `run_call_of_certified` and
-`run_call_of_contract_certified` hand the continuation the callee's certificate, which
-`run_call_of_contract` drops; `cil_certified_call` and `cil_contract_certified_call` apply
-them at a fetched call.
+exported contract from a certified internal contract that refines it. At a call site,
+`run_call_of_certified` and `run_call_of_contract_certified` hand the continuation the
+callee's certificate, which `run_call_of_contract` drops; `cil_certified_call` and
+`cil_contract_certified_call` apply them at a fetched call.
 -/
 
 namespace CIL.Safety
@@ -46,8 +46,8 @@ theorem MethodContract.Holds.certified {Input Output : Type} {c : MethodContract
   obtain ⟨formed, world⟩ := entry input initial permitted
   exact ⟨fuel, final, values, .of_invoke formed world invoked, framed, returns⟩
 
-/-- Derive a certified contract from a certified one it refines, keeping the certificate;
-    the method is neither unfolded nor executed. -/
+/-- Derive a certified exported contract from a certified internal contract that refines it,
+    keeping the certificate; the method is neither unfolded nor executed. -/
 theorem MethodContract.Certified.weaken {Input Output : Type}
     {internal exported : MethodContract Input Output}
     {program : CIL.Program} {method : Nat} (certified : internal.Certified program method)

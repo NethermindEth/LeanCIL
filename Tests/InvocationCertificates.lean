@@ -146,10 +146,13 @@ theorem echo_anywhere : echoAnywhere.Holds program echoMethod := by
   refine ⟨echoFuel, memory, _, ?_, Confined.refl _ memory, v, rfl, rfl⟩
   cil_checked_steps []
 
-/-- Every state `Echo(v)` visits from `memory` is live. This is the visited-state clause of
-    its certificate: neither `Holds` nor `run_call_of_contract_formed` supplies it. -/
+/-- Some fuel runs `Echo(v)` from `memory` to its return, and every state that run visits
+    is live. This is the visited-state clause of its certificate: neither `Holds` nor
+    `run_call_of_contract_formed` supplies it. -/
 def EchoVisitsLive (memory : Memory) (v : CIL.W64) : Prop :=
-  ∃ fuel frame entered, enterFrame echo [.scalar (.i64 v)] memory = .ok (frame, entered) ∧
+  ∃ fuel frame entered final, enterFrame echo [.scalar (.i64 v)] memory = .ok (frame, entered) ∧
+    run program fuel echoMethod 0 [.scalar (.i64 v)] frame [] entered =
+      .ok (final, [.scalar (.i64 v)]) ∧
     ∀ observedArgs observedFrame observedStack observed,
       RunningVisits program fuel echoMethod 0 [.scalar (.i64 v)] frame [] entered
         observedArgs observedFrame observedStack observed →
@@ -170,14 +173,14 @@ theorem relay_holds : relayContract.Holds program relayMethod := by
   · exact formed
   · exact world
   rintro calleeFuel final values certificate framed ⟨out, rfl, rfl⟩
-  obtain ⟨-, body, frame, entered, lookup, -, setup, -, -, visits, -⟩ := certificate
+  obtain ⟨-, body, frame, entered, lookup, -, setup, finished, -, visits, -⟩ := certificate
   cases lookup
   cil_contract_steps []
   -- `Relay` owns no allocation, so leaving its frame keeps all memory below its watermark.
   exact ⟨framed.then_below
       (leaveFrame_preserves_memory_below _ final _ fun _ member => nomatch member)
       (Nat.le_of_eq (leaveFrame_nextIdentity _ final).symm), out, rfl, rfl,
-    calleeFuel, frame, entered, setup, visits⟩
+    calleeFuel, frame, entered, final, setup, finished, visits⟩
 
 /-- Through a certified callee, the precondition of `Echo` supplies the entry premises. -/
 theorem relay_holds_of_certified : relayContract.Holds program relayMethod := by
@@ -187,14 +190,14 @@ theorem relay_holds_of_certified : relayContract.Holds program relayMethod := by
   cil_certified_call echo_certified v []
   · exact ⟨formed, world⟩
   rintro calleeFuel final values certificate framed ⟨out, rfl, rfl⟩
-  obtain ⟨-, body, frame, entered, lookup, -, setup, -, -, visits, -⟩ := certificate
+  obtain ⟨-, body, frame, entered, lookup, -, setup, finished, -, visits, -⟩ := certificate
   cases lookup
   cil_contract_steps []
   -- `Relay` owns no allocation, so leaving its frame keeps all memory below its watermark.
   exact ⟨framed.then_below
       (leaveFrame_preserves_memory_below _ final _ fun _ member => nomatch member)
       (Nat.le_of_eq (leaveFrame_nextIdentity _ final).symm), out, rfl, rfl,
-    calleeFuel, frame, entered, setup, visits⟩
+    calleeFuel, frame, entered, final, setup, finished, visits⟩
 
 #print axioms echo_anywhere
 #print axioms relay_holds
