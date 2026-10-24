@@ -69,70 +69,77 @@ def instructionStep (op : CIL.Op) (pc : Nat) (frame : Frame) (stack : List Value
   let (memory, values) ← instruction op stack memory
   return .next (pc + 1) values frame memory
 
-set_option hygiene false in
-/-- Proves `step body op ... = instructionStep op ...` for an op that observes `count` operands:
-    unfold both sides, then split on the unspecified-operand guard. Needs `stack` in scope. -/
-local macro "instruction_step_eq " count:num : tactic => `(tactic| (
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands $count stack <;> rfl))
-
 -- One equation per op, so simp selects it by constructor without a side condition.
 @[cil_step] theorem step_loadAggregate_eq {size} (stack : List Value) :
     step body (.loadAggregate size) pc args frame stack memory =
       instructionStep (.loadAggregate size) pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_copyObject_eq {size} (stack : List Value) :
     step body (.copyObject size) pc args frame stack memory =
       instructionStep (.copyObject size) pc frame stack memory := by
-  instruction_step_eq 2
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_storeAggregate_eq {size} (stack : List Value) :
     step body (.storeAggregate size) pc args frame stack memory =
       instructionStep (.storeAggregate size) pc frame stack memory := by
-  instruction_step_eq 2
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_initAggregate_eq {size} (stack : List Value) :
     step body (.initAggregate size) pc args frame stack memory =
       instructionStep (.initAggregate size) pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_loadScalar_eq {width signed} (stack : List Value) :
     step body (.loadScalar width signed) pc args frame stack memory =
       instructionStep (.loadScalar width signed) pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_storeScalar_eq {width} (stack : List Value) :
     step body (.storeScalar width) pc args frame stack memory =
       instructionStep (.storeScalar width) pc frame stack memory := by
-  instruction_step_eq 2
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_fieldAt_eq {offset width signed} (stack : List Value) :
     step body (.fieldAt offset width signed) pc args frame stack memory =
       instructionStep (.fieldAt offset width signed) pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_fieldAddress_eq {offset} (stack : List Value) :
     step body (.fieldAddress offset) pc args frame stack memory =
       instructionStep (.fieldAddress offset) pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_setFieldAt_eq {offset width} (stack : List Value) :
     step body (.setFieldAt offset width) pc args frame stack memory =
       instructionStep (.setFieldAt offset width) pc frame stack memory := by
-  instruction_step_eq 2
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_aggregateFieldAt_eq {offset size} (stack : List Value) :
     step body (.aggregateFieldAt offset size) pc args frame stack memory =
       instructionStep (.aggregateFieldAt offset size) pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_setAggregateFieldAt_eq {offset size} (stack : List Value) :
     step body (.setAggregateFieldAt offset size) pc args frame stack memory =
       instructionStep (.setAggregateFieldAt offset size) pc frame stack memory := by
-  instruction_step_eq 2
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_lane_eq {index} (stack : List Value) :
     step body (.lane index) pc args frame stack memory =
       instructionStep (.lane index) pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_laneAddress_eq {index} (stack : List Value) :
     step body (.laneAddress index) pc args frame stack memory =
       instructionStep (.laneAddress index) pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_setLane_eq {index} (stack : List Value) :
     step body (.setLane index) pc args frame stack memory =
       instructionStep (.setLane index) pc frame stack memory := by
-  instruction_step_eq 2
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_const32_eq {word} (stack : List Value) :
     step body (.const32 word) pc args frame stack memory =
       instructionStep (.const32 word) pc frame stack memory := rfl
@@ -142,11 +149,13 @@ local macro "instruction_step_eq " count:num : tactic => `(tactic| (
 @[cil_step] theorem step_load64_eq (stack : List Value) :
     step body .load64 pc args frame stack memory =
       instructionStep .load64 pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_store64_eq (stack : List Value) :
     step body .store64 pc args frame stack memory =
       instructionStep .store64 pc frame stack memory := by
-  instruction_step_eq 2
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_dup_eq (stack : List Value) :
     step body .dup pc args frame stack memory =
       instructionStep .dup pc frame stack memory := rfl
@@ -156,11 +165,13 @@ local macro "instruction_step_eq " count:num : tactic => `(tactic| (
 @[cil_step] theorem step_skipInit_eq (stack : List Value) :
     step body .skipInit pc args frame stack memory =
       instructionStep .skipInit pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_asRef_eq (stack : List Value) :
     step body .asRef pc args frame stack memory =
       instructionStep .asRef pc frame stack memory := by
-  instruction_step_eq 1
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  cases observed : unspecifiedOperands 1 stack <;> rfl
 
 -- Locals go through the frame's slot for `index`.
 @[cil_step] theorem step_local_eq (index : Nat) (narrow : Option CIL.NarrowKind)
