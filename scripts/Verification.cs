@@ -277,13 +277,30 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     {
         const int bufferSize = 64 * 1024;
         using var file = File.OpenRead(path);
+        var length = file.CanSeek ? file.Length : 0;
+        if (length > Array.MaxLength) throw new IOException("The file is too long to read.");
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
         try
         {
-            var read = 0;
-            while ((read = file.Read(buffer, 0, bufferSize)) != 0)
-                hash.AppendData(buffer, 0, read);
+            // Match ReadAllBytes: a known length bounds the read and truncation must fail.
+            if (length > 0)
+            {
+                while (length > 0)
+                {
+                    var count = (int)Math.Min(length, bufferSize);
+                    file.ReadExactly(buffer, 0, count);
+                    hash.AppendData(buffer, 0, count);
+                    length -= count;
+                }
+            }
+            else
+            {
+                // Empty and non-seekable files can still yield bytes, for example on procfs.
+                var read = 0;
+                while ((read = file.Read(buffer, 0, bufferSize)) != 0)
+                    hash.AppendData(buffer, 0, read);
+            }
             return Convert.ToHexStringLower(hash.GetHashAndReset());
         }
         finally { ArrayPool<byte>.Shared.Return(buffer); }
