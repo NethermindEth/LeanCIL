@@ -203,7 +203,54 @@ theorem overrun_not_writable : ¬ Writable unsentineled ⟨0, 0⟩ 8 0 3 := by
   rw [denied] at allowed
   cases allowed
 
+/-- Transformed 32-bit elements load back as i32 values through the width-generic load. -/
+theorem transform_loads {m : Memory} {base : Reference} {xs : List (BitVec (8 * 4))}
+    (contents : Contents m base 4 xs) (writable : Writable m base 4 0 xs.length) {i : Nat} (bound : i < xs.length) :
+    ∃ after, transformElements m base 4 (· + 1) 0 xs.length = .ok after ∧
+      loadValue after (.address (base.element 4 i)) 4 = .ok (.i32 (xs[i] + 1)) := by
+  obtain ⟨after, ran, mapped, _⟩ := transform_increments contents writable
+  refine ⟨after, ran, ?_⟩
+  have found : (xs.map (· + 1))[i]? = some (xs[i] + 1) := by simp [bound]
+  rw [mapped.load (by decide) found]
+  simp only [numericOfWidth, Except.ok.injEq, CIL.Value.i32.injEq]
+  exact BitVec.eq_of_toNat_eq (by simp)
+
+/-- An unsigned byte load zero-extends: 0xFF loads as 255, not as -1. -/
+theorem byte_load_zero_extends {m : Memory} {base : Reference}
+    (contents : Contents m base 1 [(0xFF : BitVec (8 * 1))]) :
+    loadValue m (.address base) 1 = .ok (.i32 255) := by
+  simpa [numericOfWidth] using contents.load (index := 0) (by decide) rfl
+
+/-- A 16-byte element loads as a 128-bit vector, not through the snapshot fallback. -/
+theorem vector_element_loads {m : Memory} {base : Reference} {xs : List (BitVec (8 * 16))}
+    (contents : Contents m base 16 xs) {i : Nat} {x : BitVec (8 * 16)} (found : xs[i]? = some x) :
+    loadValue m (.address (base.element 16 i)) 16 = .ok (.v128 x) := by
+  simpa [numericOfWidth] using contents.load (by decide) found
+
+/-- Four limbs of any width decode as one number, lowest limb first, each scaled past the lower limbs. -/
+theorem limbs_decode (w : Nat) (a b c d : BitVec (8 * w)) :
+    byteNumber (elementBytes w [a, b, c, d]) =
+      a.toNat + b.toNat * 256 ^ w + c.toNat * 256 ^ (w * 2) + d.toNat * 256 ^ (w * 3) := by
+  rw [byteNumber_elementBytes]
+  simp [Nat.add_assoc]
+
+/-- The 64-bit-limb form peels one limb at a time; it avoids the kernel unfolding `x * 256^(8*k)` literals. -/
+theorem word_limbs_decode (a b c d : BitVec (8 * 8)) :
+    byteNumber (elementBytes 8 [a, b, c, d]) =
+      a.toNat + 256 ^ 8 * (b.toNat + 256 ^ 8 * (c.toNat + 256 ^ 8 * d.toNat)) := by
+  simp only [byteNumber_elementBytes_cons, elementBytes_nil]
+  rfl
+
+/-- The limb sum is the byte order, not its reverse: limbs 1 and 2 decode to 1 + 2 * 2^16. -/
+example : byteNumber (elementBytes 2 [1, 2]) = 1 + 2 * 2^16 := by
+  rw [byteNumber_elementBytes]; rfl
+
 #print axioms fill_replicates
+#print axioms transform_loads
+#print axioms byte_load_zero_extends
+#print axioms vector_element_loads
+#print axioms limbs_decode
+#print axioms word_limbs_decode
 #print axioms transform_increments
 #print axioms fill_loads
 #print axioms fill_keeps_neighbours

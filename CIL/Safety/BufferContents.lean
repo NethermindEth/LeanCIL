@@ -69,6 +69,42 @@ theorem element_value {width : Nat} (x : BitVec (8 * width)) :
   have bound := x.isLt
   rwa [Nat.pow_mul] at bound
 
+theorem byteNumber_cons (byte : BitVec 8) (bytes : List (BitVec 8)) :
+    byteNumber (byte :: bytes) = byte.toNat + 256 * byteNumber bytes := rfl
+
+/-- Little-endian: the high bytes are scaled past every low byte. -/
+theorem byteNumber_append (low high : List (BitVec 8)) :
+    byteNumber (low ++ high) = byteNumber low + 256 ^ low.length * byteNumber high := by
+  induction low with
+  | nil => simp [byteNumber]
+  | cons byte low ih =>
+    rw [List.cons_append, byteNumber_cons, ih, byteNumber_cons, List.length_cons, Nat.pow_succ]
+    rw [Nat.mul_add]; ac_rfl
+
+/-- Decoding a typed buffer peels its lowest element, which is scaled by one element width. -/
+theorem byteNumber_elementBytes_cons (width : Nat) (x : BitVec (8 * width)) (xs : List (BitVec (8 * width))) :
+    byteNumber (elementBytes width (x :: xs)) = x.toNat + 256 ^ width * byteNumber (elementBytes width xs) := by
+  rw [elementBytes_cons, byteNumber_append, element_value, numberBytes_length]
+
+/-- The whole-value decode of a typed buffer is the sum of its elements, element `i` scaled by `256^(width*i)`. -/
+theorem byteNumber_elementBytes (width : Nat) (xs : List (BitVec (8 * width))) :
+    byteNumber (elementBytes width xs) = (xs.zipIdx.map fun p => p.1.toNat * 256 ^ (width * p.2)).sum := by
+  suffices shifted : ∀ start, 256 ^ (width * start) * byteNumber (elementBytes width xs) =
+      ((xs.zipIdx start).map fun p => p.1.toNat * 256 ^ (width * p.2)).sum by
+    simpa using shifted 0
+  induction xs with
+  | nil => simp [byteNumber]
+  | cons x xs ih =>
+    intro start
+    rw [byteNumber_elementBytes_cons, List.zipIdx_cons, List.map_cons, List.sum_cons, ← ih (start + 1),
+      Nat.mul_succ, Nat.pow_add]
+    rw [Nat.mul_add]; ac_rfl
+
+/-- The decode of `xs.length` elements fits `width * xs.length` bytes, so a `BitVec` of that size keeps it. -/
+theorem byteNumber_elementBytes_lt (width : Nat) (xs : List (BitVec (8 * width))) :
+    byteNumber (elementBytes width xs) < 256 ^ (width * xs.length) := by
+  simpa using byteNumber_lt (elementBytes width xs)
+
 /-- Interval `(r, width)` shares no byte with `entry`, so neither does any subinterval of it. -/
 theorem Apart.sub {r : Reference} {width : Nat} {entry : Reference × Nat} (apart : Apart r width entry)
     {start count : Nat} (within : start + count ≤ width) :
@@ -159,6 +195,12 @@ theorem Contents.load_word {base : Reference} {xs : List (BitVec (8 * 8))} (cont
     {index : Nat} {x : BitVec (8 * 8)} (found : xs[index]? = some x) :
     loadValue m (.address (base.element 8 index)) 8 = .ok (.i64 x) :=
   load_word64_of_read (contents index x found)
+
+/-- A scalar load of element `index` at any scalar width returns that element. -/
+theorem Contents.load {xs : List (BitVec (8 * width))} (contents : Contents m base width xs)
+    (scalar : ScalarWidth width) {index : Nat} {x : BitVec (8 * width)} (found : xs[index]? = some x) :
+    loadValue m (.address (base.element width index)) width = .ok (numericOfWidth width x.toNat) :=
+  load_scalar_of_read scalar (contents index x found)
 
 /-- The first `count` elements keep their contents. -/
 theorem Contents.take {xs : List (BitVec (8 * width))} (contents : Contents m base width xs) (count : Nat) :
@@ -477,10 +519,15 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat} (f : Bi
 
 #print axioms elementBytes_slice
 #print axioms element_value
+#print axioms byteNumber_append
+#print axioms byteNumber_elementBytes_cons
+#print axioms byteNumber_elementBytes
+#print axioms byteNumber_elementBytes_lt
 #print axioms Reference.element_apart
 #print axioms add_element
 #print axioms Contents.singleton
 #print axioms Contents.load_word
+#print axioms Contents.load
 #print axioms Contents.append
 #print axioms Contents.of_read
 #print axioms Contents.read
