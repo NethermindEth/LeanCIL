@@ -497,6 +497,9 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     }
 
     static SortedDictionary<string, string> Inputs(string proof, string? settings = null)
+        => Inputs(CommonInputs(), proof, settings);
+
+    static SortedDictionary<string, string> CommonInputs()
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
 
@@ -519,6 +522,13 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                     result[relative] = Sha(path);
             }
 
+        return result;
+    }
+
+    static SortedDictionary<string, string> Inputs(SortedDictionary<string, string> common, string proof,
+        string? settings = null)
+    {
+        var result = new SortedDictionary<string, string>(common, StringComparer.Ordinal);
         result["proof:" + proof] = Sha(proof);
         if (settings is not null)
             result["settings:" + settings] = Sha(settings);

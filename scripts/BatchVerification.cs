@@ -48,7 +48,8 @@ partial class Program
                 "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
             extractorBuilt = true;
         }
-        var before = requests.Select(r => Inputs(r.Proof)).ToArray();
+        var commonBefore = CommonInputs();
+        var before = requests.Select(r => Inputs(commonBefore, r.Proof)).ToArray();
         var session = Library(before[0]);
         var imports = new SortedSet<string>(StringComparer.Ordinal);
         string Body(string source)
@@ -111,6 +112,10 @@ partial class Program
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
             RequireAuditedModule(audited, "Batch", Path.Combine(fresh, "Batch.olean"));
+            foreach (var request in requests)
+                Run(Extract("check", request.Assembly!, identity, request.Entry, request.Output, profile));
+            // Every input is checked after the last subprocess, including inputs for earlier fixtures.
+            var commonAfter = CommonInputs();
             var reports = new Report[requests.Count];
             for (var i = 0; i < requests.Count; i++)
             {
@@ -118,8 +123,8 @@ partial class Program
                 var theorem = $"BatchCase{i}.{request.Theorem}";
                 var axioms = AuditedAxioms(audited.theorems[2 * i]);
                 AuditedAxioms(audited.theorems[2 * i + 1]);
-                Run(Extract("check", request.Assembly!, identity, request.Entry, request.Output, profile));
-                if (!Same(before[i], Inputs(request.Proof)) || hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
+                if (!Same(before[i], Inputs(commonAfter, request.Proof)) ||
+                    hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
                     throw new InvalidOperationException("Batch inputs changed during verification");
                 var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
