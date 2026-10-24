@@ -238,8 +238,8 @@ def Op.profileReads : Op → List Feature
   | .intrinsic operation _ => operation.requiredFeatures
   | _ => []
 
-/-- Every profile flag an instruction of any method in the program reads. Extraction emits the
-    methods reachable from its entry points, so these are the flags the reachable bodies read. -/
+/-- Every profile flag an instruction of any method in the program reads, the same scope
+    `Program.ProfileAgreement` quantifies over. -/
 def Program.profileReads (program : Program) : List Feature :=
   program.flatMap fun body => body.code.flatMap Op.profileReads
 

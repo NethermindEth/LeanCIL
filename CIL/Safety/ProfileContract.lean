@@ -15,7 +15,7 @@ namespace CIL.Safety
 
 /-- A uniform program and its reprofiling to an agreeing profile invoke identically, at every
     fuel, method, argument list and memory. -/
-theorem invoke_uniform_reprofile (program : CIL.Program) (p q : CIL.FeatureProfile)
+theorem invoke_uniform_reprofile_fun (program : CIL.Program) (p q : CIL.FeatureProfile)
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q) :
     invoke (CIL.reprofile program q) = invoke program := by
   funext fuel method args memory
@@ -28,7 +28,7 @@ theorem MethodContract.Holds.reprofile {Input Output : Type} {c : MethodContract
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (holds : c.Holds program method) : c.Holds (CIL.reprofile program q) method := by
   unfold MethodContract.Holds
-  rw [invoke_uniform_reprofile program p q uniform agreement]
+  rw [invoke_uniform_reprofile_fun program p q uniform agreement]
   exact holds
 
 /-- `MethodContract.Holds.reprofile` for a contract that reads the program's static
@@ -50,7 +50,7 @@ theorem OutcomeContract.Holds.reprofile {Input Output : Type} {c : OutcomeContra
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (holds : c.Holds program method) : c.Holds (CIL.reprofile program q) method := by
   unfold OutcomeContract.Holds Raises
-  rw [invoke_uniform_reprofile program p q uniform agreement]
+  rw [invoke_uniform_reprofile_fun program p q uniform agreement]
   exact holds
 
 /-- `OutcomeContract.Holds.reprofile` for a contract that reads the program's static
@@ -72,10 +72,10 @@ theorem OutcomeContract.HoldsCLR.reprofile {Input Output : Type}
     (uniform : ∀ body ∈ program, body.profile = p) (agreement : program.ProfileAgreement p q)
     (holds : c.HoldsCLR program method) : c.HoldsCLR (CIL.reprofile program q) method := by
   unfold OutcomeContract.HoldsCLR RaisesCLR
-  rw [invoke_uniform_reprofile program p q uniform agreement]
+  rw [invoke_uniform_reprofile_fun program p q uniform agreement]
   exact holds
 
-#print axioms invoke_uniform_reprofile
+#print axioms invoke_uniform_reprofile_fun
 #print axioms MethodContract.Holds.reprofile
 #print axioms MethodContract.Holds.reprofile_statics
 #print axioms OutcomeContract.Holds.reprofile
