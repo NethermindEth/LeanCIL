@@ -36,6 +36,8 @@ jobs:
           dotnet run --file scripts/TestLeanDiagnostics.cs
           dotnet run --file Tests/ConsumerTraceRetention.cs
           dotnet run --file Tests/FileHashing.cs
+          dotnet run --file Tests/BatchInputs.cs
+          dotnet run --file Tests/ConsumerArtifactSnapshot.cs
       - name: Select affected suites
         id: select
         env:
