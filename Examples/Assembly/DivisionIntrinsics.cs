@@ -8,7 +8,7 @@ public static class DivisionIntrinsics
     public static ulong DefinedLocal(ulong value)
     {
         var local = Vector128.Create(value);
-        return Sse2.Add(local, local).GetElement(0);
+        return local.GetElement(0) + local.GetElement(1);
     }
     public static ulong PrunedUnsafeLocal(ulong value)
     {
