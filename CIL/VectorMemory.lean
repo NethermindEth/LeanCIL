@@ -128,7 +128,9 @@ inductive MemoryOp where
   | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
-  deriving Repr
+  deriving DecidableEq, Repr
+-- Irreducible for the same reason as `instDecidableEqOp`, whose instructions embed these.
+attribute [irreducible] instDecidableEqMemoryOp
 
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
