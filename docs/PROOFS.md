@@ -230,8 +230,13 @@ apart from every entry, taking the allocation's age from `WellFormed`;
 `Confined.cells_apart` keeps every byte of an allocation no entry names, and
 `WordSnapshots.after_confined` (`CIL.Safety.ConfinedSnapshots`) keeps remembered words.
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
-the program does, so a cross-profile contract is a theorem quantified over the
-per-profile extractions.
+the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
+`OutcomeContract` and `HoldsCLR` forms) carries a contract proved for a program whose methods
+all use profile `p` to `CIL.reprofile program q` for any `q` that agrees with `p` on the
+program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in
+`program.profileReads`, which `decide` checks for concrete profiles, so one proof covers every
+profile in a family. A separate per-profile extraction is covered once it is shown equal to
+the reprofiled program, by `rfl` when only the profiles differ.
 
 A contract may also type its result: `MethodContract Input Output` adds
 `results : Output → List Value`, and `post` speaks of the `Output`. `Returns`

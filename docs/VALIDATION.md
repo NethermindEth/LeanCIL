@@ -167,6 +167,11 @@ slices of one allocation, a producer that extends its prefix while its room
 stays unreadable, empty buffers at invalid and sentinel positions, and rejection
 of uninitialized, past-end, overlapping, unjoined and stale contents.
 
+`Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under one
+profile, and carries it to other profiles and to every profile with AVX2 on through
+`MethodContract.Holds.reprofile`, with agreement decided from the flags the program reads. A
+profile with AVX2 off fails both the agreement check and the contract.
+
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
 naming `CIL.step.eq_def` elaborates.
@@ -174,7 +179,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
