@@ -162,7 +162,9 @@ refinement premises and the derived contract on a concrete input.
 
 `Tests.InvocationCertificates` builds invocation certificates from a computed
 invocation and from a computed run, keeps them through a certified contract and
-its refinement, and refutes a contract from the returned values of a computed run.
+its refinement, proves a caller whose postcondition is the visited-state clause of
+its callee's certificate, through a certified callee and through a callee without
+a precondition, and refutes a contract from the returned values of a computed run.
 `Tests.ValidCallTransport` carries `ValidCall` through writes, frame entry, memory
 kept below a watermark and a call confined apart from the inputs, and shows that a
 confined call over an input can revoke its read authority.

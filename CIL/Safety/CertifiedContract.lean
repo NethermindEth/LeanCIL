@@ -10,7 +10,8 @@ proved contract whose precondition implies well-formed memory and a valid static
 `Certified.holds` recovers the ordinary `Holds`, and `Certified.weaken` derives a certified
 contract from a certified one it refines. At a call site, `run_call_of_certified` and
 `run_call_of_contract_certified` hand the continuation the callee's certificate, which
-`run_call_of_contract` drops.
+`run_call_of_contract` drops; `cil_certified_call` and `cil_contract_certified_call` apply
+them at a fetched call.
 -/
 
 namespace CIL.Safety
@@ -60,7 +61,8 @@ theorem MethodContract.Certified.weaken {Input Output : Type}
   · rw [refines.results]; exact encoded
 
 /-- Compose a fetched call through a certified contract: the continuation receives the
-    callee's `InvocationCertificate` with the footprint and the typed output. -/
+    callee's `InvocationCertificate`, with its entered frame, live entry and visited states
+    and returned state, besides the footprint and the typed output. -/
 theorem run_call_of_certified {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value}
@@ -70,8 +72,8 @@ theorem run_call_of_certified {Input Output : Type} {c : MethodContract Input Ou
     (stepped :
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
-    (continuation : ∀ fuel final values,
-      InvocationCertificate program callee arguments updated fuel final values →
+    (continuation : ∀ calleeFuel final values,
+      InvocationCertificate program callee arguments updated calleeFuel final values →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final =
@@ -81,17 +83,18 @@ theorem run_call_of_certified {Input Output : Type} {c : MethodContract Input Ou
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
         post result returned := by
   subst encoded
-  obtain ⟨childFuel, final, values, certificate, framed, satisfied⟩ :=
+  obtain ⟨calleeFuel, final, values, certificate, framed, satisfied⟩ :=
     certified input updated permitted
   obtain ⟨parentFuel, result, returned, resumed, finished⟩ :=
-    continuation childFuel final values certificate framed satisfied
+    continuation calleeFuel final values certificate framed satisfied
   obtain ⟨fuel, composed⟩ := run_call_exists methodFound instructionFound stepped
-    ⟨childFuel, certificate.1⟩ ⟨parentFuel, resumed⟩
+    ⟨calleeFuel, certificate.1⟩ ⟨parentFuel, resumed⟩
   exact ⟨fuel, result, returned, composed, finished⟩
 
 /-- Compose a fetched call through a proved contract from a well-formed caller memory in a
-    valid static world: the continuation receives the callee's `InvocationCertificate`,
-    whose returned state carries the final memory's well-formedness and static world. -/
+    valid static world, whatever the callee's precondition: the continuation receives the
+    callee's `InvocationCertificate`, so beyond `run_call_of_contract_formed` it learns the
+    callee's entered frame and that its entry and every visited state are live. -/
 theorem run_call_of_contract_certified {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value}
@@ -103,8 +106,8 @@ theorem run_call_of_contract_certified {Input Output : Type} {c : MethodContract
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (formed : memory.WellFormed)
     (world : StaticWorldValid (programStaticDescriptors program) memory)
-    (continuation : ∀ fuel final values,
-      InvocationCertificate program callee arguments updated fuel final values →
+    (continuation : ∀ calleeFuel final values,
+      InvocationCertificate program callee arguments updated calleeFuel final values →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final =
@@ -121,13 +124,48 @@ theorem run_call_of_contract_certified {Input Output : Type} {c : MethodContract
   have enteredWorld : StaticWorldValid (programStaticDescriptors program) updated :=
     programStep_preserves_static_world called formed world
   run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
-    fun final values ⟨fuel, invoked⟩ =>
-      continuation fuel final values (.of_invoke entered enteredWorld invoked)
+    fun final values ⟨calleeFuel, invoked⟩ =>
+      continuation calleeFuel final values (.of_invoke entered enteredWorld invoked)
 
 #print axioms MethodContract.Certified.holds
 #print axioms MethodContract.Holds.certified
 #print axioms MethodContract.Certified.weaken
 #print axioms run_call_of_certified
 #print axioms run_call_of_contract_certified
+
+/-- `cil_contract_call` through `run_call_of_certified`: leaves the precondition, then the
+    continuation over the callee's certificate, footprint and output. -/
+syntax "cil_certified_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
+
+macro_rules
+  | `(tactic| cil_certified_call $certified $input [$facts:term,*]) =>
+  `(tactic| (
+    refine CIL.Safety.run_call_of_certified $certified $input
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+  | `(tactic| cil_certified_call $certified $input at $site:ident [$facts:term,*]) =>
+  `(tactic| (
+    refine CIL.Safety.run_call_of_certified $certified $input
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+
+/-- `cil_contract_call` through `run_call_of_contract_certified`: leaves the precondition,
+    the caller memory's `WellFormed` and static world, then the continuation over the
+    callee's certificate, footprint and output. -/
+syntax "cil_contract_certified_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
+
+macro_rules
+  | `(tactic| cil_contract_certified_call $holds $input [$facts:term,*]) =>
+  `(tactic| (
+    refine CIL.Safety.run_call_of_contract_certified $holds $input
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_lookup [$[$facts:term],*])
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_ ?_))
+  | `(tactic| cil_contract_certified_call $holds $input at $site:ident [$facts:term,*]) =>
+  `(tactic| (
+    refine CIL.Safety.run_call_of_contract_certified $holds $input
+      (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_ ?_))
 
 end CIL.Safety

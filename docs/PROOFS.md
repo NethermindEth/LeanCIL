@@ -321,8 +321,9 @@ certifies any successful `invoke` from those two premises, and
 arguments enter. At a call site, `run_call_of_certified` (from a `Certified`
 callee) and `run_call_of_contract_certified` (from `Holds`, a well-formed caller
 memory and a valid static world) hand the continuation the callee's certificate,
-which `run_call_of_contract` drops. `Tests/InvocationCertificates.lean` uses
-each of them.
+which `run_call_of_contract` drops; `cil_certified_call` and
+`cil_contract_certified_call` apply them at a fetched call.
+`Tests/InvocationCertificates.lean` uses each of them.
 
 `ValidCall memory inputs outputs` states that memory is well formed, every input
 buffer is readable and every output buffer writable. `CIL.Safety.CallingTransport`
