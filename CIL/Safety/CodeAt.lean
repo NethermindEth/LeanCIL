@@ -6,9 +6,9 @@ import CIL.Instructions
 `CodeAt body start segment` states that `segment` occupies `body.code` from position `start`,
 so the instruction at `start + index` is `segment[index]`. It replaces the positional
 hypotheses `body.code = leading ++ segment ++ tail` and `leading.length = start` that segment
-theorems would otherwise thread: it is decidable, so a concrete placement closes by
-`decide +kernel`, and `CodeAt.lookup` turns it into the `body.code[pc]? = some op` facts that
-the stepping tactics consume. Placements split and compose along `++`, `drop` and `take`.
+theorems would otherwise thread: a concrete placement closes by `rfl`, and `CodeAt.lookup`
+turns it into the `body.code[pc]? = some op` facts that the stepping tactics consume.
+Placements split and compose along `++`, `drop` and `take`.
 -/
 
 namespace CIL.Safety
@@ -17,12 +17,6 @@ namespace CIL.Safety
     `start + 1`, ... are exactly those of `segment`, in order. -/
 def CodeAt (body : CIL.Method) (start : Nat) (segment : List CIL.Op) : Prop :=
   (body.code.drop start).take segment.length = segment
-
-/-- A concrete placement is decided by `decide +kernel`; the kernel unfolds the instruction
-    equality that elaboration keeps irreducible. -/
-instance (body : CIL.Method) (start : Nat) (segment : List CIL.Op) :
-    Decidable (CodeAt body start segment) :=
-  inferInstanceAs (Decidable (_ = _))
 
 namespace CodeAt
 

@@ -133,10 +133,7 @@ inductive Op where
   /-- Raises an exception of the named type; there are no handlers. -/
   | throw (exception : String)
   | unsupported (description : String)
-  deriving DecidableEq, Repr
--- Irreducible: unfolding it while generating the interpreter's equation lemmas exceeds the
--- heartbeat limit. Decide instruction lists with `decide +kernel`.
-attribute [irreducible] instDecidableEqOp
+  deriving Repr
 
 /-- The call `method arguments` whose result a static constructor stores in a readonly field. -/
 structure StaticInitializer where

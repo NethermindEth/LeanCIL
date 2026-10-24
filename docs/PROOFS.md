@@ -134,7 +134,7 @@ A segment theorem over an abstract body states where its code sits with
 `body.code = leading ++ segment ++ tail` and `leading.length = start`.
 `placed.lookup (index := i) rfl` proves `body.code[start + i]? = some op` to
 pass as a lookup hypothesis; `append`, `middle`, `take` and `drop` move a placement
-between a region and its segments, and `decide +kernel` closes a concrete one.
+between a region and its segments, and `rfl` closes a concrete one.
 [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
 
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the

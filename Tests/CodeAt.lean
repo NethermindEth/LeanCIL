@@ -7,7 +7,7 @@ import CIL.Safety.SymbolicExecution
 Segment theorems stated over an abstract body with `CodeAt` instead of
 `body.code = leading ++ segment ++ tail`: the checked stepping tactics take the lookups that
 `CodeAt.lookup` derives, placements of a larger region split into the segments a proof steps,
-and a concrete body discharges the placement by `decide +kernel`.
+and a concrete body discharges the placement by `rfl`.
 -/
 
 namespace Tests.CodeAt
@@ -55,16 +55,19 @@ theorem run_sum_in_region {program : CIL.Program} {method fuel : Nat} {body : CI
   code := [.nop, .nop, .nop, .nop, .arg 0, .arg 1, .add, .ret]
   locals := [], returnsValue := true }
 
--- Placement is decided both ways on a concrete body.
-example : CodeAt placedMethod 4 sumSegment := by decide +kernel
-example : ¬ CodeAt placedMethod 3 sumSegment := by decide +kernel
+-- A concrete placement closes by `rfl`; a shifted one is refuted by the instruction it misplaces.
+example : CodeAt placedMethod 4 sumSegment := rfl
+example : ¬ CodeAt placedMethod 3 sumSegment := by
+  intro placed
+  cases placed.lookup (index := 0) rfl
 
-/-- The segment theorem instantiates at a concrete program once its placement is decided. -/
+/-- The segment theorem instantiates at a concrete program once its placement is checked. -/
 theorem run_placed_method (memory : Memory) (frame : Frame) (left right : CIL.W64) :
     run [placedMethod] 5 0 4 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
       run [placedMethod] 2 0 7 [.scalar (.i64 left), .scalar (.i64 right)] frame
         [.scalar (.i64 (left + right))] memory :=
-  run_sum_segment (fuel := 2) rfl (by decide +kernel) memory frame left right
+  run_sum_segment (fuel := 2) (start := 4) (body := placedMethod) rfl rfl memory frame
+    left right
 
 #print axioms run_placed_method
 

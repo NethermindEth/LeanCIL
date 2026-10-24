@@ -139,8 +139,8 @@ asserted.
 
 `Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the
 lookups its `CodeAt` placement yields, which stepping cannot take without them,
-hands that segment theorem the middle of a larger placed region, and decides a
-concrete placement both ways with `decide +kernel`.
+hands that segment theorem the middle of a larger placed region, closes a concrete
+placement by `rfl` and refutes a shifted one.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
 bodies with mapped program counters; `Tests.OutcomeEmbedding` checks transport of
