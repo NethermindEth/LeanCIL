@@ -1,5 +1,12 @@
 import Std
 
+/-!
+# Metadata type expressions
+
+A scope-qualified form of ECMA-335 signature types, used by extraction and by typed import
+slots to compare signatures as values.
+-/
+
 namespace CIL.Extraction
 
 /-- Scoped metadata types shared by extraction and typed import slots. -/
