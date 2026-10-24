@@ -7,7 +7,7 @@ internal static class RuntimeModels
     private static string Vector(int width, string element) => $"System.Runtime.Intrinsics.Vector{width}`1<{element}>";
 
     private static readonly Version RuntimeAssemblyVersion = new(10, 0, 0, 0);
-    // Strong-name tokens of the .NET 10 reference assemblies: "Open" for out-of-band packages, "Microsoft" otherwise.
+    // The Open key signs System.Memory and System.Runtime.Intrinsics; the Microsoft key signs the rest.
     private const string OpenKeyToken = "cc7b13ffcd2ddd51";
     private const string MicrosoftKeyToken = "b03f5f7f11d50a3a";
 
