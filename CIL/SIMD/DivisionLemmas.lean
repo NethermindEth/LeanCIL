@@ -2,6 +2,16 @@ import CIL.SIMD.VectorLemmas
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.Execution
 
+/-!
+# Lane lemmas and unspecified vector lanes
+
+Lane projections for 512-bit vectors and for lanewise operations and count shifts. Then the
+soundness of `Vector128.CreateScalarUnsafe`, whose upper lane the runtime leaves
+unspecified: the model keeps only the low lane (`v128Low64`), and every intrinsic that
+accepts such a value gives the same answer for every possible upper lane. Last, the checked
+interpreter's opaque 128-bit locals, which hold such a value whole rather than as bytes.
+-/
+
 namespace CIL.Vector
 
 @[simp] theorem lane512_0 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
@@ -75,15 +85,18 @@ theorem lane64_xor (left right : BitVec width) (index : Nat) :
   ext bit bound
   simp [lane64, BitVec.getElem_extractLsb'] <;> grind
 
-theorem lane64_andNot (left right : BitVec width) (index : Nat) (_bounded : 64 * (index + 1) ≤ width) :
+theorem lane64_andNot (left right : BitVec width) (index : Nat)
+    (_bounded : 64 * (index + 1) ≤ width) :
     lane64 ((~~~left) &&& right) index = (~~~lane64 left index) &&& lane64 right index := by
   ext bit bound
   simp [lane64, BitVec.getElem_extractLsb'] <;> grind
 
 theorem zip512_lane (operation : W64 → W64 → W64) (left right : V512)
     (index : Nat) (bound : index < 8) :
-    lane64 (zip512 operation left right) index = operation (lane64 left index) (lane64 right index) := by
-  have alternatives : index = 0 ∨ index = 1 ∨ index = 2 ∨ index = 3 ∨ index = 4 ∨ index = 5 ∨ index = 6 ∨ index = 7 := by omega
+    lane64 (zip512 operation left right) index =
+      operation (lane64 left index) (lane64 right index) := by
+  have alternatives : index = 0 ∨ index = 1 ∨ index = 2 ∨ index = 3 ∨ index = 4 ∨ index = 5 ∨
+      index = 6 ∨ index = 7 := by omega
   rcases alternatives with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp [zip512]
 
 theorem map256_lane (operation : W64 → W64) (value : V256) (index : Nat) (bound : index < 4) :
@@ -111,6 +124,8 @@ end CIL.Vector
 
 namespace CIL
 
+/-- `concrete` is a 128-bit vector the runtime may hold where the model holds `value`: the
+    same bits, or for `v128Low64` any vector with that low lane. -/
 def Vector128Represents (value : Value) (concrete : Vector.V128) : Prop :=
   match value with
   | .v128 bits => concrete = bits
@@ -121,8 +136,10 @@ theorem scalarUnsafe_represents_every_upper (low upper : W64) :
     Vector128Represents (.v128Low64 low) (Vector.pack128 low upper) := by
   simp [Vector128Represents]
 
+/-- No upper lane is fixed by `CreateScalarUnsafe`, so no proof may depend on one. -/
 theorem scalarUnsafe_no_fixed_upper (low upper : W64) :
-    ¬ ∀ concrete, Vector128Represents (.v128Low64 low) concrete → Vector.lane64 concrete 1 = upper := by
+    ¬ ∀ concrete, Vector128Represents (.v128Low64 low) concrete →
+      Vector.lane64 concrete 1 = upper := by
   intro fixed
   have zero := fixed (Vector.pack128 low 0) (scalarUnsafe_represents_every_upper low 0)
   have one := fixed (Vector.pack128 low 1) (scalarUnsafe_represents_every_upper low 1)
@@ -166,20 +183,24 @@ def Concretizes (value concrete : Value) : Prop :=
   | .v128Low64 _ => ∃ bits, concrete = .v128 bits ∧ Vector128Represents value bits
   | _ => concrete = value
 
+/-- `Concretizes`, pointwise over two argument lists of equal length. -/
 def ConcretizesAll : List Value → List Value → Prop
   | [], [] => True
-  | value :: values, concrete :: concretes => Concretizes value concrete ∧ ConcretizesAll values concretes
+  | value :: values, concrete :: concretes =>
+    Concretizes value concrete ∧ ConcretizesAll values concretes
   | _, _ => False
 
 /-- Whatever the unspecified upper lanes hold, the ISA result agrees with the model result. -/
-theorem evalUnspecifiedIntrinsic_concretizations {op : Intrinsic} {args concrete : List Value} {result : Value}
+theorem evalUnspecifiedIntrinsic_concretizations {op : Intrinsic} {args concrete : List Value}
+    {result : Value}
     (evaluated : evalUnspecifiedIntrinsic op args = some result)
     (represents : ConcretizesAll args concrete) :
     ∃ value, evalIntrinsic op concrete = some value ∧ Concretizes result value := by
   unfold evalUnspecifiedIntrinsic at evaluated
   split at evaluated
   · cases evaluated
-    rcases concrete with _ | ⟨first, _ | ⟨_, _⟩⟩ <;> simp only [ConcretizesAll, and_false, and_true] at represents
+    rcases concrete with _ | ⟨first, _ | ⟨_, _⟩⟩ <;>
+      simp only [ConcretizesAll, and_false, and_true] at represents
     obtain ⟨bits, rfl, lane⟩ := represents
     exact ⟨.v128 bits, rfl, bits, rfl, lane⟩
   · rename_i low index
@@ -192,7 +213,8 @@ theorem evalUnspecifiedIntrinsic_concretizations {op : Intrinsic} {args concrete
       cases evaluated
       have zero : index.toNat = 0 := Nat.eq_of_beq_eq_true zero
       refine ⟨.i64 low, ?_, rfl⟩
-      show (if index.toNat < 2 then some (Value.i64 (Vector.lane64 bits index.toNat)) else none) = _
+      show (if index.toNat < 2 then some (Value.i64 (Vector.lane64 bits index.toNat))
+        else none) = _
       rw [zero, lane]
       rfl
     · cases evaluated
@@ -207,7 +229,8 @@ theorem evalUnspecifiedIntrinsic_concretizations {op : Intrinsic} {args concrete
 
 /-- The checked and the plain evaluator agree wherever unspecified lanes are consumed. -/
 theorem evalUnspecifiedIntrinsic_sound {op : Intrinsic} {args : List Value} {result : Value}
-    (evaluated : evalUnspecifiedIntrinsic op args = some result) : evalIntrinsic op args = some result := by
+    (evaluated : evalUnspecifiedIntrinsic op args = some result) :
+    evalIntrinsic op args = some result := by
   unfold evalUnspecifiedIntrinsic at evaluated
   split at evaluated
   all_goals first | (cases evaluated; rfl) | (cases evaluated) | exact evaluated
@@ -218,7 +241,8 @@ namespace CIL.Safety
 
 /-- Every intrinsic the checked semantics evaluates on unspecified lanes agrees with every
     runtime concretisation of them; no other operation can succeed on such operands. -/
-theorem checkedIntrinsic_unspecified {op : CIL.Intrinsic} {operands concrete : List CIL.Value} {result : CIL.Value}
+theorem checkedIntrinsic_unspecified {op : CIL.Intrinsic} {operands concrete : List CIL.Value}
+    {result : CIL.Value}
     (unspecified : operands.any CIL.Value.hasUnspecified = true)
     (checked : checkedIntrinsic op operands = .ok result)
     (represents : CIL.ConcretizesAll operands concrete) :
@@ -233,24 +257,27 @@ theorem checkedIntrinsic_unspecified {op : CIL.Intrinsic} {operands concrete : L
 theorem opaque128_load (memory : Memory) (value : Opaque128Value) :
     loadLocal memory (.opaque128 (some value)) = .ok (.scalar value.value) := rfl
 
-theorem opaque128_store_load (memory : Memory) (before : Option Opaque128Value) (value : Opaque128Value) :
-    storeLocal memory (.opaque128 before) (.scalar value.value) = .ok (.opaque128 (some value), memory) ∧
+theorem opaque128_store_load (memory : Memory) (before : Option Opaque128Value)
+    (value : Opaque128Value) :
+    storeLocal memory (.opaque128 before) (.scalar value.value) =
+      .ok (.opaque128 (some value), memory) ∧
     loadLocal memory (.opaque128 (some value)) = .ok (.scalar value.value) := by
   cases value <;> exact ⟨rfl, rfl⟩
 
 theorem opaque128_store_memory_identity (memory result : Memory) (before : Option Opaque128Value)
     (value : Value) (slot : LocalSlot)
-    (stored : storeLocal memory (.opaque128 before) value = .ok (slot, result)) : result = memory := by
+    (stored : storeLocal memory (.opaque128 before) value = .ok (slot, result)) :
+    result = memory := by
   cases value with
   | scalar value =>
     cases value with
     | v128 bits =>
-      change (Except.ok (.opaque128 (some (.known bits)), memory) : ExecutionResult (LocalSlot × Memory)) =
-        .ok (slot, result) at stored
+      change (Except.ok (.opaque128 (some (.known bits)), memory) :
+        ExecutionResult (LocalSlot × Memory)) = .ok (slot, result) at stored
       exact (congrArg Prod.snd (Except.ok.inj stored)).symm
     | v128Low64 low =>
-      change (Except.ok (.opaque128 (some (.low64 low)), memory) : ExecutionResult (LocalSlot × Memory)) =
-        .ok (slot, result) at stored
+      change (Except.ok (.opaque128 (some (.low64 low)), memory) :
+        ExecutionResult (LocalSlot × Memory)) = .ok (slot, result) at stored
       exact (congrArg Prod.snd (Except.ok.inj stored)).symm
     | _ => cases stored
   | reference _ => cases stored
@@ -261,8 +288,10 @@ theorem opaque128_init_zero (memory : Memory) :
 
 theorem opaque128_init_unknown (memory : Memory) :
     makeOpaque128 .unmodeled memory = .ok (.opaque128 none, [], memory) ∧
-    loadLocal memory (.opaque128 none) = .error (.unsupported "Uninitialized opaque vector local") := ⟨rfl, rfl⟩
+    loadLocal memory (.opaque128 none) =
+      .error (.unsupported "Uninitialized opaque vector local") := ⟨rfl, rfl⟩
 
+/-- Storing into an opaque 128-bit local changes no allocation, cell, view or static binding. -/
 theorem opaque128_store_preserves_world (memory result : Memory) (before : Option Opaque128Value)
     (value : Value) (slot : LocalSlot)
     (stored : storeLocal memory (.opaque128 before) value = .ok (slot, result)) :
