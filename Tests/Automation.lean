@@ -77,11 +77,10 @@ theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.F
     let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
     unless (target.getArg! 1).isAppOf ``Except.ok do
       throwError "Expected the checked return equation"
-  change (Except.ok (CIL.Safety.leaveFrame frame memory,
-    [.scalar (.i32 (CIL.NarrowKind.extend .unsigned8 (if left = right then 1 else 0)))]) :
-    Except CIL.Safety.LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) = _
-  by_cases same : left = right <;>
-    simp [scalarDifference, CIL.NarrowKind.extend, CIL.Safety.leaveFrame, same]
+    -- The return cleanup drops the narrowing, so consumers never unfold `NarrowKind.extend`.
+    if (target.find? (·.isConstOf ``CIL.NarrowKind.extend)).isSome then
+      throwError "The narrowed comparison return kept NarrowKind.extend"
+  by_cases same : left = right <;> simp [scalarDifference, same]
 
 #print axioms checked_narrow_return
 

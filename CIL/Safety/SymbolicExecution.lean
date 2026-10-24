@@ -196,6 +196,7 @@ macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max "[
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
     try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
+      CIL.NarrowKind.extend_ite_one_zero, CIL.NarrowKind.extend_ite_ofNat_one_zero,
       List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend, BitVec.reduceOfInt, BitVec.isValue,
       Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
     try with_reducible rfl

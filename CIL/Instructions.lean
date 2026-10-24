@@ -25,6 +25,19 @@ def NarrowKind.extend (kind : NarrowKind) (bits : W32) : W32 :=
   | .signed16 => (bits.setWidth 16).signExtend 32
   | .unsigned16 => (bits.setWidth 16).zeroExtend 32
 
+/-- A boolean result already fits every narrow kind, so a narrowed comparison return is unchanged. -/
+theorem NarrowKind.extend_ite_one_zero (kind : NarrowKind) (p : Prop) [Decidable p] :
+    kind.extend (if p then 1 else 0) = if p then 1 else 0 := by
+  cases kind <;> split <;> rfl
+
+/-- The `1#32`/`0#32` literals comparisons produce are not syntactically `1`/`0`, so simp needs this form too. -/
+theorem NarrowKind.extend_ite_ofNat_one_zero (kind : NarrowKind) (p : Prop) [Decidable p] :
+    kind.extend (if p then 1#32 else 0#32) = if p then 1#32 else 0#32 := by
+  cases kind <;> split <;> rfl
+
+#print axioms NarrowKind.extend_ite_one_zero
+#print axioms NarrowKind.extend_ite_ofNat_one_zero
+
 def narrowValue (kind : Option NarrowKind) (value : Value) : Option Value :=
   match kind, value with
   | none, value => some value
