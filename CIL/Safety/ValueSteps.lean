@@ -113,9 +113,8 @@ cil_value_steps (target : Nat) [branch] 0
 cil_value_steps [nop] 0
 cil_value_steps (id : CIL.Feature) [feature] 0
 
--- A feature test pushes `body.profile.evaluate id`. Its equations, one per `Feature`
--- constructor, reduce a known `id` to the profile field a caller's fact names and leave a
--- symbolic one folded, so a fact about `evaluate id` still applies.
+-- One equation per `Feature`: a known feature test reduces to the profile field a caller's
+-- fact names, and a symbolic `evaluate id` stays folded so a fact about it still applies.
 open Lean Meta Elab Command in
 run_cmd do
   let some equations ← liftTermElabM <| getEqnsFor? ``CIL.FeatureProfile.evaluate

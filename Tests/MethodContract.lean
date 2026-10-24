@@ -250,9 +250,8 @@ example {program : CIL.Program} {before after : Memory} (kept : FrameInvariants 
     after.WellFormed ∧ StaticWorldValid (programStaticDescriptors program) after :=
   ⟨kept.formed, kept.staticWorld world⟩
 
--- A loaded local reaches the stack as `localResult kind value`; its consumer must still rewrite by its
--- step equation. The fallback unfolds `CIL.step`, whose match equations alone exceed this budget,
--- and so did re-elaborating an inline tactic block at every contract step.
+-- A loaded local reaches the stack as `localResult kind value` and its consumer must step by its
+-- equation; unfolding `CIL.step`, or re-elaborating a tactic per step, exceeds the budget.
 def loadedGuardBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := false, locals := [], code :=
     [.local 0, .const32 4, .bltu 7, .local 0, .const32 0, .bge 7, .nop, .ret,
@@ -297,9 +296,8 @@ theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.
       post final returned := by
   cil_contract_steps [lowSlot, highSlot, lowLoad, highLoad] until continuation
 
--- A body that selects its widening by a parameter yields `if true = true then ..` from the lookup;
--- the step must reduce it to the opcode so the widening equation applies, within a budget that
--- re-elaborating an inline tactic block at every contract step exceeded.
+-- A parameter-selected widening is fetched as `if true = true then ..` and must step by its
+-- equation; re-elaborating a tactic at every contract step exceeds the budget.
 def widenBody (signed : Bool) : CIL.Method :=
   { returnsValue := true, locals := [], code := [.arg 0, if signed then .convI8 else .convU8, .arg 1, .ret] }
 

@@ -561,9 +561,8 @@ theorem feature_steps_evaluate_forall (program : CIL.Program) (index : Nat) (bod
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
   cil_checked_steps [all, code, returns]
 
-/-- A fact about a symbolic feature applies to the pushed test as stated, by hand or through
-    the checked step: `cil_step` keeps `body.profile.evaluate f` folded instead of splitting on
-    `f`. -/
+/-- A fact about a symbolic feature rewrites the pushed test by hand: `cil_step` keeps
+    `body.profile.evaluate f` folded instead of splitting on `f`. -/
 theorem feature_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (feature : CIL.Feature)
     (enabled : body.profile.evaluate feature = true) :
@@ -572,6 +571,7 @@ theorem feature_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safety.Frame
   simp only [cil_step, enabled, ite_true]
   rfl
 
+/-- Checked stepping keeps the same fact usable: the normaliser leaves it folded too. -/
 theorem feature_checked_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (feature : CIL.Feature)
     (disabled : body.profile.evaluate feature = false) :
