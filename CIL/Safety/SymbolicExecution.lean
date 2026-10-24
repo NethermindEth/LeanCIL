@@ -250,6 +250,43 @@ def mentionsMemoryInstruction (facts : Array Term) : TacticM Bool := withMainCon
     let info ← getConstInfo name
     return name == ``CIL.Safety.memoryInstruction || name == ``CIL.Safety.staticInstruction || legacy info.type
 
+open Lean Elab Tactic Meta in
+/-- Whether a supplied fact's type satisfies `test`: a hypothesis, a constant, or an applied term that is
+    elaborated, tested and then discarded, since `test` may meet its fresh metavariables. -/
+def suppliedFactSatisfies (fact : Term) (test : Expr → MetaM Bool) : TacticM Bool := do
+  if fact.raw.isIdent then
+    match (← getLCtx).findFromUserName? fact.raw.getId with
+    | some decl => test (← instantiateMVars decl.type)
+    | none =>
+      try test (← getConstInfo (← resolveGlobalConstNoOverload fact.raw)).type
+      catch _ => return false
+  else
+    let saved ← saveState
+    try test (← instantiateMVars (← inferType (← Term.withoutErrToSorry (Term.elabTerm fact none))))
+    catch _ => return false
+    finally saved.restore
+
+open Lean Meta in
+/-- Whether `e` contains a numeral whose type reduces to `BitVec n`, such as `(27 : W32)`. -/
+partial def hasBitVecNumeral (e : Expr) : MetaM Bool := do
+  if e.isAppOfArity ``OfNat.ofNat 3 && !(e.getArg! 0).hasLooseBVars then
+    if (← whnfR (e.getArg! 0)).isAppOf ``BitVec then return true
+  e.foldlM (fun found child => if found then pure true else hasBitVecNumeral child) false
+
+/-- Succeed only when a supplied fact concludes `evalIntrinsic ... = _` with a numeral `BitVec` operand. -/
+syntax "cil_numeral_eval_fact" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_numeral_eval_fact [$facts:term,*]) => withMainContext do
+    for fact in facts.getElems do
+      let found ← suppliedFactSatisfies fact fun type => forallTelescope type fun _ conclusion => do
+        let some (_, lhs, _) := conclusion.eq? | return false
+        unless lhs.isAppOf ``CIL.evalIntrinsic || lhs.isAppOf ``CIL.Safety.checkedIntrinsic do return false
+        hasBitVecNumeral lhs
+      if found then return
+    throwError "No supplied evaluation fact with a numeral operand"
+
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
     simp only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
@@ -259,18 +296,19 @@ macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
       List.drop_succ_cons, List.drop_zero, List.drop_nil, CIL.Safety.scalars,
       CIL.Safety.numericValue, Bind.bind, Except.bind, Pure.pure, Except.pure,
       BitVec.ofInt_ofNat, cil_eval, $[$facts:term],*]
-    all_goals simp only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval, $[$facts:term],*,
+    all_goals simp only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
       List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
       Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
-      Bind.bind, Except.bind, Pure.pure, Except.pure]
-    -- `rfl` would evaluate a residue definitionally and push a value no later fact matches. Operands
-    -- arrive as `BitVec.ofNat n k`, which an evaluation fact stated with a literal `k` matches only as `OfNat`.
+      Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
+    -- `rfl` would evaluate a residue definitionally and push a value no later fact matches. Operands arrive as
+    -- `BitVec.ofNat n k`, which only a supplied fact stated with a numeral `k` needs respelled; facts are splice-last.
     all_goals (first
-      | (cil_intrinsic_pending
-         simp only [bitVecOfNatLiteral, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval, $[$facts:term],*,
+      | (cil_numeral_eval_fact [$[$facts:term],*]
+         cil_intrinsic_pending
+         simp only [bitVecOfNatLiteral, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
            List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
            Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
-           Bind.bind, Except.bind, Pure.pure, Except.pure]
+           Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
          fail_if_success cil_intrinsic_pending
          first | rfl | cil_checked_step_equations [$[$facts:term],*])
       | rfl
@@ -300,19 +338,7 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
     match (← whnfR factLhs.getAppArgs[1]!).getAppFn.constName?, head with
     | some factHead, some goalHead => return factHead == goalHead
     | _, _ => return true
-  facts.filterM fun fact => do
-    if fact.raw.isIdent then
-      match (← getLCtx).findFromUserName? fact.raw.getId with
-      | some decl => states (← instantiateMVars decl.type)
-      | none =>
-        try states (← getConstInfo (← resolveGlobalConstNoOverload fact.raw)).type
-        catch _ => return false
-    else
-      -- An applied lemma or a projection; `apply` elaborates it again, so this copy is discarded.
-      let saved ← saveState
-      try states (← instantiateMVars (← inferType (← Term.withoutErrToSorry (Term.elabTerm fact none))))
-      catch _ => return false
-      finally saved.restore
+  facts.filterM (suppliedFactSatisfies · states)
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic

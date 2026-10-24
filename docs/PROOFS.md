@@ -78,8 +78,9 @@ before choosing the next program counter. Unknown opcode heads use the equation 
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas
 before unfolding the intrinsic evaluator. Register consumer lemmas in the form
 `CIL.evalIntrinsic operation operands = some result`. Nonnegative `BitVec.ofInt`
-literals become `BitVec.ofNat` literals so these equations can match; a lemma
-stated with a numeral operand, such as `.i32 27`, also matches, because a second
+literals become `BitVec.ofNat` literals so these equations can match, so state
+`@[cil_eval]` lemmas with `BitVec.ofNat` operands. A supplied evaluation fact may
+instead use a numeral operand, such as `.i32 27`: when one is supplied, a second
 pass respells literal `BitVec.ofNat n k` operands as numerals and leaves symbolic
 `BitVec.ofNat n x` values unchanged. The tactic keeps the lemma's result form. It then removes literal stack `take`, `drop`,
 `reverse` and append expressions before the next step. These rewrites do not

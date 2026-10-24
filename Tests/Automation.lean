@@ -831,4 +831,33 @@ theorem evaluated_keeps_symbolic_slot (v : CIL.Vector.V256) (destination : Refer
 
 #print axioms evaluated_keeps_symbolic_slot
 
+-- An applied hypothesis with a numeral operand also enables the respelling pass.
+open CIL.Safety in
+theorem evaluated_by_applied_hypothesis (v : CIL.Vector.V256) (destination : Reference) (memory : Memory)
+    (k : Except LocatedFault (Memory × List Value))
+    (eval : ∀ w, CIL.evalIntrinsic (.avx2 .permute4x64) [.v256 w, .i32 27] = some (.v256 (reverseLanes w)))
+    (rest : run permuteStoreProgram 2 0 1 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 (reverseLanes v)), .reference (.address destination)] memory = k) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 v), .reference (.address destination)] memory = k := by
+  cil_checked_run_step [eval v]
+  with_reducible exact rest
+
+#print axioms evaluated_by_applied_hypothesis
+
+-- A bare step with no supplied facts still evaluates an intrinsic through the `@[cil_eval]` lemmas.
+open CIL.Safety in
+theorem intrinsic_without_facts (a b c d : CIL.W64) (destination : Reference) (memory : Memory)
+    (k : Except LocatedFault (Memory × List Value))
+    (rest : run permuteStoreProgram 2 0 1 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 (CIL.Vector.pack256 d c b a)), .reference (.address destination)] memory = k) :
+    run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 (CIL.Vector.pack256 a b c d)),
+        .reference (.address destination)] memory = k := by
+  cil_checked_run_step []
+  with_reducible exact rest
+
+/-- info: 'Tests.Automation.intrinsic_without_facts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms intrinsic_without_facts
+
 end Tests.Automation
