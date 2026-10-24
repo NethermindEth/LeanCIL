@@ -415,8 +415,8 @@ theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory
         .reference (.address destination)] memory = .ok (final, []) := by
   cil_checked_steps [stored]
 
--- The same fact closes the single store step.
 open CIL.Safety in
+/-- A `memoryInstruction` fact closes a single store step without `staticInstruction` passed. -/
 theorem store_from_instruction_fact (body : CIL.Method) (args : List Value) (frame : Frame)
     (bits : BitVec 256) (destination : Reference) (memory final : Memory)
     (stored : memoryInstruction .store256
@@ -781,9 +781,9 @@ theorem quantified_body_step_facts (frame stored : Frame) (memory written : Memo
 /-- info: 'Tests.Automation.quantified_body_step_facts' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms quantified_body_step_facts
 
--- An earlier tactic `have` wraps the target in metadata; the store fact must still be found, since
--- the `setLocal` equation alone cannot read the abstract frame's slot.
 open CIL.Safety in
+/-- A supplied step fact is found after an earlier tactic `have` wraps the target in metadata;
+    the `setLocal` equation alone cannot read the abstract frame's slot. -/
 theorem step_fact_after_have (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
     (store : step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written)) :
