@@ -6,19 +6,19 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 
 const string usage = "Usage: dotnet run --file scripts/BenchmarkViews.cs -- [--stores <1-512>] [--repetitions <1-10>]";
-int stores = 64;
-int repetitions = 3;
-for (int index = 0; index < args.Length; index++)
+var stores = 64;
+var repetitions = 3;
+for (var index = 0; index < args.Length; index++)
 {
-    string option = args[index];
+    var option = args[index];
     if (option is "--help" or "-h")
     {
         Console.WriteLine(usage);
         return;
     }
-    int maximum = option switch { "--stores" => 512, "--repetitions" => 10, _ => 0 };
+    var maximum = option switch { "--stores" => 512, "--repetitions" => 10, _ => 0 };
     if (maximum == 0 || ++index == args.Length ||
-        !int.TryParse(args[index], NumberStyles.None, CultureInfo.InvariantCulture, out int value) ||
+        !int.TryParse(args[index], NumberStyles.None, CultureInfo.InvariantCulture, out var value) ||
         value < 1 || value > maximum)
     {
         Console.Error.WriteLine(usage);
@@ -30,19 +30,19 @@ for (int index = 0; index < args.Length; index++)
 }
 
 static string Source([CallerFilePath] string path = "") => path;
-string root = Path.GetDirectoryName(Path.GetDirectoryName(Source()))!;
-string artifacts = Path.Combine(root, "artifacts", "ViewBenchmark");
+var root = Path.GetDirectoryName(Path.GetDirectoryName(Source()))!;
+var artifacts = Path.Combine(root, "artifacts", "ViewBenchmark");
 Directory.CreateDirectory(artifacts);
 await Run(["build", "Tests.ViewReuse"], "build.log", "Benchmark dependencies failed to build.");
 List<string> results = ["variant,iteration,stores,views,milliseconds"];
-for (int iteration = 1; iteration <= repetitions; iteration++)
+for (var iteration = 1; iteration <= repetitions; iteration++)
 {
     string[] variants = iteration % 2 == 1 ? ["optimized", "legacy"] : ["legacy", "optimized"];
-    foreach (string variant in variants)
+    foreach (var variant in variants)
     {
-        string writer = variant == "optimized" ? "write" : "writeAlwaysPrepend";
-        int views = variant == "optimized" ? 1 : stores + 1;
-        string source = Path.Combine(artifacts, variant + ".lean");
+        var writer = variant == "optimized" ? "write" : "writeAlwaysPrepend";
+        var views = variant == "optimized" ? 1 : stores + 1;
+        var source = Path.Combine(artifacts, variant + ".lean");
         File.WriteAllText(source, FormattableString.Invariant($"""
             import Tests.ViewReuse
             open CIL.Safety Tests.ViewReuse
@@ -70,13 +70,13 @@ async Task Run(string[] arguments, string log, string failure)
         RedirectStandardOutput = true,
         RedirectStandardError = true
     };
-    foreach (string argument in arguments) start.ArgumentList.Add(argument);
+    foreach (var argument in arguments) start.ArgumentList.Add(argument);
     using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start lake.");
-    Task<string> stdout = process.StandardOutput.ReadToEndAsync();
-    Task<string> stderr = process.StandardError.ReadToEndAsync();
+    var stdout = process.StandardOutput.ReadToEndAsync();
+    var stderr = process.StandardError.ReadToEndAsync();
     await process.WaitForExitAsync();
-    string output = await stdout + await stderr;
-    string logPath = Path.Combine(artifacts, log);
+    var output = await stdout + await stderr;
+    var logPath = Path.Combine(artifacts, log);
     File.WriteAllText(logPath, output);
     if (process.ExitCode != 0 || output.Contains("sorryAx", StringComparison.Ordinal))
         throw new InvalidOperationException($"{failure} See {logPath}");
