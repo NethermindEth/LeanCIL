@@ -403,20 +403,12 @@ theorem makeOpaque128_setup (m result : Memory) (activation : Nat) (initial : CI
   | v128 bits =>
     change Except.ok (LocalSlot.opaque128 (some (.known bits)), [], m) =
       .ok (slot, owned, result) at h
-    have same := Except.ok.inj h
-    have slotSame : LocalSlot.opaque128 (some (.known bits)) = slot := congrArg Prod.fst same
-    have ownedSame : ([] : List AllocationId) = owned := congrArg (fun value => value.2.1) same
-    have memorySame : m = result := congrArg (fun value => value.2.2) same
-    rw [← slotSame, ← ownedSame, ← memorySame]
-    exact FrameSetup.opaque128 activation m (some (.known bits))
+    cases h
+    exact FrameSetup.opaque128 activation m _
   | unmodeled =>
     change Except.ok (LocalSlot.opaque128 none, [], m) = .ok (slot, owned, result) at h
-    have same := Except.ok.inj h
-    have slotSame : LocalSlot.opaque128 none = slot := congrArg Prod.fst same
-    have ownedSame : ([] : List AllocationId) = owned := congrArg (fun value => value.2.1) same
-    have memorySame : m = result := congrArg (fun value => value.2.2) same
-    rw [← slotSame, ← ownedSame, ← memorySame]
-    exact FrameSetup.opaque128 activation m none
+    cases h
+    exact FrameSetup.opaque128 activation m _
   | _ => cases h
 
 theorem makeSelectedLocalsFrom_setup (m result : Memory) (activation : Nat) (indices : List Nat)
