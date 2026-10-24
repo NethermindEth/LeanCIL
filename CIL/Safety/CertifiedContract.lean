@@ -8,7 +8,9 @@ import CIL.Safety.MethodContract
 and returned-state invariants alongside the contract. `Holds.certified` derives it from a
 proved contract whose precondition implies well-formed memory and a valid static world.
 `Certified.holds` recovers the ordinary `Holds`, and `Certified.weaken` derives a certified
-contract from a certified one it refines.
+contract from a certified one it refines. At a call site, `run_call_of_certified` and
+`run_call_of_contract_certified` hand the continuation the callee's certificate, which
+`run_call_of_contract` drops.
 -/
 
 namespace CIL.Safety
@@ -57,8 +59,75 @@ theorem MethodContract.Certified.weaken {Input Output : Type}
   · rw [refines.args]; exact certificate
   · rw [refines.results]; exact encoded
 
+/-- Compose a fetched call through a certified contract: the continuation receives the
+    callee's `InvocationCertificate` with the footprint and the typed output. -/
+theorem run_call_of_certified {Input Output : Type} {c : MethodContract Input Output}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
+    (certified : c.Certified program callee) (input : Input)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped :
+      step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (encoded : arguments = c.args input) (permitted : c.pre input updated)
+    (continuation : ∀ fuel final values,
+      InvocationCertificate program callee arguments updated fuel final values →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
+      ∃ fuel result returned,
+        run program fuel method (pc + 1) args frame (values ++ rest) final =
+          .ok (result, returned) ∧
+        post result returned) :
+    ∃ fuel result returned,
+      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
+        post result returned := by
+  subst encoded
+  obtain ⟨childFuel, final, values, certificate, framed, satisfied⟩ :=
+    certified input updated permitted
+  obtain ⟨parentFuel, result, returned, resumed, finished⟩ :=
+    continuation childFuel final values certificate framed satisfied
+  obtain ⟨fuel, composed⟩ := run_call_exists methodFound instructionFound stepped
+    ⟨childFuel, certificate.1⟩ ⟨parentFuel, resumed⟩
+  exact ⟨fuel, result, returned, composed, finished⟩
+
+/-- Compose a fetched call through a proved contract from a well-formed caller memory in a
+    valid static world: the continuation receives the callee's `InvocationCertificate`,
+    whose returned state carries the final memory's well-formedness and static world. -/
+theorem run_call_of_contract_certified {Input Output : Type} {c : MethodContract Input Output}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
+    (holds : c.Holds program callee) (input : Input)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped :
+      step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
+    (encoded : arguments = c.args input) (permitted : c.pre input updated)
+    (formed : memory.WellFormed)
+    (world : StaticWorldValid (programStaticDescriptors program) memory)
+    (continuation : ∀ fuel final values,
+      InvocationCertificate program callee arguments updated fuel final values →
+      Confined (c.footprint input) updated final → c.Returns input updated final values →
+      ∃ fuel result returned,
+        run program fuel method (pc + 1) args frame (values ++ rest) final =
+          .ok (result, returned) ∧
+        post result returned) :
+    ∃ fuel result returned,
+      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
+        post result returned :=
+  have called : ProgramStep program method pc args frame stack memory
+      (.call callee arguments rest updated) :=
+    ⟨body, op, methodFound, instructionFound, stepped⟩
+  have entered : updated.WellFormed :=
+    programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed called
+  have enteredWorld : StaticWorldValid (programStaticDescriptors program) updated :=
+    programStep_preserves_static_world called formed world
+  run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
+    fun final values ⟨fuel, invoked⟩ =>
+      continuation fuel final values (.of_invoke entered enteredWorld invoked)
+
 #print axioms MethodContract.Certified.holds
 #print axioms MethodContract.Holds.certified
 #print axioms MethodContract.Certified.weaken
+#print axioms run_call_of_certified
+#print axioms run_call_of_contract_certified
 
 end CIL.Safety

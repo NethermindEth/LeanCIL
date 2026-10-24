@@ -307,18 +307,22 @@ either callee. `Tests/MethodContract.cs` verifies that caller proof unedited
 against a build whose helpers are reimplemented and renumbered, and refutes
 each contract with a concrete run on builds with an arithmetic or an aliasing
 bug; `invoke_ok_unique` ties a computed run to the contract's existential one,
-and `invoke_observation_unique` does so for one observation of it, such as the
-returned values, so the refutation never compares memories.
+and `invoke_ok_observation_unique` does so for one observation of it, such as
+the returned values, so the refutation never compares memories.
 
 A contract whose precondition implies well-formed memory and a valid static
 world can also keep the `InvocationCertificate` of each call:
 `MethodContract.Holds.certified` turns `Holds` into `MethodContract.Certified`,
 whose clause adds the certificate with its visited-state and returned-state
-invariants; `Certified.holds` recovers `Holds`, and `Certified.weaken` keeps the
-certificate through a `Refines`. `InvocationCertificate.of_invoke` certifies any successful `invoke`
-from those two premises, and `InvocationCertificate.of_run` certifies a run of
-the frame that checked arguments enter. `Tests/InvocationCertificates.lean`
-uses each of them.
+invariants; `Certified.holds` recovers `Holds`, and `Certified.weaken` keeps
+the certificate through a `Refines`. `InvocationCertificate.of_invoke`
+certifies any successful `invoke` from those two premises, and
+`InvocationCertificate.of_run` certifies a run of the frame that checked
+arguments enter. At a call site, `run_call_of_certified` (from a `Certified`
+callee) and `run_call_of_contract_certified` (from `Holds`, a well-formed caller
+memory and a valid static world) hand the continuation the callee's certificate,
+which `run_call_of_contract` drops. `Tests/InvocationCertificates.lean` uses
+each of them.
 
 `ValidCall memory inputs outputs` states that memory is well formed, every input
 buffer is readable and every output buffer writable. `CIL.Safety.CallingTransport`

@@ -204,7 +204,7 @@ RunFixture("Tests/MethodSelectors.cs", [], streamOutput: true, progress: "Method
 Passed("method selector aliases, overloads and actionable diagnostics");
 
 Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding", "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels", "Tests.DebugNames", "Tests.MethodContract", "Tests.ConstructContract", "Tests.OutcomeContract", "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints", "Tests.ContractConsequence", "Tests.InvocationCertificates", "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking", "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
-Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, contract consequence, buffer contents, linking and store fact tests");
+Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, contract consequence, invocation certificate, call transport, buffer contents, linking and store fact tests");
 
 // Verify each extracted method and immediately check its artifact identity.
 foreach (var (name, signature) in signatures)

@@ -11,15 +11,19 @@ namespace Tests.ValidCallTransport
 
 open CIL.Safety
 
-/-- One 24-byte caller allocation, readable and writable, holding initialized zeros. -/
+/-- The size of the only allocation in `sample`. -/
+abbrev size : Nat := 24
+
+/-- One `size`-byte caller allocation, readable and writable, holding initialized zeros. -/
 def sample : Memory := {
-  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨24, 1, []⟩, true, [24]⟩ else none
+  allocations := fun id =>
+    if id = 0 then some ⟨.callerStack, ⟨size, 1, []⟩, true, [size]⟩ else none
   cells := fun _ _ => ⟨0, true⟩
-  views := [⟨0, 0, 24, true, true⟩]
+  views := [⟨0, 0, size, true, true⟩]
   nextIdentity := 1 }
 
 /-- `sample` after a callee revokes read authority over the whole allocation. -/
-def revoked : Memory := { sample with views := [⟨0, 0, 24, false, true⟩] }
+def revoked : Memory := { sample with views := [⟨0, 0, size, false, true⟩] }
 
 /-- The input: bytes 0 to 7 of the allocation. -/
 def source : ArgumentView := ⟨⟨0, 0⟩, 8⟩
@@ -28,8 +32,8 @@ def source : ArgumentView := ⟨⟨0, 0⟩, 8⟩
 def target : ArgumentView := ⟨⟨0, 16⟩, 8⟩
 
 /-- Well-formed whenever the only view lies inside the only allocation. -/
-theorem formed_of_view {views : List View} (inside : views = [⟨0, 0, 24, true, true⟩] ∨
-    views = [⟨0, 0, 24, false, true⟩]) : ({ sample with views } : Memory).WellFormed := by
+theorem formed_of_view {views : List View} (inside : views = [⟨0, 0, size, true, true⟩] ∨
+    views = [⟨0, 0, size, false, true⟩]) : ({ sample with views } : Memory).WellFormed := by
   refine ⟨fun id allocation found => ?_, fun view member => ?_⟩
   · by_cases zero : id = 0
     · subst zero
@@ -108,18 +112,18 @@ theorem valid_after_confined {result : Memory}
 /-! Without `Apart`, a confined callee may revoke the input's read authority. -/
 
 /-- Revoking read authority over the whole allocation is confined to it. -/
-theorem revoke_confined : Confined [(source.reference, 24)] sample revoked := by
+theorem revoke_confined : Confined [(source.reference, size)] sample revoked := by
   refine ⟨Nat.le_refl _, fun _ _ => rfl, fun _ _ _ _ => rfl, ?_, ?_⟩
   · intro id _ offset
     simp [permitted, viewContains, revoked, sample]
   · intro id old offset outside
     have zero : id = 0 := by simp only [sample] at old; omega
     subst zero
-    have beyond : 24 ≤ offset := by
+    have beyond : size ≤ offset := by
       have := outside _ (List.mem_singleton_self _)
       simp only [source, ne_eq, not_true_eq_false, Nat.not_lt_zero, false_or] at this
       omega
-    have outsideView : ¬ offset < 24 := by omega
+    have outsideView : ¬ offset < size := by omega
     simp [permitted, viewContains, revoked, sample, outsideView]
 
 /-- With read authority revoked, the input can no longer be read. -/
@@ -130,7 +134,7 @@ theorem revoked_invalid : ¬ ValidCall revoked [source] [target] := fun valid =>
 
 /-- Every premise of `after_confined` except `Apart` holds, and the conclusion fails. -/
 theorem confined_needs_apart :
-    ValidCall sample [source] [target] ∧ Confined [(source.reference, 24)] sample revoked ∧
+    ValidCall sample [source] [target] ∧ Confined [(source.reference, size)] sample revoked ∧
       revoked.WellFormed ∧ ¬ ValidCall revoked [source] [target] :=
   ⟨sample_valid, revoke_confined, formed_of_view (.inr rfl), revoked_invalid⟩
 

@@ -74,8 +74,8 @@ theorem ValidCall.after_enterFrame {memory entered : Memory}
     (Nat.le_refl _) (enterFrame_preserves_wellFormed _ _ _ _ _ valid.1 setup)
 
 /-- A call confined to `footprint` keeps the call valid for inputs apart from the footprint;
-    inside it `Confined` may revoke read authority, so those inputs are excluded. Outputs
-    need no premise, since `Confined` keeps write authority everywhere. -/
+    inside it `Confined` fixes neither bytes nor read authority, so those inputs are
+    excluded. Outputs need no premise, since `Confined` keeps write authority everywhere. -/
 theorem ValidCall.after_confined {memory result : Memory} {inputs outputs : List ArgumentView}
     {footprint : List (Reference × Nat)} (valid : ValidCall memory inputs outputs)
     (framed : Confined footprint memory result) (formed : result.WellFormed)

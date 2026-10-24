@@ -6,9 +6,10 @@ import CIL.Safety.RunReturnTrace
 `InvocationCertificate` packages one successful `invoke` with the facts a consumer needs
 about it: the frame it entered, that every running state it visits satisfies `LiveState`,
 and that the returned state satisfies `ReturnedState`. `certify_invocation` builds one from
-a live entry state and a successful `run`; `InvocationCertificate.of_run` and
-`InvocationCertificate.of_invoke` need only well-formed initial memory and a valid static
-world, since checked frame entry establishes the live entry state itself.
+a live entry state and a successful `run`. `InvocationCertificate.of_run` takes the lookup,
+checked arguments, frame entry and run, and `InvocationCertificate.of_invoke` the
+invocation; both take well-formed initial memory and a valid static world instead of a
+live entry state, which checked frame entry establishes.
 -/
 
 namespace CIL.Safety

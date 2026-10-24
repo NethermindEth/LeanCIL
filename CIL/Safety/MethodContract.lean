@@ -439,7 +439,7 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
 /-- One computed observation of a successful invocation fixes that observation for every fuel
     whose invocation succeeds, so a refutation compares only the observed part, such as the
     returned values. -/
-theorem invoke_observation_unique {α : Type} {program : CIL.Program}
+theorem invoke_ok_observation_unique {α : Type} {program : CIL.Program}
     {method fuel witnessFuel : Nat}
     {args : List Value} {memory : Memory} (observe : Memory × List Value → α)
     {outcome : Memory × List Value} {observed : α}
@@ -528,7 +528,7 @@ theorem MethodContract.Holds.weaken {Input Output : Type}
 #print axioms call_frame_invariants
 #print axioms run_call_of_contract_formed
 #print axioms invoke_ok_unique
-#print axioms invoke_observation_unique
+#print axioms invoke_ok_observation_unique
 
 /-- Opens a contract goal: tidies the stack and, for an `invoke` goal, enters the frame via
     `invoke_exists_of_run` so stepping can start at pc 0. Used by `cil_contract_steps`. -/

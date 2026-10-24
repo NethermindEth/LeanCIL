@@ -1,21 +1,42 @@
 import CIL.Safety.CertifiedContract
+import CIL.Safety.ReturnMemory
 
 /-!
-Consumer uses of invocation certificates on a one-method program, `Echo(v) => v`: a
-certificate built from a computed `invoke` and from a computed run, a certified contract
-that keeps `ReturnedState` through `Holds` and a refinement, and a refutation that compares
-only the returned values of a computed run.
+Consumer uses of invocation certificates on `Echo(v) => v` and its caller
+`Relay(v) => Echo(v)`: a certificate built from a computed `invoke` and from a computed run,
+a certified contract that keeps `ReturnedState` through `Holds` and a refinement, a call
+that hands the caller the callee's certificate, and a refutation that compares only the
+returned values of a computed run.
 -/
 
 namespace Tests.InvocationCertificates
 
 open CIL.Safety
 
+/-- The method index of `Echo`. -/
+abbrev echoMethod : Nat := 0
+
+/-- The method index of `Relay`. -/
+abbrev relayMethod : Nat := 1
+
 /-- `Echo(v) => v` on one scalar argument. -/
 @[cil_code] def echo : CIL.Method := { returnsValue := true, locals := [], code := [.arg 0, .ret] }
 
-/-- `Echo` is method 0 and the program declares no statics. -/
-@[cil_code] def program : CIL.Program := [echo]
+/-- `Relay(v) => Echo(v)`: one call whose result it returns. -/
+@[cil_code] def relay : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.arg 0, .call echoMethod 1, .ret] }
+
+/-- `Echo` then `Relay`; the program declares no statics. -/
+@[cil_code] def program : CIL.Program := [echo, relay]
+
+/-- Fuel for both `Echo` instructions. -/
+abbrev echoFuel : Nat := 4
+
+/-- The argument of the computed runs. -/
+abbrev sample : CIL.W64 := 7
+
+/-- `sample` as the argument list. -/
+abbrev sampleArgs : List Value := [.scalar (.i64 sample)]
 
 /-- No allocation, view or static binding. -/
 def empty : Memory :=
@@ -27,29 +48,29 @@ theorem empty_formed : empty.WellFormed :=
 
 /-- With no static descriptor and no binding, the static world is valid. -/
 theorem empty_world : StaticWorldValid (programStaticDescriptors program) empty :=
-  StaticWorldValid.of_absent _ _ (by simp [programStaticDescriptors, program, echo])
-    (by simp [programStaticDescriptors, program, echo])
+  StaticWorldValid.of_absent _ _ (by simp [programStaticDescriptors, program, echo, relay])
+    (by simp [programStaticDescriptors, program, echo, relay])
     ⟨List.Pairwise.nil, fun _ member => (nomatch member)⟩ fun _ member => (nomatch member)
 
 /-! Certificates from a computed invocation and from its computed parts. -/
 
 /-- `of_invoke` needs only entry premises and the invocation. -/
 theorem echo_certificate :
-    ∃ final, InvocationCertificate program 0 [.scalar (.i64 7)] empty 4 final [.scalar (.i64 7)] :=
+    ∃ final, InvocationCertificate program echoMethod sampleArgs empty echoFuel final sampleArgs :=
   ⟨_, .of_invoke empty_formed empty_world
-    (rfl : invoke program 4 0 [.scalar (.i64 7)] empty = .ok _)⟩
+    (rfl : invoke program echoFuel echoMethod sampleArgs empty = .ok _)⟩
 
 /-- The certificate exposes the returned-state invariant that a bare invocation does not. -/
 theorem echo_returned_state :
-    ∃ final, ReturnedState program final [.scalar (.i64 7)] := by
+    ∃ final, ReturnedState program final sampleArgs := by
   obtain ⟨final, -, -, -, -, -, -, -, -, -, -, returned⟩ := echo_certificate
   exact ⟨final, returned⟩
 
 /-- `of_run` takes the checked arguments, frame entry and run that `invoke` composes. -/
 theorem echo_run_certificate :
-    ∃ final, InvocationCertificate program 0 [.scalar (.i64 7)] empty 4 final [.scalar (.i64 7)] :=
+    ∃ final, InvocationCertificate program echoMethod sampleArgs empty echoFuel final sampleArgs :=
   ⟨_, .of_run (body := echo) empty_formed empty_world rfl rfl
-    (rfl : enterFrame echo [.scalar (.i64 7)] empty = .ok _) rfl⟩
+    (rfl : enterFrame echo sampleArgs empty = .ok _) rfl⟩
 
 #print axioms echo_certificate
 #print axioms echo_returned_state
@@ -66,18 +87,18 @@ def echoContract : MethodContract CIL.W64 CIL.W64 where
   post v _ _ out := out = v
 
 /-- `Echo` meets its contract, stepped through the checked interpreter. -/
-theorem echo_holds : echoContract.Holds program 0 := by
+theorem echo_holds : echoContract.Holds program echoMethod := by
   rintro v memory -
   dsimp only [echoContract]
-  refine ⟨4, memory, _, ?_, Confined.refl _ memory, v, rfl, rfl⟩
+  refine ⟨echoFuel, memory, _, ?_, Confined.refl _ memory, v, rfl, rfl⟩
   cil_checked_steps []
 
 /-- The precondition supplies the entry premises, so the proved contract is certified. -/
-theorem echo_certified : echoContract.Certified program 0 :=
+theorem echo_certified : echoContract.Certified program echoMethod :=
   echo_holds.certified fun _ _ permitted => permitted
 
 /-- The contract API still applies to a certified contract. -/
-theorem echo_holds_of_certified : echoContract.Holds program 0 := echo_certified.holds
+theorem echo_holds_of_certified : echoContract.Holds program echoMethod := echo_certified.holds
 
 /-- A public contract that only bounds the result. -/
 def echoBounded : MethodContract CIL.W64 CIL.W64 :=
@@ -90,13 +111,13 @@ theorem echo_bounded_refines : echoContract.Refines echoBounded :=
     fun _ _ _ _ _ _ same => by dsimp only [echoBounded]; exact same ▸ BitVec.le_refl _⟩
 
 /-- The weakened contract is still certified, with its own postcondition. -/
-theorem echo_bounded_certified : echoBounded.Certified program 0 :=
+theorem echo_bounded_certified : echoBounded.Certified program echoMethod :=
   echo_certified.weaken echo_bounded_refines
 
 /-- Callers of the weakened contract keep `ReturnedState` next to the exported bound. -/
 theorem echo_bounded_returned (v : CIL.W64) (memory : Memory)
     (permitted : echoBounded.pre v memory) :
-    ∃ fuel final out, invoke program fuel 0 [.scalar (.i64 v)] memory =
+    ∃ fuel final out, invoke program fuel echoMethod [.scalar (.i64 v)] memory =
       .ok (final, [.scalar (.i64 out)]) ∧ ReturnedState program final [.scalar (.i64 out)] ∧
       out ≤ v := by
   obtain ⟨fuel, final, _, ⟨invoked, -, -, -, -, -, -, -, -, -, returned⟩, -, out, rfl, bound⟩ :=
@@ -112,18 +133,61 @@ theorem echo_bounded_returned (v : CIL.W64) (memory : Memory)
 #print axioms echo_holds_of_certified
 #print axioms echo_bounded_returned
 
+/-! A caller keeps the callee's certificate across the call. -/
+
+/-- `Relay` returns its argument in well-formed memory. -/
+def relayContract : MethodContract CIL.W64 CIL.W64 :=
+  { echoContract with post := fun v _ final out => out = v ∧ final.WellFormed }
+
+/-- The returned memory is well formed because of the certificate the call hands over;
+    the contract of `Echo` states nothing about memory. -/
+theorem relay_holds : relayContract.Holds program relayMethod := by
+  rintro v memory ⟨formed, world⟩
+  dsimp only [relayContract, echoContract]
+  cil_contract_steps []
+  refine run_call_of_contract_certified echo_holds v (by cil_lookup []) (by cil_lookup [])
+    (by cil_checked_step []) (by rfl) ⟨formed, world⟩ formed world ?_
+  rintro fuel final values certificate framed ⟨out, rfl, rfl⟩
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, calleeFormed, -⟩ := certificate
+  cil_contract_steps []
+  -- `Relay` owns no allocation, so leaving its frame keeps all memory below its watermark.
+  refine ⟨framed.then_below
+      (leaveFrame_preserves_memory_below _ final _ fun _ member => nomatch member)
+      (Nat.le_of_eq (leaveFrame_nextIdentity _ final).symm), out, rfl, rfl,
+    leaveFrame_preserves_wellFormed _ final calleeFormed⟩
+
+/-- `Relay` composes through the certified contract of `Echo` the same way. -/
+theorem relay_holds_of_certified : relayContract.Holds program relayMethod := by
+  rintro v memory ⟨formed, world⟩
+  dsimp only [relayContract, echoContract]
+  cil_contract_steps []
+  refine run_call_of_certified echo_certified v (by cil_lookup []) (by cil_lookup [])
+    (by cil_checked_step []) (by rfl) ⟨formed, world⟩ ?_
+  rintro fuel final values certificate framed ⟨out, rfl, rfl⟩
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, calleeFormed, -⟩ := certificate
+  cil_contract_steps []
+  -- `Relay` owns no allocation, so leaving its frame keeps all memory below its watermark.
+  refine ⟨framed.then_below
+      (leaveFrame_preserves_memory_below _ final _ fun _ member => nomatch member)
+      (Nat.le_of_eq (leaveFrame_nextIdentity _ final).symm), out, rfl, rfl,
+    leaveFrame_preserves_wellFormed _ final calleeFormed⟩
+
+#print axioms relay_holds
+#print axioms relay_holds_of_certified
+
 /-! A refutation that observes only the returned values. -/
 
-/-- Off by one: `Echo(7)` returns 7, not 8. -/
+/-- Off by one: `Echo(sample)` returns `sample`, not `sample + 1`. -/
 def echoOff : MethodContract CIL.W64 CIL.W64 :=
   { echoContract with post := fun v _ _ out => out = v + 1 }
 
 /-- Only the returned values of a computed run are compared; memories never are. -/
-theorem echo_off_rejected : ¬ echoOff.Holds program 0 := fun holds => by
+theorem echo_off_rejected : ¬ echoOff.Holds program echoMethod := fun holds => by
   obtain ⟨_, _, values, invoked, -, out, encoded, wrong⟩ :=
-    holds 7 empty ⟨empty_formed, empty_world⟩
-  have observed := invoke_observation_unique Prod.snd
-    (rfl : (invoke program 4 0 (echoOff.args 7) empty).map Prod.snd = .ok [.scalar (.i64 7)])
+    holds sample empty ⟨empty_formed, empty_world⟩
+  have observed := invoke_ok_observation_unique Prod.snd
+    (rfl : (invoke program echoFuel echoMethod (echoOff.args sample) empty).map Prod.snd =
+      .ok sampleArgs)
     invoked
   dsimp only [echoOff, echoContract] at observed encoded wrong
   subst observed wrong
