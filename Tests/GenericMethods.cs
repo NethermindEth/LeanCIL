@@ -159,7 +159,9 @@ File.WriteAllText(arrayLocalProof, arrayLocalSource + """
       by rfl
     #print axioms closed_array_local
     """);
-var arrayLocalCheck = Run(["lake", "env", "lean", arrayLocalProof]);
+var arrayLocalLibrary = verification.Library(Inputs(At("CIL.lean")));
+var arrayLocalCheck = Run([verification.LeanExecutable, arrayLocalProof],
+    leanPath: Path.Combine(arrayLocalLibrary, ".lake/build/lib/lean"));
 if (arrayLocalCheck.Contains("sorryAx", StringComparison.Ordinal))
     throw new InvalidOperationException("Untrusted generic array local proof");
 Console.WriteLine("PASS closed generic primitive-array local");
