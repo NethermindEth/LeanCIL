@@ -64,6 +64,8 @@ For checked-step and loop tactics, see [proof automation](#proof-automation).
 
 `Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping through vector and int32
 stores, reloads and overwrites with abstract homes and memory, plus signed-byte narrowing.
+The mixed-width case carries Vector256, Vector128 and int32 locals through one snapshot
+invariant and returns the full arbitrary 256-bit input after the other locals are written.
 Missing write authority, mismatched local kinds and unknown local contents remain rejected.
 The ordinary shared tactic tests run unchanged.
 
