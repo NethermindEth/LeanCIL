@@ -212,8 +212,8 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
     @interface = new[] { new { module = "PublishedTable", source = contract } },
     exports = new[] { ("Read", libArtifact), ("ReadAgain", againArtifact) }.Select(export => new
     {
-        method = "StaticFixture.Library::" + export.Item1 + "()", artifact = export.Item2, contract = "PublishedTable.read",
-        theorem = "LibraryProof.correctness"
+        method = "StaticFixture.Library::" + export.Item1 + "()", artifact = export.Item2,
+        contract = "PublishedTable.read", theorem = "LibraryProof.correctness"
     })
 }));
 string sidecar = Path.Combine(libRoot, "StaticFixture.Lib.leancil.contracts");
@@ -273,8 +273,10 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
         stages.Count(stage => stage == "Building fresh Lean verification library") != 2 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
         stages.Any(stage => stage.Contains("certified proof:", StringComparison.Ordinal)))
-        throw new InvalidOperationException("Full verification reused a receipt instead of replaying: " + string.Join(", ", stages));
-    JsonElement verified = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+        throw new InvalidOperationException(
+            "Full verification reused a receipt instead of replaying: " + string.Join(", ", stages));
+    JsonElement verified =
+        JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
     JsonElement[] imports = verified.GetProperty("imports").EnumerateArray().ToArray();
     // The published statement must carry the checked static link, not only the raw link.
     if (imports.Length != slots || imports.Any(import =>
@@ -284,7 +286,8 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
             import.GetProperty("staticIdentities")[0].GetProperty("identity").GetString() != libKey) ||
         verified.GetProperty("compositionTheorem").GetString() != "LeanCILFullComposition.certified" ||
         !verified.GetProperty("compositionAudit").GetString()!.Contains("linkChecked", StringComparison.Ordinal))
-        throw new InvalidOperationException("Full verification did not publish the checked static composition: " + verified);
+        throw new InvalidOperationException(
+            "Full verification did not publish the checked static composition: " + verified);
 }
 // Any one marker suffices where independent checks may reject the same input in either order.
 void RejectFull(string artifact, params string[] markers)
@@ -297,7 +300,8 @@ void RejectFull(string artifact, params string[] markers)
 void RewriteTable(ulong word)
 {
     using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(lib)));
-    module.GetType("StaticFixture.Data").Fields.Single(field => field.Name == "Table").InitialValue = BitConverter.GetBytes(word);
+    FieldDefinition table = module.GetType("StaticFixture.Data").Fields.Single(field => field.Name == "Table");
+    table.InitialValue = BitConverter.GetBytes(word);
     module.Write(lib);
 }
 // Republishes the bundle with edited export records under its new content identity, as a cooperating
@@ -348,22 +352,36 @@ if (fullComposition)
         File.WriteAllBytes(lib, originalLib);
         File.WriteAllText(sidecar, published.ToJsonString());
     }
-    Console.WriteLine("PASS a re-certified changed table passes ordinary import but fails the independent library proof");
+    Console.WriteLine(
+        "PASS a re-certified changed table passes ordinary import but fails the independent library proof");
 
     // Both assemblies' first tables had extraction-local index 0; ReadAgain shares Read's table.
     string mixedArtifact = Path.Combine(root, "MixedArtifact");
-    Run([.. cli, "extract", app, "StaticFixture.Application::Mixed()", mixedArtifact, .. ExtractApp(mixedArtifact)[6..]]);
-    JsonObject mixedIdentity = JsonNode.Parse(File.ReadAllText(Path.Combine(mixedArtifact, "identity.json")))!.AsObject();
-    if (mixedIdentity["staticIdentities"]!.AsArray().Count != 1 ||
-        mixedIdentity["staticIdentities"]![0]!["identity"]!.GetValue<string>() != appStatic["identity"]!.GetValue<string>() ||
+    string[] mixedImports = ExtractApp(mixedArtifact)[6..];
+    Run([.. cli, "extract", app, "StaticFixture.Application::Mixed()", mixedArtifact, .. mixedImports]);
+    JsonObject mixedIdentity =
+        JsonNode.Parse(File.ReadAllText(Path.Combine(mixedArtifact, "identity.json")))!.AsObject();
+    JsonArray mixedStatics = mixedIdentity["staticIdentities"]!.AsArray();
+    if (mixedStatics.Count != 1 ||
+        mixedStatics[0]!["identity"]!.GetValue<string>() != appStatic["identity"]!.GetValue<string>() ||
         mixedIdentity["imports"]!.AsArray().Count != 2)
-        throw new InvalidOperationException("Precondition: the mixed caller must own one table and import two readers of another.");
+        throw new InvalidOperationException(
+            "Precondition: the mixed caller must own one table and import two readers of another.");
+    // Both relocated readers of the shared table must meet the library contract in the linked program.
     string mixedProof = Path.Combine(root, "MixedCaller.lean");
-    File.WriteAllText(mixedProof, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness : " +
-        "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun _ => True) := by\n" +
-        "  intro linked links imported\n  trivial\nend ExampleProof\n");
+    File.WriteAllText(mixedProof, """
+    import ExtractedImports
+    namespace ExampleProof
+    open CIL.Safety
+    theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
+        (fun linked => PublishedTable.read.Holds linked 2 ∧ PublishedTable.read.Holds linked 3) :=
+      fun _ _ imported => imported
+    #print axioms correctness
+    end ExampleProof
+    """);
     FullVerify(mixedArtifact, mixedProof, package: false, slots: 2);
-    Console.WriteLine("PASS distinct same-index app and library tables and one shared table across two imported slots");
+    Console.WriteLine(
+        "PASS distinct same-index app and library tables and one shared table across two imported slots");
     return;
 }
 
@@ -383,8 +401,10 @@ void Reject(Action<JsonObject> mutate, string marker)
     if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal) || File.Exists(Path.Combine(rejected, "Extracted.lean")))
         throw new InvalidOperationException("Static certification rejection failed: " + result.Output);
 }
-Reject(value => ReadCertification(value).AsObject().Remove("staticIdentities"), "Missing contract interface field: staticIdentities");
-Reject(value => ReadCertification(value)["staticIdentities"] = new JsonArray(), "static identities differ from the selected implementation");
+Reject(value => ReadCertification(value).AsObject().Remove("staticIdentities"),
+    "Missing contract interface field: staticIdentities");
+Reject(value => ReadCertification(value)["staticIdentities"] = new JsonArray(),
+    "static identities differ from the selected implementation");
 Reject(value => ReadCertification(value)["staticIdentities"]![0]!["identity"] = "0", "Invalid scoped static identity");
 Reject(value =>
 {
@@ -392,7 +412,8 @@ Reject(value =>
     identity["fieldName"] = "StaticFixture.Blob StaticFixture.Data::Missing";
     identity["identity"] = StaticIdentity.Key(identity["assemblyIdentity"]!.GetValue<string>(), identity["fieldName"]!.GetValue<string>());
 }, "Certified static field is not present");
-Reject(value => ReadCertification(value)["staticIdentities"]!.AsArray().Add(libStatic.DeepClone()), "Invalid or duplicate contract certification");
+Reject(value => ReadCertification(value)["staticIdentities"]!.AsArray().Add(libStatic.DeepClone()),
+    "Invalid or duplicate contract certification");
 Reject(value =>
 {
     JsonNode conflicting = libStatic.DeepClone();
@@ -435,7 +456,8 @@ try
     RejectFull(forgedStatics, "Full-verification static identities differ from the current implementation");
 }
 finally { File.WriteAllText(sidecar, published.ToJsonString()); }
-Console.WriteLine("PASS full verification rejects a changed table DLL, forged caller or bundle static records and a tampered bundle");
+Console.WriteLine(
+    "PASS full verification rejects a changed table DLL, forged static records and a tampered bundle");
 
 using (ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(lib))))
 {
