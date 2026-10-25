@@ -54,7 +54,7 @@ internal static class ExceptionLint
         for (int methodIndex = 0; methodIndex < methods.Length; methodIndex++)
         {
             MethodDefinition method = methods[methodIndex];
-            HashSet<Instruction> nativeOperands = NativeOperands.Analyze(method, profile);
+            var nativeOperands = NativeOperands.Certify(method, profile);
             int[] parameterHomes = ParameterStorage.Analyze(method, profile);
             Throws.Analysis folded = Throws.Analyze(method);
             foreach (Instruction instruction in Reachability.Analyze(method, profile).OrderBy(value => value.Offset))

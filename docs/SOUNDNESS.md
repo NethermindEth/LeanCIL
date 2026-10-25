@@ -8,6 +8,31 @@ and interface pins, so a wrong selection can only fail, never certify other byte
 
 ## What is defined and proved
 
+Dynamic stack allocation uses the existing allocation-relative memory model. Each successful
+nonempty `localloc` creates a fresh frame-owned allocation, grants access to exactly its byte
+extent and charges its size rounded to 16 bytes against the activation's resource quota.
+`Memory.stackLimit` defaults to zero and admits at most 65,536 bytes per activation. A proof
+using a positive quota must justify that deployment assumption; this quota excludes the
+runtime's ordinary frame, call and probing overhead and does not establish available physical
+thread-stack space. The model reports `stackAllocationFailure` when the quota is insufficient.
+That resource failure is not automatically a named CLR exception, nor does a successful model
+execution prove that the runtime cannot exhaust its physical stack.
+
+The emitted initialization flag must match the raw method's `localsinit` bit. Without it, new
+bytes remain unreadable until written; with it, the payload is zero-initialized. A zero-byte
+request returns null without reserving storage. Frame exit expires all dynamic allocations,
+and the existing return checks reject escaped references and spans. Pointer values retain
+allocation provenance; numeric address fabrication remains unsupported. Memory equivalence
+now also requires equal stack quotas, and frame records track the charged dynamic bytes.
+
+These initialization and lifetime rules follow the
+[CLI localloc specification](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.localloc?view=net-10.0).
+Zero-size null results and 16-byte reservation rounding follow the .NET 10.0.0 CoreCLR
+[x64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenxarch.cpp)
+and [ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp)
+implementations. This source correspondence is an explicit runtime assumption, not a proof
+of the JIT or of resource availability on every deployment.
+
 Concrete constrained struct calls retain their original prefix and interface slot in raw
 specialization evidence. A mandatory Lean validator independently resolves the slot from the
 serialized type, interface, method and explicit-override declarations, then checks the emitted
@@ -231,7 +256,7 @@ The wrong-addition fixture has a finite execution witness plus a uniqueness theo
 
 The scalar certificate permits interchange between `word64` and `native` only at a metadata-bound 64-bit local home, argument home or return boundary. Both have the checked interpreter representation `i64` on the validated 64-bit target. This representation rule does not permit a mixed native/int64 arithmetic operation, int32 widening, or recovery of numeric width from `other`.
 
-The existing byte-span constructor model takes a checked reference and an int32 length. Scalar evidence permits that reference for the raw `void*` parameter only at the exact `System.Runtime` 10 `ReadOnlySpan<byte>(void*, int32)` constructor signature, with its exact declaring type, parameter/result metadata and emitted `spanCreate` operation. An opaque value or native integer cannot use this rule. Other pointer signatures retain their existing opaque classification.
+Primitive integer pointer parameters, locals and results carry checked allocation-relative references. Raw `void*` remains opaque except at the supported `System.Runtime` 10 primitive `Span<T>(void*, int32)` and `ReadOnlySpan<T>(void*, int32)` constructors. Their scalar evidence checks the exact declaring type, external signature, parameter/result metadata, element width and mutability against the emitted `spanFromReference` operation. The existing `ReadOnlySpan<byte>` constructor retains its exact `spanCreate` check. Each constructor requires a checked reference and an int32 length; an opaque value or native integer cannot fabricate a reference through this rule. Other pointer element types remain unsupported by extraction.
 
 A raw `stloc` into a validated int32 or narrow integer home with a known `word64` or `native` input is an explicit terminal `invalidState` case. The checked home store rejects every such `i64` input. The certificate therefore requires no successful successor from that store; it does not convert the value or treat later instructions as a successful execution. The rule requires the exact emitted local index. Unknown values, references and missing or different homes cannot use this exception. All covered arithmetic and conversion encodings still require their exact checks, including after the terminal store.
 

@@ -147,6 +147,16 @@ internal static class MetadataValidation
 
     internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, string architecture = "scalar")
     {
+        if (type is PointerType pointer)
+        {
+            if (pointer.ElementType is TypeSpecification ||
+                pointer.ElementType.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
+                    MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 or
+                    MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr))
+                throw new InvalidDataException("Unsupported stack-storage pointer element type");
+            Type(pointer.ElementType, module, architecture: architecture);
+            return;
+        }
         if (type is ByReferenceType byRef)
         {
             if (Spans.Width(byRef.ElementType) is not null)
@@ -380,10 +390,10 @@ internal static class MetadataValidation
         {
             var index = i;
             var method = methods[index];
-            HashSet<Instruction>? nativeOperands = null;
+            NativeOperands.Certificate? nativeOperands = null;
             int[]? parameterHomes = null;
             if (!Check(method, null, () => (nativeOperands, parameterHomes) =
-                (NativeOperands.Analyze(method, profile), ParameterStorage.Analyze(method, profile)), named: true))
+                (NativeOperands.Certify(method, profile), ParameterStorage.Analyze(method, profile)), named: true))
                 continue;
             foreach (Instruction instruction in Reachability.Analyze(method, profile))
                 if (!skipped.Contains(instruction))

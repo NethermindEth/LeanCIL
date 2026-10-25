@@ -28,7 +28,8 @@ abbrev ScalarCertificate := List (Option (List ScalarKind))
     underlying type. -/
 def scalarType : TypeExpr → ScalarKind
   | .enum _ underlying => scalarType underlying
-  | .byref _ => .reference
+  | .pointer .void => .other
+  | .byref _ | .pointer _ => .reference
   | .atom scope name =>
     if scope != runtimeScope then .other
     else if name ∈ ["System.IntPtr", "System.UIntPtr"] then .native
@@ -154,6 +155,10 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
         nativeWrapped left right (branchEncodingMatches instruction.opcode target) emitted
     | _, _ => false
   else if instruction.operand != .none then false
+  else if instruction.opcode == 88 && (stack[1]? == some .reference) then
+    match stack[0]?, emitted with
+    | some kind, .memory (.add 1 true) => kind ∈ [.word32, .native]
+    | _, _ => false
   else if scalarBinary instruction.opcode then match stack with
     | right :: left :: _ => compatibleBinary left right &&
         nativeWrapped left right (scalarEncodingMatches instruction.opcode) emitted
@@ -385,14 +390,30 @@ private def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
     site.target == .external (runtimeScope ++
       "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)")
 
-/-- `spanCreate` is emitted exactly for the byte-span constructor. -/
+/-- Exact primitive span pointer constructor, including owner scope and external signature. -/
+private def spanConstructor (opcode : Nat) (site : CallSite) : Option (Nat × Bool) := do
+  if opcode != 115 || site.name != ".ctor" || !site.hasThis || site.returnsValue ||
+      !site.typeArguments.isEmpty || site.parameterCount != 2 || site.returnType != .void ||
+      site.parameterTypes != [.pointer .void, .atom runtimeScope "System.Int32"] then none
+    else pure ()
+  let .apply (.constructor _ owner) (.atom _ element) := site.declaringType | none
+  let .span width writable ← spanStorage site.declaringType | none
+  if site.target != .external (runtimeScope ++ "::System.Void " ++ owner ++ "<" ++ element ++
+      ">::.ctor(System.Void*,System.Int32)") then none else some (width, writable)
+
+/-- Span constructors retain the exact element width and readonly capability. -/
 private def spanCreateMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
   let modeled := match instruction.operand with
     | .call site => byteSpanConstructor instruction.opcode site
     | _ => false
-  match emitted with
-  | .memory .spanCreate => modeled
-  | _ => !modeled
+  if modeled then match emitted with | .memory .spanCreate => true | _ => false
+  else if let .call site := instruction.operand then
+    match spanConstructor instruction.opcode site with
+    | some (width, writable) => match emitted with
+      | .memory (.spanFromReference actual capability) => width == actual && writable == capability
+      | _ => false
+    | none => match emitted with | .memory .spanCreate => false | _ => true
+  else match emitted with | .memory .spanCreate => false | _ => true
 
 /-- The kind of argument `index`, counting `this` as argument 0. -/
 private def argumentKind (raw : RawMethod) (index : Nat) : Option ScalarKind :=
@@ -426,6 +447,10 @@ private def pushedKind (raw : RawMethod) (instruction : RawInstruction) : Option
 def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     (stack : List ScalarKind) : Option (List ScalarKind) := do
   let opcode := instruction.opcode
+  if opcode == 65039 then
+    match stack with
+    | [kind] => if kind ∈ [.word32, .native] then return [.reference] else none
+    | _ => none
   -- Constants.
   if 21 <= opcode && opcode <= 33 then
     let _ ← literal instruction
@@ -433,6 +458,8 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- Arithmetic, shifts, `neg`, `not` and conversions.
   if scalarBinary opcode then
     let right :: left :: tail := stack | none
+    if opcode == 88 && left == .reference && right ∈ [.word32, .native] then
+      return .reference :: tail
     if !compatibleBinary left right then none else
       return (if comparison opcode then .word32
         else if mixedNative left right then .native else left) :: tail
@@ -460,7 +487,8 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- `call` and `newobj`: the operands must have the signature's kinds.
   if opcode == 40 || opcode == 111 || opcode == 115 then
     let .call site := instruction.operand | none
-    let expected := if byteSpanConstructor opcode site then [.word32, .reference] else
+    let expected := if byteSpanConstructor opcode site || (spanConstructor opcode site).isSome
+      then [.word32, .reference] else
       site.parameterTypes.reverse.map scalarType ++
         (if opcode != 115 && site.hasThis then [.reference] else [])
     let pops := expected.length

@@ -22,7 +22,7 @@ internal static class LeanEmitter
     internal const string Decide = "by decide +kernel";
     internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar")
     {
-        if (type is ByReferenceType) return ".reference";
+        if (type is ByReferenceType or PointerType) return ".reference";
         if (Spans.Width(type) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (MetadataValidation.IsAggregate(type, module)) return $".aggregate {MetadataValidation.Layout(type, module, architecture)}";
@@ -99,8 +99,7 @@ internal static class LeanEmitter
         {
             MethodDefinition m = methods[n];
             HashSet<Instruction> reachable = Reachability.Analyze(m, profile);
-            NativeOperands.Certificate scalarCertificate = NativeOperands.Certify(m, profile);
-            HashSet<Instruction> nativeOperands = scalarCertificate.Mixed;
+            var scalarCertificate = NativeOperands.Certify(m, profile);
             var parameterIndices = ParameterStorage.Analyze(m, profile);
             string parameters = string.Join(", ", parameterIndices.Select(index => $"({index}, {Kind(MethodArguments.Type(m, index), m.Module, profile.Architecture)})"));
             string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module, profile.Architecture) : ".unmodeled"));
@@ -109,7 +108,7 @@ internal static class LeanEmitter
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
             List<string> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices, importResolution) : ".unsupported \"Unreachable under selected profile\"");
+                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, scalarCertificate, parameterIndices, importResolution) : ".unsupported \"Unreachable under selected profile\"");
             var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
             string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&

@@ -80,6 +80,14 @@ theorem step_ownedAbove (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
   have above : (action.frameAfter frame).OwnedAbove watermark := by
     generalize action.frameAfter frame = final, action.memory = result at effect ⊢
     cases effect with
+    | stackAllocation effect =>
+      cases effect with
+      | empty => exact old
+      | fresh allocated _ =>
+        intro id member
+        rcases List.mem_cons.mp member with rfl | member
+        · exact (allocateHome_fresh _ _ _ _ _ allocated).2.1 ▸ bound
+        · exact old id member
     | memory | store => exact old
     | valueHome allocated _ | localHome allocated _ =>
       intro id member

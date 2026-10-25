@@ -132,6 +132,12 @@ name = "Tests.SpanEvidence"
 name = "Tests.ConstrainedEvidence"
 
 [[lean_lib]]
+name = "Tests.StackAllocation"
+
+[[lean_lib]]
+name = "Tests.StackAllocationEvidence"
+
+[[lean_lib]]
 name = "Tests.SpanViews"
 
 [[lean_lib]]

@@ -443,6 +443,16 @@ macro "base_relabels" : tactic => `(tactic|
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
 theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   cases op
+  case stackAlloc initLocals =>
+    stack_cases
+    all_goals first | fallback_vacuous | skip
+    all_goals cases ‹CIL.Value›
+    all_goals dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+    all_goals try cases h
+    all_goals repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+    all_goals cases h
+    all_goals simp only [FrameAction.relabel]
+    all_goals rw [context.next rfl]
   case nativeBinary operation => exact step_relabel_nativeBinary operation
   case divide signed remainder => exact step_relabel_divide signed remainder
   case checkedArithmetic kind signed => exact step_relabel_checkedArithmetic kind signed
@@ -781,6 +791,13 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/
 theorem step_raise (op : CIL.Op) : StepRaise op := by
   cases op
+  case stackAlloc initLocals =>
+    stack_cases
+    all_goals first
+      | fallback_raise_vacuous
+      | (cases ‹CIL.Value› <;>
+          dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢ <;>
+          first | cases h | raise_lockstep)
   case nativeBinary operation => exact step_raise_nativeBinary operation
   case divide signed remainder => exact step_raise_divide signed remainder
   case checkedArithmetic kind signed => exact step_raise_checkedArithmetic kind signed

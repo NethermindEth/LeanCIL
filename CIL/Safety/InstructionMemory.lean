@@ -43,6 +43,9 @@ inductive ExecutionFault where
   | thrown (exception : String)
   /-- `run` ran out of fuel before the method returned. -/
   | fuelExhausted
+  /-- Dynamic stack demand exceeded the caller-supplied per-activation quota.
+      This model resource failure is not an automatically established CLR exception. -/
+  | stackAllocationFailure (requested available : Nat)
   deriving DecidableEq, Repr
 
 /-- A checked result: a value, or the fault that stopped execution. -/
@@ -63,7 +66,7 @@ def observerCount : CIL.Op → Nat
   -- Arithmetic and comparisons
   | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
   | .checkedConvert .. | .neg | .bnot | .convI1 | .convI2 | .convU2
-  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU => 1
+  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .stackAlloc _ => 1
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
   | .lt | .ltu | .gt | .gtu | .eq | .bgt _ | .ble _ | .bleu _
   | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => 2

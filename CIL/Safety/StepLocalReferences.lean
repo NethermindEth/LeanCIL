@@ -35,6 +35,7 @@ theorem step_preserves_frame_references (body : CIL.Method) (operation : CIL.Op)
   have retained := valid.preserve hm effect.allocations
   generalize action.frameAfter frame = final, action.memory = result at effect retained ⊢
   cases effect with
+  | stackAllocation effect => cases effect <;> exact retained
   | memory | valueHome | localHome => exact retained
   | store found stored => exact stored_frame_references_valid _ _ _ _ _ _ _ hm valid found stored
 

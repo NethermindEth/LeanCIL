@@ -371,11 +371,11 @@ theorem nested_expired :
 
 theorem constructor_zero_size :
     step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 0 0)
-      0 [] ⟨0, [], [], []⟩ [] Examples.empty = .error .invalidState := rfl
+      0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty = .error .invalidState := rfl
 
 theorem constructor_stack_underflow :
     step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 1 3)
-      0 [] ⟨0, [], [], []⟩ [] Examples.empty = .error .invalidState := rfl
+      0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty = .error .invalidState := rfl
 
 def constructorCaller : CIL.Method := {
   returnsValue := true, locals := [], code := [.newAggregate 1 0 3, .ret] }
@@ -460,11 +460,11 @@ theorem division_zero (signed remainder : Bool) (x : CIL.W64) :
 
 theorem division_underflow :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], []⟩ [] Examples.empty).isOk = false := rfl
+      (.divide false false) 0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty).isOk = false := rfl
 
 theorem division_managed_reference_rejected :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], []⟩
+      (.divide false false) 0 [] ⟨0, [], [], [], 0⟩
       [.scalar (.i32 2), .reference .null] Examples.empty).isOk = false := rfl
 
 
@@ -480,12 +480,12 @@ def divRemMethod (profile : CIL.FeatureProfile) : CIL.Method :=
 
 theorem divRem_checked_fault :
     CIL.Safety.step (divRemMethod { architecture := .x64, x86Base64 := true }) (.intrinsic (.x86Base .divRem64) 3) 0 []
-      ⟨0, [], [], []⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Examples.empty =
+      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Examples.empty =
       .error (.arithmetic .overflow) := rfl
 
 theorem divRem_requires_x86Base :
     CIL.Safety.step (divRemMethod CIL.FeatureProfile.scalar) (.intrinsic (.x86Base .divRem64) 3) 0 []
-      ⟨0, [], [], []⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Examples.empty =
+      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Examples.empty =
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 
 theorem divRem_pure_fault :

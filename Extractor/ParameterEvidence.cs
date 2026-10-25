@@ -10,7 +10,7 @@ internal static class ParameterEvidence
 {
     static string Type(TypeReference type, ModuleDefinition module, LayoutEvidence layouts)
     {
-        if (type is ByReferenceType) return ".reference";
+        if (type is ByReferenceType or PointerType) return ".reference";
         if (Spans.Width(type) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (type is GenericInstanceType vector && !ValueTuples.Is(type))

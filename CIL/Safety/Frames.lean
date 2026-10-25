@@ -53,6 +53,8 @@ structure Frame where
   locals : List LocalSlot
   owned : List AllocationId
   arguments : List (Nat × LocalSlot) := []
+  /-- Rounded bytes reserved by this activation's dynamic stack allocations. -/
+  stackBytes : Nat := 0
   deriving Repr
 
 /-- Natural alignment for 32/64-bit scalar homes on the supported 64-bit targets
@@ -318,7 +320,7 @@ def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) :
   let (parameters, parameterIds, memory) ←
     makeParameterHomes activation body.parameterHomes args memory
   return (⟨activation, locals ++ parameters.map Prod.snd, (owned ++ argumentIds) ++ parameterIds,
-    arguments⟩, memory)
+    arguments, 0⟩, memory)
 
 /-- Ends an activation by expiring every allocation it owns. -/
 def leaveFrame (frame : Frame) (m : Memory) : Memory :=
@@ -335,7 +337,7 @@ theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Mem
       let (parameters, parameterIds, memory) ←
         makeParameterHomes activation body.parameterHomes args memory
       return (⟨activation, locals ++ parameters.map Prod.snd,
-        (owned ++ argumentIds) ++ parameterIds, arguments⟩, memory)) := by
+        (owned ++ argumentIds) ++ parameterIds, arguments, 0⟩, memory)) := by
   simp only [enterFrame, noOpaque, makeSelectedLocals_nil]
 #print axioms enterFrame_of_no_opaque
 

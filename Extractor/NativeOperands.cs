@@ -11,7 +11,8 @@ internal static class NativeOperands
 
     internal sealed record Certificate(HashSet<Instruction> Mixed, Dictionary<Instruction, Kind[]> Incoming);
 
-    static Kind Type(TypeReference type) => type is ByReferenceType ? Kind.Reference : EnumTypes.Storage(type).MetadataType switch
+    static Kind Type(TypeReference type) => type is ByReferenceType or PointerType
+        ? Kind.Reference : EnumTypes.Storage(type).MetadataType switch
     {
         MetadataType.IntPtr or MetadataType.UIntPtr => Kind.Native,
         MetadataType.Int64 or MetadataType.UInt64 => Kind.Word64,
@@ -36,9 +37,6 @@ internal static class NativeOperands
         Code.Bgt or Code.Bgt_S or Code.Bgt_Un or Code.Bgt_Un_S or Code.Bge or Code.Bge_S or Code.Bge_Un or Code.Bge_Un_S or
         Code.Blt or Code.Blt_S or Code.Blt_Un or Code.Blt_Un_S or Code.Ble or Code.Ble_S or Code.Ble_Un or Code.Ble_Un_S;
 
-    internal static HashSet<Instruction> Analyze(MethodDefinition method, FeatureProfile profile)
-        => Certify(method, profile).Mixed;
-
     internal static Certificate Certify(MethodDefinition method, FeatureProfile profile)
     {
         HashSet<Instruction> reachable = Reachability.Analyze(method, profile);
@@ -59,7 +57,18 @@ internal static class NativeOperands
             }
 
             var code = instruction.OpCode.Code;
-            if (code is Code.Cpblk or Code.Initblk)
+            if (code == Code.Localloc)
+            {
+                if (stack.Count != 1 || Pop() is not (Kind.Word32 or Kind.Native))
+                    throw new InvalidDataException("localloc requires only an int32 or native byte count");
+                stack.Add(Kind.Reference);
+            }
+            else if (code == Code.Add && stack.Count >= 2 && stack[^2] == Kind.Reference &&
+                     stack[^1] is Kind.Word32 or Kind.Native)
+            {
+                Pop();
+            }
+            else if (code is Code.Cpblk or Code.Initblk)
             {
                 var count = Pop();
                 var source = Pop();
@@ -144,7 +153,7 @@ internal static class NativeOperands
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj => Type((TypeReference)instruction.Operand),
                         Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S or
-                            Code.Ldflda or Code.Ldsflda => Kind.Reference,
+                            Code.Ldflda or Code.Ldsflda or Code.Localloc => Kind.Reference,
                         Code.Ldind_I or Code.Conv_I or Code.Conv_U or Code.Conv_Ovf_I or Code.Conv_Ovf_I_Un or
                             Code.Conv_Ovf_U or Code.Conv_Ovf_U_Un => Kind.Native,
                         Code.Ldc_I8 or Code.Ldind_I8 or Code.Conv_I8 or Code.Conv_U8 or Code.Conv_Ovf_I8 or

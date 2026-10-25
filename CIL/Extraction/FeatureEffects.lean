@@ -30,6 +30,7 @@ change a local root. Control flow, returns, stores and addresses require exact
 raw-instruction matching instead. No unrecognized instruction is admitted. -/
 def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :=
   match op with
+  | .stackAlloc _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
   | .const32 _ | .const64 _ | .arg .. | .vectorArg _ | .local .. | .vectorLocal _ => some (0, 1)

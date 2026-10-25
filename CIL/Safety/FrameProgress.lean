@@ -290,7 +290,7 @@ theorem enterFrame_succeeds (body : CIL.Method) (args : List Value) (m : Memory)
     m.nextIdentity body.parameterHomes args resultWF (validArgs.preserve wellFormed ext)
     fits.2.2.1
   exact ⟨⟨m.nextIdentity, locals ++ parameters.map Prod.snd, (owned ++ ids) ++ other,
-    arguments⟩, final, by
+    arguments, 0⟩, final, by
     simp [enterFrame, prepared, homes, parametersMade, Bind.bind, Except.bind, Pure.pure,
       Except.pure]⟩
 
