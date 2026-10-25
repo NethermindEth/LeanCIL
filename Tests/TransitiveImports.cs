@@ -30,7 +30,7 @@ string aRoot = Project("A", "B");
 string appRoot = Project("App", "A", "B");
 File.WriteAllText(Path.Combine(bRoot, "Library.cs"), "namespace ImportFixture; public static class LibraryB { public const ulong CertificateMarker = 17; public static ulong AddOne(ulong value) => value + 1; }\n");
 File.WriteAllText(Path.Combine(aRoot, "Library.cs"), "namespace ImportFixture; public static class LibraryA { public static ulong AddOne(ulong value) => LibraryB.AddOne(value); }\n");
-File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => LibraryA.AddOne(value); public static ulong Direct(ulong value) => LibraryB.AddOne(value); }\n");
+File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => LibraryA.AddOne(value); public static ulong Direct(ulong value) => LibraryB.AddOne(value); public static ulong Diamond(ulong value) => LibraryB.AddOne(LibraryA.AddOne(value)); }\n");
 Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string a = Path.Combine(aRoot, "bin/ImportFixture.A.dll");
 string b = Path.Combine(bRoot, "bin/ImportFixture.B.dll");
@@ -112,6 +112,8 @@ Export(a, aArtifact, aPackage, "APublished", Path.Combine(aPackage, "Conditional
 JsonObject originalA = JsonNode.Parse(File.ReadAllText(aSidecar))!.AsObject();
 JsonObject originalB = JsonNode.Parse(File.ReadAllText(bSidecar))!.AsObject();
 FullTransitive();
+FullDiamond();
+Run(["dotnet", "run", "--file", At("Tests/TransitiveOutcomes.cs")]);
 ImportReviewRegressions.ValidateGraph_WhenDuplicateImplementationHashDiffers_RejectsIdentity(ExtractorPath, originalB);
 ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
     ExtractorPath, bSidecar, b, Path.Combine(root, "AmbiguousVersions"));
@@ -221,6 +223,60 @@ Save(bSidecar, cycle);
 Reject("Contract dependency cycle: " + originalA["assemblyIdentity"]!.GetValue<string>() + " -> " +
     originalB["assemblyIdentity"]!.GetValue<string>() + " -> " + originalA["assemblyIdentity"]!.GetValue<string>());
 Console.WriteLine("PASS missing nodes, dependency hash mismatch, interface mismatch and named A -> B -> A cycles reject without artifacts");
+
+void FullDiamond()
+{
+    var artifact = Path.Combine(root, "App-FullDiamond");
+    var proof = Path.Combine(appPackage, "Diamond.lean");
+    File.WriteAllText(proof, """
+        import ExtractedImports
+        import CIL.Safety.MethodContract
+        /-! Both roots retain their exact arithmetic contracts after shared-dependency composition. -/
+        namespace DiamondProof
+        open CIL.Safety
+        /-- The independently checked A and B roots satisfy the caller's two imported obligations. -/
+        theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
+            (fun linked => ImportFixture.addOne.Holds linked 1 ∧
+              ImportFixture.addOne.Holds linked 2) := fun _ _ imported => imported
+        #print axioms correctness
+        end DiamondProof
+        """);
+    Run([.. cli, "extract", app, "ImportFixture.Application::Diamond(ulong)", artifact,
+        .. Import(aSidecar, a), .. Import(bSidecar, b)]);
+    string[] command = [.. cli, "verify", artifact, "--proof", proof, "--proof-root", appPackage,
+        "--theorem", "DiamondProof.correctness"];
+    string[] Trace(string name, bool full)
+    {
+        var trace = Path.Combine(root, name);
+        var previous = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+        try { Run([.. command, .. full ? new[] { "--force-full-verify" } : []]); }
+        finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previous); }
+        return Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+            .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!)
+            .ToArray();
+    }
+    bool Checked(string[] stages) => stages.Any(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal));
+    if (!Checked(Trace("diamond-cold", false)) || Checked(Trace("diamond-warm", false)))
+        throw new InvalidOperationException("The diamond did not start full verification with a warm proof receipt.");
+    var stages = Trace("diamond-full", true);
+    if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
+        stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
+        stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
+        stages.Count(stage => stage is "Building fresh Lean verification library" or
+            "Copying certified Lean verification library") != 3)
+        throw new InvalidOperationException("The diamond skipped or duplicated independent checking: " +
+            string.Join(", ", stages));
+    var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+    var imports = report.GetProperty("imports").EnumerateArray().ToArray();
+    var dependencies = report.GetProperty("contractDependencies").EnumerateArray().ToArray();
+    if (imports.Length != 2 || dependencies.Length != 2 ||
+        imports.Concat(dependencies).Any(node => node.GetProperty("acceptedVia").GetString() !=
+            "independently-verified") ||
+        dependencies.Select(node => node.GetProperty("assemblyIdentity").GetString()).Distinct().Count() != 2)
+        throw new InvalidOperationException("The diamond lost its independently checked shared identity.");
+    Console.WriteLine("PASS simultaneous A and B roots share one independently checked B despite warm receipts");
+}
 
 // App -> A -> B under forced full verification: B's bundle is replayed because A's regenerated extraction imports it.
 void FullTransitive()

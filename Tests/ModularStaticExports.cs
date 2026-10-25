@@ -412,7 +412,77 @@ if (fullComposition)
     FullVerify(mixedArtifact, mixedProof, package: false, slots: 2);
     Console.WriteLine("PASS distinct same-index app and library tables and one shared table across two " +
         "imported slots, with a warm receipt present");
+    FullTransitiveStatic();
     return;
+}
+
+void FullTransitiveStatic()
+{
+    var forwardingInterface = Path.Combine(caller, "PublishedForward.lean");
+    File.WriteAllText(forwardingInterface, "import PublishedTable\n");
+    File.AppendAllText(Path.Combine(caller, "lakefile.toml"),
+        "\n[[lean_lib]]\nname = \"PublishedForward\"\n");
+    File.WriteAllText(Path.Combine(appArtifact, "verification.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1, proof = Path.GetRelativePath(appArtifact, callerProof),
+        theorem = "ExampleProof.correctness", proofRoot = Path.GetRelativePath(appArtifact, caller)
+    }));
+    var forwardingManifest = Path.Combine(root, "forwarding-export.json");
+    File.WriteAllText(forwardingManifest, JsonSerializer.Serialize(new
+    {
+        schema = 1, assembly = app, proofRoot = caller,
+        @interface = new[] { new { module = "PublishedForward", source = forwardingInterface } },
+        exports = new[] { new { method = "StaticFixture.Application::Entry()", artifact = appArtifact,
+            contract = "PublishedTable.read", theorem = "ExampleProof.correctness" } }
+    }));
+    var forwardingSidecar = Path.Combine(appRoot, "StaticFixture.App.leancil.contracts");
+    Run([.. cli, "export-contracts", forwardingManifest, "--output", forwardingSidecar,
+        "--bundle", Path.Combine(root, "ForwardBundles")]);
+    var forwarding = JsonNode.Parse(File.ReadAllText(forwardingSidecar))!.AsObject();
+    var topRoot = Path.Combine(root, "Top");
+    Directory.CreateDirectory(topRoot);
+    File.WriteAllText(Path.Combine(topRoot, "Top.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.Top</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../App/App.csproj" /></ItemGroup></Project>
+        """);
+    File.WriteAllText(Path.Combine(topRoot, "Top.cs"),
+        "namespace StaticFixture; public static class Top { public static ulong Entry() => Application.Entry(); }");
+    Run(["dotnet", "build", Path.Combine(topRoot, "Top.csproj"), "-c", "Release",
+        "-p:BuildProjectReferences=false"]);
+    var topPackage = Path.Combine(root, "TopProofPackage");
+    Directory.CreateDirectory(topPackage);
+    CreatePackage(topPackage, "topstaticconsumer", "CallerProof");
+    File.Copy(callerProof, Path.Combine(topPackage, "CallerProof.lean"));
+    Run(["lake", "update"], topPackage);
+    var artifact = Path.Combine(root, "TopArtifact");
+    Run([.. cli, "extract", Path.Combine(topRoot, "bin", "StaticFixture.Top.dll"),
+        "StaticFixture.Top::Entry()", artifact,
+        "--import", forwardingSidecar, "--import-implementation", "StaticFixture.App=" + app,
+        "--import-sha256", "StaticFixture.App=" + Sha(app),
+        "--import-interface-sha256", "StaticFixture.App=" + forwarding["interfaceDigest"]!.GetValue<string>(),
+        "--import", sidecar, "--import-implementation", "StaticFixture.Lib=" + lib,
+        "--import-sha256", "StaticFixture.Lib=" + Sha(lib),
+        "--import-interface-sha256", "StaticFixture.Lib=" + published["interfaceDigest"]!.GetValue<string>()]);
+    var trace = Path.Combine(root, "trace-transitive-static");
+    var previous = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+    try
+    {
+        Run([.. cli, "verify", artifact, "--proof", Path.Combine(topPackage, "CallerProof.lean"),
+            "--proof-root", topPackage, "--force-full-verify"]);
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previous); }
+    var stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
+    var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+    if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
+        stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
+        stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
+        report.GetProperty("contractDependencies").GetArrayLength() != 2 ||
+        report.GetProperty("contractDependencies").EnumerateArray().Any(node =>
+            node.GetProperty("acceptedVia").GetString() != "independently-verified") ||
+        !report.GetProperty("compositionAudit").GetString()!.Contains("linkChecked", StringComparison.Ordinal))
+        throw new InvalidOperationException("Transitive static composition lost its independently checked link.");
+    Console.WriteLine("PASS a transitive RVA-table caller returns 17 with its explicit static-world premise");
 }
 
 Run([.. cli, "verify", appArtifact, "--proof", callerProof, "--proof-root", caller, "--fresh"]);

@@ -114,7 +114,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 18 leaves, 46 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 19 leaves, 46 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -283,7 +283,10 @@ Test("export leaf selection, strict files and shared inputs", () =>
     string[] derivedFixtures =
         ["DerivedInterface", "DerivedPercentProof", "DerivedAddProof", "DerivedShiftCaller", "DerivedSumCaller"];
     foreach (string name in derivedFixtures)
-        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportsderived"]);
+        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]),
+            name is "DerivedInterface" or "DerivedPercentProof"
+                ? ["exportsderived", "exportstransitive"] : ["exportsderived"]);
+    Equal(VerificationSelection.Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitive"]);
     Require(VerificationSelection.Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
         "Imported-layout model evidence lost its existing suite owner");
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);

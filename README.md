@@ -216,8 +216,10 @@ pointer locals. Contract refinement derives a public interface from a stronger p
 contract; that interface can be exported and imported by callers.
 
 `leancil verify --force-full-verify` independently checks supported imported
-libraries against their pinned implementation DLLs and source bundles. Closed
-libraries may read immutable RVA static tables: checked composition preserves
+libraries and their reachable contract dependencies against separately pinned
+implementation DLLs, interfaces and source bundles. Conditional exports and shared
+dependencies are checked in dependency order, including when ordinary verification
+receipts are warm. Libraries may read immutable RVA static tables: checked composition preserves
 their assembly-scoped identities and shared-table descriptors. Static-world
 requirements remain explicit contract preconditions; static-constructor and
 static-value assumptions are not supported in this mode. See
