@@ -28,6 +28,19 @@ internal static class InstructionTranslation
         if (typeTests.Results.TryGetValue(i, out bool same)) return same ? ".const32 1" : ".const32 0";
         if (typeTests.Operands.Contains(i)) return ".nop";
         var throws = Throws.Analyze(m);
+        if (i.OpCode.Code == Code.Constrained)
+        {
+            if (i.Next is null) throw new InvalidDataException("Constrained prefix has no call");
+            ConstrainedCalls.Resolve(m, i.Next, profile.Architecture);
+            return ".nop";
+        }
+        if (i.OpCode.Code == Code.Callvirt)
+        {
+            var resolved = ConstrainedCalls.Resolve(m, i, profile.Architecture).Target;
+            var index = Array.IndexOf(methods, resolved);
+            if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
+            return $".call {index} {resolved.Parameters.Count + 1}";
+        }
         if (throws.Raises.TryGetValue(i, out string? raised)) return $".throw \"{raised}\"";
         if (throws.Operands.Contains(i) || Spans.Analyze(m).Operands.Contains(i)) return ".nop";
         int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);

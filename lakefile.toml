@@ -129,6 +129,9 @@ name = "Tests.ThrowEvidence"
 name = "Tests.SpanEvidence"
 
 [[lean_lib]]
+name = "Tests.ConstrainedEvidence"
+
+[[lean_lib]]
 name = "Tests.SpanViews"
 
 [[lean_lib]]

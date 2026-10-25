@@ -458,11 +458,11 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let value :: tail := stack | none
     return value :: value :: tail
   -- `call` and `newobj`: the operands must have the signature's kinds.
-  if opcode == 40 || opcode == 115 then
+  if opcode == 40 || opcode == 111 || opcode == 115 then
     let .call site := instruction.operand | none
     let expected := if byteSpanConstructor opcode site then [.word32, .reference] else
       site.parameterTypes.reverse.map scalarType ++
-        (if opcode == 40 && site.hasThis then [.reference] else [])
+        (if opcode != 115 && site.hasThis then [.reference] else [])
     let pops := expected.length
     if !callParametersMatch site || pops > stack.length || stack.take pops != expected ||
         site.returnsValue != (site.returnType != .void) then none else

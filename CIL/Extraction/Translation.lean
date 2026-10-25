@@ -5,6 +5,7 @@ import CIL.Extraction.DivisionIntrinsics
 import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 import CIL.Extraction.ImportLayouts
+import CIL.Extraction.Constrained
 
 /-!
 # Translation validity
@@ -31,6 +32,7 @@ structure MethodEvidence where
   featureStates : FeatureCertificate
   scalarStates : ScalarCertificate
   layoutUses : List LayoutUse
+  dispatchTypes : List DispatchType := []
 
 /-- The program's method table, as the call check sees it. -/
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=
@@ -109,20 +111,22 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ParameterHomesValid layouts item.parameterInput item.reachable method ∧
   MethodLayoutsValid rawLayouts layouts method item.layoutUses ∧
   FeatureFlowValid item.closed method.profile item.featureStates item.reachable method.code ∧
-  ManagedCallsValid (specializationTable all) imports item.closed item.reachable method ∧
+  ManagedCallsValid (specializationTable all) imports
+    (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid rawLayouts item.closed method ∧
   UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
   DivisionIntrinsicsValid item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   VectorInitializationsValid item.closed item.reachable method ∧
-  ScalarFlowValid item.closed item.featureStates item.scalarStates method.code
+  ScalarFlowValid item.closed item.featureStates item.scalarStates method.code ∧
+  ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable method
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
     (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)

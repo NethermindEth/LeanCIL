@@ -150,10 +150,10 @@ def featureTransfer (raw : RawMethod) (profile : FeatureProfile)
         else if instruction.opcode == 97 then a ^^^ b else if a == b then 1 else 0
     return { state with stack := value :: stack }
   -- `call` and `newobj`; a feature getter pushes the profile's answer.
-  if instruction.opcode == 40 || instruction.opcode == 115 then
+  if instruction.opcode == 40 || instruction.opcode == 111 || instruction.opcode == 115 then
     let .call site := instruction.operand | none
     let next ← forget state
-      (site.parameterCount + if instruction.opcode == 40 && site.hasThis then 1 else 0) 0
+      (site.parameterCount + if instruction.opcode != 115 && site.hasThis then 1 else 0) 0
     if let some feature := featureGetter site then
       if instruction.opcode != 40 then none else
         return { next with stack := some (if profile.evaluate feature then 1 else 0) :: next.stack }
@@ -201,9 +201,9 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
 
 /-- The raw stack effect, with calls taken from their signature. -/
 private def rawFeatureEffect (instruction : RawInstruction) : Option (Nat × Nat) := do
-  if instruction.opcode == 40 || instruction.opcode == 115 then
+  if instruction.opcode == 40 || instruction.opcode == 111 || instruction.opcode == 115 then
     let .call site := instruction.operand | none
-    return (site.parameterCount + if instruction.opcode == 40 && site.hasThis then 1 else 0,
+    return (site.parameterCount + if instruction.opcode != 115 && site.hasThis then 1 else 0,
       if instruction.opcode == 115 || site.returnsValue then 1 else 0)
   else rawStackEffect instruction.opcode
 
@@ -214,7 +214,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) 
     | .call site => site.returnsValue
     | _ => false
   let properCall := match emitted with
-    | .call .. => instruction.opcode == 40
+    | .call .. => instruction.opcode == 40 || instruction.opcode == 111
     | .newAggregate .. | .newVector256 .. => instruction.opcode == 115
     | _ => true
   properCall && match rawFeatureEffect instruction, emittedFeatureEffect emitted returnsValue with

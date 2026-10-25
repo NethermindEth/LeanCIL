@@ -95,10 +95,10 @@ internal static class NativeOperands
                 stack.Add(value);
                 stack.Add(value);
             }
-            else if (code is Code.Call or Code.Newobj)
+            else if (code is Code.Call or Code.Callvirt or Code.Newobj)
             {
                 var callee = (MethodReference)instruction.Operand;
-                for (var index = 0; index < callee.Parameters.Count + (code == Code.Call && callee.HasThis ? 1 : 0); index++) Pop();
+                for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++) Pop();
                 if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)
                     stack.Add(code == Code.Newobj ? Kind.Other : Type(CallReturnType.Resolve(callee)));
             }

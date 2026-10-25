@@ -8,6 +8,13 @@ and interface pins, so a wrong selection can only fail, never certify other byte
 
 ## What is defined and proved
 
+Concrete constrained struct calls retain their original prefix and interface slot in raw
+specialization evidence. A mandatory Lean validator independently resolves the slot from the
+serialized type, interface, method and explicit-override declarations, then checks the emitted
+direct-call target and signature. Faithful metadata decoding and complete serialization of those
+declarations remain trusted. The admitted subset has no runtime vtable lookup or boxing fallback;
+this does not prove general CLR dispatch correct.
+
 `CIL.Safety.RuntimeExceptions` adds a fixed naming view of checked execution
 faults. `RaisesCLR` and `OutcomeContract.HoldsCLR` name `.thrown exception`
 directly, arithmetic overflow as `System.OverflowException`, and integer
@@ -337,4 +344,3 @@ metadata. These propositions do not verify Cecil decoding or establish CLR
 correspondence beyond the existing admitted layout model. Reference-only
 interfaces and caller proof caches gain no new authority. See
 [TYPED-IMPORTS.md](TYPED-IMPORTS.md) for the supported subset and rejection rules.
-
