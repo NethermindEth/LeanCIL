@@ -425,18 +425,19 @@ theorem step_relabel_throw (exception : String) : StepRelabel (.throw exception)
   explicit_intro
   cases h
 
-/-- Closes `BaseRelabel op` for a value-only instruction from its shared relabeling lemma. -/
-macro "base_relabels" : tactic => `(tactic|
-  solve_by_elim [base_relabel_nop, base_relabel_neg, base_relabel_gt, base_relabel_bgt,
-    base_relabel_ble, base_relabel_bleu, base_relabel_convI1, base_relabel_convI2,
-    base_relabel_convU2, base_relabel_convI8, base_relabel_convI4, base_relabel_convU1,
-    base_relabel_convU4, base_relabel_convU8, base_relabel_convU, base_relabel_bnot,
-    base_relabel_add, base_relabel_sub, base_relabel_mul, base_relabel_band, base_relabel_bor,
-    base_relabel_bxor, base_relabel_shl, base_relabel_shr, base_relabel_shrUn, base_relabel_lt,
-    base_relabel_ltu, base_relabel_gtu, base_relabel_eq, base_relabel_branch, base_relabel_switch,
-    base_relabel_brzero, base_relabel_brnonzero, base_relabel_bltu, base_relabel_bgeu,
-    base_relabel_bgtu, base_relabel_bge, base_relabel_blt, base_relabel_beq, base_relabel_bne,
-    base_relabel_feature])
+open Lean Elab Tactic Meta in
+/-- Selects the proved base-step equation for the goal's opcode constructor. -/
+elab "base_relabels" : tactic => withMainContext do
+  let target ← instantiateMVars (← getMainTarget)
+  unless target.isAppOfArity ``BaseRelabel 1 do
+    throwError "Expected a BaseRelabel goal"
+  let operation ← whnfR target.getAppArgs[0]!
+  let some constructor := operation.getAppFn.constName? |
+    throwError "Expected an opcode constructor"
+  let theoremName := `CIL.Embedding ++ Name.mkSimple s!"base_relabel_{constructor.getString!}"
+  let goals ← (← getMainGoal).apply (← mkConstWithFreshMVarLevels theoremName)
+  unless goals.isEmpty do throwError "The base-step equation left unsolved goals"
+  replaceMainGoal []
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_eq : StepRelabel .eq := by
