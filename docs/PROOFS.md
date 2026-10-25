@@ -334,8 +334,23 @@ def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
   post input _ _ v := v = input.1 * 3 + input.2
 ```
 
-In the caller, `cil_contract_steps [facts]` steps a `∃ fuel, run ...` goal up
-to each `.call` and return; `cil_contract_call holds input at site [facts]` applies
+In the caller, `cil_contract_steps [facts]` steps an existential-fuel goal through
+ordinary instructions and calls with supplied evidence. Mark a proved `MethodContract.Holds`
+theorem `@[cil_contract]`, or include its proof in `facts`, to apply it at a matching callee.
+The theorem's program and method binding must match the actual call; required binding
+premises are checked. Input fields are inferred from the encoded arguments. The precondition
+is proved from facts when possible, otherwise it remains a goal before the continuation.
+The continuation receives the result, footprint and postcondition. Contracts merely present
+in the local context are not automatically selected.
+
+A supplied successful child invocation, with fixed or existential fuel, or an
+`InvocationCertificate`, also composes without unfolding the helper body. Fixed-fuel
+`cil_checked_steps` can reuse a matching invocation or certificate at its actual child
+budget; a proof at a larger budget does not justify a smaller one. Contract and
+existential-child composition use `cil_contract_steps`, whose fuel remains existential.
+
+Without matching evidence, the contract stepper stops at the call.
+`cil_contract_call holds input at site [facts]` explicitly applies
 the contract at a `bind_call` site (or the fetched call without `at`), leaving the precondition and then a continuation over the
 callee's final memory, values, invocation, frame and `Returns`. Destructure
 `Returns` as `⟨out, rfl, post⟩` and unfold the contract (`dsimp only [mixContract]`)

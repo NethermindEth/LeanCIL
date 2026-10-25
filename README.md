@@ -26,6 +26,11 @@ Dashed boxes are trusted rather than proved; see the [trusted computing base](do
 
 ## Build and test
 
+Caller proofs can register proved interfaces with `@[cil_contract]` and use
+`cil_contract_steps` to compose calls. The stepper checks the callee binding and
+precondition and exposes the postcondition; it can also reuse proved child invocations.
+See [contract composition](docs/PROOFS.md) for explicit and automatic call proofs.
+
 Feature and division getter recognition use exact byte comparisons with kernel-checked
 equivalence to their original signature rules. This reduces certificate replay work while
 preserving metadata rejection; see [certificate validation](docs/PROOFS.md).
