@@ -277,17 +277,28 @@ void FullTransitive()
     Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
     try { Run(command); }
     finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
-    string[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
-        .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
-    // A and B each get a fresh extraction and library build; the caller has its own build.
+    (string Stage, string Command)[] traced = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+        .OrderBy(record => record.GetProperty("startedAtUtc").GetDateTimeOffset())
+        .Select(record => (record.GetProperty("stage").GetString()!,
+            string.Join(' ', record.GetProperty("command").EnumerateArray().Select(part => part.GetString()))))
+        .ToArray();
+    string[] stages = traced.Select(record => record.Stage).ToArray();
+    int Last(string stage) => Array.FindLastIndex(stages, item => item == stage);
+    int[] libraries = Enumerable.Range(0, stages.Length).Where(index => stages[index] is
+        "Building fresh Lean verification library" or "Copying certified Lean verification library").ToArray();
+    int Capture(int id) => Array.FindIndex(traced, record =>
+        record.Command.Contains("LeanCILCaptureLeanCILFullLibrary" + id + ".lean", StringComparison.Ordinal));
+    // A and B each get a fresh extraction and library build; the caller has its own build. Both extractions
+    // precede both library builds, and B (id 1) is checked before A (id 0) imports it.
     if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
         stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
-        stages.Count(stage => stage is "Building fresh Lean verification library" or
-            "Copying certified Lean verification library") != 3 ||
+        libraries.Length != 3 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
-        stages.Any(stage => stage.Contains("certified proof:", StringComparison.Ordinal)))
+        Last("Fresh extraction of the current imported library DLL") > libraries[1] ||
+        Capture(1) < 0 || Capture(0) < 0 || Capture(1) > libraries[2] || Capture(1) > Capture(0))
         throw new InvalidOperationException(
-            "Full verification skipped a transitive replay: " + string.Join(", ", stages));
+            "Full verification skipped or misordered a transitive replay: " + string.Join(", ", stages));
     JsonElement verified =
         JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
     JsonElement import = verified.GetProperty("imports").EnumerateArray().Single();
