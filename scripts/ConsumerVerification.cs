@@ -724,6 +724,25 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     sealed record ConsumerSession(string FrameworkCopy, Dictionary<string, string> Copied);
 
+    // Resolve source roots through Lake so library and package srcDir settings agree with imports.
+    static string[] ConsumerSourceDirectories(string session, IEnumerable<string> packageRoots)
+    {
+        var lines = Run(["lake", "env"], session).Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal)).ToArray();
+        if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean source paths.");
+        return lines[0]["LEAN_SRC_PATH=".Length..]
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => Path.GetFullPath(path, session)).Concat(packageRoots).Distinct().ToArray();
+    }
+
+    static void RejectContractSourceShadow(string module, IEnumerable<string> sourceDirectories)
+    {
+        var relative = module.Replace('.', Path.DirectorySeparatorChar) + ".lean";
+        // File lookup respects the actual filesystem's case rules, including per-directory settings.
+        if (sourceDirectories.Any(directory => File.Exists(Path.Combine(directory, relative))))
+            throw new InvalidDataException("Contract interface module shadows a consumer source: " + module);
+    }
+
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
         SortedDictionary<string, string> snapshot, string certifiedLibrary, ExtractionIdentity extraction,
         IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
@@ -775,10 +794,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .GetProperty("generatedSha256").GetString())
                 throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
         AddConsumerLibrary(frameworkCopy, "Extracted");
-        foreach (string module in extraction.Sources.Keys)
-            if (snapshot.Keys.Any(key => key.StartsWith("consumer:", StringComparison.Ordinal) &&
-                key.Replace('\\', '/').EndsWith("/" + module.Replace('.', '/') + ".lean", StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidDataException("Contract interface module shadows a consumer source: " + module);
+        if (extraction.Sources.Count > 0)
+        {
+            var packageRoots = dependencies.Select(dependency =>
+                Within(session, Path.GetRelativePath(root, dependency.Source))).Prepend(session);
+            var sourceDirectories = ConsumerSourceDirectories(session, packageRoots);
+            foreach (var module in extraction.Sources.Keys)
+                RejectContractSourceShadow(module, sourceDirectories);
+        }
         string[] importModules = StageImportSources(extraction, frameworkCopy);
         foreach (string module in importModules) AddConsumerLibrary(frameworkCopy, module);
         var symbolsPath = Path.Combine(frameworkCopy, "ExtractedSymbols.lean");
