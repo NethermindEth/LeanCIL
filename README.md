@@ -84,7 +84,7 @@ Verified: ExampleProof.correctness
           BitVec.toNat result = (BitVec.toNat x + BitVec.toNat y) % 2 ^ 64
 ```
 
-Every invocation checks the proof afresh. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
+Every invocation validates the request's identity and required proof evidence. Authenticated caches can reuse unchanged certified builds; source/hash checks, audits and required kernel replay still apply. Use `--fresh` to disable local verification reuse. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
 List the methods of an assembly with `leancil list`, and check that generated files still match
 the assembly and extraction settings without running Lean with `leancil check`:
@@ -208,6 +208,13 @@ For symbolic branches or memory operations, supply the proved conditions with
 store fact may state its value in source form. Loop segments use
 `CIL.Safety.LoopAutomation` and still require an invariant and a decreasing measure.
 
+`CodeAt` facts let the tactics resolve instructions within a known code segment without
+expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
+tracks local stores and updated snapshots. Supported forwarder bodies can inherit a
+callee's proved contract, and embedding proofs can ignore trailing unread byref or
+pointer locals. Contract refinement derives a public interface from a stronger proved
+contract; that interface can be exported and imported by callers.
+
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter
 expansion. See [proof automation validation](docs/VALIDATION.md#proof-automation)
@@ -227,7 +234,8 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | --- | --- | --- |
 | `ldc.i4` and its short forms, `ldc.i8`, `dup`, `pop` | Complete within the admitted model | Integer constants and supported stack values |
 | Argument/local loads and stores, `ldloca` | Partial | Admitted types; no address of a managed-reference local |
-| `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
+| `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; wrapping arithmetic, with checked variants listed separately; no floating-point arithmetic |
+| Checked reference offsets, differences and unsigned ordering | Partial | Allocation-relative references; differences and ordering require live references within one allocation; no numeric address fabrication |
 | Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons and checked reference null/equality tests; termination requires a separate proof |
 | `call`, `ret` | Partial | Acyclic static/struct instance methods, concrete generic-method specializations and explicitly modelled runtime calls |
 | `ldtoken` | Partial | A type in a decided closed `typeof(A) == typeof(B)` or `!=` test, which folds to a constant, or a static data field for a `ReadOnlySpan<T>` table |
@@ -243,9 +251,11 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | Integer division and remainder | Partial | Signed/unsigned 32-/64-bit operands; explicit zero-divisor and overflow faults |
 | `constrained.` + `callvirt` | Partial | Concrete same-assembly structs, including direct interface implementations; checked static target resolution, no boxing |
 | `localloc` / `stackalloc` | Partial | Bounded frame-owned storage with explicit resource quota, initialization and lifetime checks; primitive pointer and span views |
-| All other opcodes | Unsupported | Includes unconstrained `callvirt`, arrays and unsupported instruction prefixes |
+| `ldlen`, integer `ldelem.*` / `stelem.*`, typed `ldelem` / `stelem` | Partial | Supplied primitive integer arrays over checked storage; null/bounds checks, initialized reads and appropriate access authority; no array allocation |
+| `ldelema`, `readonly.` + `ldelema` | Partial | Matching primitive element types; references retain allocation lifetime and readonly restrictions through locals, calls and returns; address formation grants no access authority |
+| All other opcodes | Unsupported | Includes unconstrained `callvirt`, `newarr`, reference/floating-point array elements and unsupported instruction prefixes |
 
-The extractor rejects unmodelled instructions, recursive managed calls, exception handling, class instance/virtual dispatch, managed object construction, reference-bearing aggregates, general arrays, unsupported packing, floating-point arithmetic, arbitrary external calls, static constructors, and unsupported signatures. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
+The extractor rejects unmodelled instructions, recursive managed calls, exception handling, class instance/virtual dispatch, managed object construction, reference-bearing aggregates, array operations outside the supplied primitive-integer subset, unsupported packing, floating-point arithmetic, arbitrary external calls, general static-constructor execution, and unsupported signatures. Supplied arrays do not model GC object layouts. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
 
 The memory model checks allocation identity, liveness, bounds, byte permissions, initialization, alignment and GC-sensitive intervals. It supports overlap and distinct private frames. It does not prove JIT/compiler correctness, concurrency, GC implementation correctness, OS memory behaviour or arbitrary .NET runtime equivalence. See [soundness and trusted base](docs/SOUNDNESS.md) for the precise boundary.
 
