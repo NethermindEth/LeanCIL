@@ -295,4 +295,97 @@ example : Safety.checkedIntrinsic (.avx2 .shl64Count) [.v128Low64 1, .v128Low64 
 example : Safety.checkedIntrinsic (.scalar (.leadingZeroCount 64)) [.v128Low64 1] =
     .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
 
+/-- An admitted call still requires its exact emitted intrinsic and arity. -/
+theorem exact_division_site :
+    DivisionIntrinsicsValid (raw call0) [true] (body [.intrinsic (.avx2 .band) 2]) := by
+  decide +kernel
+#print axioms exact_division_site
+
+/-- A recognized owner and name cannot be hidden behind a forged identity or owner scope. -/
+theorem malformed_family_without_intrinsic :
+    ¬ DivisionIntrinsicsValid
+      (raw { call0 with
+        declaringType := .atom "forged" "System.Runtime.Intrinsics.X86.Avx2"
+        target := .external "forged" }) [true] (body [.nop]) := by
+  decide +kernel
+#print axioms malformed_family_without_intrinsic
+
+/-- An exact intrinsic identity still marks the family when both owner and name are forged. -/
+theorem identity_family_without_intrinsic :
+    ¬ DivisionIntrinsicsValid
+      (raw { call0 with declaringType := .atom "forged" "Other", name := "Other" })
+      [true] (body [.nop]) := by
+  decide +kernel
+#print axioms identity_family_without_intrinsic
+
+/-- Calls outside the admitted family need no division intrinsic. -/
+theorem unrelated_call_without_intrinsic :
+    DivisionIntrinsicsValid
+      (raw { call0 with
+        declaringType := .atom "Other" "Other", name := "Other"
+        target := .external "Other" }) [true] (body [.nop]) := by
+  decide +kernel
+#print axioms unrelated_call_without_intrinsic
+
+/-- Live malformed family calls cannot be discarded even when the opcode is not `call`. -/
+theorem family_wrong_opcode :
+    ¬ DivisionIntrinsicsValid
+      { raw call0 with code := [⟨0, 111, .call call0⟩] } [true] (body [.nop]) := by
+  decide +kernel
+#print axioms family_wrong_opcode
+
+/-- Unreachable sites retain the original exemption from metadata and intrinsic checks. -/
+theorem unreachable_malformed_division :
+    DivisionIntrinsicsValid
+      { raw call0 with code := [⟨0, 111, .call { call0 with target := .external "forged" }⟩] }
+      [false] (body [.intrinsic (.avx2 .band) 99]) := by
+  decide +kernel
+#print axioms unreachable_malformed_division
+
+/-- Exact metadata does not admit a mismatched emitted arity. -/
+theorem division_wrong_arity :
+    ¬ DivisionIntrinsicsValid (raw call0) [true] (body [.intrinsic (.avx2 .band) 99]) := by
+  decide +kernel
+#print axioms division_wrong_arity
+
+/-- UTF-8 comparisons do not truncate or normalize non-ASCII metadata. -/
+theorem division_non_ascii_name :
+    ¬ DivisionIntrinsicsValid (raw { call0 with name := "Andλ" }) [true]
+      (body [.intrinsic (.avx2 .band) 2]) := by
+  decide +kernel
+#print axioms division_non_ascii_name
+
+/-- A truncated scope or a non-ASCII identity suffix cannot forge a family identity. -/
+theorem division_identity_boundaries :
+    DivisionIntrinsicsValid
+      (raw { call0 with
+        declaringType := .atom "Other" "Other", name := "Other"
+        target := .external intrinsicsScope }) [true] (body [.nop]) ∧
+    DivisionIntrinsicsValid
+      (raw { call0 with
+        declaringType := .atom "Other" "Other", name := "Other"
+        target := .external (intrinsicsScope ++ "::λ") }) [true] (body [.nop]) := by
+  decide +kernel
+#print axioms division_identity_boundaries
+
+/-- An exact intrinsic still requires its profile feature. -/
+theorem division_unavailable :
+    ({ profile with
+      avx512F := false, avx512FVL := false
+      avx512DQ := false, avx512DQVL := false } : FeatureProfile).Valid ∧
+    ¬ DivisionIntrinsicsValid (raw call8) [true]
+      { body [.intrinsic (.avx512DQ .moveMask512) 1] with
+        profile := { profile with
+          avx512F := false, avx512FVL := false
+          avx512DQ := false, avx512DQVL := false } } := by
+  decide +kernel
+#print axioms division_unavailable
+
+/-- Dispatch does not relax either certificate length check. -/
+theorem division_lengths :
+    (¬ DivisionIntrinsicsValid (raw call0) [] (body [.intrinsic (.avx2 .band) 2])) ∧
+    (¬ DivisionIntrinsicsValid (raw call0) [false] (body [])) := by
+  decide +kernel
+#print axioms division_lengths
+
 end Tests.DivisionIntrinsics

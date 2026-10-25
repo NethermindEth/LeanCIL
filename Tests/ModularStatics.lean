@@ -3,6 +3,8 @@ import CIL.Safety.StaticMemoryBelow
 import CIL.Safety.WordMemory
 import Examples.Support
 
+/-! Checked static-table linking and loaded-world premises for modular consumer contracts. -/
+
 namespace Tests.ModularStatics
 
 open CIL CIL.Safety
@@ -159,6 +161,39 @@ private def collision : Library :=
 example : linkChecked [appBody] [collision] =
     .error "Static identity collision 101: App::App::Table and Lib::Lib::Table" := rfl
 
+/-- `library` with the table's bytes changed under the same identity and field. -/
+private def changedTable : Library :=
+  { entry := { libBody with staticSites := [(0, { libField with bytes := numberBytes 18 8 })] } }
+
+/-- Two readers may share exactly the same static descriptor. -/
+theorem shared_table_links :
+    linkChecked [appBody] [library, library] = .ok (link [appBody] [library, library]) :=
+  linkChecked_of_compatible (by decide +kernel)
+
+/-- Reusing an identity with different table bytes prevents checked linking. -/
+theorem changed_shared_table_rejected : linkChecked [appBody] [library, changedTable] =
+    .error "Static identity collision 202: Lib::Lib::Table and Lib::Lib::Table" := by
+  have incompatible : ¬ StaticDescriptorsCompatible
+      (programStaticDescriptors (link [appBody] [library, changedTable])) := by decide +kernel
+  unfold linkChecked
+  rw [ite_eq_right incompatible]
+  apply congrArg Except.error
+  decide +kernel
+
+/-- A loaded table with different bytes cannot satisfy a contract's static-world premise. -/
+theorem changed_loaded_table_not_valid :
+    ¬ StaticWorldValid [{ appField with bytes := numberBytes 8 8 }] afterApp := by
+  intro world
+  have valid := world.2.2.2 { appField with bytes := numberBytes 8 8 } (by simp)
+    (101, (⟨0, 0⟩ : Reference)) (by decide +kernel) rfl
+  obtain ⟨_, allocation, present, live, kind, size, bytes⟩ := valid
+  have actual : read afterApp ⟨0, 0⟩ 8 1 = .ok (numberBytes 7 8) := rfl
+  have incompatible : numberBytes 7 8 ≠ numberBytes 8 8 := by decide +kernel
+  exact incompatible (Except.ok.inj (actual.symm.trans bytes))
+
+#print axioms shared_table_links
+#print axioms changed_shared_table_rejected
+#print axioms changed_loaded_table_not_valid
 #print axioms readTable_holds
 #print axioms readTableRepeat_holds
 #print axioms linked_readTable_holds
