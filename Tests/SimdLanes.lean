@@ -224,6 +224,22 @@ example (x : V256) : lane64 (shiftRightCount64 x 3) 2 = lane64 x 2 >>> 3 := by
   rw [lane64_shiftRightCount64 _ _ (by decide)]
   rfl
 
+/-- A shift by a vector count under 64 shifts the lane. -/
+example (x : V256) : lane64 (shiftLeftCount64 x 5) 1 = lane64 x 1 <<< 5 := by
+  rw [lane64_shiftLeftCount64 _ _ (by decide)]
+  rfl
+
+/-- A logical right shift by a vector count of 64 clears the lane. -/
+example (x : V256) : lane64 (shiftRightCount64 x 64) 0 = 0 := by
+  rw [lane64_shiftRightCount64 _ _ (by decide)]
+  rfl
+
+/-- Or and and-not act lane by lane, as a mask blend `(m &&& a) ||| (~~~m &&& b)` needs. -/
+example (mask x y : V256) :
+    lane64 ((mask &&& x) ||| ((~~~mask) &&& y)) 3 =
+      (lane64 mask 3 &&& lane64 x 3) ||| ((~~~lane64 mask 3) &&& lane64 y 3) := by
+  rw [lane64_or, lane64_and, lane64_andNot]
+
 /-! ### Lane carries, borrows and masks -/
 
 /-- The 128-bit sum through its lane form: the high lane takes the low lane's carry. -/
@@ -284,9 +300,7 @@ example (x y : V256) :
 example : zip256 (fun a b => mask64 (decide (b.toInt < a.toInt))) (pack256 (BitVec.allOnes 64)
     0 0 0) 0 = 0 := by decide +kernel
 
-/-! ### Stepping a method through the intrinsics -/
-
-/-! ## Intrinsic evaluation on packed lanes -/
+/-! ### Intrinsic evaluation on packed lanes -/
 
 /-- AVX2 lane addition evaluates to the lanewise sums of packed operands. -/
 example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
@@ -331,6 +345,8 @@ example (lane0 lane1 lane2 lane3 : Bool) :
       some (.i32 (BitVec.ofNat 32
         (lane0.toNat + 2 * lane1.toNat + 4 * lane2.toNat + 8 * lane3.toNat))) := by
   rw [intrinsic_avx512dq_movemask256, moveMask64_pack256_mask64]
+
+/-! ### Stepping a method through the intrinsics -/
 
 /-- Shifts the high halves of one vector down and multiplies them by the low halves of
     another: one partial-product row of a multi-limb multiply. -/
