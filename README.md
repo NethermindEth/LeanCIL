@@ -237,6 +237,10 @@ elaborators are executable code, so use this mode with packages you trust.
 
 ### Writing compact checked proofs
 
+Return arity and fully specified results share one checked dispatcher proof. The existing
+step, run and invocation theorems retain their statements while avoiding duplicate case analysis
+during compilation and kernel replay.
+
 Import `CIL.Safety.SymbolicExecution` and use `cil_checked_steps` to compose
 checked instruction steps. It first tries definitional equality when no facts
 are supplied, then uses local instruction equations and simplification as needed.
