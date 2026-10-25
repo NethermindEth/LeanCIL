@@ -492,3 +492,6 @@ The core `Tests/AllocationImports.cs` fixture checks that the CIL umbrella omits
 refinement, builds both explicit allocation acceptance modules, and jointly replays every
 additional imported module. The current closure contains 49 production and two test modules;
 all remain mandatory checks while ordinary consumers avoid loading their 197 MiB of oleans.
+The compiled namespace audit checks their theorem axiom closures even on warm builds and binds
+the audited paths and module bytes to those replayed. An isolated theorem depending on
+`sorryAx` passes kernel replay but must fail that audit; build output is also checked.
