@@ -6,6 +6,7 @@
 // contracts derived only by Holds.weaken; separately compiled callers verify from the sidecar alone.
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 string root = At("artifacts/DerivedContractExports-" + Guid.NewGuid().ToString("N"));
 string libRoot = Path.Combine(root, "Lib");
@@ -65,15 +66,19 @@ Package(package, "derived-proofs", producerModules);
 Package(callerPackage, "derived-callers", callerModules);
 string interfaceSource = Path.Combine(package, interfaceModule + ".lean");
 
-(string Method, string Artifact, string Contract, string Kind, string Proof)[] exports =
+(string Method, string Artifact, string Contract, string Kind, string Proof, string Derivation)[] exports =
 [
-    ("DerivedFixture.Library::Percent(ulong)", Path.Combine(root, "Percent"),
-        "DerivedInterface.percentBounded", "outcome", "DerivedPercentProof"),
-    ("DerivedFixture.Library::AddTo(ulong&,ulong&,ulong&)", Path.Combine(root, "AddTo"),
-        "DerivedInterface.addPublic", "method", "DerivedAddProof")
+    ("DerivedFixture.Library::Percent(ulong)", Path.Combine(root, "Percent"), "DerivedInterface.percentBounded",
+        "outcome", "DerivedPercentProof", "percent_exact.weaken percent_bounded_refines"),
+    ("DerivedFixture.Library::AddTo(ulong&,ulong&,ulong&)", Path.Combine(root, "AddTo"), "DerivedInterface.addPublic",
+        "method", "DerivedAddProof", "add_internal.weaken add_public_refines")
 ];
-foreach ((string method, string artifact, _, _, string proof) in exports)
+foreach ((string method, string artifact, string contract, _, string proof, string derivation) in exports)
 {
+    // The exported theorem is the consequence rule alone, so no execution reasoning is repeated for it.
+    string exported = "theorem correctness : " + contract + ".Holds Extracted.program 0 :=\n  " + derivation + "\n";
+    if (!File.ReadAllText(Path.Combine(package, proof + ".lean")).Contains(exported, StringComparison.Ordinal))
+        throw new InvalidOperationException("Precondition: " + proof + " must export exactly " + derivation);
     Run([.. cli, "extract", lib, method, artifact]);
     File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(new
     {
@@ -103,7 +108,7 @@ JsonObject published = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
 string interfaceDigest = published["interfaceDigest"]!.GetValue<string>();
 JsonArray certifications = published["certifications"]!.AsArray();
 string Text(JsonNode? node, string field) => node![field]!.GetValue<string>();
-foreach ((string method, _, string contract, string kind, _) in exports)
+foreach ((string method, _, string contract, string kind, _, _) in exports)
 {
     string holds = kind == "outcome" ? "OutcomeContract.Holds" : "MethodContract.Holds";
     JsonNode export = published["exports"]!.AsArray().Single(entry => Text(entry, "contractConstant") == contract)!;
@@ -123,15 +128,14 @@ string[] internalNames =
     ["DerivedPercentProof", "DerivedAddProof", "percentExact", "addInternal", "addPre", "weaken", "Refines"];
 JsonNode module = published["interfaceModules"]!.AsArray().Single()!;
 string publishedSource = Text(module, "source");
-bool Internal(string text) => internalNames.Any(name => text.Contains(name, StringComparison.Ordinal));
+string sidecarText = File.ReadAllText(sidecar);
 if (Text(module, "name") != interfaceModule || publishedSource != File.ReadAllText(interfaceSource) ||
-    Internal(publishedSource) || certifications.Any(entry => Internal(Text(entry, "statement"))))
-    throw new InvalidOperationException("Published interface or statements reached an internal contract or proof.");
+    internalNames.Any(name => sidecarText.Contains(name, StringComparison.Ordinal)))
+    throw new InvalidOperationException("The published sidecar reached an internal contract or proof.");
 Console.WriteLine("PASS exact internal contracts derive the published MethodContract and OutcomeContract theorems");
 
-// A public contract the internal one does not refine breaks only its refinement proof; nothing is published.
-// One renamed exception stands for all four failure kinds: Rejected in each proof module refutes every
-// kind on the actual extraction, and the exporter path that stops on a failed derivation is the same.
+// An unrefined public contract fails only its refinement proof, so nothing is published. One renamed exception
+// stands for all four kinds; each proof module's Rejected section refutes every kind on the actual extraction.
 string certified = Sha(sidecar);
 string publicText = File.ReadAllText(interfaceSource);
 string renamed = publicText.Replace("else some \"System.ArgumentOutOfRangeException\"",
@@ -143,11 +147,16 @@ File.WriteAllText(interfaceSource, renamed);
 (int Code, string Output, string Stdout, string Stderr) rejected =
     Execute([.. cli, "export-contracts", Manifest("reject", "DerivedPercentProof"), "--output", sidecar]);
 File.WriteAllText(interfaceSource, publicText);
-bool UsesSorry(string theorem) => rejected.Output.Split('\n')
-    .Single(line => line.Contains("'DerivedPercentProof." + theorem + "' depends on axioms", StringComparison.Ordinal))
-    .Contains("sorryAx", StringComparison.Ordinal);
-if (rejected.Code != 1 || Sha(sidecar) != certified || UsesSorry("percent_exact") ||
-    !UsesSorry("percent_bounded_refines"))
+// Null unless the output reports this theorem's axiom set exactly once.
+string? Axioms(string theorem)
+{
+    MatchCollection reported = Regex.Matches(rejected.Output, @"'DerivedPercentProof\." + Regex.Escape(theorem) +
+        @"' depends on axioms: \[([^\]]*)\]", RegexOptions.Singleline);
+    return reported.Count == 1 ? reported[0].Groups[1].Value : null;
+}
+if (rejected.Code != 1 || Sha(sidecar) != certified ||
+    Axioms("percent_exact") is not { } exact || exact.Contains("sorryAx", StringComparison.Ordinal) ||
+    Axioms("percent_bounded_refines")?.Contains("sorryAx", StringComparison.Ordinal) != true)
     throw new InvalidOperationException("A renamed exception was published or failed outside its refinement: " +
         rejected.Output);
 Console.WriteLine("PASS a public contract naming another exception cannot be derived or published");
@@ -177,3 +186,4 @@ foreach ((string selector, string proof) in new[]
         throw new InvalidOperationException("Caller did not accept the derived public contract for the DLL: " + proof);
     Console.WriteLine("PASS " + proof + " verifies from the derived public contract and the selected DLL");
 }
+Directory.Delete(root, recursive: true);
