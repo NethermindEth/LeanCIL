@@ -283,6 +283,11 @@ program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags 
 profile in a family. A separate per-profile extraction is covered once it is shown equal to
 the reprofiled program, by `rfl` when only the profiles differ.
 
+For a program with no profile reads, use the same `ProfileAgreement.of_flags` rule:
+an equality `empty : program.profileReads = []` discharges its premise with
+`by simp [empty]`. This replaces `profileIndependentCheck` and
+`profile_independent_agreement`; no separate profile-independent checker is needed.
+
 A contract may also type its result: `MethodContract Input Output` adds
 `results : Output → List Value`, and `post` speaks of the `Output`. `Returns`
 requires the returned values to equal `results out` for some `out` satisfying

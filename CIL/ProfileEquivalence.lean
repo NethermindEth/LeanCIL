@@ -28,28 +28,6 @@ def Op.ProfileAgreement (op : Op) (p q : FeatureProfile) : Prop :=
 def Program.ProfileAgreement (program : Program) (p q : FeatureProfile) : Prop :=
   ∀ body ∈ program, ∀ op ∈ body.code, op.ProfileAgreement p q
 
-/-- A syntactic check for operations whose execution does not observe a profile. -/
-def Op.profileIndependentCheck : Op → Bool
-  | .feature _ => false
-  | .intrinsic (.scalar _) _ => true
-  | .intrinsic (.vector _) _ => true
-  | .intrinsic _ _ => false
-  | _ => true
-
-/-- Whether no instruction in the program observes the profile. -/
-def Program.profileIndependentCheck (program : Program) : Bool :=
-  program.all fun body => body.code.all Op.profileIndependentCheck
-
-theorem Program.profile_independent_agreement (program : Program)
-    (checked : program.profileIndependentCheck = true) (p q : FeatureProfile) :
-    program.ProfileAgreement p q := by
-  intro body member op instruction
-  have bodyCheck := List.all_eq_true.mp checked body member
-  have instructionCheck := List.all_eq_true.mp bodyCheck op instruction
-  cases op <;> simp [Op.profileIndependentCheck, Op.ProfileAgreement] at *
-  case intrinsic operation _ =>
-    cases operation <;> simp [Intrinsic.available] at *
-
 /-- A feature test pushes the profile's answer as `1` or `0`. -/
 theorem step_feature (id : Feature) (returns : Bool) (pc : Nat) (args : List Value)
     (frame : Nat) (stack : List Value) (memory : Memory) (profile : FeatureProfile) :
