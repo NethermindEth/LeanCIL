@@ -5,7 +5,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-// Independently compose a named exceptional contract through two separately compiled forwarders.
+// Independently compose a named exceptional contract through three separately compiled forwarders.
 var root = At("artifacts/TransitiveOutcomes-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 string[] cli = ["dotnet", ExtractorPath];
@@ -26,13 +26,15 @@ string Project(string name, string? reference, string body)
 var bRoot = Project("B", null, "public static ulong Percent(ulong value) => value <= 100 ? value : " +
     "throw new System.ArgumentOutOfRangeException(nameof(value));");
 var aRoot = Project("A", "B", "public static ulong Percent(ulong value) => B.Percent(value);");
-var appRoot = Project("App", "A", "public static ulong Percent(ulong value) => A.Percent(value);");
+var cRoot = Project("C", "A", "public static ulong Percent(ulong value) => A.Percent(value);");
+var appRoot = Project("App", "C", "public static ulong Percent(ulong value) => C.Percent(value);");
 Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string Assembly(string directory, string name) => Path.Combine(directory, "bin", "OutcomeFixture." + name + ".dll");
 var b = Assembly(bRoot, "B");
 var a = Assembly(aRoot, "A");
+var c = Assembly(cRoot, "C");
 var app = Assembly(appRoot, "App");
-string Package(string name, string module)
+string Package(string name, params string[] modules)
 {
     var directory = Path.Combine(root, name);
     Directory.CreateDirectory(directory);
@@ -40,12 +42,14 @@ string Package(string name, string module)
     File.WriteAllText(Path.Combine(directory, "lakefile.toml"),
         "name = " + JsonSerializer.Serialize(name.ToLowerInvariant()) + "\n[[require]]\nname = \"leancil\"\ngit = " +
         JsonSerializer.Serialize(Root.Replace('\\', '/')) + "\nrev = " + JsonSerializer.Serialize(revision) +
-        "\n[[lean_lib]]\nname = " + JsonSerializer.Serialize(module) + "\n");
+        "\n" + string.Concat(modules.Select(module => "\n[[lean_lib]]\nname = " +
+            JsonSerializer.Serialize(module) + "\n")));
     Run(["lake", "update"], directory);
     return directory;
 }
-var bPackage = Package("BProofPackage", "DerivedPercentProof");
-var aPackage = Package("AProofPackage", "Forward");
+var bPackage = Package("BProofPackage", "DerivedPercentProof", "PublishedOutcome");
+var aPackage = Package("AProofPackage", "Forward", "PublishedForwardOutcome");
+var cPackage = Package("CProofPackage", "Forward", "PublishedSecondForwardOutcome");
 var appPackage = Package("AppProofPackage", "Forward");
 var interfaceSource = Path.Combine(bPackage, "PublishedOutcome.lean");
 File.Copy(At("Tests/ContractImports/DerivedInterface.lean"), interfaceSource);
@@ -84,9 +88,12 @@ const string forwardProof = """
     end Forward
     """;
 File.WriteAllText(Path.Combine(aPackage, "Forward.lean"), forwardProof);
+File.WriteAllText(Path.Combine(cPackage, "Forward.lean"), forwardProof);
 File.WriteAllText(Path.Combine(appPackage, "Forward.lean"), forwardProof);
 var forwardingInterface = Path.Combine(aPackage, "PublishedForwardOutcome.lean");
 File.WriteAllText(forwardingInterface, "import PublishedOutcome\n");
+var secondForwardingInterface = Path.Combine(cPackage, "PublishedSecondForwardOutcome.lean");
+File.WriteAllText(secondForwardingInterface, "import PublishedForwardOutcome\n");
 string[] Import(string sidecar, string assembly, string name)
 {
     var descriptor = JsonNode.Parse(File.ReadAllText(sidecar))!;
@@ -120,15 +127,18 @@ var bSidecar = Export("B", b, bPackage, "PublishedOutcome", interfaceSource, "De
     "DerivedPercentProof.correctness", []);
 var aSidecar = Export("A", a, aPackage, "PublishedForwardOutcome", forwardingInterface, "Forward.lean",
     "Forward.correctness", Import(bSidecar, b, "OutcomeFixture.B"));
+var cSidecar = Export("C", c, cPackage, "PublishedSecondForwardOutcome", secondForwardingInterface, "Forward.lean",
+    "Forward.correctness", [.. Import(aSidecar, a, "OutcomeFixture.A"), .. Import(bSidecar, b, "OutcomeFixture.B")]);
 var artifact = Path.Combine(root, "ExtractApp");
 Run([.. cli, "extract", app, "OutcomeFixture.App::Percent(ulong)", artifact,
-    .. Import(aSidecar, a, "OutcomeFixture.A"), .. Import(bSidecar, b, "OutcomeFixture.B")]);
+    .. Import(cSidecar, c, "OutcomeFixture.C"), .. Import(aSidecar, a, "OutcomeFixture.A"),
+    .. Import(bSidecar, b, "OutcomeFixture.B")]);
 Run([.. cli, "verify", artifact, "--proof", Path.Combine(appPackage, "Forward.lean"),
     "--theorem", "Forward.correctness", "--proof-root", appPackage, "--force-full-verify"]);
 var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
-if (report.GetProperty("contractDependencies").GetArrayLength() != 2 ||
+if (report.GetProperty("contractDependencies").GetArrayLength() != 3 ||
     report.GetProperty("contractDependencies").EnumerateArray().Any(node =>
         node.GetProperty("acceptedVia").GetString() != "independently-verified") ||
     report.GetProperty("compositionTheorem").GetString() != "LeanCILFullComposition.certified")
     throw new InvalidOperationException("The named exceptional contract lost its independently checked dependency closure.");
-Console.WriteLine("PASS transitive full composition preserves the normal bound and named ArgumentOutOfRangeException");
+Console.WriteLine("PASS App -> C -> A -> B preserves the normal bound and named ArgumentOutOfRangeException");

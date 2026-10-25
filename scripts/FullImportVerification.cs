@@ -245,6 +245,8 @@ partial class Program
         HashSet<string> usedOverrides = new(StringComparer.Ordinal);
         List<FullBundle> regenerated =
             RegenerateFullClosure(output, bindings, overrides, usedOverrides, original, bundles, graph, staging);
+        var stagedInputs = regenerated.ToDictionary(bundle => bundle.Staging,
+            bundle => FullStagingFiles(bundle.Staging), PathComparer);
         // Preflight already required a bundle for every reachable node, so an override naming one is used.
         usedOverrides.UnionWith(ReachableGraph(ExtractionIdentity.Read(output)).Select(node =>
             AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name));
@@ -253,6 +255,7 @@ partial class Program
         // A dependency's library is built and checked before any library that imports it.
         foreach (FullBundle bundle in BundleOrder(regenerated))
         {
+            RequireFullStaging(bundle.Staging, stagedInputs[bundle.Staging]);
             libraries.AddRange(BuildFullBundle(bundle));
             RequireCallerUnchanged();
         }
@@ -483,6 +486,22 @@ partial class Program
         }
         foreach (FullBundle bundle in bundles) Visit(bundle);
         return ordered;
+    }
+
+    // Includes staged sources, framework files and regenerated extraction inputs before any producer runs.
+    static SortedDictionary<string, string> FullStagingFiles(string directory)
+    {
+        var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+            files[PortableRelativePath(directory, path)] = Sha(path);
+        return files;
+    }
+
+    // An earlier dependency build must not change the sources or file set of a later staged bundle.
+    static void RequireFullStaging(string directory, SortedDictionary<string, string> expected)
+    {
+        if (!Directory.Exists(directory) || !FullStagingFiles(directory).SequenceEqual(expected))
+            throw new InvalidDataException("Full-verification staged bundle changed before its build: " + directory);
     }
 
     // Stages the bundle's consumer package and interfaces once, however many of its exports are selected.

@@ -13,6 +13,8 @@ using System.Text.Json.Nodes;
 string root = At("artifacts/TransitiveImports-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 string[] cli = ["dotnet", ExtractorPath];
+ImportReviewRegressions.FullStaging_WhenDependencyChangesLaterBundle_Rejects(ExtractorPath,
+    Path.Combine(root, "StagedMutation"));
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 string Project(string name, params string[] references)
 {
@@ -256,13 +258,15 @@ void FullDiamond()
             .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!)
             .ToArray();
     }
-    bool Checked(string[] stages) => stages.Any(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal));
+    bool Checked(string[] stages) => stages.Contains("Building fresh consumer proof and dependencies",
+        StringComparer.Ordinal);
     if (!Checked(Trace("diamond-cold", false)) || Checked(Trace("diamond-warm", false)))
         throw new InvalidOperationException("The diamond did not start full verification with a warm proof receipt.");
     var stages = Trace("diamond-full", true);
     if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
         stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
+        stages.Count(stage => stage == "Building fresh consumer proof and dependencies") != 3 ||
         stages.Count(stage => stage is "Building fresh Lean verification library" or
             "Copying certified Lean verification library") != 3)
         throw new InvalidOperationException("The diamond skipped or duplicated independent checking: " +
@@ -323,6 +327,39 @@ void FullTransitive()
         Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,
             .. Import(aSidecar, a), .. Import(bSidecar, b)]);
         RejectFull("Unapproved proof axioms: sorryAx");
+    }
+    finally { File.WriteAllText(bSidecar, originalB.ToJsonString()); }
+    var substitution = Path.Combine(root, "rebundle-dependency-substitution");
+    CopyTree(bBundle, substitution);
+    var substitutedProof = Directory.EnumerateFiles(substitution, "BProof.lean", SearchOption.AllDirectories).Single();
+    const string dependencyForgery = """
+
+        macro_rules
+          | `(def $name:ident : $type:term := $value:term) => do
+              if name.getId.toString != "dependencies0" then Lean.Macro.throwUnsupported
+              match value with
+              | `([]) => Lean.Macro.throwUnsupported
+              | _ => pure ()
+              dbg_trace "Attempted to erase the independently pinned dependency list"
+              `(def $name : $type := [])
+        """;
+    var captureForgery = "\nmacro_rules\n  | `(IO.FS.writeFile $path:term $source:term) =>\n" +
+        "      `(_root_.IO.FS.writeFile $path ($source ++ " + JsonSerializer.Serialize(dependencyForgery) + "))\n";
+    File.AppendAllText(substitutedProof, captureForgery);
+    var substitutedInventory = JsonNode.Parse(File.ReadAllText(Path.Combine(substitution, "bundle.json")))!.AsObject();
+    substitutedInventory["files"]![Path.GetRelativePath(substitution, substitutedProof).Replace('\\', '/')] =
+        Sha(substitutedProof);
+    File.WriteAllText(Path.Combine(substitution, "bundle.json"), substitutedInventory.ToJsonString());
+    var substitutedBundle = Path.Combine(root, Sha(Path.Combine(substitution, "bundle.json")));
+    Directory.Move(substitution, substitutedBundle);
+    var substitutedContract = originalB.DeepClone().AsObject();
+    substitutedContract["fullVerificationLocator"] = substitutedBundle;
+    File.WriteAllText(bSidecar, substitutedContract.ToJsonString());
+    try
+    {
+        Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,
+            .. Import(aSidecar, a), .. Import(bSidecar, b)]);
+        RejectFull("Attempted to erase the independently pinned dependency list");
     }
     finally { File.WriteAllText(bSidecar, originalB.ToJsonString()); }
     Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,

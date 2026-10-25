@@ -76,6 +76,11 @@ full verification of an untrusted bundle in an isolated environment: a
 read-only toolchain, extractor and caller, no network, and a workspace
 discarded afterwards.
 
+Before the first dependency build, the verifier snapshots every staged bundle's
+complete file set, including its framework sources and regenerated extraction.
+It rechecks the selected bundle immediately before building it, so an earlier
+dependency cannot silently change a later bundle's staged inputs.
+
 Reports retain the original conditional caller theorem. They add the composed
 theorem and audit, source bundle identities, and `acceptedVia:
 independently-verified`. Faithful DLL decoding and CIL/runtime correspondence
@@ -86,6 +91,6 @@ The graph regression covers an actual arithmetic caller through A → B and a
 single caller importing both A and B. In the latter diamond, A's dependency
 reuses the same selected B identity; both implementations are checked once even
 when an ordinary proof receipt is already available. Separate fixtures preserve
-a named exceptional outcome through two forwarders and a table-reading contract
+a named exceptional outcome through three forwarders and a table-reading contract
 through a transitive dependency. The table fixture retains its explicit
 `StaticWorldValid` premise and checks the final `linkChecked` composition audit.
