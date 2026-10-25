@@ -27,11 +27,11 @@ Libraries may read immutable RVA static tables. The fresh extraction decides
 each export's reachable tables. Their scoped identities must equal the
 certification's, the caller binding's and the bundled extraction's records, and
 each must name a field of the library assembly. The three published records are
-compared before any build; the fresh extraction is compared with them after it runs. Table bytes come only from the
-fresh extraction, so a re-certified DLL with changed bytes fails the author
-proof that ties them to the published `StaticWorldValid` descriptors. The
-composed theorem states `linkChecked` for the whole linked program: the
-caller's tables and every imported table, including one table read through
+compared before any build; the fresh extraction is compared with them after it
+runs. Table bytes come only from the fresh extraction, so a re-certified DLL
+with changed bytes fails the author proof that ties them to the published
+`StaticWorldValid` descriptors. The composed theorem states `linkChecked` for
+the whole linked program: the caller's tables and every imported table, including one table read through
 several imports, have one descriptor per identity. `StaticWorldValid` premises
 remain preconditions of the contracts and of the caller's claim; the composed
 theorem does not establish the runtime's static state at the call. Mutable
