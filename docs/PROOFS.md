@@ -136,6 +136,32 @@ quantified over every feature, is normalized to that form. Elsewhere, including
 the field or first run
 `simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h`.
 
+### Consumer stepping regressions
+
+The consumer failures reported in #252 are covered by the following proofs. These
+use the public tactics with symbolic values and memory; they do not replace the
+checked interpreter with consumer-specific execution rules.
+
+| Case | Regression |
+| --- | --- |
+| Supplied store/load facts take priority over generic equations | `Tests.Automation.step_facts_first`, `applied_step_facts_first` |
+| Zero, nonzero and literal branch conditions | `Tests.Automation.branch_from_zero`, `branch_from_nonzero`, `literal_branch` |
+| Memory operations use their own equations | `Tests.Automation.asRef_fact_stack`, `load128_fact_stack`, `add_fact_stack` |
+| Profile facts decide instruction lookup | `Tests.Automation.feature_op_checked`, `Tests.MethodContract.feature_op_contract_steps` |
+| Intrinsic evaluation facts normalize the next stack | `Tests.Automation.evaluated_then_stored`, `evaluated_by_applied_hypothesis` |
+| Signed, unsigned and loaded-limb comparisons | `Tests.MethodContract.loaded_signed_branch`, `loaded_unsigned_branch`, `loaded_limb_branch` |
+| Signed/unsigned widening and both argument orders | `Tests.MethodContract.ordered_widening` |
+
+Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all
+eight combinations of signed conversion, scalar position and reversed arguments
+in 12,000 heartbeats, using one `cil_contract_steps 3` invocation per case. Its
+arbitrary continuation preserves the actual widened stack and memory, rather than
+merely checking that some execution exists. These budgets detect elaboration
+regressions independently of machine speed; they are not wall-clock benchmarks.
+`ordered_widening_returns` composes that prefix with a concrete suffix which
+discards both operands and returns zero, proving that the continuation premise is
+satisfiable for every case. The widened value is checked by the prefix theorem.
+
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
 by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
 hypothesis such as `found : program[index]? = some (body profile)`, or by
@@ -1018,8 +1044,9 @@ caller across an inserted dead block, with the relocated throw pc.
 
 An extraction can also declare locals the literal body never uses. Only one
 shape is covered: dead locals that trail the body's own locals and are
-references initialized to null or left unmodeled, which the extractor emits for
-byref and pointer locals. For those, `cil_embed` proves
+references or spans initialized to their empty value or left unmodeled. These cover
+byref, pointer, `Span<T>` and `ReadOnlySpan<T>` locals; spans require an element width
+of 1, 2, 4 or 8 bytes. For those, `cil_embed` proves
 `MethodEmbedsDeadLocals` instead, and the same proof covers extractions with and
 without them (from `CIL.Safety.Embedding.DeadLocals`):
 
@@ -1035,9 +1062,9 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 `.raises`, `.method_holds` and `.holds` transfer as for `MethodEmbeds`. A
 numeric dead local, such as a flag only one architecture's path reads, is still
 rejected: its home would shift every later allocation identity, and runs over
-renamed identities are not related yet. A dead span local allocates nothing
-either but is not covered yet, and a dead local before a kept one is rejected,
-since it renumbers the kept local.
+renamed identities are not related yet. A dead local before a kept one is rejected,
+since it renumbers the kept local. Span slots retain their width, mutability and empty
+or unmodeled state; padding does not create or change any allocation.
 
 ### Instruction equations for parametric bodies
 

@@ -159,12 +159,15 @@ def deadLocalsFailure (expected actual : Method) : Option String :=
   else if deadKinds.length != deadInitials.length then
     some s!"the dropped locals have {deadKinds.length} kinds for {deadInitials.length} \
       initializers"
-  else if deadKinds.any (· != .reference) then
-    some s!"a dropped local is not a reference, and only reference dead locals are \
+  else if deadKinds.any (fun kind => match kind with
+      | .reference | .span .. => false
+      | _ => true) then
+    some s!"a dropped local is not a reference or span, and only these dead locals are \
       supported: a numeric one would allocate a home\n  kinds: {reprStr deadKinds}"
   else if !rootLocals deadKinds deadInitials then
-    some s!"a dropped reference local has an initializer frame entry rejects, as only null \
-      and unmodeled are accepted\n  initializers: {reprStr deadInitials}"
+    some s!"a dropped local has a kind or initializer frame entry rejects: spans need width \
+      1, 2, 4 or 8, and only null and unmodeled are accepted\n  \
+      kinds: {reprStr deadKinds}\n  initializers: {reprStr deadInitials}"
   else if !expected.opaqueVectorLocals.all (· < kept) then
     some s!"an opaque vector local is not among the kept locals: \
       {reprStr expected.opaqueVectorLocals}"

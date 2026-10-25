@@ -219,18 +219,30 @@ For symbolic branches or memory operations, supply the proved conditions with
 `cil_checked_steps [facts]`; local facts are normalised with the goal, so a
 store fact may state its value in source form. Loop segments use
 `CIL.Safety.LoopAutomation` and still require an invariant and a decreasing measure.
+Contract stepping also handles signed and unsigned widening in either argument order;
+the [consumer stepping regressions](docs/PROOFS.md#consumer-stepping-regressions)
+cover all eight wrapper combinations under a fixed heartbeat budget.
 
 `CodeAt` facts let the tactics resolve instructions within a known code segment without
 expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
 tracks numeric local stores and updated snapshots, including mixed Vector128, Vector256
 and int32 locals. Supported forwarder bodies can inherit a
-callee's proved contract, and embedding proofs can ignore trailing unread byref or
-pointer locals. Contract refinement derives a public interface from a stronger proved
+callee's proved contract, and embedding proofs can ignore trailing unread byref,
+pointer or span locals. Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
 
 `cil_embed [facts]` binds a shared body template to an extraction using proved feature
 flag and callee equalities. Local definitions also work without a fact list; relevant
 flags left unconstrained are rejected, and the kernel checks the complete instruction map.
+
+`leancil verify --force-full-verify` independently checks supported imported
+libraries against their pinned implementation DLLs and source bundles. Closed
+libraries may read immutable RVA static tables: checked composition preserves
+their assembly-scoped identities and shared-table descriptors. Static-world
+requirements remain explicit contract preconditions; static-constructor and
+static-value assumptions are not supported in this mode. See
+[independent verification](docs/FULL_VERIFICATION.md) for the trust boundary and
+required producer evidence.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter

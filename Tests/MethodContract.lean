@@ -299,7 +299,8 @@ theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.
 -- A parameter-selected widening is fetched as `if true = true then ..` and must step by its
 -- equation; re-elaborating a tactic at every contract step exceeds the budget.
 def widenBody (signed : Bool) : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.arg 0, if signed then .convI8 else .convU8, .arg 1, .ret] }
+  { returnsValue := true, locals := [], code :=
+      [.arg 0, if signed then .convI8 else .convU8, .arg 1, .pop, .pop, .const32 0, .ret] }
 
 def widenArgs (scalarFirst : Bool) (input : Reference) (value : CIL.Value) : List Value :=
   if scalarFirst then [.scalar value, .reference (.address input)] else [.reference (.address input), .scalar value]
@@ -365,5 +366,54 @@ theorem feature_op_contract_steps (program : CIL.Program) (index : Nat) (profile
   exact ⟨rfl, rfl⟩
 
 #print axioms feature_op_contract_steps
+
+/-- A wrapper can load either argument first and widen either the first or second stack value. -/
+def orderedWidenBody (signed scalarFirst reversed : Bool) : CIL.Method :=
+  let first := if reversed then 1 else 0
+  let second := if reversed then 0 else 1
+  let convert := if signed then CIL.Op.convI8 else CIL.Op.convU8
+  { returnsValue := true, locals := [], code :=
+      (if scalarFirst then [.arg first, convert, .arg second]
+       else [.arg first, .arg second, convert]) ++ [.pop, .pop, .const32 0, .ret] }
+
+set_option maxHeartbeats 12000 in
+/-- All eight wrapper cases use one three-step proof without unfolding the evaluator. -/
+theorem ordered_widening (signed scalarFirst reversed : Bool) (program : CIL.Program) (index : Nat)
+    (found : program[index]? = some (orderedWidenBody signed scalarFirst reversed))
+    (frame : Frame) (memory : Memory) (input : Reference) (word : CIL.W32)
+    (formed : form memory input = .ok input) (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned,
+      run program fuel index 3 (widenArgs (scalarFirst != reversed) input (.i32 word)) frame
+        (widenArgs scalarFirst input
+          (.i64 (if signed then word.signExtend 64 else word.zeroExtend 64))).reverse memory =
+          .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 0
+      (widenArgs (scalarFirst != reversed) input (.i32 word)) frame [] memory =
+        .ok (final, returned) ∧ post final returned := by
+  cases signed <;> cases scalarFirst <;> cases reversed
+  all_goals
+    cil_contract_steps 3 [found, formed, widenArgs]
+    simpa only [widenArgs, Bool.false_eq_true, ite_true, ite_false,
+      List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append] using continuation
+
+#print axioms ordered_widening
+
+/-- The wrapper has a successful continuation for every ordering and every input word. -/
+theorem ordered_widening_returns (signed scalarFirst reversed : Bool)
+    (program : CIL.Program) (index : Nat)
+    (found : program[index]? = some (orderedWidenBody signed scalarFirst reversed))
+    (frame : Frame) (memory : Memory) (input : Reference) (word : CIL.W32)
+    (formed : form memory input = .ok input) :
+    ∃ fuel final returned, run program fuel index 0
+      (widenArgs (scalarFirst != reversed) input (.i32 word)) frame [] memory =
+        .ok (final, returned) ∧ final = leaveFrame frame memory ∧
+        returned = [.scalar (.i32 0)] := by
+  apply ordered_widening signed scalarFirst reversed program index found frame memory input word formed
+  cases scalarFirst <;> cases signed <;> cases reversed
+  all_goals
+    cil_contract_steps [found, formed, widenArgs, orderedWidenBody]
+    exact ⟨rfl, rfl⟩
+
+#print axioms ordered_widening_returns
 
 end Tests.MethodContract

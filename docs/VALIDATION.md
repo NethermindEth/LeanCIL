@@ -260,8 +260,10 @@ It composes adjacent placements and splits them back with `cons_iff`, `take` and
 `exists_eq_append` needs by placing the empty segment past the end of a body.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
-bodies with mapped program counters, and with trailing dead reference locals dropped,
-beside kept opaque vector locals too. It rejects numeric dead locals, in the kernel and
+bodies with mapped program counters, and with trailing dead reference and span locals dropped,
+beside kept opaque vector locals too. It checks empty and unmodeled span slots, both mutabilities
+and every supported width, and rejects unsupported widths and scalar span initializers.
+It rejects numeric dead locals, in the kernel and
 in the tactic, and non-trailing ones, and still reports a changed live instruction
 under dead locals; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
@@ -397,6 +399,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
+| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof |
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
@@ -410,9 +413,10 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, transitive, discovery, typed and derived suites cannot enter that plan.
-The registry now has 18 leaves. `exportsstatics`, `exportstransitive`, `exportstyped` and `exportsderived` run
-directly, with no core export bootstrap or nested post-call. Their fixture assertions are
+statics, fullstatics, transitive, discovery, typed and derived suites cannot enter that plan.
+The registry now has 19 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+`exportstyped` and `exportsderived` run directly, with no core export bootstrap or nested post-call.
+Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after
