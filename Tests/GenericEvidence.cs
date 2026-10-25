@@ -7,9 +7,12 @@ using System.Text;
 using System.Text.Json;
 using Nethermind.LeanCIL;
 
+if (args is not ([] or ["--external-identities"]))
+    throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities]");
 var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
 CheckExternalIdentities();
+if (args.Length != 0) return;
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var samples = new[]
@@ -100,6 +103,14 @@ void CheckExternalIdentities()
     evidence.Emit(lean);
     if (lean.ToString() != baseline)
         throw new InvalidOperationException("Repeated identity emission duplicated declarations.");
+    // Literal equality is an independent encoding oracle, not part of the generated certificate.
+    foreach (var (identity, index) in identities.Select((identity, index) => (identity, index)))
+    {
+        lean.AppendLine($"theorem exactIdentity{index} : externalIdentity{index} = " +
+            $"{JsonSerializer.Serialize(identity)} := by rfl");
+        lean.AppendLine($"#print axioms exactIdentity{index}");
+    }
+    baseline = lean.ToString();
     var path = Path.Combine(output, "ExactExternalIdentities.lean");
     File.WriteAllText(path, baseline);
     Run(["lake", "env", "lean", path]);
@@ -114,8 +125,10 @@ void CheckExternalIdentities()
         var rejectedPath = Path.Combine(output, "Identity-" + name + ".lean");
         File.WriteAllText(rejectedPath, source);
         var result = Execute(["lake", "env", "lean", rejectedPath]);
-        if (result.Code == 0 || !result.Output.Contains("rfl", StringComparison.Ordinal))
-            throw new InvalidOperationException("Exact byte equality did not reject " + name + "\n" + result.Output);
+        if (result.Code == 0 || !result.Output.Contains("error:", StringComparison.Ordinal) ||
+            !(result.Output.Contains("rfl", StringComparison.Ordinal) ||
+                result.Output.Contains("Type mismatch", StringComparison.Ordinal)))
+            throw new InvalidOperationException("Identity encoding checks did not reject " + name + "\n" + result.Output);
     }
     Console.WriteLine("PASS exact external identities: deduplication, unreachable calls, Unicode and mutations");
 }
