@@ -134,10 +134,11 @@ def MethodEmbeds (program : Program) (index : Nat) (expected : Method) : Prop :=
 def Method.withLocalsOf (actual expected : Method) : Method :=
   { actual with locals := expected.locals, localKinds := expected.localKinds }
 
-/-- True for a local that frame entry creates without allocating memory: a managed
-    reference initialized to null or left unmodeled. -/
+/-- True for a local that frame entry creates without allocating memory: a reference or
+    supported span initialized to its empty value or left unmodeled. -/
 def rootLocal : LocalKind → Value → Bool
   | .reference, .nullRef | .reference, .unmodeled => true
+  | .span width _, .nullRef | .span width _, .unmodeled => [1, 2, 4, 8].contains width
   | _, _ => false
 
 /-- True when `kinds` and `initials` describe the same number of locals, each a root local. -/

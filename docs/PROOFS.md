@@ -136,6 +136,32 @@ quantified over every feature, is normalized to that form. Elsewhere, including
 the field or first run
 `simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h`.
 
+### Consumer stepping regressions
+
+The consumer failures reported in #252 are covered by the following proofs. These
+use the public tactics with symbolic values and memory; they do not replace the
+checked interpreter with consumer-specific execution rules.
+
+| Case | Regression |
+| --- | --- |
+| Supplied store/load facts take priority over generic equations | `Tests.Automation.step_facts_first`, `applied_step_facts_first` |
+| Zero, nonzero and literal branch conditions | `Tests.Automation.branch_from_zero`, `branch_from_nonzero`, `literal_branch` |
+| Memory operations use their own equations | `Tests.Automation.asRef_fact_stack`, `load128_fact_stack`, `add_fact_stack` |
+| Profile facts decide instruction lookup | `Tests.Automation.feature_op_checked`, `Tests.MethodContract.feature_op_contract_steps` |
+| Intrinsic evaluation facts normalize the next stack | `Tests.Automation.evaluated_then_stored`, `evaluated_by_applied_hypothesis` |
+| Signed, unsigned and loaded-limb comparisons | `Tests.MethodContract.loaded_signed_branch`, `loaded_unsigned_branch`, `loaded_limb_branch` |
+| Signed/unsigned widening and both argument orders | `Tests.MethodContract.ordered_widening` |
+
+Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all
+eight combinations of signed conversion, scalar position and reversed arguments
+in 12,000 heartbeats, using one `cil_contract_steps 3` invocation per case. Its
+arbitrary continuation preserves the actual widened stack and memory, rather than
+merely checking that some execution exists. These budgets detect elaboration
+regressions independently of machine speed; they are not wall-clock benchmarks.
+`ordered_widening_returns` composes that prefix with a concrete suffix which
+discards both operands and returns zero, proving that the continuation premise is
+satisfiable for every case. The widened value is checked by the prefix theorem.
+
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
 by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
 hypothesis such as `found : program[index]? = some (body profile)`, or by
@@ -973,6 +999,22 @@ example {fuel : Nat} {args : List CIL.Safety.Value} {m : CIL.Safety.Memory} {r :
     CIL.Safety.invoke Extracted.program fuel 2 args m = .ok r := bound.invoke h
 ```
 
+An expected body can be a shared template with local flag and callee parameters.
+Use `cil_embed [sse, avx, called]` when those hypotheses equate the parameters to
+the extraction's concrete flags and callee indices. The tactic rewrites only the
+supplied facts before alignment and unfolds local definitions; it does not infer
+flag equalities from the extracted code. Relevant parameters that remain open are
+rejected. The rewrite proof and the complete instruction map are kernel checked,
+including branch targets and callee indices. The no-argument form still handles
+closed bodies directly.
+
+`Tests/ProfileEmbedding.lean` binds one template and one open theorem to three valid
+profiles, including shifted branch targets, without restating the template body for
+each profile. It also rejects unresolved flags, incorrect flag and callee values,
+and a changed branch target. An irrelevant open argument may be removed by supplying
+the definition that ignores it in the fact list; this is justified by reduction,
+not an assumption about that argument's value.
+
 `bound.certificate` transports an `InvocationCertificate` and
 `bound.descriptors` the program's static descriptor list; `ProgramRefines.set`
 composes several bound methods. Named exceptions transfer too:
@@ -1002,8 +1044,9 @@ caller across an inserted dead block, with the relocated throw pc.
 
 An extraction can also declare locals the literal body never uses. Only one
 shape is covered: dead locals that trail the body's own locals and are
-references initialized to null or left unmodeled, which the extractor emits for
-byref and pointer locals. For those, `cil_embed` proves
+references or spans initialized to their empty value or left unmodeled. These cover
+byref, pointer, `Span<T>` and `ReadOnlySpan<T>` locals; spans require an element width
+of 1, 2, 4 or 8 bytes. For those, `cil_embed` proves
 `MethodEmbedsDeadLocals` instead, and the same proof covers extractions with and
 without them (from `CIL.Safety.Embedding.DeadLocals`):
 
@@ -1019,9 +1062,21 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 `.raises`, `.method_holds` and `.holds` transfer as for `MethodEmbeds`. A
 numeric dead local, such as a flag only one architecture's path reads, is still
 rejected: its home would shift every later allocation identity, and runs over
-renamed identities are not related yet. A dead span local allocates nothing
-either but is not covered yet, and a dead local before a kept one is rejected,
-since it renumbers the kept local.
+renamed identities are not related yet. A dead local before a kept one is rejected,
+since it renumbers the kept local. Span slots retain their width, mutability and empty
+or unmodeled state; padding does not create or change any allocation.
+
+For numeric or interspersed dead locals, keep the extracted declarations and original
+local indices in the expected body and use ordinary `MethodEmbeds`. Unreachable code
+can still be omitted or marked `.unsupported`; declaring an unused numeric local
+continues to allocate its home. This preserves the identities of later parent and
+callee allocations and allows exact-memory contract transport. The int256 multiply
+fixture follows this route: its scalar body retains all 22 word64 and four vector256
+homes used across its architecture-specific paths. See
+[Tests/RetainedNumericLocals.lean](../Tests/RetainedNumericLocals.lean) for a smaller
+example with dead numeric locals on both sides of a live reference local and an
+allocating child call. Removing those declarations is a different simulation problem;
+equal scalar results alone do not imply equal final memory.
 
 ### Instruction equations for parametric bodies
 
