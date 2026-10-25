@@ -2,6 +2,14 @@
 
 For checked-step and loop tactics, see [proof automation](#proof-automation).
 
+`Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer
+element types against runtime results and certified checked execution. It also covers length,
+helper calls, aliases, returned arrays, named null/bounds faults and unsupported array forms.
+Independent changes to load width or signedness must fail the Lean scalar certificate.
+`Tests/PrimitiveArrays.lean` covers empty and null arrays, signed and native indices,
+initialization, authority, invalid extents, local storage and neighboring-byte preservation.
+Both run in the evidence suite.
+
 `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
 covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
 initialization and copies. It rejects missing initialization assumptions, mutable fields,

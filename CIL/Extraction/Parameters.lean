@@ -18,6 +18,7 @@ inductive StorageType where
   | field (type : FieldType)
   | reference | vector128 | vector256 | vector512
   | span (width : Nat) (writable : Bool)
+  | array (element : ArrayElement)
   deriving DecidableEq, Repr
 
 /-- One entry per original instruction, including instructions pruned by the profile. -/
@@ -40,6 +41,7 @@ structure RawArguments where
     struct takes its computed size, which must be below 2^64. -/
 def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalKind
   | .reference => some .reference
+  | .array element => some (.array element)
   | .span width writable =>
     if width ∈ [1, 2, 4, 8] then some (.span width writable) else none
   | .vector128 => some .vector128
@@ -106,7 +108,7 @@ def validateArgumentOpIn (raw : RawArguments) (homes : List Nat)
       | _ => return false).getD false
   | .address index => (do
       let type ← raw.arguments[index]?
-      if type == StorageType.reference then return false
+      if type == StorageType.reference || (match type with | .array _ => true | _ => false) then return false
       let slot ← homeSlot raw homes index
       match emitted with
       | .localAddr actual => return actual == slot

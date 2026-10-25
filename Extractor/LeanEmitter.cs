@@ -23,6 +23,7 @@ internal static class LeanEmitter
     internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar")
     {
         if (type is ByReferenceType or PointerType) return ".reference";
+        if (Arrays.Of(type) is { } element) return $".array .{element.Lean}";
         if (Spans.Width(type) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (MetadataValidation.IsAggregate(type, module)) return $".aggregate {MetadataValidation.Layout(type, module, architecture)}";
@@ -48,7 +49,8 @@ internal static class LeanEmitter
     {
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
         string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
-        string kind when kind.StartsWith(".span ", StringComparison.Ordinal) => ".nullRef",
+        string kind when kind.StartsWith(".span ", StringComparison.Ordinal) ||
+            kind.StartsWith(".array ", StringComparison.Ordinal) => ".nullRef",
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module, architecture)} 0)"
     };

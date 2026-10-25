@@ -40,7 +40,7 @@ def specializationTable (evidence : List MethodEvidence) : List SpecializedMetho
 
 /-- The zero value of each local kind, used when the method zero-initializes its locals. -/
 private def initialLocal : LocalKind → Value
-  | .reference | .span .. => .nullRef
+  | .reference | .span .. | .array _ => .nullRef
   | .byte => .i8 0
   | .narrow _ | .word32 => .i32 0
   | .word64 => .i64 0

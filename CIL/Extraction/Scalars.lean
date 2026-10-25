@@ -19,6 +19,7 @@ namespace CIL.Extraction
 /-- The evaluation-stack kind of a value, as far as scalar encodings care. -/
 inductive ScalarKind where
   | word32 | word64 | native | reference | nullObject | other
+  | array (element : ArrayElement)
   deriving DecidableEq, Repr
 
 /-- The claimed stack kinds (top first) at each raw pc; `none` where the pc is unreachable. -/
@@ -30,6 +31,7 @@ def scalarType : TypeExpr → ScalarKind
   | .enum _ underlying => scalarType underlying
   | .pointer .void => .other
   | .byref _ | .pointer _ => .reference
+  | .array element => (arrayElementType element).map ScalarKind.array |>.getD .other
   | .atom scope name =>
     if scope != runtimeScope then .other
     else if name ∈ ["System.IntPtr", "System.UIntPtr"] then .native
@@ -43,7 +45,8 @@ private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .n
 /-- A value of kind `value` may be stored in a slot of kind `home`; `word64` and `native`
     share one representation on the admitted 64-bit targets. -/
 private def storageCompatible (value home : ScalarKind) : Bool :=
-  value == home || value ∈ [.word64, .native] && home ∈ [.word64, .native]
+  value == home || (value == .nullObject && (match home with | .array _ => true | _ => false)) ||
+    value ∈ [.word64, .native] && home ∈ [.word64, .native]
 
 /-- Two-operand arithmetic: `add` through `xor`, the overflow-checked forms, and `ceq`
     through `clt.un`. Shifts are handled separately. -/
@@ -69,10 +72,72 @@ private def compareBranch (opcode : Nat) : Bool :=
 private def unsignedBranch (opcode : Nat) : Bool :=
   (51 <= opcode && opcode <= 55) || (64 <= opcode && opcode <= 68)
 
+/-- Raw array opcodes in the supported integer subset; element-address operations are separate. -/
+private def arrayCovered (opcode : Nat) : Bool :=
+  opcode == 142 || (144 ≤ opcode && opcode ≤ 151) ||
+    (155 ≤ opcode && opcode ≤ 159) || opcode ∈ [163, 164]
+
+/-- Null is a permitted array operand, but arbitrary opaque/reference values are not. -/
+private def arrayOperand : ScalarKind → Option (Option ArrayElement)
+  | .array element => some (some element)
+  | .nullObject => some none
+  | _ => none
+
+/-- Exact array instruction and stack transition, including primitive tokens and element types. -/
+private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
+    Option (MemoryOp × List ScalarKind) := do
+  let opcode := instruction.opcode
+  if opcode == 142 then
+    let array :: tail := stack | none
+    let _ ← arrayOperand array
+    if instruction.operand == .none then return (.arrayLength, .native :: tail) else none
+  let store := (155 ≤ opcode && opcode ≤ 159) || opcode == 164
+  let (value, input) := if store then (stack.head?, stack.drop 1) else (none, stack)
+  let index :: array :: tail := input | none
+  if index ∉ [.word32, .native] then none else pure ()
+  let element ← arrayOperand array
+  let (width, signed, native) : Nat × Bool × Bool ←
+    if opcode ∈ [163, 164] then do
+      let .type token := instruction.operand | none
+      let expected ← arrayElementType token
+      if element.isSome && element != some expected then none else
+        pure (expected.width, expected ∈ [.signed8, .signed16], expected.native)
+    else do
+      if instruction.operand != .none then none else pure ()
+      let (width, signed, native) ← match opcode with
+        | 144 => some (1, true, false) | 145 => some (1, false, false)
+        | 146 => some (2, true, false) | 147 => some (2, false, false)
+        | 148 | 149 => some (4, false, false)
+        | 150 => some (8, false, false) | 151 | 155 => some (8, false, true)
+        | 156 => some (1, false, false) | 157 => some (2, false, false)
+        | 158 => some (4, false, false) | 159 => some (8, false, false)
+        | _ => none
+      if let some actual := element then
+        if actual.width != width || actual.native != native then none else pure ()
+      pure (width, signed, native)
+  let kind := if native then ScalarKind.native else if width == 8 then .word64 else .word32
+  if store then
+    if value == some kind then return (.arrayStore width, tail) else none
+  else return (.arrayLoad width signed, kind :: tail)
+
+/-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
+private def arrayEmission : Op → Bool
+  | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _) => true
+  | _ => false
+
+/-- The emitted array operation agrees exactly with its independently decoded raw opcode. -/
+private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind)
+    (emitted : Op) : Bool :=
+  match arrayStep instruction stack, emitted with
+  | some (.arrayLength, _), .memory .arrayLength => true
+  | some (.arrayLoad width signed, _), .memory (.arrayLoad actual polarity) =>
+    width == actual && signed == polarity
+  | some (.arrayStore width, _), .memory (.arrayStore actual) => width == actual
+  | _, _ => false
 /-- Opcodes whose emitted encoding the scalar check fixes: integer constants, arithmetic,
     shifts, `neg`, `not`, conversions and compare-branches. -/
 def scalarCovered (opcode : Nat) : Bool :=
-  (21 <= opcode && opcode <= 33) || scalarBinary opcode || conversion opcode ||
+  arrayCovered opcode || (21 <= opcode && opcode <= 33) || scalarBinary opcode || conversion opcode ||
     compareBranch opcode || opcode ∈ [20, 44, 45, 57, 58, 98, 99, 100, 101, 102]
 
 /-- The emitted operation each covered non-branch opcode must produce. -/
@@ -150,7 +215,8 @@ private def literal (instruction : RawInstruction) : Option Op :=
 /-- A covered opcode emits exactly the encoding its operand kinds imply. -/
 def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Op) :
     Bool :=
-  if instruction.opcode == 20 then
+  if arrayCovered instruction.opcode || arrayEmission emitted then arrayMatches instruction stack emitted
+  else if instruction.opcode == 20 then
     instruction.operand == .none && match emitted with | .memory .nullRef => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
     match instruction.operand, stack, emitted with
@@ -239,7 +305,8 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     (bound by the feature check) or a size constant may emit a scalar operation. -/
 def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
-  if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
+  if arrayEmission emitted then arrayMatches instruction stack emitted
+  else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
@@ -297,6 +364,7 @@ private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   -- `&` and `*`.
   | .byref element => (· ++ [38]) <$> scalarTypeBytes element
   | .pointer element => (· ++ [42]) <$> scalarTypeBytes element
+  | .array element => (· ++ [91, 93]) <$> scalarTypeBytes element
   -- `Name<A>`, or `Name<A,B>` when the constructor already ends in `>`.
   | .apply constructor argument => do
     let name ← scalarTypeBytes constructor
@@ -472,6 +540,7 @@ private def pushedKind (raw : RawMethod) (instruction : RawInstruction) : Option
 def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     (stack : List ScalarKind) (role : Option FoldRole := none) : Option (List ScalarKind) := do
   let opcode := instruction.opcode
+  if arrayCovered opcode then return (← arrayStep instruction stack).2
   if opcode == 20 then
     if instruction.operand == .none then return .nullObject :: stack else none
   if opcode ∈ [44, 45, 57, 58] then
@@ -530,7 +599,9 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         stack.map (fun kind => if kind == .nullObject then .other else kind)
       else stack
     let pops := expected.length
-    if !callParametersMatch site || pops > stack.length || inputs.take pops != expected ||
+    if !callParametersMatch site || pops > stack.length || !((inputs.take pops).zip expected).all (fun (value, home) =>
+        value == home || (value == .nullObject &&
+          (match home with | .array _ => true | _ => false))) ||
         site.returnsValue != (site.returnType != .void) then none else
       return (if opcode == 115 then [ScalarKind.other]
         else if site.returnsValue then [callResult site] else []) ++ stack.drop pops
