@@ -139,6 +139,7 @@ Test("independent export cohort map preserves 18 leaves, 46 base cases and one d
         ["exportsmutationsource"] = ("consumer-source", ["full.consumer-source"]),
         ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"]),
         ["exportsstatics"] = ("statics", []),
+        ["exportsfullstatics"] = ("fullstatics", []),
         ["exportstransitive"] = ("transitive", []),
         ["exportsdiscovery"] = ("discovery", ["discovery.fixture"]),
         ["exportstyped"] = ("typed", []),
@@ -153,14 +154,14 @@ Test("independent export cohort map preserves 18 leaves, 46 base cases and one d
         {
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
-            bool standalone = entry.Cohort is "statics" or "transitive" or "typed" or "derived";
+            var standalone = entry.Cohort is "statics" or "fullstatics" or "transitive" or "typed" or "derived";
             Require(entry.Standalone == standalone, "Wrong standalone fixture kind: " + entry.Name);
             Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
                 "Wrong bootstrapped child fixture: " + entry.Name);
             string script = entry.Cohort switch
             {
                 "resolution" => "Tests/FullModuleResolution.cs",
-                "statics" => "Tests/ModularStaticExports.cs",
+                "statics" or "fullstatics" => "Tests/ModularStaticExports.cs",
                 "transitive" => "Tests/TransitiveImports.cs",
                 "typed" => "Tests/GenericLayoutImports.cs",
                 "derived" => "Tests/DerivedContractExports.cs",
@@ -168,8 +169,13 @@ Test("independent export cohort map preserves 18 leaves, 46 base cases and one d
             };
             Require(entry.Script == script,
                 "Wrong fixture: " + entry.Name);
-            bool takesNoArguments = entry.Cohort is "resolution" || standalone;
-            Equal(entry.Arguments, takesNoArguments ? [] : ["--cohort", entry.Cohort]);
+            string[] arguments = entry.Cohort switch
+            {
+                "fullstatics" => ["--full-composition"],
+                "resolution" => [],
+                _ => standalone ? [] : ["--cohort", entry.Cohort]
+            };
+            Equal(entry.Arguments, arguments);
         }
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
@@ -208,11 +214,11 @@ Test("export coverage detects each omitted completion and invalid selection", ()
         "Default standalone must aggregate leaves");
     foreach (string[] invalid in new string[][] {
         ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"],
-        ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "transitive"], ["--cohort", "typed"],
-        ["--cohort", "derived"] })
+        ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "fullstatics"], ["--cohort", "transitive"],
+        ["--cohort", "typed"], ["--cohort", "derived"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     string[] nonFullCohorts =
-        ["core", "audit", "resolution", "statics", "transitive", "discovery", "typed", "derived", "unknown"];
+        ["core", "audit", "resolution", "statics", "fullstatics", "transitive", "discovery", "typed", "derived", "unknown"];
     foreach (string cohort in nonFullCohorts)
     {
         Require(!ExportVerificationSuites.IsFull(cohort),
@@ -260,7 +266,8 @@ Test("export leaf selection, strict files and shared inputs", () =>
     foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
         Require(Selects("Tests/FullImportVerification.cs", entry.Name), "Full change lost " + entry.Name);
     Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
-    Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]), ["exportsstatics"]);
+    Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
+        ["exportsfullstatics", "exportsstatics"]);
     Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
     Equal(VerificationSelection.Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
     Equal(VerificationSelection.Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);

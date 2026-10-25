@@ -159,6 +159,16 @@ private def collision : Library :=
 example : linkChecked [appBody] [collision] =
     .error "Static identity collision 101: App::App::Table and Lib::Lib::Table" := rfl
 
+-- Two imported readers of one table link only when both carry its exact descriptor.
+private def changedTable : Library :=
+  { entry := { libBody with staticSites := [(0, { libField with bytes := numberBytes 18 8 })] } }
+
+example : linkChecked [appBody] [library, library] = .ok (link [appBody] [library, library]) :=
+  linkChecked_of_compatible (by decide +kernel)
+
+example : linkChecked [appBody] [library, changedTable] =
+    .error "Static identity collision 202: Lib::Lib::Table and Lib::Lib::Table" := rfl
+
 #print axioms readTable_holds
 #print axioms readTableRepeat_holds
 #print axioms linked_readTable_holds

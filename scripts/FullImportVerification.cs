@@ -6,7 +6,7 @@ using Nethermind.LeanCIL;
 partial class Program
 {
     sealed record FullLibrary(int Slot, string Module, string ExpectedModule, string BundleDigest,
-        string Contract, string Kind, string TransferSource, string GeneratedSource);
+        string Contract, string Kind, string TransferSource, string GeneratedSource, StaticIdentityRecord[] Statics);
     sealed record FullSelection(JsonElement Binding, string Sidecar, string SidecarSha256, string Implementation,
         string ImplementationSha256, ContractInterface Contract, string Bundle, string Digest,
         ContractBundleManifest Inventory);
@@ -15,7 +15,7 @@ partial class Program
         public int Slot => BindingSlot(Selection.Binding);
     }
     sealed record FullSlot(FullImport Import, string Author, string Artifact, string Generated, string GeneratedSha256,
-        ContractExportRequest Request);
+        ContractExportRequest Request, StaticIdentityRecord[] Statics);
 
     const string FullCompositionModule = "LeanCILFullComposition";
     const string FullCompositionTheorem = FullCompositionModule + ".certified";
@@ -183,6 +183,9 @@ partial class Program
             RequireCallerUnchanged();
         }
         libraries.Sort((left, right) => left.Slot.CompareTo(right.Slot));
+        // Names a colliding pair before the kernel decides compatibility of the whole linked program.
+        StaticIdentity.Validate(StaticIdentitySet(ExtractionIdentity.Read(output).Root)
+            .Concat(libraries.SelectMany(library => library.Statics)));
         string compositionDirectory = Path.Combine(workspace, "composition");
         Directory.CreateDirectory(compositionDirectory);
         // First: leanchecker names each olean by the first root containing it.
@@ -365,7 +368,7 @@ partial class Program
             int slotIndex = slot.Import.Slot;
             return new FullLibrary(slotIndex, FullLibraryPrefix + slotIndex, FullExpectedPrefix + slotIndex,
                 selection.Digest, slot.Import.Export.ContractConstant, slot.Import.Export.Kind, transfers[index]!,
-                slot.Generated);
+                slot.Generated, slot.Statics);
         }).ToArray();
     }
 
@@ -434,16 +437,33 @@ partial class Program
         byte[] generated = File.ReadAllBytes(Path.Combine(artifact, "Extracted.lean"));
         JsonElement regenerated =
             JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
-        foreach (string property in new[] { "initializedTypes", "staticValues", "staticIdentities" })
+        foreach (string property in new[] { "initializedTypes", "staticValues" })
             if (regenerated.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
                 throw new InvalidDataException(
-                    "Full verification version 1 rejects static or initialization state: " + property);
+                    "Full verification rejects static-value and initialization assumptions: " + property);
+        // The fresh extraction decides the reachable RVA tables; every pinned record must name exactly them.
+        StaticIdentityRecord[] statics = StaticIdentitySet(regenerated);
+        StaticIdentity.Validate(statics);
+        bool staticsBound = statics.All(item => item.AssemblyIdentity == contract.AssemblyIdentity) &&
+            statics.SequenceEqual(StaticIdentitySet(import.Selection.Binding)) &&
+            statics.SequenceEqual(StaticIdentitySet(bundledIdentity)) &&
+            statics.SequenceEqual(certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal));
+        if (!staticsBound)
+            throw new InvalidDataException(
+                "Full-verification static identities differ from the current implementation: " + export.Identity);
         VerificationSettings settings =
             new(1, Path.GetRelativePath(artifact, proof), author, Path.GetRelativePath(artifact, consumer));
         File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(settings, Json));
         return new(import, author, artifact, Encoding.UTF8.GetString(generated), ContractInterface.Hash(generated),
-            new(entry, artifact, export.ContractConstant, author, export.TypeArguments));
+            new(entry, artifact, export.ContractConstant, author, export.TypeArguments), statics);
     }
+
+    // A record's scoped static identities in identity order; a missing list is malformed, not empty.
+    static StaticIdentityRecord[] StaticIdentitySet(JsonElement record) =>
+        (record.TryGetProperty("staticIdentities", out JsonElement statics)
+            ? statics.Deserialize<StaticIdentityRecord[]>(ContractInterface.Json) : null)?
+            .OrderBy(item => item.Identity, StringComparer.Ordinal).ToArray()
+        ?? throw new InvalidDataException("Full-verification record lacks its static identities.");
 
     ConsumerDependency StageFullConsumer(string bundle, ContractBundleManifest inventory, string consumer,
         string digest, InterfaceModule[] interfaces)
