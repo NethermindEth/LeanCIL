@@ -592,7 +592,7 @@ foreach ((Action<MethodDefinition> Mutation, string Diagnostic) test in new (Act
 }
 foreach ((OpCode opcode, string diagnostic) in new[]
 {
-    (OpCodes.Callvirt, "Unsupported stack effect:"),
+    (OpCodes.Callvirt, "callvirt requires an adjacent concrete constrained receiver"),
     (OpCodes.Newobj, "support call only"),
     (OpCodes.Ldftn, "support call only")
 })

@@ -22,20 +22,21 @@ structure Memory.Equivalent (left right : Memory) : Prop where
     permitted left writing reference = permitted right writing reference
   nextIdentity : left.nextIdentity = right.nextIdentity
   staticBindings : left.staticBindings = right.staticBindings
+  stackLimit : left.stackLimit = right.stackLimit
 
 theorem Memory.Equivalent.refl (m : Memory) : m.Equivalent m :=
-  ⟨rfl, rfl, fun _ _ => rfl, rfl, rfl⟩
+  ⟨rfl, rfl, fun _ _ => rfl, rfl, rfl, rfl⟩
 
 theorem Memory.Equivalent.symm {m n : Memory} (same : m.Equivalent n) : n.Equivalent m :=
   ⟨same.allocations.symm, same.cells.symm, fun w r => (same.permissions w r).symm,
-    same.nextIdentity.symm, same.staticBindings.symm⟩
+    same.nextIdentity.symm, same.staticBindings.symm, same.stackLimit.symm⟩
 
 theorem Memory.Equivalent.trans {m n p : Memory} (first : m.Equivalent n)
     (second : n.Equivalent p) : m.Equivalent p :=
   ⟨first.allocations.trans second.allocations, first.cells.trans second.cells,
     fun w r => (first.permissions w r).trans (second.permissions w r),
     first.nextIdentity.trans second.nextIdentity,
-    first.staticBindings.trans second.staticBindings⟩
+    first.staticBindings.trans second.staticBindings, first.stackLimit.trans second.stackLimit⟩
 
 /-- Errors, including their exact payloads, must coincide. -/
 inductive ResultEquivalent (relation : α → β → Prop) : Except ε α → Except ε β → Prop where
@@ -106,7 +107,7 @@ theorem Memory.Equivalent.dereference {m n : Memory} (same : m.Equivalent n)
 theorem Memory.Equivalent.prependView {m n : Memory} (same : m.Equivalent n) (view : View) :
     Memory.Equivalent { m with views := view :: m.views }
       { n with views := view :: n.views } := by
-  refine ⟨same.allocations, same.cells, ?_, same.nextIdentity, same.staticBindings⟩
+  refine ⟨same.allocations, same.cells, ?_, same.nextIdentity, same.staticBindings, same.stackLimit⟩
   intro writing reference
   simp only [permitted, List.any_cons]
   exact congrArg (fun rest => (viewContains view reference &&
@@ -115,7 +116,7 @@ theorem Memory.Equivalent.prependView {m n : Memory} (same : m.Equivalent n) (vi
 
 theorem Memory.Equivalent.expire {m n : Memory} (same : m.Equivalent n) (id : AllocationId) :
     Memory.Equivalent (CIL.Safety.expire m id) (CIL.Safety.expire n id) := by
-  refine ⟨?_, same.cells, same.permissions, same.nextIdentity, same.staticBindings⟩
+  refine ⟨?_, same.cells, same.permissions, same.nextIdentity, same.staticBindings, same.stackLimit⟩
   simp only [CIL.Safety.expire, same.allocations]
 
 theorem Memory.Equivalent.write {m n : Memory} (same : m.Equivalent n)
@@ -129,7 +130,7 @@ theorem Memory.Equivalent.write {m n : Memory} (same : m.Equivalent n)
   | ok value =>
     cases value
     apply ResultEquivalent.ok
-    refine ⟨same.allocations, ?_, ?_, same.nextIdentity, same.staticBindings⟩
+    refine ⟨same.allocations, ?_, ?_, same.nextIdentity, same.staticBindings, same.stackLimit⟩
     · simp only [same.cells]
     · intro writing reference
       change permitted { m with views := writeViews m r bytes.length } writing reference =
@@ -155,7 +156,7 @@ theorem Memory.Equivalent.allocate {m n : Memory} (same : m.Equivalent n) (a : A
   · split
     · exact .error _
     · apply ResultEquivalent.ok
-      refine ⟨rfl, ?_, ?_, same.permissions, rfl, same.staticBindings⟩
+      refine ⟨rfl, ?_, ?_, same.permissions, rfl, same.staticBindings, same.stackLimit⟩
       · rfl
       · simp only [same.cells]
 
@@ -189,7 +190,7 @@ theorem write_equivalent_alwaysPrepend (m : Memory) (r : Reference)
   | ok value =>
     cases value
     apply ResultEquivalent.ok
-    refine ⟨rfl, rfl, ?_, rfl, rfl⟩
+    refine ⟨rfl, rfl, ?_, rfl, rfl, rfl⟩
     intro writing reference
     exact writeViews_permitted m r bytes.length writing reference
 

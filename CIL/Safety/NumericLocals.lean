@@ -25,6 +25,8 @@ theorem make_numeric_local (memory : Memory) (activation : Nat)
     cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have modeled : value ≠ .unmodeled := by
     cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+  have notSpan : ∀ width writable, kind ≠ .span width writable := by
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have bounded : localWidth kind < nativeLimit := by
     cases kind <;> simp only [localWidth, nativeLimit] <;>
       first | exact CIL.NarrowKind.width_lt _ | simp
@@ -35,7 +37,7 @@ theorem make_numeric_local (memory : Memory) (activation : Nat)
     store_numeric_local kind value number fits ready.access
   have created : makeLocal activation kind value memory =
       .ok (.bytes kind reference, [reference.allocation], result) := by
-    cases kind <;> simp_all [makeLocal, home, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
   exact ⟨reference, result, created, readback, (ready.after_write written).access,
     makeLocal_preserves_caller_memory _ _ _ _ _ _ _ created⟩
 

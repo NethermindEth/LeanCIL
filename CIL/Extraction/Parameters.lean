@@ -17,6 +17,7 @@ namespace CIL.Extraction
 inductive StorageType where
   | field (type : FieldType)
   | reference | vector128 | vector256 | vector512
+  | span (width : Nat) (writable : Bool)
   deriving DecidableEq, Repr
 
 /-- One entry per original instruction, including instructions pruned by the profile. -/
@@ -39,6 +40,8 @@ structure RawArguments where
     struct takes its computed size, which must be below 2^64. -/
 def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalKind
   | .reference => some .reference
+  | .span width writable =>
+    if width ∈ [1, 2, 4, 8] then some (.span width writable) else none
   | .vector128 => some .vector128
   | .vector256 => some .vector256
   | .vector512 => some .vector512
@@ -107,6 +110,8 @@ def validateArgumentOpIn (raw : RawArguments) (homes : List Nat)
       let slot ← homeSlot raw homes index
       match emitted with
       | .localAddr actual => return actual == slot
+      | .local actual none => return actual == slot && match type with
+          | .span .. => true | _ => false
       | _ => return false).getD false
   | .other => match emitted with
       | .arg .. | .vectorArg .. | .vectorArgAddr .. => false

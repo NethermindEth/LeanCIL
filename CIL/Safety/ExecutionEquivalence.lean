@@ -1,5 +1,6 @@
 import CIL.Safety.StaticMemoryEquivalence
 import CIL.Safety.Execution
+import CIL.Safety.StackAllocationEquivalence
 
 /-!
 # The checked interpreter respects memory equivalence
@@ -12,9 +13,23 @@ ignores how the view list is represented, so `write_run_equivalent` lets the opt
 
 namespace CIL.Safety
 
+/-- Reference truth tests depend only on the allocation metadata of equivalent memories. -/
+theorem Memory.Equivalent.referenceNonNull {m n : Memory} (same : m.Equivalent n)
+    (value : ManagedReference) : referenceNonNull m value = referenceNonNull n value := by
+  simp only [CIL.Safety.referenceNonNull, same.formValue]
+
+#print axioms Memory.Equivalent.referenceNonNull
+
+/-- Reference equality ignores permission-list representation and byte contents. -/
+theorem Memory.Equivalent.referenceEqual {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) : referenceEqual m left right = referenceEqual n left right := by
+  simp only [CIL.Safety.referenceEqual, same.formValue, liveAllocation, same.allocations]
+
+#print axioms Memory.Equivalent.referenceEqual
+
 theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
     (value : Value) : checkedValue m value = checkedValue n value := by
-  cases value <;> simp only [CIL.Safety.checkedValue, same.formValue]
+  cases value <;> simp only [CIL.Safety.checkedValue, same.formValue, same.spanValidate]
 
 theorem Memory.Equivalent.checkedValues {m n : Memory} (same : m.Equivalent n)
     (values : List Value) :
@@ -42,8 +57,15 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
       (step body op pc args frame stack n) := by
   unfold CIL.Safety.step
   dsimp only
-  split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress]
+  split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
+    same.referenceNonNull, same.referenceEqual]
   all_goals repeat' first
+    | (apply ResultEquivalent.bind (same.allocateStack _ _ _)
+       intro left right related
+       obtain ⟨reference, owner, allocated⟩ := left
+       obtain ⟨otherReference, otherOwner, otherAllocated⟩ := right
+       obtain ⟨rfl, rfl, equivalent⟩ := related
+       exact .ok (.next equivalent _ _ _))
     | exact .error _
     | exact .ok (.next same _ _ _)
     | exact .ok (.call same _ _ _)

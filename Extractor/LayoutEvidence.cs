@@ -65,6 +65,7 @@ internal sealed class LayoutEvidence(TypeReference[] types, string architecture 
                 $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
             return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
                 (metadata.IsAutoLayout ? "auto := true, " : "") +
+                $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(implementation => JsonSerializer.Serialize(Identity(implementation.InterfaceType))))}], " +
                 $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
         })));
         lean.AppendLine("]");

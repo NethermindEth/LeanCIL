@@ -16,22 +16,22 @@ private def loader (op bytes : List (BitVec 8)) (init : Option StaticInitializer
   { code := [.memory (.staticValue op), .ret none], locals := [], returnsValue := true,
     staticSites := [(0, descriptor bytes init)] }
 
-private def load (op bytes : List (BitVec 8)) (init : Option StaticInitializer := some ⟨1, []⟩) : Program :=
+private def load (op bytes : List (BitVec 8)) (init : Option StaticInitializer := some ⟨1, [], none⟩) : Program :=
   [loader op bytes init, initializer]
 
 private def run (program : Program) := (Safety.invoke program 8 0 [] initializerMemory).map Prod.snd
 
 -- A load pushes the descriptor's bytes and leaves memory unchanged.
 example : run (load zeros zeros) = .ok [.scalar (.aggregate zeros)] := rfl
-example : Safety.staticInstruction (loader zeros zeros (some ⟨1, []⟩)) 0 (.staticValue zeros) [] initializerMemory =
+example : Safety.staticInstruction (loader zeros zeros (some ⟨1, [], none⟩)) 0 (.staticValue zeros) [] initializerMemory =
     .ok (initializerMemory, [.scalar (.aggregate zeros)]) := rfl
 
 -- The certificate reruns the initializer: matching bytes pass, forged bytes fail.
 example : StaticValuesValid (load zeros zeros) := by decide +kernel
 example : ¬ StaticValuesValid (load [1, 0] [1, 0]) := by decide +kernel
 -- An initializer that is not in the program, or returns no value, is rejected too.
-example : ¬ StaticValuesValid (load zeros zeros (some ⟨5, []⟩)) := by decide +kernel
-example : ¬ StaticValuesValid (load zeros zeros (some ⟨0, []⟩)) := by decide +kernel
+example : ¬ StaticValuesValid (load zeros zeros (some ⟨5, [], none⟩)) := by decide +kernel
+example : ¬ StaticValuesValid (load zeros zeros (some ⟨0, [], none⟩)) := by decide +kernel
 
 -- The emitted bytes must equal the descriptor's, and the descriptor must name an initializer.
 example : run (load [1, 0] zeros) = .error ⟨0, 0, .invalidState⟩ := rfl

@@ -150,10 +150,10 @@ def featureTransfer (raw : RawMethod) (profile : FeatureProfile)
         else if instruction.opcode == 97 then a ^^^ b else if a == b then 1 else 0
     return { state with stack := value :: stack }
   -- `call` and `newobj`; a feature getter pushes the profile's answer.
-  if instruction.opcode == 40 || instruction.opcode == 115 then
+  if instruction.opcode == 40 || instruction.opcode == 111 || instruction.opcode == 115 then
     let .call site := instruction.operand | none
     let next ← forget state
-      (site.parameterCount + if instruction.opcode == 40 && site.hasThis then 1 else 0) 0
+      (site.parameterCount + if instruction.opcode != 115 && site.hasThis then 1 else 0) 0
     if let some feature := featureGetter site then
       if instruction.opcode != 40 then none else
         return { next with stack := some (if profile.evaluate feature then 1 else 0) :: next.stack }
@@ -201,9 +201,9 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
 
 /-- The raw stack effect, with calls taken from their signature. -/
 private def rawFeatureEffect (instruction : RawInstruction) : Option (Nat × Nat) := do
-  if instruction.opcode == 40 || instruction.opcode == 115 then
+  if instruction.opcode == 40 || instruction.opcode == 111 || instruction.opcode == 115 then
     let .call site := instruction.operand | none
-    return (site.parameterCount + if instruction.opcode == 40 && site.hasThis then 1 else 0,
+    return (site.parameterCount + if instruction.opcode != 115 && site.hasThis then 1 else 0,
       if instruction.opcode == 115 || site.returnsValue then 1 else 0)
   else rawStackEffect instruction.opcode
 
@@ -214,7 +214,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) 
     | .call site => site.returnsValue
     | _ => false
   let properCall := match emitted with
-    | .call .. => instruction.opcode == 40
+    | .call .. => instruction.opcode == 40 || instruction.opcode == 111
     | .newAggregate .. | .newVector256 .. => instruction.opcode == 115
     | _ => true
   properCall && match rawFeatureEffect instruction, emittedFeatureEffect emitted returnsValue with
@@ -228,6 +228,11 @@ def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted :
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65050] then return false
+  if instruction.opcode == 65039 then
+    return match instruction.operand, emitted with
+      | .none, .stackAlloc flag => flag == raw.initLocals
+      | _, _ => false
+  if let .stackAlloc _ := emitted then return false
   if let some word := constant32 instruction then
     return match emitted with | .const32 actual => word == actual | _ => false
   if let .call site := instruction.operand then
@@ -235,8 +240,6 @@ def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted :
       return match emitted with
         | .feature actual => instruction.opcode == 40 && feature == actual
         | _ => false
-  -- A span local has no storage; outside a receiver fold it has no translation.
-  if spanLocalOp raw.locals instruction then return false
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036, 10, 11, 12, 13, 19, 65038] then
     let some index := localIndex instruction | return false
     let narrow := match raw.locals[index]? with
@@ -252,11 +255,14 @@ def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted :
   if instruction.opcode ∈ [18, 65037] then
     return match localIndex instruction, emitted with
       | some index, .localAddr actual => index == actual
+      | some index, .local actual none => index == actual && spanLocalOp raw.locals instruction
       | _, _ => false
   -- Argument homes are appended after all raw locals. Their precise mapping is
   -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
   if instruction.opcode ∈ [15, 65034] then
-    return match emitted with | .localAddr index => raw.locals.length <= index | _ => false
+    return match emitted with
+      | .localAddr index | .local index none => raw.locals.length <= index
+      | _ => false
   if instruction.opcode ∈ [16, 65035] then
     return match emitted with | .setLocal index none => raw.locals.length <= index | _ => false
   -- A native-width wrapper is looked through only for `and`, `or`, `xor`, `ceq` and

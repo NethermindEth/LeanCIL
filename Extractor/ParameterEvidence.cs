@@ -10,8 +10,9 @@ internal static class ParameterEvidence
 {
     static string Type(TypeReference type, ModuleDefinition module, LayoutEvidence layouts)
     {
-        // Only folded span locals reach here; Lean derives the same inert root from the type.
-        if (type is ByReferenceType || Spans.Width(type) is not null) return ".reference";
+        if (type is ByReferenceType or PointerType) return ".reference";
+        if (Spans.Width(type) is { } width)
+            return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (type is GenericInstanceType vector && !ValueTuples.Is(type))
             return vector.ElementType.FullName switch
             {
