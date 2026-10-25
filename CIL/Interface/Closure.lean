@@ -235,6 +235,7 @@ private def walk (environment : Environment) (roots : List Name) (serialize : Bo
     passes the interface checks. -/
 def validateInterfaceDeclarations (environment : Environment) (interfaceModules : Array Name) :
     Except String Unit := do
+  if interfaceModules.isEmpty then return
   let declarations := environment.constants.toList.filterMap fun (name, _) =>
     if interfaceModules.contains (definingModule environment name) then some name else none
   discard <| walk environment declarations false
