@@ -61,6 +61,7 @@ internal static class VerificationSelection
             "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/Imports.lean",
             "Tests/LoopOutcome.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean",
             "Tests/ConfinedFootprints.lean", "Tests/LocalSnapshots.lean", "Tests/ContractConsequence.lean",
+            "Tests/InvocationCertificates.lean", "Tests/ValidCallTransport.lean",
             "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean",
             "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
             "Tests/VerificationReuse.cs", "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean"
