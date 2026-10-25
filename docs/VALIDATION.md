@@ -241,7 +241,9 @@ inputs and arbitrary caller memory, using `cil_checked_steps`. Its instruction
 sequence is `arg, arg, const32, shl, add, const32, gtu, ret`; the theorem's axiom
 assertion permits only `propext` and `Quot.sound`. The same module checks both
 paths of a symbolic branch using a supplied truth hypothesis, and verifies that
-failed candidate summaries do not escape their transaction.
+failed candidate summaries do not escape their transaction. Memory and static
+dispatch facts retain abstract bitcast results in inferred stacks; a conjunction-wrapped
+store fact exercises the generic dispatch fallback.
 
 `Tests.LegacyFeatures`, imported by `Tests.Automation`, uses only the reference
 interpreter tactic import. It checks enabled and disabled symbolic features from

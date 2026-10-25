@@ -1052,4 +1052,51 @@ theorem checked_add64_return (memory : CIL.Safety.Memory) (x y : W64) (fits : x.
 
 #print axioms checked_add64_return
 
+open CIL.Safety in
+/-- A dispatch fact preserves its abstract value when the step infers the next stack. -/
+theorem bitcast_dispatch_keeps_value (body : CIL.Method) (args : List Value) (frame : Frame)
+    (memory : Memory) (byte : BitVec 8) (value : BitVec 256)
+    (casted : memoryInstruction (.bitcastValue (.aggregate 32) .vector256)
+      [.scalar (.aggregate (List.replicate 32 byte))] memory =
+        .ok (memory, [.scalar (.v256 value)])) :
+    ∃ stack, step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame
+      [.scalar (.aggregate (List.replicate 32 byte))] memory =
+        .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.v256 value)] := by
+  refine ⟨?_, ?_, ?_⟩
+  rotate_left
+  · cil_checked_step [casted]
+  · rfl
+
+#print axioms bitcast_dispatch_keeps_value
+
+open CIL.Safety in
+/-- The same abstract result is retained for a fact at the static dispatch boundary. -/
+theorem bitcast_static_keeps_value (body : CIL.Method) (args : List Value) (frame : Frame)
+    (memory : Memory) (byte : BitVec 8) (value : BitVec 256)
+    (casted : staticInstruction body 0 (.bitcastValue (.aggregate 32) .vector256)
+      [.scalar (.aggregate (List.replicate 32 byte))] memory =
+        .ok (memory, [.scalar (.v256 value)])) :
+    ∃ stack, step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame
+      [.scalar (.aggregate (List.replicate 32 byte))] memory =
+        .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.v256 value)] := by
+  refine ⟨?_, ?_, ?_⟩
+  rotate_left
+  · cil_checked_step [casted]
+  · rfl
+
+#print axioms bitcast_static_keeps_value
+
+open CIL.Safety in
+/-- A conjunction-wrapped dispatch fact remains usable through the generic fallback. -/
+theorem store_from_wrapped_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+    (bits : BitVec 256) (destination : Reference) (memory final : Memory)
+    (stored : True ∧ memoryInstruction .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step_normalized [stored]
+
+#print axioms store_from_wrapped_fact
+
 end Tests.Automation

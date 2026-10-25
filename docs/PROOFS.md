@@ -132,9 +132,13 @@ Each `.memory` operation has one equation per operand shape in
 `formValue`, `loadValue`, `storeValue` or `add`, so state facts at that level
 rather than passing `staticInstruction` or `memoryInstruction` to unfold. Only
 the static-field operations still go through `staticInstruction`. A fact stated
-at the `memoryInstruction` or `staticInstruction` level is still accepted, through
-a slower fallback that runs only when such a fact is supplied; a failed step
-reports the per-shape goal. That fallback is part of `cil_checked_step`,
+at the `memoryInstruction` or `staticInstruction` level is tried before the
+per-shape equation when its operation constructor matches. This preserves a
+supplied abstract result instead of expanding its bytes and forcing later goals
+to recover the abstraction. Other simp-usable dispatch facts, including wrapped
+conjunctions, retain the fallback after the per-shape equation fails. Every
+attempt restores the proof state on failure; a failed step reports the per-shape
+goal. This dispatch-fact handling is part of `cil_checked_step`,
 `cil_checked_steps` and `cil_contract_steps` (and the loop tactics built on them)
 only: a hand-written memory step, or `cil_checked_step_equations`, with such a fact
 must `rw [CIL.Safety.step_memory_eq]` first, and for a `memoryInstruction` fact

@@ -230,7 +230,9 @@ checked instruction steps. It first tries definitional equality when no facts
 are supplied, then uses local instruction equations and simplification as needed.
 For symbolic branches or memory operations, supply the proved conditions with
 `cil_checked_steps [facts]`; local facts are normalised with the goal, so a
-store fact may state its value in source form. Loop segments use
+store fact may state its value in source form. Matching memory-dispatch facts preserve
+their abstract results before per-shape evaluation, avoiding unnecessary byte expansion.
+Loop segments use
 `CIL.Safety.LoopAutomation` and still require an invariant and a decreasing measure.
 Contract stepping also handles signed and unsigned widening in either argument order;
 the [consumer stepping regressions](docs/PROOFS.md#consumer-stepping-regressions)
