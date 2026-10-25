@@ -54,7 +54,10 @@ internal static class ExportVerificationSuites
             ["Tests/DerivedContractExports.cs", "Tests/ContractImports/DerivedInterface.lean",
              "Tests/ContractImports/DerivedPercentProof.lean", "Tests/ContractImports/DerivedAddProof.lean",
              "Tests/ContractImports/DerivedShiftCaller.lean", "Tests/ContractImports/DerivedSumCaller.lean"],
-            Standalone: true)
+            Standalone: true),
+        new("exportsinitialized", "initialized", "Tests/InitializedExports.cs", [],
+            "scoped initialization assumptions in exported and imported contracts", [],
+            ["Tests/InitializedExports.cs", "Tests/TransitiveImports/Conditional.lean"], Standalone: true)
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>

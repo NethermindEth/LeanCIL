@@ -231,7 +231,7 @@ JsonObject RestrictedManifest(string assembly, string method, string folder)
     return manifest;
 }
 const string shape = "Contract exports require a public or protected static, non-virtual, closed method.";
-const string assumptions = "Contract export rejects static/initialization assumptions: ";
+const string assumptions = "Contract export rejects static-value assumptions: ";
 foreach ((string Name, string Method, string Marker) restriction in new[]
 {
     ("internal", "ImportFixture.Library::Hidden(ulong)", shape),
@@ -269,14 +269,19 @@ if (staticValueIdentity.GetProperty("staticValues").GetArrayLength() != 1 ||
     staticValueIdentity.GetProperty("initializedTypes").GetArrayLength() != 1)
     throw new InvalidOperationException("Precondition: the real static-value export candidate must record its value and initialization assumption.");
 RejectExport(RestrictedManifest(library, "ImportFixture.StaticReader::Read()", staticValueArtifact),
-    assumptions + "initializedTypes", restricted);
+    assumptions + "staticValues", restricted);
 if (File.Exists(Path.Combine(staticValueArtifact, "verified.json")))
     throw new InvalidOperationException("A rejected static-value export published a verification report.");
 completed.CompleteCase("core.static-values");
 Console.WriteLine("PASS generic, virtual and static-value export candidates reject without changing the published sidecar");
-RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
-    Restriction("initialized", library, "ImportFixture.Library::AddOne(ulong)", "--assume-initialized", "ImportFixture.Seeded")),
-    assumptions + "initializedTypes", restricted);
+var initializedArtifact = Restriction("initialized", library, "ImportFixture.Library::AddOne(ulong)",
+    "--assume-initialized", "ImportFixture.Seeded");
+var initializedIdentityPath = Path.Combine(initializedArtifact, "identity.json");
+var initializedIdentity = JsonNode.Parse(File.ReadAllText(initializedIdentityPath))!.AsObject();
+initializedIdentity["initializationAssumptions"] = new JsonArray();
+File.WriteAllText(initializedIdentityPath, initializedIdentity.ToJsonString());
+RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)", initializedArtifact),
+    "differs from regenerated assembly, extractor or configuration metadata", restricted);
 completed.CompleteCase("core.initialized");
 // Conditional exports are supported, but their producer sources must not shadow a published dependency.
 RejectExport(RestrictedManifest(app, "ImportFixture.Application::Entry(ulong)",

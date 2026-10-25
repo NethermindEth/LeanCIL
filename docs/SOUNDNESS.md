@@ -383,6 +383,16 @@ publisher or prove a library implementation theorem. The supplied certification
 theorem, statement and statement digest are provenance records here. Full
 implementation verification is a separate producer operation.
 
+Named type-initialization premises are part of the digest-bound export descriptor,
+scoped by full assembly identity, type and profile. Export checks bind the exact
+list to regenerated extraction through a kernel-checked, structurally audited
+equality. Import validation checks local type constructors and exact propagation
+from dependency contracts. Caller artifacts and reports retain the inherited
+premises. This certifies which runtime assumptions accompany the CIL proof; it
+does not model CLR initialization or establish that an initializer ran. Exported
+constructor-initialized field values and forced-full initialization premises remain
+unsupported.
+
 `--force-full-verify` instead rechecks the library proof and composes it with
 the caller theorem. It elaborates the source bundle of every library in the
 caller's reachable dependency closure, possibly from different publishers, with
