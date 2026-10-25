@@ -145,6 +145,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 | --- | --- |
 | `leancil list` | List canonical method signatures to copy into `extract` |
 | `leancil extract` | Validate a method and its reachable calls and generate `Extracted.lean` |
+| `leancil templates` | Generate shared flag/callee templates and exact bindings from checked profile extractions |
 | `leancil workspace` | Create an editable Lean package for one method/profile, with pinned imports and PDB symbols |
 | `leancil blockers` | Report what blocks extraction for listed method and profile pairs, without proofs |
 | `leancil check` | Regenerate the extraction in memory and compare it with the saved files |
@@ -231,6 +232,12 @@ contract; that interface can be exported and imported by callers.
 `cil_embed [facts]` binds a shared body template to an extraction using proved feature
 flag and callee equalities. Local definitions also work without a fact list; relevant
 flags left unconstrained are rejected, and the kernel checks the complete instruction map.
+
+`leancil templates shared scalar-extraction sse42-extraction v3-extraction` generates
+the shared bodies from compiled CIL, including per-instruction equations and a binding
+module for each input. Prove the template once and use the generated bindings for the
+selected profiles; see [generated profile templates](docs/PROOFS.md#generated-profile-templates)
+for the supported domain and checking workflow.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter
