@@ -28,6 +28,8 @@ def Frame.appendLocals (frame : Frame) (extra : List LocalSlot) : Frame :=
 @[simp] theorem Frame.appendLocals_nil (frame : Frame) : frame.appendLocals [] = frame := by
   simp [Frame.appendLocals]
 
+#print axioms CIL.Safety.Frame.appendLocals_nil
+
 /-- The action with `extra` slots after the locals of the frame it resumes in. -/
 def FrameAction.appendLocals (extra : List LocalSlot) : FrameAction → FrameAction
   | .next target stack frame memory => .next target stack (frame.appendLocals extra) memory
@@ -48,6 +50,8 @@ theorem Frame.appendLocals_getElem? {frame : Frame} {extra : List LocalSlot} {in
   rw [List.getElem?_append_left (List.getElem?_eq_some_iff.mp found).1]
   exact found
 
+#print axioms CIL.Safety.Frame.appendLocals_getElem?
+
 /-- Storing to a local present in `frame` commutes with padding. -/
 theorem Frame.appendLocals_set {frame : Frame} {extra : List LocalSlot} {index : Nat}
     {slot old : LocalSlot} (found : frame.locals[index]? = some old) :
@@ -56,6 +60,8 @@ theorem Frame.appendLocals_set {frame : Frame} {extra : List LocalSlot} {index :
       { frame with locals := frame.locals.set index slot }.appendLocals extra := by
   simp only [Frame.appendLocals]
   rw [List.set_append_left _ _ (List.getElem?_eq_some_iff.mp found).1]
+
+#print axioms CIL.Safety.Frame.appendLocals_set
 
 /-- Closes `step` on a padded frame against the unpadded step mapped through the padding,
     splitting both sides in lockstep; fails on a branch that reads a local the unpadded frame
@@ -131,6 +137,8 @@ theorem makeLocal_root {kind : CIL.LocalKind} {initial : CIL.Value}
     makeLocal activation kind initial memory = .ok (rootSlot initial, [], memory) := by
   unfold rootLocal at root
   split at root <;> first | rfl | cases root
+
+#print axioms CIL.Safety.makeLocal_root
 
 /-- Root locals are created without touching memory, each as its `rootSlot`. -/
 theorem makeLocals_roots (activation : Nat) : ∀ (kinds : List CIL.LocalKind)
