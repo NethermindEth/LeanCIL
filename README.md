@@ -214,6 +214,8 @@ differences. Mismatches fail explicitly.
 
 `leancil verify-batch requests.json` verifies many requests against one consumer snapshot, sharing
 builds and certified support between them while each request keeps an independent certificate.
+Related multi-method extractions can also share checked method evidence; unique wrappers and
+each complete program's call connections still compile and validate separately.
 [Consumer packages and batch verification](docs/CONSUMERS.md) describes what is checked and reused,
 the local support cache, and portable support across machines. Lake configuration and Lean
 elaborators are executable code, so use this mode with packages you trust.
