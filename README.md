@@ -231,6 +231,10 @@ callee's proved contract, and embedding proofs can ignore trailing unread byref,
 pointer or span locals. Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
 
+`cil_embed [facts]` binds a shared body template to an extraction using proved feature
+flag and callee equalities. Local definitions also work without a fact list; relevant
+flags left unconstrained are rejected, and the kernel checks the complete instruction map.
+
 `leancil verify --force-full-verify` independently checks supported imported
 libraries against their pinned implementation DLLs and source bundles. Closed
 libraries may read immutable RVA static tables: checked composition preserves
