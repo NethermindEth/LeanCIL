@@ -145,6 +145,7 @@ To prove another method, supply a unique method selector, write a Lean file impo
 | --- | --- |
 | `leancil list` | List canonical method signatures to copy into `extract` |
 | `leancil extract` | Validate a method and its reachable calls and generate `Extracted.lean` |
+| `leancil workspace` | Create an editable Lean package for one method/profile, with pinned imports and PDB symbols |
 | `leancil blockers` | Report what blocks extraction for listed method and profile pairs, without proofs |
 | `leancil check` | Regenerate the extraction in memory and compare it with the saved files |
 | `leancil verify` | Check, kernel-replay and audit a proof, then write `verified.json` |
@@ -163,6 +164,17 @@ The [command-line reference](docs/CLI.md) covers method selectors, assembly iden
 settings, profiles, initialization assumptions and diagnostics.
 
 ## Consumer packages and batches
+
+For an editor workspace with the selected extraction, pinned imports and portable PDB symbols:
+
+```sh
+leancil workspace path/to/Nethermind.Int256.dll 'Nethermind.Int256.UInt256::get_IsZeroOrOne()' --profile scalar --proof proofs/IsZeroOrOne.lean --proof-root . --assume-initialized Nethermind.Int256.UInt256
+```
+
+The consumer package and proof must already exist. Reopening checks for stale assembly,
+profile, symbols and dependency inputs while preserving editor proof edits.
+**Editor checking is not a certificate**; copy the edited proof back and run ordinary
+`verify`. See [proof-authoring workspaces](docs/CONSUMERS.md#proof-authoring-workspace).
 
 For proofs split across a consumer's own Lean modules, pass the Lake package root:
 
@@ -210,7 +222,8 @@ store fact may state its value in source form. Loop segments use
 
 `CodeAt` facts let the tactics resolve instructions within a known code segment without
 expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
-tracks local stores and updated snapshots. Supported forwarder bodies can inherit a
+tracks numeric local stores and updated snapshots, including mixed Vector128, Vector256
+and int32 locals. Supported forwarder bodies can inherit a
 callee's proved contract, and embedding proofs can ignore trailing unread byref or
 pointer locals. Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
