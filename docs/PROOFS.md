@@ -604,8 +604,9 @@ checks them all; the call must expose no unspecified vector bits; and a narrowed
 holds for a boolean. Use `Holds.weaken` afterwards to export a different contract.
 
 `MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which
-passes the address of a fresh numeric local (not a reference or span, which have
-no home) as a last out argument and drops it.
+passes the address of a fresh numeric local (not a reference, span or array, which have
+no byte home) as a last out argument and drops it. `ForwardsOut.notArray` excludes every
+array element kind; `make_fitting_local` requires the same premise after `notSpan`.
 The local may hold any initializer that fits its kind; the extractor emits
 `.unmodeled` without `InitLocals` and the kind's zero with it. The callee runs in
 the memory after frame entry and the result is read after the local expires, so
