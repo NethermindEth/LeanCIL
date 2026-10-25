@@ -1,6 +1,7 @@
 import CIL.Safety.ExecutionTrace
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.StaticMemoryLemmas
+import CIL.Safety.StackAllocationLemmas
 
 /-!
 # What one checked step may change
@@ -29,6 +30,9 @@ def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
     evidence. Value-stack validity is independent of this effect classification. -/
 inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) :
     Frame → Memory → Prop where
+  | stackAllocation {reference final result}
+      (effect : StackAllocationEffect m frame reference final result) :
+      StepEffect body frame m final result
   | memory {result} (effect : StaticInstructionEffect body m result) :
       StepEffect body frame m frame result
   | store {index slot final value result}
@@ -47,6 +51,7 @@ inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) :
 theorem StepEffect.wellFormed {body : CIL.Method} {frame final : Frame} {m result : Memory}
     (effect : StepEffect body frame m final result) (hm : m.WellFormed) : result.WellFormed := by
   cases effect with
+  | stackAllocation effect => exact effect.wellFormed hm
   | memory effect => exact effect.wellFormed hm
   | store _ stored => exact storeLocal_preserves_wellFormed _ _ _ _ _ hm stored
   | valueHome allocated stored =>
@@ -59,6 +64,7 @@ theorem StepEffect.wellFormed {body : CIL.Method} {frame final : Frame} {m resul
 theorem StepEffect.allocations {body : CIL.Method} {frame final : Frame} {m result : Memory}
     (effect : StepEffect body frame m final result) : AllocationExtension m result := by
   cases effect with
+  | stackAllocation effect => exact effect.allocations
   | memory effect => exact effect.allocations
   | store _ stored => exact storeLocal_extends_allocations _ _ _ _ _ stored
   | valueHome allocated stored =>
@@ -79,6 +85,7 @@ theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
       | solve | cases ‹Opaque128Value› <;> rfl
       | solve | exact loadSnapshot_numeric (by assumption)
       | solve | apply formValue_result_valid; assumption
+      | solve | exact checkedAt_ok (by assumption)
       | cases h
       | split at h
 
@@ -87,6 +94,7 @@ theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value
   cases slot with
   | root root => cases h
   | opaque128 _ => cases h
+  | span _ _ _ => cases h
   | bytes kind r => exact formValue_result_valid m (.address r) value h
 
 theorem ValuesValid.drop {m : Memory} {values : List Value}
@@ -147,6 +155,20 @@ theorem StepContract.staticInstruction {body : CIL.Method} {frame : Frame}
     StepContract body frame stack m (.next pc values frame result) :=
   ⟨.memory contract.effect, contract.values⟩
 
+/-- Dynamic allocation supplies a live reference and preserves existing memory. -/
+theorem StepContract.stackAllocation {body : CIL.Method} {frame final : Frame}
+    {stack : List Value} {memory result : Memory} {reference : ManagedReference}
+    {size pc : Nat} {initLocals : Bool}
+    (success : allocateStack memory frame size initLocals = .ok (reference, final, result)) :
+    StepContract body frame stack memory (.next pc [.reference reference] final result) := by
+  have effect := allocateStack_effect success
+  refine ⟨.stackAllocation effect, ?_⟩
+  intro valid _ value member
+  obtain rfl := List.mem_singleton.mp member
+  exact effect.reference_valid valid
+
+#print axioms StepContract.stackAllocation
+
 /-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
     so it is the place that breaks when an instruction is added without an effect. -/
 theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
@@ -156,6 +178,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
   unfold step at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
+    | solve | exact .stackAllocation (by assumption)
     | solve | exact .staticInstruction (staticInstruction_contract _ _ _ _ _ _ _ (by assumption))
     | solve | exact .instruction (instruction_contract _ _ _ _ _ (by assumption))
     | solve |
@@ -170,6 +193,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
             | exact retained
             | solve | simp [FrameAction.LiveValues, ValuesValid, Value.Valid, numericValue]
             | exact retained.tail
+            | exact retained.tail.tail
             | solve | exact retained.drop _
             | solve | apply checkedValues_preserved _ _ _ _ hm ext; assumption
             | solve |

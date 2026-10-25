@@ -220,4 +220,46 @@ theorem Op.ProfileAgreement.trans (op : Op) (p q r : FeatureProfile)
   cases op <;> try trivial
   all_goals exact Eq.trans hpq hqr
 
+/-- An intrinsic's availability is fixed by the features it needs: two profiles that agree on
+    each of `requiredFeatures` agree on `available`. -/
+theorem Intrinsic.available_eq_of_required (operation : Intrinsic) (p q : FeatureProfile)
+    (agree : ∀ featureId ∈ operation.requiredFeatures,
+      p.evaluate featureId = q.evaluate featureId) :
+    operation.available p = operation.available q := by
+  cases operation <;>
+    simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
+  case sse operation => cases operation <;> simp_all
+  case avx512 operation => cases operation <;> simp_all
+  case avx512DQ operation => cases operation <;> simp_all
+
+/-- The profile flags `op` reads: the feature it tests, or every feature its intrinsic needs. -/
+def Op.profileReads : Op → List Feature
+  | .feature featureId => [featureId]
+  | .intrinsic operation _ => operation.requiredFeatures
+  -- A new profile-reading op breaks `step_profile_eq`; covering it in `ProfileAgreement`
+  -- then breaks `ProfileAgreement.of_flags` until it is listed here.
+  | _ => []
+
+/-- Every profile flag an instruction of any method in the program reads, the same scope
+    `Program.ProfileAgreement` quantifies over. -/
+def Program.profileReads (program : Program) : List Feature :=
+  program.flatMap fun body => body.code.flatMap Op.profileReads
+
+/-- Two profiles that agree on every flag the program reads agree on the whole program. The
+    hypothesis is decidable, so `decide` closes it for concrete profiles. -/
+theorem Program.ProfileAgreement.of_flags (program : Program) (p q : FeatureProfile)
+    (agree : ∀ featureId ∈ program.profileReads, p.evaluate featureId = q.evaluate featureId) :
+    program.ProfileAgreement p q := by
+  intro body member op instruction
+  have reads : ∀ featureId ∈ op.profileReads, p.evaluate featureId = q.evaluate featureId :=
+    fun featureId read => agree featureId (List.mem_flatMap.mpr
+      ⟨body, member, List.mem_flatMap.mpr ⟨op, instruction, read⟩⟩)
+  cases op with
+  | feature featureId => exact reads featureId (List.mem_singleton_self featureId)
+  | intrinsic operation _ => exact Intrinsic.available_eq_of_required operation p q reads
+  | _ => trivial
+
+#print axioms Intrinsic.available_eq_of_required
+#print axioms Program.ProfileAgreement.of_flags
+
 end CIL

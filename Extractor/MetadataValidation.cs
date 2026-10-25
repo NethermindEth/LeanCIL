@@ -145,10 +145,22 @@ internal static class MetadataValidation
         return new AggregateInfo(fields.Length * width, width, offsets);
     }
 
-    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, bool span = false, string architecture = "scalar")
+    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, string architecture = "scalar")
     {
+        if (type is PointerType pointer)
+        {
+            if (pointer.ElementType is TypeSpecification ||
+                pointer.ElementType.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
+                    MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 or
+                    MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr))
+                throw new InvalidDataException("Unsupported stack-storage pointer element type");
+            Type(pointer.ElementType, module, architecture: architecture);
+            return;
+        }
         if (type is ByReferenceType byRef)
         {
+            if (Spans.Width(byRef.ElementType) is not null)
+                throw new InvalidDataException("Unsupported by-reference span");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
             Type(byRef.ElementType, module, architecture: architecture);
@@ -160,8 +172,7 @@ internal static class MetadataValidation
             ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char") &&
             !(type is GenericInstanceType && type.FullName.StartsWith("System.Runtime.Intrinsics.Vector", StringComparison.Ordinal) && RuntimeModels.SupportedType(type)) &&
-            // Spans are admitted only as by-value returns and folded receivers; elsewhere their reference field would sit in unmodelled storage.
-            !((returns || span) && Spans.Width(type) is not null))
+            Spans.Width(type) is null)
             throw new InvalidDataException($"Unsupported type: {type.FullName}");
         RuntimeModels.ValidateTypeIdentity(type, module, architecture);
     }
@@ -254,10 +265,10 @@ internal static class MetadataValidation
                     if (parameter.ParameterType is ByReferenceType && importedByref?.Invoke(parameter.ParameterType) == true) return;
                     Type(parameter.ParameterType, module, architecture: profile.Architecture);
                 }, named: true);
-            Spans.Analysis? spans = null;
-            if (Check(method, null, () => spans = Spans.Analyze(method), named: true))
+            if (Check(method, null, () => Spans.Analyze(method), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
-                    Check(method, null, () => Type(local.VariableType, module, span: spans!.Locals.Contains(local.Index), architecture: profile.Architecture), named: true);
+                    Check(method, null, () => Type(local.VariableType, module,
+                        architecture: profile.Architecture), named: true);
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;
@@ -274,6 +285,12 @@ internal static class MetadataValidation
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
+                if (instruction.OpCode.Code == Code.Callvirt)
+                {
+                    var resolved = ConstrainedCalls.Resolve(method, instruction, profile.Architecture);
+                    Enter(resolved.Target, reference, instruction);
+                    return;
+                }
                 if (ImportResolution.External(reference, module))
                 {
                     if (imports is null)
@@ -339,7 +356,7 @@ internal static class MetadataValidation
                 {
                     throw new InvalidDataException($"{error.Message}\n  Site: {instruction}", error);
                 }
-                Enter(value.Initializer, value.Initializer, instruction);
+                if (value.Initializer is { } initializer) Enter(initializer, initializer, instruction);
             }
             foreach (Instruction instruction in reachable)
             {
@@ -373,10 +390,10 @@ internal static class MetadataValidation
         {
             var index = i;
             var method = methods[index];
-            HashSet<Instruction>? nativeOperands = null;
+            NativeOperands.Certificate? nativeOperands = null;
             int[]? parameterHomes = null;
             if (!Check(method, null, () => (nativeOperands, parameterHomes) =
-                (NativeOperands.Analyze(method, profile), ParameterStorage.Analyze(method, profile)), named: true))
+                (NativeOperands.Certify(method, profile), ParameterStorage.Analyze(method, profile)), named: true))
                 continue;
             foreach (Instruction instruction in Reachability.Analyze(method, profile))
                 if (!skipped.Contains(instruction))

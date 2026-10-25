@@ -8,7 +8,7 @@ import CIL.Safety.GuardNormalization
 branches, `switch`, `nop` and feature tests), one per op and i32/i64 operand shape.
 `cil_value_steps` generates them as the library builds by evaluating the dispatcher once, so
 stepping rewrites by constructor instead of unfolding `CIL.step` in every proof. A feature
-test is then reduced to the profile field that a caller's fact names.
+test on a known feature is then reduced to the profile field that a caller's fact names.
 -/
 
 namespace CIL.Safety
@@ -113,9 +113,14 @@ cil_value_steps (target : Nat) [branch] 0
 cil_value_steps [nop] 0
 cil_value_steps (id : CIL.Feature) [feature] 0
 
--- A feature test pushes `body.profile.evaluate id`; these reduce it to the profile field a
--- caller's fact names.
-attribute [cil_step] CIL.FeatureProfile.evaluate
+-- One equation per `Feature`: a known feature test reduces to the profile field a caller's
+-- fact names, and a symbolic `evaluate id` stays folded so a fact about it still applies.
+open Lean Meta Elab Command in
+run_cmd do
+  let some equations ← liftTermElabM <| getEqnsFor? ``CIL.FeatureProfile.evaluate
+    | throwError "FeatureProfile.evaluate has no equations"
+  for name in equations do
+    elabCommand (← `(attribute [cil_step, cil_feature] $(mkIdent name)))
 
 open Lean Meta in
 /-- `(m ..).profile` for a method definition or literal, unfolding only to the structure head;
