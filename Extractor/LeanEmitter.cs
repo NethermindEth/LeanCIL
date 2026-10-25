@@ -7,7 +7,8 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
-    internal readonly record struct Emission(string Source, string[] LayoutIdentities);
+    internal readonly record struct Emission(string Source, string[] LayoutIdentities,
+        TemplateEmitter.Method[] Templates);
 
     internal static string? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -79,8 +80,9 @@ internal static class LeanEmitter
     }
 
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null,
-        StaticIdentityRecord[]? staticIdentities = null)
+        StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false)
     {
+        var templates = new List<TemplateEmitter.Method>();
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
@@ -144,7 +146,12 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], parameterHomes := [{parameters}], staticSites := [{sites}], code := [");
+            var metadata = $"returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, " +
+                $"locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], " +
+                $"parameterHomes := [{parameters}], staticSites := [{sites}]";
+            if (collectTemplates)
+                templates.Add(new(m.FullName, metadata, ops.ToArray(), sites.Length != 0));
+            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {metadata}, code := [");
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
@@ -193,6 +200,6 @@ internal static class LeanEmitter
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray());
     }
 }

@@ -2,6 +2,7 @@ import CIL.Extraction.Generics
 import CIL.Extraction.FeatureEffects
 import CIL.Extraction.Folds
 import CIL.Extraction.FlowIndex
+import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
 # Feature flow
@@ -50,18 +51,97 @@ private def featureNames : List (String × Feature) := [
   ("X86.Bmi1", .bmi1), ("X86.Bmi2/X64", .bmi2), ("X86.X86Base/X64", .x86Base64),
   ("Vector128", .vector128Accelerated), ("Vector256", .vector256Accelerated)]
 
+/-- The exact assembly, return type and namespace shared by feature getters. -/
+private def featurePrefix := intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics."
+
+/-- The class and member portion of each admitted feature getter. -/
+private def featureSuffix (name : String) (feature : Feature) : String :=
+  name ++ "::" ++
+    (if feature == .vector128Accelerated || feature == .vector256Accelerated then
+      "get_IsHardwareAccelerated" else "get_IsSupported") ++ "()"
+
+/-- Literal identities avoid rebuilding common assembly and namespace prefixes per lookup. -/
+private def featureIdentities : List (List UInt8) := by
+  run_tac do
+    let expression ← Lean.Elab.Term.elabTerm
+      (← `(featureNames.map fun (name, feature) =>
+        (featureSuffix name feature).toByteArray.data.toList)) none
+    Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
+    let expression ← Lean.instantiateMVars expression
+    let values ← unsafe Lean.Meta.evalExpr (List (List UInt8))
+      (← Lean.Meta.inferType expression) expression
+    Lean.Elab.Tactic.closeMainGoal `featureIdentities (Lean.toExpr values)
+
+set_option maxRecDepth 4096 in
+/-- The kernel checks every materialized identity against the original feature names. -/
+private theorem featureIdentities_eq : featureIdentities =
+    featureNames.map (fun (name, feature) =>
+      (featureSuffix name feature).toByteArray.data.toList) := by rfl
+#print axioms featureIdentities_eq
+
+/-- Remove an exact byte prefix, rejecting mismatches and truncated identities. -/
+private def stripFeaturePrefix : List UInt8 → List UInt8 → Option (List UInt8)
+  | [], bytes => some bytes
+  | first :: expected, actual :: bytes =>
+    if first == actual then stripFeaturePrefix expected bytes else none
+  | _, _ => none
+
+/-- Successful prefix removal retains exactly the remaining bytes. -/
+private theorem stripFeaturePrefix_eq (expected bytes suffix : List UInt8) :
+    stripFeaturePrefix expected bytes = some suffix ↔ bytes = expected ++ suffix := by
+  induction expected generalizing bytes with
+  | nil => simp [stripFeaturePrefix]
+  | cons first expected ih =>
+    cases bytes with
+    | nil => simp [stripFeaturePrefix]
+    | cons actual bytes =>
+      by_cases equal : first = actual
+      · subst actual
+        simp [stripFeaturePrefix, ih]
+      · simp [stripFeaturePrefix, equal, beq_iff_eq, Ne.symm equal]
+#print axioms stripFeaturePrefix_eq
+
+/-- The class and member bytes under the exact feature-getter prefix. -/
+private def featureSignature (identity : String) : Option (List UInt8) :=
+  stripFeaturePrefix featurePrefix.toByteArray.data.toList identity.toByteArray.data.toList
+
 /-- Identify getters from raw member and assembly identity, never an emitter-supplied flag. -/
 def featureGetter (site : CallSite) : Option Feature := do
   let .external identity := site.target | none
   if site.parameterCount != 0 || site.hasThis || !site.returnsValue ||
       !site.typeArguments.isEmpty then none
-  else (featureNames.find? fun (name, feature) =>
-    identity == intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++
-      "::" ++
-      (if feature == .vector128Accelerated || feature == .vector256Accelerated then
-          "get_IsHardwareAccelerated"
-        else "get_IsSupported") ++
-      "()").map Prod.snd
+  else
+    let signature := featureSignature identity
+    ((featureIdentities.zip (featureNames.map Prod.snd)).find?
+      fun (expected, _) => signature == some expected).map Prod.snd
+
+/-- UTF-8 byte equality is exact string equality, including non-ASCII metadata. -/
+private theorem featureBytes_eq (identity suffix : String) :
+    (featureSignature identity == some suffix.toByteArray.data.toList) =
+      (identity == featurePrefix ++ suffix) := by
+  apply Bool.eq_iff_iff.mpr
+  simp only [featureSignature, beq_iff_eq, stripFeaturePrefix_eq]
+  rw [← ByteArray.toList_data_append, ← String.toByteArray_append, Array.toList_inj]
+  constructor
+  · intro equal
+    exact String.toByteArray_inj.mp (ByteArray.ext equal)
+  · intro equal
+    cases equal
+    rfl
+#print axioms featureBytes_eq
+/-- Literal lookup preserves the admitted getters for every raw call site. -/
+theorem featureGetter_eq_original (site : CallSite) : featureGetter site = (do
+    let .external identity := site.target | none
+    if site.parameterCount != 0 || site.hasThis || !site.returnsValue ||
+        !site.typeArguments.isEmpty then none
+    else (featureNames.find? fun (name, feature) =>
+      identity == intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++
+        "::" ++ (if feature == .vector128Accelerated || feature == .vector256Accelerated then
+          "get_IsHardwareAccelerated" else "get_IsSupported") ++ "()").map Prod.snd) := by
+  simp only [featureGetter, featureIdentities_eq, List.zip_map', List.find?_map,
+    Function.comp_def, featureBytes_eq, Option.map_map, featurePrefix, featureSuffix,
+    String.append_assoc]
+#print axioms featureGetter_eq_original
 
 /-- Whether the body takes local `index`'s address with `ldloca` (18 or 0xFE0D). -/
 private def addressed (raw : RawMethod) (index : Nat) : Bool := raw.code.any fun instruction =>

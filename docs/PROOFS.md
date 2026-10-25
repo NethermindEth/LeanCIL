@@ -14,6 +14,12 @@ table exact without adding axioms. `DivisionIntrinsicsValid_iff_original` proves
 the original signature lookup, malformed-family rejection, arity, reachability, profile
 availability and length checks for arbitrary raw metadata, including non-ASCII identities.
 
+Feature getter validation likewise checks the common assembly/type prefix once, then compares
+literal UTF-8 suffixes. `featureGetter_eq_original` proves equality with the original lookup
+for every raw call site; a separate kernel-checked equality validates the generated suffix
+table. Prefix truncation, trailing bytes, non-ASCII names and call-shape mismatches remain
+rejected. This changes certificate checking cost, not the admitted feature getters.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a
@@ -1077,6 +1083,47 @@ homes used across its architecture-specific paths. See
 example with dead numeric locals on both sides of a live reference local and an
 allocating child call. Removing those declarations is a different simulation problem;
 equal scalar results alone do not imply equal final memory.
+
+### Generated profile templates
+
+Create ordinary extractions for the profiles your proof supports, then combine them:
+
+```sh
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' scalar scalar
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' sse42 x64-sse42
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' v3 x64-v3
+leancil templates shared scalar sse42 v3
+```
+
+The command reruns exact extraction checking for every input and requires the same
+assembly bytes. `shared/Templates.lean` defines each method once, with a profile parameter,
+parameters for the feature flags it reads, and managed callee indices keyed by full method
+identity. Every original IL instruction keeps its pc. Conditional instructions and excluded
+paths become `if` expressions and unsupported padding; `cil_instruction_equations` generates
+kernel-checked equations for every pc.
+
+`TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
+`Templates`. Each binding proves `Extracted.program[i]? = some (Templates.methodN ...)`
+by `rfl`, including all metadata and callee indices. Compile a binding only against its
+corresponding extraction, recorded in `templates.json`. Add the shared module and selected
+binding module to your proof package, import that binding from the consumer proof, and use
+ordinary `leancil verify` with that extraction and proof package. The templates command
+generates proof source; it does not replace Lean checking or verification of the extraction.
+
+Only the input profiles receive extraction bindings. Unselected combinations of observed
+flags produce unsupported instructions, and no correctness claim about another extraction
+follows from generating a template. The full profile remains an explicit parameter; a
+behavioral proof must relate its feature fields to the flag arguments it uses. Profiles
+that produce different metadata, different instruction counts, or different instructions
+under identical observed flags are rejected. Static-site metadata, imported callee slots
+and the model's `newVector256` constructor form are currently unsupported in template generation.
+
+`Tests/ProfileTemplates.cs` compiles a real AVX2/SSE4.2 dispatch helper and checks one
+shared proof from `Tests/ProfileTemplatesProof.lean` against three profiles. A fourth
+extraction changes the managed callee numbering through a wrapper entry point. The suite
+replays the generated equations, extraction certificates, bindings and consumer proofs in
+the kernel, and rejects changed flag values, callees, branch targets, instruction equations,
+stale extraction source and incompatible profile-dependent parameter homes.
 
 ### Instruction equations for parametric bodies
 
