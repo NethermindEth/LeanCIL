@@ -228,6 +228,10 @@ callee's proved contract, and embedding proofs can ignore trailing unread byref 
 pointer locals. Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
 
+`cil_embed [facts]` binds a shared body template to an extraction using proved feature
+flag and callee equalities. Local definitions also work without a fact list; relevant
+flags left unconstrained are rejected, and the kernel checks the complete instruction map.
+
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter
 expansion. See [proof automation validation](docs/VALIDATION.md#proof-automation)

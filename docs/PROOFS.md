@@ -973,6 +973,22 @@ example {fuel : Nat} {args : List CIL.Safety.Value} {m : CIL.Safety.Memory} {r :
     CIL.Safety.invoke Extracted.program fuel 2 args m = .ok r := bound.invoke h
 ```
 
+An expected body can be a shared template with local flag and callee parameters.
+Use `cil_embed [sse, avx, called]` when those hypotheses equate the parameters to
+the extraction's concrete flags and callee indices. The tactic rewrites only the
+supplied facts before alignment and unfolds local definitions; it does not infer
+flag equalities from the extracted code. Relevant parameters that remain open are
+rejected. The rewrite proof and the complete instruction map are kernel checked,
+including branch targets and callee indices. The no-argument form still handles
+closed bodies directly.
+
+`Tests/ProfileEmbedding.lean` binds one template and one open theorem to three valid
+profiles, including shifted branch targets, without restating the template body for
+each profile. It also rejects unresolved flags, incorrect flag and callee values,
+and a changed branch target. An irrelevant open argument may be removed by supplying
+the definition that ignores it in the fact list; this is justified by reduction,
+not an assumption about that argument's value.
+
 `bound.certificate` transports an `InvocationCertificate` and
 `bound.descriptors` the program's static descriptor list; `ProgramRefines.set`
 composes several bound methods. Named exceptions transfer too:
