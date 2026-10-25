@@ -35,7 +35,7 @@ internal static class ExportVerificationSuites
             "independent full composition of shared and changed static tables", [], ["Tests/ModularStaticExports.cs"],
             Standalone: true),
         new("exportstransitive", "transitive", "Tests/TransitiveImports.cs", [], "independent transitive contract imports",
-            [], ["Tests/TransitiveImports.cs", "Tests/TransitiveOutcomes.cs",
+            [], ["Tests/TransitiveImports.cs", "Tests/TransitiveOutcomes.cs", "Tests/StagedBundleMutation.cs",
                 "Tests/ContractImports/DerivedInterface.lean", "Tests/ContractImports/DerivedPercentProof.lean"],
             Standalone: true),
         new("exportsdiscovery", "discovery", "Tests/ContractExport.cs", ["--cohort", "discovery"], "contract discovery with real export bootstrap",

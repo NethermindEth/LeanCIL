@@ -115,6 +115,7 @@ JsonObject originalA = JsonNode.Parse(File.ReadAllText(aSidecar))!.AsObject();
 JsonObject originalB = JsonNode.Parse(File.ReadAllText(bSidecar))!.AsObject();
 FullTransitive();
 FullDiamond();
+Run(["dotnet", "run", "--file", At("Tests/StagedBundleMutation.cs"), "--", root]);
 Run(["dotnet", "run", "--file", At("Tests/TransitiveOutcomes.cs")]);
 ImportReviewRegressions.ValidateGraph_WhenDuplicateImplementationHashDiffers_RejectsIdentity(ExtractorPath, originalB);
 ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(

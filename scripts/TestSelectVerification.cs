@@ -287,6 +287,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
             name is "DerivedInterface" or "DerivedPercentProof"
                 ? ["exportsderived", "exportstransitive"] : ["exportsderived"]);
     Equal(VerificationSelection.Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitive"]);
+    Equal(VerificationSelection.Select(["Tests/StagedBundleMutation.cs"]), ["exportstransitive"]);
     Require(VerificationSelection.Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
         "Imported-layout model evidence lost its existing suite owner");
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);

@@ -78,8 +78,9 @@ discarded afterwards.
 
 Before the first dependency build, the verifier snapshots every staged bundle's
 complete file set, including its framework sources and regenerated extraction.
-It rechecks the selected bundle immediately before building it, so an earlier
-dependency cannot silently change a later bundle's staged inputs.
+It rechecks the selected bundle immediately before building it, detecting changes
+left by an earlier dependency before the later bundle starts. The isolation
+requirement still applies to ongoing or hostile producer processes.
 
 Reports retain the original conditional caller theorem. They add the composed
 theorem and audit, source bundle identities, and `acceptedVia:
