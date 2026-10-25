@@ -155,12 +155,13 @@ macro "cil_steps_from " message:str tactic:tacticSeq : tactic =>
 syntax "cil_lookup" "[" term,* "]" : tactic
 
 /-- A lookup that finds `a` finds every `b` equal to it. -/
-theorem getElem?_eq_some_of_eq {α : Type u} {l : List α} {i : Nat} {a b : α}
-    (found : l[i]? = some a) (reduced : a = b) : l[i]? = some b := by subst reduced; exact found
+theorem lookup_eq_some_of_eq {α : Type u} {lookup : Option α} {a b : α}
+    (found : lookup = some a) (reduced : a = b) : lookup = some b := by subst reduced; exact found
 
-#print axioms getElem?_eq_some_of_eq
+#print axioms lookup_eq_some_of_eq
 
-/-- Close `l[i]? = some x` by `rfl`, deciding a fetched feature `if` with `facts` first so the
+/-- Close `l[i]? = some x`, or a lookup a `@[cil_code]` equation already rewrote to
+    `some op = some x`, by `rfl`, deciding a fetched feature `if` with `facts` first so the
     op is a constructor and its step equation applies. -/
 syntax "cil_lookup_rfl" "[" term,* "]" : tactic
 
@@ -192,7 +193,7 @@ elab_rules : tactic
         throwError "Unexpected lookup"
       let fetchedOp ← mkExpectedTypeHint (← mkEqRefl lookup)
         (← mkEq lookup (← mkAppM ``Option.some #[op]))
-      goal.assign (← mkAppM ``CIL.Safety.getElem?_eq_some_of_eq #[fetchedOp, ← reduced.getProof])
+      goal.assign (← mkAppM ``CIL.Safety.lookup_eq_some_of_eq #[fetchedOp, ← reduced.getProof])
       replaceMainGoal []
     catch _ => fetched.restore
 
