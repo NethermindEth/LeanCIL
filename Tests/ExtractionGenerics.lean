@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import CIL.Safety.SymbolicExecution
 
 namespace Tests.ExtractionGenerics
 open CIL CIL.Extraction
@@ -43,17 +44,17 @@ def callCode : Method := { locals := [], returnsValue := true, code := [.call 0 
 /-- Structural proof construction retains the complete managed-call predicate. -/
 theorem structural_call : ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
     callCode := by
-  cil_managed_calls [caller, closed, raw, word, callCode]
+  cil_strict (cil_managed_calls [caller, closed, raw, word, callCode])
 #print axioms structural_call
 
 /-- Equal storage width does not permit substituting a signed parameter. -/
 theorem signed_parameter_rejected :
     ¬ ManagedCallsValid [⟨[word], closed⟩] []
       (caller (.atom runtimeScope "System.Int64")) [true] callCode := by
-  fail_if_success
+  fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[word], closed⟩] []
         (caller (.atom runtimeScope "System.Int64")) [true] callCode := by
-      cil_managed_calls [caller, closed, raw, word, callCode]
+      cil_managed_calls [caller, closed, raw, word, callCode]))
   decide +kernel
 #print axioms signed_parameter_rejected
 
@@ -61,10 +62,10 @@ theorem signed_parameter_rejected :
 theorem parameter_scope_rejected :
     ¬ ManagedCallsValid [⟨[word], closed⟩] []
       (caller (.atom "attacker" "System.UInt64")) [true] callCode := by
-  fail_if_success
+  fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[word], closed⟩] []
         (caller (.atom "attacker" "System.UInt64")) [true] callCode := by
-      cil_managed_calls [caller, closed, raw, word, callCode]
+      cil_managed_calls [caller, closed, raw, word, callCode]))
   decide +kernel
 #print axioms parameter_scope_rejected
 
@@ -72,10 +73,10 @@ theorem parameter_scope_rejected :
 theorem generic_argument_rejected :
     ¬ ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] []
       (caller word) [true] callCode := by
-  fail_if_success
+  fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] []
         (caller word) [true] callCode := by
-      cil_managed_calls [caller, closed, raw, word, callCode]
+      cil_managed_calls [caller, closed, raw, word, callCode]))
   decide +kernel
 #print axioms generic_argument_rejected
 
@@ -83,10 +84,10 @@ theorem generic_argument_rejected :
 theorem argument_count_rejected :
     ¬ ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
       { callCode with code := [.call 0 2] } := by
-  fail_if_success
+  fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
         { callCode with code := [.call 0 2] } := by
-      cil_managed_calls [caller, closed, raw, word, callCode]
+      cil_managed_calls [caller, closed, raw, word, callCode]))
   decide +kernel
 #print axioms argument_count_rejected
 
