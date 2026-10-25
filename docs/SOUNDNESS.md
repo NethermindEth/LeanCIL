@@ -120,6 +120,12 @@ Scope and limits:
 
 `cil_embed` (`CIL.Embedding.Tactic`) computes the map outside the kernel by aligning live instructions, following fallthroughs and branch targets. The alignment is untrusted: the proof term passes the map to `Embeds.mk` with every field closed by `Eq.refl`, and the kernel checks it against the body reduced from `program[index]?`. A wrong map can only make the kernel reject the proof. Before building the proof, the tactic evaluates the same conditions and reports the first violated one.
 
+### Dead locals
+
+`MethodEmbedsDeadLocals program index expected` relaxes only the local declarations: `EmbedsDeadLocals expected actual map` requires `Embeds expected (actual.withLocalsOf expected) map`, so every other field and the code are checked as above, and that `actual`'s locals and local kinds are `expected`'s followed by trailing locals that are each a `.reference` initialized to `.nullRef` or `.unmodeled`. It also requires `expected`'s kinds and initializers to have equal length, every opaque vector local to lie among the kept locals, and no parameter homes, which the frame places after the locals and the extractor addresses by local count. Frame entry creates such a dead local as a root slot without allocating, so `enterFrame_deadLocals` shows that `actual` enters the frame of `actual.withLocalsOf expected` with the dead slots appended, in the same memory with the same allocation identities. `step_appendLocals` shows that a step that succeeds or throws behaves the same with the padded frame, since every local an instruction reads is below the padding, and `run_padded` lifts it to whole runs. `EmbedsDeadLocals.invoke_outcome` composes this with `invoke_outcome_refines`; `MethodEmbedsDeadLocals.invoke`, `.raises`, `.method_holds`, `.holds` and `EmbedsDeadLocals.invoke_raise` (`CIL.Safety.Embedding.DeadLocals`) are its instances, with the same transfer limits as above. `InvocationCertificate`s are not transferred, since their live state names the frame. There is no `MethodEmbedsDeadLocals.refines`: the padded run is related to the unpadded one directly, not through a `ProgramRefines`, so it does not combine with other replacements through `ProgramRefines.set`. To replace other methods as well, prove their `MethodEmbeds` against `program.set index expected`, the program with the dead-local method already replaced, and chain each `.invoke` with this one's.
+
+Only trailing byref and pointer dead locals are covered, the extractor's `.reference` locals. A dead span local (`.span` kind) also allocates nothing, but its slot is a span view rather than a root, so it is not covered yet. Numeric dead locals are rejected: each allocates a home, which shifts the identity of every later allocation, and no relation between memories with renamed identities is modeled. A dead local before a kept one is rejected because it renumbers the kept local. `cil_embed` proves `MethodEmbedsDeadLocals` goals too and names the violated local condition.
+
 ## Shared proof contracts and reduction
 
 `RunTrace` exposes the four successful control-flow cases of checked execution.
@@ -158,6 +164,29 @@ Primitive indirect loads/stores and integer `ldobj`/`stobj` use those same acces
 A null managed reference is a distinct value, not address zero. `Unsafe.NullRef<T>` produces it and `Unsafe.IsNullRef<T>` compares against it without any access check, as .NET compares the pointer. Every checked memory instruction faults with `nullDereference` on it, before forming a field or lane offset; this models the `NullReferenceException` that the runtime raises for an access through a null byref, under the same runtime correspondence assumption as other faults. The fault is not `thrown`, so an `OutcomeContract` cannot name it as raised; methods with handlers remain rejected, so nothing observes it.
 
 Static data is immutable, extraction-bound RVA storage with field identities retained separately from contents. Static initializers that could execute unmodelled code are rejected.
+
+Supplied one-dimensional primitive integer arrays retain an element type, length and checked
+allocation-relative data reference. The runtime correspondence premise must identify these with
+the actual array's element type, length and backing bytes; constructing a model view does not
+establish that correspondence. Array operations reuse existing allocation, lifetime,
+initialization and authority checks. A readonly permission set grants no write authority, while
+aliases over the same allocation observe the same bytes. A valid null array raises the named
+`System.NullReferenceException`; an out-of-range index on a valid non-null array raises
+`System.IndexOutOfRangeException`. Invalid extents, expired storage and missing authority remain
+model faults and cannot prove either expected exception. Array allocation, reference elements,
+multidimensional arrays and taking the address of an array root are outside this subset.
+The scalar certificate checks array opcode families, integer widths, load signedness, native
+integer distinctions and typed element tokens against the emitted operations.
+
+For `readonly.; ldelema`, the certificate additionally binds the readonly flag to the
+immediately preceding raw prefix and disallows branch entry between the two instructions.
+Restricted references keep their tag through argument checks, calls, returns and local stores.
+A local holding a restricted reference uses `LocalSlot.readOnlyRoot`; loading it cannot produce
+an unrestricted reference. Reads still require initialized readable bytes. Stores through the
+restricted view fail even when memory contains write authority, and unsupported reference
+adapters cannot strip the tag. This is an access restriction, not an immutability or uniqueness
+claim: writes through other authorized aliases remain visible. The subset excludes reference
+element arrays and their covariance/type-check behavior.
 
 Generated static identities are unsigned natural numbers from SHA-256 of the
 full assembly identity and full field name. The assembly identity text is
@@ -238,7 +267,24 @@ Portable consumer support manifests require an independently trusted SHA256 and 
 
 Local consumer support generations are a cache, not part of the trusted base. A restored module is reused only when its local HMAC receipt and every file hash verify, its recorded source hashes and compiled imports match the current snapshot, and Lake leaves its bytes unchanged after the build; otherwise every module is replayed. Each such artifact was kernel-replayed (or restored under the same rules) by an earlier successful verification. The key binds the variables Lean, Lake and elan read, not the whole process environment: an elaborator that reads another variable is not tracked by Lake's own traces either, and its output is still kernel-replayed when first certified. Name such variables in `LEANCIL_CACHE_ENVIRONMENT`, or use `--fresh`.
 
-Batch verification shares a source snapshot, workspace builds and kernel replay only between requests with identical generated CIL. Each request's theorem audit loads only its own proof module's replayed oleans and runs none of their code, so no request's notations or elaborators can affect any printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
+These receipts also retain compilation outputs for `Extracted` and `ExtractionAudit`, bound
+to the exact generated program and audit source through their compiled import closure.
+When a consumer proof is rechecked, restored certificates and their extraction-dependent
+importers still undergo kernel replay. The certificate and theorem audits, extraction
+regeneration, assembly hashes and source-stability checks remain mandatory.
+
+Batch verification shares a source snapshot across requests. Requests with identical generated CIL share a workspace build and kernel replay; other groups may share only certified extraction-independent support. Each request's theorem audit loads only its own proof module's replayed oleans and runs none of their code, so no request's notations or elaborators can affect any printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
+
+For multi-extraction consumer batches, the first workspace prebuilds support found in all
+requests' source import closures. This scheduling scan recognizes repeated import commands,
+including `public`, `meta`, `import all` and nested comments; ambiguous sources
+and unrecognized syntax remain ordinary per-group work. The scan grants no trust.
+Every built module enters the compiled import graph and kernel replay, including modules
+outside the first proof's closure. Only after replay, theorem audits and source/artifact
+stability checks pass are extraction-independent artifacts shared with later workspaces.
+The compiled graph excludes indirect imports of `Extracted` and `ExtractedSymbols` even
+when their source imports were not recognized by the scheduling scan. Failed optional
+support builds do not bypass normal group builds or certify their unfinished outputs.
 
 ## Theorem audit
 
@@ -384,3 +430,12 @@ its raw object-null kind separately from managed references. It can be truth-tes
 compared with another object null, duplicated or discarded. It cannot justify object
 parameters, locals or results, or a comparison against a managed reference. The scalar
 certificate binds the raw null literal, comparison operation and branch target exactly.
+
+Pointer subtraction and unsigned ordering require live, well-formed references. Differences
+and orderings additionally require both references to identify the same allocation; no relative
+runtime addresses are inferred from different allocation identities. The runtime correspondence
+assumes an allocation occupies one contiguous, non-wrapping address interval. Within that
+interval, unsigned address order matches offset order and address subtraction cancels its base.
+Differences retain their native-width two's-complement representation. Subtracting an int32 or
+native byte displacement reuses checked wrapping reference arithmetic and retains readonly
+restrictions. None of these observations reads, initializes or grants authority over storage.

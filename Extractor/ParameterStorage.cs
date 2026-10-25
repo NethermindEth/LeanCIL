@@ -14,8 +14,9 @@ internal static class ParameterStorage
             if (instruction.Operand is not ParameterDefinition parameter)
                 throw new InvalidDataException($"Invalid argument operand: {instruction}");
             var index = MethodArguments.Index(method, parameter);
-            if (instruction.OpCode.Code is Code.Ldarga or Code.Ldarga_S && MethodArguments.Type(method, index) is ByReferenceType)
-                throw new InvalidDataException("Address of managed-reference argument is unsupported");
+            var address = instruction.OpCode.Code is Code.Ldarga or Code.Ldarga_S;
+            if (address && MethodArguments.Type(method, index) is ByReferenceType or ArrayType)
+                throw new InvalidDataException("Address of managed-reference or array-root argument is unsupported");
             indices.Add(index);
         }
         return [.. indices];

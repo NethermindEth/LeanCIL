@@ -116,13 +116,32 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     Directory.CreateDirectory(output);
     string proof = Path.Combine(output, "Proof.lean");
     string word = wide ? "i32" : "i64";
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+    var executionProof = name switch
+    {
+        "And" => BroadcastProof("band", 0, "and"),
+        "Or" => BroadcastProof("bor", 1, "or"),
+        "Xor" => BroadcastProof("bxor", 2, "xor"),
+        "AndNot" => BroadcastProof("andNot", 3, "andNot"),
+        "ShiftLeft" => ShiftProof("shl64Count", 0, "shiftLeft"),
+        "ShiftRight" => ShiftProof("shr64Count", 3, "shiftRight"),
+        _ => "\n  apply ok_of_toOption\n  decide +kernel"
+    };
+    string BroadcastProof(string operation, int lane, string lemma) =>
+        $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word " +
+        $"Extracted.profile .{operation} {lane} {left} {right} {expected} Examples.empty " +
+        $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
+    string ShiftProof(string operation, int lane, string lemma) =>
+        $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift " +
+        $"Extracted.profile .{operation} {lane} {left} {right} {expected} Examples.empty " +
+        $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
+    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\n" +
+        "import CIL.Safety.IntrinsicExecution\nnamespace ExampleProof\n" +
         (wide ? "private theorem ok_of_toOption {error value : Type} {result : Except error value} {expected : value}\n" +
             "    (observed : result.toOption = some expected) : result = .ok expected := by\n" +
             "  cases result <;> simp_all [Except.toOption]\n" : "") +
         "theorem correctness : (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 " + left +
         "), .scalar (.i64 " + right + ")] Examples.empty).map Prod.snd = .ok [.scalar (." + word + " " + expected +
-        ")] := by " + (wide ? "\n  apply ok_of_toOption\n  decide +kernel" : "rfl") + "\nend ExampleProof\n");
+        ")] := by " + executionProof + "\n#print axioms correctness\nend ExampleProof\n");
     pending.Add((new(selectors[name], proof, output), wide ? "x64-v4" : "x64-v3", () =>
     {
         RequireRuntimeGroups(output, wide);

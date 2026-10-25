@@ -1,4 +1,5 @@
 import Std
+import CIL.Safety.StepAttribute
 
 /-!
 # Feature profiles
@@ -81,6 +82,15 @@ def FeatureProfile.evaluate (p : FeatureProfile) : Feature → Bool
   | .vector256Accelerated => p.vector256Accelerated
   | .x86Base64 => p.x86Base64
   | .vector128Accelerated => p.vector128Accelerated
+
+-- One equation per `Feature`: a known feature test reduces to the profile field a caller's
+-- fact names, and a symbolic `evaluate id` stays folded so a fact about it still applies.
+open Lean Meta Elab Command in
+run_cmd do
+  let some equations ← liftTermElabM <| getEqnsFor? ``CIL.FeatureProfile.evaluate
+    | throwError "FeatureProfile.evaluate has no equations"
+  for name in equations do
+    elabCommand (← `(attribute [cil_step, cil_feature] $(mkIdent name)))
 
 /-- Declared capability domain: 64-bit little-endian execution, architecture
 separation, and prerequisites used by the reachable SSE/AVX operations. This is

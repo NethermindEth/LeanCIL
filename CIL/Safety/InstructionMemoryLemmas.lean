@@ -1,5 +1,6 @@
 import CIL.Safety.Execution
 import CIL.Safety.SpanViewLemmas
+import CIL.Safety.ArrayViewLemmas
 
 /-!
 # Instruction effects and value validity
@@ -50,6 +51,7 @@ theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List
 def Value.Valid (m : Memory) : Value → Prop
   | .scalar value => numericValue value = true
   | .bufferSpan view => view.validate m = .ok ()
+  | .array view => view.validate m = .ok ()
   | .readOnlyReference .null => True
   | .readOnlyReference (.address r) => form m r = .ok r
   | .reference .null | .span .null _ => True
@@ -121,6 +123,16 @@ theorem formValue_result_valid (m : Memory) (r : ManagedReference) (value : Valu
       subst formed
       exact hf
 
+/-- Forming a reference also validates the same address with a readonly restriction. -/
+theorem formValue_readOnly_valid (m : Memory) (reference : ManagedReference) (value : Value)
+    (formed : formValue m reference = .ok value) :
+    (Value.readOnlyReference reference).Valid m := by
+  have valid := formValue_result_valid m reference value formed
+  rw [formValue_returns_input m reference value formed] at valid
+  cases reference <;> exact valid
+
+#print axioms formValue_readOnly_valid
+
 /-- `checkedValue` either faults or returns its input, which is then valid. -/
 theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
@@ -134,13 +146,13 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
     · cases h
   | reference r =>
     exact ⟨formValue_returns_input _ _ _ h, formValue_result_valid _ _ _ h⟩
-  | bufferSpan view =>
+  | bufferSpan view | array view =>
     cases formed : view.validate m <;>
       simp only [checkedValue, formed, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at h
     · cases h
-    · rename_i unit
-      cases unit
+    · rename_i validated
+      cases validated
       cases h
       exact ⟨rfl, formed⟩
   | readOnlyReference r =>
@@ -166,7 +178,7 @@ theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid 
     checkedValue m value = .ok value := by
   cases value with
   | scalar value => simp only [Value.Valid] at valid; simp [checkedValue, valid]
-  | bufferSpan view =>
+  | bufferSpan view | array view =>
     simp only [Value.Valid] at valid
     simp [checkedValue, valid, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
@@ -189,6 +201,7 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   cases value with
   | scalar value => exact hv
   | bufferSpan view => exact view.validate_preserved hv hm ext
+  | array view => exact view.validate_preserved hv hm ext
   | readOnlyReference r =>
     cases r with
     | null => exact True.intro
@@ -228,6 +241,18 @@ theorem checkedValues_valid (m : Memory) (values result : List Value)
 #print axioms checkedValue_of_valid
 #print axioms ValuesValid.preserve
 #print axioms checkedValues_valid
+
+/-- Values valid in `memory` pass the argument and result checks unchanged. -/
+theorem checkedValues_of_valid {memory : Memory} {values : List Value}
+    (valid : ValuesValid memory values) : values.mapM (checkedValue memory) = .ok values := by
+  induction values with
+  | nil => rfl
+  | cons value rest restChecked =>
+    have head := checkedValue_of_valid memory value (valid value (List.mem_cons_self ..))
+    have tail := restChecked fun other member => valid other (List.mem_cons_of_mem _ member)
+    simp only [List.mapM_cons, head, tail, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms checkedValues_of_valid
 
 theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
     {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) :
@@ -340,6 +365,29 @@ theorem checkedSpanElement_valid (view : SpanView) (memory : Memory) (width inde
 #print axioms checkedSpanSlice_valid
 #print axioms checkedSpanElement_valid
 
+/-- Checked array addresses retain a live allocation-relative reference. -/
+theorem checkedArrayElement_valid (view : ArrayView) (memory : Memory) (index width : Nat)
+    (reference : Reference) (found : arrayElement memory view index width = .ok reference) :
+    (Value.reference (.address reference)).Valid memory := by
+  unfold arrayElement at found
+  repeat' first
+    | solve | exact view.element_formed memory index reference (checkedAt_ok found)
+    | cases found
+    | split at found
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at found
+
+#print axioms checkedArrayElement_valid
+
+/-- A readonly array address retains validity without gaining write permission through the view. -/
+theorem checkedArrayAddress_valid (view : ArrayView) (memory : Memory) (index width : Nat)
+    (writable : Bool)
+    (reference : Reference) (found : arrayElement memory view index width = .ok reference) :
+    (if writable then Value.reference (.address reference)
+      else .readOnlyReference (.address reference)).Valid memory := by
+  cases writable <;> exact checkedArrayElement_valid view memory index width reference found
+
+#print axioms checkedArrayAddress_valid
+
 set_option hygiene false in
 /-- Closes one success case of the instruction case analysis with `InstructionContract.of_effect`:
     picks the effect from the hypotheses, then rebuilds the output stack from retained inputs
@@ -373,6 +421,8 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | apply checkedReadOnlySpan_valid; assumption
             | apply checkedSpanSlice_valid; assumption
             | apply checkedSpanElement_valid; assumption
+            | apply checkedArrayElement_valid; assumption
+            | apply checkedArrayAddress_valid; assumption
           · first
             | exact retained
             | exact retained.tail
@@ -386,7 +436,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   unfold memoryInstruction at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
-    | solve | instruction_contract_close
+    | solve | cases h; instruction_contract_close
     | cases h
     | split at h
 
@@ -398,7 +448,7 @@ theorem instruction_contract (operation : CIL.Op) (stack values : List Value) (m
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply memoryInstruction_contract; assumption
-    | solve | instruction_contract_close
+    | solve | cases h; instruction_contract_close
     | cases h
     | split at h
 

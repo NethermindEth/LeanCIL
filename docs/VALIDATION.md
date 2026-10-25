@@ -1,6 +1,73 @@
 # Validation coverage
 
+`Tests/ConsumerCertificateReuse.cs` measures four independent verifier processes with
+distinct proof sources. Unchanged generated certificates retain their authenticated build
+outputs; changed extraction text and self-rehashed corrupt artifacts force rebuilding both
+`Extracted` and `ExtractionAudit`. Every successful request still replays both modules and
+the proof, and audits the certificate. Generated-source tampering remains rejected before
+receipt reuse. Pass a baseline extractor DLL and `--measure` to collect the same workload
+without requiring compilation reuse; results are written to `timings.json`.
+
+`Tests/TranslationScaling.cs` checks the unchanged extraction prefix once, then imports it
+into the compositional certificate and deliberately failing monolithic certificate. Its
+`--measure` option also checks both original complete files and records command timings
+for the identical six-method workload. The consumer still verifies the original extraction.
+`Tests/TranslationAudit.cs` shares and replays the prefix once across certificate mutations;
+each variant retains its original certificate audit and rejection assertions. A changed
+prefix is rejected before any suffix can use the checked module.
+
+`Tests.CertificateFlow` covers streaming fallthrough, indexed forward/backward edges,
+missing states, out-of-bounds targets and mismatched certificate lengths. The feature and
+scalar equivalence theorems retain the original list-indexed rules, including rejection
+when the feature and scalar certificate lengths differ.
+
+`Tests/CertificateFlowScaling.lean` and `Tests/CertificateBranchScaling.lean` provide fixed
+512-nop and 512-branch workloads, each followed by a return, for kernel checking and independent
+replay. Their profiler reports tactic execution and kernel type-checking separately.
+Compile and replay each workload, for example:
+
+```sh
+lake env lean -o .lake/build/lib/lean/Tests/CertificateFlowScaling.olean Tests/CertificateFlowScaling.lean
+lake env leanchecker Tests.CertificateFlowScaling
+```
+
+Compare identical source with baseline and updated libraries; native evaluation alone does
+not measure this workload. The benchmark is separate from ordinary library builds.
+
+`Tests/ConsumerSupportUnion.cs` runs a fixed three-extraction consumer batch in two orders.
+Support imported only by later groups must build and replay once; direct and indirect
+extraction-dependent modules must replay in every consuming group, including repeated import
+commands on one line. Compiled import headers remain authoritative when scheduling misses an import.
+The fixture records wall, build and replay timings and module counts in `timings.json`.
+Run it with an extractor DLL path and `--measure` to record a baseline without asserting
+the improved reuse counts. The ordinary consumer suite runs the assertions.
+
 For checked-step and loop tactics, see [proof automation](#proof-automation).
+
+`Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping through vector and int32
+stores, reloads and overwrites with abstract homes and memory, plus signed-byte narrowing.
+Missing write authority, mismatched local kinds and unknown local contents remain rejected.
+The ordinary shared tactic tests run unchanged.
+
+`Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer
+element types against runtime results and certified checked execution. It also covers length,
+helper calls, aliases, returned arrays, named null/bounds faults and unsupported array forms.
+Independent changes to load width or signedness must fail the Lean scalar certificate.
+`Tests/PrimitiveArrays.lean` covers empty and null arrays, signed and native indices,
+initialization, authority, invalid extents, local storage and neighboring-byte preservation.
+Both run in the evidence suite.
+
+`Tests/ArrayElementReferences.cs` checks compiled `ldelema` returns, helper reads and writes
+against runtime behavior, preserving neighboring contents and rejecting a forged element type.
+`Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired
+references and address formation without granting memory authority. Both run in the evidence suite.
+
+`Tests/ReadOnlyArrayReferences.cs` inserts real `readonly.` prefixes into compiled fixtures,
+checks returned and locally stored references, and proves that caller stores fail despite
+writable backing memory. It rejects independently forged writable evidence, separated prefixes
+and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
+read access and rejection of an adapter that would remove the restriction. Both run in the
+evidence suite.
 
 `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
 covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
@@ -152,6 +219,11 @@ assertion permits only `propext` and `Quot.sound`. The same module checks both
 paths of a symbolic branch using a supplied truth hypothesis, and verifies that
 failed candidate summaries do not escape their transaction.
 
+`Tests.LegacyFeatures`, imported by `Tests.Automation`, uses only the reference
+interpreter tactic import. It checks enabled and disabled symbolic features from
+caller facts, plus a concrete feature reduced to its profile field. `cil_steps`
+keeps symbolic `FeatureProfile.evaluate` applications folded, as checked stepping does.
+
 `Tests.StoreFacts` checks symbolic carry and borrow stores whose write facts
 state `a + b + c`, `a - b - c` and the flag words in source form, through both
 `cil_checked_steps` and `cil_contract_steps`. A wrong stored value, address or
@@ -168,7 +240,10 @@ It composes adjacent placements and splits them back with `cons_iff`, `take` and
 `exists_eq_append` needs by placing the empty segment past the end of a body.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
-bodies with mapped program counters; `Tests.OutcomeEmbedding` checks transport of
+bodies with mapped program counters, and with trailing dead reference locals dropped,
+beside kept opaque vector locals too. It rejects numeric dead locals, in the kernel and
+in the tactic, and non-trailing ones, and still reports a changed live instruction
+under dead locals; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
 throws, unsupported execution and fuel exhaustion do not transfer. `Tests.AggregateSetup` and `Tests.Semantics`
 cover frame setup and interpreter behavior. The extracted-loop suite checks
@@ -188,7 +263,17 @@ exception never satisfy an expected loop exception.
 internal ones without re-executing the callee, composes callers through the derived
 contracts, and proves that an unjustified stronger postcondition, a weaker
 precondition, a smaller footprint and a changed exception type each fail both the
-refinement premises and the derived contract on a concrete input.
+refinement premises and the derived contract on a concrete input. Its forwarders inherit
+their callees' contracts through `MethodContract.Holds.forward` and `forward_out`: `Sum`,
+`SumSwapped` and `AddFrom` pass `AddTo` its arguments in order, swapped and reversed;
+`SumDiscard` inherits `AddFlag`'s contract with an uninitialized out local, and `CopyTo`
+inherits `AddFrom`'s with a zeroed local, a callee region footprint inside its own and an
+`Apart` fact from the local's freshness; `IsZeroForward`, `IsZeroIgnoring` and
+`IsZeroSecond` re-narrow `IsZero`'s boolean, the last two skipping an argument; and
+`IsSetForward` passes a boolean through a narrowed load. Rejected are a body whose loads
+differ, a selection that passes one argument twice, a result or load outside the narrow
+range, and two false contracts: `IsZeroSecond` as if it loaded its first argument, and
+`IsZeroIgnoring` with a dangling unused argument.
 
 `Tests.InvocationCertificates` builds invocation certificates from a computed
 invocation and from a computed run, keeps them through a certified contract and
@@ -231,7 +316,10 @@ naming `CIL.step.eq_def` elaborates.
 
 `Tests.SimdLanes` checks the SIMD lane lemmas as a multi-limb routine uses them: the
 carry and borrow cascades built from intrinsic comparison masks reproduce 256-bit sums
-and differences for every input, including a carry that crosses an all-ones lane where a
+and differences for every input. The 512-bit forms cover all eight lane carry-ins and the
+outgoing carry or borrow; boundary fixtures propagate across all eight lanes and reject an
+unshifted generate mask. Broadcast all-ones and operand-swapped AVX-512 greater-than
+sources feed the same 256-bit cascade. Tests include a carry across an all-ones lane where a
 single repair hop is wrong, and 128-bit sums and differences follow from their lane
 carries. Each intrinsic equation (lane add, multiply, equal, unsigned and signed compare,
 `MoveMask`, shifts by immediate and by vector count, permute, sum and even-lane multiply)
@@ -293,6 +381,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
+| `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -302,9 +391,10 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, transitive, discovery and typed suites cannot enter that plan.
-The registry now has 18 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`
-and `exportstyped` run directly, with no core export bootstrap or nested post-call. Their fixture assertions are
+statics, full statics, transitive, discovery, typed and derived suites cannot enter that plan.
+The registry now has 19 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+`exportstyped` and `exportsderived` run directly, with no core export bootstrap or nested
+post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after
@@ -315,9 +405,22 @@ caller. It needs no baseline caller artifact or verified report. The discovery
 leaf runs no core caller verification, restrictions, callbacks or full cases.
 The typed leaf explicitly owns its fixture and five input proof/interface
 modules. Shared model and proof dependencies retain their existing owners.
+The derived leaf likewise owns its fixture and the five `Derived*` interface,
+producer and caller modules in `Tests/ContractImports`. It proves exact internal
+method and outcome contracts on the actual extraction and exports public ones
+derived only through `Holds.weaken`. Callers verify from the sidecar alone, on
+normal and named-exception paths. Stronger posts, weaker preconditions, smaller
+footprints and renamed exceptions are refuted on the same extraction; at the
+exporter, one renamed exception fails only its refinement proof.
 
 New cohort durations are unmeasured. The existing CI caps remain 90 minutes
 for imports, 120 for each exports leaf, and 30 for other suites. The matrix
 still uses at most eight runners. Run the resource-bounded routing tests with
 `dotnet run --file scripts/TestSelectVerification.cs`; they need no Lean build
 or fixture SDK project. Full integration results come from the CI leaf jobs.
+
+`Tests/PointerOperations.cs` compares seven compiled pointer methods with .NET: int32/native
+byte subtraction, pointer differences and four unsigned orderings. It independently forges
+subtraction as addition and requires the Lean scalar certificate to reject it. The Lean fixtures
+cover negative offsets and differences, end positions, readonly preservation, every unsigned
+branch, and null, cross-allocation, invalid-position and signed-comparison rejection.

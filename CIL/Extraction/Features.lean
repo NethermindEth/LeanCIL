@@ -1,6 +1,7 @@
 import CIL.Extraction.Generics
 import CIL.Extraction.FeatureEffects
 import CIL.Extraction.Folds
+import CIL.Extraction.FlowIndex
 
 /-!
 # Feature flow
@@ -313,7 +314,8 @@ def featureOpMatchesAt (raw : RawMethod) (role : Option FoldRole)
     be well shaped, match its emitted instruction, and flow into a weaker state at every
     recomputed successor. -/
 private def checkFeatureSite (raw : RawMethod) (profile : FeatureProfile)
-    (certificate : FeatureCertificate) (roles : List (Option FoldRole)) :
+    (certificate : Nat → Option (Option FeatureState))
+    (roles : Nat → Option (Option FoldRole)) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Op → Bool
   | _, none, .unsupported _ => true
   | ((instruction, role), pc), some state, emitted =>
@@ -322,9 +324,9 @@ private def checkFeatureSite (raw : RawMethod) (profile : FeatureProfile)
           featureSuccessors pc instruction state with
       | some after, some successors =>
         -- Roles are contiguous, so only a non-fallthrough edge can enter a fold's interior.
-        successors.all (fun target => target == pc + 1 || foldEntry roles target) &&
+        successors.all (fun target => target == pc + 1 || foldEntry (roles target)) &&
         successors.all fun target =>
-          match certificate[target]? with
+          match certificate target with
           | some (some incoming) => after.weakens incoming
           | _ => false
       | _, _ => false
@@ -337,13 +339,37 @@ def FeatureFlowValid (raw : RawMethod) (profile : FeatureProfile)
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := List.replicate raw.locals.length none }) ∧
-  all3 (checkFeatureSite raw profile certificate (foldRoles raw.locals raw.code))
+  all3Flow (fun lookup => checkFeatureSite raw profile lookup
+      (FlowIndex.ofList (foldRoles raw.locals raw.code)).get?)
+    (.ofList certificate) 0
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true
 
 instance (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
     (reachable : List Bool) (code : List Op) :
     Decidable (FeatureFlowValid raw profile certificate reachable code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- Streaming validation has exactly the same entry, mask, shape and successor checks
+    as indexing the complete certificate and fold-role lists at every site. -/
+theorem FeatureFlowValid_iff_list (raw : RawMethod) (profile : FeatureProfile)
+    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Op) :
+    FeatureFlowValid raw profile certificate reachable code ↔
+      certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
+      reachable = certificate.map Option.isSome ∧
+      certificate[0]? = some (some
+        { stack := [], locals := List.replicate raw.locals.length none }) ∧
+      all3 (checkFeatureSite raw profile (fun target => certificate[target]?)
+          (fun target => (foldRoles raw.locals raw.code)[target]?))
+        (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true := by
+  unfold FeatureFlowValid
+  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
+  have roles : (FlowIndex.ofList (foldRoles raw.locals raw.code)).get? =
+      (fun target => (foldRoles raw.locals raw.code)[target]?) := by
+    funext target
+    exact FlowIndex.get?_ofList _ _
+  rw [roles]
+
+#print axioms FeatureFlowValid_iff_list
 
 /-- A feature fact denotes an exact word, while unknown admits any value. -/
 def FactRepresents (fact : Option W32) (value : Value) : Prop :=
@@ -408,7 +434,9 @@ theorem FeatureFlowValid.edge_closed {raw : RawMethod} {profile : FeatureProfile
   have indexed : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
       some ((instruction, role), pc) := by
     simp [List.getElem?_zipIdx, rawAt]
-  have checked := all3_at valid.2.2.2.2 indexed stateAt (List.getElem?_eq_getElem bound)
+  have sites := valid.2.2.2.2
+  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at sites
+  have checked := all3_at sites indexed stateAt (List.getElem?_eq_getElem bound)
   simp only [checkFeatureSite, transferred, successorsAt, Bool.and_eq_true] at checked
   have successor := List.all_eq_true.mp checked.2.2 target member
   cases hnext : certificate[target]? with

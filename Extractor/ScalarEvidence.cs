@@ -12,7 +12,7 @@ internal static class ScalarEvidence
         NativeOperands.Kind.Native => ".native",
         NativeOperands.Kind.Reference => ".reference",
         NativeOperands.Kind.NullObject => ".nullObject",
-        _ => ".other"
+        _ => Arrays.StackKind(kind) ?? ".other"
     };
 
     internal static void Emit(StringBuilder lean, MethodDefinition method, int number,

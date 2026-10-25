@@ -54,6 +54,7 @@ import CIL.Safety.ByteEncoding
 import CIL.Safety.ByteRoundTrip
 import CIL.Safety.BufferContents
 import CIL.Safety.CallComposition
+import CIL.Safety.Embedding.DeadLocals
 import CIL.Safety.Embedding.Outcomes
 import CIL.Safety.Embedding.Simulation
 import CIL.Safety.Embedding.Suffix
@@ -77,6 +78,7 @@ import CIL.Safety.ExecutionLemmas
 import CIL.Safety.ExecutionLifetime
 import CIL.Safety.ExecutionPrefixes
 import CIL.Safety.ExecutionStaticWorld
+import CIL.Safety.Forwarders
 import CIL.Safety.FrameAllocations
 import CIL.Safety.FrameLemmas
 import CIL.Safety.FrameMemoryBelow
@@ -106,6 +108,7 @@ import CIL.Safety.StepFlow
 import CIL.Safety.RegionRun
 import CIL.Safety.NegationReturn
 import CIL.Safety.LocalSnapshots
+import CIL.Safety.LocalSnapshotSteps
 import CIL.Safety.NumericHomes
 import CIL.Safety.NumericLocalLoad
 import CIL.Safety.NumericLocalStore
@@ -174,6 +177,8 @@ import CIL.Interface.Closure
 import CIL.Safety.StaticLinking
 import CIL.Interface.FullTransfer
 import CIL.SIMD.UnspecifiedLanes
+
+import CIL.Safety.IntrinsicExecution
 
 /-!
 # LeanCIL
