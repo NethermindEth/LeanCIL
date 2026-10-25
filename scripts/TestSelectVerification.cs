@@ -114,7 +114,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 18 leaves, 46 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 22 leaves, 46 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -139,10 +139,14 @@ Test("independent export cohort map preserves 18 leaves, 46 base cases and one d
         ["exportsmutationsource"] = ("consumer-source", ["full.consumer-source"]),
         ["exportsmutationshadow"] = ("consumer-shadow", ["full.consumer-shadow"]),
         ["exportsstatics"] = ("statics", []),
+        ["exportsfullstatics"] = ("fullstatics", []),
         ["exportstransitive"] = ("transitive", []),
+        ["exportstransitiveoutcomes"] = ("transitiveoutcomes", []),
         ["exportsdiscovery"] = ("discovery", ["discovery.fixture"]),
         ["exportstyped"] = ("typed", []),
-        ["exportsderived"] = ("derived", [])
+        ["exportsderived"] = ("derived", []),
+        ["exportsinitialized"] = ("initialized", []),
+        ["exportsprofiles"] = ("profiles", [])
     };
     void ExactPlan(IEnumerable<ExportSuite> plan)
     {
@@ -153,23 +157,34 @@ Test("independent export cohort map preserves 18 leaves, 46 base cases and one d
         {
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
-            bool standalone = entry.Cohort is "statics" or "transitive" or "typed" or "derived";
+            var standalone =
+                entry.Cohort is "statics" or "fullstatics" or "transitive" or "transitiveoutcomes" or "typed" or
+                    "derived" or "initialized" or "profiles";
+
             Require(entry.Standalone == standalone, "Wrong standalone fixture kind: " + entry.Name);
             Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
                 "Wrong bootstrapped child fixture: " + entry.Name);
             string script = entry.Cohort switch
             {
                 "resolution" => "Tests/FullModuleResolution.cs",
-                "statics" => "Tests/ModularStaticExports.cs",
+                "statics" or "fullstatics" => "Tests/ModularStaticExports.cs",
                 "transitive" => "Tests/TransitiveImports.cs",
+                "transitiveoutcomes" => "Tests/TransitiveOutcomes.cs",
                 "typed" => "Tests/GenericLayoutImports.cs",
                 "derived" => "Tests/DerivedContractExports.cs",
+                "initialized" => "Tests/InitializedExports.cs",
+                "profiles" => "Tests/ProfileFamilies.cs",
                 _ => "Tests/ContractExport.cs"
             };
             Require(entry.Script == script,
                 "Wrong fixture: " + entry.Name);
-            bool takesNoArguments = entry.Cohort is "resolution" || standalone;
-            Equal(entry.Arguments, takesNoArguments ? [] : ["--cohort", entry.Cohort]);
+            string[] arguments = entry.Cohort switch
+            {
+                "fullstatics" => ["--full-composition"],
+                "resolution" => [],
+                _ => standalone ? [] : ["--cohort", entry.Cohort]
+            };
+            Equal(entry.Arguments, arguments);
         }
     }
     ExportSuite[] all = ExportVerificationSuites.Plan();
@@ -208,11 +223,13 @@ Test("export coverage detects each omitted completion and invalid selection", ()
         "Default standalone must aggregate leaves");
     foreach (string[] invalid in new string[][] {
         ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"],
-        ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "transitive"], ["--cohort", "typed"],
-        ["--cohort", "derived"] })
+        ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "fullstatics"], ["--cohort", "transitive"],
+        ["--cohort", "transitiveoutcomes"], ["--cohort", "typed"], ["--cohort", "derived"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     string[] nonFullCohorts =
-        ["core", "audit", "resolution", "statics", "transitive", "discovery", "typed", "derived", "unknown"];
+        ["core", "audit", "resolution", "statics", "fullstatics", "transitive", "transitiveoutcomes", "discovery", "typed",
+            "derived", "unknown"];
+
     foreach (string cohort in nonFullCohorts)
     {
         Require(!ExportVerificationSuites.IsFull(cohort),
@@ -260,7 +277,8 @@ Test("export leaf selection, strict files and shared inputs", () =>
     foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
         Require(Selects("Tests/FullImportVerification.cs", entry.Name), "Full change lost " + entry.Name);
     Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
-    Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]), ["exportsstatics"]);
+    Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
+        ["exportsfullstatics", "exportsstatics"]);
     Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
     Equal(VerificationSelection.Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
     Equal(VerificationSelection.Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
@@ -269,10 +287,18 @@ Test("export leaf selection, strict files and shared inputs", () =>
     foreach (string name in typedFixtures)
         Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportstyped"]);
     Equal(VerificationSelection.Select(["Tests/DerivedContractExports.cs"]), ["exportsderived"]);
+    Equal(VerificationSelection.Select(["Tests/InitializedExports.cs"]), ["exportsinitialized"]);
+    Equal(VerificationSelection.Select(["Tests/ProfileFamilies.cs"]), ["exportsprofiles"]);
+    foreach (var name in new[] { "ProfileFamilyContract", "ProfileFamilyProof", "ProfileFamilyCaller" })
+        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportsprofiles"]);
     string[] derivedFixtures =
         ["DerivedInterface", "DerivedPercentProof", "DerivedAddProof", "DerivedShiftCaller", "DerivedSumCaller"];
     foreach (string name in derivedFixtures)
-        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportsderived"]);
+        Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]),
+            name is "DerivedInterface" or "DerivedPercentProof"
+                ? ["exportsderived", "exportstransitiveoutcomes"] : ["exportsderived"]);
+    Equal(VerificationSelection.Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitiveoutcomes"]);
+    Equal(VerificationSelection.Select(["Tests/StagedBundleMutation.cs"]), ["exportstransitive"]);
     Require(VerificationSelection.Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
         "Imported-layout model evidence lost its existing suite owner");
     Equal(VerificationSelection.Schedule(exports).Order(StringComparer.Ordinal), exports);
@@ -313,9 +339,11 @@ Test("a missing registered export fixture fails selection", () =>
             ("Tests/FullModuleResolution.cs", "resolution"),
             ("Tests/ModularStaticExports.cs", "standalone static"),
             ("Tests/TransitiveImports.cs", "standalone transitive"),
+            ("Tests/TransitiveOutcomes.cs", "standalone transitive outcomes"),
             ("Tests/ContractDiscovery.cs", "discovery child"),
             ("Tests/GenericLayoutImports.cs", "standalone typed"),
-            ("Tests/DerivedContractExports.cs", "standalone derived")
+            ("Tests/DerivedContractExports.cs", "standalone derived"),
+            ("Tests/InitializedExports.cs", "standalone initialized")
         ];
         foreach ((string fixture, string kind) in fixtures)
         {

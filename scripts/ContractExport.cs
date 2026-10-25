@@ -8,7 +8,8 @@ partial class Program
         string Identity, string Signature, int ParameterCount, bool ReturnsValue, string Visibility,
         bool Conditional, ContractDependency[] Dependencies, InterfaceModule[] ImportedInterfaces,
         StaticIdentityRecord[] StaticIdentities, string DefinitionSignature, string[] TypeArguments,
-        ContractMethodSignature TypedSignature, ContractLayout[] Layouts, string ComputedLayouts, int[] LayoutIndices);
+        ContractMethodSignature TypedSignature, ContractLayout[] Layouts, string ComputedLayouts, int[] LayoutIndices,
+        InitializationAssumption[] InitializationAssumptions);
     sealed record ExportClosure(string Contract, string Kind, string Digest, string Canonical);
     sealed record CheckedContractExport(PreparedContractExport Export, ExportClosure Closure,
         string StatementDigest, string Statement, string AuditSource, string AuthorModule);
@@ -163,8 +164,11 @@ partial class Program
             (string digest, string statement) = CheckExportStatement(session, proofModule, leanPath);
             checkedExport = new(export, actual, digest, statement, audit, proofModule + "Author");
         }, [ExportTheoremRequest(contract, published.Kind, export.Conditional),
-            ExportTheoremRequest(contract, published.Kind, export.Conditional) with { name = export.Request.Theorem },
-            PublicLayoutsRequest(export.Profile)]);
+            export.Request.Program is null
+                ? ExportTheoremRequest(contract, published.Kind, export.Conditional) with { name = export.Request.Theorem }
+                : ProofTheorem(export.Request.Theorem),
+            PublicLayoutsRequest(export.Profile), .. InitializationAuditRequests(export),
+            .. ProfileFamilyAudits(export)], ProfileFamilySources(export));
         ConsumerRequest request = new(manifest.Assembly, export.Request.Artifact, export.Proof, ExportTheorem, null,
             ExportAudit: specification);
         ConsumerOutcome outcome = VerifyConsumerRequests(manifest.ProofRoot, [request], null, batch: false)[0];
@@ -211,7 +215,7 @@ partial class Program
                 return new ContractExport(group.Key, export.Signature, export.ParameterCount, false,
                     export.ReturnsValue, export.Visibility, export.Request.Contract, first.Closure.Digest, profiles,
                     first.Closure.Kind, export.DefinitionSignature, export.TypeArguments, export.TypedSignature,
-                    export.Layouts);
+                    export.Layouts, PublishedInitializationAssumptions(group.Select(result => result.Export)));
             }).ToArray();
 
     static SortedDictionary<string, string> ExportInputs(string manifestPath, ContractExportManifest manifest)
@@ -295,15 +299,16 @@ partial class Program
         int[] projection = ImportedLayoutMetadata.Projection(layouts, layoutIdentities);
         if (FeatureProfile.Select(profile.Name) != profile)
             throw new InvalidDataException("Contract exports require an exact built-in profile.");
+        if (request.Profiles is { } profiles && profiles.Single().Profile != profile.Name)
+            throw new InvalidDataException("Profile family artifact does not match its selected profile: " +
+                profiles.Single().Profile);
         if (identity.GetProperty("entry").GetString() != method.FullName ||
             identity.GetProperty("assemblyIdentity").GetString() != module.Assembly.Name.FullName ||
             identity.GetProperty("assemblySha256").GetString() != Sha(manifest.Assembly))
             throw new InvalidDataException(
                 "Contract export method/entry or implementation differs from its selected artifact.");
-        foreach (string property in new[] { "initializedTypes", "staticValues" })
-            if (identity.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
-                throw new InvalidDataException(
-                    "Contract export rejects static/initialization assumptions: " + property);
+        if (identity.TryGetProperty("staticValues", out var staticValues) && staticValues.GetArrayLength() != 0)
+            throw new InvalidDataException("Contract export rejects static-value assumptions: staticValues");
         if (!IsExportableMethod(method))
             throw new InvalidDataException(
                 "Contract exports require a public or protected static, non-virtual, closed method.");
@@ -315,6 +320,8 @@ partial class Program
         StaticIdentity.ValidateFields(statics, module);
         JsonElement[] imports =
             identity.TryGetProperty("imports", out JsonElement imported) ? imported.EnumerateArray().ToArray() : [];
+        if (request.Program is not null && imports.Length != 0)
+            throw new InvalidDataException("Profile-family transport requires a closed program without contract imports.");
         ContractDependency[] dependencies = imports.Select(binding => new ContractDependency(
                 binding.GetProperty("identity").GetString()!.Split("::", 2)[0],
                 binding.GetProperty("implementationSha256").GetString()!,
@@ -327,7 +334,8 @@ partial class Program
         return new(request, proof, profile.Name, selection.Identity, method.FullName,
             method.Parameters.Count, returnsValue, visibility,
             imports.Length != 0, dependencies, importedInterfaces, statics, selection.Definition.FullName,
-            selection.ArgumentNames, selection.Signature, layouts, computedLayouts, projection);
+            selection.ArgumentNames, selection.Signature, layouts, computedLayouts, projection,
+            ExportInitializationAssumptions(identity));
     }
 
     static bool IsExportableMethod(MethodDefinition method)
@@ -389,17 +397,23 @@ partial class Program
             : holds + " _root_.Extracted.program 0";
         string architecture = FeatureProfile.Select(export.Profile).Architecture;
         string layoutIndices = string.Join(", ", export.LayoutIndices);
+        var certification = export.Request.Program is null
+            ? $"theorem LeanCILExportAudit.certified : {statement} := _root_.{export.Request.Theorem}"
+            : ProfileFamilySource(export, statement);
         return $$"""
 import CIL.Safety.Linking
+import Extracted
 import CIL.Safety.OutcomeContract
+import CIL.Safety.ProfileContract
 import CIL.Extraction.LayoutProjection
-theorem LeanCILExportAudit.certified : {{statement}} := _root_.{{export.Request.Theorem}}
+{{certification}}
 #print axioms LeanCILExportAudit.certified
 theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectionValid
     _root_.Extracted.rawLayouts _root_.Extracted.computedLayouts
     {{ImportedLayoutMetadata.RawLean(export.Layouts)}} {{export.ComputedLayouts}}
     [{{layoutIndices}}] .{{architecture}} := by decide +kernel
 #print axioms LeanCILExportAudit.publicLayouts
+{{InitializationAuditSource(export)}}
 """;
     }
     Dictionary<string, ExportClosure> CheckPublishedContractInterfaces(ContractExportManifest manifest,

@@ -12,7 +12,9 @@ internal sealed record ContractExport(string Identity, string Signature, int Par
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DefinitionSignature = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? TypeArguments = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractMethodSignature? TypedSignature = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractLayout[]? Layouts = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ContractLayout[]? Layouts = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ProfileInitializationAssumptions[]? InitializationAssumptions = null);
 internal sealed record ContractCertification(string Identity, string Profile, string ImplementationSha256,
     string InterfaceDigest, string ClosureDigest, string Theorem, string Statement, string StatementDigest,
     StaticIdentityRecord[] StaticIdentities);
@@ -95,6 +97,7 @@ internal sealed record ContractInterface(int Schema, int SemanticsVersion, int F
             throw new InvalidDataException("Invalid or duplicate contract export.");
         foreach (ContractExport export in value.Exports)
         {
+            InitializationAssumption.ValidateExport(export, value.FormatVersion);
             bool metadata = export.DefinitionSignature is not null || export.TypeArguments is not null ||
                 export.TypedSignature is not null || export.Layouts is not null;
             if (value.FormatVersion == 1 && metadata)

@@ -1,0 +1,58 @@
+import CIL.Extraction.Features
+
+/-!
+# Exact feature getter identities
+
+The byte-table lookup must retain assembly, namespace, class and member identity,
+including malformed signatures which share the admitted prefix.
+-/
+
+namespace Tests.FeatureGetter
+
+open CIL CIL.Extraction
+
+/-- A static feature getter with independently constructed raw metadata. -/
+def getter (owner member : String) : CallSite := {
+  declaringType := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner)
+  name := member
+  target := .external (intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++
+    owner ++ "::" ++ member ++ "()")
+  parameterCount := 0, hasThis := false, returnsValue := true, typeArguments := []
+  returnType := .atom runtimeScope "System.Boolean", parameterTypes := [] }
+
+/-- Hardware acceleration, nested class and ordinary supported getters retain their flags. -/
+theorem supported :
+    featureGetter (getter "Vector256" "get_IsHardwareAccelerated") = some .vector256Accelerated ∧
+    featureGetter (getter "X86.Sse41" "get_IsSupported") = some .sse41 ∧
+    featureGetter (getter "Arm.ArmBase/Arm64" "get_IsSupported") = some .armBase64 := by
+  decide +kernel
+#print axioms supported
+
+/-- A syntactically similar identity cannot change the exact admitted feature class or member. -/
+theorem wrong_names :
+    featureGetter (getter "Vector256" "get_IsSupported") = none ∧
+    featureGetter (getter "X86.Sse41X" "get_IsSupported") = none ∧
+    featureGetter (getter "X86.Sse41" "get_IsSupportedX") = none ∧
+    featureGetter (getter "X86.Ssé41" "get_IsSupported") = none := by decide +kernel
+#print axioms wrong_names
+
+/-- Truncation, an incorrect assembly and trailing signature bytes all fail exact matching. -/
+theorem wrong_prefix_or_tail :
+    (List.all ["", intrinsicsScope, intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics.",
+      "Other::System.Boolean System.Runtime.Intrinsics.X86.Sse41::get_IsSupported()",
+      intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics.X86.Sse41::get_IsSupported()X"]
+      (fun identity =>
+        (featureGetter { getter "X86.Sse41" "get_IsSupported" with
+          target := .external identity }).isNone)) = true := by decide +kernel
+#print axioms wrong_prefix_or_tail
+
+/-- Signature acceleration leaves the existing call-shape checks intact. -/
+theorem wrong_call_shape :
+    featureGetter { getter "X86.Sse41" "get_IsSupported" with parameterCount := 1 } = none ∧
+    featureGetter { getter "X86.Sse41" "get_IsSupported" with hasThis := true } = none ∧
+    featureGetter { getter "X86.Sse41" "get_IsSupported" with returnsValue := false } = none ∧
+    featureGetter { getter "X86.Sse41" "get_IsSupported" with
+      typeArguments := [.atom runtimeScope "System.Int32"] } = none := by decide +kernel
+#print axioms wrong_call_shape
+
+end Tests.FeatureGetter

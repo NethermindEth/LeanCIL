@@ -30,6 +30,9 @@ name = "Tests.DebugNames"
 name = "Tests.MethodContract"
 
 [[lean_lib]]
+name = "Tests.ContractCalls"
+
+[[lean_lib]]
 name = "Tests.OutcomeContract"
 
 [[lean_lib]]
@@ -207,6 +210,15 @@ name = "Tests.CertificateFlow"
 
 [[lean_lib]]
 name = "Tests.RetainedNumericLocals"
+
+[[lean_lib]]
+name = "Tests.ProfileEmbedding"
+
+[[lean_lib]]
+name = "Tests.FeatureGetter"
+
+[[lean_lib]]
+name = "Tests.Segment"
 
 [[lean_lib]]
 name = "Tests.AllocationRenaming"

@@ -347,6 +347,26 @@ theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Out
     run_call_exists methodFound instructionFound stepped ⟨childFuel, invoked⟩ ⟨parentFuel, resumed⟩
   exact ⟨fuel, result, returned, composed, finished⟩
 
+/-- Compose a separately proved child invocation with a caller postcondition. -/
+theorem run_call_post {program : CIL.Program} {method pc callee : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {frame : Frame} {memory updated final : Memory} {post : Memory → List Value → Prop}
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory =
+      .ok (.call callee arguments rest updated))
+    (child : ∃ fuel, invoke program fuel callee arguments updated = .ok (final, values))
+    (continuation : ∃ fuel result returned,
+      run program fuel method (pc + 1) args frame (values ++ rest) final =
+        .ok (result, returned) ∧ post result returned) :
+    ∃ fuel result returned,
+      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
+        post result returned := by
+  obtain ⟨parentFuel, result, returned, resumed, satisfied⟩ := continuation
+  obtain ⟨fuel, composed⟩ := run_call_exists methodFound instructionFound stepped child
+    ⟨parentFuel, resumed⟩
+  exact ⟨fuel, result, returned, composed, satisfied⟩
+#print axioms run_call_post
+
 /-- A successful call from a well-formed memory returns a well-formed memory and keeps
     the static world, whatever the callee's contract states. -/
 theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : Nat}
@@ -580,35 +600,156 @@ macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
 
-open Lean Elab Tactic Meta in
-/-- Fails on a `step` goal whose op reduces to `ret`, which only `run_return_exists` takes.
-    Compiled once here: an inline `run_tac` block is elaborated again at every step. -/
-elab "cil_step_not_return" : tactic => withMainContext do
-  let target := (← instantiateMVars (← getMainTarget)).consumeMData
-  let some (_, lhs, _) := target.eq? | return
-  unless lhs.isAppOfArity ``CIL.Safety.step 7 do return
-  if (← cilReducedOp? lhs.getAppArgs[1]!).any (·.isAppOf ``CIL.Op.ret) then
-    throwError "Return requires run_return_exists"
+/-- One contract step, selecting the composition rule from the fetched opcode. -/
+syntax "cil_contract_step" "[" term,* "]" : tactic
 
-/-- One step of a contract goal: a non-return instruction through `run_next_exists`, or a
-    `ret` through `run_return_exists`, leaving the postcondition. Fails at a call. -/
-macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
-  `(tactic| (first
-    | (cil_strict refine CIL.Safety.run_next_exists (post := _)
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_lookup [$[$facts:term],*])
-        (by
-          cil_step_not_return
-          cil_checked_step_normalized [$[$facts:term],*]) ?_
-       cil_stack_cleanup)
-    | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)
-        (by cil_lookup [$[$facts:term],*])
-        (by cil_lookup [$[$facts:term],*])
+open Lean in
+/-- Proved method interfaces available to call stepping across imported modules. -/
+initialize contractTheorems : SimplePersistentEnvExtension Name (Array Name) ←
+  registerSimplePersistentEnvExtension {
+    addEntryFn := Array.push
+    addImportedFn := fun entries => entries.foldl (· ++ ·) #[] }
+
+open Lean in
+/-- Register a theorem whose conclusion is a method contract for its bound callee. -/
+initialize registerBuiltinAttribute {
+  name := `cil_contract
+  descr := "A proved method contract available to checked call composition"
+  add := fun name stx kind => do
+    Attribute.Builtin.ensureNoArgs stx
+    unless kind == .global do throwError "cil_contract must be global"
+    let .thmInfo declaration ← getConstInfo name
+      | throwError "cil_contract requires a theorem"
+    unless declaration.type.getForallBody.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
+      throwError "cil_contract requires a MethodContract.Holds conclusion"
+    modifyEnv fun environment => contractTheorems.addEntry environment name }
+
+open Lean Elab Tactic Meta in
+/-- Recognize successful invocation evidence without elaborating unrelated local hypotheses. -/
+def cilInvocationEvidence (type : Expr) : Bool :=
+  let type := type.consumeMData
+  let invocation := fun statement : Expr =>
+    statement.eq?.any fun (_, left, _) => left.isAppOf ``CIL.Safety.invoke
+  type.isAppOf `CIL.Safety.InvocationCertificate || invocation type ||
+    (type.isAppOfArity ``Exists 2 && match type.appArg! with
+      | .lam _ _ body _ => invocation body
+      | _ => false)
+
+open Lean Elab Tactic Meta in
+/-- Use supplied or local successful invocation evidence at the fetched call. -/
+def cilContractChild (methodFound instructionFound : Term) (facts : Array Term) : TacticM Unit := do
+  let mut candidates := facts
+  for declaration in ← getLCtx do
+    unless declaration.isImplementationDetail do
+      if cilInvocationEvidence declaration.type then
+        candidates := candidates.push (← Term.exprToSyntax declaration.toExpr)
+  for candidate in candidates do
+    let saved ← saveState
+    try
+      let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm candidate none
+      let type ← instantiateMVars (← inferType proof)
+      unless cilInvocationEvidence type do throwError "Not a successful invocation fact"
+      let child ← if type.isAppOf `CIL.Safety.InvocationCertificate then
+        `(⟨_, ($candidate).1⟩)
+        else if type.isAppOfArity ``Exists 2 then pure candidate
+        else `(⟨_, $candidate⟩)
+      evalTactic (← `(tactic| (
+        cil_strict refine CIL.Safety.run_call_post $methodFound $instructionFound
+          (by cil_checked_step_normalized [$facts,*]) $child ?_
+        cil_stack_cleanup)))
+      return
+    catch _ => saved.restore
+  throwError "Call requires a proved contract or matching child invocation"
+
+open Lean Elab Tactic Meta in
+/-- Apply a matching contract and expose its postcondition to the caller continuation. -/
+def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) : TacticM Unit := do
+  let mut candidates := facts
+  for name in contractTheorems.getState (← getEnv) do
+    candidates := candidates.push (mkIdent name)
+  for candidate in candidates do
+    let saved ← saveState
+    try
+      let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm candidate none
+      let proofType ← instantiateMVars (← inferType proof)
+      unless proofType.getForallBody.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
+        throwError "Not a method contract"
+      let (parameters, _, type) ← forallMetaTelescope proofType
+      let type ← instantiateMVars type
+      unless type.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
+        throwError "Not a method contract"
+      let inputType := type.getAppArgs[0]!
+      let mut input ← mkFreshExprMVar inputType
+      if let some name := (← whnf inputType).getAppFn.constName? then
+        if let .inductInfo info ← getConstInfo name then
+          if info.ctors.length == 1 then
+            let constructor ← mkConstWithFreshMVarLevels info.ctors.head!
+            let (arguments, _, result) ← forallMetaTelescopeReducing (← inferType constructor)
+            if ← isDefEq result inputType then
+              input := mkAppN constructor arguments
+      let inputSyntax ← Term.exprToSyntax input
+      let proofSyntax ← Term.exprToSyntax (mkAppN proof parameters)
+      let siblings := (← getGoals).tail!
+      evalTactic (← `(tactic| (
+        cil_strict refine CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
+          $methodFound $instructionFound
+          (by cil_checked_step_normalized [$facts,*]) (by rfl) ?_ ?_)))
+      for parameter in parameters do
+        unless ← parameter.mvarId!.isAssigned do
+          let remaining ← Tactic.run parameter.mvarId! (evalTactic (← `(tactic|
+            first | assumption | cil_lookup [$facts,*])))
+          unless remaining.isEmpty do throwError "The contract binding could not be established"
+      let pending ← getGoals
+      unless pending.length == siblings.length + 2 do
+        throwError "The contract input could not be inferred from the call arguments"
+      let permitted := pending[0]!
+      let continuation := pending[1]!
+      let beforePrecondition ← saveState
+      try
+        evalTactic (← `(tactic| focus
+          first | assumption | trivial | (simp [$[$facts:term],*]; done)))
+      catch _ => beforePrecondition.restore
+      if (← instantiateMVars input).hasExprMVar then
+        throwError "The contract input has fields not determined by the call or precondition"
+      setGoals [continuation]
+      evalTactic (← `(tactic| (
+        intro final values invoked confined returned
+        obtain ⟨output, equal, post⟩ := returned
+        subst values
+        cil_stack_cleanup)))
+      let remaining ← getGoals
+      setGoals ((if ← permitted.isAssigned then [] else [permitted]) ++ remaining ++ siblings)
+      return
+    catch _ => saved.restore
+  throwError "No matching contract with an established precondition"
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_contract_step [$facts:term,*]) => withMainContext do
+    let (methodFound, instructionFound, operation) ←
+      cilFetchedOp ``CIL.Safety.run_next_exists some 4 facts.getElems
+    if operation == ``CIL.Op.call then
+      let saved ← saveState
+      try cilContractApply methodFound instructionFound facts.getElems
+      catch _ =>
+        saved.restore
+        cilContractChild methodFound instructionFound facts.getElems
+      return
+    evalTactic (← if operation == ``CIL.Op.ret then
+      `(tactic| cil_strict refine CIL.Safety.run_return_exists
+        $methodFound $instructionFound
         (by cil_checked_step_normalized [$[$facts:term],*])
-        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
+        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
+      else
+      `(tactic| (
+        cil_strict refine CIL.Safety.run_next_exists (post := _)
+          $methodFound $instructionFound
+          (by cil_checked_step_normalized [$[$facts:term],*]) ?_
+        cil_stack_cleanup)))
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
-    leaving each `.call` for `cil_contract_call` and the postcondition at each return. -/
+    composing calls with registered contracts or child evidence. Unmatched calls and
+    the postcondition at each return remain explicit goals. -/
 syntax "cil_contract_steps" "[" term,* "]" : tactic
 /-- As `cil_contract_steps`, but stop silently after at most `count` steps. -/
 syntax "cil_contract_steps" num "[" term,* "]" : tactic

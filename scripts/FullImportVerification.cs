@@ -5,17 +5,22 @@ using Nethermind.LeanCIL;
 
 partial class Program
 {
-    sealed record FullLibrary(int Slot, string Module, string ExpectedModule, string BundleDigest,
-        string Contract, string Kind, string TransferSource, string GeneratedSource);
+    // Id names one independently checked export; Dependencies are the ids filling its own import slots in order.
+    sealed record FullLibrary(int Id, string Module, string ExpectedModule, string BundleDigest,
+        string Contract, string Kind, string TransferSource, string GeneratedSource, StaticIdentityRecord[] Statics,
+        string AssemblyIdentity, int[] Dependencies);
     sealed record FullSelection(JsonElement Binding, string Sidecar, string SidecarSha256, string Implementation,
         string ImplementationSha256, ContractInterface Contract, string Bundle, string Digest,
         ContractBundleManifest Inventory);
-    sealed record FullImport(FullSelection Selection, ContractExport Export, ContractCertification Certification)
-    {
-        public int Slot => BindingSlot(Selection.Binding);
-    }
+    // Caller slot j has id j; dependency exports reached through libraries take the following ids.
+    sealed record FullImport(FullSelection Selection, ContractExport Export, ContractCertification Certification,
+        int Id);
     sealed record FullSlot(FullImport Import, string Author, string Artifact, string Generated, string GeneratedSha256,
-        ContractExportRequest Request);
+        ContractExportRequest Request, StaticIdentityRecord[] Statics, JsonElement[] Imports);
+    // One staged bundle and every selected export regenerated from it; Dependencies[i] fills Slots[i]'s imports.
+    sealed record FullBundle(FullSelection Selection, string Staging, string Consumer, ConsumerDependency Dependency,
+        ContractSource[] Interfaces, JsonElement[] Metadata, JsonElement OriginalManifest, List<FullSlot> Slots,
+        List<int[]> Dependencies);
 
     const string FullCompositionModule = "LeanCILFullComposition";
     const string FullCompositionTheorem = FullCompositionModule + ".certified";
@@ -50,6 +55,18 @@ partial class Program
             throw new InvalidDataException("Full-verification imported implementation or sidecar changed: " +
                 binding.GetProperty("identity").GetString());
         ContractInterface contract = ContractInterface.Read(sidecarBytes);
+        var selected = contract.Exports.Single(export => export.Identity == binding.GetProperty("identity").GetString());
+        if (InitializationAssumption.ForProfile(selected, binding.GetProperty("profile").GetString()!).Length != 0)
+            throw new InvalidDataException("Full verification rejects initialization assumptions.");
+        (string bundle, string digest, ContractBundleManifest inventory) =
+            LocateFullBundle(contract, sidecar, overrides, used);
+        return new(binding, sidecar, sidecarSha256, implementation, implementationSha256, contract, bundle, digest,
+            inventory);
+    }
+
+    static (string Bundle, string Digest, ContractBundleManifest Inventory) LocateFullBundle(
+        ContractInterface contract, string sidecar, IReadOnlyDictionary<string, string> overrides, ISet<string> used)
+    {
         string locator = contract.FullVerificationLocator
             ?? throw new InvalidDataException(MissingFullBundle + contract.AssemblyIdentity);
         string digest = BundleName(locator);
@@ -63,8 +80,44 @@ partial class Program
         if (!Directory.Exists(bundle)) throw new InvalidDataException(MissingFullBundle + bundle);
         if (BundleName(bundle) != digest)
             throw new InvalidDataException("Full-verification source bundle override has the wrong content identity.");
-        return new(binding, sidecar, sidecarSha256, implementation, implementationSha256, contract, bundle, digest,
-            ContractSourceBundle.Validate(bundle, digest));
+        return (bundle, digest, ContractSourceBundle.Validate(bundle, digest));
+    }
+
+    // The graph nodes the caller's bindings reach through declared dependencies; other supplied libraries are unused.
+    static IEnumerable<JsonElement> ReachableGraph(ExtractionIdentity extraction)
+    {
+        Dictionary<string, JsonElement> nodes = extraction.Graph.ToDictionary(
+            node => node.GetProperty("assemblyIdentity").GetString()!, StringComparer.Ordinal);
+        Queue<string> pending = new(extraction.Imports.Select(binding => ContractInterface.Read(File.ReadAllBytes(
+            ExtractionIdentity.Resolve(extraction.Output, binding.GetProperty("sidecarPath").GetString()!)))
+            .AssemblyIdentity));
+        HashSet<string> reached = new(StringComparer.Ordinal);
+        while (pending.TryDequeue(out string? assembly))
+        {
+            if (!reached.Add(assembly)) continue;
+            JsonElement node = nodes.TryGetValue(assembly, out JsonElement found) ? found
+                : throw new InvalidDataException("Full verification has no unique pinned dependency graph node: " +
+                    assembly);
+            foreach (JsonElement dependency in node.GetProperty("dependencies").EnumerateArray())
+                pending.Enqueue(dependency.GetProperty("assemblyIdentity").GetString()!);
+            yield return node;
+        }
+    }
+
+    // Every reached graph node is located and validated before any build; regeneration still binds each one.
+    static void PreflightFullNode(string output, JsonElement node, IReadOnlyDictionary<string, string> overrides,
+        ISet<string> used)
+    {
+        string assemblyIdentity = node.GetProperty("assemblyIdentity").GetString()!;
+        string sidecar = ExtractionIdentity.Resolve(output, node.GetProperty("sidecarPath").GetString()!);
+        string implementation =
+            ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
+        ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecar));
+        if (contract.InterfaceDigest != node.GetProperty("interfaceDigest").GetString() ||
+            Sha(implementation) != node.GetProperty("implementationSha256").GetString())
+            throw new InvalidDataException(
+                "Full-verification imported implementation or sidecar changed: " + assemblyIdentity);
+        LocateFullBundle(contract, sidecar, overrides, used);
     }
 
     static void RequireUsedOverrides(IReadOnlyDictionary<string, string> overrides, ISet<string> used)
@@ -76,11 +129,36 @@ partial class Program
 
     void PreflightFullImports(string output, IReadOnlyDictionary<string, string> overrides)
     {
-        JsonElement[] imports = ExtractionIdentity.Read(output).Imports;
-        if (imports.Length == 0) throw new InvalidDataException(NoFullImports);
+        ExtractionIdentity extraction = ExtractionIdentity.Read(output);
+        if (extraction.Imports.Length == 0) throw new InvalidDataException(NoFullImports);
         HashSet<string> used = new(StringComparer.Ordinal);
-        foreach (JsonElement binding in imports) SelectFullBundle(output, binding, overrides, used);
+        foreach (var binding in extraction.Imports)
+            RequireAgreedStaticRecords(binding, SelectFullBundle(output, binding, overrides, used));
+        foreach (var node in ReachableGraph(extraction)) PreflightFullNode(output, node, overrides, used);
         RequireUsedOverrides(overrides, used);
+    }
+
+    // The caller binding, certification and bundled extraction must name one static set before any build;
+    // the fresh extraction is compared with all three after regeneration.
+    static void RequireAgreedStaticRecords(JsonElement binding, FullSelection selection)
+    {
+        var identity = binding.GetProperty("identity").GetString()!;
+        var profile = binding.GetProperty("profile").GetString()!;
+        var certifications = selection.Contract.Certifications
+            .Where(item => item.Identity == identity && item.Profile == profile).ToArray();
+        var matches = selection.Inventory.Exports.EnumerateArray().Select((record, index) => (record, index))
+            .Where(item => item.record.GetProperty("identity").GetString() == identity &&
+                item.record.GetProperty("profile").GetString() == profile)
+            .Select(item => item.index).ToArray();
+        if (certifications.Length != 1 || matches.Length != 1)
+            throw new InvalidDataException("Full source bundle has no unique selected export/profile.");
+        var bundled = JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Within(selection.Bundle, "exports/" + matches[0] + "/identity.json")));
+        var pinned = StaticIdentitySet(binding);
+        var agreed = pinned.SequenceEqual(StaticIdentitySet(bundled)) && pinned.SequenceEqual(
+            certifications[0].StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal));
+        if (!agreed)
+            throw new InvalidDataException("Full-verification static identity records disagree: " + identity);
     }
 
     // Search roots without the toolchain, which a supported run keeps read-only instead of rehashing.
@@ -166,23 +244,28 @@ partial class Program
         }
         foreach (string file in new[] { "identity.json", "Extracted.lean" })
             original[Path.Combine(output, file)] = Sha(Path.Combine(output, file));
-        List<FullImport> imports = CollectFullImports(output, overrides, bindings, original, bundles);
+        JsonElement[] graph = ExtractionIdentity.Read(output).Graph;
+        HashSet<string> usedOverrides = new(StringComparer.Ordinal);
+        List<FullBundle> regenerated =
+            RegenerateFullClosure(output, bindings, overrides, usedOverrides, original, bundles, graph, staging);
+        var stagedInputs = regenerated.ToDictionary(bundle => bundle.Staging,
+            bundle => FullStagingFiles(bundle.Staging), PathComparer);
+        // Preflight already required a bundle for every reachable node, so an override naming one is used.
+        usedOverrides.UnionWith(ReachableGraph(ExtractionIdentity.Read(output)).Select(node =>
+            AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name));
+        RequireUsedOverrides(overrides, usedOverrides);
         List<FullLibrary> libraries = [];
-        // One library build per bundle, however many of its methods the caller imports.
-        IEnumerable<IGrouping<string, FullImport>> byBundle =
-            imports.GroupBy(item => item.Selection.Bundle, StringComparer.Ordinal);
-        foreach ((IGrouping<string, FullImport> group, int index) in byBundle.Select((group, index) => (group, index)))
+        // A dependency's library is built and checked before any library that imports it.
+        foreach (FullBundle bundle in BundleOrder(regenerated))
         {
-            int implementations = group
-                .Select(item => (item.Selection.SidecarSha256, item.Selection.ImplementationSha256))
-                .Distinct().Count();
-            if (implementations != 1)
-                throw new InvalidDataException(
-                    "Full-verification source bundle is shared by different implementations: " + group.Key);
-            libraries.AddRange(CheckFullBundle(group.ToArray(), Path.Combine(staging, "bundle-" + index)));
+            RequireFullStaging(bundle.Staging, stagedInputs[bundle.Staging]);
+            libraries.AddRange(BuildFullBundle(bundle));
             RequireCallerUnchanged();
         }
-        libraries.Sort((left, right) => left.Slot.CompareTo(right.Slot));
+        libraries.Sort((left, right) => left.Id.CompareTo(right.Id));
+        // Names a colliding pair before the kernel decides compatibility of the whole linked program.
+        StaticIdentity.Validate(StaticIdentitySet(ExtractionIdentity.Read(output).Root)
+            .Concat(libraries.SelectMany(library => library.Statics)));
         string compositionDirectory = Path.Combine(workspace, "composition");
         Directory.CreateDirectory(compositionDirectory);
         // First: leanchecker names each olean by the first root containing it.
@@ -235,7 +318,7 @@ partial class Program
         }
         string composition = FullCompositionModule;
         File.WriteAllText(Path.Combine(compositionDirectory, composition + ".lean"),
-            FullCompositionSource(callerModule, callerTheorem, libraries));
+            FullCompositionSource(callerModule, callerTheorem, libraries, bindings.Length));
         CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
         Compile(composition, "Checking concrete library relocation and caller composition", untrusted: true);
         Run([checker, composition], callerSession, fullLeanPath,
@@ -243,68 +326,192 @@ partial class Program
         AuditRequest certified =
             new(FullCompositionTheorem, type: FullCompositionType(), axioms: ApprovedAxioms, statement: true);
         AuditedOleans audited = AuditOleans(fullLeanPath, [composition], [certified],
-            FullCompositionConstants(callerTheorem, libraries));
+            FullCompositionConstants(callerTheorem, libraries, bindings.Length));
         RequireAuditedModule(audited, composition, Path.Combine(compositionDirectory, composition + ".olean"));
         RecheckResolution();
         RequireAuditedConstants(audited);
         AuditedAxioms(audited.theorems[0]);
         string audit = AuditText(audited.theorems[0]);
-        return new(FullCompositionTheorem, audit, IndependentlyVerifiedImports(output, libraries));
+        JsonElement identity = JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Path.Combine(output, "identity.json")));
+        return new(FullCompositionTheorem, audit, IndependentlyVerifiedImports(identity, libraries),
+            IndependentlyVerifiedClosure(identity, libraries));
     }
 
     // The caller's published imports, each now accepted through its checked bundle instead of its sidecar.
-    static PublishedImport[] IndependentlyVerifiedImports(string output, List<FullLibrary> libraries)
-    {
-        string identity = File.ReadAllText(Path.Combine(output, "identity.json"));
-        return PublishedImports(JsonSerializer.Deserialize<JsonElement>(identity))
-            .Select(import => import with
+    static PublishedImport[] IndependentlyVerifiedImports(JsonElement identity, List<FullLibrary> libraries) =>
+        PublishedImports(identity).Select(import => import with
+        {
+            acceptedVia = "independently-verified",
+            sourceBundleDigest = libraries.Single(library => library.Id == import.slot).BundleDigest,
+            deploymentObligation = FullDeploymentObligation
+        }).ToArray();
+
+    // Every graph node with a checked export names its bundle; a node no selected export reaches stays unmarked.
+    static DeploymentDependency[] IndependentlyVerifiedClosure(JsonElement identity, List<FullLibrary> libraries) =>
+        DeploymentDependencies(identity).Select(node =>
+        {
+            string[] digests = libraries.Where(library => library.AssemblyIdentity == node.assemblyIdentity)
+                .Select(library => library.BundleDigest).Distinct(StringComparer.Ordinal).ToArray();
+            if (digests.Length > 1)
+                throw new InvalidDataException(
+                    "Full-verification dependency was checked from different bundles: " + node.assemblyIdentity);
+            return digests.Length == 0 ? node : node with
             {
                 acceptedVia = "independently-verified",
-                sourceBundleDigest = libraries[import.slot].BundleDigest,
-                deploymentObligation = FullDeploymentObligation
-            }).ToArray();
+                sourceBundleDigest = digests.Single()
+            };
+        }).ToArray();
+
+    // Two imports naming the same export of the same implementation and profile are checked once.
+    static string SharedExportKey(FullImport import) => JsonSerializer.Serialize(new[]
+    {
+        import.Selection.Contract.AssemblyIdentity, import.Export.Identity, import.Certification.Profile,
+        import.Selection.ImplementationSha256
+    });
+
+    // The caller's dependency graph names one implementation and interface per assembly.
+    static JsonElement FullGraphNode(JsonElement[] graph, string assemblyIdentity)
+    {
+        JsonElement[] nodes = graph
+            .Where(node => node.GetProperty("assemblyIdentity").GetString() == assemblyIdentity).ToArray();
+        return nodes.Length == 1 ? nodes[0] : throw new InvalidDataException(
+            "Full verification has no unique pinned dependency graph node: " + assemblyIdentity);
+
     }
 
-    // Pins every binding's sidecar and implementation in original and its bundle identity in bundles.
-    static List<FullImport> CollectFullImports(string output, IReadOnlyDictionary<string, string> overrides,
-        JsonElement[] bindings, SortedDictionary<string, string> original, Dictionary<string, string> bundles)
+    // Pins the binding's sidecar, implementation and bundle identity, and requires the caller's graph node for it.
+    static FullImport BindFullImport(string callerOutput, string output, JsonElement binding,
+        IReadOnlyDictionary<string, string> overrides, ISet<string> usedOverrides,
+        SortedDictionary<string, string> original, Dictionary<string, string> bundles, JsonElement[] graph, int id)
     {
-        HashSet<string> usedOverrides = new(StringComparer.Ordinal);
-        List<FullImport> imports = [];
+        string identity = binding.GetProperty("identity").GetString()!;
+        FullSelection selection = SelectFullBundle(output, binding, overrides, usedOverrides);
+        original[selection.Sidecar] = selection.SidecarSha256;
+        original[selection.Implementation] = selection.ImplementationSha256;
+        ContractInterface contract = selection.Contract;
+        if (contract.IsReferenceAssembly)
+            throw new InvalidDataException("Full verification requires implementation libraries: " + identity);
+        JsonElement node = FullGraphNode(graph, contract.AssemblyIdentity);
+        string NodePath(string field) =>
+            Path.GetFullPath(ExtractionIdentity.Resolve(callerOutput, node.GetProperty(field).GetString()!));
+        bool selectedNode = node.GetProperty("implementationSha256").GetString() == selection.ImplementationSha256 &&
+            node.GetProperty("interfaceDigest").GetString() == contract.InterfaceDigest &&
+            PathComparer.Equals(NodePath("implementationPath"), Path.GetFullPath(selection.Implementation)) &&
+            PathComparer.Equals(NodePath("sidecarPath"), Path.GetFullPath(selection.Sidecar));
+        if (!selectedNode)
+            throw new InvalidDataException(
+                "Full-verification dependency differs from the caller's selected graph node: " +
+                contract.AssemblyIdentity);
+        string profile = binding.GetProperty("profile").GetString()!;
+        ContractExport export = contract.Exports.Single(item => item.Identity == identity);
+        ContractCertification certification =
+            contract.Certifications.Single(item => item.Identity == identity && item.Profile == profile);
+        bool certificationBound = certification.ImplementationSha256 == selection.ImplementationSha256 &&
+            certification.InterfaceDigest == contract.InterfaceDigest &&
+            certification.ClosureDigest == export.ClosureDigest &&
+            certification.StatementDigest == binding.GetProperty("certificationStatementDigest").GetString();
+        if (!certificationBound)
+            throw new InvalidDataException("Full-verification certification binding mismatch: " + identity);
+        if (bundles.TryGetValue(selection.Bundle, out string? previousDigest) && previousDigest != selection.Digest)
+            throw new InvalidDataException(
+                "Full-verification source bundle path has conflicting content identities: " + selection.Bundle);
+        bundles.TryAdd(selection.Bundle, selection.Digest);
+        return new(selection, export, certification, id);
+    }
+
+    // Regenerates every selected export and, transitively, every export its fresh extraction imports, before
+    // any library build; each bundle is staged once.
+    List<FullBundle> RegenerateFullClosure(string output, JsonElement[] bindings,
+        IReadOnlyDictionary<string, string> overrides, ISet<string> usedOverrides,
+        SortedDictionary<string, string> original, Dictionary<string, string> bundles, JsonElement[] graph,
+        string staging)
+    {
+        Dictionary<string, int> exportIds = new(StringComparer.Ordinal);
+        Dictionary<string, FullBundle> staged = new(PathComparer);
+        List<FullBundle> ordered = [];
+        Queue<FullImport> pending = new();
         foreach (JsonElement binding in bindings)
         {
-            string identity = binding.GetProperty("identity").GetString()!;
-            FullSelection selection = SelectFullBundle(output, binding, overrides, usedOverrides);
-            original[selection.Sidecar] = selection.SidecarSha256;
-            original[selection.Implementation] = selection.ImplementationSha256;
-            ContractInterface contract = selection.Contract;
-            if (contract.Dependencies.Length != 0 || contract.IsReferenceAssembly)
-                throw new InvalidDataException(
-                    "Full verification version 1 requires closed implementation libraries without transitive imports.");
-            string profile = binding.GetProperty("profile").GetString()!;
-            ContractExport export = contract.Exports.Single(item => item.Identity == identity);
-            ContractCertification certification =
-                contract.Certifications.Single(item => item.Identity == identity && item.Profile == profile);
-            bool certificationBound = certification.ImplementationSha256 == selection.ImplementationSha256 &&
-                certification.InterfaceDigest == contract.InterfaceDigest &&
-                certification.ClosureDigest == export.ClosureDigest &&
-                certification.StatementDigest == binding.GetProperty("certificationStatementDigest").GetString();
-            if (!certificationBound)
-                throw new InvalidDataException("Full-verification certification binding mismatch: " + identity);
-            if (bundles.TryGetValue(selection.Bundle, out string? previousDigest) && previousDigest != selection.Digest)
-                throw new InvalidDataException(
-                    "Full-verification source bundle path has conflicting content identities: " + selection.Bundle);
-            bundles.TryAdd(selection.Bundle, selection.Digest);
-            imports.Add(new(selection, export, certification));
+            FullImport import = BindFullImport(output, output, binding, overrides, usedOverrides, original, bundles,
+                graph, BindingSlot(binding));
+            exportIds.TryAdd(SharedExportKey(import), import.Id);
+            pending.Enqueue(import);
         }
-        RequireUsedOverrides(overrides, usedOverrides);
-        return imports;
+        int nextId = bindings.Length;
+        int DependencyId(string importer, JsonElement binding)
+        {
+            FullImport import = BindFullImport(output, importer, binding, overrides, usedOverrides, original,
+                bundles, graph, nextId);
+            if (exportIds.TryGetValue(SharedExportKey(import), out int existing)) return existing;
+            exportIds.Add(SharedExportKey(import), nextId);
+            pending.Enqueue(import);
+            return nextId++;
+        }
+        while (pending.TryDequeue(out FullImport? import))
+        {
+            FullSelection selection = import.Selection;
+            if (!staged.TryGetValue(selection.Bundle, out FullBundle? bundle))
+            {
+                bundle = StageFullBundle(selection, Path.Combine(staging, "bundle-" + staged.Count), output, graph);
+                staged.Add(selection.Bundle, bundle);
+                ordered.Add(bundle);
+            }
+            bool sameImplementation = bundle.Selection.SidecarSha256 == selection.SidecarSha256 &&
+                bundle.Selection.ImplementationSha256 == selection.ImplementationSha256;
+            if (!sameImplementation)
+                throw new InvalidDataException(
+                    "Full-verification source bundle is shared by different implementations: " + selection.Bundle);
+            FullSlot slot = RegenerateFullSlot(import, bundle.Metadata, bundle.OriginalManifest, selection.Contract,
+                selection.Bundle, bundle.Consumer, bundle.Staging, selection.Implementation, output, graph);
+            bundle.Slots.Add(slot);
+            bundle.Dependencies.Add(slot.Imports.Select(binding => DependencyId(slot.Artifact, binding)).ToArray());
+        }
+        return ordered;
     }
 
-    FullLibrary[] CheckFullBundle(FullImport[] imports, string staging)
+    // Bundles ordered so each follows every bundle whose exports its own exports import.
+    static List<FullBundle> BundleOrder(List<FullBundle> bundles)
+    {
+        Dictionary<int, FullBundle> owners = bundles
+            .SelectMany(bundle => bundle.Slots.Select(slot => (slot.Import.Id, bundle)))
+            .ToDictionary(pair => pair.Id, pair => pair.bundle);
+        List<FullBundle> ordered = [];
+        HashSet<FullBundle> visiting = [];
+        void Visit(FullBundle bundle)
+        {
+            if (ordered.Contains(bundle)) return;
+            if (!visiting.Add(bundle))
+                throw new InvalidDataException(
+                    "Full-verification bundle dependency cycle: " + bundle.Selection.Bundle);
+            foreach (int dependency in bundle.Dependencies.SelectMany(ids => ids)) Visit(owners[dependency]);
+            ordered.Add(bundle);
+        }
+        foreach (FullBundle bundle in bundles) Visit(bundle);
+        return ordered;
+    }
+
+    // Includes staged sources, framework files and regenerated extraction inputs before any producer runs.
+    static SortedDictionary<string, string> FullStagingFiles(string directory)
+    {
+        var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+            files[PortableRelativePath(directory, path)] = Sha(path);
+        return files;
+    }
+
+    // An earlier dependency build must not change the sources or file set of a later staged bundle.
+    static void RequireFullStaging(string directory, SortedDictionary<string, string> expected)
+    {
+        if (!Directory.Exists(directory) || !FullStagingFiles(directory).SequenceEqual(expected))
+            throw new InvalidDataException("Full-verification staged bundle changed before its build: " + directory);
+    }
+
+    // Stages the bundle's consumer package and interfaces once, however many of its exports are selected.
+    FullBundle StageFullBundle(FullSelection selection, string staging, string callerOutput,
+        JsonElement[] graph)
     {
         Directory.CreateDirectory(staging);
-        FullSelection selection = imports[0].Selection;
         (ContractInterface contract, string bundle, string digest, ContractBundleManifest inventory) =
             (selection.Contract, selection.Bundle, selection.Digest, selection.Inventory);
         JsonElement[] metadata = inventory.Exports.EnumerateArray().ToArray();
@@ -313,13 +520,20 @@ partial class Program
         string consumer = Path.Combine(staging, "consumer");
         ConsumerDependency dependency =
             StageFullConsumer(bundle, inventory, consumer, digest, contract.InterfaceModules);
-        ContractSource[] interfaces =
-            contract.InterfaceModules.Select(module => StageFullInterface(bundle, consumer, module)).ToArray();
+        Dictionary<string, string> dependencyInterfaces = FullDependencyInterfaces(contract, callerOutput, graph);
+        ContractSource[] interfaces = contract.InterfaceModules
+            .Select(module => StageFullInterface(bundle, consumer, module, dependencyInterfaces)).ToArray();
+        return new(selection, staging, consumer, dependency, interfaces, metadata, originalManifest, [], []);
+    }
+
+    // Builds one bundle's library once for all its regenerated exports and captures each checked theorem.
+    FullLibrary[] BuildFullBundle(FullBundle bundle)
+    {
+        (FullSelection selection, string consumer, ContractSource[] interfaces, List<FullSlot> slots) =
+            (bundle.Selection, bundle.Consumer, bundle.Interfaces, bundle.Slots);
+        ContractInterface contract = selection.Contract;
+        ConsumerDependency dependency = bundle.Dependency;
         string implementation = selection.Implementation;
-        List<FullSlot> slots = [];
-        foreach (FullImport import in imports)
-            slots.Add(RegenerateFullSlot(import, metadata, originalManifest, contract, bundle, consumer, staging,
-                implementation));
         ContractExportManifest manifest =
             new(1, implementation, consumer, interfaces, slots.Select(slot => slot.Request).ToArray());
         using ModuleDefinition module =
@@ -345,9 +559,13 @@ partial class Program
                     throw new InvalidDataException(
                         "Independent library export closure or canonical statement mismatch.");
                 transfers[index] = independent.CaptureFullTerms(session, proofModule,
-                    FullLibraryPrefix + slot.Import.Slot, contract.InterfaceModules, leanPath);
-            }, [ExportTheoremRequest(export.ContractConstant, export.Kind),
-                ExportTheoremRequest(export.ContractConstant, export.Kind) with { name = slot.Author }]);
+                    FullLibraryPrefix + slot.Import.Id, contract.InterfaceModules, leanPath);
+            }, [ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional),
+                slot.Request.Program is null
+                    ? ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional)
+                        with { name = slot.Author }
+                    : ProofTheorem(slot.Author), .. ProfileFamilyAudits(prepared[index])],
+                ProfileFamilySources(prepared[index]));
             return new ConsumerRequest(implementation, slot.Artifact, prepared[index].Proof, ExportTheorem, null,
                 ExportAudit: audit);
         }).ToArray();
@@ -362,18 +580,67 @@ partial class Program
             if (Sha(Path.Combine(slot.Artifact, "Extracted.lean")) != slot.GeneratedSha256)
                 throw new InvalidDataException(
                     "Full-verification regenerated extraction changed after its library check: " + slot.Artifact);
-            int slotIndex = slot.Import.Slot;
-            return new FullLibrary(slotIndex, FullLibraryPrefix + slotIndex, FullExpectedPrefix + slotIndex,
+            int id = slot.Import.Id;
+            return new FullLibrary(id, FullLibraryPrefix + id, FullExpectedPrefix + id,
                 selection.Digest, slot.Import.Export.ContractConstant, slot.Import.Export.Kind, transfers[index]!,
-                slot.Generated);
+                slot.Generated, slot.Statics, contract.AssemblyIdentity, bundle.Dependencies[index]);
         }).ToArray();
     }
 
-    // The bundled interface must equal the pinned source, and so must any copy already in the consumer.
-    static ContractSource StageFullInterface(string bundle, string consumer, InterfaceModule module)
+    // Graph nodes reached from the declared dependencies; each declaration must match its node's pins.
+    static IEnumerable<JsonElement> DependencyClosure(JsonElement[] graph, IEnumerable<ContractDependency> declared)
+    {
+        Queue<ContractDependency> pending = new(declared);
+        HashSet<string> reached = new(StringComparer.Ordinal);
+        while (pending.TryDequeue(out ContractDependency? dependency))
+        {
+            JsonElement node = FullGraphNode(graph, dependency.AssemblyIdentity);
+            if (node.GetProperty("implementationSha256").GetString() != dependency.ImplementationSha256 ||
+                node.GetProperty("interfaceDigest").GetString() != dependency.InterfaceDigest)
+                throw new InvalidDataException(
+                    "Full-verification dependency pin differs from the caller's graph node: " +
+                    dependency.AssemblyIdentity);
+            if (!reached.Add(dependency.AssemblyIdentity)) continue;
+            yield return node;
+            foreach (JsonElement next in node.GetProperty("dependencies").EnumerateArray())
+                pending.Enqueue(new(next.GetProperty("assemblyIdentity").GetString()!,
+                    next.GetProperty("implementationSha256").GetString()!,
+                    next.GetProperty("interfaceDigest").GetString()!));
+        }
+    }
+
+    // Interface sources of the direct dependencies, read from the caller's pinned graph sidecars.
+    static Dictionary<string, string> FullDependencyInterfaces(ContractInterface contract, string callerOutput,
+        JsonElement[] graph)
+    {
+        Dictionary<string, string> sources = new(StringComparer.Ordinal);
+        foreach (ContractDependency dependency in contract.Dependencies)
+        {
+            JsonElement node = FullGraphNode(graph, dependency.AssemblyIdentity);
+            ContractInterface pinned = ContractInterface.Read(File.ReadAllBytes(
+                ExtractionIdentity.Resolve(callerOutput, node.GetProperty("sidecarPath").GetString()!)));
+            if (pinned.InterfaceDigest != dependency.InterfaceDigest ||
+                pinned.ImplementationSha256 != dependency.ImplementationSha256)
+                throw new InvalidDataException(
+                    "Full-verification dependency sidecar differs from its pin: " + dependency.AssemblyIdentity);
+            foreach (InterfaceModule module in pinned.InterfaceModules)
+                if (sources.TryGetValue(module.Name, out string? previous) && previous != module.Source)
+                    throw new InvalidDataException("Conflicting dependency interface source: " + module.Name);
+                else sources[module.Name] = module.Source;
+        }
+        return sources;
+    }
+
+    // A module the bundle publishes must equal its pinned source; one it does not must be a dependency's.
+    // Any copy already in the consumer must equal the pinned source as well.
+    static ContractSource StageFullInterface(string bundle, string consumer, InterfaceModule module,
+        IReadOnlyDictionary<string, string> dependencyInterfaces)
     {
         string bundled = Within(bundle, "interface/" + module.Name.Replace('.', '/') + ".lean");
-        if (File.ReadAllText(bundled) != module.Source)
+        bool published = File.Exists(bundled)
+            ? File.ReadAllText(bundled) == module.Source
+            : dependencyInterfaces.TryGetValue(module.Name, out string? inherited) && inherited == module.Source;
+        if (!published)
             throw new InvalidDataException(
                 "Full source bundle interface differs from the pinned source: " + module.Name);
         string target = Within(consumer, module.Name.Replace('.', '/') + ".lean");
@@ -387,7 +654,8 @@ partial class Program
 
     // Binds one import to its bundle records, then re-extracts it from the current DLL for the library run.
     FullSlot RegenerateFullSlot(FullImport import, JsonElement[] metadata, JsonElement originalManifest,
-        ContractInterface contract, string bundle, string consumer, string staging, string implementation)
+        ContractInterface contract, string bundle, string consumer, string staging, string implementation,
+        string callerOutput, JsonElement[] graph)
     {
         (ContractExport export, ContractCertification certification) = (import.Export, import.Certification);
         int[] matches = Enumerable.Range(0, metadata.Length).Where(index =>
@@ -403,7 +671,10 @@ partial class Program
             record.GetProperty("statement").GetString() == certification.Statement;
         if (!recordBound)
             throw new InvalidDataException("Full source bundle export statement or closure binding mismatch.");
-        JsonElement request = originalManifest.GetProperty("exports")[selected];
+        var originalRequests = originalManifest.GetProperty("exports")
+            .Deserialize<ContractExportRequest[]>(ContractExportManifest.Json)
+            ?? throw new InvalidDataException("Missing bundled export requests.");
+        var request = ContractExportManifest.ExpandExports(originalRequests, consumer)[selected];
         string bundledIdentityPath = Within(bundle, "exports/" + selected + "/identity.json");
         JsonElement bundledIdentity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(bundledIdentityPath));
         bool extractionMatches =
@@ -415,8 +686,7 @@ partial class Program
             throw new InvalidDataException(
                 "Full source bundle extraction metadata differs from the selected implementation, method or profile.");
         string author = record.GetProperty("theorem").GetString()!;
-        if (request.GetProperty("theorem").GetString() != author || !ContractInterface.Constant(author) ||
-            request.GetProperty("contract").GetString() != export.ContractConstant)
+        if (request.Theorem != author || !ContractInterface.Constant(author) || request.Contract != export.ContractConstant)
             throw new InvalidDataException("Full source bundle author theorem binding mismatch.");
         if (!record.TryGetProperty("proofPath", out JsonElement recordedProof) ||
             recordedProof.ValueKind != JsonValueKind.String)
@@ -424,26 +694,74 @@ partial class Program
         string proof = Within(consumer, recordedProof.GetString()!);
         if (!File.Exists(proof))
             throw new InvalidDataException("Full source bundle is missing its rebased author proof.");
-        string artifact = Path.Combine(staging, "regenerated-" + import.Slot);
+        string artifact = Path.Combine(staging, "regenerated-" + import.Id);
         string entry = export.DefinitionSignature ?? export.Signature;
         List<string> extraction =
             ["dotnet", ExtractorPath, "extract", implementation, entry, artifact, certification.Profile];
         foreach (string argument in export.TypeArguments ?? []) extraction.AddRange(["--type-argument", argument]);
+        // Every dependency the library reaches resolves only to the caller's pinned graph nodes.
+        foreach (JsonElement node in DependencyClosure(graph, contract.Dependencies))
+        {
+            string nodeSha256 = node.GetProperty("implementationSha256").GetString()!;
+            string nodeInterface = node.GetProperty("interfaceDigest").GetString()!;
+            string name = AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name;
+            string nodeImplementation =
+                ExtractionIdentity.Resolve(callerOutput, node.GetProperty("implementationPath").GetString()!);
+            extraction.AddRange([
+                "--import", ExtractionIdentity.Resolve(callerOutput, node.GetProperty("sidecarPath").GetString()!),
+                "--import-implementation", name + "=" + nodeImplementation,
+                "--import-sha256", name + "=" + nodeSha256, "--import-interface-sha256", name + "=" + nodeInterface]);
+        }
         Run(extraction, progress: "Fresh extraction of the current imported library DLL");
+        string? referenceArtifact = null;
+        if (request.Program is not null)
+        {
+            referenceArtifact = Path.Combine(staging, "reference-" + import.Id);
+            var referenceExtraction = extraction.ToArray();
+            referenceExtraction[5] = referenceArtifact;
+            referenceExtraction[6] = request.ReferenceProfile!;
+            Run(referenceExtraction, progress: "Fresh extraction of the fixed reference profile");
+        }
         // Composition compiles these exact bytes, which the library run below binds to the DLL.
         byte[] generated = File.ReadAllBytes(Path.Combine(artifact, "Extracted.lean"));
         JsonElement regenerated =
             JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
-        foreach (string property in new[] { "initializedTypes", "staticValues", "staticIdentities" })
+        foreach (string property in new[] { "initializedTypes", "initializationAssumptions", "staticValues" })
             if (regenerated.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
                 throw new InvalidDataException(
-                    "Full verification version 1 rejects static or initialization state: " + property);
+                    "Full verification rejects static-value and initialization assumptions: " + property);
+        // The fresh extraction decides the reachable RVA tables; every pinned record must name exactly them.
+        var statics = StaticIdentitySet(regenerated);
+        StaticIdentity.Validate(statics);
+        var staticsBound = statics.All(item => item.AssemblyIdentity == contract.AssemblyIdentity) &&
+            statics.SequenceEqual(StaticIdentitySet(import.Selection.Binding)) &&
+            statics.SequenceEqual(StaticIdentitySet(bundledIdentity)) &&
+            statics.SequenceEqual(
+                certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal));
+        if (!staticsBound)
+            throw new InvalidDataException(
+                "Full-verification static identities differ from the current implementation: " + export.Identity);
+        JsonElement[] imported = regenerated.TryGetProperty("imports", out JsonElement bindings)
+            ? bindings.EnumerateArray().OrderBy(BindingSlot).ToArray() : [];
+        if (imported.Select(BindingSlot).Where((slot, index) => slot != index).Any())
+            throw new InvalidDataException("Full verification requires contiguous unique import slots.");
         VerificationSettings settings =
             new(1, Path.GetRelativePath(artifact, proof), author, Path.GetRelativePath(artifact, consumer));
         File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(settings, Json));
         return new(import, author, artifact, Encoding.UTF8.GetString(generated), ContractInterface.Hash(generated),
-            new(entry, artifact, export.ContractConstant, author, export.TypeArguments));
+            request with
+            {
+                Method = entry, Artifact = artifact, TypeArguments = export.TypeArguments,
+                ReferenceArtifact = referenceArtifact
+            }, statics, imported);
     }
+
+    // A record's scoped static identities in identity order; a missing list is malformed, not empty.
+    static StaticIdentityRecord[] StaticIdentitySet(JsonElement record) =>
+        (record.TryGetProperty("staticIdentities", out JsonElement statics)
+            ? statics.Deserialize<StaticIdentityRecord[]>(ContractInterface.Json) : null)?
+            .OrderBy(item => item.Identity, StringComparer.Ordinal).ToArray()
+        ?? throw new InvalidDataException("Full-verification record lacks its static identities.");
 
     ConsumerDependency StageFullConsumer(string bundle, ContractBundleManifest inventory, string consumer,
         string digest, InterfaceModule[] interfaces)
@@ -644,15 +962,16 @@ run_cmd do
         return App(AuditConstant("And"), checkedLink, callerClaim);
     }
 
-    static AuditConstantRequest[] FullCompositionConstants(string callerTheorem, IReadOnlyList<FullLibrary> libraries)
+    static AuditConstantRequest[] FullCompositionConstants(string callerTheorem, IReadOnlyList<FullLibrary> libraries,
+        int callers)
     {
         static object App(params object[] parts) => new { app = parts };
         static object ListConstant(string name) => new { @const = "List." + name, levels = new[] { 0 } };
         object libraryType = AuditConstant("CIL.Safety.Library");
-        object list = App(ListConstant("nil"), libraryType);
-        foreach (FullLibrary library in libraries.Reverse())
-            list = App(ListConstant("cons"), libraryType,
-                AuditConstant("LeanCILFullComposition.library" + library.Slot), list);
+        object LibraryList(IEnumerable<int> ids) => ids.Reverse().Aggregate(App(ListConstant("nil"), libraryType),
+            (tail, id) => App(ListConstant("cons"), libraryType, AuditConstant("LeanCILFullComposition.library" + id),
+                tail));
+        object list = LibraryList(Enumerable.Range(0, callers));
         object claimType = new { forall = new object[] { AuditConstant("CIL.Program"), new { sort = 0 } } };
         object givenType = App(AuditConstant("CIL.Safety.HoldsGiven"), AuditConstant("Extracted.program"),
             AuditConstant("Extracted.ImportsHold"), new { bvar = 0 });
@@ -666,11 +985,18 @@ run_cmd do
             new("LeanCILFullComposition.fullCallerClaim", callerClaim)];
         foreach (FullLibrary library in libraries)
         {
-            object helpers = App(ListConstant("drop"), AuditConstant("CIL.Method"), new { nat = 1 },
-                AuditConstant(library.ExpectedModule + ".Extracted.program"));
+            // A library's program is its own extraction linked with exactly its pinned dependencies.
+            object program = AuditConstant(library.ExpectedModule + ".Extracted.program");
+            if (library.Dependencies.Length != 0)
+            {
+                string dependencies = "LeanCILFullComposition.dependencies" + library.Id;
+                constants.Add(new(dependencies, LibraryList(library.Dependencies)));
+                program = App(AuditConstant("CIL.Safety.link"), program, AuditConstant(dependencies));
+            }
+            object helpers = App(ListConstant("drop"), AuditConstant("CIL.Method"), new { nat = 1 }, program);
             object definition = App(AuditConstant("CIL.Safety.Library.mk"),
                 AuditConstant(library.ExpectedModule + ".Extracted.method0"), helpers);
-            constants.Add(new("LeanCILFullComposition.library" + library.Slot, definition));
+            constants.Add(new("LeanCILFullComposition.library" + library.Id, definition));
         }
         return [.. constants];
     }
@@ -681,58 +1007,54 @@ run_cmd do
         "_root_.CIL.Program -> Prop := claim\n" +
         "def fullCallerClaim : _root_.CIL.Program -> Prop := selectFullCallerClaim _root_." + theorem + "\n";
 
-    static string FullCompositionSource(string callerModule, string callerTheorem, IReadOnlyList<FullLibrary> libraries)
+    // Libraries ordered so each follows every library it links.
+    static List<FullLibrary> DependencyOrder(IReadOnlyList<FullLibrary> libraries)
+    {
+        List<FullLibrary> ordered = [];
+        HashSet<int> visiting = [];
+        void Visit(FullLibrary library)
+        {
+            if (ordered.Contains(library)) return;
+            if (!visiting.Add(library.Id))
+                throw new InvalidDataException("Full-verification dependency cycle at library " + library.Id);
+            foreach (int dependency in library.Dependencies) Visit(libraries.Single(item => item.Id == dependency));
+            ordered.Add(library);
+        }
+        foreach (FullLibrary library in libraries) Visit(library);
+        return ordered;
+    }
+
+    static string FullCompositionSource(string callerModule, string callerTheorem,
+        IReadOnlyList<FullLibrary> libraries, int callerSlots)
     {
         StringBuilder source = new("import " + callerModule +
             "\nimport CIL.Safety.Linking\nimport CIL.Safety.StaticLinking\nimport CIL.Interface.Closure\n");
         foreach (FullLibrary library in libraries)
             source.AppendLine("import " + library.Module).AppendLine("import " + library.ExpectedModule);
         source.AppendLine("namespace LeanCILFullComposition\nopen CIL.Safety");
-        foreach (FullLibrary library in libraries)
-        {
-            string index = library.Slot.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            string program = library.ExpectedModule + ".Extracted.program";
-            string holds = HoldsTerm(library.Kind, library.Contract);
-            source.AppendLine("theorem programIdentity" + index + " : " + library.Module + ".Extracted.program = " +
-                program + " := rfl");
-            source.AppendLine("theorem extraction" + index + " : CIL.Extraction.TranslationValid " +
-                library.ExpectedModule + ".Extracted.rawLayouts " +
-                library.ExpectedModule + ".Extracted.computedLayouts " +
-                library.ExpectedModule + ".Extracted.methodEvidence " +
-                library.ExpectedModule + ".Extracted.imports " + program + " := " +
-                library.ExpectedModule + ".Extracted.translation_valid");
-            source.AppendLine("def library" + index + " : Library := { entry := " + library.ExpectedModule +
-                ".Extracted.method0, helpers := " + program + ".drop 1 }");
-            source.AppendLine("theorem libraryProgram" + index + " : library" + index + ".program = " + program +
-                " := rfl");
-            source.AppendLine("theorem closed" + index + " : Closed library" + index +
-                ".program := Closed.of_check (by decide +kernel)");
-            source.AppendLine("theorem holds" + index + " : " + holds + " library" + index +
-                ".program 0 := by\n  simpa only [libraryProgram" + index + ", programIdentity" + index + "] using " +
-                library.Module + ".LeanCILExportAudit.certified");
-        }
+        foreach (FullLibrary library in DependencyOrder(libraries))
+            source.Append(FullLibrarySource(library, libraries));
+        int[] callers = Enumerable.Range(0, callerSlots).ToArray();
         source.AppendLine("def libraries : List Library := [" +
-            string.Join(", ", libraries.Select(library => "library" + library.Slot)) + "]");
-        source.AppendLine("def specifications : List Relocatable := [" + string.Join(", ", libraries.Select(library =>
-            "_root_.CIL.Safety." + ContractNamespace(library.Kind) + ".relocatable _root_." + library.Contract)) + "]");
+            string.Join(", ", callers.Select(id => "library" + id)) + "]");
+        source.AppendLine("def specifications : List Relocatable := [" + Specifications(callers, libraries) + "]");
         source.AppendLine("theorem app_prefix : Links Extracted.program (link Extracted.program libraries) := " +
             "link_links _ _");
         // Equal static identities must name equal descriptors across the whole linked program.
         source.AppendLine("theorem staticLink : linkChecked Extracted.program libraries = " +
             ".ok (link Extracted.program libraries) :=\n  linkChecked_of_compatible (by decide +kernel)");
-        foreach (FullLibrary library in libraries)
-            source.AppendLine("theorem relocation" + library.Slot + " : RelocatesInto library" + library.Slot +
+        foreach (int slot in callers)
+            source.AppendLine("theorem relocation" + slot + " : RelocatesInto library" + slot +
                 ".program " + "(link Extracted.program libraries) (linkSlot Extracted.program libraries " +
-                library.Slot + ") := link_relocates Extracted.program libraries (j := " + library.Slot +
-                ") (by decide)");
+                slot + ") := link_relocates Extracted.program libraries (j := " + slot + ") (by decide)");
         source.AppendLine("theorem bridge (linked : CIL.Program) " +
             "(met : Imports Extracted.program specifications linked) : Extracted.ImportsHold linked := by\n  exact " +
-            Conjunction(libraries.Select(library => "met " + library.Slot + " (by decide)").ToArray()));
+            Conjunction(callers.Select(slot => "met " + slot + " (by decide)").ToArray()));
         source.AppendLine("def discharge {claim : CIL.Program -> Prop} " +
             "(callerProof : HoldsGiven Extracted.program Extracted.ImportsHold claim) :\n" +
             "    claim (link Extracted.program libraries) :=\n  composed (callerProof.mono bridge) rfl");
-        source.AppendLine(FiniteLibraryProof(libraries.Count, "closed", false));
-        source.AppendLine(FiniteLibraryProof(libraries.Count, "holds", true));
+        source.AppendLine(FiniteLibraryProof("libraries", callers, "closed", false));
+        source.AppendLine(FiniteLibraryProof("libraries", callers, "holds", true));
         source.AppendLine(FullClaimSelector(callerTheorem));
         source.AppendLine("theorem certified : linkChecked Extracted.program libraries = " +
             ".ok (link Extracted.program libraries) /\\\n    fullCallerClaim (link Extracted.program libraries) :=\n" +
@@ -742,18 +1064,77 @@ run_cmd do
         return source.ToString();
     }
 
+    static string Specifications(IEnumerable<int> ids, IReadOnlyList<FullLibrary> libraries) =>
+        string.Join(", ", ids.Select(id => libraries.Single(library => library.Id == id)).Select(library =>
+            "_root_.CIL.Safety." + ContractNamespace(library.Kind) + ".relocatable _root_." + library.Contract));
+
+    // Proves one library's contract on its own linked program; a library with imports discharges them first.
+    static string FullLibrarySource(FullLibrary library, IReadOnlyList<FullLibrary> libraries)
+    {
+        StringBuilder source = new();
+        string index = library.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string program = library.ExpectedModule + ".Extracted.program";
+        string holds = HoldsTerm(library.Kind, library.Contract);
+        source.AppendLine("theorem programIdentity" + index + " : " + library.Module + ".Extracted.program = " +
+            program + " := rfl");
+        source.AppendLine("theorem extraction" + index + " : CIL.Extraction.TranslationValid " +
+            library.ExpectedModule + ".Extracted.rawLayouts " +
+            library.ExpectedModule + ".Extracted.computedLayouts " +
+            library.ExpectedModule + ".Extracted.methodEvidence " +
+            library.ExpectedModule + ".Extracted.imports " + program + " := " +
+            library.ExpectedModule + ".Extracted.translation_valid");
+        string certified = library.Module + ".LeanCILExportAudit.certified";
+        if (library.Dependencies.Length == 0)
+        {
+            source.AppendLine("def library" + index + " : Library := { entry := " + library.ExpectedModule +
+                ".Extracted.method0, helpers := " + program + ".drop 1 }");
+            source.AppendLine("theorem libraryProgram" + index + " : library" + index + ".program = " + program +
+                " := rfl");
+            source.AppendLine("theorem closed" + index + " : Closed library" + index +
+                ".program := Closed.of_check (by decide +kernel)");
+            source.AppendLine("theorem holds" + index + " : " + holds + " library" + index +
+                ".program 0 := by\n  simpa only [libraryProgram" + index + ", programIdentity" + index + "] using " +
+                certified);
+            return source.ToString();
+        }
+        string dependencies = "dependencies" + index;
+        string linked = "(link " + program + " " + dependencies + ")";
+        source.AppendLine("def " + dependencies + " : List Library := [" +
+            string.Join(", ", library.Dependencies.Select(id => "library" + id)) + "]");
+        source.AppendLine("def specifications" + index + " : List Relocatable := [" +
+            Specifications(library.Dependencies, libraries) + "]");
+        source.AppendLine("def library" + index + " : Library := { entry := " + library.ExpectedModule +
+            ".Extracted.method0, helpers := " + linked + ".drop 1 }");
+        source.AppendLine("theorem libraryProgram" + index + " : library" + index + ".program = " + linked +
+            " := rfl");
+        source.AppendLine("theorem closed" + index + " : Closed library" + index +
+            ".program := Closed.of_check (by decide +kernel)");
+        // The kernel checks each conjunct, so the transferred import assumptions need no separate pin.
+        source.AppendLine("theorem bridge" + index + " (linked : CIL.Program) (met : Imports " + program + " " +
+            "specifications" + index + " linked) : " + library.Module + ".Extracted.ImportsHold linked := by\n" +
+            "  exact " + Conjunction(Enumerable.Range(0, library.Dependencies.Length)
+                .Select(slot => "met " + slot + " (by decide)").ToArray()));
+        source.AppendLine("theorem holds" + index + " : " + holds + " library" + index + ".program 0 := by\n" +
+            "  have given := " + certified + "\n  rw [programIdentity" + index + "] at given\n" +
+            "  rw [libraryProgram" + index + "]\n  exact composed (given.mono bridge" + index + ") rfl\n" +
+            FiniteLibraryProof(dependencies, library.Dependencies, "closed", false) + "\n" +
+            FiniteLibraryProof(dependencies, library.Dependencies, "holds", true));
+        return source.ToString();
+    }
+
     static string Conjunction(string[] values) => values.Length == 1 ? values[0] :
         "And.intro (" + values[0] + ") (" + Conjunction(values[1..]) + ")";
 
-    static string FiniteLibraryProof(int count, string theorem, bool specification)
+    // Discharges a goal over every member of list, whose members are the libraries named by ids in order.
+    static string FiniteLibraryProof(string list, int[] ids, string theorem, bool specification)
     {
         StringBuilder source = new("    (by\n      intro index bound" + (specification ? " specification" : "") + "\n");
-        string selected = Alternatives(Enumerable.Range(0, count).Select(index => "index = " + index).ToArray());
-        source.AppendLine("      have selected : " + selected +
-            " := by\n        simp only [libraries, List.length_cons, List.length_nil] at bound\n        omega");
-        source.AppendLine("      rcases selected with " + string.Join(" | ", Enumerable.Repeat("rfl", count)));
+        string selected = Alternatives(Enumerable.Range(0, ids.Length).Select(index => "index = " + index).ToArray());
+        source.AppendLine("      have selected : " + selected + " := by\n        simp only [" + list +
+            ", List.length_cons, List.length_nil] at bound\n        omega");
+        source.AppendLine("      rcases selected with " + string.Join(" | ", Enumerable.Repeat("rfl", ids.Length)));
         source.AppendLine("      all_goals first");
-        for (int index = 0; index < count; index++) source.AppendLine("        | exact " + theorem + index);
+        foreach (int id in ids) source.AppendLine("        | exact " + theorem + id);
         source.Append("    )");
         return source.ToString();
     }

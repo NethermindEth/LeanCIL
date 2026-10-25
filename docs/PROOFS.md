@@ -7,6 +7,27 @@ list-indexed rules without changing their entry, reachability, opcode or bounds 
 `foldEntry roles[target]?`. Missing entries retain the original permissive fold-role result;
 the successor-state check independently rejects a target missing from its certificate.
 
+Division intrinsic validation classifies each emitted intrinsic once and removes the common
+assembly scope once when recognizing a raw call's family. Its signature-byte table is generated
+from the existing signature strings at elaboration time; a kernel-checked equality proves the
+table exact without adding axioms. `DivisionIntrinsicsValid_iff_original` proves equivalence to
+the original signature lookup, malformed-family rejection, arity, reachability, profile
+availability and length checks for arbitrary raw metadata, including non-ASCII identities.
+
+Feature getter validation likewise checks the common assembly/type prefix once, then compares
+literal UTF-8 suffixes. `featureGetter_eq_original` proves equality with the original lookup
+for every raw call site; a separate kernel-checked equality validates the generated suffix
+table. Prefix truncation, trailing bytes, non-ASCII names and call-shape mismatches remain
+rejected. This changes certificate checking cost, not the admitted feature getters.
+
+Generated managed-call certificates use `cil_managed_calls` to prove the unchanged
+`ManagedCallsValid` proposition. The tactic unfolds the supplied generated definitions and
+proves identical scoped types and generic arguments by reflexivity. Remaining checks use
+kernel decision; unsupported proof shapes fall back to the original complete decision.
+The validator still checks targets, method tokens, type arguments, exact parameter and return
+types, instance metadata, reachability and argument counts. This changes proof construction;
+source binding, certificate audits and kernel replay are unchanged.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a
@@ -129,6 +150,32 @@ quantified over every feature, is normalized to that form. Elsewhere, including
 the field or first run
 `simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h`.
 
+### Consumer stepping regressions
+
+The consumer failures reported in #252 are covered by the following proofs. These
+use the public tactics with symbolic values and memory; they do not replace the
+checked interpreter with consumer-specific execution rules.
+
+| Case | Regression |
+| --- | --- |
+| Supplied store/load facts take priority over generic equations | `Tests.Automation.step_facts_first`, `applied_step_facts_first` |
+| Zero, nonzero and literal branch conditions | `Tests.Automation.branch_from_zero`, `branch_from_nonzero`, `literal_branch` |
+| Memory operations use their own equations | `Tests.Automation.asRef_fact_stack`, `load128_fact_stack`, `add_fact_stack` |
+| Profile facts decide instruction lookup | `Tests.Automation.feature_op_checked`, `Tests.MethodContract.feature_op_contract_steps` |
+| Intrinsic evaluation facts normalize the next stack | `Tests.Automation.evaluated_then_stored`, `evaluated_by_applied_hypothesis` |
+| Signed, unsigned and loaded-limb comparisons | `Tests.MethodContract.loaded_signed_branch`, `loaded_unsigned_branch`, `loaded_limb_branch` |
+| Signed/unsigned widening and both argument orders | `Tests.MethodContract.ordered_widening` |
+
+Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all
+eight combinations of signed conversion, scalar position and reversed arguments
+in 12,000 heartbeats, using one `cil_contract_steps 3` invocation per case. Its
+arbitrary continuation preserves the actual widened stack and memory, rather than
+merely checking that some execution exists. These budgets detect elaboration
+regressions independently of machine speed; they are not wall-clock benchmarks.
+`ordered_widening_returns` composes that prefix with a concrete suffix which
+discards both operands and returns zero, proving that the continuation premise is
+satisfiable for every case. The widened value is checked by the prefix theorem.
+
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
 by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
 hypothesis such as `found : program[index]? = some (body profile)`, or by
@@ -148,6 +195,27 @@ placement expressions such as `region.append_left`. The fetched instruction must
 inside the segment and agree with its code. `append`, `middle`, `take` and `drop` move a placement
 between a region and its segments, and `rfl` closes a concrete one.
 [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
+`Segment program method start finish pre post` packages a checked prefix as a composable
+contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame,
+stack and memory. Each admitted input supplies an output state and a cost, with an exact
+`run (fuel + cost) = run fuel` equation for every continuation fuel. `Segment.trans` composes
+adjacent contracts and adds their costs; `Segment.run_exists` applies a successful continuation.
+`Segment.consequence` changes assertions by proved
+implications. `SegmentState.exact` describes a known state. For these exact-state contracts,
+`cil_segment 3 [found, placed, facts]` proves the boundary using `cil_checked_steps` and fails
+unless the complete equation closes. `cil_segment_steps [facts]` proves a `SegmentRun`
+boundary directly. Neither tactic invents a memory or availability premise.
+
+For numeric-local framing, record successful write equations in `SegmentLocalEffects`.
+The destinations must occur in `segmentStores code`, read from the placed instructions.
+`Segment.frameLocals` combines these effects with the initial `LocalSnapshots` and
+`WritableHomes` to derive snapshots for `untouchedLocals code known`. Effects compose through
+`append` or `trans`; one frame-rule application replaces separate disjoint-read proofs for
+all retained locals. The numeric slot identities must remain fixed, and the frame-rule placement must belong to
+the running method and end at the contract boundary. Indirect writes and
+calls need a proved memory effect; absence of a direct `setLocal` is not evidence that an
+aliased byte-backed local keeps its value. [Tests/Segment](../Tests/Segment.lean) composes the
+UInt256 Add Vector128 reference prefix and Multiply AVX2 vector-input stages with these rules.
 
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the
 relevant proved facts. Branches always use equations before reflexivity, so a fact
@@ -276,6 +344,62 @@ program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags 
 profile in a family. A separate per-profile extraction is covered once it is shown equal to
 the reprofiled program, by `rfl` when only the profiles differ.
 
+`leancil export-contracts` accepts one manifest entry for such a family:
+
+```json
+{
+  "method": "Library::Supported()",
+  "contract": "Public.supported",
+  "theorem": "Proof.family",
+  "program": "Reference.program",
+  "referenceProfile": "x64-sse2",
+  "profiles": [
+    { "profile": "x64-sse2", "artifact": "extractions/sse2" },
+    { "profile": "x64-sse42", "artifact": "extractions/sse42" },
+    { "profile": "x64-v3", "artifact": "extractions/v3" }
+  ]
+}
+```
+
+The surrounding manifest still provides `schema`, `assembly`, `proofRoot` and `interface`.
+Each artifact's `verification.json` selects the shared proof source under `proofRoot`.
+The family theorem has shape
+`∀ q : FeatureProfile, Predicate q → contract.Holds (reprofile Reference.program q) 0`,
+where the concrete predicate is decidable. Both method and outcome contracts are supported.
+The selected artifacts must include `referenceProfile`. Its extraction is checked against the
+same DLL, copied into a reserved generated module, and compiled separately from author macros.
+Its compiled artifacts are frozen before author code runs and checked again afterward.
+Every profile must prove by `rfl` that the named reference program equals this fixed program;
+a definition that changes with the current extraction cannot substitute a different body.
+The reference program must use `referenceProfile` uniformly. Each profile receives its own
+ordinary extraction check, layout check, theorem audit and kernel replay; generated proofs
+instantiate the predicate with `by decide +kernel` and establish the exact program equality
+with `rfl`. Because the family theorem already concludes a reprofiled program, no second
+transport or handwritten per-profile proof file is needed.
+
+This manifest form covers same-flag transport: a separate checked `ProfileAgreement.of_flags`
+obligation rejects any selected profile that disagrees on a reference program read flag,
+including intrinsic prerequisites, and reports the flag's name. It deliberately does not
+accept general families whose observed branches differ. Use profile templates for those
+proofs. Even an otherwise valid family is rejected when extraction pruning, method numbering,
+instructions or metadata make its program differ from the reprofiled reference. The exact
+equality and agreement statements are independently audited, so proof-source macros cannot
+replace these checks. Nothing is published unless all selected profiles pass.
+Published source bundles retain every selected extraction; full verification freshly extracts
+both the selected profile and its fixed reference from the pinned implementation DLL, then
+repeats the family checks before composing the caller theorem.
+
+Profiles must be distinct built-in names and match their artifacts. A family entry cannot
+also specify `artifact`; ordinary single-profile entries are unchanged. Family transport
+currently requires a closed extraction without imported-contract slots. Explicit type-initialization
+premises remain bound to each exported profile; static-value assumptions remain unsupported.
+Full source-bundle verification rejects initialization premises, as for single-profile exports.
+
+For a program with no profile reads, use the same `ProfileAgreement.of_flags` rule:
+an equality `empty : program.profileReads = []` discharges its premise with
+`by simp [empty]`. This replaces `profileIndependentCheck` and
+`profile_independent_agreement`; no separate profile-independent checker is needed.
+
 A contract may also type its result: `MethodContract Input Output` adds
 `results : Output → List Value`, and `post` speaks of the `Output`. `Returns`
 requires the returned values to equal `results out` for some `out` satisfying
@@ -290,8 +414,23 @@ def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
   post input _ _ v := v = input.1 * 3 + input.2
 ```
 
-In the caller, `cil_contract_steps [facts]` steps a `∃ fuel, run ...` goal up
-to each `.call` and return; `cil_contract_call holds input at site [facts]` applies
+In the caller, `cil_contract_steps [facts]` steps an existential-fuel goal through
+ordinary instructions and calls with supplied evidence. Mark a proved `MethodContract.Holds`
+theorem `@[cil_contract]`, or include its proof in `facts`, to apply it at a matching callee.
+The theorem's program and method binding must match the actual call; required binding
+premises are checked. Input fields are inferred from the encoded arguments. The precondition
+is proved from facts when possible, otherwise it remains a goal before the continuation.
+The continuation receives the result, footprint and postcondition. Contracts merely present
+in the local context are not automatically selected.
+
+A supplied successful child invocation, with fixed or existential fuel, or an
+`InvocationCertificate`, also composes without unfolding the helper body. Fixed-fuel
+`cil_checked_steps` can reuse a matching invocation or certificate at its actual child
+budget; a proof at a larger budget does not justify a smaller one. Contract and
+existential-child composition use `cil_contract_steps`, whose fuel remains existential.
+
+Without matching evidence, the contract stepper stops at the call.
+`cil_contract_call holds input at site [facts]` explicitly applies
 the contract at a `bind_call` site (or the fetched call without `at`), leaving the precondition and then a continuation over the
 callee's final memory, values, invocation, frame and `Returns`. Destructure
 `Returns` as `⟨out, rfl, post⟩` and unfold the contract (`dsimp only [mixContract]`)
@@ -961,6 +1100,22 @@ example {fuel : Nat} {args : List CIL.Safety.Value} {m : CIL.Safety.Memory} {r :
     CIL.Safety.invoke Extracted.program fuel 2 args m = .ok r := bound.invoke h
 ```
 
+An expected body can be a shared template with local flag and callee parameters.
+Use `cil_embed [sse, avx, called]` when those hypotheses equate the parameters to
+the extraction's concrete flags and callee indices. The tactic rewrites only the
+supplied facts before alignment and unfolds local definitions; it does not infer
+flag equalities from the extracted code. Relevant parameters that remain open are
+rejected. The rewrite proof and the complete instruction map are kernel checked,
+including branch targets and callee indices. The no-argument form still handles
+closed bodies directly.
+
+`Tests/ProfileEmbedding.lean` binds one template and one open theorem to three valid
+profiles, including shifted branch targets, without restating the template body for
+each profile. It also rejects unresolved flags, incorrect flag and callee values,
+and a changed branch target. An irrelevant open argument may be removed by supplying
+the definition that ignores it in the fact list; this is justified by reduction,
+not an assumption about that argument's value.
+
 `bound.certificate` transports an `InvocationCertificate` and
 `bound.descriptors` the program's static descriptor list; `ProgramRefines.set`
 composes several bound methods. Named exceptions transfer too:
@@ -1062,6 +1217,47 @@ handle its exact-memory subset. See
 [Tests/AllocationExecutionRenaming.lean](../Tests/AllocationExecutionRenaming.lean) for
 two live numeric locals interspersed with three dead ones, a nested call followed by
 dynamic allocation, exact scalar results, caller-prefix preservation and a named exception.
+
+### Generated profile templates
+
+Create ordinary extractions for the profiles your proof supports, then combine them:
+
+```sh
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' scalar scalar
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' sse42 x64-sse42
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' v3 x64-v3
+leancil templates shared scalar sse42 v3
+```
+
+The command reruns exact extraction checking for every input and requires the same
+assembly bytes. `shared/Templates.lean` defines each method once, with a profile parameter,
+parameters for the feature flags it reads, and managed callee indices keyed by full method
+identity. Every original IL instruction keeps its pc. Conditional instructions and excluded
+paths become `if` expressions and unsupported padding; `cil_instruction_equations` generates
+kernel-checked equations for every pc.
+
+`TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
+`Templates`. Each binding proves `Extracted.program[i]? = some (Templates.methodN ...)`
+by `rfl`, including all metadata and callee indices. Compile a binding only against its
+corresponding extraction, recorded in `templates.json`. Add the shared module and selected
+binding module to your proof package, import that binding from the consumer proof, and use
+ordinary `leancil verify` with that extraction and proof package. The templates command
+generates proof source; it does not replace Lean checking or verification of the extraction.
+
+Only the input profiles receive extraction bindings. Unselected combinations of observed
+flags produce unsupported instructions, and no correctness claim about another extraction
+follows from generating a template. The full profile remains an explicit parameter; a
+behavioral proof must relate its feature fields to the flag arguments it uses. Profiles
+that produce different metadata, different instruction counts, or different instructions
+under identical observed flags are rejected. Static-site metadata, imported callee slots
+and the model's `newVector256` constructor form are currently unsupported in template generation.
+
+`Tests/ProfileTemplates.cs` compiles a real AVX2/SSE4.2 dispatch helper and checks one
+shared proof from `Tests/ProfileTemplatesProof.lean` against three profiles. A fourth
+extraction changes the managed callee numbering through a wrapper entry point. The suite
+replays the generated equations, extraction certificates, bindings and consumer proofs in
+the kernel, and rejects changed flag values, callees, branch targets, instruction equations,
+stale extraction source and incompatible profile-dependent parameter homes.
 
 ### Instruction equations for parametric bodies
 

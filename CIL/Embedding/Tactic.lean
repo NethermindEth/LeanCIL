@@ -1,6 +1,7 @@
 import CIL.MethodBinding
 import CIL.Embedding.Basic
 import Lean.Meta.Tactic.AuxLemma
+import Lean.Elab.Tactic.Simp
 
 /-!
 # The `cil_embed` tactic
@@ -13,6 +14,10 @@ which checks every `Embeds` field by evaluation. The alignment is untrusted: a
 wrong map only makes the kernel reject the proof. A `MethodEmbedsDeadLocals` goal is
 proved the same way against the method with its trailing dead locals dropped, after
 checking that those locals qualify.
+
+`cil_embed [facts]` first rewrites explicit equalities, so local flags and callee
+parameters can be fixed by the extraction. Local definitions are unfolded; any
+remaining open parameters are rejected. Neither step guesses a feature value.
 -/
 
 namespace CIL.MethodBinding
@@ -179,10 +184,9 @@ private unsafe def evaluateUnsafe (T : Type) (type value : Expr) : MetaM T := ev
 @[implemented_by evaluateUnsafe]
 private opaque evaluate (T : Type) (type value : Expr) : MetaM T
 
-/-- Proves `MethodEmbeds program index expected`, or `MethodEmbedsDeadLocals program index
-    expected`, for closed terms; on failure names the first violated condition. The pc map is
-    checked by the kernel, not trusted. -/
-syntax (name := cilEmbed) "cil_embed" : tactic
+/-- Proves a method embedding after rewriting explicit facts and unfolding local definitions.
+    Any remaining relevant parameters must be closed. The kernel checks the computed pc map. -/
+syntax (name := cilEmbed) "cil_embed" (" [" term,* "]")? : tactic
 
 /-- `ctor` applied to `prefixArgs` and an `Eq.refl` of the left side of each remaining
     equation field; only the kernel compares the sides. -/
@@ -199,17 +203,26 @@ private def reflFields (ctor : Name) (prefixArgs : Array Expr) : MetaM Expr := d
 
 /-- Elaborates `cil_embed`: evaluates the goal's terms, aligns the bodies, reports the first
     failure, or builds the `Embeds` proof from `Eq.refl` fields as an auxiliary lemma. -/
-@[tactic cilEmbed] def evalCilEmbed : Tactic := fun _ => do
+@[tactic cilEmbed] def evalCilEmbed : Tactic := fun stx => focus <| withMainContext do
+  let checkShape (type : Expr) : TacticM Unit := do
+    unless type.isAppOfArity ``CIL.MethodEmbeds 3 ||
+        type.isAppOfArity ``CIL.MethodEmbedsDeadLocals 3 do
+      throwError "cil_embed: the goal must be `MethodEmbeds program index expected` or \
+        `MethodEmbedsDeadLocals program index expected`, not {type}"
+  checkShape (← instantiateMVars (← (← getMainGoal).getType))
+  if let `(tactic| cil_embed [$facts:term,*]) := stx then
+    evalTactic (← `(tactic| simp (config := { failIfUnchanged := false }) only [$[$facts:term],*]))
+    if (← getGoals).isEmpty then return
   let goal ← getMainGoal
-  let type ← instantiateMVars (← goal.getType)
+  let originalType ← instantiateMVars (← goal.getType)
+  let type ← if originalType.hasFVar then zetaReduce originalType else pure originalType
   let fail (message : MessageData) : TacticM Unit :=
     throwError m!"cil_embed: the expected body does not embed into the extracted method\n{message}"
   let dropsLocals := type.isAppOfArity ``CIL.MethodEmbedsDeadLocals 3
-  unless type.isAppOfArity ``CIL.MethodEmbeds 3 || dropsLocals do
-    throwError "cil_embed: the goal must be `MethodEmbeds program index expected` or \
-      `MethodEmbedsDeadLocals program index expected`, not {type}"
+  checkShape type
   if type.hasFVar || type.hasMVar then
-    throwError "cil_embed: program, index and expected body must be closed terms"
+    throwError "cil_embed: unresolved parameters remain in the program, index or expected body; \
+      supply extraction flag and callee equalities with `cil_embed [facts]`"
   let program := type.appFn!.appFn!.appArg!
   let index := type.appFn!.appArg!
   let expected := type.appArg!

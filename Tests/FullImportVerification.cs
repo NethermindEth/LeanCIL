@@ -98,11 +98,19 @@ if (cohort is "consumer" or "ordinary")
     }
     JsonElement[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
         .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
-    int expectedRuns = cohort == "consumer" ? 2 : 1;
+    var expectedRuns = cohort == "consumer" ? 2 : 1;
+    var proofRuns = stages.GroupBy(stage => stage.GetProperty("processId").GetInt32())
+        .Select(group => group.Select(stage => stage.GetProperty("stage").GetString()!).ToArray())
+        .Where(group => group.Contains("Fresh extraction of the current imported library DLL",
+            StringComparer.Ordinal)).ToArray();
     if (stages.Count(stage => stage.GetProperty("stage").GetString() == "Fresh extraction of the current imported library DLL") != expectedRuns ||
         stages.Count(stage => stage.GetProperty("stage").GetString() == "Capturing actual checked author and extraction kernel terms") != expectedRuns ||
         stages.Count(stage => stage.GetProperty("stage").GetString() == "Independent kernel replay of the composed caller theorem") != expectedRuns ||
-        stages.Any(stage => stage.GetProperty("stage").GetString()!.Contains("certified proof:", StringComparison.Ordinal)))
+        proofRuns.Length != expectedRuns || proofRuns.Any(run =>
+            run.Count(stage => stage == "Building fresh consumer proof and dependencies") !=
+                (cohort == "consumer" ? 2 : 1) ||
+            run.Count(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal)) !=
+                (cohort == "consumer" ? 0 : 1)))
         throw new InvalidOperationException("Repeated full verification did not re-extract, audit and replay each actual library and composition.");
     Console.WriteLine("PASS " + cohort + " full verification without original library proof paths");
 }
@@ -166,7 +174,9 @@ if (cohort == "pair")
             import.GetProperty("sourceBundleDigest").GetString() != pairBundle) ||
         pairStages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
         pairStages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
-        pairStages.Count(stage => stage is "Building fresh Lean verification library" or "Copying certified Lean verification library") != 2)
+        pairStages.Count(stage => stage is "Building fresh Lean verification library" or "Copying certified Lean verification library") != 2 ||
+        pairStages.Count(stage => stage == "Building fresh consumer proof and dependencies") != 2 ||
+        pairStages.Count(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal)) != 1)
         throw new InvalidOperationException("Two imports from one bundle were not verified with one library build: " + string.Join(", ", pairStages));
     completed.CompleteCase("full.pair");
     Console.WriteLine("PASS two imports from one source bundle share one independent library build");

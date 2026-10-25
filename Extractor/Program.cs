@@ -8,13 +8,14 @@ namespace Nethermind.LeanCIL;
 
 internal static partial class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil templates output-directory extraction-directory...\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
     static int Main(string[] args) => Run(args);
 
-    static int Run(string[] args, ExtractionBatch? batch = null)
+    static int Run(string[] args, ExtractionBatch? batch = null,
+        Action<TemplateEmitter.Variant>? checkedTemplate = null)
     {
         if (args.Length == 0 || args is ["--help"] or ["-h"])
         {
@@ -35,6 +36,18 @@ internal static partial class Program
             {
                 stage = "import resolution";
                 return ImportResolver.Run(args[1..]);
+            }
+            if (args[0] == "workspace")
+            {
+                stage = "editor workspace";
+                global::Program.CreateProofWorkspace(args[1..]);
+                return 0;
+            }
+            if (args[0] == "templates")
+            {
+                stage = "template generation";
+                TemplateEmitter.Run(args[1..], ReadTemplate);
+                return 0;
             }
             if (args[0] == "list")
             {
@@ -255,7 +268,8 @@ internal static partial class Program
             }
             stage = "metadata and CIL validation";
             using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false));
-            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, originalModule, imports, staticIdentities);
+            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, originalModule, imports,
+                staticIdentities, collectTemplates: checkedTemplate is not null);
             string source = emitted.Source;
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
                 .Where(i => i.OpCode.Code == Code.Ldsfld)
@@ -263,6 +277,12 @@ internal static partial class Program
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
+            var initializationAssumptions = InitializationAssumption.Normalize(initializedTypes.Select(type =>
+                new InitializationAssumption(assemblyIdentity, type)).Concat(imports.InitializationAssumptions()));
+            if (initializationAssumptions.Length > 0)
+                source += "\n-- Named runtime premises inherited from this assembly and its contract imports.\n" +
+                    "def Extracted.initializationAssumptions : List (String × String) := " +
+                    InitializationAssumption.Lean(initializationAssumptions) + "\n";
             if (staticValues.Count > 0)
                 source += "-- Caller assumption: these fields keep the values their static constructors stored.\n" +
                     "def Extracted.staticValues : List String := " + JsonSerializer.Serialize(staticValues) + "\n";
@@ -289,7 +309,9 @@ internal static partial class Program
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
                 assemblySha256 = assemblyHash, entry = methods[0].FullName,
                 entryDefinition = MethodSpecialization.Definition(methods[0]).FullName, entryTypeArguments,
-                layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes, staticValues,
+                layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes,
+                initializationAssumptions = JsonSerializer.SerializeToElement(initializationAssumptions, ContractInterface.Json),
+                staticValues,
                 staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = extractorHash,
@@ -347,8 +369,12 @@ internal static partial class Program
             if (symbolNotice is not null) Console.WriteLine("  " + symbolNotice);
             foreach (var name in initializedTypes)
                 Console.WriteLine($"  Caller assumption: {name} initialization completed successfully before invocation.");
+            foreach (var assumption in initializationAssumptions.Where(item => item.AssemblyIdentity != assemblyIdentity))
+                Console.WriteLine($"  Imported caller assumption: {assumption.AssemblyIdentity}::{assumption.TypeName} " +
+                    "initialization completed successfully before invocation.");
             foreach (var name in staticValues)
                 Console.WriteLine($"  Caller assumption: {name} keeps the value its static constructor stored.");
+            checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
         }
         catch (Exception exception)
         {
@@ -356,5 +382,14 @@ internal static partial class Program
             return 1;
         }
         return 0;
+    }
+
+    // Capture only after the ordinary check has matched every extraction artifact.
+    static TemplateEmitter.Variant ReadTemplate(string directory)
+    {
+        TemplateEmitter.Variant? variant = null;
+        if (Run(["check", directory], checkedTemplate: value => variant = value) != 0 || variant is null)
+            throw new InvalidDataException("Template input failed exact extraction checking: " + directory);
+        return variant;
     }
 }

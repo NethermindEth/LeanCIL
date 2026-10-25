@@ -7,7 +7,8 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
-    internal readonly record struct Emission(string Source, string[] LayoutIdentities);
+    internal readonly record struct Emission(string Source, string[] LayoutIdentities,
+        TemplateEmitter.Method[] Templates);
 
     internal static string? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -78,9 +79,31 @@ internal static class LeanEmitter
         return layouts.ToArray();
     }
 
-    internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null,
-        StaticIdentityRecord[]? staticIdentities = null)
+    // These definitions guide proof simplification; the full validator still checks every call.
+    static string? CallDefinitions(int caller, IReadOnlyList<string> operations, int methodCount)
     {
+        var targets = new SortedSet<int> { caller };
+        var hasCall = false;
+        foreach (var operation in operations)
+        {
+            if (!operation.StartsWith(".call ", StringComparison.Ordinal) &&
+                !operation.StartsWith(".newAggregate ", StringComparison.Ordinal) &&
+                !operation.StartsWith(".newVector256 ", StringComparison.Ordinal)) continue;
+            hasCall = true;
+            var fields = operation.Split(' ', 3);
+            if (fields.Length >= 2 && int.TryParse(fields[1], out var target) &&
+                target >= 0 && target < methodCount) targets.Add(target);
+        }
+        if (!hasCall) return null;
+        return string.Join(", ", targets.SelectMany(target =>
+            new[] { $"method{target}Closed", $"method{target}TypeArgumentsRaw" }));
+    }
+
+    internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null,
+        StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false)
+    {
+        var templates = new List<TemplateEmitter.Method>();
+        var callDefinitions = new string?[methods.Length];
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
@@ -144,7 +167,13 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], parameterHomes := [{parameters}], staticSites := [{sites}], code := [");
+            var metadata = $"returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, " +
+                $"locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], " +
+                $"parameterHomes := [{parameters}], staticSites := [{sites}]";
+            callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
+            if (collectTemplates)
+                templates.Add(new(m.FullName, metadata, ops.ToArray(), sites.Length != 0));
+            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {metadata}, code := [");
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
@@ -161,8 +190,15 @@ internal static class LeanEmitter
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
-        for (int n = 0; n < methods.Length; n++)
-            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods imports (Extraction.lowerConstrainedRaw method{n}DispatchTypes method{n}Closed) method{n}Reachable method{n} := {Decide}");
+        for (var n = 0; n < methods.Length; n++)
+        {
+            var facts = $"specializedMethods, imports, Extraction.lowerConstrainedRaw, {callDefinitions[n]}, " +
+                $"method{n}, method{n}Reachable, method{n}DispatchTypes";
+            var proof = callDefinitions[n] is null ? Decide : $"by cil_managed_calls [{facts}]";
+            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid " +
+                $"specializedMethods imports (Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
+                $"method{n}Closed) method{n}Reachable method{n} := {proof}");
+        }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them.
         lean.AppendLine("def signatures : List String := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}Signature")) + "]");
@@ -193,6 +229,6 @@ internal static class LeanEmitter
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray());
     }
 }

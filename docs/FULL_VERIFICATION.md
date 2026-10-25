@@ -17,10 +17,37 @@ The three assurance levels are distinct:
 Full mode uses no proof receipts, portable support or successful proof caches.
 It validates source inventory and framework/toolchain bytes. It rebases proof
 paths into a fresh package and ignores original absolute filesystem locations.
-The first version supports closed library exports with the `leancil` source
-dependency only. Transitive library imports, extra source packages, static sites
-and initialization assumptions fail. Package configuration is generated from the
-validated source inventory; no Git history is inferred from a source bundle.
+Library exports may depend only on the `leancil` source package. Extra source
+packages, static-value assumptions and initialization assumptions fail.
+
+A library export may itself import other libraries. Its fresh extraction is pinned
+to the caller's dependency graph nodes. Every export reachable this way is
+re-extracted before any library is built; then each bundle is built once, after
+the bundles it depends on. Every bundle in the reachable closure is located and
+validated before the caller is checked. A missing, changed or failing dependency
+bundle fails the run; the dependency's published certification is never used in
+its place. The composition proves each dependency's contract on
+its own linked program, discharges the importer's `ImportsHold` with those
+proofs, and links the importer with its dependencies before linking it into the
+caller. The report marks each re-checked `contractDependencies` node with
+`acceptedVia` and `sourceBundleDigest`. Package configuration is
+generated from the validated source inventory; no Git history is inferred from a
+source bundle.
+
+Libraries may read immutable RVA static tables. The fresh extraction decides
+each export's reachable tables. Their scoped identities must equal the
+certification's, the caller binding's and the bundled extraction's records, and
+each must name a field of the library assembly. The three published records are
+compared before any build; the fresh extraction is compared with them after it runs. Table bytes come only from the
+fresh extraction, so a re-certified DLL with changed bytes fails the author
+proof that ties them to the published `StaticWorldValid` descriptors. The
+composed theorem states `linkChecked` for the whole linked program: the
+caller's tables and every imported table, including one table read through
+several imports, have one descriptor per identity. `StaticWorldValid` premises
+remain preconditions of the contracts and of the caller's claim; the composed
+theorem does not establish the runtime's static state at the call. Mutable
+statics, static constructors and `ldsfld` of constructor-initialized fields
+remain unsupported.
 
 Imports from one source bundle share one staged package and one fresh library
 build. The author source first passes the ordinary fresh export, extraction,
@@ -49,8 +76,22 @@ full verification of an untrusted bundle in an isolated environment: a
 read-only toolchain, extractor and caller, no network, and a workspace
 discarded afterwards.
 
+Before the first dependency build, the verifier snapshots every staged bundle's
+complete file set, including its framework sources and regenerated extraction.
+It rechecks the selected bundle immediately before building it, detecting changes
+left by an earlier dependency before the later bundle starts. The isolation
+requirement still applies to ongoing or hostile producer processes.
+
 Reports retain the original conditional caller theorem. They add the composed
 theorem and audit, source bundle identities, and `acceptedVia:
 independently-verified`. Faithful DLL decoding and CIL/runtime correspondence
 remain trust boundaries. These checks establish CIL theorems, not correctness
 of CoreCLR or a JIT.
+
+The graph regression covers an actual arithmetic caller through A → B and a
+single caller importing A and C, both of which depend on B. This four-node
+diamond reuses the same selected B identity; all three implementations are checked
+once even when an ordinary proof receipt is already available. Separate fixtures preserve
+a named exceptional outcome through three forwarders and a table-reading contract
+through a transitive dependency. The table fixture retains its explicit
+`StaticWorldValid` premise and checks the final `linkChecked` composition audit.

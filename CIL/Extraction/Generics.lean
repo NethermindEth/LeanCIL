@@ -342,6 +342,17 @@ instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : R
     Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
+/-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
+    Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
+macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
+  `(tactic| first
+    | (refine ⟨?_, ?_, ?_⟩
+       · rfl
+       · rfl
+       · simp [all3, validateManagedCall, managedCallTarget, $[$facts:term],*] <;>
+           decide +kernel)
+    | decide +kernel)
+
 theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot}
     {raw : RawMethod} {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :

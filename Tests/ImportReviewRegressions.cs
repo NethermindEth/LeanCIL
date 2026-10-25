@@ -6,6 +6,35 @@ using Mono.Cecil;
 
 internal static class ImportReviewRegressions
 {
+    internal static void FullStaging_WhenDependencyChangesLaterBundle_Rejects(string extractor, string directory)
+    {
+        var program = RequiredType(Assembly.LoadFrom(extractor), "Program");
+        var snapshot = program.GetMethod("FullStagingFiles", PrivateStatic)!;
+        var require = program.GetMethod("RequireFullStaging", PrivateStatic)!;
+        Directory.CreateDirectory(directory);
+        var proof = Path.Combine(directory, "Proof.lean");
+        var framework = Path.Combine(directory, ".lake", "packages", "leancil", "CIL.lean");
+        Directory.CreateDirectory(Path.GetDirectoryName(framework)!);
+        File.WriteAllText(proof, "theorem original : True := True.intro\n");
+        File.WriteAllText(framework, "-- pinned framework source\n");
+        var accepted = snapshot.Invoke(null, [directory]);
+        void Check() => require.Invoke(null, [directory, accepted]);
+        var diagnostic = "Full-verification staged bundle changed before its build: " + directory;
+        Check();
+        File.AppendAllText(proof, "-- dependency changed a later proof\n");
+        Reject(Check, diagnostic);
+        File.WriteAllText(proof, "theorem original : True := True.intro\n");
+        var added = Path.Combine(directory, "Shadow.lean");
+        File.WriteAllText(added, "-- unexpected staged source\n");
+        Reject(Check, diagnostic);
+        File.Delete(added);
+        File.Delete(framework);
+        Reject(Check, diagnostic);
+        File.WriteAllText(framework, "-- pinned framework source\n");
+        Check();
+        Console.WriteLine("PASS staged proof changes, added modules and removed framework sources reject before building");
+    }
+
     const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
     const BindingFlags PrivateStatic = BindingFlags.Static | BindingFlags.NonPublic;
     static readonly JsonSerializerOptions RecordJson = new() { PropertyNameCaseInsensitive = true };

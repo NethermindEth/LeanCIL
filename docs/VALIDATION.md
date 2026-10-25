@@ -64,7 +64,12 @@ For checked-step and loop tactics, see [proof automation](#proof-automation).
 
 `Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping through vector and int32
 stores, reloads and overwrites with abstract homes and memory, plus signed-byte narrowing.
+The mixed-width case carries Vector256, Vector128 and int32 locals through one snapshot
+invariant and returns the full arbitrary 256-bit input after the other locals are written.
 Missing write authority, mismatched local kinds and unknown local contents remain rejected.
+Each rejection uses an isolated store or load and a matching successful run with only the
+missing authority, correct value kind or remembered contents supplied. Strict proof elaboration
+prevents an incomplete rejected proof from inserting a placeholder.
 The ordinary shared tactic tests run unchanged.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer
@@ -108,10 +113,11 @@ CI builds the certified library once per workflow attempt and passes its immutab
 
 `dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` requires an empty or absent destination and publishes a freshly built library through a staging directory. Explicit reuse uses `--reuse <trusted-manifest-sha256>`; obtain this digest independently from a trusted producer, never by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing the destination. Rebuilding an existing library requires a separate output directory. `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests, missing producer digests, and preservation of unrelated destination files.
 
-The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integer`, `narrow`, `primitive`, `division`, `checked`, `conversions`, `native`, `arguments`, `layout`, `copy`, `bits`, `enums`, `nested`, `instance`, `constructors`, `fsharp`, `math`, `divrem`, `unsafe`, `blocks`, `generics`, `loops`, `contracts`, `evidence`, `scaling`, `excluded`, `identity`, `labels`, `names`, `symbols`, `callers`, `construction`, `outcomes` and `audit`. These partitions cover the same check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
+The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integer`, `narrow`, `primitive`, `division`, `checked`, `conversions`, `native`, `arguments`, `layout`, `copy`, `bits`, `enums`, `nested`, `instance`, `constructors`, `fsharp`, `math`, `divrem`, `unsafe`, `blocks`, `generics`, `loops`, `contracts`, `evidence`, `scaling`, `excluded`, `identity`, `labels`, `names`, `symbols`, `workspace`, `templates`, `callers`, `construction`, `outcomes` and `audit`. These partitions cover the same check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites, retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |
 | --- | --- |
+| Profile-parametric templates | Compiled AVX2/SSE4.2 dispatch helper, one generated template proof on three profiles, renumbered managed callees, exact per-pc equations, independent kernel replay, and wrong flag/callee/branch/equation, stale source and metadata rejection |
 | Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a loop that returns or raises its helper's exception after earlier calls, proved for every pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper and rejecting another exception type, a nondecreasing measure, a non-inductive invariant and a wrong specified exception; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 17 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected |
 | Generic method specialization | 125 C#/F# runtime comparisons, six universal identity proofs, six reference checks, twelve metadata/recursion rejections, wrong-implementation rejection and provenance tamper detection |
 | Block memory and alignment prefixes | 251 checks; ten malformed-prefix/type cases rejected; universal out-of-bounds fill rejection |
@@ -248,6 +254,12 @@ state `a + b + c`, `a - b - c` and the flag words in source form, through both
 source memory leaves the run stuck at that store, with the exact unsolved goal
 asserted.
 
+`Tests.Segment` composes the UInt256 Add Vector128 eight-op reference prefix and Multiply
+AVX2 input stages at positions 44–56. Formation, checked loads and stores, intrinsic
+availability and exact permutation semantics remain premises. Two actual vector writes
+frame all other numeric snapshots using separated homes. Negative cases reject aliased
+homes, hidden indirect writes, changed endpoint states, fuel costs and mismatched composition
+positions or assertions, and placements from a different body or end boundary. Every new theorem is kernel checked with its axiom set reported.
 `Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the
 lookups its `CodeAt` placement yields, with the error asserted when stepping has no
 placement, hands that segment theorem the middle of a larger placed region, closes a
@@ -360,7 +372,7 @@ method steps through a shift and an even-lane multiply with those lemmas as fact
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
@@ -396,9 +408,9 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
 | `exportsresolution` | Same loaded files and changed loaded module |
-| `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal |
-| `exportsfullordinary` | Ordinary caller full verification |
-| `exportsfullpair` | Two imported slots from one bundle |
+| `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal; caller and library proof-build stages required separately for each invocation |
+| `exportsfullordinary` | Ordinary caller full verification, requiring its direct proof check and the imported proof build |
+| `exportsfullpair` | Two imported slots from one bundle, requiring both imported proof builds and the caller check |
 | `exportsfullchecks` | Bundle, DLL, closure, statement digest and caller-premise rejection |
 | `exportsfulltheorems` | Wrong producer theorem statement and definition |
 | `exportsfullcomposition` | Transferred macro cannot replace the composition theorem with True |
@@ -407,10 +419,14 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
-| `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
+| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof; a Top → App → library chain independently composes the table reader with its static-world premise |
+| `exportstransitive` | App → A → B and a four-node diamond where A and C share B; full mode rechecks each selected export despite warm receipts, rejects changed deployment pins and cycles before building, rejects forged dependency composition, and detects B changing staged A before A builds |
+| `exportstransitiveoutcomes` | App → C → A → B independently preserves normal returns and the named exceptional outcome through three forwarders |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
 | `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
+| `exportsinitialized` | A static-readonly struct library exports a named initialization premise; its caller retains the scoped premise, malformed descriptors reject, and full verification remains unavailable |
+| `exportsprofiles` | One family theorem across three profiles, independent full composition, outcome families and scoped initialization premises; disagreeing flags, unequal programs, malformed selections, forged audit declarations and compiled-reference mutation reject |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -420,9 +436,10 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, transitive, discovery, typed and derived suites cannot enter that plan.
-The registry now has 18 leaves. `exportsstatics`, `exportstransitive`, `exportstyped` and `exportsderived` run
-directly, with no core export bootstrap or nested post-call. Their fixture assertions are
+statics, fullstatics, transitive, transitiveoutcomes, discovery, typed, derived, initialized and profiles suites cannot enter that plan.
+The registry now has 22 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+`exportstransitiveoutcomes`, `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with no core export bootstrap
+or nested post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after
@@ -452,3 +469,12 @@ byte subtraction, pointer differences and four unsigned orderings. It independen
 subtraction as addition and requires the Lean scalar certificate to reject it. The Lean fixtures
 cover negative offsets and differences, end positions, readonly preservation, every unsigned
 branch, and null, cross-allocation, invalid-position and signed-comparison rejection.
+
+Managed-call proof construction is covered by `Tests/ExtractionGenerics.lean` and the
+15 generated generic-method samples in `Tests/GenericEvidence.cs`. Direct tactic rejection
+checks cover changed signedness, assembly scope, generic arguments and argument count.
+The fixed three-method int256 scalar Equality extraction retains every public certificate
+proposition and all program/metadata definitions. Replaying every generated theorem reduces
+kernel work from 36,782,462 to 32,494,315 raw heartbeats (11.7%); the structural proofs introduce
+additional auxiliary theorems, increasing the replay count from 169 to 181. These are kernel
+work measurements, not full consumer build or end-to-end verification timings.
