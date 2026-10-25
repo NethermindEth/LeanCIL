@@ -35,7 +35,8 @@ Feature and division getter recognition use exact byte comparisons with kernel-c
 equivalence to their original signature rules. This reduces certificate replay work while
 preserving metadata rejection. Managed-call certificates use structural equality proofs for
 matching metadata, reducing repeated string comparisons during replay. Primitive metadata also
-shares the exact runtime assembly identity to avoid repeated UTF-8 decoding in the kernel. See
+shares the exact runtime assembly identity. Reachable external calls reuse their complete
+identities as checked UTF-8 byte constants, avoiding repeated decoding in the kernel. See
 [certificate validation](docs/PROOFS.md).
 
 Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.402**. The extractor uses Mono.Cecil; the F# examples also use FSharp.Core. Both packages are pinned in `Directory.Packages.props`. Lean uses Std and Lean, without Mathlib.
