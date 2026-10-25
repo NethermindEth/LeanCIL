@@ -19,7 +19,7 @@ internal static class ImportReviewRegressions
         File.WriteAllText(framework, "-- pinned framework source\n");
         var accepted = snapshot.Invoke(null, [directory]);
         void Check() => require.Invoke(null, [directory, accepted]);
-        const string diagnostic = "Full-verification staged bundle changed before its build: ";
+        var diagnostic = "Full-verification staged bundle changed before its build: " + directory;
         Check();
         File.AppendAllText(proof, "-- dependency changed a later proof\n");
         Reject(Check, diagnostic);
