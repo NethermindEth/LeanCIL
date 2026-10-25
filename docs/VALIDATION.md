@@ -1,5 +1,13 @@
 # Validation coverage
 
+`Tests/ConsumerSupportUnion.cs` runs a fixed three-extraction consumer batch in two orders.
+Support imported only by later groups must build and replay once; direct and indirect
+extraction-dependent modules must replay in every consuming group, including repeated import
+commands on one line. Compiled import headers remain authoritative when scheduling misses an import.
+The fixture records wall, build and replay timings and module counts in `timings.json`.
+Run it with an extractor DLL path and `--measure` to record a baseline without asserting
+the improved reuse counts. The ordinary consumer suite runs the assertions.
+
 For checked-step and loop tactics, see [proof automation](#proof-automation).
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer

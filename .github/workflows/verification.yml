@@ -38,6 +38,7 @@ jobs:
           dotnet run --file Tests/FileHashing.cs
           dotnet run --file Tests/BatchInputs.cs
           dotnet run --file Tests/ConsumerArtifactSnapshot.cs
+          dotnet run --file Tests/ConsumerSupportCandidates.cs
       - name: Select affected suites
         id: select
         env:
