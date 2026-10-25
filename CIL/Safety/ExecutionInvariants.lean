@@ -194,8 +194,14 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | exact .stackAllocation (by assumption)
-    | solve | exact .staticInstruction (staticInstruction_contract _ _ _ _ _ _ _ (by assumption))
-    | solve | exact .instruction (instruction_contract _ _ _ _ _ (by assumption))
+    | solve |
+        apply StepContract.staticInstruction
+        apply staticInstruction_contract
+        assumption
+    | solve |
+        apply StepContract.instruction
+        apply instruction_contract
+        assumption
     | solve |
         refine StepContract.of_effect ?_ ?_
         · first
@@ -206,7 +212,10 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
         · intro hm ext retained
           repeat' first
             | exact retained
-            | solve | simp [FrameAction.LiveValues, ValuesValid, Value.Valid, numericValue]
+            | solve |
+                simp only [FrameAction.LiveValues, ValuesValid, Value.Valid, numericValue,
+                  List.mem_cons, List.mem_nil, forall_eq_or_imp, false_implies, forall_const,
+                  and_true, true_and]
             | exact retained.tail
             | exact retained.tail.tail
             | solve | exact retained.drop _
@@ -235,6 +244,8 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
             | constructor
     | cases h
     | split at h
+
+#print axioms step_contract
 
 theorem step_effect (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)

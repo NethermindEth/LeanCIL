@@ -18,6 +18,8 @@ and `stepEqualityBranch`, and their four separate family constructors. `stepTran
 successful/exceptional execution guarantees retain their statements.
 The ordinary instruction proof normalizes mapped stack constructors with a single simplifier
 pass, avoiding repeated traversal of the dispatcher. Later normalization retains full simplification.
+The execution-invariant dispatcher applies contract lemmas before searching for their success
+hypotheses, and uses an explicit simp set to establish scalar-stack validity.
 
 Certificate validation streams fallthrough states and uses balanced indexes for branch
 destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original
