@@ -269,7 +269,9 @@ Test("export leaf selection, strict files and shared inputs", () =>
     foreach (string name in typedFixtures)
         Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportstyped"]);
     Equal(VerificationSelection.Select(["Tests/DerivedContractExports.cs"]), ["exportsderived"]);
-    foreach (string name in ExportVerificationSuites.DerivedFixtures)
+    string[] derivedFixtures =
+        ["DerivedInterface", "DerivedPercentProof", "DerivedAddProof", "DerivedShiftCaller", "DerivedSumCaller"];
+    foreach (string name in derivedFixtures)
         Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportsderived"]);
     Require(VerificationSelection.Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
         "Imported-layout model evidence lost its existing suite owner");
