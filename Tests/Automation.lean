@@ -426,7 +426,23 @@ theorem store_from_instruction_fact (body : CIL.Method) (args : List Value) (fra
       .ok (.next 3 [] frame final) := by
   cil_checked_step [stored]
 
-#print axioms store_from_instruction_fact
+/-- info: 'Tests.Automation.store_from_instruction_fact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms store_from_instruction_fact
+
+open CIL.Safety in
+/-- A fact one level up, on `staticInstruction`, still closes the store: the retry tries it
+    before unfolding `staticInstruction`, which would rewrite past it. -/
+theorem store_from_static_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+    (bits : BitVec 256) (destination : Reference) (memory final : Memory)
+    (stored : staticInstruction body 2 .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [stored]
+
+/-- info: 'Tests.Automation.store_from_static_fact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms store_from_static_fact
 
 -- The same store from a `storeValue` fact: the per-shape memory equation exposes it without unfolding a dispatcher.
 open CIL.Safety in

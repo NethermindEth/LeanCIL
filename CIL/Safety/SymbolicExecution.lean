@@ -281,20 +281,27 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
     | cil_checked_step_by_equations [$[$facts:term],*]
     | cil_checked_step_by_unfolding [$[$facts:term],*])
 
-/-- Closes a `.memory` step through the generic `step_memory_eq`, unfolding
-    `staticInstruction` so a fact stated at the `memoryInstruction` level applies. Such a fact
-    fails once a per-shape memory equation rewrites past it, so the stepping tactics retry it
-    here. -/
-macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
+/-- Closes a `.memory` step through the generic `step_memory_eq` with `facts`, constructors
+    and `rfl`. -/
+macro "cil_checked_memory_by_dispatch " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        rw [CIL.Safety.step_memory_eq]
        try simp only [cil_guard]
-       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.staticInstruction,
-         CIL.Safety.checkedValue, CIL.Safety.numericValue, CIL.Safety.scalars,
+       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue,
+         CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null,
          CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
          Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
+
+/-- Closes a `.memory` step from a fact stated at the `staticInstruction` or
+    `memoryInstruction` level, which fails once a per-shape memory equation rewrites past it.
+    A `staticInstruction` fact must be tried before unfolding `staticInstruction`, which would
+    rewrite past it too. -/
+macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
+  `(tactic| first
+    | cil_checked_memory_by_dispatch [$[$facts:term],*]
+    | cil_checked_memory_by_dispatch [CIL.Safety.staticInstruction, $[$facts:term],*])
 
 open Lean Elab Tactic Meta in
 /-- Whether a supplied fact is, or is stated about, `memoryInstruction` or `staticInstruction`;
