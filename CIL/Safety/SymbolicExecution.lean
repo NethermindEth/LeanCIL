@@ -43,8 +43,6 @@ syntax "cil_fact_simp" Lean.Parser.Tactic.optConfig " [" term,* "]" " [" term,* 
 
 -- `trace.CIL.factNormalize` names each local fact that `normaliseStepFacts` normalises.
 initialize Lean.registerTraceClass `CIL.factNormalize
--- `trace.CIL.lookup` names each fetched feature test the facts left undecided, and why.
-initialize Lean.registerTraceClass `CIL.lookup
 
 open Lean Elab Tactic Meta in
 /-- `proof` and, for a fact over `Fin n` (n <= 64) or over every `Feature`, its instance at
@@ -197,9 +195,7 @@ elab_rules : tactic
         (← mkEq lookup (← mkAppM ``Option.some #[op]))
       goal.assign (← mkAppM ``CIL.Safety.lookup_eq_some_of_eq #[fetchedOp, ← reduced.getProof])
       replaceMainGoal []
-    catch failure =>
-      trace[CIL.lookup] "feature test left undecided: {op}: {failure.toMessageData}"
-      fetched.restore
+    catch _ => fetched.restore
 
 -- Reducible `assumption` keeps a failed candidate lookup from unfolding every hypothesis.
 -- A branch leaves `(v != 0) = true` in the pc: the negation lemmas decide it from
