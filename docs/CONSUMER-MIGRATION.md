@@ -13,8 +13,9 @@ pinned LeanCIL version.
 
 The compatibility workflow checks out an immutable int256
 revision, substitutes the committed LeanCIL candidate as its Lake dependency,
-builds its extraction-independent library, and verifies Add/ARM64 AdvSimd and
-Subtract/x64 SSE4.2. Its summary distinguishes library builds from compiled
+builds its extraction-independent library, and verifies Add/ARM64 AdvSimd,
+Subtract/x64 SSE4.2, Multiply/scalar and LeUInt256UInt256/scalar.
+Its summary distinguishes library builds from compiled
 certificates. Update the consumer revision through a reviewed PR when adopting
 API migrations. Logs are diagnostic evidence; the workflow does not publish
 portable trusted consumer artifacts.
@@ -71,6 +72,19 @@ large symbolic stacks. No global heartbeat increase or weakened safety condition
 is part of this migration.
 
 ## Checked method boundaries
+
+`Frame.stackBytes` tracks rounded bytes reserved by dynamic stack allocations in
+the current activation. A newly entered frame starts at zero; ordinary local
+homes and vector argument homes do not consume this counter. When migrating an
+explicit initial frame, use named fields, including `stackBytes := 0`, instead
+of a four-field anonymous constructor. Preserve the counter when updating an
+existing frame: resetting it after `stackAlloc` would invalidate quota reasoning.
+
+For example, a fresh localless frame is
+`{ activation := memory.nextIdentity, locals := [], owned := [], arguments := [], stackBytes := 0 }`.
+This changes the proof's frame representation, not its arithmetic, aliasing or
+memory-preservation contract. Recheck frame-entry equations and compiled-method
+certificates after updating the consumer.
 
 `step_newAggregate`, `step_newVector256` and `run_newAggregate_of_contract`
 also require `arguments.any Value.hasUnspecified = false`, with an automatic proof for concrete arguments. For abstract arguments, prove this from the
