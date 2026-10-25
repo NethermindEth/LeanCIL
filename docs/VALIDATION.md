@@ -1,5 +1,16 @@
 # Validation coverage
 
+`Tests/CliImportedKernelAudit.cs`, called by the CLI suite, builds and kernel-replays its
+modified source corpus once with the ordinary library producer. Both standalone
+`verify --fresh` calls use private copies authenticated by that producer's manifest digest. The valid
+helper succeeds; the forged `AuditBad.helper` fails specifically during kernel replay and
+removes the previous certificate. Both helpers remain outside the audited base aggregate.
+The fixture also rejects using the modified corpus's certificate with the unmodified tool.
+Trace assertions require one fresh build, one base replay and two successful private copies.
+Run `dotnet run --file Tests/CliImportedKernelAudit.cs` after building the extractor and example
+assembly; add `-- --measure-baseline` to measure the original two-build workload. Each run
+writes `timings.json` beneath its isolated `artifacts/CliImportedKernelAudit-*` directory.
+
 `Tests/VerificationCache.cs` checks certified-library copying against the pinned manifest,
 source snapshot and toolchain key, rejects changed/missing/extra files and rehashed
 manifests, and independently detects destination corruption. On Unix it also checks that

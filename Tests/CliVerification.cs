@@ -118,48 +118,6 @@ if (memory.Code != 0 || memory.Stderr.Length != 0 || !memory.Stdout.Contains("St
     throw new InvalidOperationException("Missing checked invalid-access theorem: " + memory.Output);
 Console.WriteLine("PASS CLI invalid memory-access theorem");
 
-// Helpers outside the CIL aggregate are compiled only after the base library audit.
-// Exercise the packaged verifier in an isolated source corpus so the real library
-// and any concurrent suites remain unchanged. External installed-tool smoke tests
-// use their own layout; the repository CLI suite exercises this regression.
 if (args.Length == 0)
-{
-    var importedRoot = At("artifacts/CliImportedKernelAudit");
-    var importedTool = Path.Combine(importedRoot, "tool");
-    CopyTree(Path.GetDirectoryName(cli[1])!, importedTool);
-    var sources = Path.Combine(importedTool, "verification", "CIL");
-    File.WriteAllText(Path.Combine(sources, "AuditGood.lean"),
-        "import Lean\nnamespace AuditGood\ntheorem helper : True := True.intro\nend AuditGood\n");
-    File.WriteAllText(Path.Combine(sources, "AuditBad.lean"), """
-        import Lean
-        set_option debug.skipKernelTC true
-        run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
-          name := `AuditBad.helper
-          levelParams := []
-          type := Lean.mkConst ``False
-          value := Lean.mkConst ``True.intro
-        })
-        """);
-    var importedCli = new[] { "dotnet", Path.Combine(importedTool, Path.GetFileName(cli[1])) };
-    var importedOutput = Path.Combine(importedRoot, "output");
-    Run([.. importedCli, "extract", assembly, "Arithmetic::Add(ulong,ulong)", importedOutput]);
-    var importedProof = Path.Combine(importedRoot, "Proof.lean");
-    File.WriteAllText(importedProof, "import Extracted\nimport CIL.AuditGood\ntheorem ExampleProof.correctness : True := AuditGood.helper\n");
-    // This corpus deliberately differs from CI's shared certified library. Build
-    // and replay it from source rather than accepting that library's certificate.
-    var uncertified = new Dictionary<string, string> { ["LEANCIL_CERTIFIED_LIBRARY"] = "" };
-    var validImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof, "--fresh"],
-        progress: "Checking valid imported helper against modified library", environment: uncertified);
-    if (validImported.Code != 0 || validImported.Stderr.Length != 0 ||
-        !validImported.Stdout.StartsWith("Verified: ExampleProof.correctness"))
-        throw new InvalidOperationException("Valid imported CIL helper rejected: " + validImported.Output);
-    File.WriteAllText(importedProof, "import Extracted\nimport CIL.AuditBad\ntheorem ExampleProof.correctness : False := AuditBad.helper\n");
-    var invalidImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof, "--fresh"],
-        progress: "Rejecting forged imported helper against modified library", environment: uncertified);
-    if (invalidImported.Code != 1 || invalidImported.Stdout.Length != 0 ||
-        !invalidImported.Stderr.Contains("Stage: kernel replay") ||
-        !invalidImported.Stderr.Contains("AuditBad.helper") ||
-        File.Exists(Path.Combine(importedOutput, "verified.json")))
-        throw new InvalidOperationException("Unchecked imported CIL helper bypassed replay: " + invalidImported.Output);
-    Console.WriteLine("PASS CLI replay covers valid and forged CIL helpers outside the base aggregate");
-}
+    Run(["dotnet", "run", "--file", At("Tests/CliImportedKernelAudit.cs")],
+        streamOutput: true, progress: "CLI imported helper kernel audit");
