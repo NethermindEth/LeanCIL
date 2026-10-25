@@ -1,11 +1,12 @@
 import CIL.Safety.Embedding.Outcomes
+import CIL.Safety.Embedding.AppendLocals
 
 /-!
 # Refinement modulo dead locals
 
 `EmbedsDeadLocals expected actual map` lets `actual` declare trailing locals that `expected`
-lacks, provided each is a managed reference initialized to null or left unmodeled. Frame
-entry creates such a local as a root slot without allocating, so every allocation identity and
+lacks, provided each is a reference or supported span initialized empty or left unmodeled. Frame
+entry creates such a local without allocating, so every allocation identity and
 every memory state is the same with or without it; the only difference is the frame's slot
 list, which is `expected`'s followed by the dead slots. Instructions address locals by index,
 so a step that succeeds or throws with the shorter list behaves the same with the longer one.
@@ -19,114 +20,6 @@ shifts every later allocation identity.
 namespace CIL.Safety
 
 open CIL.Embedding
-
-/-- `frame` with the slots `extra` placed after its locals. -/
-def Frame.appendLocals (frame : Frame) (extra : List LocalSlot) : Frame :=
-  { frame with locals := frame.locals ++ extra }
-
-/-- Padding with no slots leaves a frame unchanged. -/
-@[simp] theorem Frame.appendLocals_nil (frame : Frame) : frame.appendLocals [] = frame := by
-  simp [Frame.appendLocals]
-
-#print axioms CIL.Safety.Frame.appendLocals_nil
-
-/-- The action with `extra` slots after the locals of the frame it resumes in. -/
-def FrameAction.appendLocals (extra : List LocalSlot) : FrameAction → FrameAction
-  | .next target stack frame memory => .next target stack (frame.appendLocals extra) memory
-  | .construct callee args rest frame temporary kind memory =>
-    .construct callee args rest (frame.appendLocals extra) temporary kind memory
-  | action => action
-
-/-- A step outcome the padded simulation carries: a success or a thrown exception. -/
-def StepKept : ExecutionResult α → Prop
-  | .ok _ => True
-  | .error fault => ∃ exception, fault = .thrown exception
-
-/-- A local present in `frame` is the same slot after padding. -/
-theorem Frame.appendLocals_getElem? {frame : Frame} {extra : List LocalSlot} {index : Nat}
-    {slot : LocalSlot} (found : frame.locals[index]? = some slot) :
-    (frame.appendLocals extra).locals[index]? = some slot := by
-  simp only [Frame.appendLocals]
-  rw [List.getElem?_append_left (List.getElem?_eq_some_iff.mp found).1]
-  exact found
-
-#print axioms CIL.Safety.Frame.appendLocals_getElem?
-
-/-- Storing to a local present in `frame` commutes with padding. -/
-theorem Frame.appendLocals_set {frame : Frame} {extra : List LocalSlot} {index : Nat}
-    {slot old : LocalSlot} (found : frame.locals[index]? = some old) :
-    { frame.appendLocals extra with
-        locals := (frame.appendLocals extra).locals.set index slot } =
-      { frame with locals := frame.locals.set index slot }.appendLocals extra := by
-  simp only [Frame.appendLocals]
-  rw [List.set_append_left _ _ (List.getElem?_eq_some_iff.mp found).1]
-
-#print axioms CIL.Safety.Frame.appendLocals_set
-
-/-- A dynamic stack allocation reads only the frame's activation and reserved bytes, so it
-    does the same in a padded frame and returns that frame padded. -/
-theorem allocateStack_appendLocals (memory : Memory) (frame : Frame) (extra : List LocalSlot)
-    (size : Nat) (initLocals : Bool) :
-    allocateStack memory (frame.appendLocals extra) size initLocals =
-      (fun allocated => (allocated.1, allocated.2.1.appendLocals extra, allocated.2.2)) <$>
-        allocateStack memory frame size initLocals := by
-  unfold allocateStack
-  simp only [Frame.appendLocals]
-  by_cases limit : (size ≥ nativeLimit || memory.stackLimit > maxDynamicStack) = true
-  · simp [limit, Bind.bind, Except.bind, Functor.map, Except.map]
-  by_cases empty : (size == 0) = true
-  · simp [limit, empty, Functor.map, Except.map, Pure.pure, Except.pure]
-  by_cases full : (frame.stackBytes > memory.stackLimit ||
-      stackReservation size > memory.stackLimit - frame.stackBytes) = true
-  · simp [limit, empty, full, Bind.bind, Except.bind, Functor.map, Except.map]
-  cases allocateHome memory frame.activation size stackAlignment <;>
-    cases initLocals <;>
-    simp [limit, empty, full, Bind.bind, Except.bind, Functor.map, Except.map, Pure.pure,
-      Except.pure] <;> split <;> simp_all
-
-#print axioms allocateStack_appendLocals
-
-/-- Closes `step` on a padded frame against the unpadded step mapped through the padding,
-    splitting both sides in lockstep; fails on a branch that reads a local the unpadded frame
-    lacks. -/
-local macro "frame_natural" : tactic => `(tactic| repeat' (first
-  | rfl
-  | contradiction
-  | (simp only [map_bind, map_pure, FrameAction.appendLocals, Frame.appendLocals]; done)
-  | split
-  | (apply bind_congr; intro)
-  | simp only [map_bind]))
-
--- The bounded proof covers array and read-only reference cases as well as numeric values.
-set_option maxHeartbeats 2000000 in
-/-- A step that succeeds or throws in `frame` does the same in `frame` padded with `extra`,
-    resuming in the padded frame: instructions only read locals the unpadded frame has. -/
-theorem step_appendLocals (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
-    (frame : Frame) (extra : List LocalSlot) (stack : List Value) (memory : Memory)
-    (outcome : ExecutionResult FrameAction)
-    (stepped : step body op pc args frame stack memory = outcome) (kept : StepKept outcome) :
-    step body op pc args (frame.appendLocals extra) stack memory =
-      FrameAction.appendLocals extra <$> outcome := by
-  subst stepped
-  cases op
-  case «local» index _ | vectorLocal index | vectorLocalAddr index | setVectorLocal index
-    | localAddr index | setLocal index _ =>
-    cases found : frame.locals[index]? with
-    | some slot =>
-      cases stack <;>
-        simp only [step, found, Frame.appendLocals_getElem? found,
-          Frame.appendLocals_set found] <;>
-        frame_natural
-    | none =>
-      revert kept
-      cases stack <;> simp only [step, found] <;> repeat' split
-      all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
-  case stackAlloc =>
-    simp only [step, allocateStack_appendLocals, bind_map_left]
-    frame_natural
-  all_goals (simp only [step]; frame_natural)
-
-#print axioms step_appendLocals
 
 /-- Replacing a body's locals keeps every step that succeeds or throws: steps read the
     profile, return arity and static sites, never the local declarations. -/
@@ -152,24 +45,28 @@ theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Op) (pc : Nat
 
 #print axioms step_withLocalsOf
 
-/-- The slot frame entry gives a root local with initializer `initial`. -/
-def rootSlot : CIL.Value → LocalSlot
-  | .nullRef => .root (some .null)
-  | _ => .root none
+/-- The slot frame entry gives a nonallocating local of the given kind and initializer. -/
+def rootSlot : CIL.LocalKind → CIL.Value → LocalSlot
+  | .span width writable, .nullRef =>
+    .span width writable (some ⟨.null, 0, width, writable⟩)
+  | .span width writable, _ => .span width writable none
+  | _, .nullRef => .root (some .null)
+  | _, _ => .root none
 
 /-- A root local is created without touching memory. -/
 theorem makeLocal_root {kind : CIL.LocalKind} {initial : CIL.Value}
     (root : rootLocal kind initial = true) (activation : Nat) (memory : Memory) :
-    makeLocal activation kind initial memory = .ok (rootSlot initial, [], memory) := by
+    makeLocal activation kind initial memory = .ok (rootSlot kind initial, [], memory) := by
   unfold rootLocal at root
-  split at root <;> first | rfl | cases root
+  split at root <;> simp_all [makeLocal, rootSlot]
 
 #print axioms CIL.Safety.makeLocal_root
 
 /-- Root locals are created without touching memory, each as its `rootSlot`. -/
 theorem makeLocals_roots (activation : Nat) : ∀ (kinds : List CIL.LocalKind)
     (initials : List CIL.Value) (memory : Memory), rootLocals kinds initials = true →
-      makeLocals activation kinds initials memory = .ok (initials.map rootSlot, [], memory)
+      makeLocals activation kinds initials memory =
+        .ok (List.zipWith rootSlot kinds initials, [], memory)
   | [], [], _, _ => rfl
   | kind :: kinds, initial :: initials, memory, roots => by
     simp only [rootLocals, List.length_cons, List.zip_cons_cons, List.all_cons,
@@ -183,9 +80,9 @@ theorem makeLocals_roots (activation : Nat) : ∀ (kinds : List CIL.LocalKind)
 #print axioms makeLocals_roots
 
 /-- Pads the slots of a `makeLocals` result with the root slots of `deadInitials`. -/
-def padSlots (deadInitials : List CIL.Value) :
+def padSlots (deadKinds : List CIL.LocalKind) (deadInitials : List CIL.Value) :
     List LocalSlot × List AllocationId × Memory → List LocalSlot × List AllocationId × Memory
-  | (slots, owned, memory) => (slots ++ deadInitials.map rootSlot, owned, memory)
+  | (slots, owned, memory) => (slots ++ List.zipWith rootSlot deadKinds deadInitials, owned, memory)
 
 /-- Trailing root locals add their root slots and nothing else to the frame's locals. -/
 theorem makeLocals_append (activation : Nat) {deadKinds : List CIL.LocalKind}
@@ -193,7 +90,7 @@ theorem makeLocals_append (activation : Nat) {deadKinds : List CIL.LocalKind}
     ∀ (kinds : List CIL.LocalKind) (initials : List CIL.Value) (memory : Memory),
       kinds.length = initials.length →
       makeLocals activation (kinds ++ deadKinds) (initials ++ deadInitials) memory =
-        padSlots deadInitials <$> makeLocals activation kinds initials memory
+        padSlots deadKinds deadInitials <$> makeLocals activation kinds initials memory
   | [], [], memory, _ => by
     simp [makeLocals_roots activation _ _ memory roots, makeLocals, padSlots]; rfl
   | kind :: kinds, initial :: initials, memory, length => by
@@ -212,7 +109,7 @@ theorem makeSelectedLocalsFrom_roots (activation : Nat) (indices : List Nat) :
     ∀ (start : Nat) (kinds : List CIL.LocalKind) (initials : List CIL.Value) (memory : Memory),
       (∀ index ∈ indices, index < start) → rootLocals kinds initials = true →
       makeSelectedLocalsFrom activation indices start kinds initials memory =
-        .ok (initials.map rootSlot, [], memory)
+        .ok (List.zipWith rootSlot kinds initials, [], memory)
   | _, [], [], _, _, _ => rfl
   | start, kind :: kinds, initial :: initials, memory, below, roots => by
     simp only [rootLocals, List.length_cons, List.zip_cons_cons, List.all_cons,
@@ -236,8 +133,8 @@ theorem makeSelectedLocalsFrom_append (activation : Nat) (indices : List Nat)
       kinds.length = initials.length → (∀ index ∈ indices, index < start + kinds.length) →
       makeSelectedLocalsFrom activation indices start (kinds ++ deadKinds)
           (initials ++ deadInitials) memory =
-        padSlots deadInitials <$> makeSelectedLocalsFrom activation indices start kinds initials
-          memory
+        padSlots deadKinds deadInitials <$>
+          makeSelectedLocalsFrom activation indices start kinds initials memory
   | start, [], [], memory, _, below => by
     simp [makeSelectedLocalsFrom_roots activation indices start _ _ memory
       (by simpa using below) roots, makeSelectedLocalsFrom]; rfl
@@ -260,7 +157,8 @@ theorem makeSelectedLocalsFrom_append (activation : Nat) (indices : List Nat)
 
 /-- The root slots of `actual`'s locals past `expected`'s. -/
 def deadSlots (expected actual : CIL.Method) : List LocalSlot :=
-  (actual.locals.drop expected.locals.length).map rootSlot
+  List.zipWith rootSlot (actual.localKinds.drop expected.localKinds.length)
+    (actual.locals.drop expected.locals.length)
 
 /-- Under `EmbedsDeadLocals`, `actual` enters the frame `actual.withLocalsOf expected` enters,
     padded with the dead root slots, in the same memory. -/
@@ -275,7 +173,8 @@ theorem enterFrame_deadLocals {expected actual : CIL.Method} {map : List Nat}
   have roots := embeds.dead
   have selected : makeSelectedLocals memory.nextIdentity actual.opaqueVectorLocals
       actual.localKinds actual.locals memory =
-        padSlots (actual.locals.drop expected.locals.length) <$> makeSelectedLocals
+        padSlots (actual.localKinds.drop expected.localKinds.length)
+          (actual.locals.drop expected.locals.length) <$> makeSelectedLocals
           memory.nextIdentity actual.opaqueVectorLocals expected.localKinds expected.locals
           memory := by
     conv => lhs; rw [embeds.localKinds, embeds.locals]

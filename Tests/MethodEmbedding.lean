@@ -199,10 +199,10 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 def thrower : Method :=
   { code := [.branch 1, .throw "Overflow"], locals := [], returnsValue := false }
 
-/-- `thrower` as extracted with a dead block before the throw and an unused null reference. -/
+/-- `thrower` with a dead block before the throw and unused reference and span locals. -/
 def throwerDead : Method := {
   code := [.branch 2, .unsupported "Unreachable under selected profile", .throw "Overflow"]
-  locals := [.nullRef], localKinds := [.reference], returnsValue := false }
+  locals := [.nullRef, .nullRef], localKinds := [.reference, .span 1 false], returnsValue := false }
 
 /-- A throw of the expected body is raised by the extraction with the dead local. -/
 theorem thrower_dead_raises (memory : Safety.Memory) :
@@ -222,7 +222,7 @@ theorem thrower_dead_fault (memory : Safety.Memory) :
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
-a dropped local is not a reference, and only reference dead locals are supported
+a dropped local is not a reference or span, and only these dead locals are supported
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbedsDeadLocals
@@ -230,17 +230,51 @@ example : MethodEmbedsDeadLocals
     stored := by
   cil_embed
 
--- A span local allocates nothing either, but is not yet covered.
+/-- Both readonly empty spans and uninitialized writable spans allocate no frame storage. -/
+def storedDeadSpans : Method := {
+  stored with
+  locals := [.nullRef, .nullRef, .unmodeled]
+  localKinds := [.reference, .span 4 false, .span 8 true] }
+
+/-- Dead spans preserve the same frame and allocation identities as the kept method. -/
+theorem stored_dead_spans_embeds : MethodEmbedsDeadLocals [storedDeadSpans] 0 stored := by
+  cil_embed
+
+#print axioms stored_dead_spans_embeds
+
+/-- The original invocation proof transfers across both kinds of dead span slots. -/
+theorem stored_dead_spans_returns (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [storedDeadSpans] (executionBound [stored] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) :=
+  stored_dead_spans_embeds.invoke (stored_invocation memory value)
+
+#print axioms stored_dead_spans_returns
+
+/-- Every supported span width and mutability permits both empty initializers. -/
+theorem dead_span_kinds_supported :
+    ([1, 2, 4, 8].all fun width => [false, true].all fun writable =>
+      [.nullRef, .unmodeled].all (rootLocal (.span width writable))) = true := by decide
+
+#print axioms dead_span_kinds_supported
+
+-- Invalid span widths must not turn a rejected frame entry into a padded successful one.
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
-a dropped local is not a reference, and only reference dead locals are supported
+a dropped local has a kind or initializer frame entry rejects
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbedsDeadLocals
-    [{ stored with locals := [.nullRef, .nullRef], localKinds := [.reference, .span 4 false] }]
-    0 stored := by
-  cil_embed
+    [{ stored with locals := [.nullRef, .nullRef], localKinds := [.reference, .span 3 false] }]
+    0 stored := by cil_embed
+
+/-- The kernel rejects unsupported widths and nonempty scalar initializers independently. -/
+theorem invalid_dead_spans_rejected :
+    rootLocal (.span 3 false) .nullRef = false ∧
+    rootLocal (.span 0 true) .unmodeled = false ∧
+    rootLocal (.span 4 true) (.i32 0) = false := by decide
+
+#print axioms invalid_dead_spans_rejected
 
 -- A dead local before a kept one would renumber the kept local.
 /--
@@ -258,7 +292,7 @@ example : MethodEmbedsDeadLocals
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
-a dropped reference local has an initializer frame entry rejects
+a dropped local has a kind or initializer frame entry rejects
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbedsDeadLocals
@@ -307,11 +341,11 @@ example : MethodEmbedsDeadLocals
   locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0]
   returnsValue := true }
 
-/-- `vectorKept` as extracted with an unused reference local after its opaque one. -/
+/-- `vectorKept` with unused reference and span locals after its opaque one. -/
 def vectorDead : Method := {
   vectorKept with
-  locals := [.unmodeled, .nullRef]
-  localKinds := [.vector128, .reference] }
+  locals := [.unmodeled, .nullRef, .unmodeled]
+  localKinds := [.vector128, .reference, .span 2 true] }
 
 /-- An opaque local is kept in place while a trailing dead reference is dropped. -/
 theorem vector_dead_embeds : MethodEmbedsDeadLocals [vectorDead] 0 vectorKept := by cil_embed
@@ -349,6 +383,16 @@ theorem numeric_dead_rejected : ¬ MethodEmbedsDeadLocals
   rintro ⟨actual, map, found, embeds⟩
   cases found
   exact absurd embeds.dead (by decide)
+
+/-- An unsupported span width fails the embedding condition in the kernel itself. -/
+theorem invalid_span_dead_rejected : ¬ MethodEmbedsDeadLocals
+    [{ stored with locals := [.nullRef, .nullRef], localKinds := [.reference, .span 3 false] }]
+    0 stored := by
+  rintro ⟨actual, map, found, embeds⟩
+  cases found
+  exact absurd embeds.dead (by decide)
+
+#print axioms invalid_span_dead_rejected
 
 -- `MethodEmbeds` still demands equal locals.
 example : ¬ MethodEmbeds [storedDead] 0 stored := by
