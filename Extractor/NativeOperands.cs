@@ -81,7 +81,10 @@ internal static class NativeOperands
             {
                 var right = Pop();
                 var left = Pop();
-                var native = left == Kind.Native || right == Kind.Native;
+                var referenceOffset = code is Code.Add or Code.Sub && left == Kind.Reference &&
+                    right is Kind.Word32 or Kind.Native;
+                var referenceDifference = code == Code.Sub && left == Kind.Reference && right == Kind.Reference;
+                var native = !referenceOffset && (left == Kind.Native || right == Kind.Native);
                 if (native && (left is not (Kind.Native or Kind.Word32) || right is not (Kind.Native or Kind.Word32)))
                     throw new InvalidDataException($"Unsupported native operand mixture: {instruction}");
                 if (native && left != right)
@@ -96,7 +99,8 @@ internal static class NativeOperands
                 }
                 if (instruction.OpCode.FlowControl != FlowControl.Cond_Branch)
                     stack.Add(code is Code.Ceq or Code.Clt or Code.Clt_Un or Code.Cgt or Code.Cgt_Un ? Kind.Word32 :
-                        native ? Kind.Native : left == right ? left : Kind.Other);
+                        referenceOffset ? Kind.Reference : referenceDifference || native ? Kind.Native :
+                        left == right ? left : Kind.Other);
             }
             else if (code == Code.Dup)
             {

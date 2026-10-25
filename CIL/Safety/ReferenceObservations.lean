@@ -35,4 +35,33 @@ def referenceEqual (memory : Memory) (left right : ManagedReference) : Execution
         second.offset < secondAllocation.layout.size then return false
     else .error (.unsupported "Cross-allocation end-pointer comparison")
 
+/-- Two non-null, live references to one allocation, checked without byte access authority. -/
+def referencePositions (memory : Memory) (left right : ManagedReference) :
+    ExecutionResult (Nat × Nat) := do
+  let first ← referenceAt left
+  let second ← referenceAt right
+  let _ ← checkedAt left 0 (form memory first)
+  let _ ← checkedAt right 0 (form memory second)
+  if first.allocation != second.allocation then
+    .error (.unsupported "Cross-allocation pointer arithmetic")
+  else return (first.offset, second.offset)
+
+/-- Pointer differences return the native-width signed byte displacement, with modular bits. -/
+def referenceDifference (memory : Memory) (left right : ManagedReference) :
+    ExecutionResult CIL.W64 := do
+  let (first, second) ← referencePositions memory left right
+  return BitVec.ofNat 64 first - BitVec.ofNat 64 second
+
+/-- Unsigned address ordering within one allocation agrees with ordering its offsets. -/
+def referenceLess (memory : Memory) (left right : ManagedReference) : ExecutionResult Bool := do
+  let (first, second) ← referencePositions memory left right
+  return first < second
+
+/-- Subtracting a signed byte offset retains provenance and checks the resulting position. -/
+def referenceSubtract (memory : Memory) (reference : ManagedReference) (offset : CIL.Value) :
+    ExecutionResult ManagedReference := do
+  let some displacement := CIL.offsetValue true offset | .error .invalidState
+  let address ← referenceAt reference
+  let result ← checkedAt reference 0 (add memory address 1 (BitVec.ofInt 64 (-displacement)))
+  return .address result
 end CIL.Safety

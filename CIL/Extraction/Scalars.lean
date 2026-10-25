@@ -121,9 +121,11 @@ private def mixedNative (left right : ScalarKind) : Bool :=
 private def compatibleBinary (left right : ScalarKind) : Bool :=
   numeric left && numeric right && (left == right || mixedNative left right)
 
-/-- Reference equality does not identify an object null with a managed pointer. -/
-private def referenceEquality (opcode : Nat) (left right : ScalarKind) : Bool :=
-  opcode ∈ [46, 51, 59, 64, 65025] && left == right && left ∈ [.reference, .nullObject]
+/-- Object null supports equality; only managed references support unsigned ordering. -/
+private def referenceComparison (opcode : Nat) (left right : ScalarKind) : Bool :=
+  left == right &&
+    ((opcode ∈ [46, 51, 59, 64, 65025] && left ∈ [.reference, .nullObject]) ||
+      (opcode ∈ [52, 53, 54, 55, 65, 66, 67, 68, 65027, 65029] && left == .reference))
 
 /-- Mixed native/int32 operands require exactly one `nativeBinary` wrapper; any other pair
     forbids it. -/
@@ -166,7 +168,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
     | _, _ => false
   else if compareBranch instruction.opcode then match instruction.operand, stack with
     | .target target, right :: left :: _ =>
-        (compatibleBinary left right || referenceEquality instruction.opcode left right) &&
+        (compatibleBinary left right || referenceComparison instruction.opcode left right) &&
         !(mixedNative left right && unsignedBranch instruction.opcode) &&
         nativeWrapped left right (branchEncodingMatches instruction.opcode target) emitted
     | _, _ => false
@@ -175,9 +177,13 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
     match stack[0]?, emitted with
     | some kind, .memory (.add 1 true) => kind ∈ [.word32, .native]
     | _, _ => false
+  else if instruction.opcode == 89 && (stack.drop 1).head? == some .reference then
+    match stack.head?, emitted with
+    | some kind, .sub => kind ∈ [.word32, .native, .reference]
+    | _, _ => false
   else if scalarBinary instruction.opcode then match stack with
     | right :: left :: _ =>
-        (compatibleBinary left right || referenceEquality instruction.opcode left right) &&
+        (compatibleBinary left right || referenceComparison instruction.opcode left right) &&
         nativeWrapped left right (scalarEncodingMatches instruction.opcode) emitted
     | _ => false
   else if instruction.opcode ∈ [98, 99, 100] then match stack with
@@ -473,7 +479,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     if numeric value || value ∈ [.reference, .nullObject] then return tail else none
   if compareBranch opcode then
     let right :: left :: tail := stack | none
-    if compatibleBinary left right || referenceEquality opcode left right then return tail else none
+    if compatibleBinary left right || referenceComparison opcode left right then return tail else none
   if opcode == 65039 then
     match stack with
     | [kind] => if kind ∈ [.word32, .native] then return [.reference] else none
@@ -485,9 +491,11 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- Arithmetic, shifts, `neg`, `not` and conversions.
   if scalarBinary opcode then
     let right :: left :: tail := stack | none
-    if opcode == 88 && left == .reference && right ∈ [.word32, .native] then
+    if opcode ∈ [88, 89] && left == .reference && right ∈ [.word32, .native] then
       return .reference :: tail
-    if !(compatibleBinary left right || referenceEquality opcode left right) then none else
+    if opcode == 89 && left == .reference && right == .reference then
+      return .native :: tail
+    if !(compatibleBinary left right || referenceComparison opcode left right) then none else
       return (if comparison opcode then .word32
         else if mixedNative left right then .native else left) :: tail
   if opcode ∈ [98, 99, 100] then

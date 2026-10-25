@@ -320,3 +320,9 @@ for imports, 120 for each exports leaf, and 30 for other suites. The matrix
 still uses at most eight runners. Run the resource-bounded routing tests with
 `dotnet run --file scripts/TestSelectVerification.cs`; they need no Lean build
 or fixture SDK project. Full integration results come from the CI leaf jobs.
+
+`Tests/PointerOperations.cs` compares seven compiled pointer methods with .NET: int32/native
+byte subtraction, pointer differences and four unsigned orderings. It independently forges
+subtraction as addition and requires the Lean scalar certificate to reject it. The Lean fixtures
+cover negative offsets and differences, end positions, readonly preservation, every unsigned
+branch, and null, cross-allocation, invalid-position and signed-comparison rejection.

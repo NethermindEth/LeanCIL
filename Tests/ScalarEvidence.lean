@@ -494,7 +494,8 @@ example : branches.all (fun (opcode, emitted) => branchAt opcode .word32 .native
 example : branches.all (fun (opcode, emitted) => !branchAt opcode .native .word32 emitted) = true := by decide +kernel
 example : branches.all (fun (opcode, emitted) => !branchAt opcode .native .word64 emitted) = true := by decide +kernel
 example : branches.all (fun (opcode, emitted) => !branchAt opcode .word32 .word64 emitted) = true := by decide +kernel
-example : branches.all (fun (opcode, emitted) => branchAt opcode .reference .reference emitted == (opcode ∈ [46, 51, 59, 64])) = true := by decide +kernel
+example : branches.all (fun (opcode, emitted) => branchAt opcode .reference .reference emitted ==
+    (opcode ∈ [46, 51, 52, 53, 54, 55, 59, 64, 65, 66, 67, 68])) = true := by decide +kernel
 
 example (valid : ScalarFlowValid addRaw addFeatures addStates addCode) :
     scalarEmissionMatches none (i 88) [.word64, .word64] .add = true :=
