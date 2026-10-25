@@ -186,4 +186,8 @@ foreach ((string selector, string proof) in new[]
         throw new InvalidOperationException("Caller did not accept the derived public contract for the DLL: " + proof);
     Console.WriteLine("PASS " + proof + " verifies from the derived public contract and the selected DLL");
 }
+// Git marks pack files read-only, which makes recursive deletion fail on Windows.
+EnumerationOptions ownFiles = new() { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
+foreach (string file in Directory.EnumerateFiles(root, "*", ownFiles))
+    File.SetAttributes(file, FileAttributes.Normal);
 Directory.Delete(root, recursive: true);
