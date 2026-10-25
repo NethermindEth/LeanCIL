@@ -1,12 +1,14 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 
 using System.Reflection;
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/PrimitiveArrays");
 Directory.CreateDirectory(root);
+var evidence = new GeneratedEvidence(root, args.Contains("--measure", StringComparer.Ordinal));
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.PrimitiveArrays")!;
 Run(["lake", "build", "CIL.Extraction.Translation", "Tests.PrimitiveArrays"]);
 var elements = new (Type Type, string Lean, int Width)[]
@@ -56,9 +58,6 @@ foreach (var (type, element, width) in elements)
                  | .error _ => false) = true := by decide +kernel
             #print axioms array_result
             """);
-        var checkedProof = Run(["lake", "env", "lean", proof]);
-        if (checkedProof.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted array proof");
-        Console.WriteLine("PASS runtime, certificate and checked array execution: " + name);
         if (name == "ReadInt32")
         {
             File.AppendAllText(proof, """
@@ -76,8 +75,6 @@ foreach (var (type, element, width) in elements)
                      | .ok _ => false) = true := by decide +kernel
                 #print axioms array_bounds_fault
                 """);
-            var faults = Run(["lake", "env", "lean", proof]);
-            if (faults.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted fault proof");
             foreach (var (input, index, exception) in new (int[]? Input, int Index, Type Exception)[]
                 { (null, 0, typeof(NullReferenceException)), (new int[2], 2, typeof(IndexOutOfRangeException)) })
             {
@@ -89,6 +86,7 @@ foreach (var (type, element, width) in elements)
                 catch (TargetInvocationException fault) when (fault.InnerException?.GetType() == exception) { }
             }
         }
+        evidence.Add(proof, "PASS runtime, certificate and checked array execution: " + name);
         if (name != "ReadSByte") continue;
         foreach (var replacement in new[] { ".arrayLoad 1 false", ".arrayLoad 2 true" })
         {
@@ -135,10 +133,9 @@ foreach (var (name, signature, arguments, expected) in new[]
              | .error _ => false) = true := by decide +kernel
         #print axioms array_composition
         """);
-    var checkedProof = Run(["lake", "env", "lean", proof]);
-    if (checkedProof.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted composition");
-    Console.WriteLine("PASS certified array composition: " + name);
+    evidence.Add(proof, "PASS certified array composition: " + name);
 }
+evidence.Check();
 foreach (var signature in new[]
 {
     "Allocate(System.Int32)", "ReadObject(System.Object[],System.Int32)",

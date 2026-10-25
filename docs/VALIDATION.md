@@ -1,5 +1,36 @@
 # Validation coverage
 
+Generated positive evidence in `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`,
+`GenericEvidence` and `StaticScalarValues` shares imports within each fixture. Each extraction
+and its proof remain in their own namespace, following the generated verification batch
+pattern. The combined file is compiled once and independently replayed with `leanchecker`;
+passes are printed only after both checks and source-stability checks succeed. Rejection
+fixtures still run separately with their original diagnostic assertions. The array read,
+null and bounds checks share one final file instead of checking the read twice.
+
+Each of these five scripts accepts `--measure`, which first checks the same final source files
+separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and
+batch compilation/replay time. One local run measured:
+
+| Positive evidence | Files | Separate checking | Batch checking and replay |
+| --- | ---: | ---: | ---: |
+| Primitive arrays | 30 | 68.37s | 18.34s |
+| Layouts | 7 | 17.64s | 14.11s |
+| Parameter homes | 11 | 43.06s | 14.28s |
+| Generic specializations | 15 | 42.84s | 32.16s |
+| Static scalar values | 16 | 40.39s | 8.16s |
+| Total | 79 | 212.29s | 87.04s |
+
+These timings exclude extraction, dependency setup and unchanged rejection cases; they are
+not whole-suite CI timings. `GenericEvidence` also checks that an invalid proof fails batch
+compilation and that an unchecked declaration reaches, and fails, independent kernel replay.
+The complete local `PrimitiveArrays` fixture, including extraction and rejection checks,
+took 76.20 seconds before batching and 31.72 seconds afterward.
+
+```sh
+dotnet run --file Tests/PrimitiveArrays.cs -- --measure
+```
+
 `Tests/CliImportedKernelAudit.cs`, called by the CLI suite, builds and kernel-replays its
 modified source corpus once with the ordinary library producer. Both standalone
 `verify --fresh` calls use private copies authenticated by that producer's manifest digest. The valid

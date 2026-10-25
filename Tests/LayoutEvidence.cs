@@ -1,11 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 
 using System.Text.RegularExpressions;
 
 var output = At("artifacts/LayoutEvidence");
 Directory.CreateDirectory(output);
+var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 Run(["lake", "env", "lean", "Tests/ExtractionLayout.lean"]);
 var samples = new[]
@@ -22,9 +24,10 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
 {
     var folder = Path.Combine(output, index.ToString());
     Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples", selector, folder));
-    Run(["lake", "env", "lean", Path.Combine(folder, "Extracted.lean")]);
+    evidence.Add(Path.Combine(folder, "Extracted.lean"), "PASS checked extraction: " + selector);
 }
 
+evidence.Check();
 var baseline = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
 void Reject(string name, string mutated)
 {
