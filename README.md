@@ -351,6 +351,11 @@ Keep this aggregate check required rather than individual matrix jobs, which may
 be absent on a PR. Run `dotnet run --file scripts/TestSelectVerification.cs` to test the
 selection rules and final gate locally.
 
+The separate scheduled/manual consumer advisory checks a pinned int256 library
+and four compiled-method certificates. It does not participate in PR checks.
+When upgrading the pin, follow the [consumer API migration notes](docs/CONSUMER-MIGRATION.md)
+and validate both the supporting library and those certificates.
+
 ## License
 
 [MIT](LICENSE).
