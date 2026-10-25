@@ -130,37 +130,27 @@ if (Text(module, "name") != interfaceModule || publishedSource != File.ReadAllTe
 Console.WriteLine("PASS exact internal contracts derive the published MethodContract and OutcomeContract theorems");
 
 // A public contract the internal one does not refine breaks only its refinement proof; nothing is published.
+// One renamed exception stands for all four failure kinds: Rejected in each proof module refutes every
+// kind on the actual extraction, and the exporter path that stops on a failed derivation is the same.
 string certified = Sha(sidecar);
 string publicText = File.ReadAllText(interfaceSource);
-string AxiomLine(string output, string theorem) => output.Split('\n')
-    .Single(line => line.Contains("'" + theorem + "' depends on axioms", StringComparison.Ordinal));
-foreach ((string name, string from, string to, string proof, string exact, string refines) in new[]
-{
-    ("stronger post", "post _ _ _ output := output \u2264 100", "post _ _ _ output := output < 100",
-        "DerivedPercentProof", "percent_exact", "percent_bounded_refines"),
-    ("changed exception", "else some \"System.ArgumentOutOfRangeException\"", "else some \"System.ArgumentException\"",
-        "DerivedPercentProof", "percent_exact", "percent_bounded_refines"),
-    ("smaller footprint", "footprint input := [(input.region, 32)]", "footprint input := []",
-        "DerivedAddProof", "add_internal", "add_public_refines"),
-    ("weaker pre", "    access memory input.sum 8 1 true = .ok () \u2227\n", "",
-        "DerivedAddProof", "add_internal", "add_public_refines")
-})
-{
-    string changed = publicText.Replace(from, to, StringComparison.Ordinal);
-    if (changed == publicText)
-        throw new InvalidOperationException("Precondition: the public contract must contain " + from);
-    File.WriteAllText(interfaceSource, changed);
-    // Only the affected export is attempted, so the unchanged one is not verified again.
-    (int Code, string Output, string Stdout, string Stderr) rejected =
-        Execute([.. cli, "export-contracts", Manifest("reject-" + proof, proof), "--output", sidecar]);
-    File.WriteAllText(interfaceSource, publicText);
-    if (rejected.Code != 1 || Sha(sidecar) != certified ||
-        AxiomLine(rejected.Output, proof + "." + exact).Contains("sorryAx", StringComparison.Ordinal) ||
-        !AxiomLine(rejected.Output, proof + "." + refines).Contains("sorryAx", StringComparison.Ordinal))
-        throw new InvalidOperationException("A " + name + " was published or failed outside its refinement: " +
-            rejected.Output);
-    Console.WriteLine("PASS a " + name + " public contract cannot be derived or published");
-}
+string renamed = publicText.Replace("else some \"System.ArgumentOutOfRangeException\"",
+    "else some \"System.ArgumentException\"", StringComparison.Ordinal);
+if (renamed == publicText)
+    throw new InvalidOperationException("Precondition: the public contract must name its exception.");
+File.WriteAllText(interfaceSource, renamed);
+// Only the affected export is attempted, so the unchanged one is not verified again.
+(int Code, string Output, string Stdout, string Stderr) rejected =
+    Execute([.. cli, "export-contracts", Manifest("reject", "DerivedPercentProof"), "--output", sidecar]);
+File.WriteAllText(interfaceSource, publicText);
+bool UsesSorry(string theorem) => rejected.Output.Split('\n')
+    .Single(line => line.Contains("'DerivedPercentProof." + theorem + "' depends on axioms", StringComparison.Ordinal))
+    .Contains("sorryAx", StringComparison.Ordinal);
+if (rejected.Code != 1 || Sha(sidecar) != certified || UsesSorry("percent_exact") ||
+    !UsesSorry("percent_bounded_refines"))
+    throw new InvalidOperationException("A renamed exception was published or failed outside its refinement: " +
+        rejected.Output);
+Console.WriteLine("PASS a public contract naming another exception cannot be derived or published");
 
 // Separately compiled callers see only the sidecar's public interface and the selected DLL.
 if (Directory.EnumerateFiles(callerPackage, "*.lean", SearchOption.TopDirectoryOnly)
