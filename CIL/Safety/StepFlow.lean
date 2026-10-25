@@ -24,7 +24,7 @@ def FrameAction.callee : FrameAction → Option Nat
   | .call callee .. | .construct callee .. => some callee
   | _ => none
 
-set_option maxHeartbeats 400000 in
+set_option maxHeartbeats 800000 in
 /-- Only `.call`, `.newVector256` and `.newAggregate` enter a method, and each enters the
     one it names. -/
 theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}

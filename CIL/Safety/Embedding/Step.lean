@@ -498,6 +498,90 @@ theorem step_relabel_bne (target : Nat) : StepRelabel (.bne target) := by
 
 #print axioms step_relabel_bne
 
+/-- Relabel scalar or reference observations while preserving their result. -/
+theorem step_relabel_sub : StepRelabel .sub := by
+  stack_cases
+  all_goals first
+      | exact fallback_relabel (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+         cases h
+         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_sub
+
+/-- Relabel scalar or reference observations while preserving their result. -/
+theorem step_relabel_ltu : StepRelabel .ltu := by
+  stack_cases
+  all_goals first
+      | exact fallback_relabel (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+         cases h
+         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_ltu
+
+/-- Relabel scalar or reference observations while preserving their result. -/
+theorem step_relabel_gtu : StepRelabel .gtu := by
+  stack_cases
+  all_goals first
+      | exact fallback_relabel (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+         cases h
+         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_gtu
+
+/-- Relabel scalar or reference observations while preserving their result. -/
+theorem step_relabel_bltu (target : Nat) : StepRelabel (.bltu target) := by
+  stack_cases
+  all_goals first
+      | exact fallback_relabel (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+         cases h
+         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_bltu
+
+/-- Relabel scalar or reference observations while preserving their result. -/
+theorem step_relabel_bgeu (target : Nat) : StepRelabel (.bgeu target) := by
+  stack_cases
+  all_goals first
+      | exact fallback_relabel (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+         cases h
+         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_bgeu
+
+/-- Relabel scalar or reference observations while preserving their result. -/
+theorem step_relabel_bgtu (target : Nat) : StepRelabel (.bgtu target) := by
+  stack_cases
+  all_goals first
+      | exact fallback_relabel (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+         cases h
+         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_bgtu
+
+/-- Relabel scalar or reference observations while preserving their result. -/
+theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
+  stack_cases
+  all_goals first
+      | exact fallback_relabel (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+         cases h
+         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_bleu
+
 /-- Every instruction steps in lockstep with its relabeled form. Pure operations
     share the base-step contract; ordinary memory operations share an unchanged
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
@@ -535,14 +619,21 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case ret narrow => exact step_relabel_ret narrow
   case throw exception => exact step_relabel_throw exception
   case unsupported description => exact step_relabel_unsupported description
+  case sub => exact step_relabel_sub
+  case ltu => exact step_relabel_ltu
+  case gtu => exact step_relabel_gtu
+  case bltu target => exact step_relabel_bltu target
+  case bgeu target => exact step_relabel_bgeu target
+  case bgtu target => exact step_relabel_bgtu target
+  case bleu target => exact step_relabel_bleu target
   case eq => exact step_relabel_eq
   case brzero target => exact step_relabel_brzero target
   case brnonzero target => exact step_relabel_brnonzero target
   case beq target => exact step_relabel_beq target
   case bne target => exact step_relabel_bne target
-  case nop | neg | gt | bgt | ble | bleu | convI1 | convI2 | convU2 | convI8 | convI4 | convU1
-    | convU4 | convU8 | convU | bnot | add | sub | mul | band | bor | bxor | shl | shr | shrUn
-    | lt | ltu | gtu | branch | switch | bltu | bgeu | bgtu | bge | blt | feature =>
+  case nop | neg | gt | bgt | ble | convI1 | convI2 | convU2 | convI8 | convI4 | convU1
+    | convU4 | convU8 | convU | bnot | add | mul | band | bor | bxor | shl | shr | shrUn
+    | lt | branch | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | lane
@@ -556,7 +647,6 @@ theorem step_relabel_neg : StepRelabel .neg := step_relabel _
 theorem step_relabel_gt : StepRelabel .gt := step_relabel _
 theorem step_relabel_bgt (target : Nat) : StepRelabel (.bgt target) := step_relabel _
 theorem step_relabel_ble (target : Nat) : StepRelabel (.ble target) := step_relabel _
-theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := step_relabel _
 theorem step_relabel_loadAggregate (size : Nat) : StepRelabel (.loadAggregate size) :=
   step_relabel _
 theorem step_relabel_copyObject (size : Nat) : StepRelabel (.copyObject size) := step_relabel _
@@ -594,7 +684,6 @@ theorem step_relabel_convU8 : StepRelabel .convU8 := step_relabel _
 theorem step_relabel_convU : StepRelabel .convU := step_relabel _
 theorem step_relabel_bnot : StepRelabel .bnot := step_relabel _
 theorem step_relabel_add : StepRelabel .add := step_relabel _
-theorem step_relabel_sub : StepRelabel .sub := step_relabel _
 theorem step_relabel_mul : StepRelabel .mul := step_relabel _
 theorem step_relabel_band : StepRelabel .band := step_relabel _
 theorem step_relabel_bor : StepRelabel .bor := step_relabel _
@@ -603,17 +692,12 @@ theorem step_relabel_shl : StepRelabel .shl := step_relabel _
 theorem step_relabel_shr : StepRelabel .shr := step_relabel _
 theorem step_relabel_shrUn : StepRelabel .shrUn := step_relabel _
 theorem step_relabel_lt : StepRelabel .lt := step_relabel _
-theorem step_relabel_ltu : StepRelabel .ltu := step_relabel _
-theorem step_relabel_gtu : StepRelabel .gtu := step_relabel _
 theorem step_relabel_load64 : StepRelabel .load64 := step_relabel _
 theorem step_relabel_store64 : StepRelabel .store64 := step_relabel _
 theorem step_relabel_dup : StepRelabel .dup := step_relabel _
 theorem step_relabel_pop : StepRelabel .pop := step_relabel _
 theorem step_relabel_branch (target : Nat) : StepRelabel (.branch target) := step_relabel _
 theorem step_relabel_switch (targets : List Nat) : StepRelabel (.switch targets) := step_relabel _
-theorem step_relabel_bltu (target : Nat) : StepRelabel (.bltu target) := step_relabel _
-theorem step_relabel_bgeu (target : Nat) : StepRelabel (.bgeu target) := step_relabel _
-theorem step_relabel_bgtu (target : Nat) : StepRelabel (.bgtu target) := step_relabel _
 theorem step_relabel_bge (target : Nat) : StepRelabel (.bge target) := step_relabel _
 theorem step_relabel_blt (target : Nat) : StepRelabel (.blt target) := step_relabel _
 theorem step_relabel_skipInit : StepRelabel .skipInit := step_relabel _
@@ -897,6 +981,76 @@ theorem step_raise_bne (target : Nat) : StepRaise (.bne target) := by
 
 #print axioms step_raise_bne
 
+/-- Reference observations preserve exceptional outcomes under relabeling. -/
+theorem step_raise_sub : StepRaise .sub := by
+  stack_cases
+  all_goals first
+      | exact fallback_raise (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | raise_lockstep
+
+#print axioms step_raise_sub
+
+/-- Reference observations preserve exceptional outcomes under relabeling. -/
+theorem step_raise_ltu : StepRaise .ltu := by
+  stack_cases
+  all_goals first
+      | exact fallback_raise (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | raise_lockstep
+
+#print axioms step_raise_ltu
+
+/-- Reference observations preserve exceptional outcomes under relabeling. -/
+theorem step_raise_gtu : StepRaise .gtu := by
+  stack_cases
+  all_goals first
+      | exact fallback_raise (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | raise_lockstep
+
+#print axioms step_raise_gtu
+
+/-- Reference observations preserve exceptional outcomes under relabeling. -/
+theorem step_raise_bltu (target : Nat) : StepRaise (.bltu target) := by
+  stack_cases
+  all_goals first
+      | exact fallback_raise (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | raise_lockstep
+
+#print axioms step_raise_bltu
+
+/-- Reference observations preserve exceptional outcomes under relabeling. -/
+theorem step_raise_bgeu (target : Nat) : StepRaise (.bgeu target) := by
+  stack_cases
+  all_goals first
+      | exact fallback_raise (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | raise_lockstep
+
+#print axioms step_raise_bgeu
+
+/-- Reference observations preserve exceptional outcomes under relabeling. -/
+theorem step_raise_bgtu (target : Nat) : StepRaise (.bgtu target) := by
+  stack_cases
+  all_goals first
+      | exact fallback_raise (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | raise_lockstep
+
+#print axioms step_raise_bgtu
+
+/-- Reference observations preserve exceptional outcomes under relabeling. -/
+theorem step_raise_bleu (target : Nat) : StepRaise (.bleu target) := by
+  stack_cases
+  all_goals first
+      | exact fallback_raise (profile := expected.profile) _ rfl
+          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+      | raise_lockstep
+
+#print axioms step_raise_bleu
+
 /-- Instructions dispatched directly to the memory evaluator preserve its faults. -/
 theorem step_raise_instruction (op : CIL.Op)
     (relabels : ∀ r, op.relabel r = op)
@@ -922,6 +1076,7 @@ theorem step_raise_instruction (op : CIL.Op)
 
 #print axioms step_raise_instruction
 
+set_option maxHeartbeats 400000 in
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/
 theorem step_raise (op : CIL.Op) : StepRaise op := by
   cases op
@@ -964,14 +1119,21 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
   case unsupported =>
     plain_cases
     fallback_raise_vacuous
+  case sub => exact step_raise_sub
+  case ltu => exact step_raise_ltu
+  case gtu => exact step_raise_gtu
+  case bltu target => exact step_raise_bltu target
+  case bgeu target => exact step_raise_bgeu target
+  case bgtu target => exact step_raise_bgtu target
+  case bleu target => exact step_raise_bleu target
   case eq => exact step_raise_eq
   case brzero target => exact step_raise_brzero target
   case brnonzero target => exact step_raise_brnonzero target
   case beq target => exact step_raise_beq target
   case bne target => exact step_raise_bne target
-  case nop | neg | gt | bgt | ble | bleu | convI1 | convI2 | convU2 | convI8 | convI4 | convU1
-    | convU4 | convU8 | convU | bnot | add | sub | mul | band | bor | bxor | shl | shr | shrUn
-    | lt | ltu | gtu | branch | switch | bltu | bgeu | bgtu | bge | blt | feature =>
+  case nop | neg | gt | bgt | ble | convI1 | convI2 | convU2 | convI8 | convI4 | convU1
+    | convU4 | convU8 | convU | bnot | add | mul | band | bor | bxor | shl | shr | shrUn
+    | lt | branch | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | lane

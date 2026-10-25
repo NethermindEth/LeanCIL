@@ -183,3 +183,6 @@ name = "Tests.ReferenceTests"
 [[lean_exe]]
 name = "leancil-audit"
 root = "CIL.OleanAudit"
+
+[[lean_lib]]
+name = "Tests.PointerOperations"
