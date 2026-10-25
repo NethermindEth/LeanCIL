@@ -15,6 +15,13 @@ against runtime behavior, preserving neighboring contents and rejecting a forged
 `Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired
 references and address formation without granting memory authority. Both run in the evidence suite.
 
+`Tests/ReadOnlyArrayReferences.cs` inserts real `readonly.` prefixes into compiled fixtures,
+checks returned and locally stored references, and proves that caller stores fail despite
+writable backing memory. It rejects independently forged writable evidence, separated prefixes
+and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
+read access and rejection of an adapter that would remove the restriction. Both run in the
+evidence suite.
+
 `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
 covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
 initialization and copies. It rejects missing initialization assumptions, mutable fields,

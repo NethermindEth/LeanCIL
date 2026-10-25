@@ -14,6 +14,8 @@ Run(["dotnet", "run", "--file", "Tests/PrimitiveArrays.cs"], streamOutput: true,
     progress: "Supplied primitive arrays");
 Run(["dotnet", "run", "--file", "Tests/ArrayElementReferences.cs"], streamOutput: true,
     progress: "Array element references");
+Run(["dotnet", "run", "--file", "Tests/ReadOnlyArrayReferences.cs"], streamOutput: true,
+    progress: "Readonly array references");
 foreach (var name in new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables", "MemorySpans", "ReferenceInstructions", "PointerOperations", "StaticValues", "StaticScalarValues", "TranslationAudit" })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");

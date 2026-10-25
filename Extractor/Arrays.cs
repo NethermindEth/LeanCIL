@@ -38,7 +38,8 @@ internal static class Arrays
     {
         Code.Ldlen => ".memory .arrayLength",
         Code.Ldelema => $".memory (.arrayAddress .{(Primitive((TypeReference)instruction.Operand) ??
-            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Lean})",
+            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Lean}" +
+            (instruction.Previous?.OpCode.Code == Code.Readonly ? " false)" : ")"),
         Code.Ldelem_I1 => ".memory (.arrayLoad 1 true)",
         Code.Ldelem_U1 => ".memory (.arrayLoad 1 false)",
         Code.Ldelem_I2 => ".memory (.arrayLoad 2 true)",
@@ -53,6 +54,15 @@ internal static class Arrays
         Code.Stelem_Any => Typed(instruction, true),
         _ => null
     };
+
+    internal static void ValidateReadOnly(MethodDefinition method, Instruction prefix)
+    {
+        if (prefix.Next is not { OpCode.Code: Code.Ldelema } address || prefix.Operand is not null)
+            throw new InvalidDataException("Readonly prefix requires an immediate array element address");
+        if (method.Body.Instructions.Any(instruction => instruction.Operand == address ||
+            instruction.Operand is Instruction[] targets && targets.Contains(address)))
+            throw new InvalidDataException("Branch enters an array address after its readonly prefix");
+    }
 
     static string Typed(Instruction instruction, bool store)
     {

@@ -172,6 +172,16 @@ multidimensional arrays and taking the address of an array root are outside this
 The scalar certificate checks array opcode families, integer widths, load signedness, native
 integer distinctions and typed element tokens against the emitted operations.
 
+For `readonly.; ldelema`, the certificate additionally binds the readonly flag to the
+immediately preceding raw prefix and disallows branch entry between the two instructions.
+Restricted references keep their tag through argument checks, calls, returns and local stores.
+A local holding a restricted reference uses `LocalSlot.readOnlyRoot`; loading it cannot produce
+an unrestricted reference. Reads still require initialized readable bytes. Stores through the
+restricted view fail even when memory contains write authority, and unsupported reference
+adapters cannot strip the tag. This is an access restriction, not an immutability or uniqueness
+claim: writes through other authorized aliases remain visible. The subset excludes reference
+element arrays and their covariance/type-check behavior.
+
 Generated static identities are unsigned natural numbers from SHA-256 of the
 full assembly identity and full field name. The assembly identity text is
 `Name, Version=a.b.c.d, Culture=<culture or neutral>, PublicKeyToken=<16 lowercase

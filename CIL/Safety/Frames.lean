@@ -42,6 +42,8 @@ def Opaque128Value.value : Opaque128Value → CIL.Value
 inductive LocalSlot where
   | bytes (kind : CIL.LocalKind) (reference : Reference)
   | root (value : Option ManagedReference)
+  /-- A byref local currently holding a restricted reference; assignment preserves its tag. -/
+  | readOnlyRoot (value : ManagedReference)
   | opaque128 (value : Option Opaque128Value)
   | span (width : Nat) (writable : Bool) (value : Option SpanView)
   | array (element : CIL.ArrayElement) (value : Option ArrayView)
@@ -136,9 +138,12 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     return (.span width false (some view), m)
   | .opaque128 _, .scalar (.v128 bits) => return (.opaque128 (some (.known bits)), m)
   | .opaque128 _, .scalar (.v128Low64 low) => return (.opaque128 (some (.low64 low)), m)
-  | .root _, .reference reference =>
+  | .root _, .reference reference | .readOnlyRoot _, .reference reference =>
     let _ ← formValue m reference
     return (.root (some reference), m)
+  | .root _, .readOnlyReference reference | .readOnlyRoot _, .readOnlyReference reference =>
+    let _ ← formValue m reference
+    return (.readOnlyRoot reference, m)
   | .bytes kind reference, .scalar (.snapshot shape bytes) =>
     if localSnapshotShape kind != some shape || bytes.length != localWidth kind then
       .error .invalidState else
@@ -170,6 +175,9 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
   | .opaque128 (some value) => return .scalar value.value
   | .root none => .error .invalidState
   | .root (some reference) => formValue m reference
+  | .readOnlyRoot reference =>
+    let _ ← formValue m reference
+    return .readOnlyReference reference
   | .bytes kind reference =>
     if let some shape := localSnapshotShape kind then
       if let .error .uninitialized := read m reference (localWidth kind) 1 then
@@ -192,7 +200,7 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
 def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
   match slot with
   | .bytes _ reference => formValue m (.address reference)
-  | .root _ => .error (.unsupported "Address of managed-reference local")
+  | .root _ | .readOnlyRoot _ => .error (.unsupported "Address of managed-reference local")
   | .array .. => .error (.unsupported "Address of array root local")
   | .opaque128 _ => .error (.unsupported "Address of opaque vector local")
   | .span .. => .error (.unsupported "Address of span local outside a validated receiver")

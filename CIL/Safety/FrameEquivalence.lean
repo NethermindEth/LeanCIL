@@ -67,6 +67,7 @@ theorem Memory.Equivalent.loadLocal {m n : Memory} (same : m.Equivalent n)
     CIL.Safety.loadLocal m slot = CIL.Safety.loadLocal n slot := by
   cases slot with
   | root value => cases value <;> simp only [CIL.Safety.loadLocal, same.formValue]
+  | readOnlyRoot value => simp only [CIL.Safety.loadLocal, same.formValue]
   | bytes kind reference => simp only [CIL.Safety.loadLocal, same.read, same.loadSnapshot]
   | opaque128 value => cases value <;> rfl
   | span width writable value =>
@@ -104,9 +105,9 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
     | reference _ => exact .error _
     | span _ _ => exact .error _
     | bufferSpan _ | readOnlyReference _ | array _ => exact .error _
-  | root root =>
+  | root root | readOnlyRoot root =>
     cases value with
-    | reference reference =>
+    | reference reference | readOnlyReference reference =>
       simp only [CIL.Safety.storeLocal, Value.hasUnspecified, same.formValue, Bool.false_and,
         Bool.false_eq_true, ↓reduceIte]
       apply ResultEquivalent.bind_same
@@ -114,7 +115,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       exact .ok ⟨rfl, same⟩
     | scalar scalar => cases scalar <;> exact .error _
     | span reference length => exact .error _
-    | bufferSpan _ | readOnlyReference _ | array _ => exact .error _
+    | bufferSpan _ | array _ => exact .error _
   | bytes kind reference =>
     cases value with
     | scalar value =>
