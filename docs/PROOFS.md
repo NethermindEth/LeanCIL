@@ -988,8 +988,8 @@ for the exact conditions and limits; `Tests/MethodEmbedding.lean` covers both
 outcomes, and `Tests/OutcomeEmbedding.lean` transfers a raising helper and its
 caller across an inserted dead block, with the relocated throw pc.
 
-An extraction can also declare locals the literal body never uses. Only one
-shape is covered: dead locals that trail the body's own locals and are
+An extraction can also declare locals the literal body never uses. Exact-memory embedding
+covers dead locals that trail the body's own locals and are
 references or spans initialized to their empty value or left unmodeled. These cover
 byref, pointer, `Span<T>` and `ReadOnlySpan<T>` locals; spans require an element width
 of 1, 2, 4 or 8 bytes. For those, `cil_embed` proves
@@ -1006,10 +1006,10 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 ```
 
 `.raises`, `.method_holds` and `.holds` transfer as for `MethodEmbeds`. A
-numeric dead local, such as a flag only one architecture's path reads, is still
-rejected: its home would shift every later allocation identity, and runs over
-renamed identities are not related yet. A dead local before a kept one is rejected,
-since it renumbers the kept local. Span slots retain their width, mutability and empty
+numeric dead local, such as a flag only one architecture's path reads, requires the
+allocation refinement below: its home shifts later allocation identities. A dead local
+before a kept one also changes the kept local's operand. Span slots retain their width,
+mutability and empty
 or unmodeled state; padding does not create or change any allocation.
 
 For numeric or interspersed dead locals, keep the extracted declarations and original
@@ -1021,8 +1021,47 @@ fixture follows this route: its scalar body retains all 22 word64 and four vecto
 homes used across its architecture-specific paths. See
 [Tests/RetainedNumericLocals.lean](../Tests/RetainedNumericLocals.lean) for a smaller
 example with dead numeric locals on both sides of a live reference local and an
-allocating child call. Removing those declarations is a different simulation problem;
-equal scalar results alone do not imply equal final memory.
+allocating child call. This route retains exact final memory and remains useful when a
+postcondition names fresh references.
+
+To omit numeric or interspersed declarations from the proof body, import
+`CIL.Safety.AllocationRefinement`. `LocalIndexMap.keep`, `.skip` and `.nil` describe the
+retained declarations in order. `MethodRenaming` checks the matching local kinds and the
+target code's relocated local operands; method indices, call targets, profiles, return
+metadata and static sites stay exact. `ProgramRenaming` supplies this correspondence for
+every source method. The target is the extraction with the additional dead declarations.
+
+This entry route currently requires `UnmodeledFrame` on both sides: each local initializer
+is `.unmodeled`, and `opaqueVectorLocals`, `vectorArgs` and `parameterHomes` are empty.
+Local widths must fit the native range; span element widths must be 1, 2, 4 or 8.
+These are explicit, checked metadata conditions, not assumed frame-entry success. The
+audited int256 Multiply extractions across all fourteen profiles have 22 word64 and four
+vector256 unmodeled locals and no opaque, vector-argument or parameter homes.
+
+Starting from the same well-formed memory with bounded static bindings,
+`ProgramRenaming.invoke_scalars` transfers a successful checked invocation with the same
+fuel and exact scalar results. Its final memories satisfy `MemoryBelow` at the initial
+allocation counter. `invoke_confined` also carries a `MemoryBelow` preservation claim from
+the initial memory to the target's final memory. `ProgramRenaming.raises` transfers a
+named exception and additionally requires valid initial arguments. These theorems use
+the proved complete dispatcher internally. The allocation relation extends through
+local setup, nested calls, constructors, static allocation and `stackAlloc`; frame
+ownership and expiry remain checked.
+
+`MethodContract.Holds.of_allocationRenaming` transfers the original complete contract,
+including its precondition and footprint. Supply proofs that the precondition establishes
+well-formed memory and bounded static bindings, that the contract encodes scalar outputs,
+and that its postcondition is preserved by `MemoryBelow` on the initial caller prefix.
+The adapter derives confinement from the actual paired executions; it does not replace
+the contract with a weaker one.
+
+This is not exact-memory transport: extra homes change counters and fresh references.
+Arbitrary reference results and postconditions naming fresh allocations need a statement
+modulo the allocation relation. The existing `MethodEmbedsDeadLocals` tactic continues to
+handle its exact-memory subset. See
+[Tests/AllocationExecutionRenaming.lean](../Tests/AllocationExecutionRenaming.lean) for
+two live numeric locals interspersed with three dead ones, a nested call followed by
+dynamic allocation, exact scalar results, caller-prefix preservation and a named exception.
 
 ### Instruction equations for parametric bodies
 

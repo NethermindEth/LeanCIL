@@ -212,7 +212,11 @@ store fact may state its value in source form. Loop segments use
 expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
 tracks local stores and updated snapshots. Supported forwarder bodies can inherit a
 callee's proved contract, and embedding proofs can ignore trailing unread byref,
-pointer or span locals. Contract refinement derives a public interface from a stronger proved
+pointer or span locals. Allocation refinement also relates numeric and interspersed dead
+locals in ordinary unmodeled frames: scalar results and caller-memory prefixes transfer,
+as do named exceptions, while fresh allocation identities may differ. See
+[dead-local refinement](docs/PROOFS.md#bodies-modulo-dead-code) for its frame restrictions.
+Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable

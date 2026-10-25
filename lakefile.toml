@@ -207,3 +207,9 @@ name = "Tests.CertificateFlow"
 
 [[lean_lib]]
 name = "Tests.RetainedNumericLocals"
+
+[[lean_lib]]
+name = "Tests.AllocationRenaming"
+
+[[lean_lib]]
+name = "Tests.AllocationExecutionRenaming"
