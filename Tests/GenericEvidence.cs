@@ -1,9 +1,15 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../Extractor/ExternalIdentityEvidence.cs
+
+using System.Text;
+using System.Text.Json;
+using Nethermind.LeanCIL;
 
 var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
+CheckExternalIdentities();
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var samples = new[]
@@ -23,6 +29,7 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
 }
 
 Run(["lake", "env", "lean", "Tests/ExtractionGenerics.lean"]);
+CheckExternalCallTargets();
 string ChangeDefinition(string source, string name, Func<string, string> change)
 {
     var start = source.IndexOf("def " + name + " :", StringComparison.Ordinal);
@@ -64,3 +71,78 @@ Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32
 Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"));
 Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"));
 Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"));
+
+void CheckExternalIdentities()
+{
+    var evidence = new ExternalIdentityEvidence();
+    var identities = new[]
+    {
+        "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::" +
+            "System.UInt64 Namespace.Type::Method(System.UInt64)",
+        "Unicode::Namespace.λ漢字::Method(\"quoted\",\\path)",
+        "System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=0000000000000000::" +
+            "System.UInt64 Namespace.Type::Method(System.UInt64)"
+    };
+    var lean = new StringBuilder("import Lean\nset_option maxRecDepth 4096\n");
+    if (evidence.Reference("unreachable only", false) != JsonSerializer.Serialize("unreachable only"))
+        throw new InvalidOperationException("Unreachable identity was materialized.");
+    evidence.Emit(lean);
+    if (lean.ToString().Contains("externalIdentity", StringComparison.Ordinal))
+        throw new InvalidOperationException("Unreachable identity emitted proof declarations.");
+    foreach (var (identity, index) in identities.Select((identity, index) => (identity, index)))
+    {
+        var name = "externalIdentity" + index;
+        if (evidence.Reference(identity, true) != name || evidence.Reference(identity, true) != name)
+            throw new InvalidOperationException("Exact identity deduplication changed.");
+    }
+    evidence.Emit(lean);
+    var baseline = lean.ToString();
+    evidence.Emit(lean);
+    if (lean.ToString() != baseline)
+        throw new InvalidOperationException("Repeated identity emission duplicated declarations.");
+    var path = Path.Combine(output, "ExactExternalIdentities.lean");
+    File.WriteAllText(path, baseline);
+    Run(["lake", "env", "lean", path]);
+    foreach (var (name, source) in new[]
+    {
+        ("changed-byte", baseline.Replace("#[83,", "#[84,", StringComparison.Ordinal)),
+        ("changed-version", baseline.Replace("Version=10.0.0.0", "Version=11.0.0.0", StringComparison.Ordinal)),
+        ("changed-token", baseline.Replace("b03f5f7f11d50a3a", "b03f5f7f11d50a3b", StringComparison.Ordinal))
+    })
+    {
+        if (source == baseline) throw new InvalidOperationException("Identity mutation was not applied: " + name);
+        var rejectedPath = Path.Combine(output, "Identity-" + name + ".lean");
+        File.WriteAllText(rejectedPath, source);
+        var result = Execute(["lake", "env", "lean", rejectedPath]);
+        if (result.Code == 0 || !result.Output.Contains("rfl", StringComparison.Ordinal))
+            throw new InvalidOperationException("Exact byte equality did not reject " + name + "\n" + result.Output);
+    }
+    Console.WriteLine("PASS exact external identities: deduplication, unreachable calls, Unicode and mutations");
+}
+
+void CheckExternalCallTargets()
+{
+    var folder = Path.Combine(output, "ExternalCalls");
+    Run(Extract("extract", assembly, "Examples", "DivisionIntrinsics::UnsafeEquals(ulong)", folder, "x64-v3"));
+    var path = Path.Combine(folder, "Extracted.lean");
+    Run(["lake", "env", "lean", path]);
+    var baseline = File.ReadAllText(path);
+    foreach (var (name, source) in new[]
+    {
+        ("wrong-raw-target", baseline.Replace("target := .external externalIdentity0",
+            "target := .external externalIdentity1", StringComparison.Ordinal)),
+        ("wrong-emitted-intrinsic", baseline.Replace(".vector .createScalarUnsafe64",
+            ".avx2 .band", StringComparison.Ordinal))
+    })
+    {
+        if (source == baseline) throw new InvalidOperationException("Call mutation was not applied: " + name);
+        var rejectedPath = Path.Combine(folder, name + ".lean");
+        File.WriteAllText(rejectedPath, source);
+        var result = Execute(["lake", "env", "lean", rejectedPath]);
+        if (result.Code == 0 ||
+            !result.Output.Contains("Extraction.DivisionIntrinsicsValid", StringComparison.Ordinal) ||
+            !result.Output.Contains("is false", StringComparison.Ordinal))
+            throw new InvalidOperationException("Division certificate did not reject " + name + "\n" + result.Output);
+        Console.WriteLine("PASS materialized external call rejects " + name);
+    }
+}

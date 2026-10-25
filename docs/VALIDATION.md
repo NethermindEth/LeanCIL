@@ -488,6 +488,33 @@ raw heartbeats (13.5%). The latter includes the one-time scope construction and 
 cost. Actual extractor output matches the measured source. Generic evidence mutations also
 reject altered runtime versions and public-key tokens; no scope comparison is relaxed.
 
+`Tests/GenericEvidence.cs` also checks exact external-call identity sharing, repeated emission,
+pruned-only identities and Unicode/escaped characters. Changed bytes, versions and tokens fail
+the generated equality proof. Replacing a raw target with another correctly encoded identity,
+or changing its emitted intrinsic, still fails the unchanged division certificate. Existing
+specialization and raw/translated metadata rejection cases remain enabled.
+
+External-call byte sharing was measured against the parent extractor on fixed compiled inputs.
+The following counts replay every generated definition, theorem and auxiliary proof, including
+all new byte constants, UTF-8 proofs and exact equality proofs:
+
+| Fixed input | Before raw heartbeats | After raw heartbeats |
+| --- | ---: | ---: |
+| int256 scalar Equality, three methods | 26,209,754 | 21,765,190 |
+| `DivisionIntrinsics.UnsafeEquals`, x64-v3 | 28,184,308 | 22,519,141 |
+| `VectorFields.Reinterpret`, x64-v3 | 15,047,351 | 14,850,377 |
+| `Arithmetic.Add`, scalar, no calls | 1,397,796 | 1,397,796 |
+| Feature getter only, scalar | 12,688,673 | 8,715,896 |
+| `UnsafeLow` through one managed caller, scalar | 25,337,727 | 20,917,175 |
+| Eight different division intrinsic helpers, x64-v4 | 379,503,016 | 257,862,158 |
+
+The last input calls `And`, `Or`, `Xor`, `AndNot`, `ShiftLeft`, `ShiftRight`, `Less` and `Greater`
+once each and sums the results. Its nine-method extraction has thirteen unique external
+identities, including eight operator identities used only once. Counts include the new
+declarations (582 before, 647 after); sharing does not require repeated source call sites.
+Source checking and independent kernel replay both pass. These are deterministic kernel-work
+measurements, not isolated wall times or end-to-end consumer verification improvements.
+
 The core `Tests/AllocationImports.cs` fixture checks that the CIL umbrella omits allocation
 refinement, builds both explicit allocation acceptance modules, and jointly replays every
 additional imported module. The current closure contains 49 production and two test modules;
