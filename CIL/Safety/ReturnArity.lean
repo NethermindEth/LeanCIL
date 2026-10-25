@@ -16,6 +16,7 @@ private theorem bind_success {source : Except ε α} {continuation : α → Exce
       ∃ input, source = .ok input ∧ continuation input = .ok value := by
   cases source <;> simp [Except.bind]
 
+set_option maxHeartbeats 400000 in
 /-- A checked return has the arity declared by its actual method body. -/
 theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
@@ -54,6 +55,7 @@ theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body :
 #print axioms step_return_length
 #print axioms run_return_length
 
+set_option maxHeartbeats 400000 in
 /-- Successful returns never expose unspecified SIMD lanes. -/
 theorem step_return_known (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)

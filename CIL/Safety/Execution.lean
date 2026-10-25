@@ -1,6 +1,7 @@
 import CIL.Safety.Frames
 import CIL.Safety.StackAllocation
 import CIL.Safety.StaticMemory
+import CIL.Safety.ReferenceObservations
 import CIL.NativeEvaluation
 
 /-!
@@ -130,6 +131,33 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   if unspecifiedOperands (observerCount op) stack || unknownArgument then
     .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
+  -- Reference observations preserve memory and do not grant byte access authority.
+  | .brzero target, .reference value :: rest
+  | .brzero target, .readOnlyReference value :: rest =>
+    let present ← referenceNonNull m value
+    return .next (if present then pc + 1 else target) rest frame m
+  | .brnonzero target, .reference value :: rest
+  | .brnonzero target, .readOnlyReference value :: rest =>
+    let present ← referenceNonNull m value
+    return .next (if present then target else pc + 1) rest frame m
+  | .eq, .reference right :: .reference left :: rest
+  | .eq, .reference right :: .readOnlyReference left :: rest
+  | .eq, .readOnlyReference right :: .reference left :: rest
+  | .eq, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let equal ← referenceEqual m left right
+    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
+  | .beq target, .reference right :: .reference left :: rest
+  | .beq target, .reference right :: .readOnlyReference left :: rest
+  | .beq target, .readOnlyReference right :: .reference left :: rest
+  | .beq target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let equal ← referenceEqual m left right
+    return .next (if equal then target else pc + 1) rest frame m
+  | .bne target, .reference right :: .reference left :: rest
+  | .bne target, .reference right :: .readOnlyReference left :: rest
+  | .bne target, .readOnlyReference right :: .reference left :: rest
+  | .bne target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let equal ← referenceEqual m left right
+    return .next (if equal then pc + 1 else target) rest frame m
   | .stackAlloc initLocals, [.scalar size] =>
     let bytes ← match size with
       | .i32 bits => pure bits.toNat

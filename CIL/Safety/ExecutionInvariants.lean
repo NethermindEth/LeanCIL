@@ -193,6 +193,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
             | exact retained
             | solve | simp [FrameAction.LiveValues, ValuesValid, Value.Valid, numericValue]
             | exact retained.tail
+            | exact retained.tail.tail
             | solve | exact retained.drop _
             | solve | apply checkedValues_preserved _ _ _ _ hm ext; assumption
             | solve |

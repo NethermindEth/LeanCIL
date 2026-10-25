@@ -7,7 +7,7 @@ namespace Nethermind.LeanCIL;
 // share 64-bit storage, but only metadata-proven native/int32 mixtures may widen.
 internal static class NativeOperands
 {
-    internal enum Kind { Other, Word32, Word64, Native, Reference }
+    internal enum Kind { Other, Word32, Word64, Native, Reference, NullObject }
 
     internal sealed record Certificate(HashSet<Instruction> Mixed, Dictionary<Instruction, Kind[]> Incoming);
 
@@ -159,6 +159,7 @@ internal static class NativeOperands
                         Code.Ldc_I8 or Code.Ldind_I8 or Code.Conv_I8 or Code.Conv_U8 or Code.Conv_Ovf_I8 or
                             Code.Conv_Ovf_I8_Un or Code.Conv_Ovf_U8 or Code.Conv_Ovf_U8_Un => Kind.Word64,
                         Code.Ldtoken => Kind.Other,
+                        Code.Ldnull => Kind.NullObject,
                         Code.Neg or Code.Not => popped[0],
                         Code.Shl or Code.Shr or Code.Shr_Un => popped[1],
                         // All remaining supported pushi encodings produce int32 (constants,

@@ -10,6 +10,6 @@ Run(["dotnet", "run", "--file", "Tests/ConstrainedResolution.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ConstrainedCalls.cs"]);
 Run(["lake", "build", "Tests.StackAllocationEvidence"]);
 Run(["dotnet", "run", "--file", "Tests/StackAllocation.cs"]);
-foreach (var name in new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables", "MemorySpans", "StaticValues", "StaticScalarValues", "TranslationAudit" })
+foreach (var name in new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables", "MemorySpans", "ReferenceInstructions", "StaticValues", "StaticScalarValues", "TranslationAudit" })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");

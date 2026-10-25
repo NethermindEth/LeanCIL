@@ -228,7 +228,7 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | `ldc.i4` and its short forms, `ldc.i8`, `dup`, `pop` | Complete within the admitted model | Integer constants and supported stack values |
 | Argument/local loads and stores, `ldloca` | Partial | Admitted types; no address of a managed-reference local |
 | `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
-| Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons; termination requires a separate proof |
+| Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons and checked reference null/equality tests; termination requires a separate proof |
 | `call`, `ret` | Partial | Acyclic static/struct instance methods, concrete generic-method specializations and explicitly modelled runtime calls |
 | `ldtoken` | Partial | A type in a decided closed `typeof(A) == typeof(B)` or `!=` test, which folds to a constant, or a static data field for a `ReadOnlySpan<T>` table |
 | Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda`, `ldsfld` | Partial | Checked references, validated integer/aggregate layouts, restricted static data and static readonly integer, enum or struct values fixed by the static constructor |
