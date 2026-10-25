@@ -131,6 +131,14 @@ stated over an abstract `program` therefore steps exactly like one over
 `cil_raise_steps` fail when they cannot take a first step, instead of returning
 the goal unchanged.
 
+A segment theorem over an abstract body states where its code sits with
+`CodeAt body start segment` ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of
+`body.code = leading ++ segment ++ tail` and `leading.length = start`.
+`placed.lookup i rfl` proves `body.code[start + i]? = some op` to
+pass as a lookup hypothesis; `append`, `middle`, `take` and `drop` move a placement
+between a region and its segments, and `rfl` closes a concrete one.
+[Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
+
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the
 relevant proved facts. Branches always use equations before reflexivity, so a fact
 can decide the next program counter before the next lookup. A branch condition is
@@ -231,9 +239,19 @@ or at disjoint offsets of one. `Confined.read_apart` keeps a checked read of old
 apart from every entry, taking the allocation's age from `WellFormed`;
 `Confined.cells_apart` keeps every byte of an allocation no entry names, and
 `WordSnapshots.after_confined` (`CIL.Safety.ConfinedSnapshots`) keeps remembered words.
+`LocalSnapshots` (`CIL.Safety.LocalSnapshots`) remembers locals of every numeric kind, such
+as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a call, and
+`after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
+`snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
-the program does, so a cross-profile contract is a theorem quantified over the
-per-profile extractions.
+the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
+`OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of the first two for a contract
+indexed by `programStaticDescriptors`) carries a contract proved for a program whose methods
+all use profile `p` to `CIL.reprofile program q` for any `q` that agrees with `p` on the
+program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in
+`program.profileReads`, which `decide` checks for concrete profiles, so one proof covers every
+profile in a family. A separate per-profile extraction is covered once it is shown equal to
+the reprofiled program, by `rfl` when only the profiles differ.
 
 A contract may also type its result: `MethodContract Input Output` adds
 `results : Output → List Value`, and `post` speaks of the `Output`. `Returns`
@@ -308,7 +326,36 @@ stores and rejects a wrong value, address or memory state.
 either callee. `Tests/MethodContract.cs` verifies that caller proof unedited
 against a build whose helpers are reimplemented and renumbered, and refutes
 each contract with a concrete run on builds with an arithmetic or an aliasing
-bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
+bug; `invoke_ok_unique` ties a computed run to the contract's existential one,
+and `invoke_ok_observation_unique` does so for one observation of it, such as
+the returned values, so the refutation never compares memories.
+
+A contract whose precondition implies well-formed memory and a valid static
+world can also keep the `InvocationCertificate` of each call:
+`MethodContract.Holds.certified` turns `Holds` into `MethodContract.Certified`,
+whose clause adds the certificate with its visited-state and returned-state
+invariants; `Certified.holds` recovers `Holds`, and `Certified.weaken` keeps
+the certificate through a `Refines`. `InvocationCertificate.of_invoke`
+certifies any successful `invoke` from those two premises, and
+`InvocationCertificate.of_run` certifies a run of the frame that checked
+arguments enter. At a call site, `run_call_of_certified` (from a `Certified`
+callee) and `run_call_of_contract_certified` (from `Holds`, a well-formed caller
+memory and a valid static world) hand the continuation the callee's certificate,
+which `run_call_of_contract` drops. At a fetched call, `cil_certified_call
+certified input [facts]` leaves the precondition and then the continuation, and
+`cil_contract_certified_call holds input [facts]` leaves the precondition, the
+caller memory's `WellFormed`, its static world and then the continuation. Both
+accept `at site` like `cil_contract_call`.
+`Tests/InvocationCertificates.lean` uses each of them.
+
+`ValidCall memory inputs outputs` states that memory is well formed, every input
+buffer is readable and every output buffer writable. `CIL.Safety.CallingTransport`
+carries it to later memory so a caller can pass the same buffers again:
+`ValidCall.after_write` after any checked write, `after_enterFrame` after frame
+entry, `after_below` across memory that keeps old allocations' access
+(`AccessBelow`, or `MemoryBelow.accessBelow`), and `after_confined` across a call
+whose footprint the inputs lie `Apart` from. `mono` drops buffers, and
+`input_bound` / `output_bound` give the identity bound those relations take.
 
 ## Describe buffer contents
 
@@ -868,3 +915,45 @@ The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for
 for the exact conditions and limits; `Tests/MethodEmbedding.lean` covers both
 outcomes, and `Tests/OutcomeEmbedding.lean` transfers a raising helper and its
 caller across an inserted dead block, with the relocated throw pc.
+
+### Instruction equations for parametric bodies
+
+A body written once for every profile takes its feature flags and callee
+indices as parameters and keeps each feature-dependent instruction as an `if`,
+padding the other profile's side with `.unsupported` so every profile has the
+same pcs. `cil_instruction_equations` (from `CIL.InstructionEquations`) states
+one `@[cil_code ↓]` equation per pc for such a body, the same
+`code[pc]? = some op` equations the extractor emits for its own methods, so a
+lookup rewrites by one equation instead of unfolding the body:
+
+```lean
+import CIL.InstructionEquations
+import CIL.Safety.SymbolicExecution
+
+abbrev unreachable : CIL.Op := .unsupported "Unreachable under selected profile"
+
+def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
+  { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
+    .feature .avx2, .brzero 4,
+    if avx2 then .call callee 0 else unreachable,
+    if avx2 then .ret else unreachable,
+    if avx2 then unreachable else .ret] }
+
+cil_instruction_equations body
+
+-- body_instruction2 (sse42 avx2 : Bool) (callee : Nat) :
+--   (body sse42 avx2 callee).code[2]? = some (if avx2 = true then .call callee 0 else unreachable)
+-- cil_lookup fetches through the equation and decides the `if` from the fact.
+example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
+    ∃ op, (body sse42 avx2 callee).code[2]? = some op ∧ op = .call callee 0 :=
+  ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
+```
+
+A body whose code length depends on a parameter, such as an `if` around a
+whole block, is rejected with the first pc that is not determined. Only the
+kernel checks the equations: 100 instructions take about 0.1 s, 400 take 2.4 s
+and 1,500 take 32 s, growing with the square of the length like the extractor's
+own equations, and about eight times faster than writing each `:= rfl` by hand.
+`Tests/InstructionEquations.lean` covers lookups on symbolic flags and on
+concrete profiles, with the body sealed so only the equations can fetch, and a
+`cil_checked_steps` run decided by a fact about a symbolic flag.

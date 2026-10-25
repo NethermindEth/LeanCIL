@@ -1,126 +1,15 @@
-import CIL.SIMD.VectorLemmas
+import CIL.SIMD.PackedLanes
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.Execution
 
 /-!
-# Lane lemmas and unspecified vector lanes
+# Unspecified vector lanes
 
-Lane projections for 512-bit vectors and for lanewise operations and count shifts. Then the
-soundness of `Vector128.CreateScalarUnsafe`, whose upper lane the runtime leaves
+The soundness of `Vector128.CreateScalarUnsafe`, whose upper lane the runtime leaves
 unspecified: the model keeps only the low lane (`v128Low64`), and every intrinsic that
 accepts such a value gives the same answer for every possible upper lane. Last, the checked
 interpreter's opaque 128-bit locals, which hold such a value whole rather than as bytes.
 -/
-
-namespace CIL.Vector
-
-@[simp] theorem lane512_0 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
-    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 0 = a0 := by
-  simp only [lane64, pack512, pack256]
-  ext i hi
-  simp only [BitVec.getElem_extractLsb']
-  grind
-
-@[simp] theorem lane512_1 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
-    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 1 = a1 := by
-  simp only [lane64, pack512, pack256]
-  ext i hi
-  simp only [BitVec.getElem_extractLsb']
-  grind
-
-@[simp] theorem lane512_2 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
-    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 2 = a2 := by
-  simp only [lane64, pack512, pack256]
-  ext i hi
-  simp only [BitVec.getElem_extractLsb']
-  grind
-
-@[simp] theorem lane512_3 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
-    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 3 = a3 := by
-  simp only [lane64, pack512, pack256]
-  ext i hi
-  simp only [BitVec.getElem_extractLsb']
-  grind
-
-@[simp] theorem lane512_4 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
-    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 4 = a4 := by
-  simp only [lane64, pack512, pack256]
-  ext i hi
-  simp only [BitVec.getElem_extractLsb']
-  grind
-
-@[simp] theorem lane512_5 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
-    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 5 = a5 := by
-  simp only [lane64, pack512, pack256]
-  ext i hi
-  simp only [BitVec.getElem_extractLsb']
-  grind
-
-@[simp] theorem lane512_6 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
-    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 6 = a6 := by
-  simp only [lane64, pack512, pack256]
-  ext i hi
-  simp only [BitVec.getElem_extractLsb']
-  grind
-
-@[simp] theorem lane512_7 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
-    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 7 = a7 := by
-  simp only [lane64, pack512, pack256]
-  ext i hi
-  simp only [BitVec.getElem_extractLsb']
-  grind
-
-theorem lane64_and (left right : BitVec width) (index : Nat) :
-    lane64 (left &&& right) index = lane64 left index &&& lane64 right index := by
-  ext bit bound
-  simp [lane64, BitVec.getElem_extractLsb'] <;> grind
-
-theorem lane64_or (left right : BitVec width) (index : Nat) :
-    lane64 (left ||| right) index = lane64 left index ||| lane64 right index := by
-  ext bit bound
-  simp [lane64, BitVec.getElem_extractLsb'] <;> grind
-
-theorem lane64_xor (left right : BitVec width) (index : Nat) :
-    lane64 (left ^^^ right) index = lane64 left index ^^^ lane64 right index := by
-  ext bit bound
-  simp [lane64, BitVec.getElem_extractLsb'] <;> grind
-
-theorem lane64_andNot (left right : BitVec width) (index : Nat)
-    (_bounded : 64 * (index + 1) ≤ width) :
-    lane64 ((~~~left) &&& right) index = (~~~lane64 left index) &&& lane64 right index := by
-  ext bit bound
-  simp [lane64, BitVec.getElem_extractLsb'] <;> grind
-
-theorem zip512_lane (operation : W64 → W64 → W64) (left right : V512)
-    (index : Nat) (bound : index < 8) :
-    lane64 (zip512 operation left right) index =
-      operation (lane64 left index) (lane64 right index) := by
-  have alternatives : index = 0 ∨ index = 1 ∨ index = 2 ∨ index = 3 ∨ index = 4 ∨ index = 5 ∨
-      index = 6 ∨ index = 7 := by omega
-  rcases alternatives with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp [zip512]
-
-theorem map256_lane (operation : W64 → W64) (value : V256) (index : Nat) (bound : index < 4) :
-    lane64 (map256 operation value) index = operation (lane64 value index) := by
-  have alternatives : index = 0 ∨ index = 1 ∨ index = 2 ∨ index = 3 := by omega
-  rcases alternatives with rfl | rfl | rfl | rfl <;> simp [map256]
-
-theorem shiftLeftCount64_lane (value : V256) (count : W64) (index : Nat) (bound : index < 4) :
-    lane64 (shiftLeftCount64 value count) index =
-      if count.toNat >= 64 then 0 else lane64 value index <<< count.toNat := by
-  unfold shiftLeftCount64
-  split
-  · simp [lane64]
-  · exact map256_lane _ _ _ bound
-
-theorem shiftRightCount64_lane (value : V256) (count : W64) (index : Nat) (bound : index < 4) :
-    lane64 (shiftRightCount64 value count) index =
-      if count.toNat >= 64 then 0 else lane64 value index >>> count.toNat := by
-  unfold shiftRightCount64
-  split
-  · simp [lane64]
-  · exact map256_lane _ _ _ bound
-
-end CIL.Vector
 
 namespace CIL
 
@@ -309,22 +198,6 @@ end CIL.Safety
 #print axioms CIL.scalarUnsafe_no_fixed_upper
 #print axioms CIL.scalarUnsafe_shiftLeft_all_concretizations
 #print axioms CIL.scalarUnsafe_shiftRight_all_concretizations
-#print axioms CIL.Vector.zip512_lane
-#print axioms CIL.Vector.shiftLeftCount64_lane
-#print axioms CIL.Vector.shiftRightCount64_lane
-#print axioms CIL.Vector.lane512_0
-#print axioms CIL.Vector.lane512_1
-#print axioms CIL.Vector.lane512_2
-#print axioms CIL.Vector.lane512_3
-#print axioms CIL.Vector.lane512_4
-#print axioms CIL.Vector.lane512_5
-#print axioms CIL.Vector.lane512_6
-#print axioms CIL.Vector.lane512_7
-#print axioms CIL.Vector.lane64_and
-#print axioms CIL.Vector.lane64_or
-#print axioms CIL.Vector.lane64_xor
-#print axioms CIL.Vector.lane64_andNot
-#print axioms CIL.Vector.map256_lane
 #print axioms CIL.scalarUnsafe_extract_all_concretizations
 #print axioms CIL.scalarUnsafe_reinterpret_preserves
 #print axioms CIL.evalUnspecifiedIntrinsic_concretizations

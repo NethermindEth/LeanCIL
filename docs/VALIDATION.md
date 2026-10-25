@@ -137,6 +137,15 @@ state `a + b + c`, `a - b - c` and the flag words in source form, through both
 source memory leaves the run stuck at that store, with the exact unsolved goal
 asserted.
 
+`Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the
+lookups its `CodeAt` placement yields, with the error asserted when stepping has no
+placement, hands that segment theorem the middle of a larger placed region, closes a
+concrete placement by `rfl` and refutes a shifted one and one running past the code.
+It composes adjacent placements and splits them back with `cons_iff`, `take` and
+`drop`, including past the segment's end, and recovers the positional
+`leading ++ segment ++ tail` form from a nonempty placement alone, proving the bound
+`exists_eq_append` needs by placing the empty segment past the end of a body.
+
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
 bodies with mapped program counters; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
@@ -160,21 +169,59 @@ contracts, and proves that an unjustified stronger postcondition, a weaker
 precondition, a smaller footprint and a changed exception type each fail both the
 refinement premises and the derived contract on a concrete input.
 
+`Tests.InvocationCertificates` builds invocation certificates from a computed
+invocation and from a computed run, keeps them through a certified contract and
+its refinement, proves a caller whose postcondition is the visited-state clause of
+its callee's certificate, through a certified callee and through a callee without
+a precondition, and refutes a contract from the returned values of a computed run.
+`Tests.ValidCallTransport` carries `ValidCall` through writes, frame entry, memory
+kept below a watermark and a call confined apart from the inputs, and shows that a
+confined call over an input can revoke its read authority.
+
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
-`Confined`. `Tests.BufferContents` checks typed buffer contents: fills and
-in-place transforms of any length, unchanged neighbouring bytes and sibling
-slices of one allocation, a producer that extends its prefix while its room
-stays unreadable, empty buffers at invalid and sentinel positions, and rejection
-of uninitialized, past-end, overlapping, unjoined and stale contents.
+`Confined`. `Tests.LocalSnapshots` keeps vector, int32, byte and narrow locals
+known across stores, overwrites, writes elsewhere and confined calls, and steps
+a load from a snapshot fact. `Tests.BufferContents` checks typed buffer
+contents: fills and in-place transforms of any length, unchanged neighbouring
+bytes and sibling slices of one allocation, a producer that extends its prefix
+while its room stays unreadable, empty buffers at invalid and sentinel
+positions, and rejection of uninitialized, past-end, overlapping, unjoined and
+stale contents.
+
+`Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under
+x86-64-v3, and carries it to x86-64-v4, to v3 without 256-bit acceleration and to every
+profile with AVX2 on. A raising method's outcome contract carries over too, in outcome,
+CLR-named and descriptor-indexed forms, with agreement decided from the flags the program
+reads. The baseline profile, with AVX2 off, fails both the agreement check and the contract,
+and turning off one of the four flags an AVX-512 DQ multiply needs fails the check.
+
+`Tests.InstructionEquations` checks that `cil_instruction_equations` states one
+equation per pc of a body over two feature flags and a callee index, keeping each
+feature test as an `if`, and of bodies with no parameters, with implicit and
+hypothesis parameters, and composed with `++` and `List.replicate`; that
+`cil_lookup` fetches through them from a sealed body; that facts or literal flags
+decide the test, in lookups and in a checked run; and that a run proved over the
+flags binds two profiles. A body whose length depends on a flag, at its first pc
+or a later one, is rejected with nothing declared.
 
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
 naming `CIL.step.eq_def` elaborates.
 
+`Tests.SimdLanes` checks the SIMD lane lemmas as a multi-limb routine uses them: the
+carry and borrow cascades built from intrinsic comparison masks reproduce 256-bit sums
+and differences for every input, including a carry that crosses an all-ones lane where a
+single repair hop is wrong, and 128-bit sums and differences follow from their lane
+carries. Each intrinsic equation (lane add, multiply, equal, unsigned and signed compare,
+`MoveMask`, shifts by immediate and by vector count, permute, sum and even-lane multiply)
+rewrites a packed or symbolic operand to its lane values, the bitwise lane projections
+cover a mask blend, and concrete 256-bit values are checked by kernel evaluation. A
+method steps through a shift and an even-lane multiply with those lemmas as facts.
+
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

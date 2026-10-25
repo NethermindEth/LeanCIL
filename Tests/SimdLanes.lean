@@ -1,0 +1,382 @@
+import CIL.Safety.SymbolicExecution
+import CIL.SIMD.PackedLanes
+
+/-!
+# SIMD lane lemma tests
+
+Checks the lane lemmas the way a multi-limb vector routine uses them: the carry cascade built
+from intrinsic comparison masks reproduces the 256-bit sum and difference on concrete inputs
+where a single repair hop is wrong and on symbolic inputs; intrinsic results on packed lanes
+rewrite to their lane values; and a method steps through shift and multiply with them as facts.
+-/
+
+open CIL CIL.Vector
+
+namespace Tests.SimdLanes
+
+/-- All ones in a 64-bit lane. -/
+private abbrev ones : W64 := BitVec.allOnes 64
+
+/-- A 0-or-1 lane from a flag bit. -/
+private def bit (flag : Bool) : W64 := if flag then 1 else 0
+
+/-- The lane sums of `x + y`, as `Avx2.Add` computes them. -/
+private def laneSums (x y : V256) : V256 := zip256 (· + ·) x y
+
+/-- Lanes whose sum wraps, as AVX-512 `CompareLessThan` against `x` marks them. -/
+private def generated (x y : V256) : W32 :=
+  moveMask64 (zip256 (fun a b => mask64 (a.ult b)) (laneSums x y) x)
+
+/-- Lanes whose sum is all ones, as `CompareEqual` against `Vector256.AllBitsSet` marks them. -/
+private def propagated (x y : V256) : W32 :=
+  moveMask64 (zip256 (fun a b => mask64 (a == b)) (laneSums x y) (~~~0))
+
+/-- The packed-flag carry lookahead: bit `i` is the carry into lane `i`. -/
+private def cascade (x y : V256) : W32 :=
+  propagated x y ^^^ (propagated x y + (generated x y <<< 1))
+
+/-- The vector routine: lane sums plus the cascaded carries. -/
+private def rippleSum (x y : V256) : V256 :=
+  zip256 (· + ·) (laneSums x y) (pack256 0 (bit ((cascade x y).getLsbD 1))
+    (bit ((cascade x y).getLsbD 2)) (bit ((cascade x y).getLsbD 3)))
+
+/-- A single repair hop: lane sums less the shifted carry masks, without the cascade. -/
+private def singleHopSum (x y : V256) : V256 :=
+  zip256 (· - ·) (laneSums x y)
+    (pack256 0 (mask64 ((lane64 x 0 + lane64 y 0).ult (lane64 x 0)))
+      (mask64 ((lane64 x 1 + lane64 y 1).ult (lane64 x 1)))
+      (mask64 ((lane64 x 2 + lane64 y 2).ult (lane64 x 2))))
+
+/-- Two all-ones low lanes: adding one carries out of lane 0, across lane 1, into lane 2. -/
+private def cascading : V256 := pack256 ones ones 5 0
+/-- One, which carries out of lane 0 of `cascading`. -/
+private def increment : V256 := pack256 1 0 0 0
+
+-- The cascade reaches lane 2, which the single hop misses: the lookahead is what is correct.
+example : (cascade cascading increment).getLsbD 2 = true := by decide +kernel
+example : rippleSum cascading increment = cascading + increment := by decide +kernel
+example : singleHopSum cascading increment ≠ cascading + increment := by decide +kernel
+-- The cascade agrees with the true lane carry, so the lemma is not vacuous here.
+example : BitVec.carry 128 cascading increment false = true := by decide +kernel
+
+/-- For every input the cascade from intrinsic masks gives the 256-bit sum. -/
+theorem rippleSum_eq_add (x y : V256) : rippleSum x y = x + y :=
+  (add256_cascade x y).symm
+/--
+info: 'Tests.SimdLanes.rippleSum_eq_add' depends on axioms: [propext, Classical.choice,
+  Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms rippleSum_eq_add
+
+/-- Bit 4 of the cascade is the unsigned overflow of the 256-bit sum. -/
+theorem cascade_overflow (x y : V256) :
+    (cascade x y).getLsbD 4 = decide (2 ^ 256 ≤ x.toNat + y.toNat) := by
+  rw [show (cascade x y).getLsbD 4 = _ from cascade_add256 x y (i := 4) (by decide)]
+  exact carry_width x y
+#print axioms cascade_overflow
+
+/-- The vector subtraction routine: lane differences less the cascaded borrows. -/
+private def rippleDifference (x y : V256) : V256 :=
+  let generate := moveMask64 (zip256 (fun a b => mask64 (a.ult b)) x y)
+  let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b)) x y)
+  let borrows := propagate ^^^ (propagate + (generate <<< 1))
+  zip256 (· - ·) (zip256 (· - ·) x y)
+    (pack256 0 (bit (borrows.getLsbD 1)) (bit (borrows.getLsbD 2)) (bit (borrows.getLsbD 3)))
+
+-- A borrow out of lane 0 crosses the equal lane 1 into lane 2.
+example : rippleDifference (pack256 0 7 9 1) (pack256 1 7 3 0) =
+    pack256 0 7 9 1 - pack256 1 7 3 0 := by decide +kernel
+
+/-- For every input the cascade from intrinsic masks gives the 256-bit difference. -/
+theorem rippleDifference_eq_sub (x y : V256) : rippleDifference x y = x - y :=
+  (sub256_cascade x y).symm
+/--
+info: 'Tests.SimdLanes.rippleDifference_eq_sub' depends on axioms: [propext, Classical.choice,
+  Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms rippleDifference_eq_sub
+
+/-- The final borrow is the unsigned comparison of the whole vectors. -/
+example (x y : V256) :
+    (moveMask64 (zip256 (fun a b => mask64 (a == b)) x y) ^^^
+      (moveMask64 (zip256 (fun a b => mask64 (a == b)) x y) +
+        (moveMask64 (zip256 (fun a b => mask64 (a.ult b)) x y) <<< 1))).getLsbD 4 =
+      x.ult y := by
+  rw [cascade_sub256 x y (i := 4) (by decide)]
+  exact subBorrow_width x y
+
+/-- Packed lanes are digits: the lane recipe's value is the wide sum's value. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    (pack256 a0 a1 a2 a3 + pack256 b0 b1 b2 b3).toNat =
+      (a0.toNat + 2 ^ 64 * a1.toNat + 2 ^ 128 * a2.toNat + 2 ^ 192 * a3.toNat +
+        (b0.toNat + 2 ^ 64 * b1.toNat + 2 ^ 128 * b2.toNat + 2 ^ 192 * b3.toNat)) % 2 ^ 256 := by
+  rw [BitVec.toNat_add, toNat_pack256, toNat_pack256]
+
+/-! ### Stepped intrinsic results on packed lanes -/
+
+/-- Shifting each lane by an immediate, as stepping leaves it. -/
+example (a0 a1 a2 a3 : W64) :
+    evalIntrinsic (.avx2 .shr64) [.v256 (pack256 a0 a1 a2 a3), .i32 (BitVec.ofNat 32 32)] =
+      some (.v256 (pack256 (a0 >>> 32) (a1 >>> 32) (a2 >>> 32) (a3 >>> 32))) := by
+  rw [intrinsic_shr256 _ (by decide), map256_pack256]
+
+example (a0 a1 a2 a3 : W64) :
+    evalIntrinsic (.avx2 .shl64) [.v256 (pack256 a0 a1 a2 a3), .i32 (BitVec.ofNat 32 32)] =
+      some (.v256 (pack256 (a0 <<< 32) (a1 <<< 32) (a2 <<< 32) (a3 <<< 32))) := by
+  rw [intrinsic_shl256 _ (by decide), map256_pack256]
+
+-- A count of 64 or more clears the lane rather than wrapping the count.
+example : evalIntrinsic (.avx2 .shl64) [.v256 (pack256 1 2 3 4), .i32 (BitVec.ofNat 32 64)] =
+    some (.v256 0) := by decide +kernel
+
+/-- Reversing the lanes with `Permute4x64`. -/
+example (a0 a1 a2 a3 : W64) :
+    evalIntrinsic (.avx2 .permute4x64) [.v256 (pack256 a0 a1 a2 a3), .i32 (BitVec.ofNat 32 27)] =
+      some (.v256 (pack256 a3 a2 a1 a0)) := by
+  rw [intrinsic_permute4x64 _ (by decide), permute4x64_reverse]
+
+/-- `Vector256.Sum` of packed lanes. -/
+example (a0 a1 a2 a3 : W64) :
+    evalIntrinsic (.vector (.sum64 256)) [.v256 (pack256 a0 a1 a2 a3)] =
+      some (.i64 (a0 + a1 + a2 + a3)) :=
+  intrinsic_sum256_pack256 a0 a1 a2 a3
+
+/-- AVX-512DQ lane products on packed lanes. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.avx512DQ .mul64) [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (a0 * b0) (a1 * b1) (a2 * b2) (a3 * b3))) := by
+  rw [intrinsic_avx512dq_mul256, multiplyLow64_pack256]
+
+/-- The even-lane product is exact: a 32-by-32-bit partial product never wraps. -/
+theorem even_product_exact (x y : V256) {i : Nat} (lane : i < 4) :
+    (lane64 (multiplyEven32 x y) i).toNat =
+      (lane64 x i).toNat % 2 ^ 32 * ((lane64 y i).toNat % 2 ^ 32) := by
+  rw [lane64_multiplyEven32 x y lane, toNat_even_product]
+#print axioms even_product_exact
+
+-- The low 32-bit halves multiply to more than 2^63, so the product fills the 64-bit lane.
+example : multiplyEven32 (pack256 0xFFFFFFFF 0 0 0) (pack256 0xFFFFFFFF 0 0 0) =
+    pack256 0xFFFFFFFE00000001 0 0 0 := by decide +kernel
+
+/-- Sign masks of comparison results are the flag bits. -/
+example (p0 p1 p2 p3 : Bool) :
+    (moveMask64 (pack256 (mask64 p0) (mask64 p1) (mask64 p2) (mask64 p3))).getLsbD 2 = p2 := by
+  rw [getLsbD_moveMask64_of_lt _ (by decide), lane256_2, msb_mask64]
+
+/-- The 512-bit sign mask has one bit per lane and nothing above lane 7. -/
+example (x : V512) : (moveMask512 x).getLsbD 8 = false := by
+  rw [getLsbD_moveMask512]
+  rfl
+
+/-- The AVX-512 carry sign from `TernaryLogic` table `0xD4` broadcast to a lane mask. -/
+example (a b : W64) :
+    (ternaryLogic a b (a + b) 0xD4).sshiftRight 63 = mask64 ((a + b).ult a) := by
+  rw [arithmetic_sign_mask, msb_ternary_add]
+
+/-- Subtracting a shifted carry mask adds the carry. -/
+example (sum : W64) (a b : W64) :
+    sum - mask64 ((a + b).ult a) = sum + bit (decide (2 ^ 64 ≤ a.toNat + b.toNat)) := by
+  rw [sub_mask64, add_ult_eq_overflow]
+  rfl
+
+/-! ### Lane projections -/
+
+/-- 128-bit lanewise operations and maps on packed lanes. -/
+example (a0 a1 b0 b1 : W64) :
+    zip128 (· * ·) (pack128 a0 a1) (pack128 b0 b1) = pack128 (a0 * b0) (a1 * b1) :=
+  zip128_pack128 _ a0 a1 b0 b1
+
+example (a0 a1 : W64) : map128 (· >>> 1) (pack128 a0 a1) = pack128 (a0 >>> 1) (a1 >>> 1) :=
+  map128_pack128 _ a0 a1
+
+/-- `Vector128.Sum` of packed lanes. -/
+example (a0 a1 : W64) :
+    evalIntrinsic (.vector (.sum64 128)) [.v128 (pack128 a0 a1)] = some (.i64 (a0 + a1)) :=
+  intrinsic_sum128_pack128 a0 a1
+
+/-- The sign mask of four comparisons is their 4-bit flag word. -/
+example : moveMask64 (pack256 (mask64 true) (mask64 false) (mask64 true) (mask64 true)) =
+    BitVec.ofNat 32 13 := by
+  rw [moveMask64_pack256_mask64]
+  rfl
+
+/-- AVX-512DQ lane products, lane by lane. -/
+example (x y : V256) : lane64 (multiplyLow64 x y) 3 = lane64 x 3 * lane64 y 3 :=
+  lane64_multiplyLow64 x y (by decide)
+
+/-- 512-bit lanewise operations, lane by lane. -/
+example (x y : V512) : lane64 (zip512 (· + ·) x y) 7 = lane64 x 7 + lane64 y 7 :=
+  lane64_zip512 _ x y (by decide)
+
+/-- Bitwise operations act lane by lane. -/
+example (x y : V256) :
+    lane64 (x ^^^ (x &&& y)) 1 = lane64 x 1 ^^^ (lane64 x 1 &&& lane64 y 1) := by
+  rw [lane64_xor, lane64_and]
+
+/-- A shift by a vector count of 64 or more clears the lane. -/
+example (x : V256) : lane64 (shiftLeftCount64 x 64) 2 = 0 := by
+  rw [lane64_shiftLeftCount64 _ _ (by decide)]
+  rfl
+
+example (x : V256) : lane64 (shiftRightCount64 x 3) 2 = lane64 x 2 >>> 3 := by
+  rw [lane64_shiftRightCount64 _ _ (by decide)]
+  rfl
+
+/-- A shift by a vector count under 64 shifts the lane. -/
+example (x : V256) : lane64 (shiftLeftCount64 x 5) 1 = lane64 x 1 <<< 5 := by
+  rw [lane64_shiftLeftCount64 _ _ (by decide)]
+  rfl
+
+/-- A logical right shift by a vector count of 64 clears the lane. -/
+example (x : V256) : lane64 (shiftRightCount64 x 64) 0 = 0 := by
+  rw [lane64_shiftRightCount64 _ _ (by decide)]
+  rfl
+
+/-- Or and and-not act lane by lane, as a mask blend `(m &&& a) ||| (~~~m &&& b)` needs. -/
+example (mask x y : V256) :
+    lane64 ((mask &&& x) ||| ((~~~mask) &&& y)) 3 =
+      (lane64 mask 3 &&& lane64 x 3) ||| ((~~~lane64 mask 3) &&& lane64 y 3) := by
+  rw [lane64_or, lane64_and, lane64_andNot]
+
+/-! ### Lane carries, borrows and masks -/
+
+/-- The 128-bit sum through its lane form: the high lane takes the low lane's carry. -/
+example (x y : V128) :
+    lane64 (x + y) 1 = lane64 x 1 + lane64 y 1 + (if BitVec.carry 64 x y false then 1 else 0) := by
+  rw [add128_lanes, zip128, zip128, lane128_1, lane128_1, lane128_1]
+
+/-- The 128-bit difference through its lane form: the high lane pays the low lane's borrow. -/
+example (x y : V128) :
+    lane64 (x - y) 1 = lane64 x 1 - lane64 y 1 - (if subBorrow 64 x y then 1 else 0) := by
+  rw [sub128_lanes, zip128, zip128, lane128_1, lane128_1, lane128_1]
+
+-- A 128-bit carry out of the low lane, concretely.
+example : (pack128 (BitVec.allOnes 64) 4 + pack128 1 0) = pack128 0 5 := by decide +kernel
+
+/-- Without an all-ones lane on the way, one repair hop gives the next carry. -/
+example (x y : V256) (notFull : (lane64 x 1 + lane64 y 1 == BitVec.allOnes 64) = false) :
+    BitVec.carry (64 * (1 + 1)) x y false = (lane64 x 1 + lane64 y 1).ult (lane64 x 1) :=
+  carry_lane_succ_of_isolated x y 1 (by rw [notFull, Bool.false_and])
+
+/-- Without an equal lane on the way, one repair hop gives the next borrow. -/
+example (x y : V256) (differ : (lane64 x 1 == lane64 y 1) = false) :
+    subBorrow (64 * (1 + 1)) x y = (lane64 x 1).ult (lane64 y 1) :=
+  subBorrow_lane_succ_of_isolated x y 1 (by rw [differ, Bool.false_and])
+
+/-- Adding a borrow mask subtracts the borrow. -/
+example (difference a b : W64) :
+    difference + mask64 (a.ult b) = difference - bit (a.ult b) := by
+  rw [add_mask64]
+  rfl
+
+/-- Masking a propagate mask with a generate mask keeps lanes that do both. -/
+example (p q : Bool) : mask64 p &&& mask64 q = mask64 (p && q) := mask64_and_mask64 p q
+
+-- The doubled generate word, as C# writes `generate * 2`, gives the same cascade.
+example (x y : V256) :
+    (propagated x y ^^^ (propagated x y + 2 * generated x y)).getLsbD 2 =
+      BitVec.carry 128 x y false := by
+  rw [two_mul_eq_shiftLeft]
+  exact cascade_add256 x y (i := 2) (by decide)
+
+/-- The borrow sign from `TernaryLogic` table `0x8E` broadcast to a lane mask. -/
+example (a b : W64) : (ternaryLogic a b (a - b) 0x8E).sshiftRight 63 = mask64 (a.ult b) := by
+  rw [arithmetic_sign_mask, msb_ternary_subtract]
+
+/-- Lane `i` of `Permute4x64` reads the lane its control bits name. -/
+example (x : V256) : lane64 (permute4x64 x (BitVec.ofNat 8 0x1B)) 0 = lane64 x 3 := by
+  rw [lane64_permute4x64 _ _ (by decide)]
+  rfl
+
+/-- Signed comparison of lanes, as `Avx2.CompareGreaterThan` produces it. -/
+example (x y : V256) :
+    lane64 (zip256 (fun a b => mask64 (decide (b.toInt < a.toInt))) x y) 2 =
+      mask64 (decide ((lane64 y 2).toInt < (lane64 x 2).toInt)) :=
+  lane64_signedgt256 x y (by decide)
+
+-- The signed mask differs from the unsigned one on a lane with its top bit set.
+example : zip256 (fun a b => mask64 (decide (b.toInt < a.toInt))) (pack256 (BitVec.allOnes 64)
+    0 0 0) 0 = 0 := by decide +kernel
+
+/-! ### Intrinsic evaluation on packed lanes -/
+
+/-- AVX2 lane addition evaluates to the lanewise sums of packed operands. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.avx2 .add64) [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (a0 + b0) (a1 + b1) (a2 + b2) (a3 + b3))) := by
+  rw [intrinsic_avx2_add256, zip256_pack256]
+
+/-- AVX2 equality evaluates to one all-ones or zero mask per packed lane. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.avx2 .eq64) [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (mask64 (a0 == b0)) (mask64 (a1 == b1))
+        (mask64 (a2 == b2)) (mask64 (a3 == b3)))) := by
+  rw [intrinsic_avx2_eq256, zip256_pack256]
+
+/-- AVX-512 unsigned less-than evaluates to one mask per packed lane. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.avx512 .ltu64)
+        [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (mask64 (a0.ult b0)) (mask64 (a1.ult b1))
+        (mask64 (a2.ult b2)) (mask64 (a3.ult b3)))) := by
+  rw [intrinsic_avx512_ltu256, zip256_pack256]
+
+/-- AVX2 signed greater-than masks exactly the lanes where the first operand is larger. -/
+example (x y : V256) {i : Nat} (lane : i < 4) (value : V256)
+    (evaluated : evalIntrinsic (.avx2 .signedgt64) [.v256 x, .v256 y] = some (.v256 value)) :
+    lane64 value i = mask64 (decide ((lane64 y i).toInt < (lane64 x i).toInt)) := by
+  rw [intrinsic_avx2_signedgt256] at evaluated
+  cases evaluated
+  exact lane64_signedgt256 x y lane
+
+/-- The portable lane multiply evaluates to the wrapping lanewise products. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.vector (.mul64 256))
+        [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (a0 * b0) (a1 * b1) (a2 * b2) (a3 * b3))) := by
+  rw [intrinsic_mul256, zip256_pack256]
+
+/-- AVX-512DQ `MoveMask` of a packed mask vector gathers the four conditions as bits. -/
+example (lane0 lane1 lane2 lane3 : Bool) :
+    evalIntrinsic (.avx512DQ .moveMask64)
+        [.v256 (pack256 (mask64 lane0) (mask64 lane1) (mask64 lane2) (mask64 lane3))] =
+      some (.i32 (BitVec.ofNat 32
+        (lane0.toNat + 2 * lane1.toNat + 4 * lane2.toNat + 8 * lane3.toNat))) := by
+  rw [intrinsic_avx512dq_movemask256, moveMask64_pack256_mask64]
+
+/-! ### Stepping a method through the intrinsics -/
+
+/-- Shifts the high halves of one vector down and multiplies them by the low halves of
+    another: one partial-product row of a multi-limb multiply. -/
+@[cil_code] def partialProductMethod : CIL.Method := {
+  profile := { architecture := .x64, avx2 := true }
+  code := [.intrinsic (.avx2 .shr64) 2, .intrinsic (.avx2 .multiplyEven32) 2, .ret]
+  locals := [], returnsValue := true }
+
+/-- The program holding `partialProductMethod`. -/
+@[cil_code] def partialProductProgram : CIL.Program := [partialProductMethod]
+
+/-- Stepping the method on packed lanes with the lane lemmas as facts leaves the lanewise
+    products of low halves by shifted high halves on the stack. -/
+theorem partial_product_steps (a0 a1 a2 a3 b0 b1 b2 b3 : W64) (memory : CIL.Safety.Memory)
+    (finish : Except CIL.Safety.LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value))
+    (rest : CIL.Safety.run partialProductProgram 1 0 2 []
+      { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 (pack256
+        ((a0.setWidth 32).zeroExtend 64 * ((b0 >>> 32).setWidth 32).zeroExtend 64)
+        ((a1.setWidth 32).zeroExtend 64 * ((b1 >>> 32).setWidth 32).zeroExtend 64)
+        ((a2.setWidth 32).zeroExtend 64 * ((b2 >>> 32).setWidth 32).zeroExtend 64)
+        ((a3.setWidth 32).zeroExtend 64 * ((b3 >>> 32).setWidth 32).zeroExtend 64)))]
+      memory = finish) :
+    CIL.Safety.run partialProductProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 (BitVec.ofInt 32 32)), .scalar (.v256 (pack256 b0 b1 b2 b3)),
+        .scalar (.v256 (pack256 a0 a1 a2 a3))] memory = finish := by
+  cil_checked_run_step [intrinsic_shr256 (pack256 b0 b1 b2 b3) (count := 32) (by decide),
+    map256_pack256]
+  cil_checked_run_step [intrinsic_multiplyEven32, multiplyEven32_pack256]
+  with_reducible exact rest
+#print axioms partial_product_steps
+
+end Tests.SimdLanes
