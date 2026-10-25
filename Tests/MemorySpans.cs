@@ -43,17 +43,25 @@ foreach (var (name, signature, arguments, expected) in new[]
 }
 
 var original = File.ReadAllText(Path.Combine(root, "SliceRead", "Extracted.lean"));
+var argumentStart = original.IndexOf("def method0RawArguments :", StringComparison.Ordinal);
+if (argumentStart < 0) throw new Exception("Missing span argument evidence");
+var argumentEnd = original.IndexOf('\n', argumentStart);
+var argumentDefinition = original[argumentStart..argumentEnd];
 foreach (var (name, before, after) in new[]
 {
     ("element-width", ".span 4 false", ".span 8 false"),
     ("write-authority", ".span 4 false", ".span 4 true")
 })
 {
-    if (!original.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing mutation: " + name);
+    if (!argumentDefinition.Contains(before, StringComparison.Ordinal))
+        throw new Exception("Missing span argument mutation: " + name);
     var proof = Path.Combine(root, "Forged-" + name + ".lean");
-    File.WriteAllText(proof, original.Replace(before, after, StringComparison.Ordinal));
+    // Keep both raw methods intact: rejection must bind argument evidence to the closed signature.
+    File.WriteAllText(proof, original[..argumentStart] +
+        argumentDefinition.Replace(before, after, StringComparison.Ordinal) + original[argumentEnd..]);
     var result = Execute(["lake", "env", "lean", proof]);
-    if (result.Code == 0 || !result.Output.Contains("SpecializationValid", StringComparison.Ordinal))
+    var rejectedGoal = "⊢ Extraction.closedArguments rawLayouts method0Closed = some method0RawArguments";
+    if (result.Code == 0 || !result.Output.Contains(rejectedGoal, StringComparison.Ordinal))
         throw new Exception("Incorrect span evidence rejection: " + name + "\n" + result.Output);
     Console.WriteLine("PASS independent span evidence rejection: " + name);
 }
