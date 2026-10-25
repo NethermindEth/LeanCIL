@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include ConsumerVerification.cs
+#:include LeanDiagnostics.cs
 
 if (args is not ([_] or [_, "--reuse", _]))
     throw new ArgumentException("Usage: dotnet run --file scripts/PrepareLibrary.cs -- <output-directory> [--reuse <trusted-manifest-sha256>]");
@@ -10,6 +12,7 @@ var trustedDigest = args.Length == 3 ? args[2] : null;
 // Fresh production must not inherit a supplied library from a consumer's environment.
 Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY", null);
 using var verifier = new Program { freshLibrary = true };
+if (trustedDigest is null) verifier.PrepareCertifiedFingerprints();
 // The reuse digest must come from a trusted producer, independently of the restored files.
 var digest = verifier.PrepareLibrary(directory, trustedDigest);
 if (trustedDigest is not null)

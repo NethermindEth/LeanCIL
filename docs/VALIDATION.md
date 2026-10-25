@@ -105,6 +105,15 @@ kernel replay. `--measure` uses the fixed full framework plus fixture workload a
 wall time, raw input bytes, serialization counts and native normalization time. Supply a
 baseline worker DLL before `--measure` to compare the same seven requests.
 
+`Tests/CertifiedFingerprints.cs` compares direct normalization with an authenticated
+prepared-library table while local receipts remain disabled. It checks identical canonical
+results across independent receivers, relocation, renamed modules, changed parts and native
+tools, metadata mutation before publication and consumption, and self-rehashed corruption.
+The normal fixture uses two framework modules plus one consumer module; `--measure` uses
+the complete prepared framework and compares direct and prepared requests, recording
+fingerprint time, total worker time and serialization counts. Preparation normalizes the
+framework once; its cost must be included when assessing a workload's amortized savings.
+
 `Tests/ConsumerCertificateReuse.cs` measures four independent verifier processes with
 distinct proof sources. Unchanged generated certificates retain their authenticated build
 outputs; changed extraction text and self-rehashed corrupt artifacts force rebuilding both

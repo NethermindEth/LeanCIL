@@ -61,6 +61,10 @@ Core consumer tests batch fixed rejection cases to reuse certified-library setup
 source, environment and cache-invalidation checks isolated. See the reproducible comparison in
 [validation coverage](docs/VALIDATION.md).
 
+Prepared certified libraries include canonical fingerprints of their compiled modules.
+Consumer verification reuses them only while module bytes and the normalizer match,
+avoiding repeated framework serialization even when local receipts are disabled.
+
 The test command builds independent example assemblies, runs Lean semantic tests, extracts actual CIL, proves positive examples, checks semantic counterexamples, rejects malformed/unsupported inputs, and tests artifact identity. Results go to `artifacts/test-results.json`; generated CIL, proof caches and verification reports are ignored by Git.
 
 To run one part of the suite, use `dotnet run --file scripts/Test.cs -- --suite core` (or `cli`, `integer`, `narrow`, `primitive`). Each selection builds its prerequisites and writes `artifacts/test-results-<suite>.json`. Use separate checkouts when running suites concurrently because tests build and mutate artifacts.
