@@ -162,7 +162,7 @@ internal static class NativeOperands
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj or Code.Ldelem_Any => Type((TypeReference)instruction.Operand),
                         Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S or
-                            Code.Ldflda or Code.Ldsflda or Code.Localloc => Kind.Reference,
+                            Code.Ldflda or Code.Ldsflda or Code.Localloc or Code.Ldelema => Kind.Reference,
                         Code.Ldlen or Code.Ldelem_I or Code.Ldind_I or Code.Conv_I or Code.Conv_U or Code.Conv_Ovf_I or Code.Conv_Ovf_I_Un or
                             Code.Conv_Ovf_U or Code.Conv_Ovf_U_Un => Kind.Native,
                         Code.Ldc_I8 or Code.Ldelem_I8 or Code.Ldind_I8 or Code.Conv_I8 or Code.Conv_U8 or Code.Conv_Ovf_I8 or

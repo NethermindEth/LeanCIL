@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 173 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 174 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -21,6 +21,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
 | `ldlen` | Partial | Length of a supplied primitive integer array, returned as a native integer. Null raises `System.NullReferenceException`. |
+| `ldelema` | Partial | Checked element reference into a supplied primitive array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
 | `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` requires an admitted primitive token matching the array element type. Reads require initialized bytes and read authority. |
 | `stelem.i1`, `stelem.i2`, `stelem.i4`, `stelem.i8`, `stelem.i`, `stelem` | Partial | Checked integer array stores; narrow stores truncate. Typed `stelem` requires a matching primitive token. Stores require write authority and initialize only the selected element. |
 | `ldc.i4`, `ldc.i4.s`, `ldc.i4.m1`, `ldc.i4.0`–`ldc.i4.8` | Complete within the admitted model | Push the encoded 32-bit integer constant. |
@@ -146,7 +147,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`; `constrained.` outside the checked struct-call subset |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*` |
-| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, reference/floating-point `ldelem.*`/`stelem.*`, `ldelema`, `ldtoken` of a method or of a type outside a decided type test |
+| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, reference/floating-point `ldelem.*`/`stelem.*`, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` of other fields, `ldsflda` of constructor-initialized fields |
 | Dispatch and exceptions | Unconstrained `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |

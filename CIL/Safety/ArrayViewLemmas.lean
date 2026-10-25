@@ -27,4 +27,17 @@ theorem ArrayView.validate_preserved (view : ArrayView) {before after : Memory}
 #print axioms ArrayView.validate_congr
 #print axioms ArrayView.validate_preserved
 
+/-- Successful element lookup returns a reference that forms in the same memory. -/
+theorem ArrayView.element_formed (view : ArrayView) (memory : Memory) (index : Nat)
+    (reference : Reference) (found : view.element memory index = .ok reference) :
+    form memory reference = .ok reference := by
+  unfold ArrayView.element at found
+  repeat' first
+    | exact view.storage.element_formed memory index reference found
+    | cases found
+    | split at found
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at found
+
+#print axioms ArrayView.element_formed
+
 end CIL.Safety

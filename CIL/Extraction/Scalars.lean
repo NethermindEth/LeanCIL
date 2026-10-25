@@ -72,9 +72,9 @@ private def compareBranch (opcode : Nat) : Bool :=
 private def unsignedBranch (opcode : Nat) : Bool :=
   (51 <= opcode && opcode <= 55) || (64 <= opcode && opcode <= 68)
 
-/-- Raw array opcodes in the supported integer subset; element-address operations are separate. -/
+/-- Raw array opcodes in the supported integer and element-address subset. -/
 private def arrayCovered (opcode : Nat) : Bool :=
-  opcode == 142 || (144 ≤ opcode && opcode ≤ 151) ||
+  (142 ≤ opcode && opcode ≤ 151) ||
     (155 ≤ opcode && opcode ≤ 159) || opcode ∈ [163, 164]
 
 /-- Null is a permitted array operand, but arbitrary opaque/reference values are not. -/
@@ -96,6 +96,11 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
   let index :: array :: tail := input | none
   if index ∉ [.word32, .native] then none else pure ()
   let element ← arrayOperand array
+  if opcode == 143 then
+    let .type token := instruction.operand | none
+    let expected ← arrayElementType token
+    if element.isSome && element != some expected then none else
+      return (.arrayAddress expected, .reference :: tail)
   let (width, signed, native) : Nat × Bool × Bool ←
     if opcode ∈ [163, 164] then do
       let .type token := instruction.operand | none
@@ -122,7 +127,8 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
 
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
 private def arrayEmission : Op → Bool
-  | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _) => true
+  | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
+  | .memory (.arrayAddress _) => true
   | _ => false
 
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode. -/
@@ -133,6 +139,7 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
   | some (.arrayLoad width signed, _), .memory (.arrayLoad actual polarity) =>
     width == actual && signed == polarity
   | some (.arrayStore width, _), .memory (.arrayStore actual) => width == actual
+  | some (.arrayAddress element, _), .memory (.arrayAddress actual) => element == actual
   | _, _ => false
 /-- Opcodes whose emitted encoding the scalar check fixes: integer constants, arithmetic,
     shifts, `neg`, `not`, conversions and compare-branches. -/

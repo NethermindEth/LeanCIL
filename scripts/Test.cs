@@ -128,7 +128,7 @@ if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
-        "Tests/PrimitiveArrays.cs"]);
+        "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/StackAllocation.cs"]);
 if (suite is "all" or "evidence")
