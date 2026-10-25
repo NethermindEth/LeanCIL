@@ -161,10 +161,50 @@ def lengthDependsBody (avx2 : Bool) : CIL.Method :=
 
 /--
 error: cil_instruction_equations: the instruction at pc 0 of
-Tests.InstructionEquations.lengthDependsBody is not determined by its parameters; state each
-feature-dependent instruction as an `if` on the instruction, padding the shorter side with
-`.unsupported`, so every profile has the same pcs
+Tests.InstructionEquations.lengthDependsBody is not determined by its parameters, or the body
+does not unfold; state each feature-dependent instruction as an `if` on the instruction,
+padding the shorter side with `.unsupported`, so every profile has the same pcs
 -/
 #guard_msgs (whitespace := lax) in cil_instruction_equations lengthDependsBody
+
+/-- A body that agrees on its first instruction but not on its length. -/
+def tailDependsBody (avx2 : Bool) : CIL.Method :=
+  { returnsValue := false, locals := [], code := .nop :: if avx2 then [.ret] else [.nop, .ret] }
+
+-- The walk fails at pc 1, and the command declares nothing, not even pc 0.
+/--
+error: cil_instruction_equations: the instruction at pc 1 of
+Tests.InstructionEquations.tailDependsBody is not determined by its parameters, or the body
+does not unfold; state each feature-dependent instruction as an `if` on the instruction,
+padding the shorter side with `.unsupported`, so every profile has the same pcs
+-/
+#guard_msgs (whitespace := lax) in cil_instruction_equations tailDependsBody
+/-- error: Unknown identifier `tailDependsBody_instruction0` -/
+#guard_msgs in #check tailDependsBody_instruction0
+
+/-- A body with no parameters, as the extractor's own methods are. -/
+def fixedBody : CIL.Method := { returnsValue := false, locals := [], code := [.nop, .ret] }
+
+cil_instruction_equations fixedBody
+
+example : fixedBody.code[1]? = some .ret := fixedBody_instruction1
+example : ∃ op, fixedBody.code[0]? = some op ∧ op = .nop :=
+  ⟨_, by cil_lookup [], by with_reducible rfl⟩
+
+/-- A body with an implicit width and a hypothesis about it, both kept as parameters. -/
+def guardedBody {width : Nat} (_wide : 32 < width) : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.const32 (BitVec.ofNat 32 width), .ret] }
+
+cil_instruction_equations guardedBody
+
+/--
+info: Tests.InstructionEquations.guardedBody_instruction0 {width : Nat} (_wide : 32 < width) :
+  (guardedBody _wide).code[0]? = some (CIL.Op.const32 (BitVec.ofNat 32 width))
+-/
+#guard_msgs (whitespace := lax) in #check guardedBody_instruction0
+
+example (wide : 32 < 40) :
+    ∃ op, (guardedBody wide).code[0]? = some op ∧ op = .const32 (BitVec.ofNat 32 40) :=
+  ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
 end Tests.InstructionEquations
