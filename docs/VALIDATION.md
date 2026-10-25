@@ -472,3 +472,10 @@ proposition and all program/metadata definitions. Replaying every generated theo
 kernel work from 36,782,462 to 32,494,315 raw heartbeats (11.7%); the structural proofs introduce
 additional auxiliary theorems, increasing the replay count from 169 to 181. These are kernel
 work measurements, not full consumer build or end-to-end verification timings.
+
+Shared runtime-scope encoding keeps the same 181 Equality theorems and reduces their replay
+from 32,494,315 to 26,201,571 raw heartbeats (19.4%). Including all 43 generated data definitions
+and the changed scope definition plus its equality theorem gives 32,502,723 versus 28,123,894
+raw heartbeats (13.5%). The latter includes the one-time scope construction and equivalence
+cost. Actual extractor output matches the measured source. Generic evidence mutations also
+reject altered runtime versions and public-key tokens; no scope comparison is relaxed.
