@@ -426,7 +426,9 @@ theorem store_from_instruction_fact (body : CIL.Method) (args : List Value) (fra
       .ok (.next 3 [] frame final) := by
   cil_checked_step [stored]
 
-/-- info: 'Tests.Automation.store_from_instruction_fact' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Tests.Automation.store_from_instruction_fact' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in #print axioms store_from_instruction_fact
 
 open CIL.Safety in
@@ -441,8 +443,41 @@ theorem store_from_static_fact (body : CIL.Method) (args : List Value) (frame : 
       .ok (.next 3 [] frame final) := by
   cil_checked_step [stored]
 
-/-- info: 'Tests.Automation.store_from_static_fact' depends on axioms: [propext, Quot.sound] -/
+/--
+info: 'Tests.Automation.store_from_static_fact' depends on axioms: [propext, Quot.sound]
+-/
 #guard_msgs in #print axioms store_from_static_fact
+
+-- Naming `staticInstruction` explicitly, and stating either fact as a proof term, still applies.
+open CIL.Safety in
+example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+    (destination : Reference) (memory final : Memory)
+    (stored : memoryInstruction .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [staticInstruction, stored]
+
+open CIL.Safety in
+example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+    (destination : Reference) (memory final : Memory)
+    (stored : memoryInstruction .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [(stored)]
+
+open CIL.Safety in
+example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+    (destination : Reference) (memory final : Memory)
+    (stored : staticInstruction body 2 .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [(stored)]
 
 -- The same store from a `storeValue` fact: the per-shape memory equation exposes it without unfolding a dispatcher.
 open CIL.Safety in
