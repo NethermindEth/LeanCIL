@@ -273,8 +273,9 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
         stages.Count(stage => stage is "Building fresh Lean verification library" or
             "Copying certified Lean verification library") != 2 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
-        !stages.Any(stage => package ? stage == "Building fresh consumer proof and dependencies" :
-            stage.StartsWith("Checking Proof:", StringComparison.Ordinal)))
+        stages.Count(stage => stage == "Building fresh consumer proof and dependencies") !=
+            slots + (package ? 1 : 0) ||
+        stages.Count(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal)) != (package ? 0 : 1))
         throw new InvalidOperationException(
             "Full verification reused a receipt instead of replaying: " + string.Join(", ", stages));
     JsonElement verified =
