@@ -23,7 +23,7 @@ def localWidth : CIL.LocalKind → Nat
   | .vector128 => 16
   | .vector256 => 32
   | .vector512 => 64
-  | .reference => 0
+  | .reference | .span .. => 0
 
 /-- The contents of an opaque 128-bit vector local: fully known bits, or only the low 64
     bits known. -/
@@ -43,6 +43,7 @@ inductive LocalSlot where
   | bytes (kind : CIL.LocalKind) (reference : Reference)
   | root (value : Option ManagedReference)
   | opaque128 (value : Option Opaque128Value)
+  | span (width : Nat) (writable : Bool) (value : Option SpanView)
   deriving DecidableEq, Repr
 
 /-- A method activation: its identity, local slots, the allocations it owns (expired by
@@ -116,6 +117,14 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
   if value.hasUnspecified && !selectedOpaque then
     .error (.unsupported "Byte home observes unspecified vector bits") else
   match slot, value with
+  | .span width writable _, .bufferSpan view =>
+    if view.width != width || view.writable != writable then .error .invalidState else pure ()
+    let _ ← checkedAt view.reference 0 (view.validate m)
+    return (.span width writable (some view), m)
+  | .span width false _, .span reference length =>
+    let view : SpanView := ⟨reference, length, width, false⟩
+    let _ ← checkedAt reference 0 (view.validate m)
+    return (.span width false (some view), m)
   | .opaque128 _, .scalar (.v128 bits) => return (.opaque128 (some (.known bits)), m)
   | .opaque128 _, .scalar (.v128Low64 low) => return (.opaque128 (some (.low64 low)), m)
   | .root _, .reference reference =>
@@ -138,6 +147,11 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     vector home with uninitialized bytes loads as a snapshot instead. -/
 def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
   match slot with
+  | .span _ _ none => .error .invalidState
+  | .span width writable (some view) =>
+    if view.width != width || view.writable != writable then .error .invalidState else pure ()
+    let _ ← checkedAt view.reference 0 (view.validate m)
+    return .bufferSpan view
   | .opaque128 none => .error (.unsupported "Uninitialized opaque vector local")
   | .opaque128 (some value) => return .scalar value.value
   | .root none => .error .invalidState
@@ -157,7 +171,7 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
     | .vector128 => return .scalar (.v128 (BitVec.ofNat 128 number))
     | .vector256 => return .scalar (.v256 (BitVec.ofNat 256 number))
     | .vector512 => return .scalar (.v512 (BitVec.ofNat 512 number))
-    | .reference => .error .invalidState
+    | .reference | .span .. => .error .invalidState
 
 /-- The address of a local's byte home. Root and opaque vector slots have no bytes and
     cannot be addressed. -/
@@ -166,6 +180,7 @@ def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
   | .bytes _ reference => formValue m (.address reference)
   | .root _ => .error (.unsupported "Address of managed-reference local")
   | .opaque128 _ => .error (.unsupported "Address of opaque vector local")
+  | .span .. => .error (.unsupported "Address of span local outside a validated receiver")
 
 /-- Initialized reads retain the original typed decoding, independently of the
     fallback used for partial aggregate/vector copies. -/
@@ -180,7 +195,7 @@ theorem loadLocal_of_read {m : Memory} {reference : Reference} {kind : CIL.Local
       | .vector128 => .ok (.scalar (.v128 (BitVec.ofNat 128 (byteNumber bytes))))
       | .vector256 => .ok (.scalar (.v256 (BitVec.ofNat 256 (byteNumber bytes))))
       | .vector512 => .ok (.scalar (.v512 (BitVec.ofNat 512 (byteNumber bytes))))
-      | .reference => .error .invalidState) := by
+      | .reference | .span .. => .error .invalidState) := by
   simp only [loadLocal, loaded, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
   cases kind <;> rfl
@@ -189,6 +204,12 @@ theorem loadLocal_of_read {m : Memory} {reference : Reference} {kind : CIL.Local
 def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m : Memory) :
     ExecutionResult (LocalSlot × List AllocationId × Memory) := do
   match kind with
+  | .span width writable =>
+    if width ∉ [1, 2, 4, 8] then .error .invalidState else
+    match initial with
+    | .nullRef => .ok (.span width writable (some ⟨.null, 0, width, writable⟩), [], m)
+    | .unmodeled => .ok (.span width writable none, [], m)
+    | _ => .error .invalidState
   | .reference => match initial with
     | .nullRef => .ok (.root (some .null), [], m)
     | .unmodeled => .ok (.root none, [], m)

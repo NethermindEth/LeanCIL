@@ -22,8 +22,9 @@ internal static class LeanEmitter
     internal const string Decide = "by decide +kernel";
     internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar")
     {
-        // A span local is only touched by a receiver fold, so its slot is an inert root.
-        if (type is ByReferenceType || Spans.Width(type) is not null) return ".reference";
+        if (type is ByReferenceType) return ".reference";
+        if (Spans.Width(type) is { } width)
+            return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (MetadataValidation.IsAggregate(type, module)) return $".aggregate {MetadataValidation.Layout(type, module, architecture)}";
         if (Narrow(type) is { } narrow) return $".narrow .{narrow}";
         return EnumTypes.Storage(type).FullName switch
@@ -47,6 +48,7 @@ internal static class LeanEmitter
     {
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
         string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
+        string kind when kind.StartsWith(".span ", StringComparison.Ordinal) => ".nullRef",
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module, architecture)} 0)"
     };

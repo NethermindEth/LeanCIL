@@ -61,6 +61,12 @@ theorem bitcastValue_numeric {source target : CIL.SnapshotShape} {input value : 
     scalar must be numeric. -/
 def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .reference r => formValue m r
+  | .readOnlyReference r => do
+    let _ ← formValue m r
+    return .readOnlyReference r
+  | .bufferSpan view => do
+    let _ ← checkedAt view.reference 0 (view.validate m)
+    return .bufferSpan view
   | .span r length => do
     let _ ← formValue m r
     return .span r length

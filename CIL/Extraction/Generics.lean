@@ -35,14 +35,22 @@ private def enumField : FieldType → Bool
   | .signed64 | .unsigned64 => true
   | _ => false
 
-/-- `ReadOnlySpan<T>` over a primitive integer `T`. As a local it has no storage: only a
-    receiver fold may touch it, so its slot is an inert root. -/
-def spanLocal : TypeExpr → Bool
-  | .apply (.constructor scope "System.ReadOnlySpan`1") (.atom elementScope element) =>
-    scope == runtimeScope && elementScope == runtimeScope && element ∈ ["System.Byte",
-      "System.SByte", "System.Int16", "System.UInt16", "System.Int32", "System.UInt32",
-      "System.Int64", "System.UInt64"]
-  | _ => false
+/-- Exact primitive span metadata, including element width and write capability. -/
+def spanStorage : TypeExpr → Option StorageType
+  | .apply (.constructor scope name) (.atom elementScope element) => do
+    if scope != runtimeScope || elementScope != runtimeScope ||
+        name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
+    let width ← match element with
+      | "System.Byte" | "System.SByte" => some 1
+      | "System.Int16" | "System.UInt16" => some 2
+      | "System.Int32" | "System.UInt32" => some 4
+      | "System.Int64" | "System.UInt64" => some 8
+      | _ => none
+    return .span width (name == "System.Span`1")
+  | _ => none
+
+/-- Whether a local is a supported primitive span. -/
+def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
 
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
@@ -54,7 +62,8 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
-  | .apply (.constructor scope name) (.atom elementScope element) =>
+  | type@(.apply (.constructor scope name) (.atom elementScope element)) =>
+    if let some storage := spanStorage type then some storage else
     if scope != intrinsicsScope || elementScope != runtimeScope ||
         element ∉ ["System.UInt64", "System.Int64", "System.UInt32", "System.Int32",
           "System.Byte", "System.Double", "System.Single"] then none
@@ -165,7 +174,7 @@ private def allowedConstraint (constraint : GenericConstraint) : Bool :=
 /-- A closed, non-reference type argument with a known storage. -/
 private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : Bool :=
   substituteType [] type == some type && match typeStorage layouts type with
-    | some .reference | none => false
+    | some .reference | some (.span ..) | none => false
     | some _ => true
 
 /-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/
@@ -199,12 +208,10 @@ def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   | opcode, _ =>
     if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
 
-/-- The storage of a closed method's arguments and locals and its argument accesses;
-    a span local is recorded as a reference. -/
+/-- Closed argument and local storage, including typed span views, and argument accesses. -/
 def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments := do
   let parameters ← closed.parameters.mapM (typeStorage layouts)
-  let locals ← closed.locals.mapM fun type =>
-    if spanLocal type then some .reference else typeStorage layouts type
+  let locals ← closed.locals.mapM (typeStorage layouts)
   let code ← closed.code.mapM argumentOperation
   return ⟨(if closed.hasThis then [.reference] else []) ++ parameters, locals, code⟩
 

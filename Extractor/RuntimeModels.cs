@@ -91,7 +91,7 @@ internal static class RuntimeModels
     private static bool IsModeledValueType(string name) => name is "System.UInt64" or "System.Int64" or
         "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char" or
         "System.UInt32" or "System.Int32" or "System.Byte" or "System.Boolean" or "System.Double" or "System.Single" or
-        "System.IntPtr" or "System.UIntPtr" or "System.ReadOnlySpan`1" or "System.RuntimeFieldHandle" or
+        "System.IntPtr" or "System.UIntPtr" or "System.ReadOnlySpan`1" or "System.Span`1" or "System.RuntimeFieldHandle" or
         "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1" or
         "System.Runtime.Intrinsics.Vector512`1" or "System.ValueTuple`2";
 
@@ -114,7 +114,7 @@ internal static class RuntimeModels
     internal static string? Translate(MethodReference reference, FeatureProfile profile)
     {
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
-            (reference.HasThis && reference.Name is not (".ctor" or "get_Item" or "get_Length")) ||
+            (reference.HasThis && reference.Name is not (".ctor" or "get_Item" or "get_Length" or "Slice")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
         if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" &&
@@ -265,6 +265,24 @@ internal static class RuntimeModels
             if (signature == "!!0& System.Runtime.InteropServices.MemoryMarshal::" +
                 $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)")
                 return ".memory .spanReference";
+            foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
+            {
+                var owner = $"{name}<{element}>";
+                var writable = name == "System.Span`1";
+                if (signature == $"System.Int32 {owner}::get_Length()") return ".memory .spanLength";
+                if (writable && signature == $"!0& {owner}::get_Item(System.Int32)")
+                    return $".memory (.spanItem {width})";
+                if (signature == $"{name}<!0> {owner}::Slice(System.Int32)")
+                    return ".memory (.spanSlice false)";
+                if (signature == $"{name}<!0> {owner}::Slice(System.Int32,System.Int32)")
+                    return ".memory (.spanSlice true)";
+                var factory = writable ? "CreateSpan" : "CreateReadOnlySpan";
+                if (signature == $"{name}<!!0> System.Runtime.InteropServices.MemoryMarshal::" +
+                    $"{factory}<{element}>(!!0&,System.Int32)")
+                    return $".memory (.spanFromReference {width} {(writable ? "true" : "false")})";
+            }
+            if (signature == $"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
+                "op_Implicit(System.Span`1<!0>)") return ".memory .spanReadOnly";
         }
         return null;
     }

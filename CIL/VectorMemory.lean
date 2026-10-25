@@ -126,6 +126,9 @@ inductive MemoryOp where
   | staticValue (bytes : List (BitVec 8))
   /-- A span of `width`-byte elements over a whole static field; indexing is bounds checked. -/
   | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
+  /-- Primitive spans over supplied storage; these operations never grant memory authority. -/
+  | spanFromReference (width : Nat) (writable : Bool)
+  | spanSlice (explicitLength : Bool) | spanReadOnly
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
   deriving Repr
@@ -133,6 +136,9 @@ inductive MemoryOp where
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
+  | .spanSlice explicitLength => if explicitLength then 3 else 2
+  | .spanFromReference .. => 2
+  | .spanReadOnly => 1
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
   | .staticAddress _ | .staticValue _ | .nullRef => 0
   | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
