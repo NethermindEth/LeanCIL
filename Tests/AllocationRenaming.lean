@@ -149,6 +149,35 @@ theorem target_frame_shape :
       .ok ([.bytes .word32 ⟨1, 0⟩, .bytes .word64 ⟨2, 0⟩, .bytes .word32 ⟨3, 0⟩], 4) := rfl
 #print axioms target_frame_shape
 
+/-- The reachable Multiply helper's extracted word64 zero remains an initialized retained home. -/
+def initializedSource : CIL.Method := { sourceBody with locals := [.i64 0] }
+
+/-- Dead numeric homes may surround the initialized helper declaration. -/
+def initializedTarget : CIL.Method := {
+  targetBody with locals := [.unmodeled, .i64 0, .unmodeled] }
+
+/-- The actual word64 initializer is preserved while its allocation identity changes. -/
+theorem initialized_helper_frames :
+    ∃ later sourceFrame targetFrame sourceAfter targetAfter,
+      (AllocationRenaming.identity caller.nextIdentity).Extends later ∧
+      enterFrame initializedSource [] caller = .ok (sourceFrame, sourceAfter) ∧
+      enterFrame initializedTarget [] caller = .ok (targetFrame, targetAfter) ∧
+      Memory.Renamed later (enterScopes Eq 1 1) sourceAfter targetAfter ∧
+      Frame.Renamed indices later (enterScopes Eq 1 1) sourceFrame targetFrame := by
+  have sourceReady : OrdinaryFrame initializedSource :=
+    ⟨rfl, rfl, rfl, entry_ready.1.layouts⟩
+  have targetReady : OrdinaryFrame initializedTarget :=
+    ⟨rfl, rfl, rfl, entry_ready.2.layouts⟩
+  have selected : LocalDeclarations indices initializedSource.localKinds initializedSource.locals
+      initializedTarget.localKinds initializedTarget.locals :=
+    .skip .word32 (.keep .word64 (.i64 0) (.skip .word32 .nil))
+  have sourceEntry : ∃ frame after, enterFrame initializedSource [] caller = .ok (frame, after) :=
+    ⟨_, _, rfl⟩
+  obtain ⟨frame, after, entered⟩ := sourceEntry
+  exact (Memory.Renamed.refl caller Eq).enterFrameInitialized caller_formed caller_formed
+    (by simp [caller]) sourceReady targetReady indices selected [] [] entered
+#print axioms initialized_helper_frames
+
 /-- Keeping the old operand would address a dead word32 declaration, so it is rejected. -/
 theorem old_operand_rejected : indices.index 0 ≠ 0 := by decide
 #print axioms old_operand_rejected

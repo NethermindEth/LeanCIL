@@ -126,10 +126,12 @@ Scope and limits:
 
 Trailing byref, pointer and span dead locals are covered. Span slots retain their element width and mutability, and hold an empty view or an unmodeled value without allocating. Unsupported span widths and nonempty scalar initializers remain rejected by the kernel-checked condition. Numeric and interspersed dead locals are outside this exact-memory embedding: their homes change later allocation identities or local operands. They use the separate allocation refinement below. `cil_embed` proves `MethodEmbedsDeadLocals` goals too and names the violated local condition.
 `CIL.Safety.AllocationRefinement` supplies a separate checked simulation for numeric and
-interspersed dead declarations. `MethodRenaming` retains local kinds in order and checks
+interspersed dead declarations. `MethodRenaming` retains local kinds and initializers in order and checks
 all relocated local operands while preserving method indices and execution metadata.
-Both methods must satisfy `UnmodeledFrame`: ordinary unmodeled initializers, no opaque
-vector locals or vector/parameter argument homes, bounded layouts and supported span widths.
+Both methods must satisfy `OrdinaryFrame`: no opaque vector locals or vector/parameter
+argument homes, bounded layouts and supported span widths. `LocalDeclarations` preserves
+each retained initializer and permits only unmodeled inserted dead declarations. Actual
+source entry success supplies successful retained initialization; the target entry is proved.
 The initial memory must be well formed and its static bindings bounded by the allocation
 counter. These restrictions are premises of the public theorems.
 

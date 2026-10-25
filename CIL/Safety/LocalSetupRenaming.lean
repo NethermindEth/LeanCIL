@@ -1,11 +1,12 @@
 import CIL.Safety.FrameHomeRenaming
 import CIL.Safety.LocalSlotRenaming
+import CIL.Safety.LocalStoreRenaming
 
 /-!
-# Uninitialized local setup under renaming
+# Local setup under renaming
 
-Unmodeled extracted locals preserve their physical home and initialization behavior.
-Numeric homes allocate paired identities; roots, spans and arrays allocate no bytes.
+Retained locals preserve their physical home and checked initializer. Numeric homes
+allocate paired identities; deleted unmodeled homes remain private to the target.
 -/
 
 namespace CIL.Safety
@@ -74,6 +75,89 @@ theorem Memory.Renamed.makeLocalUnmodeled {mapping : AllocationRenaming}
       have equal := List.mem_singleton.mp member
       exact equal.symm ▸ freshBound
 #print axioms Memory.Renamed.makeLocalUnmodeled
+
+/-- A retained initializer performs the same checked store in its corresponding fresh home. -/
+theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target)
+    (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
+    (staticBounds : ∀ binding ∈ source.staticBindings,
+      binding.2.allocation < mapping.sourceLimit)
+    (sourceActivation targetActivation : Nat) (scope : scopes sourceActivation targetActivation)
+    (kind : CIL.LocalKind) (initial : CIL.Value) (bounded : localWidth kind < nativeLimit)
+    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8])
+    {slot : LocalSlot} {owned : List AllocationId} {sourceAfter : Memory}
+    (made : makeLocal sourceActivation kind initial source = .ok (slot, owned, sourceAfter)) :
+    ∃ later targetAfter, mapping.Extends later ∧
+      makeLocal targetActivation kind initial target =
+        .ok (later.localSlot slot, owned.map later.image, targetAfter) ∧
+      Memory.Renamed later scopes sourceAfter targetAfter ∧
+      slot.Below later.sourceLimit ∧ ∀ identity ∈ owned, identity < later.sourceLimit := by
+  by_cases unmodeled : initial = .unmodeled
+  · subst initial
+    obtain ⟨later, actualSlot, actualOwned, actualAfter, targetAfter, extension,
+      sourceMade, targetMade, remains, slotBound, ownedBound⟩ :=
+      related.makeLocalUnmodeled sourceFormed targetFormed staticBounds sourceActivation
+        targetActivation scope kind bounded spanWidth
+    rw [made] at sourceMade
+    cases sourceMade
+    exact ⟨later, targetAfter, extension, targetMade, remains, slotBound, ownedBound⟩
+  have bytes (kind : CIL.LocalKind) (bounded : localWidth kind < nativeLimit) :=
+    related.allocateHome sourceFormed targetFormed staticBounds sourceActivation
+      targetActivation (localWidth kind) (localAlignment kind) scope bounded
+      (localAlignment_pos kind)
+  have freshBound : source.nextIdentity < mapping.allocate.sourceLimit := by
+    rw [← related.sourceLimit]
+    exact Nat.lt_succ_self _
+  have freshImage : mapping.allocate.image source.nextIdentity = target.nextIdentity := by
+    rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
+  let retainedKind := kind
+  cases kind with
+  | reference | array _ =>
+    cases initial <;> simp only [CIL.Safety.makeLocal] at made
+    all_goals first | contradiction | cases made
+    all_goals refine ⟨mapping, target, .refl mapping, ?_, related, ?_, ?_⟩
+    all_goals simp [CIL.Safety.makeLocal, AllocationRenaming.localSlot,
+      AllocationRenaming.managedReference,
+      AllocationRenaming.arrayView, LocalSlot.Below, ManagedReference.Below]
+  | span width writable =>
+    have widthOK := spanWidth width writable rfl
+    cases initial <;> simp only [CIL.Safety.makeLocal, widthOK, not_true_eq_false,
+      ite_false] at made
+    all_goals first | contradiction | cases made
+    all_goals refine ⟨mapping, target, .refl mapping, ?_, related, ?_, ?_⟩
+    all_goals simp [CIL.Safety.makeLocal, widthOK, AllocationRenaming.localSlot,
+      AllocationRenaming.managedReference, AllocationRenaming.spanView,
+      LocalSlot.Below, ManagedReference.Below]
+  | byte | word32 | word64 | narrow _ | aggregate _ | vector128 | vector256 | vector512 =>
+    obtain ⟨sourceHome, targetHome, sourceAllocated, targetAllocated, homes⟩ := bytes _ bounded
+    simp only [CIL.Safety.makeLocal, sourceAllocated, unmodeled, ite_false,
+      Bind.bind, Except.bind] at made
+    split at made
+    · cases made
+    rename_i stored sourceStored
+    cases stored with
+    | mk storedSlot storedMemory =>
+      simp only [Pure.pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at made
+      obtain ⟨rfl, rfl, rfl⟩ := made
+      have stores := homes.storeLocal (.bytes retainedKind ⟨source.nextIdentity, 0⟩)
+        (.scalar initial) freshBound (by trivial)
+      rw [sourceStored] at stores
+      obtain ⟨⟨targetSlot, targetMemory⟩, targetStored, slots, remains⟩ := stores.success
+      dsimp only at slots remains
+      subst targetSlot
+      refine ⟨mapping.allocate, targetMemory, mapping.allocate_extends, ?_, remains,
+        storeLocal_below (slot := .bytes retainedKind ⟨source.nextIdentity, 0⟩)
+          (value := .scalar initial) freshBound (by trivial) sourceStored, ?_⟩
+      · simp only [CIL.Safety.makeLocal, targetAllocated, unmodeled, ite_false,
+          Bind.bind, Except.bind]
+        simp only [AllocationRenaming.localSlot, AllocationRenaming.reference,
+          AllocationRenaming.value, freshImage, retainedKind] at targetStored
+        simp only [targetStored, List.map_cons, List.map_nil, freshImage,
+          Pure.pure, Except.pure, AllocationRenaming.localSlot, AllocationRenaming.reference]
+      · intro identity member
+        exact (List.mem_singleton.mp member).symm ▸ freshBound
+#print axioms Memory.Renamed.makeLocalInitialized
 
 /-- A deleted unmodeled local creates private target storage and preserves mapped observations. -/
 theorem Memory.Renamed.skipLocalUnmodeled {mapping : AllocationRenaming}

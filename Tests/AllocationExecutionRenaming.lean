@@ -23,17 +23,17 @@ theorem initial_formed : initial.WellFormed := AllocationRenaming.caller_formed
 /-- Two retained declarations are interleaved with three private numeric homes. -/
 def indices : LocalIndexMap := .skip (.keep (.skip (.keep (.skip .nil))))
 
-/-- The source frame retains two initialized-by-code word32 homes. -/
+/-- The source retains one initialized word32 home and one initialized by its code. -/
 def sourceBody (code : List CIL.Op) : CIL.Method := {
   returnsValue := true
-  locals := [.unmodeled, .unmodeled]
+  locals := [.i32 7, .unmodeled]
   localKinds := [.word32, .word32]
   code }
 
 /-- Private word64 declarations precede, separate and follow the retained word32 homes. -/
 def targetBody (code : List CIL.Op) : CIL.Method := {
   returnsValue := true
-  locals := [.unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled]
+  locals := [.unmodeled, .i32 7, .unmodeled, .unmodeled, .unmodeled]
   localKinds := [.word64, .word32, .word64, .word32, .word64]
   code := code.map indices.operation }
 
@@ -41,7 +41,7 @@ def targetBody (code : List CIL.Op) : CIL.Method := {
 theorem bodies_related (code : List CIL.Op) :
     Nonempty (MethodRenaming (sourceBody code) (targetBody code)) := by
   refine ⟨⟨indices, ⟨rfl, rfl, rfl⟩,
-    .skip _ (.keep rfl (.skip _ (.keep rfl (.skip _ .nil)))), ?_, ?_, rfl⟩⟩
+    .skip _ (.keep _ _ (.skip _ (.keep _ _ (.skip _ .nil)))), ?_, ?_, rfl⟩⟩
   all_goals constructor <;> first
     | rfl
     | (intro kind member
@@ -49,8 +49,19 @@ theorem bodies_related (code : List CIL.Op) :
        rcases member with rfl | rfl | rfl | rfl | rfl <;> simp [localWidth, nativeLimit])
 #print axioms bodies_related
 
-/-- The child returns seven after allocating its own numeric homes. -/
-def childCode : List CIL.Op := [.const32 7, .ret]
+/-- Changing a retained initializer cannot satisfy the declaration correspondence. -/
+theorem changed_initializer_rejected :
+    ¬ LocalDeclarations indices [.word32, .word32] [.i32 7, .unmodeled]
+      [.word64, .word32, .word64, .word32, .word64]
+      [.unmodeled, .i32 8, .unmodeled, .unmodeled, .unmodeled] := by
+  intro declarations
+  cases declarations
+  rename_i retained
+  cases retained
+#print axioms changed_initializer_rejected
+
+/-- The child reads seven from its retained initializer after allocating its numeric homes. -/
+def childCode : List CIL.Op := [.local 0, .ret]
 
 /-- A returned child value is stored before later dynamic allocation changes fresh identities. -/
 def allocationPrefix : List CIL.Op :=

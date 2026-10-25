@@ -286,7 +286,8 @@ numeric local changes the allocation watermark and fails ordinary embedding.
 numeric homes and distinct activation labels. `Tests.AllocationExecutionRenaming` uses the
 concrete allocation-refinement API to transfer scalar results, caller-memory prefixes, a
 complete method contract and named exceptions through nested calls followed by dynamic
-allocation. It independently checks different source/target allocation counters and rejects
+allocation, including a child that reads its initialized numeric local. It independently
+checks different source/target allocation counters and rejects changed retained initializers,
 unchanged local operands, changed call targets and an exhausted stack quota.
 The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,

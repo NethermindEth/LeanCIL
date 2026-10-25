@@ -149,10 +149,10 @@ theorem RunTrace.rename (transport : StepTransport)
       obtain ⟨targetChild, targetChildFound, ⟨childMethods⟩⟩ := programs _ _ childFound
       obtain ⟨entryMap, sourceChildFrame, targetChildFrame, sourceChildMemory,
         targetChildMemory, entryExtension, sourceEntry, targetEntry, childMemoryRelated,
-        childFrames⟩ := renamed.enterFrameUnmodeled sourceReady targetReady
+        childFrames⟩ := renamed.enterFrameInitialized sourceReady targetReady
           (by rw [renamed.sourceLimit]; exact updatedStatics)
           childMethods.sourceReady childMethods.targetReady childMethods.indices
-          childMethods.declarations childArguments (childArguments.map middle.value)
+          childMethods.declarations childArguments (childArguments.map middle.value) entered
       have same := Except.ok.inj (sourceEntry.symm.trans entered)
       cases same
       have childBounds : ∀ value ∈ childArguments, value.Below middle.sourceLimit := by
@@ -221,10 +221,10 @@ theorem RunTrace.rename (transport : StepTransport)
       obtain ⟨targetChild, targetChildFound, ⟨childMethods⟩⟩ := programs _ _ childFound
       obtain ⟨entryMap, sourceChildFrame, targetChildFrame, sourceChildMemory,
         targetChildMemory, entryExtension, sourceEntry, targetEntry, childMemoryRelated,
-        childFrames⟩ := renamed.enterFrameUnmodeled sourceReady targetReady
+        childFrames⟩ := renamed.enterFrameInitialized sourceReady targetReady
           (by rw [renamed.sourceLimit]; exact updatedStatics)
           childMethods.sourceReady childMethods.targetReady childMethods.indices
-          childMethods.declarations childArguments (childArguments.map middle.value)
+          childMethods.declarations childArguments (childArguments.map middle.value) entered
       have same := Except.ok.inj (sourceEntry.symm.trans entered)
       cases same
       have childBounds : ∀ value ∈ childArguments, value.Below middle.sourceLimit := by
@@ -311,9 +311,9 @@ theorem invoke_rename (transport : StepTransport)
   obtain ⟨targetBody, targetFound, ⟨methods⟩⟩ := programs _ _ found
   obtain ⟨entryMap, sourceFrame, targetFrame, sourceEntered, targetEntered, extension,
     sourceEntry, targetEntry, enteredMemory, enteredFrames⟩ :=
-    memory.enterFrameUnmodeled sourceFormed targetFormed
+    memory.enterFrameInitialized sourceFormed targetFormed
       (by rw [memory.sourceLimit]; exact statics) methods.sourceReady methods.targetReady
-      methods.indices methods.declarations arguments (arguments.map mapping.value)
+      methods.indices methods.declarations arguments (arguments.map mapping.value) entry
   have same := Except.ok.inj (sourceEntry.symm.trans entry)
   cases same
   have renamed := (run_success_trace _ _ _ _ _ _ _ _ _ _ finished).rename transport programs
@@ -499,12 +499,23 @@ theorem run_throw_rename (transport : StepTransport)
             cases thrown
           | some child =>
             obtain ⟨targetChild, targetChildFound, ⟨childMethods⟩⟩ := programs _ _ childFound
+            obtain ⟨initialFrame, initialMemory, entered⟩ :
+                ∃ childFrame childMemory,
+                  enterFrame child childArguments updated = .ok (childFrame, childMemory) := by
+              cases entry : enterFrame child childArguments updated with
+              | ok result => exact ⟨result.1, result.2, rfl⟩
+              | error reason =>
+                simp only [childFound, entry] at failed
+                cases failed
+                exact False.elim (enterFrame_not_thrown child childMethods.sourceReady
+                  childArguments updated exception
+                  (by simpa only [show reason = .thrown exception from thrown] using entry))
             obtain ⟨entryMap, childFrame, targetChildFrame, childMemory, targetChildMemory,
               entryExtension, sourceEntry, targetEntry, childMemoryRelated, childFrames⟩ :=
-              renamed.enterFrameUnmodeled sourceReady targetReady
+              renamed.enterFrameInitialized sourceReady targetReady
                 (by rw [renamed.sourceLimit]; exact updatedStatics)
                 childMethods.sourceReady childMethods.targetReady childMethods.indices
-                childMethods.declarations childArguments (childArguments.map middle.value)
+                childMethods.declarations childArguments (childArguments.map middle.value) entered
             have childBounds : ∀ value ∈ childArguments, value.Below middle.sourceLimit := by
               rw [renamed.sourceLimit]
               exact live.1.below sourceReady
@@ -575,12 +586,23 @@ theorem run_throw_rename (transport : StepTransport)
             cases thrown
           | some child =>
             obtain ⟨targetChild, targetChildFound, ⟨childMethods⟩⟩ := programs _ _ childFound
+            obtain ⟨initialFrame, initialMemory, entered⟩ :
+                ∃ childFrame childMemory,
+                  enterFrame child childArguments updated = .ok (childFrame, childMemory) := by
+              cases entry : enterFrame child childArguments updated with
+              | ok result => exact ⟨result.1, result.2, rfl⟩
+              | error reason =>
+                simp only [childFound, entry] at failed
+                cases failed
+                exact False.elim (enterFrame_not_thrown child childMethods.sourceReady
+                  childArguments updated exception
+                  (by simpa only [show reason = .thrown exception from thrown] using entry))
             obtain ⟨entryMap, childFrame, targetChildFrame, childMemory, targetChildMemory,
               entryExtension, sourceEntry, targetEntry, childMemoryRelated, childFrames⟩ :=
-              renamed.enterFrameUnmodeled sourceReady targetReady
+              renamed.enterFrameInitialized sourceReady targetReady
                 (by rw [renamed.sourceLimit]; exact updatedStatics)
                 childMethods.sourceReady childMethods.targetReady childMethods.indices
-                childMethods.declarations childArguments (childArguments.map middle.value)
+                childMethods.declarations childArguments (childArguments.map middle.value) entered
             have childBounds : ∀ value ∈ childArguments, value.Below middle.sourceLimit := by
               rw [renamed.sourceLimit]
               exact live.1.below sourceReady
@@ -704,11 +726,20 @@ theorem invoke_throw_rename (transport : StepTransport)
     obtain ⟨targetArguments, targetChecked, checkedEqual⟩ := checks.success
     subst targetArguments
     obtain ⟨targetBody, targetFound, ⟨methods⟩⟩ := programs _ _ found
+    obtain ⟨initialFrame, initialMemory, entry⟩ :
+        ∃ frame entered, enterFrame body arguments source = .ok (frame, entered) := by
+      cases entry : enterFrame body arguments source with
+      | ok result => exact ⟨result.1, result.2, rfl⟩
+      | error reason =>
+        simp only [invoke, found, checked, entry, Except.mapError, Bind.bind, Except.bind] at failed
+        cases failed
+        exact False.elim (enterFrame_not_thrown body methods.sourceReady arguments source exception
+          (by simpa only [show reason = .thrown exception from thrown] using entry))
     obtain ⟨entryMap, sourceFrame, targetFrame, sourceEntered, targetEntered, extension,
       sourceEntry, targetEntry, enteredMemory, enteredFrames⟩ :=
-      memory.enterFrameUnmodeled sourceFormed targetFormed
+      memory.enterFrameInitialized sourceFormed targetFormed
         (by rw [memory.sourceLimit]; exact statics) methods.sourceReady methods.targetReady
-        methods.indices methods.declarations arguments (arguments.map mapping.value)
+        methods.indices methods.declarations arguments (arguments.map mapping.value) entry
     simp only [invoke, found, checked, sourceEntry, Except.mapError, Bind.bind,
       Except.bind] at failed
     have renamed := run_throw_rename transport programs failed thrown found targetFound methods

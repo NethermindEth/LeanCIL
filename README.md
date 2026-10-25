@@ -248,7 +248,7 @@ and int32 locals. Snapshot facts do not supply write authority or justify a valu
 local kind. Supported forwarder bodies can inherit a
 callee's proved contract, and embedding proofs can ignore trailing unread byref,
 pointer or span locals. Allocation refinement also relates numeric and interspersed dead
-locals in ordinary unmodeled frames: scalar results and caller-memory prefixes transfer,
+locals in ordinary frames: retained initializers, scalar results and caller-memory prefixes transfer,
 as do named exceptions, while fresh allocation identities may differ. See
 [dead-local refinement](docs/PROOFS.md#bodies-modulo-dead-code) for its frame restrictions.
 Contract refinement derives a public interface from a stronger proved

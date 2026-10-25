@@ -1181,17 +1181,22 @@ postcondition names fresh references.
 
 To omit numeric or interspersed declarations from the proof body, import
 `CIL.Safety.AllocationRefinement`. `LocalIndexMap.keep`, `.skip` and `.nil` describe the
-retained declarations in order. `MethodRenaming` checks the matching local kinds and the
+retained declarations in order. `LocalDeclarations` checks matching retained kinds and
+initializers and requires inserted dead declarations to be unmodeled. `MethodRenaming` checks the
 target code's relocated local operands; method indices, call targets, profiles, return
 metadata and static sites stay exact. `ProgramRenaming` supplies this correspondence for
 every source method. The target is the extraction with the additional dead declarations.
 
-This entry route currently requires `UnmodeledFrame` on both sides: each local initializer
-is `.unmodeled`, and `opaqueVectorLocals`, `vectorArgs` and `parameterHomes` are empty.
+This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals`, `vectorArgs`
+and `parameterHomes` are empty. Retained initializers stay exact, including initialized
+numeric helpers; their successful setup is derived from the actual source execution.
 Local widths must fit the native range; span element widths must be 1, 2, 4 or 8.
-These are explicit, checked metadata conditions, not assumed frame-entry success. The
-audited int256 Multiply extractions across all fourteen profiles have 22 word64 and four
-vector256 unmodeled locals and no opaque, vector-argument or parameter homes.
+These are explicit, checked metadata conditions, not assumed target frame-entry success.
+The audited int256 Multiply body across all fourteen profiles has 22 word64 and four
+vector256 unmodeled locals. Its reachable helper method4 has an initialized word64 zero
+local in every profile. The full extracted programs have no opaque, vector-argument or
+parameter homes; the relation preserves that helper initializer rather than treating it
+as unmodeled.
 
 Starting from the same well-formed memory with bounded static bindings,
 `ProgramRenaming.invoke_scalars` transfers a successful checked invocation with the same
@@ -1215,7 +1220,7 @@ Arbitrary reference results and postconditions naming fresh allocations need a s
 modulo the allocation relation. The existing `MethodEmbedsDeadLocals` tactic continues to
 handle its exact-memory subset. See
 [Tests/AllocationExecutionRenaming.lean](../Tests/AllocationExecutionRenaming.lean) for
-two live numeric locals interspersed with three dead ones, a nested call followed by
+two live numeric locals interspersed with three dead ones, an initialized nested helper followed by
 dynamic allocation, exact scalar results, caller-prefix preservation and a named exception.
 
 ### Generated profile templates

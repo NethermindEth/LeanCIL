@@ -6,12 +6,27 @@ import CIL.Safety.FrameSetupLemmas
 /-!
 # Frame setup with interleaved dead declarations
 
-Unmodeled local lists are built by the actual frame allocator. Retained declarations
-receive paired homes and deleted declarations receive private target homes. The result
+Local lists are built by the actual frame allocator. Retained initializers receive
+paired homes and deleted unmodeled declarations receive private target homes. The result
 binds the executable local operand map, ownership and evolving allocation correspondence.
 -/
 
 namespace CIL.Safety
+
+/-- Retained declarations preserve their initializer; inserted dead homes are unmodeled. -/
+inductive LocalDeclarations : LocalIndexMap → List CIL.LocalKind → List CIL.Value →
+    List CIL.LocalKind → List CIL.Value → Prop
+  | nil : LocalDeclarations .nil [] [] [] []
+  | keep {indices sourceKinds sourceValues targetKinds targetValues}
+      (kind : CIL.LocalKind) (initial : CIL.Value)
+      (rest : LocalDeclarations indices sourceKinds sourceValues targetKinds targetValues) :
+      LocalDeclarations (.keep indices) (kind :: sourceKinds) (initial :: sourceValues)
+        (kind :: targetKinds) (initial :: targetValues)
+  | skip {indices sourceKinds sourceValues targetKinds targetValues}
+      (kind : CIL.LocalKind)
+      (rest : LocalDeclarations indices sourceKinds sourceValues targetKinds targetValues) :
+      LocalDeclarations (.skip indices) sourceKinds sourceValues
+        (kind :: targetKinds) (.unmodeled :: targetValues)
 
 /-- Corresponding retained slots remain bounded across subsequent calls. -/
 def LocalSlot.Renamed (mapping : AllocationRenaming) (source target : LocalSlot) : Prop :=
@@ -98,5 +113,86 @@ theorem Memory.Renamed.makeLocalsUnmodeled {mapping : AllocationRenaming}
     · exact ((OwnedAllocations.privateList skipped owned privateOwned).extend following).append
         ownedRest
 #print axioms Memory.Renamed.makeLocalsUnmodeled
+
+/-- Actual successful initialization is preserved for every retained declaration. -/
+theorem Memory.Renamed.makeLocalsInitialized {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target)
+    (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
+    (staticBounds : ∀ binding ∈ source.staticBindings,
+      binding.2.allocation < mapping.sourceLimit)
+    (sourceActivation targetActivation : Nat) (scope : scopes sourceActivation targetActivation)
+    {indices : LocalIndexMap} {sourceKinds targetKinds : List CIL.LocalKind}
+    {sourceValues targetValues : List CIL.Value}
+    (selected : LocalDeclarations indices sourceKinds sourceValues targetKinds targetValues)
+    (ready : ∀ kind ∈ targetKinds, localWidth kind < nativeLimit ∧
+      ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8])
+    {sourceSlots : List LocalSlot} {sourceOwned : List AllocationId} {sourceAfter : Memory}
+    (made : makeLocals sourceActivation sourceKinds sourceValues source =
+      .ok (sourceSlots, sourceOwned, sourceAfter)) :
+    ∃ later targetSlots targetOwned targetAfter, mapping.Extends later ∧
+      makeLocals targetActivation targetKinds targetValues target =
+        .ok (targetSlots, targetOwned, targetAfter) ∧
+      Memory.Renamed later scopes sourceAfter targetAfter ∧
+      indices.Selects (LocalSlot.Renamed later) sourceSlots targetSlots ∧
+      OwnedAllocations later sourceOwned targetOwned := by
+  induction selected generalizing mapping source target sourceSlots sourceOwned sourceAfter with
+  | nil =>
+    cases made
+    exact ⟨mapping, [], [], target, .refl mapping, rfl, related, .nil, .nil⟩
+  | @keep indices sourceKinds sourceValues targetKinds targetValues kind initial
+      selected induction =>
+    simp only [makeLocals, Bind.bind, Except.bind] at made
+    split at made
+    · cases made
+    rename_i head sourceMade
+    rcases head with ⟨slot, owned, sourceHome⟩
+    split at made
+    · cases made
+    rename_i tail sourceRest
+    rcases tail with ⟨slots, other, after⟩
+    simp only [Pure.pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at made
+    obtain ⟨rfl, rfl, rfl⟩ := made
+    obtain ⟨bounded, spanWidth⟩ := ready kind List.mem_cons_self
+    obtain ⟨paired, targetHome, extension, targetMade, homes, slotBound, ownedBounds⟩ :=
+      related.makeLocalInitialized sourceFormed targetFormed staticBounds sourceActivation
+        targetActivation scope kind initial bounded spanWidth sourceMade
+    have sourceSetup := makeLocal_setup _ _ _ _ _ _ _ sourceMade
+    have targetSetup := makeLocal_setup _ _ _ _ _ _ _ targetMade
+    have nextStatic : ∀ binding ∈ sourceHome.staticBindings,
+        binding.2.allocation < paired.sourceLimit := by
+      intro binding member
+      rw [sourceSetup.registry] at member
+      exact Nat.lt_of_lt_of_le (staticBounds binding member) extension.source
+    obtain ⟨later, targetSlots, targetOwned, targetAfter, following, targetRest,
+      remains, renamedSlots, ownedRest⟩ :=
+      induction homes (sourceSetup.wellFormed sourceFormed) (targetSetup.wellFormed targetFormed)
+        nextStatic (fun kind member => ready kind (List.mem_cons_of_mem _ member)) sourceRest
+    refine ⟨later, paired.localSlot slot :: targetSlots, owned.map paired.image ++ targetOwned,
+      targetAfter, extension.trans following, ?_, remains, ?_, ?_⟩
+    · simp only [makeLocals, targetMade, targetRest, Bind.bind, Except.bind,
+        Pure.pure, Except.pure]
+    · exact .keep ((show LocalSlot.Renamed paired slot (paired.localSlot slot) from
+        ⟨slotBound, rfl⟩).extend following) renamedSlots
+    · exact ((OwnedAllocations.mapped paired owned ownedBounds).extend following).append ownedRest
+  | @skip indices sourceKinds sourceValues targetKinds targetValues kind selected induction =>
+    obtain ⟨bounded, spanWidth⟩ := ready kind List.mem_cons_self
+    obtain ⟨skipped, slot, owned, home, extension, madeHome, homes, privateOwned⟩ :=
+      related.skipLocalUnmodeled targetFormed targetActivation kind bounded spanWidth
+    have targetSetup := makeLocal_setup _ _ _ _ _ _ _ madeHome
+    have nextStatic : ∀ binding ∈ source.staticBindings,
+        binding.2.allocation < skipped.sourceLimit :=
+      fun binding member => Nat.lt_of_lt_of_le (staticBounds binding member) extension.source
+    obtain ⟨later, targetSlots, targetOwned, targetAfter, following, targetRest,
+      remains, slots, ownedRest⟩ :=
+      induction homes sourceFormed (targetSetup.wellFormed targetFormed) nextStatic
+        (fun other member => ready other (List.mem_cons_of_mem _ member)) made
+    refine ⟨later, slot :: targetSlots, owned ++ targetOwned, targetAfter,
+      extension.trans following, ?_, remains, .skip slot slots, ?_⟩
+    · simp only [makeLocals, madeHome, targetRest, Bind.bind, Except.bind,
+        Pure.pure, Except.pure]
+    · exact ((OwnedAllocations.privateList skipped owned privateOwned).extend following).append
+        ownedRest
+#print axioms Memory.Renamed.makeLocalsInitialized
 
 end CIL.Safety

@@ -5,7 +5,7 @@ import CIL.Safety.FrameEntryRenaming
 # Methods with relocated retained locals
 
 The relation fixes every instruction and call target while relocating local operands.
-Its frame-entry evidence admits ordinary unmodeled declarations on both sides.
+Retained declarations keep their initializers; inserted declarations are unmodeled.
 -/
 
 namespace CIL.Safety
@@ -14,9 +14,10 @@ namespace CIL.Safety
 structure MethodRenaming (source target : CIL.Method) where
   indices : LocalIndexMap
   metadata : StepMetadata source target
-  declarations : indices.Selects Eq source.localKinds target.localKinds
-  sourceReady : UnmodeledFrame source
-  targetReady : UnmodeledFrame target
+  declarations : LocalDeclarations indices source.localKinds source.locals
+    target.localKinds target.locals
+  sourceReady : OrdinaryFrame source
+  targetReady : OrdinaryFrame target
   code : target.code = source.code.map indices.operation
 
 /-- Fetching an actual instruction selects its relocated target instruction at the same pc. -/
