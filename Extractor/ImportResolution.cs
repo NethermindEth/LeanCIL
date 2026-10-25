@@ -13,7 +13,7 @@ internal sealed class ImportResolution : IDisposable
         string SidecarPath, string SidecarSha256, string InterfaceDigest, string ContractConstant,
         string ClosureDigest, string Signature, int ParameterCount, bool ReturnsValue, string Profile, string ContractKind,
         string CertificationTheorem, string CertificationStatement, string CertificationStatementDigest, bool IsReferenceAssembly,
-        StaticIdentityRecord[] StaticIdentities,
+        StaticIdentityRecord[] StaticIdentities, InitializationAssumption[] InitializationAssumptions,
         string? DefinitionSignature, string[] TypeArguments, ContractMethodSignature? TypedSignature,
         ContractLayout[] PublishedLayouts, ContractLayout[] ActualLayouts, string ComputedLayouts);
     sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
@@ -197,6 +197,9 @@ internal sealed class ImportResolution : IDisposable
             metadata = new(actualLayouts, ImportedLayoutMetadata.ComputedLean(actualLayouts, library.Module, profile.Architecture));
         }
         StaticIdentity.ValidateFields(certification.StaticIdentities, library.Module);
+        if (library.Interface.IsReferenceAssembly &&
+            InitializationAssumption.ForProfile(export, profile.Name).Length != 0)
+            throw new InvalidDataException("Initialization assumptions require the implementation DLL metadata.");
         if (!library.Interface.IsReferenceAssembly)
             ValidateImplementation(library, export, certification, profile);
         MarkUsed(library);
@@ -208,7 +211,8 @@ internal sealed class ImportResolution : IDisposable
                 Path.GetFullPath(library.Source.SidecarPath), library.SidecarSha256, library.Interface.InterfaceDigest,
                 export.ContractConstant, export.ClosureDigest, export.Signature, export.ParameterCount, export.ReturnsValue, profile.Name, export.Kind,
                 certification.Theorem, certification.Statement, certification.StatementDigest, library.Interface.IsReferenceAssembly,
-                certification.StaticIdentities, export.DefinitionSignature,
+                certification.StaticIdentities, InitializationAssumption.ForProfile(export, profile.Name),
+                export.DefinitionSignature,
                 export.TypeArguments ?? [], export.TypedSignature, export.Layouts ?? [], metadata.ActualLayouts,
                 metadata.ComputedLayouts));
         }
@@ -238,9 +242,17 @@ internal sealed class ImportResolution : IDisposable
         try
         {
             using ImportResolution imports = new(libraries, implementationState, validatedMetadata, library.Interface);
+            var assumptions = InitializationAssumption.ForProfile(export, profile.Name);
+            var ownTypes = assumptions.Where(item => item.AssemblyIdentity == library.Interface.AssemblyIdentity)
+                .Select(item => item.TypeName).ToArray();
             MethodDefinition[] implementation = MetadataValidation.Validate(library.Module, library.Interface.AssemblyIdentity,
-                export.DefinitionSignature ?? export.Signature, profile, imports: imports,
+                export.DefinitionSignature ?? export.Signature, profile, initializedTypes: ownTypes, imports: imports,
                 typeArguments: export.TypeArguments, importedByref: type => imports.ValidateByref(type, profile));
+            var actualAssumptions = InitializationAssumption.Normalize(ownTypes.Select(type =>
+                new InitializationAssumption(library.Interface.AssemblyIdentity, type))
+                .Concat(imports.InitializationAssumptions()));
+            if (!assumptions.SequenceEqual(actualAssumptions))
+                throw new InvalidDataException("Contract import initialization assumptions differ from its dependencies.");
             StaticIdentityRecord[] actualStatics = LeanEmitter.StaticIdentities(implementation, profile);
             StaticIdentityRecord[] certifiedStatics = certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal).ToArray();
             if (!actualStatics.SequenceEqual(certifiedStatics))
@@ -326,6 +338,9 @@ internal sealed class ImportResolution : IDisposable
         }
         return modules;
     }
+
+    internal InitializationAssumption[] InitializationAssumptions() =>
+        InitializationAssumption.Normalize(bindings.SelectMany(binding => binding.InitializationAssumptions));
 
     internal string EmitImports(int methodCount)
     {

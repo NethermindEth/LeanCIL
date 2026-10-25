@@ -256,9 +256,19 @@ module for each input. Prove the template once and use the generated bindings fo
 selected profiles; see [generated profile templates](docs/PROOFS.md#generated-profile-templates)
 for the supported domain and checking workflow.
 
+Exported contracts can carry an explicit type-initialization premise for libraries
+with static constructors, including types containing `static readonly` struct fields.
+The sidecar binds each premise to an assembly, type and profile; importing callers
+retain it in their generated artifacts and verification reports. This is a runtime
+assumption, not a proof that the CLR initializer ran. Constructor-initialized field
+values remain unsupported for export. See [contract interfaces](docs/CONTRACT-INTERFACES.md).
+
 `leancil verify --force-full-verify` independently checks supported imported
-libraries against their pinned implementation DLLs and source bundles. Closed
-libraries may read immutable RVA static tables: checked composition preserves
+libraries and their reachable contract dependencies against separately pinned
+implementation DLLs, interfaces and source bundles. Conditional exports and shared
+dependencies are checked in dependency order, including when ordinary verification
+receipts are warm. Composition preserves normal returns and named exceptional
+outcomes. Libraries may read immutable RVA static tables: checked composition preserves
 their assembly-scoped identities and shared-table descriptors. Static-world
 requirements remain explicit contract preconditions; static-constructor and
 static-value assumptions are not supported in this mode. See

@@ -277,6 +277,12 @@ internal static partial class Program
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
+            var initializationAssumptions = InitializationAssumption.Normalize(initializedTypes.Select(type =>
+                new InitializationAssumption(assemblyIdentity, type)).Concat(imports.InitializationAssumptions()));
+            if (initializationAssumptions.Length > 0)
+                source += "\n-- Named runtime premises inherited from this assembly and its contract imports.\n" +
+                    "def Extracted.initializationAssumptions : List (String × String) := " +
+                    InitializationAssumption.Lean(initializationAssumptions) + "\n";
             if (staticValues.Count > 0)
                 source += "-- Caller assumption: these fields keep the values their static constructors stored.\n" +
                     "def Extracted.staticValues : List String := " + JsonSerializer.Serialize(staticValues) + "\n";
@@ -303,7 +309,9 @@ internal static partial class Program
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
                 assemblySha256 = assemblyHash, entry = methods[0].FullName,
                 entryDefinition = MethodSpecialization.Definition(methods[0]).FullName, entryTypeArguments,
-                layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes, staticValues,
+                layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes,
+                initializationAssumptions = JsonSerializer.SerializeToElement(initializationAssumptions, ContractInterface.Json),
+                staticValues,
                 staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = extractorHash,
@@ -361,6 +369,9 @@ internal static partial class Program
             if (symbolNotice is not null) Console.WriteLine("  " + symbolNotice);
             foreach (var name in initializedTypes)
                 Console.WriteLine($"  Caller assumption: {name} initialization completed successfully before invocation.");
+            foreach (var assumption in initializationAssumptions.Where(item => item.AssemblyIdentity != assemblyIdentity))
+                Console.WriteLine($"  Imported caller assumption: {assumption.AssemblyIdentity}::{assumption.TypeName} " +
+                    "initialization completed successfully before invocation.");
             foreach (var name in staticValues)
                 Console.WriteLine($"  Caller assumption: {name} keeps the value its static constructor stored.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));

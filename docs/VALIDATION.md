@@ -403,11 +403,13 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
-| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof |
-| `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
+| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof; a Top → App → library chain independently composes the table reader with its static-world premise |
+| `exportstransitive` | App → A → B and a four-node diamond where A and C share B; full mode rechecks each selected export despite warm receipts, rejects changed deployment pins and cycles before building, rejects forged dependency composition, and detects B changing staged A before A builds |
+| `exportstransitiveoutcomes` | App → C → A → B independently preserves normal returns and the named exceptional outcome through three forwarders |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
 | `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
+| `exportsinitialized` | A static-readonly struct library exports a named initialization premise; its caller retains the scoped premise, malformed descriptors reject, and full verification remains unavailable |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -417,10 +419,10 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, fullstatics, transitive, discovery, typed and derived suites cannot enter that plan.
-The registry now has 19 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
-`exportstyped` and `exportsderived` run directly, with no core export bootstrap or nested post-call.
-Their fixture assertions are
+statics, fullstatics, transitive, transitiveoutcomes, discovery, typed, derived and initialized suites cannot enter that plan.
+The registry now has 21 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+`exportstransitiveoutcomes`, `exportstyped`, `exportsderived` and `exportsinitialized` run directly, with no core export bootstrap
+or nested post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after

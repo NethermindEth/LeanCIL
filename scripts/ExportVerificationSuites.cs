@@ -35,7 +35,13 @@ internal static class ExportVerificationSuites
             "independent full composition of shared and changed static tables", [], ["Tests/ModularStaticExports.cs"],
             Standalone: true),
         new("exportstransitive", "transitive", "Tests/TransitiveImports.cs", [], "independent transitive contract imports",
-            [], ["Tests/TransitiveImports.cs"], Standalone: true),
+            [], ["Tests/TransitiveImports.cs", "Tests/StagedBundleMutation.cs"],
+            Standalone: true),
+        new("exportstransitiveoutcomes", "transitiveoutcomes", "Tests/TransitiveOutcomes.cs", [],
+            "independent deep transitive named outcome contracts",
+            [], ["Tests/TransitiveOutcomes.cs", "Tests/ContractImports/DerivedInterface.lean",
+                "Tests/ContractImports/DerivedPercentProof.lean"],
+            Standalone: true),
         new("exportsdiscovery", "discovery", "Tests/ContractExport.cs", ["--cohort", "discovery"], "contract discovery with real export bootstrap",
             ["discovery.fixture"], ["Tests/ContractExport.cs", "Tests/ContractDiscovery.cs"], ChildScript: "Tests/ContractDiscovery.cs"),
         new("exportstyped", "typed", "Tests/GenericLayoutImports.cs", [], "independent typed generic and layout imports", [],
@@ -48,7 +54,10 @@ internal static class ExportVerificationSuites
             ["Tests/DerivedContractExports.cs", "Tests/ContractImports/DerivedInterface.lean",
              "Tests/ContractImports/DerivedPercentProof.lean", "Tests/ContractImports/DerivedAddProof.lean",
              "Tests/ContractImports/DerivedShiftCaller.lean", "Tests/ContractImports/DerivedSumCaller.lean"],
-            Standalone: true)
+            Standalone: true),
+        new("exportsinitialized", "initialized", "Tests/InitializedExports.cs", [],
+            "scoped initialization assumptions in exported and imported contracts", [],
+            ["Tests/InitializedExports.cs", "Tests/TransitiveImports/Conditional.lean"], Standalone: true)
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>

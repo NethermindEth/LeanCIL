@@ -117,13 +117,24 @@ and virtual call sites are rejected. Import signatures must use supported
 parameter and result types with matching assembly-scoped type identities.
 Profiles must name an exact built-in profile; custom profiles are not admitted.
 For an implementation DLL, the selected export is validated with its independently
-pinned direct dependencies and without external initialization assumptions. Its
+pinned direct dependencies and its explicitly declared initialization assumptions. Its
 own reachable static identity set must match the selected certification exactly.
 This checks metadata and serialization; it does not verify the imported theorem.
+An optional `initializationAssumptions` descriptor records each exported profile's
+sorted assembly/type pairs and participates in the interface digest. Each local
+type must have a static constructor in the selected implementation. These premises
+require the implementation DLL; a reference-only import is rejected. Imported
+dependency premises must match those reached by implementation validation exactly.
+The exporter kernel-checks and structurally audits equality with the generated
+`Extracted.initializationAssumptions` list. Callers propagate this list into their
+generated source, identity and report; exporting such a caller propagates it again.
+These are deployment premises that initialization completed successfully, not CLR
+initialization theorems or field-value guarantees. Recorded `staticValues` remain
+unexportable, and forced full verification still rejects initialization premises.
 Each node's static identities are checked with those of its direct imports before
 output. A collision reports both scoped field names. Full verification uses
-`linkChecked` to check all descriptors in its linked program, but currently rejects
-transitive dependency graphs. Conditional transitive proofs retain the
+`linkChecked` to check all descriptors in its linked program, including those of
+dependencies linked into an imported library. Conditional transitive proofs retain the
 `StaticWorldValid` premises; extraction does not compare every pair of graph nodes.
 
 The framework manifest lists `CIL.lean`, all `CIL/**/*.lean`, and `lean-toolchain`

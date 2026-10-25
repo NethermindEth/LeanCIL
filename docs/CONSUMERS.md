@@ -357,11 +357,13 @@ must agree. Custom axioms, sorry and valueless opaque interface declarations are
 not exportable. Contract predicates and their reachable definitions determine the
 closure digest; the name alone does not determine it.
 
-Version 1 supports public or protected static, non-virtual, non-generic exports
-without imports. RVA static sites are supported. Each certification records the
+Version 1 supports public or protected static, non-virtual, non-generic exports.
+An export that calls another library's contract is certified conditionally on
+that import (`HoldsGiven ... ImportsHold`). RVA static sites are supported. Each certification records the
 exact scoped static identities, and the producer checks their set against the
-generated program in Lean. It rejects recorded static-value and
-initialization assumptions because this sidecar version does not transport them.
+generated program in Lean. Typed sidecars also transport named initialization
+premises, scoped by assembly and profile, into each caller's generated identity and
+report. Recorded static-value assumptions remain unsupported for export.
 This restriction does not weaken the extractor's admission or profile rules.
 
 Static identities are stable across separate extractions and body-only rebuilds.
@@ -485,4 +487,6 @@ proof into a contract at a relocated entry. They require an explicit closed
 completion, its prefix relation, satisfaction of imported contracts in that
 completion, and a relocation of the completion into the target program.
 Transitive graph implementation changes conservatively invalidate proof reuse.
-Static and initialization assumptions still cannot be exported in this feature.
+Initialization premises propagate through these conditional exports. They remain
+explicit runtime assumptions; forced full verification rejects them. Constructor-
+initialized field values still cannot be exported.
