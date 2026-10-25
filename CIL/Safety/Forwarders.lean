@@ -315,7 +315,8 @@ def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
     `calleeBody`, with the address of its only local, a numeric home of `kind` created from
     `initial`, as a last out argument whose contents it drops; it declares the callee's
-    return arity. `initial` is `.unmodeled` without `InitLocals` and the kind's zero with it. -/
+    return arity. Any initializer that fits the kind is accepted; the extractor emits
+    `.unmodeled` without `InitLocals` and the kind's zero with it. -/
 structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Option CIL.NarrowKind))
     (callee : Nat) (narrow : Option CIL.NarrowKind) (kind : CIL.LocalKind) (initial : CIL.Value) :
     Prop where

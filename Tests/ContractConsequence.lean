@@ -578,8 +578,11 @@ def secondZero : MethodContract (CIL.W64 × CIL.W64) Bool where
   footprint _ := []
   post pair _ _ zero := zero = decide (pair.2 = 0)
 
+/-- `IsZero` meets `secondZero` by its own contract at the second word. -/
 theorem second_zero_holds : secondZero.Holds Extracted.program isZero :=
   fun pair memory _ => is_zero_holds pair.2 memory trivial
+
+#print axioms second_zero_holds
 
 /-- `IsZeroSecond(v, w)`'s arguments. -/
 def pairArgs (pair : CIL.W64 × CIL.W64) : List Value :=

@@ -533,18 +533,22 @@ holds for a boolean. Use `Holds.weaken` afterwards to export a different contrac
 
 `MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which
 passes the address of a fresh numeric local as a last out argument and drops it.
-The local is uninitialized (`.unmodeled`) or holds its kind's zero, as the
-extractor emits it without or with `InitLocals`. The callee runs in the memory
-after frame entry and the result is read after the local expires, so the
-forwarder's contract `outer` is related to the callee's `inner` through
-`extend input home` and premises over those memories: every forwarder argument
-valid under `outer.pre` (`checked`), since the forwarder checks them all;
-`inner.pre` from `outer.pre` with the home fresh, writable and holding its
-initializer (`LocalHolds`); an `inner` footprint that names fresh storage or lies
-inside `outer.footprint`; and `outer.post` from `inner.post` once the frame has
-expired. The footprint is checked by the lemma (`Confined.across_frame`); returned
-values must be scalars, which survive the local's expiry. The home's alignment is
-not surfaced, so a callee whose precondition requires it cannot be composed yet.
+The local may hold any initializer that fits its kind; the extractor emits
+`.unmodeled` without `InitLocals` and the kind's zero with it. The callee runs in
+the memory after frame entry and the result is read after the local expires, so
+the forwarder's contract `outer` is related to the callee's `inner` through
+`extend input home` and premises over those memories. The callee's arguments must
+be the forwarder's selected by the loads followed by the home, each kept by its
+load's narrowing and none with unspecified vector bits; `outer.pre` must give a
+well-formed memory in which every forwarder argument is valid (`checked`), since
+the forwarder checks them all; `inner.pre` must follow from `outer.pre` with the
+home fresh, writable and holding its initializer (`LocalHolds`); the `inner`
+footprint must name fresh storage or lie inside `outer.footprint`; the two
+contracts must encode results alike, as scalars that survive the local's expiry
+and that a narrowed `ret` keeps; and `outer.post` must follow from `inner.post`
+once the frame has expired. The footprint is checked by the lemma
+(`Confined.across_frame`). The home's alignment is not surfaced, so a callee whose
+precondition requires it cannot be composed yet.
 
 ## Compose through imported contracts
 
