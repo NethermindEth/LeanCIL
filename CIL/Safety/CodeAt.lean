@@ -42,7 +42,7 @@ theorem iff_lookup : CodeAt body start segment ↔
 #print axioms iff_lookup
 
 /-- The instruction at each position of a placed segment is the segment's instruction there. -/
-theorem lookup {index : Nat} {op : CIL.Op} (placed : CodeAt body start segment)
+theorem lookup {op : CIL.Op} (placed : CodeAt body start segment) (index : Nat)
     (found : segment[index]? = some op) : body.code[start + index]? = some op := by
   rw [iff_lookup.mp placed index (List.getElem?_eq_some_iff.mp found).1, found]
 
@@ -71,6 +71,16 @@ theorem exists_eq_append (placed : CodeAt body start segment)
     omega
 
 #print axioms exists_eq_append
+
+/-- A nonempty placed segment ends within the code, so `exists_eq_append` applies to it. -/
+theorem end_le_length (placed : CodeAt body start segment) (nonempty : segment ≠ []) :
+    start + segment.length ≤ body.code.length := by
+  have length := congrArg List.length placed
+  simp only [List.length_take, List.length_drop] at length
+  have positive := List.length_pos_iff.mpr nonempty
+  omega
+
+#print axioms end_le_length
 
 /-- The empty segment is placed anywhere. -/
 theorem nil : CodeAt body start [] := by
@@ -149,9 +159,9 @@ theorem take (placed : CodeAt body start segment) (count : Nat) :
 #print axioms take
 
 /-- A segment inside a placed segment is placed after the instructions that precede it. -/
-theorem middle {before middle after : List CIL.Op}
-    (placed : CodeAt body start (before ++ middle ++ after)) :
-    CodeAt body (start + before.length) middle :=
+theorem middle {before inner after : List CIL.Op}
+    (placed : CodeAt body start (before ++ inner ++ after)) :
+    CodeAt body (start + before.length) inner :=
   append_left (append_right (List.append_assoc _ _ _ ▸ placed))
 
 #print axioms middle

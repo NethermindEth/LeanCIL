@@ -132,7 +132,7 @@ the goal unchanged.
 A segment theorem over an abstract body states where its code sits with
 `CodeAt body start segment` ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of
 `body.code = leading ++ segment ++ tail` and `leading.length = start`.
-`placed.lookup (index := i) rfl` proves `body.code[start + i]? = some op` to
+`placed.lookup i rfl` proves `body.code[start + i]? = some op` to
 pass as a lookup hypothesis; `append`, `middle`, `take` and `drop` move a placement
 between a region and its segments, and `rfl` closes a concrete one.
 [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.

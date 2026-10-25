@@ -17,6 +17,18 @@ open CIL.Safety
 /-- The segment `left + right` over the first two arguments. -/
 def sumSegment : List CIL.Op := [.arg 0, .arg 1, .add]
 
+-- Without a placement the abstract body's instructions are unknown, so stepping cannot start.
+/-- error: cil_checked_steps took no step: the method or instruction lookup -/
+#guard_msgs (substring := true) in
+example {program : CIL.Program} {method fuel start : Nat} {body : CIL.Method}
+    (found : program[method]? = some body) (memory : Memory) (frame : Frame)
+    (left right : CIL.W64) :
+    run program (fuel + 3) method start [.scalar (.i64 left), .scalar (.i64 right)] frame []
+        memory =
+      run program fuel method (start + 3) [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 (left + right))] memory := by
+  cil_checked_steps [found]
+
 /-- Placing `sumSegment` at any `start` of a body is enough to run it: from `start` the run
     reaches `start + 3` with the sum pushed. The only facts about the body are its lookup in
     the program and the placement. -/
@@ -27,14 +39,13 @@ theorem run_sum_segment {program : CIL.Program} {method fuel start : Nat} {body 
         memory =
       run program fuel method (start + 3) [.scalar (.i64 left), .scalar (.i64 right)] frame
         [.scalar (.i64 (left + right))] memory := by
-  -- Without the placement's lookups the abstract body cannot be stepped.
-  fail_if_success cil_checked_steps [found]
-  have loadLeft : body.code[start]? = some (.arg 0) := placed.lookup (index := 0) rfl
-  have loadRight : body.code[start + 1]? = some (.arg 1) := placed.lookup (index := 1) rfl
-  have addition : body.code[start + 2]? = some .add := placed.lookup (index := 2) rfl
+  have loadLeft : body.code[start]? = some (.arg 0) := placed.lookup 0 rfl
+  have loadRight : body.code[start + 1]? = some (.arg 1) := placed.lookup 1 rfl
+  have addition : body.code[start + 2]? = some .add := placed.lookup 2 rfl
   cil_checked_steps [found, loadLeft, loadRight, addition]
 
-#print axioms run_sum_segment
+/-- info: 'Tests.CodeAt.run_sum_segment' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms run_sum_segment
 
 /-- A placed region containing `sumSegment` runs it, through the segment theorem applied to
     the region's middle placement. -/
@@ -48,10 +59,11 @@ theorem run_sum_in_region {program : CIL.Program} {method fuel : Nat} {body : CI
         [.scalar (.i64 (left + right))] memory :=
   run_sum_segment found placed.middle memory frame left right
 
-#print axioms run_sum_in_region
+/-- info: 'Tests.CodeAt.run_sum_in_region' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms run_sum_in_region
 
 /-- A concrete body holding `sumSegment` at pc 4. -/
-@[cil_code] def placedMethod : CIL.Method := {
+def placedMethod : CIL.Method := {
   code := [.nop, .nop, .nop, .nop, .arg 0, .arg 1, .add, .ret]
   locals := [], returnsValue := true }
 
@@ -59,7 +71,7 @@ theorem run_sum_in_region {program : CIL.Program} {method fuel : Nat} {body : CI
 example : CodeAt placedMethod 4 sumSegment := rfl
 example : ¬ CodeAt placedMethod 3 sumSegment := by
   intro placed
-  cases placed.lookup (index := 0) rfl
+  cases placed.lookup 0 rfl
 
 /-- The segment theorem instantiates at a concrete program once its placement is checked. -/
 theorem run_placed_method (memory : Memory) (frame : Frame) (left right : CIL.W64) :
@@ -69,7 +81,8 @@ theorem run_placed_method (memory : Memory) (frame : Frame) (left right : CIL.W6
   run_sum_segment (fuel := 2) (start := 4) (body := placedMethod) rfl rfl memory frame
     left right
 
-#print axioms run_placed_method
+/-- info: 'Tests.CodeAt.run_placed_method' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms run_placed_method
 
 -- The positional hypotheses an older segment theorem threads give the same placement.
 example {body : CIL.Method} {tail : List CIL.Op}
@@ -103,5 +116,20 @@ example : ¬ ∃ leading tail : List CIL.Op,
   have total := congrArg List.length split
   simp [placedMethod] at total
   omega
+
+-- A placement's first instruction is at its start, and the rest follows it.
+example {body : CIL.Method} (placed : CodeAt body 4 sumSegment) :
+    body.code[4]? = some (.arg 0) ∧ CodeAt body 5 [.arg 1, .add] :=
+  CodeAt.cons_iff.mp placed
+
+-- A nonempty placement lies within the code, so it recovers the positional form on its own.
+example {body : CIL.Method} (placed : CodeAt body 4 sumSegment) :
+    ∃ leading tail, body.code = leading ++ sumSegment ++ tail ∧ leading.length = 4 :=
+  placed.exists_eq_append (by
+    have ends := placed.end_le_length (by simp [sumSegment])
+    simp only [sumSegment, List.length_cons, List.length_nil] at ends
+    omega)
+example : ¬ CodeAt placedMethod 6 sumSegment := fun placed =>
+  absurd (placed.end_le_length (by simp [sumSegment])) (by simp [placedMethod, sumSegment])
 
 end Tests.CodeAt
