@@ -11,6 +11,7 @@ internal static class ScalarEvidence
         NativeOperands.Kind.Word64 => ".word64",
         NativeOperands.Kind.Native => ".native",
         NativeOperands.Kind.Reference => ".reference",
+        NativeOperands.Kind.NullObject => ".nullObject",
         _ => ".other"
     };
 

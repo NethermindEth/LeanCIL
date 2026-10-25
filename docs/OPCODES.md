@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 156 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 157 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -22,6 +22,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | --- | --- | --- |
 | `ldc.i4`, `ldc.i4.s`, `ldc.i4.m1`, `ldc.i4.0`–`ldc.i4.8` | Complete within the admitted model | Push the encoded 32-bit integer constant. |
 | `ldc.i8` | Complete within the admitted model | Push the encoded 64-bit integer constant. |
+| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, or stack shuffles/discard. Object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
 | `nop` | Complete within the admitted model | Advance without changing the stack or memory. |
 | `dup`, `pop` | Complete within the admitted model | Duplicate or discard a supported stack value; stack underflow fails. |
 | `ldarg`, `ldarg.s`, `ldarg.0`–`ldarg.3` | Partial | Load admitted argument values; struct instance methods have a managed-reference `this` at index zero; narrow integers are truncated and sign- or zero-extended to `i32`. Reference values undergo validity checks; class instance methods remain unsupported. |
@@ -46,14 +47,14 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `conv.i8` | Partial | Sign-extend `i32` to `i64`, or preserve an `i64`. No floating-point or reference conversions. |
 | `conv.i` | Partial | Sign-extend an integer `i32` to the admitted 64-bit native width, or preserve an `i64`. No pointer/reference or floating-point conversion. |
 | `conv.u` | Partial | Model native unsigned integers as 64-bit: zero-extend `i32`, or preserve `i64`. Does not convert a managed reference to an integer address. |
-| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. No reference/null equality or floating-point/unordered comparisons. |
+| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality as described below; the other comparisons remain numeric. No floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted instruction boundary, including backward edges and self-loops. |
 | `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. All reachable targets must be valid instruction boundaries; each arm and the fallthrough participate in dependency and stack analysis. |
 | `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char) or same-assembly explicit- or sequential-layout, reference-free aggregates. Native integers use eight bytes under the validated profile. No reference types, floating-point, generic layouts or vector types. |
-| `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. No managed-reference/null truth tests. Admitted forward and backward successors. |
+| `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. Also accepts checked references, including readonly references and null. Admitted forward and backward successors. |
 | `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
 | `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
-| `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. No reference or floating-point comparison. |
+| `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. Also supports checked reference equality as described below. No floating-point comparison. |
 | `ldind.i`, `stind.i` | Partial | Native-width integer load/store through checked managed references; eight bytes on the admitted target, with the same allocation, permission and lifetime checks. |
 | `ldind.i8`, `stind.i8` | Partial | Eight-byte integer load/store through a checked reference. Allocation bounds, permissions, initialization and lifetime rules apply; arbitrary numeric addresses are not accepted. |
 | `ldind.i1`, `ldind.u1`, `ldind.i2`, `ldind.u2`, `ldind.i4`, `ldind.u4` | Partial | One-, two- or four-byte integer loads through a checked reference. Signed narrow loads sign-extend and unsigned loads zero-extend to `i32`; both four-byte forms return the same `i32` bits. Aggregate snapshots and numeric addresses are rejected. |
@@ -90,6 +91,20 @@ fails. Numeric address fabrication and general pointer casts remain unsupported.
 The quota is a deployment premise rather than a physical-stack measurement. Ordinary frame and
 call overhead are outside it; see [the soundness boundary](SOUNDNESS.md#what-is-defined-and-proved).
 
+## Reference observations
+
+Reference truth tests and equality validate lifetime and reference formation without requiring
+read authority or initialized bytes. Readonly references retain their write restriction.
+Equality compares offsets within one allocation and distinguishes interior addresses from
+separate allocations. Cross-allocation comparisons involving an end sentinel are rejected:
+the model does not know whether the physical end address equals a neighbouring allocation's
+start. Comparing invalid or expired references fails, even when both operands are identical.
+
+The certificate tracks an `ldnull` object separately from managed references. It cannot be
+stored or passed as a managed pointer. Existing `Unsafe.NullRef<T>` values remain managed
+references and can participate in reference comparisons. Numeric zero does not become a
+reference through these rules.
+
 ## Block memory and alignment prefixes
 
 `initblk` and `cpblk` are partially supported for checked managed references and unsigned 32-bit byte counts. Initialization uses the low eight bits of its integer value. Copying requires initialized, readable source bytes; both operations require writable destination bytes, valid lifetimes, bounds and reference-free storage. Every nonempty overlapping copy, including an exact alias, is rejected because CLI overlap behaviour is unspecified. Zero counts access no memory and permit null references.
@@ -109,7 +124,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`; `constrained.` outside the checked struct-call subset |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*` |
-| Objects, arrays and metadata | `ldnull` and `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` of a method or of a type outside a decided type test |
+| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` of other fields, `ldsflda` of constructor-initialized fields |
 | Dispatch and exceptions | Unconstrained `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
@@ -191,8 +206,8 @@ Every load, store, copy, initialization, field or lane access of one or more
 bytes through null faults with `nullDereference`, the model's
 `NullReferenceException`, and no address is formed from it; zero-length block
 operations access nothing, as above. Extraction evidence binds each call to its operation in
-both directions, as for `SkipInit`. `ldnull` remains unsupported: this is a null
-byref, not a null object reference.
+both directions, as for `SkipInit`. `NullRef` produces a null byref; the bounded
+`ldnull` support above produces an object null and does not permit mixing it with managed pointers.
 
 The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and byte-span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references remains unsupported.
 

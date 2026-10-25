@@ -18,7 +18,7 @@ namespace CIL.Extraction
 
 /-- The evaluation-stack kind of a value, as far as scalar encodings care. -/
 inductive ScalarKind where
-  | word32 | word64 | native | reference | other
+  | word32 | word64 | native | reference | nullObject | other
   deriving DecidableEq, Repr
 
 /-- The claimed stack kinds (top first) at each raw pc; `none` where the pc is unreachable. -/
@@ -73,7 +73,7 @@ private def unsignedBranch (opcode : Nat) : Bool :=
     shifts, `neg`, `not`, conversions and compare-branches. -/
 def scalarCovered (opcode : Nat) : Bool :=
   (21 <= opcode && opcode <= 33) || scalarBinary opcode || conversion opcode ||
-    compareBranch opcode || opcode ∈ [98, 99, 100, 101, 102]
+    compareBranch opcode || opcode ∈ [20, 44, 45, 57, 58, 98, 99, 100, 101, 102]
 
 /-- The emitted operation each covered non-branch opcode must produce. -/
 private def scalarEncodingMatches (opcode : Nat) (emitted : Op) : Bool :=
@@ -121,6 +121,10 @@ private def mixedNative (left right : ScalarKind) : Bool :=
 private def compatibleBinary (left right : ScalarKind) : Bool :=
   numeric left && numeric right && (left == right || mixedNative left right)
 
+/-- Reference equality does not identify an object null with a managed pointer. -/
+private def referenceEquality (opcode : Nat) (left right : ScalarKind) : Bool :=
+  opcode ∈ [46, 51, 59, 64, 65025] && left == right && left ∈ [.reference, .nullObject]
+
 /-- Mixed native/int32 operands require exactly one `nativeBinary` wrapper; any other pair
     forbids it. -/
 private def nativeWrapped (left right : ScalarKind) (encoding : Op → Bool) : Op → Bool
@@ -144,13 +148,25 @@ private def literal (instruction : RawInstruction) : Option Op :=
 /-- A covered opcode emits exactly the encoding its operand kinds imply. -/
 def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Op) :
     Bool :=
-  if 21 <= instruction.opcode && instruction.opcode <= 33 then
+  if instruction.opcode == 20 then
+    instruction.operand == .none && match emitted with | .memory .nullRef => true | _ => false
+  else if instruction.opcode ∈ [44, 45, 57, 58] then
+    match instruction.operand, stack, emitted with
+    | .target target, value :: _, .brzero actual =>
+      instruction.opcode ∈ [44, 57] && target == actual &&
+        (numeric value || value ∈ [.reference, .nullObject])
+    | .target target, value :: _, .brnonzero actual =>
+      instruction.opcode ∈ [45, 58] && target == actual &&
+        (numeric value || value ∈ [.reference, .nullObject])
+    | _, _, _ => false
+  else if 21 <= instruction.opcode && instruction.opcode <= 33 then
     match literal instruction, emitted with
     | some (.const32 expected), .const32 actual => expected == actual
     | some (.const64 expected), .const64 actual => expected == actual
     | _, _ => false
   else if compareBranch instruction.opcode then match instruction.operand, stack with
-    | .target target, right :: left :: _ => compatibleBinary left right &&
+    | .target target, right :: left :: _ =>
+        (compatibleBinary left right || referenceEquality instruction.opcode left right) &&
         !(mixedNative left right && unsignedBranch instruction.opcode) &&
         nativeWrapped left right (branchEncodingMatches instruction.opcode target) emitted
     | _, _ => false
@@ -160,7 +176,8 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
     | some kind, .memory (.add 1 true) => kind ∈ [.word32, .native]
     | _, _ => false
   else if scalarBinary instruction.opcode then match stack with
-    | right :: left :: _ => compatibleBinary left right &&
+    | right :: left :: _ =>
+        (compatibleBinary left right || referenceEquality instruction.opcode left right) &&
         nativeWrapped left right (scalarEncodingMatches instruction.opcode) emitted
     | _ => false
   else if instruction.opcode ∈ [98, 99, 100] then match stack with
@@ -216,7 +233,9 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     (bound by the feature check) or a size constant may emit a scalar operation. -/
 def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
-  if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
+  if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
+    instruction.operand == .none && match emitted with | .nop => true | _ => false
+  else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | some (.result _), .const32 _ => true
     | _, .const32 bits => sizeConstant instruction bits
@@ -445,8 +464,16 @@ private def pushedKind (raw : RawMethod) (instruction : RawInstruction) : Option
 
 /-- The stack kinds after `instruction`, or `none` if its operands have the wrong kinds. -/
 def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
-    (stack : List ScalarKind) : Option (List ScalarKind) := do
+    (stack : List ScalarKind) (role : Option FoldRole := none) : Option (List ScalarKind) := do
   let opcode := instruction.opcode
+  if opcode == 20 then
+    if instruction.operand == .none then return .nullObject :: stack else none
+  if opcode ∈ [44, 45, 57, 58] then
+    let value :: tail := stack | none
+    if numeric value || value ∈ [.reference, .nullObject] then return tail else none
+  if compareBranch opcode then
+    let right :: left :: tail := stack | none
+    if compatibleBinary left right || referenceEquality opcode left right then return tail else none
   if opcode == 65039 then
     match stack with
     | [kind] => if kind ∈ [.word32, .native] then return [.reference] else none
@@ -460,7 +487,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let right :: left :: tail := stack | none
     if opcode == 88 && left == .reference && right ∈ [.word32, .native] then
       return .reference :: tail
-    if !compatibleBinary left right then none else
+    if !(compatibleBinary left right || referenceEquality opcode left right) then none else
       return (if comparison opcode then .word32
         else if mixedNative left right then .native else left) :: tail
   if opcode ∈ [98, 99, 100] then
@@ -491,8 +518,11 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
       then [.word32, .reference] else
       site.parameterTypes.reverse.map scalarType ++
         (if opcode != 115 && site.hasThis then [.reference] else [])
+    let inputs := if opcode == 115 && role == some .interior then
+        stack.map (fun kind => if kind == .nullObject then .other else kind)
+      else stack
     let pops := expected.length
-    if !callParametersMatch site || pops > stack.length || stack.take pops != expected ||
+    if !callParametersMatch site || pops > stack.length || inputs.take pops != expected ||
         site.returnsValue != (site.returnType != .void) then none else
       return (if opcode == 115 then [ScalarKind.other]
         else if site.returnsValue then [callResult site] else []) ++ stack.drop pops
@@ -537,7 +567,7 @@ private def checkScalarSite (raw : RawMethod) (features : FeatureCertificate)
       spanCreateMatches instruction emitted &&
       scalarEmissionMatches role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||
-      match scalarTransfer raw instruction stack, featureSuccessors pc instruction feature with
+      match scalarTransfer raw instruction stack role, featureSuccessors pc instruction feature with
       | some after, some successors =>
         successors.all fun target => match features[target]? with
           | some (some _) => certificate[target]? == some (some after)
