@@ -210,12 +210,12 @@ Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.Metho
     "Tests.LocalSnapshots", "Tests.ContractConsequence", "Tests.InvocationCertificates",
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
-    "Tests.ProfileContract"],
+    "Tests.ProfileContract", "Tests.InstructionEquations"],
     streamOutput: true, progress: "Building Lean library, semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
     + "local snapshot, contract consequence, invocation certificate, call transport, buffer contents, linking, "
-    + "store fact and profile contract tests");
+    + "store fact, profile contract and instruction equation tests");
 
 // Verify each extracted method and immediately check its artifact identity.
 foreach (var (name, signature) in signatures)

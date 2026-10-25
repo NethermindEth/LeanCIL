@@ -152,6 +152,9 @@ name = "Tests.VectorFields"
 [[lean_lib]]
 name = "Tests.ProfileContract"
 
+[[lean_lib]]
+name = "Tests.InstructionEquations"
+
 # Audits kernel-replayed oleans without elaborating proof or publisher source.
 [[lean_exe]]
 name = "leancil-audit"

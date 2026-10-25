@@ -905,3 +905,45 @@ The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for
 for the exact conditions and limits; `Tests/MethodEmbedding.lean` covers both
 outcomes, and `Tests/OutcomeEmbedding.lean` transfers a raising helper and its
 caller across an inserted dead block, with the relocated throw pc.
+
+### Instruction equations for parametric bodies
+
+A body written once for every profile takes its feature flags and callee
+indices as parameters and keeps each feature-dependent instruction as an `if`,
+padding the other profile's side with `.unsupported` so every profile has the
+same pcs. `cil_instruction_equations` (from `CIL.InstructionEquations`) states
+one `@[cil_code ↓]` equation per pc for such a body, the same
+`code[pc]? = some op` equations the extractor emits for its own methods, so a
+lookup rewrites by one equation instead of unfolding the body:
+
+```lean
+import CIL.InstructionEquations
+import CIL.Safety.SymbolicExecution
+
+abbrev unreachable : CIL.Op := .unsupported "Unreachable under selected profile"
+
+def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
+  { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
+    .feature .avx2, .brzero 4,
+    if avx2 then .call callee 0 else unreachable,
+    if avx2 then .ret else unreachable,
+    if avx2 then unreachable else .ret] }
+
+cil_instruction_equations body
+
+-- body_instruction2 (sse42 avx2 : Bool) (callee : Nat) :
+--   (body sse42 avx2 callee).code[2]? = some (if avx2 = true then .call callee 0 else unreachable)
+-- cil_lookup fetches through the equation and decides the `if` from the fact.
+example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
+    ∃ op, (body sse42 avx2 callee).code[2]? = some op ∧ op = .call callee 0 :=
+  ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
+```
+
+A body whose code length depends on a parameter, such as an `if` around a
+whole block, is rejected with the first pc that is not determined. Only the
+kernel checks the equations: 100 instructions take about 0.1 s, 400 take 2.4 s
+and 1,500 take 32 s, growing with the square of the length like the extractor's
+own equations, and about eight times faster than writing each `:= rfl` by hand.
+`Tests/InstructionEquations.lean` covers lookups on symbolic flags and on
+concrete profiles, with the body sealed so only the equations can fetch, and a
+`cil_checked_steps` run decided by a fact about a symbolic flag.

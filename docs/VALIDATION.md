@@ -186,6 +186,15 @@ CLR-named and descriptor-indexed forms, with agreement decided from the flags th
 reads. The baseline profile, with AVX2 off, fails both the agreement check and the contract,
 and turning off one of the four flags an AVX-512 DQ multiply needs fails the check.
 
+`Tests.InstructionEquations` checks that `cil_instruction_equations` states one
+equation per pc of a body over two feature flags and a callee index, keeping each
+feature test as an `if`, and of bodies with no parameters, with implicit and
+hypothesis parameters, and composed with `++` and `List.replicate`; that
+`cil_lookup` fetches through them from a sealed body; that facts or literal flags
+decide the test, in lookups and in a checked run; and that a run proved over the
+flags binds two profiles. A body whose length depends on a flag, at its first pc
+or a later one, is rejected with nothing declared.
+
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
 naming `CIL.step.eq_def` elaborates.
@@ -193,7 +202,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
