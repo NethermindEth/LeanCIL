@@ -374,6 +374,9 @@ and four compiled-method certificates. It does not participate in PR checks.
 When upgrading the pin, follow the [consumer API migration notes](docs/CONSUMER-MIGRATION.md)
 and validate both the supporting library and those certificates.
 
+The [fixed-consumer performance report](docs/performance/issue270/README.md) separates
+historical extraction-certificate costs from consumer proof checking and joint replay.
+
 ## License
 
 [MIT](LICENSE).
