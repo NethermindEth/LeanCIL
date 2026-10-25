@@ -1,0 +1,179 @@
+diff --git a/UInt256/Methods/ConstructorSafety.lean b/UInt256/Methods/ConstructorSafety.lean
+index f78deae..70964df 100644
+--- a/UInt256/Methods/ConstructorSafety.lean
++++ b/UInt256/Methods/ConstructorSafety.lean
+@@ -7 +6,0 @@ import CIL.SymbolicExecution
+-import CIL.Safety.GuardNormalization
+@@ -25 +24 @@ macro "constructor_step" facts:term,* : tactic =>
+-  `(tactic| simp [step, cil_guard, observerCount, arguments, checkedValue, numericValue, formValue,
++  `(tactic| simp [step, arguments, checkedValue, numericValue, formValue,
+@@ -69 +68 @@ theorem constructor_safe (profile : CIL.FeatureProfile) (program : CIL.Program)
+-    simp [run, found, body, step, cil_guard, observerCount, leaveFrame, Except.mapError,
++    simp [run, found, body, step, leaveFrame, Except.mapError,
+diff --git a/UInt256/Methods/Equality/PrimitiveChecked.lean b/UInt256/Methods/Equality/PrimitiveChecked.lean
+index 9bd4bb7..008a7bb 100644
+--- a/UInt256/Methods/Equality/PrimitiveChecked.lean
++++ b/UInt256/Methods/Equality/PrimitiveChecked.lean
+@@ -22 +22 @@ theorem primitive_setup (primitiveBody : CIL.Method)
+-    (opaqueLocals : primitiveBody.opaqueVectorLocals = [])
++    (opaqueLocals : ([] : List Nat) = [])
+@@ -52 +52 @@ variable (program : CIL.Program) (primitiveIndex primitiveConstructorCall scalar
+-  (opaqueLocals : primitiveBody.opaqueVectorLocals = [])
++  (opaqueLocals : ([] : List Nat) = [])
+diff --git a/UInt256/Methods/Equality/PrimitiveFinish.lean b/UInt256/Methods/Equality/PrimitiveFinish.lean
+index e3f0740..f5df15a 100644
+--- a/UInt256/Methods/Equality/PrimitiveFinish.lean
++++ b/UInt256/Methods/Equality/PrimitiveFinish.lean
+@@ -6 +5,0 @@ import CIL.Safety.CallComposition
+-import CIL.Safety.GuardNormalization
+@@ -44 +43 @@ theorem primitive_store_prefix (memory updated : Memory) (left home : Reference)
+-  · simp [step, cil_guard, observerCount, stored, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
++  · simp [step, stored, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+@@ -47 +46 @@ theorem primitive_store_prefix (memory updated : Memory) (left home : Reference)
+-  · simp [step, cil_guard, observerCount, localAddress, formValue, formed, checkedAt,
++  · simp [step, localAddress, formValue, formed, checkedAt,
+@@ -57 +56 @@ include lookup retFetched returns in
+-    simp [run, lookup, retFetched, step, cil_guard, observerCount, returns, checkedValue, numericValue, CIL.NarrowKind.extend,
++    simp [run, lookup, retFetched, step, returns, checkedValue, numericValue, CIL.NarrowKind.extend,
+@@ -103 +102 @@ theorem primitive_finish (memory : Memory) (left home : Reference) (right : CIL.
+-    simp [step, cil_guard, observerCount, readOnlyArguments, checkedValue, formValue, fl, fh, checkedAt,
++    simp [step, readOnlyArguments, checkedValue, formValue, fl, fh, checkedAt,
+diff --git a/UInt256/Methods/Equality/PrimitiveOperator.lean b/UInt256/Methods/Equality/PrimitiveOperator.lean
+index ad5a07c..433211b 100644
+--- a/UInt256/Methods/Equality/PrimitiveOperator.lean
++++ b/UInt256/Methods/Equality/PrimitiveOperator.lean
+@@ -18 +18 @@ theorem returned (profile : CIL.FeatureProfile) (reversed negate : Bool) (progra
+-    simp [run, found, body, step, cil_guard, observerCount, pureArity, scalars, CIL.step.eq_def, CIL.binary,
++    simp [run, found, body, step, pureArity, scalars, CIL.step.eq_def, CIL.binary,
+@@ -40 +40 @@ theorem prefix_trace {α : Type} (encode : α → CIL.Value)
+-         · simp [body, step, cil_guard, observerCount, scalarOperatorArguments, scalarArguments, numeric, checkedValue, formValue, formed,
++         · simp [body, step, scalarOperatorArguments, scalarArguments, numeric, checkedValue, formValue, formed,
+@@ -49 +49 @@ theorem checked {α : Type} (encode : α → CIL.Value) (equal : BitVec 256 →
+-    (known : ∀ word, (encode word).hasUnspecified = false := by intros; rfl) :
++    (known : ∀ word, ((fun (_ : CIL.Value) => false) (encode word)) = false := by intros; rfl) :
+@@ -55 +55 @@ theorem checked {α : Type} (encode : α → CIL.Value) (equal : BitVec 256 →
+-    simp [enterFrame, body, makeSelectedLocals, makeLocals, makeArgumentHomes, makeParameterHomes, frame,
++    simp [enterFrame, body, makeLocals, makeArgumentHomes, makeParameterHomes, frame,
+@@ -72 +72 @@ theorem checked {α : Type} (encode : α → CIL.Value) (equal : BitVec 256 →
+-    simp [step, cil_guard, observerCount, scalarOperatorArguments, scalarArguments, checkedValue, numeric, known, formValue, formed,
++    simp [step, scalarOperatorArguments, scalarArguments, checkedValue, numeric, known, formValue, formed,
+diff --git a/UInt256/Methods/Equality/ReferenceOperator.lean b/UInt256/Methods/Equality/ReferenceOperator.lean
+index 7ca7c02..5db5ae3 100644
+--- a/UInt256/Methods/Equality/ReferenceOperator.lean
++++ b/UInt256/Methods/Equality/ReferenceOperator.lean
+@@ -26 +26 @@ theorem checked (equal : BitVec 256 → BitVec 256 → Bool)
+-    simp [enterFrame, body, PrimitiveOperator.body, makeSelectedLocals, makeLocals, makeArgumentHomes, makeParameterHomes, frame,
++    simp [enterFrame, body, PrimitiveOperator.body, makeLocals, makeArgumentHomes, makeParameterHomes, frame,
+@@ -40 +40 @@ theorem checked (equal : BitVec 256 → BitVec 256 → Bool)
+-    simp [step, cil_guard, observerCount, readOnlyArguments, checkedValue, formValue, fl, fr, checkedAt,
++    simp [step, readOnlyArguments, checkedValue, formValue, fl, fr, checkedAt,
+@@ -51 +51 @@ theorem checked (equal : BitVec 256 → BitVec 256 → Bool)
+-        · simp (config := { implicitDefEqProofs := false }) [step, cil_guard, observerCount, readOnlyArguments, checkedValue, formValue, fl, fr,
++        · simp (config := { implicitDefEqProofs := false }) [step, readOnlyArguments, checkedValue, formValue, fl, fr,
+diff --git a/UInt256/Methods/Equality/ReferenceVector.lean b/UInt256/Methods/Equality/ReferenceVector.lean
+index fe39aa6..ba5c4df 100644
+--- a/UInt256/Methods/Equality/ReferenceVector.lean
++++ b/UInt256/Methods/Equality/ReferenceVector.lean
+@@ -39 +39 @@ theorem executed (profile : CIL.FeatureProfile) (program : CIL.Program) (index :
+-          [body, step, cil_guard, observerCount, readOnlyArguments, checkedValue, numericValue, formValue, fl, fr,
++          [body, step, readOnlyArguments, checkedValue, numericValue, formValue, fl, fr,
+@@ -45 +45 @@ theorem executed (profile : CIL.FeatureProfile) (program : CIL.Program) (index :
+-  simp [run, found, body, step, cil_guard, observerCount, checkedValue, numericValue, CIL.NarrowKind.extend,
++  simp [run, found, body, step, checkedValue, numericValue, CIL.NarrowKind.extend,
+@@ -59 +59 @@ theorem checked (profile : CIL.FeatureProfile) (program : CIL.Program) (index :
+-    (by intro left right; simp [body, FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit, SelectedKindsFit])
++    (by intro left right; simp [body, FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit])
+diff --git a/UInt256/Methods/Equality/ReferenceVectorWrapper.lean b/UInt256/Methods/Equality/ReferenceVectorWrapper.lean
+index 6b4ca51..578415e 100644
+--- a/UInt256/Methods/Equality/ReferenceVectorWrapper.lean
++++ b/UInt256/Methods/Equality/ReferenceVectorWrapper.lean
+@@ -48 +48 @@ theorem executed (profile : CIL.FeatureProfile) (program : CIL.Program) (index c
+-    split <;> simp [run, found, body, step, cil_guard, observerCount, checkedValue, numericValue, CIL.NarrowKind.extend,
++    split <;> simp [run, found, body, step, checkedValue, numericValue, CIL.NarrowKind.extend,
+@@ -53 +53 @@ theorem executed (profile : CIL.FeatureProfile) (program : CIL.Program) (index c
+-    simp [step, cil_guard, observerCount, readOnlyArguments, checkedValue, formValue, fl, fr, checkedAt,
++    simp [step, readOnlyArguments, checkedValue, formValue, fl, fr, checkedAt,
+@@ -61 +61 @@ theorem executed (profile : CIL.FeatureProfile) (program : CIL.Program) (index c
+-      · simp (config := { implicitDefEqProofs := false }) [body, step, cil_guard, observerCount, readOnlyArguments, checkedValue, numericValue, formValue, fl, fr,
++      · simp (config := { implicitDefEqProofs := false }) [body, step, readOnlyArguments, checkedValue, numericValue, formValue, fl, fr,
+@@ -79 +79 @@ theorem checked (profile : CIL.FeatureProfile) (program : CIL.Program) (index ca
+-    (by intro left right; simp [body, FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit, SelectedKindsFit])
++    (by intro left right; simp [body, FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit])
+diff --git a/UInt256/Methods/Equality/ScalarLeaf.lean b/UInt256/Methods/Equality/ScalarLeaf.lean
+index 56da324..655af0d 100644
+--- a/UInt256/Methods/Equality/ScalarLeaf.lean
++++ b/UInt256/Methods/Equality/ScalarLeaf.lean
+@@ -112 +112 @@ theorem scalar_frame_fits (left right : Reference) :
+-  simp [body, FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit, SelectedKindsFit]
++  simp [body, FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit]
+diff --git a/UInt256/Methods/Equality/ScalarSafetyContract.lean b/UInt256/Methods/Equality/ScalarSafetyContract.lean
+index 2d1d1bd..81606a6 100644
+--- a/UInt256/Methods/Equality/ScalarSafetyContract.lean
++++ b/UInt256/Methods/Equality/ScalarSafetyContract.lean
+@@ -7 +6,0 @@ import UInt256.Safety.ReadOnlyExecution
+-import CIL.Safety.GuardNormalization
+@@ -56 +55 @@ theorem scalar_run (memory : Memory) (left right : Reference) (frame : Frame)
+-          [step, cil_guard, observerCount, readOnlyArguments, checkedValue, numericValue, formValue, fl, fr,
++          [step, readOnlyArguments, checkedValue, numericValue, formValue, fl, fr,
+@@ -61 +60 @@ theorem scalar_run (memory : Memory) (left right : Reference) (frame : Frame)
+-  simp [run, cil_code, step, cil_guard, observerCount, checkedValue, numericValue, scalarDifference, CIL.NarrowKind.extend,
++  simp [run, cil_code, step, checkedValue, numericValue, scalarDifference, CIL.NarrowKind.extend,
+@@ -109 +108 @@ theorem scalar_frame_fits (left right : Reference) :
+-  simp [FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit, SelectedKindsFit]
++  simp [FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit]
+diff --git a/UInt256/Methods/Equality/VectorPrimitive.lean b/UInt256/Methods/Equality/VectorPrimitive.lean
+index 9133f1d..958bff2 100644
+--- a/UInt256/Methods/Equality/VectorPrimitive.lean
++++ b/UInt256/Methods/Equality/VectorPrimitive.lean
+@@ -5 +4,0 @@ import CIL.Safety.Equations
+-import CIL.Safety.GuardNormalization
+@@ -7,0 +7,2 @@ import CIL.Safety.SymbolicExecution
++set_option maxHeartbeats 2000000
++
+@@ -21 +22 @@ theorem load_input {program : CIL.Program} {memory : Memory} {inputs outputs : L
+-  simp only [cil_guard, observerCount, Bool.or_false, Bool.false_eq_true, ite_false, dereference, ordinaryAccessAlignment, loaded, inputBytes, checkedAt, Except.mapError,
++  simp only [Bool.or_false, Bool.false_eq_true, ite_false, dereference, ordinaryAccessAlignment, loaded, inputBytes, checkedAt, Except.mapError,
+@@ -109 +110 @@ theorem checked32 (profile : CIL.FeatureProfile) (program : CIL.Program) (index
+-    (by intro left right; simp [body, FrameSetupFits, InitializersFit, InitializerFits, AggregateArgumentsFit, ParameterArgumentsFit, SelectedKindsFit])
++    (by intro left right; simp [body, FrameSetupFits, InitializersFit, InitializerFits, AggregateArgumentsFit, ParameterArgumentsFit])
+@@ -118 +119 @@ theorem checked64 (profile : CIL.FeatureProfile) (program : CIL.Program) (index
+-    (by intro left right; simp [body, FrameSetupFits, InitializersFit, InitializerFits, AggregateArgumentsFit, ParameterArgumentsFit, SelectedKindsFit])
++    (by intro left right; simp [body, FrameSetupFits, InitializersFit, InitializerFits, AggregateArgumentsFit, ParameterArgumentsFit])
+diff --git a/UInt256/Methods/Equality/WrapperSafetyContract.lean b/UInt256/Methods/Equality/WrapperSafetyContract.lean
+index d6ecb76..1eae089 100644
+--- a/UInt256/Methods/Equality/WrapperSafetyContract.lean
++++ b/UInt256/Methods/Equality/WrapperSafetyContract.lean
+@@ -5 +4,0 @@ import CIL.Safety.StepComposition
+-import CIL.Safety.GuardNormalization
+@@ -57 +56 @@ theorem wrapper_prefix (outer : Bool) (left right : Reference) (frame : Frame) (
+-             [cil_code, readOnlyArguments, step, cil_guard, observerCount, checkedValue, numericValue, formValue,
++             [cil_code, readOnlyArguments, step, checkedValue, numericValue, formValue,
+@@ -72 +71 @@ theorem wrapper_return (outer : Bool) (args : List Value) (flag : BitVec 32)
+-  simp [lookup, forwarding, step, cil_guard, observerCount, returns, checkedValue, numericValue, normalized,
++  simp [lookup, forwarding, step, returns, checkedValue, numericValue, normalized,
+@@ -108 +107 @@ theorem wrapper_checked (outer : Bool)
+-      simp [FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit, SelectedKindsFit]
++      simp [FrameSetupFits, InitializersFit, AggregateArgumentsFit, ParameterArgumentsFit]
+@@ -119 +118 @@ theorem wrapper_checked (outer : Bool)
+-    simp [step, cil_guard, observerCount, readOnlyArguments, checkedValue, formValue, fl, fr, checkedAt,
++    simp [step, readOnlyArguments, checkedValue, formValue, fl, fr, checkedAt,
+diff --git a/UInt256/Safety/AggregateReturnSetup.lean b/UInt256/Safety/AggregateReturnSetup.lean
+index d02bb19..b7ee04c 100644
+--- a/UInt256/Safety/AggregateReturnSetup.lean
++++ b/UInt256/Safety/AggregateReturnSetup.lean
+@@ -15 +15 @@ theorem setup (body : CIL.Method) (args : List Value)
+-    (opaqueLocals : body.opaqueVectorLocals = [])
++    (opaqueLocals : ([] : List Nat) = [])
+@@ -31 +31 @@ theorem setup (body : CIL.Method) (args : List Value)
+-    simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true, kinds, initializers, makeLocals, made, vectorArgs, parameters,
++    simp only [enterFrame, opaqueLocals, List.isEmpty_nil, ite_true, kinds, initializers, makeLocals, made, vectorArgs, parameters,
+diff --git a/UInt256/Safety/ConstructorSetup.lean b/UInt256/Safety/ConstructorSetup.lean
+index 02a01b1..527c56b 100644
+--- a/UInt256/Safety/ConstructorSetup.lean
++++ b/UInt256/Safety/ConstructorSetup.lean
+@@ -29 +29 @@ theorem CallingConditions.new_aggregate256 {program : CIL.Program} {body : CIL.M
+-    (known : arguments.any Value.hasUnspecified = false) :
++    (known : arguments.any (fun (_ : Value) => false) = false) :
+@@ -39 +39 @@ theorem CallingConditions.new_aggregate256 {program : CIL.Program} {body : CIL.M
+-    step_newAggregate (32 : Fin (2^64)) (by decide) args arguments rest frame memory call.1.1 checked known
++    step_newAggregate (32 : Fin (2^64)) (by decide) args arguments rest frame memory call.1.1 checked

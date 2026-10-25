@@ -1,0 +1,7 @@
+diff --git a/UInt256/Methods/Equality/VectorPrimitive.lean b/UInt256/Methods/Equality/VectorPrimitive.lean
+index 9133f1d..7ee6291 100644
+--- a/UInt256/Methods/Equality/VectorPrimitive.lean
++++ b/UInt256/Methods/Equality/VectorPrimitive.lean
+@@ -7,0 +8,2 @@ import CIL.Safety.SymbolicExecution
++set_option maxHeartbeats 2000000
++

@@ -1,0 +1,42 @@
+diff --git a/UInt256/Methods/Equality/VectorPrimitive.lean b/UInt256/Methods/Equality/VectorPrimitive.lean
+index 9133f1d..e781dfb 100644
+--- a/UInt256/Methods/Equality/VectorPrimitive.lean
++++ b/UInt256/Methods/Equality/VectorPrimitive.lean
+@@ -7,0 +8,2 @@ import CIL.Safety.SymbolicExecution
++set_option maxHeartbeats 200000
++
+diff --git a/UInt256/Methods/Equality/ReferenceVectorWrapper.lean b/UInt256/Methods/Equality/ReferenceVectorWrapper.lean
+index 6b4ca51..35b2b8e 100644
+--- a/UInt256/Methods/Equality/ReferenceVectorWrapper.lean
++++ b/UInt256/Methods/Equality/ReferenceVectorWrapper.lean
+@@ -34 +34 @@ theorem executed (profile : CIL.FeatureProfile) (program : CIL.Program) (index c
+-  let childFrame : Frame := ⟨memory.nextIdentity, [], [], []⟩
++  let childFrame : Frame := ⟨memory.nextIdentity, [], [], [], 0⟩
+diff --git a/UInt256/Methods/Equality/ScalarLeaf.lean b/UInt256/Methods/Equality/ScalarLeaf.lean
+index 56da324..9b2d618 100644
+--- a/UInt256/Methods/Equality/ScalarLeaf.lean
++++ b/UInt256/Methods/Equality/ScalarLeaf.lean
+@@ -65 +65 @@ theorem scalar_run (memory : Memory) (left right : Reference) (frame : Frame)
+-  split <;> rfl
++  all_goals split <;> rfl
+diff --git a/UInt256/Safety/AggregateReturnSetup.lean b/UInt256/Safety/AggregateReturnSetup.lean
+index d02bb19..3d895ca 100644
+--- a/UInt256/Safety/AggregateReturnSetup.lean
++++ b/UInt256/Safety/AggregateReturnSetup.lean
+@@ -8 +8 @@ def frame (memory : Memory) (output : Reference) : Frame :=
+-  ⟨memory.nextIdentity, [.bytes (.aggregate 32) output], [output.allocation], []⟩
++  ⟨memory.nextIdentity, [.bytes (.aggregate 32) output], [output.allocation], [], 0⟩
+diff --git a/UInt256/Methods/Equality/PrimitiveOperator.lean b/UInt256/Methods/Equality/PrimitiveOperator.lean
+index ad5a07c..adae300 100644
+--- a/UInt256/Methods/Equality/PrimitiveOperator.lean
++++ b/UInt256/Methods/Equality/PrimitiveOperator.lean
+@@ -52 +52 @@ theorem checked {α : Type} (encode : α → CIL.Value) (equal : BitVec 256 →
+-  let frame : Frame := ⟨memory.nextIdentity, [], [], []⟩
++  let frame : Frame := ⟨memory.nextIdentity, [], [], [], 0⟩
+diff --git a/UInt256/Methods/Equality/ReferenceOperator.lean b/UInt256/Methods/Equality/ReferenceOperator.lean
+index 7ca7c02..4b7ef50 100644
+--- a/UInt256/Methods/Equality/ReferenceOperator.lean
++++ b/UInt256/Methods/Equality/ReferenceOperator.lean
+@@ -23 +23 @@ theorem checked (equal : BitVec 256 → BitVec 256 → Bool)
+-  let frame : Frame := ⟨memory.nextIdentity, [], [], []⟩
++  let frame : Frame := ⟨memory.nextIdentity, [], [], [], 0⟩
