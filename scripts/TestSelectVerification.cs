@@ -154,7 +154,8 @@ Test("independent export cohort map preserves 19 leaves, 46 base cases and one d
         {
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
-            bool standalone = entry.Cohort is "statics" or "fullstatics" or "transitive" or "fulltransitive" or "typed";
+            bool standalone =
+                entry.Cohort is "statics" or "fullstatics" or "transitive" or "fulltransitive" or "typed";
             Require(entry.Standalone == standalone, "Wrong standalone fixture kind: " + entry.Name);
             Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
                 "Wrong bootstrapped child fixture: " + entry.Name);

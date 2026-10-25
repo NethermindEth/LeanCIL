@@ -1260,7 +1260,8 @@ unsafe def main (args : List String) : IO Unit := do
     sealed record DeploymentDependency(string assemblyIdentity, string implementationSha256, string interfaceDigest,
         string[] dependencies, bool conditional,
         [property: System.Text.Json.Serialization.JsonIgnore(
-            Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? acceptedVia = null,
+            Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        string? acceptedVia = null,
         [property: System.Text.Json.Serialization.JsonIgnore(
             Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         string? sourceBundleDigest = null);
