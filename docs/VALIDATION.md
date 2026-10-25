@@ -260,8 +260,10 @@ It composes adjacent placements and splits them back with `cons_iff`, `take` and
 `exists_eq_append` needs by placing the empty segment past the end of a body.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
-bodies with mapped program counters, and with trailing dead reference locals dropped,
-beside kept opaque vector locals too. It rejects numeric dead locals, in the kernel and
+bodies with mapped program counters, and with trailing dead reference and span locals dropped,
+beside kept opaque vector locals too. It checks empty and unmodeled span slots, both mutabilities
+and every supported width, and rejects unsupported widths and scalar span initializers.
+It rejects numeric dead locals, in the kernel and
 in the tactic, and non-trailing ones, and still reports a changed live instruction
 under dead locals; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed

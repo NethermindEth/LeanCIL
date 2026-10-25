@@ -227,8 +227,8 @@ cover all eight wrapper combinations under a fixed heartbeat budget.
 expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
 tracks numeric local stores and updated snapshots, including mixed Vector128, Vector256
 and int32 locals. Supported forwarder bodies can inherit a
-callee's proved contract, and embedding proofs can ignore trailing unread byref or
-pointer locals. Contract refinement derives a public interface from a stronger proved
+callee's proved contract, and embedding proofs can ignore trailing unread byref,
+pointer or span locals. Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
 
 `leancil verify --force-full-verify` independently checks supported imported
