@@ -441,12 +441,12 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       Confined (outer.footprint input) memory left →
       inner.post (extend input home) entered final out → outer.post input memory left out) :
     outer.Holds program method := by
-  intro input initial permitted
-  obtain ⟨formed, outerValid⟩ := checked input initial permitted
-  obtain ⟨home, memory, setup, fresh, writable, initialized, entryBelow, memoryFormed⟩ :=
-    forwards.enterFrame (outer.args input) initial formed
+  intro input memory permitted
+  obtain ⟨formed, outerValid⟩ := checked input memory permitted
+  obtain ⟨home, entered, setup, fresh, writable, initialized, entryBelow, enteredFormed⟩ :=
+    forwards.enterFrame (outer.args input) memory formed
   have owned := enterFrame_fresh _ _ _ _ _ setup
-  have calleePre := prepared input initial memory home permitted entryBelow memoryFormed fresh
+  have calleePre := prepared input memory entered home permitted entryBelow enteredFormed fresh
     writable initialized
   obtain ⟨loaded, rest, split, loadedSome, restSome⟩ :=
     List.map_eq_append_iff.mp (selected input home).symm
@@ -465,27 +465,27 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     rw [forwards.code]; exact fun _ => rfl
   have loadedNarrowed : ∀ pair ∈ loads.zip loaded, LoadsUnchanged pair.1.2 pair.2 := by
     intro pair member
-    refine narrowed input initial home permitted pair ?_
+    refine narrowed input memory home permitted pair ?_
     have same : loads.length = loaded.length := by
       have lengths := congrArg List.length loadedSome
       simp only [List.length_map] at lengths
       omega
     rw [split, ← List.append_nil loads, List.zip_append same]
     exact List.mem_append_left _ member
-  have memoryValid := outerValid.preserve formed owned.1
+  have enteredValid := outerValid.preserve formed owned.1
   refine invoke_exists_of_run found (checkedValues_of_valid outerValid) setup ?_
-  refine run_load_arguments found memoryValid loads 0 [] loaded
+  refine run_load_arguments found enteredValid loads 0 [] loaded
     (fun position load located => ?_) loadedSome.symm loadedNarrowed ?_
   · have bound : position < loads.length := (List.getElem?_eq_some_iff.mp located).1
     rw [Nat.zero_add, fetched, outForwarderCode,
       List.getElem?_append_left (by simpa using bound), List.getElem?_map, located]
     rfl
   rw [Nat.zero_add, List.append_nil]
-  let frame : Frame := ⟨initial.nextIdentity, [.bytes kind home], [home.allocation], []⟩
+  let frame : Frame := ⟨memory.nextIdentity, [.bytes kind home], [home.allocation], []⟩
   have addressed : step body (.localAddr 0) loads.length (outer.args input) frame
-      loaded.reverse memory =
+      loaded.reverse entered =
         .ok (.next (loads.length + 1) (.reference (.address home) :: loaded.reverse) frame
-          memory) := by
+          entered) := by
     have formedHome := access_reference_valid _ _ _ _ _ writable
     simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
       Bool.false_or, Bool.false_eq_true, ↓reduceIte, frame, List.getElem?_cons_zero,
@@ -496,7 +496,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       (inner.args (extend input home)).reverse := by
     rw [split]; simp
   rw [stack]
-  have exitFresh : ∀ id ∈ frame.owned, initial.nextIdentity ≤ id :=
+  have exitFresh : ∀ id ∈ frame.owned, memory.nextIdentity ≤ id :=
     fun id member => (owned.2 id member).1
   refine run_forward_call holds found calleeFound
     (by rw [length]; simp [fetched, outForwarderCode])
@@ -505,22 +505,22 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       simp [show loads.length + 1 + 1 - loads.length = 2 by omega])
     forwards.returnsValue
     (fun final out satisfied =>
-      unchanged input initial home memory final out permitted satisfied)
-    calleePre (known input initial home permitted) (fun final values valid returns => ?_)
+      unchanged input memory home entered final out permitted satisfied)
+    calleePre (known input memory home permitted) (fun final values valid returns => ?_)
     (fun final values framed returns => ?_)
   · obtain ⟨out, encoded, satisfied⟩ := returns
     intro value member
     obtain ⟨scalar, same⟩ :=
-      scalars input initial home memory final out permitted satisfied value (encoded ▸ member)
+      scalars input memory home entered final out permitted satisfied value (encoded ▸ member)
     subst same
     exact valid _ member
   · have exitBelow := leaveFrame_preserves_memory_below frame final _ exitFresh
     have confined := Confined.across_frame entryBelow owned.1.next framed exitBelow
       (Nat.le_of_eq (leaveFrame_nextIdentity frame final).symm)
-      (footprint input initial home permitted fresh)
+      (footprint input memory home permitted fresh)
     obtain ⟨out, encoded, satisfied⟩ := returns
     exact ⟨confined, out, encoded.trans (results out).symm,
-      returned input initial memory final _ home out permitted entryBelow exitBelow fresh
+      returned input memory entered final _ home out permitted entryBelow exitBelow fresh
         framed confined satisfied⟩
 
 #print axioms MethodContract.Holds.forward_out
