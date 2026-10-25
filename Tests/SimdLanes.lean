@@ -379,4 +379,80 @@ theorem partial_product_steps (a0 a1 a2 a3 b0 b1 b2 b3 : W64) (memory : CIL.Safe
   with_reducible exact rest
 #print axioms partial_product_steps
 
+/-! ### Wide carry cascades and broadcast sources -/
+
+/-- A carry generated in lane zero propagates through all eight lanes and out of the word. -/
+theorem cascade512_full_carry :
+    let left : V512 := ~~~0
+    let right := pack512 1 0 0 0 0 0 0 0
+    let sum := zip512 (· + ·) left right
+    let generate := moveMask512 (zip512 (fun a b => mask64 (a.ult b)) sum left)
+    let propagate := moveMask512 (zip512 (fun a b => mask64 (a == b)) sum (~~~0))
+    (propagate ^^^ (propagate + (generate <<< 1))) = 510 := by
+  decide +kernel
+#print axioms cascade512_full_carry
+
+/-- Subtracting one from zero borrows through all eight lanes, including the outgoing bit. -/
+theorem cascade512_full_borrow :
+    let left : V512 := 0
+    let right := pack512 1 0 0 0 0 0 0 0
+    let generate := moveMask512 (zip512 (fun a b => mask64 (a.ult b)) left right)
+    let propagate := moveMask512 (zip512 (fun a b => mask64 (a == b)) left right)
+    (propagate ^^^ (propagate + (generate <<< 1))) = 510 := by
+  decide +kernel
+#print axioms cascade512_full_borrow
+
+/-- A generated carry is not a carry-in to the lane that generated it. -/
+theorem cascade_rejects_unshifted_generate :
+    let generate : W32 := 1
+    let propagate : W32 := 254
+    propagate ^^^ (propagate + generate) ≠
+      propagate ^^^ (propagate + (generate <<< 1)) := by
+  decide +kernel
+#print axioms cascade_rejects_unshifted_generate
+
+/-- Lane-local sums without overflow produce no cascade bits. -/
+theorem cascade512_no_carry :
+    let left := pack512 1 2 3 4 5 6 7 8
+    let right := pack512 8 7 6 5 4 3 2 1
+    let sum := zip512 (· + ·) left right
+    let generate := moveMask512 (zip512 (fun a b => mask64 (a.ult b)) sum left)
+    let propagate := moveMask512 (zip512 (fun a b => mask64 (a == b)) sum (~~~0))
+    (propagate ^^^ (propagate + (generate <<< 1))) = 0 := by
+  decide +kernel
+#print axioms cascade512_no_carry
+
+/-- A broadcast `create64` produces exactly the all-ones propagate comparand. -/
+theorem broadcast_all_ones :
+    evalIntrinsic (.vector (.create64 256)) [.i64 (~~~0)] = some (.v256 (~~~0)) := by
+  change some (CIL.Value.v256 (pack256 (~~~0) (~~~0) (~~~0) (~~~0))) = _
+  rw [pack256_allOnes]
+#print axioms broadcast_all_ones
+
+/-- The greater-than source and broadcast comparand recover the outgoing 256-bit carry. -/
+theorem broadcast_gtu_outgoing (left right : V256) :
+    let sum := zip256 (· + ·) left right
+    let generate := moveMask64 (zip256 (fun a b => mask64 (b.ult a)) right sum)
+    let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b)) sum
+      (pack256 (~~~0) (~~~0) (~~~0) (~~~0)))
+    (propagate ^^^ (propagate + (generate <<< 1))).getLsbD 4 =
+      BitVec.carry 256 left right false := by
+  exact cascade_add256_gtu_broadcast left right (by decide)
+#print axioms broadcast_gtu_outgoing
+
+/-- The existing AVX-512 greater-than intrinsic supplies the operand-swapped generate mask. -/
+theorem gtu_intrinsic_cascade (left right comparison : V256)
+    (evaluated : evalIntrinsic (.avx512 .gtu64)
+      [.v256 right, .v256 (zip256 (· + ·) left right)] = some (.v256 comparison)) :
+    let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b))
+      (zip256 (· + ·) left right) (pack256 (~~~0) (~~~0) (~~~0) (~~~0)))
+    (propagate ^^^ (propagate + (moveMask64 comparison <<< 1))).getLsbD 4 =
+      BitVec.carry 256 left right false := by
+  change some (CIL.Value.v256
+    (zip256 (fun a b => mask64 (b.ult a)) right (zip256 (· + ·) left right))) =
+      some (.v256 comparison) at evaluated
+  cases evaluated
+  exact cascade_add256_gtu_broadcast left right (by decide)
+#print axioms gtu_intrinsic_cascade
+
 end Tests.SimdLanes

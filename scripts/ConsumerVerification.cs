@@ -724,6 +724,87 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     sealed record ConsumerSession(string FrameworkCopy, Dictionary<string, string> Copied);
 
+    // Resolve source roots through Lake so library and package srcDir settings agree with imports.
+    static string[] ConsumerSourceDirectories(string session, IEnumerable<string> packageRoots)
+    {
+        var lines = Run(["lake", "env"], session).Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal)).ToArray();
+        if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean source paths.");
+        return lines[0]["LEAN_SRC_PATH=".Length..]
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => Path.GetFullPath(path, session)).Concat(packageRoots).Distinct().ToArray();
+    }
+
+    static void RejectContractSourceShadow(string module, IEnumerable<string> sourceDirectories)
+    {
+        var relative = module.Replace('.', Path.DirectorySeparatorChar) + ".lean";
+        // File lookup respects the actual filesystem's case rules, including per-directory settings.
+        if (sourceDirectories.Any(directory => File.Exists(Path.Combine(directory, relative))))
+            throw new InvalidDataException("Contract interface module shadows a consumer source: " + module);
+    }
+
+    // Source imports schedule work only; compiled import headers decide what can be shared.
+    [GeneratedRegex(@"(?<!\S)(?:(?:public|meta)\s+)*import\s+(?:all\s+)?([A-Za-z_][A-Za-z0-9_'.]*)")]
+    private static partial Regex ConsumerImportCommand();
+
+    static IEnumerable<string> ConsumerSourceImports(string source)
+    {
+        var text = source.ToCharArray();
+        var blockDepth = 0;
+        var lineComment = false;
+        for (var index = 0; index < text.Length; index++)
+        {
+            if (text[index] == '\n') { lineComment = false; continue; }
+            var current = source[index];
+            var next = index + 1 < text.Length ? source[index + 1] : '\0';
+            if (!lineComment && current == '/' && next == '-')
+            {
+                blockDepth++;
+                text[index] = text[index + 1] = ' ';
+                index++;
+            }
+            else if (!lineComment && blockDepth > 0 && current == '-' && next == '/')
+            {
+                blockDepth--;
+                text[index] = text[index + 1] = ' ';
+                index++;
+            }
+            else
+            {
+                if (blockDepth == 0 && current == '-' && next == '-') lineComment = true;
+                if (blockDepth > 0 || lineComment) text[index] = ' ';
+            }
+        }
+        return ConsumerImportCommand().Matches(new string(text)).Select(import => import.Groups[1].Value);
+    }
+
+    static string[] ConsumerSupportCandidates(IEnumerable<string> proofs, string[] sourceDirectories,
+        IEnumerable<string> generatedModules, string toolchainModules)
+    {
+        var excluded = generatedModules.Concat(["Extracted", "ExtractedSymbols", "ExtractionAudit"])
+            .ToHashSet(StringComparer.Ordinal);
+        var imports = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var pending = new Queue<string>();
+        foreach (var proof in proofs)
+            foreach (var import in ConsumerSourceImports(File.ReadAllText(proof)))
+                pending.Enqueue(import);
+        while (pending.TryDequeue(out var module))
+        {
+            if (excluded.Contains(module) || imports.ContainsKey(module) || module == "CIL" ||
+                module.StartsWith("CIL.", StringComparison.Ordinal)) continue;
+            var relative = module.Replace('.', Path.DirectorySeparatorChar) + ".lean";
+            if (File.Exists(Path.Combine(toolchainModules, Path.ChangeExtension(relative, ".olean")))) continue;
+            var sources = sourceDirectories.Select(directory => Path.Combine(directory, relative))
+                .Where(File.Exists).Distinct().ToArray();
+            // Ambiguous and unresolved sources are left to each group's ordinary Lake build.
+            if (sources.Length != 1) { excluded.Add(module); continue; }
+            imports[module] = ConsumerSourceImports(File.ReadAllText(sources[0])).Distinct().ToArray();
+            foreach (var imported in imports[module]) pending.Enqueue(imported);
+        }
+        var dependent = DependentModules(imports, excluded);
+        return imports.Keys.Where(module => !dependent.Contains(module)).Order(StringComparer.Ordinal).ToArray();
+    }
+
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
         SortedDictionary<string, string> snapshot, string certifiedLibrary, ExtractionIdentity extraction,
         IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
@@ -775,10 +856,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .GetProperty("generatedSha256").GetString())
                 throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
         AddConsumerLibrary(frameworkCopy, "Extracted");
-        foreach (string module in extraction.Sources.Keys)
-            if (snapshot.Keys.Any(key => key.StartsWith("consumer:", StringComparison.Ordinal) &&
-                key.Replace('\\', '/').EndsWith("/" + module.Replace('.', '/') + ".lean", StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidDataException("Contract interface module shadows a consumer source: " + module);
+        if (extraction.Sources.Count > 0)
+        {
+            var packageRoots = dependencies.Select(dependency =>
+                Within(session, Path.GetRelativePath(root, dependency.Source))).Prepend(session);
+            var sourceDirectories = ConsumerSourceDirectories(session, packageRoots);
+            foreach (var module in extraction.Sources.Keys)
+                RejectContractSourceShadow(module, sourceDirectories);
+        }
         string[] importModules = StageImportSources(extraction, frameworkCopy);
         foreach (string module in importModules) AddConsumerLibrary(frameworkCopy, module);
         var symbolsPath = Path.Combine(frameworkCopy, "ExtractedSymbols.lean");
@@ -1179,6 +1264,24 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Stage(members, "extraction certificate audit");
             var extractionAudit = Run(["lake", "build", "+ExtractionAudit:olean"], frameworkCopy,
                 progress: "Checking consumer extraction certificate");
+            if (first && share)
+            {
+                var packageRoots = dependencies.Select(dependency =>
+                    Within(session, Path.GetRelativePath(root, dependency.Source))).Prepend(session);
+                var sourceDirectories = ConsumerSourceDirectories(session, packageRoots);
+                var candidates = ConsumerSupportCandidates(
+                    ordered.SelectMany(group => group).Select(index =>
+                        Within(session, Path.GetRelativePath(root, proofs[index]))),
+                    sourceDirectories, ordered.SelectMany(group => group)
+                        .SelectMany(index => extractions[index].Sources.Keys),
+                    Path.Combine(Toolchain, "lib/lean"));
+                if (candidates.Length > 0)
+                {
+                    // A scheduling miss or an invalid later proof must not prevent other groups from verifying.
+                    Execute(["lake", "build", .. candidates.Select(module => "+" + module + ":olean")], session,
+                        progress: "Building shared consumer support");
+                }
+            }
             Stage(members, "proof checking");
             string[] importModules = extractions[members[0]].Sources.Keys.ToArray();
             if (importModules.Length > 0)

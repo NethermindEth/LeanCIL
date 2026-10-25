@@ -195,3 +195,6 @@ name = "Tests.ArrayElementReferences"
 
 [[lean_lib]]
 name = "Tests.ReadOnlyArrayReferences"
+
+[[lean_lib]]
+name = "Tests.LegacyFeatures"
