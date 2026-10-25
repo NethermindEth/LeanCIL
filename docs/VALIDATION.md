@@ -67,6 +67,9 @@ stores, reloads and overwrites with abstract homes and memory, plus signed-byte 
 The mixed-width case carries Vector256, Vector128 and int32 locals through one snapshot
 invariant and returns the full arbitrary 256-bit input after the other locals are written.
 Missing write authority, mismatched local kinds and unknown local contents remain rejected.
+Each rejection uses an isolated store or load and a matching successful run with only the
+missing authority, correct value kind or remembered contents supplied. Strict proof elaboration
+prevents an incomplete rejected proof from inserting a placeholder.
 The ordinary shared tactic tests run unchanged.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer
