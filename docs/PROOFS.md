@@ -4,6 +4,8 @@
 SIMD lanes together. `step_return_length` and `step_return_known` project the two results, so
 the checked dispatcher is analyzed once. The existing step, run and invocation statements,
 interpreter definitions and approved axioms are unchanged; no stepping attributes are added.
+The return proof uses an explicit simplification set: unrestricted `simp_all` repeatedly tries
+to discharge irrelevant dispatcher exclusions. Keep that set narrow when extending the proof.
 
 Certificate validation streams fallthrough states and uses balanced indexes for branch
 destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original

@@ -37,7 +37,11 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Na
       rw [same]
       simp_all [observerCount, unspecifiedOperands, List.take_of_length_le,
         Value.hasUnspecified, CIL.Value.hasUnspecified]
-    | solve | simp_all [Value.hasUnspecified, CIL.Value.hasUnspecified]
+    | solve |
+        simp_all only [reduceCtorEq, implies_true, Bool.or_false, Bool.not_eq_true,
+          List.reverse_cons, List.reverse_nil, List.nil_append, List.length_cons,
+          List.length_nil, Nat.zero_add, ↓reduceIte, List.any_cons, Value.hasUnspecified,
+          CIL.Value.hasUnspecified, List.any_nil, Bool.or_self, and_self]
     | cases executed
     | obtain ⟨_, _, executed⟩ := bind_success.mp executed
     | simp only [Bind.bind, Pure.pure, Except.pure] at executed
