@@ -419,9 +419,8 @@ duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
 statics, fullstatics, transitive, transitiveoutcomes, discovery, typed and derived suites cannot enter that plan.
 The registry now has 20 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
-`exportstyped` and `exportsderived` run directly, with no core export bootstrap
+`exportstransitiveoutcomes`, `exportstyped` and `exportsderived` run directly, with no core export bootstrap
 or nested post-call. Their fixture assertions are
-
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after
