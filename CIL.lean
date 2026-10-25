@@ -178,6 +178,8 @@ import CIL.Safety.StaticLinking
 import CIL.Interface.FullTransfer
 import CIL.SIMD.UnspecifiedLanes
 
+import CIL.Safety.IntrinsicExecution
+
 /-!
 # LeanCIL
 
