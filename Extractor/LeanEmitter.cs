@@ -177,7 +177,7 @@ internal static class LeanEmitter
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
-            genericEvidence.EmitMethod(lean, m, n);
+            genericEvidence.EmitMethod(lean, m, n, reachable);
             FeatureEvidence.Emit(lean, m, n, profile);
             lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : method{n}.opaqueVectorLocals = [{opaqueLocals}] := rfl");
             ScalarEvidence.Emit(lean, m, n, scalarCertificate);

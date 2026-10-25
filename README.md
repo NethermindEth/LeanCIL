@@ -35,7 +35,8 @@ Feature and division getter recognition use exact byte comparisons with kernel-c
 equivalence to their original signature rules. This reduces certificate replay work while
 preserving metadata rejection. Managed-call certificates use structural equality proofs for
 matching metadata, reducing repeated string comparisons during replay. Primitive metadata also
-shares the exact runtime assembly identity to avoid repeated UTF-8 decoding in the kernel. See
+shares the exact runtime assembly identity. Reachable external calls reuse their complete
+identities as checked UTF-8 byte constants, avoiding repeated decoding in the kernel. See
 [certificate validation](docs/PROOFS.md).
 
 Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.402**. The extractor uses Mono.Cecil; the F# examples also use FSharp.Core. Both packages are pinned in `Directory.Packages.props`. Lean uses Std and Lean, without Mathlib.
@@ -230,7 +231,9 @@ checked instruction steps. It first tries definitional equality when no facts
 are supplied, then uses local instruction equations and simplification as needed.
 For symbolic branches or memory operations, supply the proved conditions with
 `cil_checked_steps [facts]`; local facts are normalised with the goal, so a
-store fact may state its value in source form. Loop segments use
+store fact may state its value in source form. Matching memory-dispatch facts preserve
+their abstract results before per-shape evaluation, avoiding unnecessary byte expansion.
+Loop segments use
 `CIL.Safety.LoopAutomation` and still require an invariant and a decreasing measure.
 Contract stepping also handles signed and unsigned widening in either argument order;
 the [consumer stepping regressions](docs/PROOFS.md#consumer-stepping-regressions)
