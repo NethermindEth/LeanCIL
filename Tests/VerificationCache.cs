@@ -81,12 +81,52 @@ try
         ValidCertifiedLibrary(supplied, trustedDigest, "different toolchain", suppliedSources) ||
         ValidCertifiedLibrary(supplied, trustedDigest, "toolchain-and-sources", new SortedDictionary<string, string> { ["CIL.lean"] = "different source" }))
         throw new Exception("Producer digest/source/toolchain identity checks failed");
+    var checkedCopy = Path.Combine(directory, "checked-copy");
+    if (!OperatingSystem.IsWindows())
+    {
+        var executableMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        File.SetUnixFileMode(suppliedObject, executableMode);
+        File.SetUnixFileMode(Path.Combine(supplied, "cache-manifest.json"), executableMode);
+    }
+    bool CopySupplied(string? digest = null, string key = "toolchain-and-sources",
+        SortedDictionary<string, string>? sourceBinding = null) =>
+        CopyCertifiedLibrary(supplied, checkedCopy, digest ?? trustedDigest, key, sourceBinding ?? suppliedSources);
+    if (!CopySupplied() ||
+        !ValidCertifiedLibrary(checkedCopy, trustedDigest, "toolchain-and-sources", suppliedSources) ||
+        CopySupplied("wrong digest") || CopySupplied(key: "different toolchain") ||
+        CopySupplied(sourceBinding: new() { ["CIL.lean"] = "different source" }))
+        throw new Exception("Certified copy did not preserve pinned digest/source/toolchain binding");
+    if (!OperatingSystem.IsWindows())
+        foreach (var name in new[] { ".lake/build/lib/lean/CIL.olean", "cache-manifest.json" })
+            if (File.GetUnixFileMode(Path.Combine(supplied, name)) !=
+                File.GetUnixFileMode(Path.Combine(checkedCopy, name)))
+                throw new Exception("Certified copy changed Unix file modes: " + name);
+    File.AppendAllText(Path.Combine(checkedCopy, ".lake/build/lib/lean/CIL.olean"), "destination mutation");
+    if (ValidCertifiedLibrary(checkedCopy, trustedDigest, "toolchain-and-sources", suppliedSources))
+        throw new Exception("Independent destination validation accepted changed compiled bytes");
+    foreach (var name in new[] { ".lake/build/lib/lean/CIL.olean", "CIL.lean" })
+    {
+        var path = Path.Combine(supplied, name);
+        var original = File.ReadAllBytes(path);
+        File.AppendAllText(path, "changed contents");
+        if (CopySupplied()) throw new Exception("Certified copy accepted changed contents: " + name);
+        File.Delete(path);
+        if (CopySupplied()) throw new Exception("Certified copy accepted a missing file: " + name);
+        File.WriteAllBytes(path, original);
+    }
+    var extraPart = suppliedObject + ".private";
+    File.WriteAllText(extraPart, "unbound compiled part");
+    if (CopySupplied()) throw new Exception("Certified copy accepted an extra compiled part");
+    File.Delete(extraPart);
+    if (!CopySupplied() || !ValidCertifiedLibrary(checkedCopy, trustedDigest, "toolchain-and-sources", suppliedSources))
+        throw new Exception("Restored source bytes failed certified copying");
+    Console.WriteLine("PASS fused certified copy preserves manifest, source, file-set and destination integrity");
     File.AppendAllText(suppliedObject, "changed after initial validation");
     File.WriteAllText(Path.Combine(supplied, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(supplied)));
     var suppliedCopy = Path.Combine(directory, "supplied-copy");
     CopyTree(supplied, suppliedCopy);
     if (ValidCertifiedLibrary(supplied, trustedDigest, "toolchain-and-sources", suppliedSources) ||
-        ValidCertifiedLibrary(suppliedCopy, trustedDigest, "toolchain-and-sources", suppliedSources))
+        ValidCertifiedLibrary(suppliedCopy, trustedDigest, "toolchain-and-sources", suppliedSources) || CopySupplied())
         throw new Exception("Rehashed artifact or changed private copy accepted against original producer digest");
     // Republishing identical content is a no-op; it must not create a second copy.
     var receipt = Path.Combine(SuccessCacheRoot, "original-identical", "receipt.hmac");

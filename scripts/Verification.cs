@@ -640,6 +640,81 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
     }
 
+    // The pinned manifest binds the source snapshot before copying. Hash exactly the bytes
+    // written to the private destination; callers independently verify that destination.
+    static bool CopyCertifiedLibrary(string source, string destination, string? trustedDigest,
+        string key, SortedDictionary<string, string> sources)
+    {
+        try
+        {
+            var bytes = File.ReadAllBytes(Path.Combine(source, "cache-manifest.json"));
+            if (string.IsNullOrWhiteSpace(trustedDigest) ||
+                Convert.ToHexStringLower(SHA256.HashData(bytes)) != trustedDigest ||
+                File.ReadAllText(Path.Combine(source, "library-key.txt")) != key) return false;
+            var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(bytes);
+            if (manifest is null || !manifest.ContainsKey(".lake/build/lib/lean/CIL.olean") ||
+                !Same(sources, LibrarySources(manifest))) return false;
+            var files = Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories)
+                .ToDictionary(path => Path.GetRelativePath(source, path).Replace('\\', '/'),
+                    path => path, StringComparer.Ordinal);
+            static bool Included(string path) =>
+                Path.GetFileName(path) is not ("cache-manifest.json" or "cache-receipt.hmac");
+            if (!manifest.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(files.Keys.Where(Included))) return false;
+            var entries = files.ToArray();
+            var valid = new bool[entries.Length];
+            var failures = new ExceptionDispatchInfo?[entries.Length];
+            const int maximumWorkers = 4;
+            Parallel.For(0, entries.Length,
+                new ParallelOptions { MaxDegreeOfParallelism = Math.Min(maximumWorkers, Environment.ProcessorCount) },
+                index =>
+                {
+                    try
+                    {
+                        var (name, path) = entries[index];
+                        var target = Path.Combine(destination, name);
+                        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                        if (Included(name)) valid[index] = HashAndCopyFile(path, target, manifest[name]);
+                        else { File.Copy(path, target, true); valid[index] = true; }
+                    }
+                    catch (Exception error) { failures[index] = ExceptionDispatchInfo.Capture(error); }
+                });
+            for (var index = 0; index < entries.Length; index++)
+            {
+                failures[index]?.Throw();
+                if (!valid[index]) return false;
+            }
+            return files.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(
+                Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(source, path).Replace('\\', '/')));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+    }
+
+    static bool HashAndCopyFile(string source, string destination, string expectedHash)
+    {
+        const int copyBufferSize = 1024 * 1024;
+        var buffer = ArrayPool<byte>.Shared.Rent(copyBufferSize);
+        try
+        {
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1,
+                FileOptions.SequentialScan);
+            using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 1);
+            int length;
+            while ((length = input.Read(buffer)) != 0)
+            {
+                hash.AppendData(buffer, 0, length);
+                output.Write(buffer, 0, length);
+            }
+            if (Convert.ToHexStringLower(hash.GetHashAndReset()) != expectedHash) return false;
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(destination, File.GetUnixFileMode(source));
+            return true;
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
+    }
     static void CopyTree(string source, string destination)
     {
         foreach (var path in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
@@ -792,9 +867,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             {
                 var copyStarted = DateTimeOffset.UtcNow;
                 var copyElapsed = Stopwatch.StartNew();
-                if (!ValidCertifiedLibrary(supplied, suppliedDigest, libraryKey, sources))
+                if (!CopyCertifiedLibrary(supplied, library, suppliedDigest, libraryKey, sources))
                     throw new InvalidOperationException("Certified library identity or integrity mismatch");
-                CopyTree(supplied, library);
                 if (!ValidCertifiedLibrary(library, suppliedDigest, libraryKey, sources))
                     throw new InvalidOperationException("Certified library changed while copying");
                 libraryBuild = "certified-artifact";
