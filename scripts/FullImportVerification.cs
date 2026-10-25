@@ -97,13 +97,14 @@ partial class Program
         }
     }
 
-    // Every reached graph node is located and validated before any build; the binding checks still run on regeneration.
+    // Every reached graph node is located and validated before any build; regeneration still binds each one.
     static void PreflightFullNode(string output, JsonElement node, IReadOnlyDictionary<string, string> overrides,
         ISet<string> used)
     {
         string assemblyIdentity = node.GetProperty("assemblyIdentity").GetString()!;
         string sidecar = ExtractionIdentity.Resolve(output, node.GetProperty("sidecarPath").GetString()!);
-        string implementation = ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
+        string implementation =
+            ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
         ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecar));
         if (contract.InterfaceDigest != node.GetProperty("interfaceDigest").GetString() ||
             Sha(implementation) != node.GetProperty("implementationSha256").GetString())
@@ -279,6 +280,9 @@ partial class Program
             }
             pending = discovered;
         }
+        // Preflight required a bundle for every reachable node, so an override for one is used.
+        usedOverrides.UnionWith(ReachableGraph(ExtractionIdentity.Read(output)).Select(node =>
+            AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name));
         RequireUsedOverrides(overrides, usedOverrides);
         libraries.Sort((left, right) => left.Id.CompareTo(right.Id));
         // Names a colliding pair before the kernel decides compatibility of the whole linked program.
@@ -511,6 +515,28 @@ partial class Program
         }).ToArray();
     }
 
+    // Graph nodes reached from the declared dependencies; each declaration must match its node's pins.
+    static IEnumerable<JsonElement> DependencyClosure(JsonElement[] graph, IEnumerable<ContractDependency> declared)
+    {
+        Queue<ContractDependency> pending = new(declared);
+        HashSet<string> reached = new(StringComparer.Ordinal);
+        while (pending.TryDequeue(out ContractDependency? dependency))
+        {
+            JsonElement node = FullGraphNode(graph, dependency.AssemblyIdentity);
+            if (node.GetProperty("implementationSha256").GetString() != dependency.ImplementationSha256 ||
+                node.GetProperty("interfaceDigest").GetString() != dependency.InterfaceDigest)
+                throw new InvalidDataException(
+                    "Full-verification dependency pin differs from the caller's graph node: " +
+                    dependency.AssemblyIdentity);
+            if (!reached.Add(dependency.AssemblyIdentity)) continue;
+            yield return node;
+            foreach (JsonElement next in node.GetProperty("dependencies").EnumerateArray())
+                pending.Enqueue(new(next.GetProperty("assemblyIdentity").GetString()!,
+                    next.GetProperty("implementationSha256").GetString()!,
+                    next.GetProperty("interfaceDigest").GetString()!));
+        }
+    }
+
     // Interface sources of the direct dependencies, read from the caller's pinned graph sidecars.
     static Dictionary<string, string> FullDependencyInterfaces(ContractInterface contract, string callerOutput,
         JsonElement[] graph)
@@ -599,17 +625,12 @@ partial class Program
         List<string> extraction =
             ["dotnet", ExtractorPath, "extract", implementation, entry, artifact, certification.Profile];
         foreach (string argument in export.TypeArguments ?? []) extraction.AddRange(["--type-argument", argument]);
-        // Dependencies resolve only to the caller's pinned graph nodes, which the extractor re-pins.
-        foreach (ContractDependency dependency in contract.Dependencies)
+        // Every dependency the library reaches resolves only to the caller's pinned graph nodes.
+        foreach (JsonElement node in DependencyClosure(graph, contract.Dependencies))
         {
-            JsonElement node = FullGraphNode(graph, dependency.AssemblyIdentity);
             string nodeSha256 = node.GetProperty("implementationSha256").GetString()!;
             string nodeInterface = node.GetProperty("interfaceDigest").GetString()!;
-            if (nodeSha256 != dependency.ImplementationSha256 || nodeInterface != dependency.InterfaceDigest)
-                throw new InvalidDataException(
-                    "Full-verification dependency pin differs from the caller's graph node: " +
-                    dependency.AssemblyIdentity);
-            string name = AssemblyNameReference.Parse(dependency.AssemblyIdentity).Name;
+            string name = AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name;
             string nodeImplementation =
                 ExtractionIdentity.Resolve(callerOutput, node.GetProperty("implementationPath").GetString()!);
             extraction.AddRange([
@@ -916,7 +937,8 @@ run_cmd do
         return ordered;
     }
 
-    static string FullCompositionSource(string callerModule, string callerTheorem, IReadOnlyList<FullLibrary> libraries,
+    static string FullCompositionSource(string callerModule, string callerTheorem,
+        IReadOnlyList<FullLibrary> libraries,
         int callerSlots)
     {
         StringBuilder source = new("import " + callerModule +

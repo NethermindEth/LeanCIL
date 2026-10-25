@@ -251,7 +251,8 @@ void FullTransitive()
         (int Code, string Output, string Stdout, string Stderr) result = Execute(command);
         if (result.Code != 1 || !result.Output.Contains(marker, StringComparison.Ordinal) ||
             File.Exists(Path.Combine(artifact, "verified.json")))
-            throw new InvalidOperationException("Full verification accepted an unchecked dependency: " + result.Output);
+            throw new InvalidOperationException(
+                "Full verification accepted an unchecked dependency: " + result.Output);
     }
     // B has no evidence of its own here, so the caller's composition must not fall back to B's sidecar.
     string hidden = bBundle + "-hidden";
