@@ -186,7 +186,8 @@ theorem relaySite.call : relay.code[1]? = some (.call echoMethod 1) := rfl
 theorem relay_holds : relayContract.Holds program relayMethod := by
   rintro v memory ⟨formed, world⟩
   dsimp only [relayContract, echoContract]
-  -- `Relay` has no locals and `arg` leaves memory unchanged, so the call memory is `memory`.
+  -- `Relay` has no locals, and `arg` and the call step leave memory unchanged, so the
+  -- callee runs from `memory`.
   cil_contract_steps []
   cil_contract_certified_call echo_anywhere v []
   · trivial
