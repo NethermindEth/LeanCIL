@@ -10,6 +10,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+bool fullComposition = args switch
+{
+    [] => false,
+    ["--full-composition"] => true,
+    _ => throw new ArgumentException("Usage: TransitiveImports.cs [--full-composition]")
+};
 string root = At("artifacts/TransitiveImports-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 string[] cli = ["dotnet", ExtractorPath];
@@ -93,7 +99,8 @@ void Export(string assembly, string artifact, string package, string sourceModul
         @interface = new[] { new { module = sourceModule, source = Path.Combine(package, sourceModule + ".lean") } },
         exports = new[] { new { method, artifact, contract = "ImportFixture.addOne", theorem } }
     }));
-    Run([.. cli, "export-contracts", manifest, "--output", sidecar]);
+    Run([.. cli, "export-contracts", manifest, "--output", sidecar,
+        .. fullComposition ? new[] { "--bundle", Path.Combine(root, "Bundles") } : []]);
 }
 string[] Import(string sidecar, string assembly)
 {
@@ -111,6 +118,11 @@ Export(a, aArtifact, aPackage, "APublished", Path.Combine(aPackage, "Conditional
     "ImportFixture.LibraryA::AddOne(ulong)", "ExampleProof.correctness", aSidecar);
 JsonObject originalA = JsonNode.Parse(File.ReadAllText(aSidecar))!.AsObject();
 JsonObject originalB = JsonNode.Parse(File.ReadAllText(bSidecar))!.AsObject();
+if (fullComposition)
+{
+    FullTransitive();
+    return;
+}
 ImportReviewRegressions.ValidateGraph_WhenDuplicateImplementationHashDiffers_RejectsIdentity(ExtractorPath, originalB);
 ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
     ExtractorPath, bSidecar, b, Path.Combine(root, "AmbiguousVersions"));
@@ -220,3 +232,68 @@ Save(bSidecar, cycle);
 Reject("Contract dependency cycle: " + originalA["assemblyIdentity"]!.GetValue<string>() + " -> " +
     originalB["assemblyIdentity"]!.GetValue<string>() + " -> " + originalA["assemblyIdentity"]!.GetValue<string>());
 Console.WriteLine("PASS missing nodes, dependency hash mismatch, interface mismatch and named A -> B -> A cycles reject without artifacts");
+
+// App -> A -> B under forced full verification: B's bundle is replayed because A's regenerated extraction imports it.
+void FullTransitive()
+{
+    string Bundle(JsonObject contract, string sidecar) =>
+        Path.GetFullPath(contract["fullVerificationLocator"]!.GetValue<string>(), Path.GetDirectoryName(sidecar)!);
+    string aBundle = Bundle(originalA, aSidecar);
+    string bBundle = Bundle(originalB, bSidecar);
+    string callerProof = Path.Combine(appPackage, "Conditional.lean");
+    string artifact = Path.Combine(root, "App-Full");
+    Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,
+        .. Import(aSidecar, a), .. Import(bSidecar, b)]);
+    string[] command = [.. cli, "verify", artifact, "--proof", callerProof, "--proof-root", appPackage,
+        "--force-full-verify"];
+    void RejectFull(string marker)
+    {
+        (int Code, string Output, string Stdout, string Stderr) result = Execute(command);
+        if (result.Code != 1 || !result.Output.Contains(marker, StringComparison.Ordinal) ||
+            File.Exists(Path.Combine(artifact, "verified.json")))
+            throw new InvalidOperationException("Full verification accepted an unchecked dependency: " + result.Output);
+    }
+    // B has no evidence of its own here, so the caller's composition must not fall back to B's sidecar.
+    string hidden = bBundle + "-hidden";
+    Directory.Move(bBundle, hidden);
+    try { RejectFull("Full verification source bundle is missing: " + bBundle); }
+    finally { Directory.Move(hidden, bBundle); }
+    string bProofSource = Directory.EnumerateFiles(bBundle, "BProof.lean", SearchOption.AllDirectories).Single();
+    string bProofText = File.ReadAllText(bProofSource);
+    File.WriteAllText(bProofSource, bProofText.Replace("all_goals bv_omega", "all_goals sorry"));
+    try { RejectFull("Contract source bundle file is missing or changed: "); }
+    finally { File.WriteAllText(bProofSource, bProofText); }
+
+    string trace = Path.Combine(root, "trace-full");
+    string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+    try { Run(command); }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+    string[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
+    // A and B each get a fresh extraction and library build; the caller has its own build.
+    if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
+        stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
+        stages.Count(stage => stage == "Building fresh Lean verification library") != 3 ||
+        stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
+        stages.Any(stage => stage.Contains("certified proof:", StringComparison.Ordinal)))
+        throw new InvalidOperationException(
+            "Full verification skipped a transitive replay: " + string.Join(", ", stages));
+    JsonElement verified =
+        JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+    JsonElement import = verified.GetProperty("imports").EnumerateArray().Single();
+    Dictionary<string, string?> accepted = verified.GetProperty("contractDependencies").EnumerateArray().ToDictionary(
+        node => node.GetProperty("assemblyIdentity").GetString()!,
+        node => node.GetProperty("acceptedVia").GetString() == "independently-verified"
+            ? node.GetProperty("sourceBundleDigest").GetString() : null);
+    bool published = import.GetProperty("acceptedVia").GetString() == "independently-verified" &&
+        import.GetProperty("sourceBundleDigest").GetString() == Path.GetFileName(aBundle) &&
+        accepted.Count == 2 &&
+        accepted[originalA["assemblyIdentity"]!.GetValue<string>()] == Path.GetFileName(aBundle) &&
+        accepted[originalB["assemblyIdentity"]!.GetValue<string>()] == Path.GetFileName(bBundle) &&
+        verified.GetProperty("compositionTheorem").GetString() == "LeanCILFullComposition.certified";
+    if (!published)
+        throw new InvalidOperationException("Full verification did not publish both checked bundles: " + verified);
+    Console.WriteLine("PASS App -> A -> B forced full verification replays both bundles and rejects a missing or " +
+        "tampered dependency bundle");
+}

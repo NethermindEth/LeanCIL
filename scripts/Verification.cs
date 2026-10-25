@@ -78,7 +78,8 @@ partial class Program : IDisposable
     readonly Dictionary<string, SortedDictionary<string, string>> supportSourceKeys = new(StringComparer.Ordinal);
 
     bool forceFullVerification { get; init; }
-    sealed record FullImportResult(string Theorem, string Audit, PublishedImport[] Imports);
+    sealed record FullImportResult(string Theorem, string Audit, PublishedImport[] Imports,
+        DeploymentDependency[] Dependencies);
     Func<string, string, string, string, FullImportResult>? fullImportAudit { get; set; }
     readonly AsyncLocal<bool> referenceOnlyContext = new();
     bool referenceOnlyAuthoring { get => referenceOnlyContext.Value; set => referenceOnlyContext.Value = value; }
@@ -1255,8 +1256,14 @@ unsafe def main (args : List String) : IO Unit := do
 
     static JsonElement[] ImportGraph(string output) => ExtractionIdentity.Read(output).Graph;
 
+    // acceptedVia and sourceBundleDigest name a node whose export forced full verification re-checked.
     sealed record DeploymentDependency(string assemblyIdentity, string implementationSha256, string interfaceDigest,
-        string[] dependencies, bool conditional);
+        string[] dependencies, bool conditional,
+        [property: System.Text.Json.Serialization.JsonIgnore(
+            Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? acceptedVia = null,
+        [property: System.Text.Json.Serialization.JsonIgnore(
+            Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        string? sourceBundleDigest = null);
 
     static DeploymentDependency[] DeploymentDependencies(JsonElement identity) =>
         identity.TryGetProperty("importGraph", out JsonElement graph) ? graph.EnumerateArray().Select(node =>
@@ -1703,8 +1710,7 @@ unsafe def main (args : List String) : IO Unit := do
             var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root),
                 imports: fullResult?.Imports ?? PublishedImports(extraction.Root),
-                contractDependencies: DeploymentDependencies(extraction.Root),
-
+                contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction.Root),
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");

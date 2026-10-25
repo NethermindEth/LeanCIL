@@ -223,6 +223,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsstatics` | Standalone modular static exports, then forced full verification of the RVA-table library with warm receipts; changed DLL, forged caller or bundle static records and tampered bundle rejection |
 | `exportsfullstatics` | The same fixture with `--full-composition`: app and library tables with one local index, one table shared by two imported slots, and rejection of a re-certified changed table |
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
+| `exportsfulltransitive` | The same fixture with `--full-composition`: forced full verification of App -> A -> B replays both bundles; a missing or tampered B bundle fails |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
 
@@ -235,8 +236,8 @@ once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
 statics, transitive, discovery and typed suites cannot enter that plan.
-The registry now has 18 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`
-and `exportstyped` run directly, with no core export bootstrap or nested post-call. Their fixture assertions are
+The registry now has 19 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+`exportsfulltransitive` and `exportstyped` run directly, with no core export bootstrap or nested post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after
