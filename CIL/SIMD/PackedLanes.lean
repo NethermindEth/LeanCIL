@@ -150,30 +150,29 @@ theorem lane64_map256 (f : W64 → W64) (x : V256) {i : Nat} (lane : i < 4) :
 #print axioms lane512_7
 
 /-- Bitwise and acts lane by lane. -/
-theorem lane64_and (left right : BitVec width) (index : Nat) :
-    lane64 (left &&& right) index = lane64 left index &&& lane64 right index := by
+theorem lane64_and (x y : BitVec width) {i : Nat} :
+    lane64 (x &&& y) i = lane64 x i &&& lane64 y i := by
   ext bit bound
   simp [lane64, BitVec.getElem_extractLsb'] <;> grind
 #print axioms lane64_and
 
 /-- Bitwise or acts lane by lane. -/
-theorem lane64_or (left right : BitVec width) (index : Nat) :
-    lane64 (left ||| right) index = lane64 left index ||| lane64 right index := by
+theorem lane64_or (x y : BitVec width) {i : Nat} :
+    lane64 (x ||| y) i = lane64 x i ||| lane64 y i := by
   ext bit bound
   simp [lane64, BitVec.getElem_extractLsb'] <;> grind
 #print axioms lane64_or
 
 /-- Bitwise exclusive or acts lane by lane. -/
-theorem lane64_xor (left right : BitVec width) (index : Nat) :
-    lane64 (left ^^^ right) index = lane64 left index ^^^ lane64 right index := by
+theorem lane64_xor (x y : BitVec width) {i : Nat} :
+    lane64 (x ^^^ y) i = lane64 x i ^^^ lane64 y i := by
   ext bit bound
   simp [lane64, BitVec.getElem_extractLsb'] <;> grind
 #print axioms lane64_xor
 
-/-- `andNot` acts lane by lane on lanes inside the vector. -/
-theorem lane64_andNot (left right : BitVec width) (index : Nat)
-    (_bounded : 64 * (index + 1) ≤ width) :
-    lane64 ((~~~left) &&& right) index = (~~~lane64 left index) &&& lane64 right index := by
+/-- `andNot` acts lane by lane. -/
+theorem lane64_andNot (x y : BitVec width) {i : Nat} :
+    lane64 ((~~~x) &&& y) i = (~~~lane64 x i) &&& lane64 y i := by
   ext bit bound
   simp [lane64, BitVec.getElem_extractLsb'] <;> grind
 #print axioms lane64_andNot
