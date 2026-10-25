@@ -1,5 +1,13 @@
 # Validation coverage
 
+`Tests/TranslationScaling.cs` checks the unchanged extraction prefix once, then imports it
+into the compositional certificate and deliberately failing monolithic certificate. Its
+`--measure` option also checks both original complete files and records command timings
+for the identical six-method workload. The consumer still verifies the original extraction.
+`Tests/TranslationAudit.cs` shares and replays the prefix once across certificate mutations;
+each variant retains its original certificate audit and rejection assertions. A changed
+prefix is rejected before any suffix can use the checked module.
+
 `Tests.CertificateFlow` covers streaming fallthrough, indexed forward/backward edges,
 missing states, out-of-bounds targets and mismatched certificate lengths. The feature and
 scalar equivalence theorems retain the original list-indexed rules, including rejection
