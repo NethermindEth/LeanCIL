@@ -2,6 +2,10 @@
 
 For checked-step and loop tactics, see [proof automation](#proof-automation).
 
+`Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping through vector and int32
+stores, reloads and overwrites with abstract homes and memory. Missing write authority and
+unknown local contents remain rejected. The ordinary shared tactic tests run unchanged.
+
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer
 element types against runtime results and certified checked execution. It also covers length,
 helper calls, aliases, returned arrays, named null/bounds faults and unsupported array forms.

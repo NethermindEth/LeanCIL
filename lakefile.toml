@@ -45,6 +45,9 @@ name = "Tests.ConfinedFootprints"
 name = "Tests.LocalSnapshots"
 
 [[lean_lib]]
+name = "Tests.LocalSnapshotSteps"
+
+[[lean_lib]]
 name = "Tests.ContractConsequence"
 
 [[lean_lib]]
