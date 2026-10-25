@@ -70,7 +70,8 @@ stay separate from the recorded generated/support sources.
 
 Re-run the same workspace command before checking after an input change.
 It hashes the assembly, PDB presence and bytes, extractor, profile configuration,
-consumer sources, dependency sources and pinned revisions. It also checks the
+exact bundled framework sources and configuration, consumer sources, dependency sources
+and pinned revisions. It also checks the
 recorded generated modules, framework, Lake configuration and toolchain pin in
 the workspace. Changed inputs or managed files cause an explicit rejection;
 select a new `--output` directory after preserving proof edits. Reopening an

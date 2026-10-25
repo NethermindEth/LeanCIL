@@ -15,8 +15,8 @@ partial class Program
 
     internal static void CreateProofWorkspace(string[] args)
     {
-        WorkspaceSettings settings = ParseWorkspaceSettings(args);
-        using Program verification = new();
+        var settings = ParseWorkspaceSettings(args);
+        using var verification = new Program();
         verification.MaterializeProofWorkspace(settings);
     }
 
@@ -25,11 +25,11 @@ partial class Program
         if (args.Length < 2 || args[0].StartsWith("--", StringComparison.Ordinal) ||
             args[1].StartsWith("--", StringComparison.Ordinal))
             throw new ArgumentException(WorkspaceUsage);
-        Dictionary<string, string> options = new(StringComparer.Ordinal);
-        SortedSet<string> initialized = new(StringComparer.Ordinal);
+        var options = new Dictionary<string, string>(StringComparer.Ordinal);
+        var initialized = new SortedSet<string>(StringComparer.Ordinal);
         for (int index = 2; index < args.Length; index++)
         {
-            string option = args[index];
+            var option = args[index];
             if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
                 throw new ArgumentException("Missing value for " + option + ".");
             if (option == "--assume-initialized")
@@ -40,20 +40,20 @@ partial class Program
                 !options.TryAdd(option, args[index]))
                 throw new ArgumentException("Unknown or duplicate option: " + option);
         }
-        if (!options.TryGetValue("--profile", out string? profile) || !options.TryGetValue("--proof", out string? proof))
+        if (!options.TryGetValue("--profile", out var profile) || !options.TryGetValue("--proof", out var proof))
             throw new ArgumentException(WorkspaceUsage);
         if (profile.StartsWith('@')) profile = "@" + Path.GetFullPath(profile[1..]);
-        string assembly = Path.GetFullPath(args[0]);
+        var assembly = Path.GetFullPath(args[0]);
         proof = Path.GetFullPath(proof);
-        string root = options.TryGetValue("--proof-root", out string? selectedRoot)
+        var root = options.TryGetValue("--proof-root", out var selectedRoot)
             ? Path.GetFullPath(selectedRoot) : FindProofPackage(proof);
         Within(root, Path.GetRelativePath(root, proof));
-        string output = options.TryGetValue("--output", out string? selectedOutput) ? Path.GetFullPath(selectedOutput)
+        var output = options.TryGetValue("--output", out var selectedOutput) ? Path.GetFullPath(selectedOutput)
             : Path.Combine(root, ".work", "leancil", ContentKey(assembly + "\n" + args[1] + "\n" + profile)[..20]);
-        string back = Path.GetRelativePath(output, root);
+        var back = Path.GetRelativePath(output, root);
         if (!Path.IsPathRooted(back) && back != ".." && !back.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new ArgumentException("Workspace output must not contain the source consumer package.");
-        string relativeOutput = Path.GetRelativePath(root, output);
+        var relativeOutput = Path.GetRelativePath(root, output);
         if (!Path.IsPathRooted(relativeOutput) && relativeOutput != ".." &&
             !relativeOutput.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
             relativeOutput.Split(Path.DirectorySeparatorChar)[0] is not (".work" or "artifacts" or "generated" or "bin" or "obj"))
@@ -75,15 +75,17 @@ partial class Program
 
     static SortedDictionary<string, string> WorkspaceInputs(WorkspaceSettings settings)
     {
-        SortedDictionary<string, string> inputs = ConsumerSnapshot(settings.ProofRoot, settings.Output);
+        var inputs = ConsumerSnapshot(settings.ProofRoot, settings.Output);
+        foreach (var (path, hash) in LibrarySources(CommonInputs()))
+            inputs["framework:" + path] = hash;
         inputs["assembly:" + settings.Assembly] = Sha(settings.Assembly);
-        string pdb = Path.ChangeExtension(settings.Assembly, ".pdb");
+        var pdb = Path.ChangeExtension(settings.Assembly, ".pdb");
         inputs["pdb:" + pdb] = File.Exists(pdb) ? Sha(pdb) : "absent";
         inputs["extractor"] = Sha(ExtractorPath);
         inputs["settings"] = ContentKey(JsonSerializer.Serialize(settings));
         if (settings.Profile.StartsWith('@'))
         {
-            string profilePath = Path.GetFullPath(settings.Profile[1..]);
+            var profilePath = Path.GetFullPath(settings.Profile[1..]);
             inputs["profile:" + profilePath] = Sha(profilePath);
         }
         return inputs;
@@ -91,27 +93,27 @@ partial class Program
 
     void MaterializeProofWorkspace(WorkspaceSettings settings)
     {
-        SortedDictionary<string, string> inputs = WorkspaceInputs(settings);
-        string manifestPath = Path.Combine(settings.Output, WorkspaceManifest);
+        var inputs = WorkspaceInputs(settings);
+        var manifestPath = Path.Combine(settings.Output, WorkspaceManifest);
         if (Directory.Exists(settings.Output))
         {
             if (!File.Exists(manifestPath)) throw new InvalidDataException("Workspace output already exists without an editor workspace manifest.");
-            EditorWorkspace existing = JsonSerializer.Deserialize<EditorWorkspace>(File.ReadAllText(manifestPath))
+            var existing = JsonSerializer.Deserialize<EditorWorkspace>(File.ReadAllText(manifestPath))
                 ?? throw new InvalidDataException("Invalid editor workspace manifest.");
             if (existing.Schema != 1 || !existing.EditorOnly || existing.Inputs is null || existing.ManagedFiles is null ||
                 !Same(inputs, existing.Inputs))
-                throw new InvalidDataException("Stale editor workspace: assembly, profile, PDB, toolchain or consumer dependencies changed. Preserve your proof edits and select a new --output directory.");
+                throw new InvalidDataException("Stale editor workspace: assembly, profile, PDB, toolchain, framework or consumer dependencies changed. Preserve your proof edits and select a new --output directory.");
             foreach ((string relative, string hash) in existing.ManagedFiles)
             {
-                string path = Within(settings.Output, relative);
+                var path = Within(settings.Output, relative);
                 if (!File.Exists(path) || Sha(path) != hash)
                     throw new InvalidDataException("Editor workspace generated or support source changed: " + relative + ". Select a new --output directory.");
             }
-            IEnumerable<string> sources = ConsumerSources(settings.Output).Concat(ConsumerDependencies(settings.Output)
+            var sources = ConsumerSources(settings.Output).Concat(ConsumerDependencies(settings.Output)
                 .SelectMany(dependency => ConsumerSources(dependency.Directory)));
-            foreach (string path in sources)
+            foreach (var path in sources)
             {
-                string relative = Path.GetRelativePath(settings.Output, path).Replace('\\', '/');
+                var relative = Path.GetRelativePath(settings.Output, path).Replace('\\', '/');
                 if (relative != WorkspaceManifest && relative != WorkspaceProof + ".lean" && !existing.ManagedFiles.ContainsKey(relative))
                     throw new InvalidDataException("Editor workspace contains an unrecorded source: " + relative + ". Select a new --output directory.");
             }
@@ -121,25 +123,25 @@ partial class Program
             return;
         }
 
-        string staging = settings.Output + ".staging-" + Guid.NewGuid().ToString("N");
-        string extraction = Path.Combine(staging, ".work", "extraction");
+        var staging = settings.Output + ".staging-" + Guid.NewGuid().ToString("N");
+        var extraction = Path.Combine(staging, ".work", "extraction");
         Directory.CreateDirectory(staging);
         try
         {
             Run([.. Extract("extract", settings.Assembly, settings.AssemblyIdentity, settings.Method, extraction, settings.Profile),
                 .. settings.InitializedTypes.SelectMany(type => new[] { "--assume-initialized", type })]);
-            ConsumerDependency[] dependencies = ConsumerDependencies(settings.ProofRoot);
-            string? symbols = File.Exists(Path.Combine(extraction, "Symbols.lean")) ? Sha(Path.Combine(extraction, "Symbols.lean")) : null;
-            ConsumerSession prepared = PrepareConsumerSession(staging, settings.ProofRoot, dependencies, inputs, null,
+            var dependencies = ConsumerDependencies(settings.ProofRoot);
+            var symbols = File.Exists(Path.Combine(extraction, "Symbols.lean")) ? Sha(Path.Combine(extraction, "Symbols.lean")) : null;
+            var prepared = PrepareConsumerSession(staging, settings.ProofRoot, dependencies, inputs, null,
                 ExtractionIdentity.Read(extraction), [(WorkspaceProof, settings.Proof, extraction)], symbols,
                 purpose: ConsumerSessionPurpose.Editor);
             if (!Same(inputs, WorkspaceInputs(settings))) throw new InvalidDataException("Workspace inputs changed during generation.");
-            SortedDictionary<string, string> managed = new(StringComparer.Ordinal);
-            foreach (string path in prepared.Copied.Keys.Where(path => path != Path.Combine(staging, WorkspaceProof + ".lean")))
+            var managed = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            foreach (var path in prepared.Copied.Keys.Where(path => path != Path.Combine(staging, WorkspaceProof + ".lean")))
                 managed[Path.GetRelativePath(staging, path).Replace('\\', '/')] = Sha(path);
-            foreach (string path in Directory.EnumerateFiles(extraction))
+            foreach (var path in Directory.EnumerateFiles(extraction))
                 managed[Path.GetRelativePath(staging, path).Replace('\\', '/')] = Sha(path);
-            EditorWorkspace manifest = new(1, true, settings, inputs, managed);
+            var manifest = new EditorWorkspace(1, true, settings, inputs, managed);
             File.WriteAllText(Path.Combine(staging, WorkspaceManifest), JsonSerializer.Serialize(manifest, Json) + "\n");
             File.WriteAllText(Path.Combine(staging, "LEANCIL-WORKSPACE.md"),
                 "# LeanCIL editor workspace\n\nEditor checking is not a certificate. This workspace publishes no verification report or trusted receipt.\n\n" +

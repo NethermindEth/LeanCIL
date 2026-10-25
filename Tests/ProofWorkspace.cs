@@ -5,10 +5,10 @@
 using System.Text.Json;
 
 string[] cli = ["dotnet", ExtractorPath];
-string root = At("artifacts/ProofWorkspace-" + Guid.NewGuid().ToString("N"));
-string consumer = Path.Combine(root, "Consumer");
-string package = Path.Combine(root, "Package");
-string workspace = Path.Combine(root, "Workspace");
+var root = At("artifacts/ProofWorkspace-" + Guid.NewGuid().ToString("N"));
+var consumer = Path.Combine(root, "Consumer");
+var package = Path.Combine(root, "Package");
+var workspace = Path.Combine(root, "Workspace");
 Directory.CreateDirectory(Path.Combine(package, "Client"));
 const string consumerRevision = "00fcecf53e22b5c9090052779e14b3ba246fb117";
 const string method = "Nethermind.Int256.UInt256::get_IsZeroOrOne()";
@@ -17,16 +17,17 @@ Run(["git", "init", consumer]);
 Run(["git", "remote", "add", "origin", "https://github.com/NethermindEth/int256.git"], consumer);
 Run(["git", "fetch", "--depth", "1", "origin", consumerRevision], consumer);
 Run(["git", "checkout", "--detach", "FETCH_HEAD"], consumer);
+Console.WriteLine("Building pinned Nethermind.Int256 consumer " + consumerRevision);
 Run(["dotnet", "build", Path.Combine(consumer, "src", "Nethermind.Int256", "Nethermind.Int256.csproj"),
     "-c", "Release"]);
-string assembly = Path.Combine(consumer, "src", "artifacts", "bin", "Nethermind.Int256", "release",
+var assembly = Path.Combine(consumer, "src", "artifacts", "bin", "Nethermind.Int256", "release",
     "Nethermind.Int256.dll");
-string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
+var revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(package, "lakefile.toml"),
     "name = \"consumer\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
     "\nrev = \"" + revision + "\"\n[[lean_lib]]\nname = \"Client\"\n");
 File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
-string helper = Path.Combine(package, "Client", "Support.lean");
+var helper = Path.Combine(package, "Client", "Support.lean");
 File.WriteAllText(helper, """
 import Extracted
 import ExtractedSymbols
@@ -38,7 +39,7 @@ theorem methodIdentity : Extracted.method0Signature =
 #print axioms methodIdentity
 end Client
 """);
-string proof = Path.Combine(package, "Proof.lean");
+var proof = Path.Combine(package, "Proof.lean");
 File.WriteAllText(proof, """
 import Client.Support
 namespace WorkspaceProof
@@ -49,27 +50,29 @@ theorem selectedMethod : Extracted.program.length = 1 ∧ Extracted.method0Signa
 end WorkspaceProof
 """);
 Run(["lake", "update"], package);
+Console.WriteLine("Checking the real UInt256 editor workspace and preserving proof edits");
 string[] command = [.. cli, "workspace", assembly, method,
     "--profile", "scalar", "--proof", proof, "--assume-initialized", initializedType, "--output", workspace];
-string created = Run(command);
-string editorProof = Path.Combine(workspace, "LeanCILProofWorkspace.lean");
+var created = Run(command);
+var editorProof = Path.Combine(workspace, "LeanCILProofWorkspace.lean");
 if (!created.Contains("Editor checking is not a certificate", StringComparison.Ordinal) || Sha(editorProof) != Sha(proof))
     throw new InvalidOperationException("Workspace did not preserve the selected proof or state its trust boundary.");
-JsonElement manifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(workspace, "leancil-workspace.json")));
+var manifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(workspace, "leancil-workspace.json")));
 if (!manifest.GetProperty("EditorOnly").GetBoolean() || Directory.EnumerateFiles(workspace, "verified.json", SearchOption.AllDirectories).Any())
     throw new InvalidOperationException("An editor workspace must never publish a certificate.");
 Run(["lake", "build", "+LeanCILProofWorkspace:olean"], workspace);
 File.AppendAllText(editorProof, "\ntheorem editorChange : True := True.intro\n#print axioms editorChange\n");
-string changedProof = Sha(editorProof);
+var changedProof = Sha(editorProof);
 Run(command);
 if (Sha(editorProof) != changedProof) throw new InvalidOperationException("Reopening a workspace overwrote proof edits.");
 Run(["lake", "build", "+LeanCILProofWorkspace:olean"], workspace);
 File.Copy(editorProof, proof, true);
-string output = Path.Combine(root, "Verification");
+Console.WriteLine("Verifying the unchanged editor proof through fresh hermetic verification");
+var output = Path.Combine(root, "Verification");
 Run([.. cli, "extract", assembly, method, output, "scalar", "--assume-initialized", initializedType]);
 Run([.. cli, "verify", output, "--proof", proof, "--proof-root", package,
     "--theorem", "WorkspaceProof.selectedMethod", "--fresh"]);
-JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 if (!report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid", StringComparison.Ordinal) ||
     report.GetProperty("libraryBuild").GetString() == "consumer-proof-cache")
     throw new InvalidOperationException("Workspace proof did not pass ordinary fresh extraction audit and hermetic verification.");
@@ -77,7 +80,7 @@ Console.WriteLine("PASS real pinned UInt256 workspace, transitive symbols import
 
 void Reject(string[] arguments, string marker)
 {
-    (int Code, string Output, string Stdout, string Stderr) result = Execute(arguments);
+    var result = Execute(arguments);
     if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal) || Sha(editorProof) != changedProof)
         throw new InvalidOperationException("Expected explicit stale workspace rejection without proof loss: " + result.Output);
 }
@@ -85,14 +88,14 @@ void Reject(string[] arguments, string marker)
 File.WriteAllText(proof, File.ReadAllText(editorProof).Replace(
     "\ntheorem editorChange : True := True.intro\n#print axioms editorChange\n", "", StringComparison.Ordinal));
 Run(command);
-foreach ((string path, string name) in new[]
+foreach (var (path, name) in new[]
 {
     (assembly, "assembly"), (Path.ChangeExtension(assembly, ".pdb"), "PDB"),
     (helper, "consumer helper"), (Path.Combine(package, "lean-toolchain"), "toolchain"),
     (Path.Combine(package, ".lake", "packages", "leancil", "lakefile.toml"), "dependency source")
 })
 {
-    byte[] original = File.ReadAllBytes(path);
+    var original = File.ReadAllBytes(path);
     try
     {
         File.WriteAllBytes(path, [.. original, 32]);
@@ -103,13 +106,13 @@ foreach ((string path, string name) in new[]
 string[] wrongProfile = [.. command];
 wrongProfile[Array.IndexOf(wrongProfile, "scalar")] = "arm64-armbase";
 Reject(wrongProfile, "Stale editor workspace");
-string pdb = Path.ChangeExtension(assembly, ".pdb");
-byte[] savedPdb = File.ReadAllBytes(pdb);
+var pdb = Path.ChangeExtension(assembly, ".pdb");
+var savedPdb = File.ReadAllBytes(pdb);
 try
 {
     File.Delete(pdb);
     Reject(command, "Stale editor workspace");
-    string stripped = Path.Combine(root, "NoPdbWorkspace");
+    var stripped = Path.Combine(root, "NoPdbWorkspace");
     string[] strippedCommand = [.. command];
     strippedCommand[^1] = stripped;
     Run(strippedCommand);
@@ -121,8 +124,34 @@ try
 finally { File.WriteAllBytes(pdb, savedPdb); }
 Console.WriteLine("PASS assembly, profile, PDB presence/content, toolchain and transitive source changes reject stale workspaces");
 
-string sourceDependency = Path.Combine(package, ".lake", "packages", "leancil");
-string olderRevision = Run(["git", "rev-parse", "HEAD^"], sourceDependency).Trim();
+// Exercise the framework actually used by the tool without mutating the running checkout.
+var toolCopy = Path.Combine(root, "Tool");
+var toolSource = Path.GetDirectoryName(ExtractorPath)!;
+foreach (var source in Directory.EnumerateFiles(toolSource, "*", SearchOption.AllDirectories))
+{
+    var destination = Path.Combine(toolCopy, Path.GetRelativePath(toolSource, source));
+    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+    File.Copy(source, destination);
+}
+string[] copiedCommand = ["dotnet", Path.Combine(toolCopy, Path.GetFileName(ExtractorPath)), .. command[2..]];
+Run(copiedCommand);
+var copiedFramework = Path.Combine(toolCopy, "verification", "CIL", "ProfileEquivalence.lean");
+var frameworkBytes = File.ReadAllBytes(copiedFramework);
+try
+{
+    var frameworkText = File.ReadAllText(copiedFramework);
+    var otherLineEnding = frameworkText.Contains("\r\n", StringComparison.Ordinal) ? "\n" : "\r\n";
+    File.WriteAllText(copiedFramework, frameworkText.ReplaceLineEndings(otherLineEnding));
+    Reject(copiedCommand, "Stale editor workspace");
+    File.Delete(copiedFramework);
+    Reject(copiedCommand, "Stale editor workspace");
+}
+finally { File.WriteAllBytes(copiedFramework, frameworkBytes); }
+Run(copiedCommand);
+Console.WriteLine("PASS exact tool framework bytes and removed tool sources reject stale workspaces");
+
+var sourceDependency = Path.Combine(package, ".lake", "packages", "leancil");
+var olderRevision = Run(["git", "rev-parse", "HEAD^"], sourceDependency).Trim();
 try
 {
     Run(["git", "update-ref", "HEAD", olderRevision], sourceDependency);
@@ -131,11 +160,11 @@ try
 finally { Run(["git", "update-ref", "HEAD", revision], sourceDependency); }
 Console.WriteLine("PASS a dependency checkout revision inconsistent with its manifest is rejected");
 
-string framework = Path.Combine(workspace, ".lake", "packages", "leancil");
-foreach (string path in new[] { Path.Combine(framework, "Extracted.lean"), Path.Combine(framework, "ExtractedSymbols.lean"),
+var framework = Path.Combine(workspace, ".lake", "packages", "leancil");
+foreach (var path in new[] { Path.Combine(framework, "Extracted.lean"), Path.Combine(framework, "ExtractedSymbols.lean"),
     Path.Combine(framework, "CIL", "Semantics.lean"), Path.Combine(workspace, "lakefile.toml"), Path.Combine(workspace, "lean-toolchain") })
 {
-    string original = File.ReadAllText(path);
+    var original = File.ReadAllText(path);
     try
     {
         File.AppendAllText(path, "\n ");
@@ -143,7 +172,7 @@ foreach (string path in new[] { Path.Combine(framework, "Extracted.lean"), Path.
     }
     finally { File.WriteAllText(path, original); }
 }
-string shadow = Path.Combine(workspace, "Extracted.lean");
+var shadow = Path.Combine(workspace, "Extracted.lean");
 try
 {
     File.WriteAllText(shadow, "def forged : Nat := 0\n");
