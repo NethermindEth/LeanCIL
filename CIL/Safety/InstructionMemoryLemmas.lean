@@ -123,6 +123,16 @@ theorem formValue_result_valid (m : Memory) (r : ManagedReference) (value : Valu
       subst formed
       exact hf
 
+/-- Forming a reference also validates the same address with a readonly restriction. -/
+theorem formValue_readOnly_valid (m : Memory) (reference : ManagedReference) (value : Value)
+    (formed : formValue m reference = .ok value) :
+    (Value.readOnlyReference reference).Valid m := by
+  have valid := formValue_result_valid m reference value formed
+  rw [formValue_returns_input m reference value formed] at valid
+  cases reference <;> exact valid
+
+#print axioms formValue_readOnly_valid
+
 /-- `checkedValue` either faults or returns its input, which is then valid. -/
 theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
@@ -356,6 +366,16 @@ theorem checkedArrayElement_valid (view : ArrayView) (memory : Memory) (index wi
 
 #print axioms checkedArrayElement_valid
 
+/-- A readonly array address retains validity without gaining write permission through the view. -/
+theorem checkedArrayAddress_valid (view : ArrayView) (memory : Memory) (index width : Nat)
+    (writable : Bool)
+    (reference : Reference) (found : arrayElement memory view index width = .ok reference) :
+    (if writable then Value.reference (.address reference)
+      else .readOnlyReference (.address reference)).Valid memory := by
+  cases writable <;> exact checkedArrayElement_valid view memory index width reference found
+
+#print axioms checkedArrayAddress_valid
+
 set_option hygiene false in
 /-- Closes one success case of the instruction case analysis with `InstructionContract.of_effect`:
     picks the effect from the hypotheses, then rebuilds the output stack from retained inputs
@@ -390,6 +410,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | apply checkedSpanSlice_valid; assumption
             | apply checkedSpanElement_valid; assumption
             | apply checkedArrayElement_valid; assumption
+            | apply checkedArrayAddress_valid; assumption
           · first
             | exact retained
             | exact retained.tail

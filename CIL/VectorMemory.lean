@@ -133,7 +133,7 @@ inductive MemoryOp where
   /-- Integer operations over supplied array storage; allocation is not modelled. -/
   | arrayLength | arrayLoad (width : Nat) (signed : Bool) | arrayStore (width : Nat)
   /-- A checked element address retains allocation provenance without granting authority. -/
-  | arrayAddress (element : ArrayElement)
+  | arrayAddress (element : ArrayElement) (writable : Bool := true)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
   deriving Repr
@@ -144,7 +144,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. => 2
   | .spanReadOnly | .arrayLength => 1
-  | .arrayLoad .. | .arrayAddress _ => 2
+  | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
   | .staticAddress _ | .staticValue _ | .nullRef => 0

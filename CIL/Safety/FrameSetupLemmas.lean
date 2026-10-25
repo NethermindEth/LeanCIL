@@ -119,8 +119,8 @@ theorem allocateHome_preserves_caller_memory {alignment : Nat} (m result : Memor
 
 /-- Roots and spans retain checked references and extents; byte slots name live storage. -/
 def LocalSlot.ReferencesValid (m : Memory) : LocalSlot → Prop
-  | .root none | .root (some .null) | .opaque128 _ => True
-  | .root (some (.address r)) | .bytes _ r => form m r = .ok r
+  | .root none | .root (some .null) | .readOnlyRoot .null | .opaque128 _ => True
+  | .root (some (.address r)) | .readOnlyRoot (.address r) | .bytes _ r => form m r = .ok r
   | .span _ _ none => True
   | .span _ _ (some view) => view.validate m = .ok ()
   | .array _ none => True
@@ -136,6 +136,10 @@ theorem LocalSlot.ReferencesValid.preserve {m result : Memory} {slot : LocalSlot
   cases slot with
   | bytes kind r => exact ext.preserves_reference hm r r valid
   | opaque128 _ => trivial
+  | readOnlyRoot reference =>
+    cases reference with
+    | null => trivial
+    | address reference => exact ext.preserves_reference hm reference reference valid
   | span width writable value =>
     cases value with
     | none => trivial
@@ -171,7 +175,7 @@ theorem allocateHome_reference_valid {alignment : Nat} (m result : Memory)
 
 /-- Byte homes are allocated after the entry watermark; roots do not own bytes. -/
 def LocalSlot.Above (watermark : Nat) : LocalSlot → Prop
-  | .root _ | .opaque128 _ | .span .. | .array .. => True
+  | .root _ | .readOnlyRoot _ | .opaque128 _ | .span .. | .array .. => True
   | .bytes _ r => watermark ≤ r.allocation
 
 theorem write_staticBindings {m result : Memory} {r : Reference} {bytes : List (BitVec 8)}
@@ -246,6 +250,13 @@ theorem formValue_root_valid {m : Memory} {r : ManagedReference} {value : Value}
       subst_vars
       exact hf
 
+/-- A restricted root retains the same live reference validated at storage. -/
+theorem formValue_readOnlyRoot_valid {m : Memory} {r : ManagedReference} {value : Value}
+    (formed : formValue m r = .ok value) : (LocalSlot.readOnlyRoot r).ReferencesValid m := by
+  cases r <;> exact formValue_root_valid formed
+
+#print axioms formValue_readOnlyRoot_valid
+
 theorem storeLocal_preserves_reference_validity (m result : Memory) (slot final : LocalSlot)
     (value : Value) (hm : m.WellFormed) (valid : slot.ReferencesValid m)
     (h : storeLocal m slot value = .ok (final, result)) : final.ReferencesValid result := by
@@ -255,6 +266,7 @@ theorem storeLocal_preserves_reference_validity (m result : Memory) (slot final 
     | exact retained
     | solve | exact ArrayView.null_valid _ _
     | solve | exact formValue_root_valid (by assumption)
+    | solve | exact formValue_readOnlyRoot_valid (by assumption)
     | solve | exact checkedAt_ok (by assumption)
     | cases h
     | split at h
@@ -297,6 +309,7 @@ theorem FrameSetup.append {activation : Nat} {first middle last : Memory}
     · have bound := b.above slot member
       cases slot with
       | root _ => trivial
+      | readOnlyRoot _ => trivial
       | opaque128 _ => trivial
       | span _ _ _ => trivial
       | array _ _ => trivial

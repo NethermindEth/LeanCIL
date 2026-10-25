@@ -85,6 +85,7 @@ theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
       | solve | cases ‹Opaque128Value› <;> rfl
       | solve | exact loadSnapshot_numeric (by assumption)
       | solve | apply formValue_result_valid; assumption
+      | solve | apply formValue_readOnly_valid; assumption
       | solve | exact checkedAt_ok (by assumption)
       | cases h
       | split at h
@@ -93,6 +94,7 @@ theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value
     (h : localAddress m slot = .ok value) : value.Valid m := by
   cases slot with
   | root root => cases h
+  | readOnlyRoot _ => cases h
   | opaque128 _ => cases h
   | span _ _ _ => cases h
   | array _ _ => cases h

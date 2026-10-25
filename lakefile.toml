@@ -192,3 +192,6 @@ name = "Tests.PrimitiveArrays"
 
 [[lean_lib]]
 name = "Tests.ArrayElementReferences"
+
+[[lean_lib]]
+name = "Tests.ReadOnlyArrayReferences"

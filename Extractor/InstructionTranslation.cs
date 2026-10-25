@@ -22,6 +22,12 @@ internal static class InstructionTranslation
             incoming.Length >= 2 && incoming[^2] == NativeOperands.Kind.Reference &&
             incoming[^1] is NativeOperands.Kind.Word32 or NativeOperands.Kind.Native)
             return ".memory (.add 1 true)";
+        if (i.OpCode.Code == Code.Readonly)
+        {
+            Arrays.ValidateReadOnly(m, i);
+            return ".nop";
+        }
+        if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(m, i.Previous);
         if (Arrays.Translate(i) is { } arrayOperation) return arrayOperation;
         var translated = TranslateCore(i, m, methods, methodIndex, profile, parameterHomes ?? ParameterStorage.Analyze(m, profile));
         return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;
