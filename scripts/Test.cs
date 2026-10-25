@@ -218,7 +218,7 @@ Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.Metho
     "Tests.LocalSnapshots", "Tests.LocalSnapshotSteps", "Tests.ContractConsequence", "Tests.InvocationCertificates",
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
-    "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.SimdLanes"],
+    "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes"],
     streamOutput: true, progress: "Building Lean library, semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
