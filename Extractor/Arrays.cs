@@ -37,6 +37,8 @@ internal static class Arrays
     internal static string? Translate(Instruction instruction) => instruction.OpCode.Code switch
     {
         Code.Ldlen => ".memory .arrayLength",
+        Code.Ldelema => $".memory (.arrayAddress .{(Primitive((TypeReference)instruction.Operand) ??
+            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Lean})",
         Code.Ldelem_I1 => ".memory (.arrayLoad 1 true)",
         Code.Ldelem_U1 => ".memory (.arrayLoad 1 false)",
         Code.Ldelem_I2 => ".memory (.arrayLoad 2 true)",

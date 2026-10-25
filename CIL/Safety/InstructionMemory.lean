@@ -329,6 +329,11 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     let _ ← formValue memory r
     return (memory, rest)
   -- Arrays retain the supplied length; reads and writes use checked element storage.
+  | .arrayAddress element, .scalar index :: .array view :: rest =>
+    if view.elementType != element then .error .invalidState else pure ()
+    let some index := arrayIndex index | .error .invalidState
+    let reference ← arrayElement memory view index element.width
+    return (memory, .reference (.address reference) :: rest)
   | .arrayLength, .array view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)
     if view.reference == .null then .error (.thrown "System.NullReferenceException") else
@@ -349,7 +354,8 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
       (write memory reference (numberBytes number width) 1)
     return (updated, rest)
   | .arrayLength, .reference .null :: _ => .error (.thrown "System.NullReferenceException")
-  | .arrayLoad .., .scalar index :: .reference .null :: _ =>
+  | .arrayLoad .., .scalar index :: .reference .null :: _
+  | .arrayAddress _, .scalar index :: .reference .null :: _ =>
     let some _ := arrayIndex index | .error .invalidState
     .error (.thrown "System.NullReferenceException")
   | .arrayStore _, .scalar _ :: .scalar index :: .reference .null :: _ =>

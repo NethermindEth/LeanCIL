@@ -343,6 +343,19 @@ theorem checkedSpanElement_valid (view : SpanView) (memory : Memory) (width inde
 #print axioms checkedSpanSlice_valid
 #print axioms checkedSpanElement_valid
 
+/-- Checked array addresses retain a live allocation-relative reference. -/
+theorem checkedArrayElement_valid (view : ArrayView) (memory : Memory) (index width : Nat)
+    (reference : Reference) (found : arrayElement memory view index width = .ok reference) :
+    (Value.reference (.address reference)).Valid memory := by
+  unfold arrayElement at found
+  repeat' first
+    | solve | exact view.element_formed memory index reference (checkedAt_ok found)
+    | cases found
+    | split at found
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at found
+
+#print axioms checkedArrayElement_valid
+
 set_option hygiene false in
 /-- Closes one success case of the instruction case analysis with `InstructionContract.of_effect`:
     picks the effect from the hypotheses, then rebuilds the output stack from retained inputs
@@ -376,6 +389,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | apply checkedReadOnlySpan_valid; assumption
             | apply checkedSpanSlice_valid; assumption
             | apply checkedSpanElement_valid; assumption
+            | apply checkedArrayElement_valid; assumption
           · first
             | exact retained
             | exact retained.tail
