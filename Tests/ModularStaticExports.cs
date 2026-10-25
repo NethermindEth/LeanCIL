@@ -482,7 +482,8 @@ void FullTransitiveStatic()
     var stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
         .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
-    if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
+    if (stages.Count(stage => stage == "Building fresh consumer proof and dependencies") != 3 ||
+        stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
         stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
         report.GetProperty("contractDependencies").GetArrayLength() != 2 ||
