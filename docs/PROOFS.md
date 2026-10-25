@@ -990,8 +990,9 @@ caller across an inserted dead block, with the relocated throw pc.
 
 An extraction can also declare locals the literal body never uses. Only one
 shape is covered: dead locals that trail the body's own locals and are
-references initialized to null or left unmodeled, which the extractor emits for
-byref and pointer locals. For those, `cil_embed` proves
+references or spans initialized to their empty value or left unmodeled. These cover
+byref, pointer, `Span<T>` and `ReadOnlySpan<T>` locals; spans require an element width
+of 1, 2, 4 or 8 bytes. For those, `cil_embed` proves
 `MethodEmbedsDeadLocals` instead, and the same proof covers extractions with and
 without them (from `CIL.Safety.Embedding.DeadLocals`):
 
@@ -1007,9 +1008,9 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 `.raises`, `.method_holds` and `.holds` transfer as for `MethodEmbeds`. A
 numeric dead local, such as a flag only one architecture's path reads, is still
 rejected: its home would shift every later allocation identity, and runs over
-renamed identities are not related yet. A dead span local allocates nothing
-either but is not covered yet, and a dead local before a kept one is rejected,
-since it renumbers the kept local.
+renamed identities are not related yet. A dead local before a kept one is rejected,
+since it renumbers the kept local. Span slots retain their width, mutability and empty
+or unmodeled state; padding does not create or change any allocation.
 
 ### Instruction equations for parametric bodies
 

@@ -211,8 +211,8 @@ store fact may state its value in source form. Loop segments use
 `CodeAt` facts let the tactics resolve instructions within a known code segment without
 expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
 tracks local stores and updated snapshots. Supported forwarder bodies can inherit a
-callee's proved contract, and embedding proofs can ignore trailing unread byref or
-pointer locals. Contract refinement derives a public interface from a stronger proved
+callee's proved contract, and embedding proofs can ignore trailing unread byref,
+pointer or span locals. Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
