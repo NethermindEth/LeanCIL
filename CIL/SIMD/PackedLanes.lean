@@ -445,6 +445,191 @@ theorem sub256_cascade (x y : V256) :
   exact sub256_lanes x y
 #print axioms sub256_cascade
 
+/-- Every lane of the 512-bit all-ones vector is all ones. -/
+theorem lane64_allOnes512 {index : Nat} (lane : index < 8) :
+    lane64 (~~~0 : V512) index = BitVec.allOnes 64 := by
+  rw [show (0 : V512) = 0#512 from rfl, BitVec.not_zero]
+  apply BitVec.eq_of_getLsbD_eq
+  intro bit below
+  simp only [lane64, BitVec.getLsbD_extractLsb', below, decide_true, Bool.true_and,
+    BitVec.getLsbD_allOnes]
+  exact decide_eq_true (by omega)
+#print axioms lane64_allOnes512
+
+/-- A comparison mask bit below lane eight is exactly that lane's comparison result. -/
+theorem getLsbD_moveMask512_compare (compare : W64 → W64 → Bool) (left right : V512)
+    {index : Nat} (lane : index < 8) :
+    (moveMask512 (zip512 (fun a b => mask64 (compare a b)) left right)).getLsbD index =
+      compare (lane64 left index) (lane64 right index) := by
+  rw [getLsbD_moveMask512, decide_eq_true lane, Bool.true_and,
+    lane64_zip512 _ _ _ lane, msb_mask64]
+#print axioms getLsbD_moveMask512_compare
+
+/-- Cascade bit eight is the carry out of a 512-bit sum; lower bits are lane carry-ins. -/
+theorem cascade_add512 (left right : V512) {index : Nat} (lane : index ≤ 8) :
+    let sum := zip512 (· + ·) left right
+    let generate := moveMask512 (zip512 (fun a b => mask64 (a.ult b)) sum left)
+    let propagate := moveMask512 (zip512 (fun a b => mask64 (a == b)) sum (~~~0))
+    (propagate ^^^ (propagate + (generate <<< 1))).getLsbD index =
+      BitVec.carry (64 * index) left right false := by
+  intro sum generate propagate
+  apply cascade_add_flags left right generate propagate 8 _ _ index lane (by omega)
+  · intro index below
+    rw [getLsbD_moveMask512_compare _ _ _ below, lane64_zip512 _ _ _ below]
+  · intro index below
+    rw [getLsbD_moveMask512_compare _ _ _ below, lane64_zip512 _ _ _ below,
+      lane64_allOnes512 below]
+#print axioms cascade_add512
+
+/-- Cascade bit eight is the borrow out of a 512-bit difference; lower bits are borrow-ins. -/
+theorem cascade_sub512 (left right : V512) {index : Nat} (lane : index ≤ 8) :
+    let generate := moveMask512 (zip512 (fun a b => mask64 (a.ult b)) left right)
+    let propagate := moveMask512 (zip512 (fun a b => mask64 (a == b)) left right)
+    (propagate ^^^ (propagate + (generate <<< 1))).getLsbD index =
+      subBorrow (64 * index) left right := by
+  intro generate propagate
+  apply cascade_sub_flags left right generate propagate 8 _ _ index lane (by omega)
+  · intro index below
+    rw [getLsbD_moveMask512_compare _ _ _ below]
+  · intro index below
+    rw [getLsbD_moveMask512_compare _ _ _ below]
+#print axioms cascade_sub512
+
+/-- Equal 64-bit lanes determine all 512 bits of a vector. -/
+theorem eq_of_lane64_eq512 {left right : V512}
+    (lanes : ∀ index < 8, lane64 left index = lane64 right index) : left = right := by
+  apply BitVec.eq_of_getLsbD_eq
+  intro bit below
+  have equal := congrArg (fun value : W64 => value.getLsbD (bit % 64))
+    (lanes (bit / 64) (by omega))
+  have position : 64 * (bit / 64) + bit % 64 = bit := by omega
+  simpa only [lane64, BitVec.getLsbD_extractLsb',
+    decide_eq_true (Nat.mod_lt bit (by decide : 0 < 64)), Bool.true_and, position] using equal
+#print axioms eq_of_lane64_eq512
+/-- A 512-bit sum is the independent lane sums repaired by decoded cascade carry-ins. -/
+theorem add512_cascade (left right : V512) :
+    let sum := zip512 (· + ·) left right
+    let generate := moveMask512 (zip512 (fun a b => mask64 (a.ult b)) sum left)
+    let propagate := moveMask512 (zip512 (fun a b => mask64 (a == b)) sum (~~~0))
+    let carries := propagate ^^^ (propagate + (generate <<< 1))
+    left + right = zip512 (· + ·) sum
+      (pack512 0 (if carries.getLsbD 1 then 1 else 0) (if carries.getLsbD 2 then 1 else 0)
+        (if carries.getLsbD 3 then 1 else 0) (if carries.getLsbD 4 then 1 else 0)
+        (if carries.getLsbD 5 then 1 else 0) (if carries.getLsbD 6 then 1 else 0)
+        (if carries.getLsbD 7 then 1 else 0)) := by
+  intro sum generate propagate carries
+  apply eq_of_lane64_eq512
+  intro index below
+  rw [lane64_add left right index (by omega), lane64_zip512 _ _ _ below,
+    lane64_zip512 _ _ _ below]
+  match index, below with
+  | 0, _ => simp only [carry_lane_zero, lane512_0]; rfl
+  | 1, _ => rw [lane512_1, show carries.getLsbD 1 = _ from
+      cascade_add512 left right (index := 1) (by decide)]
+  | 2, _ => rw [lane512_2, show carries.getLsbD 2 = _ from
+      cascade_add512 left right (index := 2) (by decide)]
+  | 3, _ => rw [lane512_3, show carries.getLsbD 3 = _ from
+      cascade_add512 left right (index := 3) (by decide)]
+  | 4, _ => rw [lane512_4, show carries.getLsbD 4 = _ from
+      cascade_add512 left right (index := 4) (by decide)]
+  | 5, _ => rw [lane512_5, show carries.getLsbD 5 = _ from
+      cascade_add512 left right (index := 5) (by decide)]
+  | 6, _ => rw [lane512_6, show carries.getLsbD 6 = _ from
+      cascade_add512 left right (index := 6) (by decide)]
+  | 7, _ => rw [lane512_7, show carries.getLsbD 7 = _ from
+      cascade_add512 left right (index := 7) (by decide)]
+#print axioms add512_cascade
+
+/-- A 512-bit difference is the lane differences repaired by decoded cascade borrow-ins. -/
+theorem sub512_cascade (left right : V512) :
+    let difference := zip512 (· - ·) left right
+    let generate := moveMask512 (zip512 (fun a b => mask64 (a.ult b)) left right)
+    let propagate := moveMask512 (zip512 (fun a b => mask64 (a == b)) left right)
+    let borrows := propagate ^^^ (propagate + (generate <<< 1))
+    left - right = zip512 (· - ·) difference
+      (pack512 0 (if borrows.getLsbD 1 then 1 else 0) (if borrows.getLsbD 2 then 1 else 0)
+        (if borrows.getLsbD 3 then 1 else 0) (if borrows.getLsbD 4 then 1 else 0)
+        (if borrows.getLsbD 5 then 1 else 0) (if borrows.getLsbD 6 then 1 else 0)
+        (if borrows.getLsbD 7 then 1 else 0)) := by
+  intro difference generate propagate borrows
+  apply eq_of_lane64_eq512
+  intro index below
+  rw [lane64_sub left right index (by omega), lane64_zip512 _ _ _ below,
+    lane64_zip512 _ _ _ below]
+  match index, below with
+  | 0, _ => simp only [subBorrow_lane_zero, lane512_0]; rfl
+  | 1, _ => rw [lane512_1, show borrows.getLsbD 1 = _ from
+      cascade_sub512 left right (index := 1) (by decide)]
+  | 2, _ => rw [lane512_2, show borrows.getLsbD 2 = _ from
+      cascade_sub512 left right (index := 2) (by decide)]
+  | 3, _ => rw [lane512_3, show borrows.getLsbD 3 = _ from
+      cascade_sub512 left right (index := 3) (by decide)]
+  | 4, _ => rw [lane512_4, show borrows.getLsbD 4 = _ from
+      cascade_sub512 left right (index := 4) (by decide)]
+  | 5, _ => rw [lane512_5, show borrows.getLsbD 5 = _ from
+      cascade_sub512 left right (index := 5) (by decide)]
+  | 6, _ => rw [lane512_6, show borrows.getLsbD 6 = _ from
+      cascade_sub512 left right (index := 6) (by decide)]
+  | 7, _ => rw [lane512_7, show borrows.getLsbD 7 = _ from
+      cascade_sub512 left right (index := 7) (by decide)]
+#print axioms sub512_cascade
+
+/-- Testing the second addend above the wrapped lane sum gives the same carry cascade. -/
+theorem cascade_add256_gtu (left right : V256) {index : Nat} (lane : index ≤ 4) :
+    let sum := zip256 (· + ·) left right
+    let generate := moveMask64 (zip256 (fun a b => mask64 (b.ult a)) right sum)
+    let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b)) sum (~~~0))
+    (propagate ^^^ (propagate + (generate <<< 1))).getLsbD index =
+      BitVec.carry (64 * index) left right false := by
+  have sums : zip256 (· + ·) right left = zip256 (· + ·) left right := by
+    apply eq_of_lane64_eq256
+    intro index below
+    rw [lane64_zip256 _ _ _ below, lane64_zip256 _ _ _ below, BitVec.add_comm]
+  have comparison :
+      zip256 (fun a b => mask64 (a.ult b)) (zip256 (· + ·) left right) right =
+      zip256 (fun a b => mask64 (b.ult a)) right (zip256 (· + ·) left right) := by
+    apply eq_of_lane64_eq256
+    intro index below
+    simp only [lane64_zip256 _ _ _ below]
+  simpa only [sums, comparison, BitVec.carry, Nat.add_comm] using
+    cascade_add256 right left lane
+#print axioms cascade_add256_gtu
+
+/-- Broadcasting the all-ones 64-bit word gives the 256-bit all-ones comparand. -/
+theorem pack256_allOnes :
+    pack256 (~~~0) (~~~0) (~~~0) (~~~0) = (~~~0 : V256) := by
+  apply eq_of_lane64_eq256
+  intro index below
+  rw [lane64_allOnes256 below]
+  match index, below with
+  | 0, _ => rw [lane256_0]; rfl
+  | 1, _ => rw [lane256_1]; rfl
+  | 2, _ => rw [lane256_2]; rfl
+  | 3, _ => rw [lane256_3]; rfl
+#print axioms pack256_allOnes
+
+/-- The addition cascade accepts the comparand emitted by a broadcast `create64`. -/
+theorem cascade_add256_broadcast (left right : V256) {index : Nat} (lane : index ≤ 4) :
+    let sum := zip256 (· + ·) left right
+    let generate := moveMask64 (zip256 (fun a b => mask64 (a.ult b)) sum left)
+    let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b)) sum
+      (pack256 (~~~0) (~~~0) (~~~0) (~~~0)))
+    (propagate ^^^ (propagate + (generate <<< 1))).getLsbD index =
+      BitVec.carry (64 * index) left right false := by
+  simpa only [pack256_allOnes] using cascade_add256 left right lane
+#print axioms cascade_add256_broadcast
+
+/-- Broadcast propagation and operand-swapped greater-than generation compose directly. -/
+theorem cascade_add256_gtu_broadcast (left right : V256) {index : Nat} (lane : index ≤ 4) :
+    let sum := zip256 (· + ·) left right
+    let generate := moveMask64 (zip256 (fun a b => mask64 (b.ult a)) right sum)
+    let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b)) sum
+      (pack256 (~~~0) (~~~0) (~~~0) (~~~0)))
+    (propagate ^^^ (propagate + (generate <<< 1))).getLsbD index =
+      BitVec.carry (64 * index) left right false := by
+  simpa only [pack256_allOnes] using cascade_add256_gtu left right lane
+#print axioms cascade_add256_gtu_broadcast
+
 /-! ### Multiplication -/
 
 /-- An even 32-bit lane is the low half of the 64-bit lane that holds it. -/
