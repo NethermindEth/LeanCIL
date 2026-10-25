@@ -108,6 +108,7 @@ import CIL.Safety.StepFlow
 import CIL.Safety.RegionRun
 import CIL.Safety.NegationReturn
 import CIL.Safety.LocalSnapshots
+import CIL.Safety.LocalSnapshotSteps
 import CIL.Safety.NumericHomes
 import CIL.Safety.NumericLocalLoad
 import CIL.Safety.NumericLocalStore

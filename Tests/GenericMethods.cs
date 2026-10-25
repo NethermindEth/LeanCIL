@@ -132,8 +132,42 @@ catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean
 if (!rejected || File.Exists(Path.Combine(wrong, "verified.json")))
     throw new InvalidOperationException("Wrong generic implementation accepted");
 
+// A closed primitive-array local now specializes and executes through its typed root slot.
+var arrayLocal = Path.Combine(root, "ClosedArrayLocal");
+Directory.CreateDirectory(arrayLocal);
+var arrayLocalAssembly = Path.Combine(arrayLocal, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var caller = module.GetType("Examples.GenericMethods").Methods.Single(method => method.Name == "Identity32");
+    var call = (GenericInstanceMethod)caller.Body.Instructions.Single(instruction =>
+        instruction.OpCode.Code == Code.Call).Operand;
+    var definition = call.Resolve();
+    definition.Body.Variables.Add(new VariableDefinition(new ArrayType(definition.GenericParameters[0])));
+    module.Write(arrayLocalAssembly);
+}
+Run(Extract("extract", arrayLocalAssembly, "Examples", "GenericMethods::Identity32(int)", arrayLocal));
+var arrayLocalSource = File.ReadAllText(Path.Combine(arrayLocal, "Extracted.lean"));
+if (!arrayLocalSource.Contains(".array .signed32", StringComparison.Ordinal))
+    throw new InvalidOperationException("Closed generic array local lost its primitive element type");
+var arrayLocalProof = Path.Combine(arrayLocal, "Checked.lean");
+File.WriteAllText(arrayLocalProof, arrayLocalSource + """
+
+    theorem closed_array_local :
+        (CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 42)]
+          { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
+            views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] :=
+      by rfl
+    #print axioms closed_array_local
+    """);
+var arrayLocalLibrary = verification.Library(Inputs(At("CIL.lean")));
+var arrayLocalCheck = Run([verification.LeanExecutable, arrayLocalProof],
+    leanPath: Path.Combine(arrayLocalLibrary, ".lake/build/lib/lean"));
+if (arrayLocalCheck.Contains("sorryAx", StringComparison.Ordinal))
+    throw new InvalidOperationException("Untrusted generic array local proof");
+Console.WriteLine("PASS closed generic primitive-array local");
+
 // Reject unsupported constraints, signatures, bodies and type arguments explicitly.
-foreach (var mutation in new[] { "class", "float", "byref", "arity", "return", "constraint", "flags", "constraint-encoding", "interface", "boxing", "array-local", "recursion" })
+foreach (var mutation in new[] { "class", "float", "byref", "arity", "return", "constraint", "flags", "constraint-encoding", "interface", "boxing", "jagged-array-local", "recursion" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
@@ -162,7 +196,10 @@ foreach (var mutation in new[] { "class", "float", "byref", "arity", "return", "
                 break;
             case "interface": definition.GenericParameters[0].Constraints.Add(new GenericParameterConstraint(new TypeReference("System", "IComparable", module, module.TypeSystem.Int32.Scope))); break;
             case "boxing": definition.Body.GetILProcessor().InsertBefore(definition.Body.Instructions.Last(), Instruction.Create(OpCodes.Box, definition.GenericParameters[0])); break;
-            case "array-local": definition.Body.Variables.Add(new VariableDefinition(new ArrayType(definition.GenericParameters[0]))); break;
+            case "jagged-array-local":
+                definition.Body.Variables.Add(new VariableDefinition(
+                    new ArrayType(new ArrayType(definition.GenericParameters[0]))));
+                break;
         }
         module.Write(dll);
     }

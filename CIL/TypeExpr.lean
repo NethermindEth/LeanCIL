@@ -22,6 +22,8 @@ inductive TypeExpr where
   | parameter (index : Nat)
   | byref (element : TypeExpr)
   | pointer (element : TypeExpr)
+  /-- A zero-based, single-dimensional CLI array signature. -/
+  | array (element : TypeExpr)
   | constructor (scope name : String)
   | apply (constructor argument : TypeExpr)
   deriving DecidableEq, Repr

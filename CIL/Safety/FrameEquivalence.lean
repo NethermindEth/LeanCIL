@@ -32,6 +32,26 @@ theorem Memory.Equivalent.spanElement {m n : Memory} (same : m.Equivalent n)
 #print axioms Memory.Equivalent.spanSlice
 #print axioms Memory.Equivalent.spanElement
 
+/-- Array formation respects observational memory equivalence. -/
+theorem Memory.Equivalent.arrayValidate {m n : Memory} (same : m.Equivalent n)
+    (view : ArrayView) : view.validate m = view.validate n := by
+  simp only [ArrayView.validate, same.spanValidate]
+
+/-- Array element addresses respect observational memory equivalence. -/
+theorem Memory.Equivalent.arrayViewElement {m n : Memory} (same : m.Equivalent n)
+    (view : ArrayView) (index : Nat) : view.element m index = view.element n index := by
+  simp only [ArrayView.element, same.arrayValidate, same.spanElement]
+
+/-- Array access checks produce the same address or fault in equivalent memories. -/
+theorem Memory.Equivalent.arrayElement {m n : Memory} (same : m.Equivalent n)
+    (view : ArrayView) (index width : Nat) :
+    CIL.Safety.arrayElement m view index width = CIL.Safety.arrayElement n view index width := by
+  simp only [CIL.Safety.arrayElement, same.arrayValidate, same.arrayViewElement]
+
+#print axioms Memory.Equivalent.arrayValidate
+#print axioms Memory.Equivalent.arrayViewElement
+#print axioms Memory.Equivalent.arrayElement
+
 theorem Memory.Equivalent.loadSnapshot {m n : Memory} (same : m.Equivalent n)
     (r : ManagedReference) (shape : CIL.SnapshotShape) :
     loadSnapshot m r shape = loadSnapshot n r shape := by
@@ -47,10 +67,13 @@ theorem Memory.Equivalent.loadLocal {m n : Memory} (same : m.Equivalent n)
     CIL.Safety.loadLocal m slot = CIL.Safety.loadLocal n slot := by
   cases slot with
   | root value => cases value <;> simp only [CIL.Safety.loadLocal, same.formValue]
+  | readOnlyRoot value => simp only [CIL.Safety.loadLocal, same.formValue]
   | bytes kind reference => simp only [CIL.Safety.loadLocal, same.read, same.loadSnapshot]
   | opaque128 value => cases value <;> rfl
   | span width writable value =>
     cases value <;> simp only [CIL.Safety.loadLocal, same.spanValidate]
+  | array element value =>
+    cases value <;> simp only [CIL.Safety.loadLocal, same.arrayValidate]
 
 theorem Memory.Equivalent.localAddress {m n : Memory} (same : m.Equivalent n)
     (slot : LocalSlot) :
@@ -81,10 +104,10 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       cases scalar <;> first | exact .error _ | exact .ok ⟨rfl, same⟩
     | reference _ => exact .error _
     | span _ _ => exact .error _
-    | bufferSpan _ | readOnlyReference _ => exact .error _
-  | root root =>
+    | bufferSpan _ | readOnlyReference _ | array _ => exact .error _
+  | root root | readOnlyRoot root =>
     cases value with
-    | reference reference =>
+    | reference reference | readOnlyReference reference =>
       simp only [CIL.Safety.storeLocal, Value.hasUnspecified, same.formValue, Bool.false_and,
         Bool.false_eq_true, ↓reduceIte]
       apply ResultEquivalent.bind_same
@@ -92,7 +115,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       exact .ok ⟨rfl, same⟩
     | scalar scalar => cases scalar <;> exact .error _
     | span reference length => exact .error _
-    | bufferSpan _ | readOnlyReference _ => exact .error _
+    | bufferSpan _ | array _ => exact .error _
   | bytes kind reference =>
     cases value with
     | scalar value =>
@@ -114,12 +137,23 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
            exact .ok ⟨rfl, related⟩)
     | reference reference => exact .error _
     | span reference length => exact .error _
-    | bufferSpan _ | readOnlyReference _ => exact .error _
+    | bufferSpan _ | readOnlyReference _ | array _ => exact .error _
   | span width writable stored =>
     cases value
     case scalar scalar => cases scalar <;> exact .error _
     all_goals simp only [CIL.Safety.storeLocal, Value.hasUnspecified,
       Bool.false_and, Bool.false_eq_true, ↓reduceIte, same.spanValidate]
+    all_goals repeat' first
+      | contradiction
+      | exact .error _
+      | exact .ok ⟨rfl, same⟩
+      | (apply ResultEquivalent.bind_same; intro)
+      | split
+  | array element stored =>
+    cases value
+    case scalar scalar => cases scalar <;> exact .error _
+    all_goals simp only [CIL.Safety.storeLocal, Value.hasUnspecified,
+      Bool.false_and, Bool.false_eq_true, ↓reduceIte, same.arrayValidate]
     all_goals repeat' first
       | contradiction
       | exact .error _
@@ -259,7 +293,7 @@ theorem Memory.Equivalent.makeArgumentHomes {m n : Memory} (same : m.Equivalent 
       cases value with
       | reference reference => exact .error _
       | span reference length => exact .error _
-      | bufferSpan _ | readOnlyReference _ => exact .error _
+      | bufferSpan _ | readOnlyReference _ | array _ => exact .error _
       | scalar value =>
         cases value <;> first | exact .error _ | skip
         apply ResultEquivalent.bind (same.allocateHome _ _ _)

@@ -61,6 +61,8 @@ inductive LocalKind where
   | aggregate (size : Fin (2^64))
   /-- A span root stores provenance rather than serializing a managed pointer into bytes. -/
   | span (width : Nat) (writable : Bool)
+  /-- A typed array root keeps its shape and reference without encoding object headers. -/
+  | array (element : ArrayElement)
   | byte | word32 | word64 | vector128 | vector256 | vector512 | reference
   deriving DecidableEq, Repr
 

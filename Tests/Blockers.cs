@@ -20,7 +20,7 @@ public static class Fixture
     public static ulong Admitted(ulong x, ulong y) => x + y;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    static int Helper(int x) => new int[x].Length;
+    static int Helper(int x) => System.GC.GetGeneration(new int[x]);
 
     public static int First(int x) => Helper(x);
 
@@ -30,7 +30,7 @@ public static class Fixture
 
     public static ulong Excluded(ulong x, ulong y)
     {
-        if (Avx2.IsSupported) return (ulong)new long[(int)x].Length;
+        if (Avx2.IsSupported) return (ulong)System.GC.GetGeneration(new long[(int)x]);
         return x + y;
     }
 }
@@ -84,20 +84,27 @@ string[] Reached(JsonElement blocker) => blocker.GetProperty("entries").Enumerat
     .Order(StringComparer.Ordinal).ToArray();
 string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
 Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)
-    .SequenceEqual(["External managed dependency: System.Int32 System.Environment::get_ProcessorCount()", "Unsupported instruction: ldlen", "Unsupported instruction: newarr System.Int32", "Unsupported instruction: newarr System.Int64"]),
+    .SequenceEqual([
+        "External managed dependency: System.Int32 System.Environment::get_ProcessorCount()",
+        "External managed dependency: System.Int32 System.GC::GetGeneration(System.Object)",
+        "Unsupported instruction: newarr System.Int32",
+        "Unsupported instruction: newarr System.Int64"]),
     "Expected one blocker per unsupported construct");
 var allocation = Blocker("Unsupported instruction: newarr System.Int32");
-var length = Blocker("Unsupported instruction: ldlen");
+var generation = Blocker("External managed dependency: System.Int32 System.GC::GetGeneration(System.Object)");
 Require(Reached(allocation).SequenceEqual([
     $"scalar System.Int32 Fixture::First(System.Int32) -> {helper}",
     $"scalar System.Int32 Fixture::Second(System.Int32) -> {helper}"]), "Wrong call chains: " + string.Join("; ", Reached(allocation)));
-Require(Reached(length).SequenceEqual([
+Require(Reached(generation).SequenceEqual([
     $"scalar System.Int32 Fixture::First(System.Int32) -> {helper}",
     $"scalar System.Int32 Fixture::Second(System.Int32) -> {helper}",
-    $"x64-v3 {excluded}"]), "ldlen not shared across methods and profiles: " + string.Join("; ", Reached(length)));
-Require(length.GetProperty("sites").EnumerateArray().Select(s => s.GetProperty("method").GetString()).Order(StringComparer.Ordinal)
-    .SequenceEqual([helper, excluded]), "ldlen sites not kept per method");
-Require(Ids(1).Order(StringComparer.Ordinal).SequenceEqual(new[] { Id(allocation), Id(length) }.Order(StringComparer.Ordinal)) &&
+    $"x64-v3 {excluded}"]),
+    "GetGeneration not shared across methods and profiles: " + string.Join("; ", Reached(generation)));
+Require(generation.GetProperty("sites").EnumerateArray().Select(s => s.GetProperty("method").GetString())
+    .Order(StringComparer.Ordinal)
+    .SequenceEqual([helper, excluded]), "GetGeneration sites not kept per method");
+Require(Ids(1).Order(StringComparer.Ordinal)
+    .SequenceEqual(new[] { Id(allocation), Id(generation) }.Order(StringComparer.Ordinal)) &&
     Ids(1).SequenceEqual(Ids(2)), "Entries do not share the Helper blockers");
 
 // The exact instruction, its offset and the PDB location name the construct.
@@ -113,7 +120,8 @@ Require(site.GetProperty("source").GetString()!.StartsWith($"Fixture.cs:{LineOf(
 Require(Ids(3).Length == 0, "Excluded branch reported under the scalar profile");
 var live = Blocker("Unsupported instruction: newarr System.Int64");
 var liveSite = live.GetProperty("sites").EnumerateArray().Single();
-Require(Ids(4).Order(StringComparer.Ordinal).SequenceEqual(new[] { Id(live), Id(length) }.Order(StringComparer.Ordinal)) &&
+Require(Ids(4).Order(StringComparer.Ordinal)
+    .SequenceEqual(new[] { Id(live), Id(generation) }.Order(StringComparer.Ordinal)) &&
     Reached(live).SequenceEqual([$"x64-v3 {excluded}"]) && liveSite.GetProperty("method").GetString() == excluded &&
     liveSite.GetProperty("source").GetString()!.StartsWith($"Fixture.cs:{LineOf("Avx2.IsSupported")}:", StringComparison.Ordinal),
     "Live AVX2 branch not reported");

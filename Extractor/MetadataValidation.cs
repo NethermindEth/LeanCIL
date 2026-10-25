@@ -157,8 +157,17 @@ internal static class MetadataValidation
             Type(pointer.ElementType, module, architecture: architecture);
             return;
         }
+        if (type is ArrayType array)
+        {
+            if (Arrays.Of(array) is null)
+                throw new InvalidDataException("Unsupported array shape or element type: " + type.FullName);
+            Type(array.ElementType, module, architecture: architecture);
+            return;
+        }
         if (type is ByReferenceType byRef)
         {
+            if (byRef.ElementType is ArrayType)
+                throw new InvalidDataException("Unsupported by-reference array root");
             if (Spans.Width(byRef.ElementType) is not null)
                 throw new InvalidDataException("Unsupported by-reference span");
             if (byRef.ElementType is ByReferenceType)

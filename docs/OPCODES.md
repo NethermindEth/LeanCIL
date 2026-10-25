@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 157 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 175 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -20,9 +20,14 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
+| `ldlen` | Partial | Length of a supplied primitive integer array, returned as a native integer. Null raises `System.NullReferenceException`. |
+| `ldelema` | Partial | Checked element reference into a supplied primitive array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
+| `readonly.` | Partial | Immediately precedes an admitted `ldelema`; branches into the following address instruction are rejected. Produces a restricted reference that remains readonly through byref locals, arguments and returns. Scalar reads are allowed, while stores and adapters that would discard the restriction fail. Other authorized aliases can still update the backing bytes. |
+| `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` requires an admitted primitive token matching the array element type. Reads require initialized bytes and read authority. |
+| `stelem.i1`, `stelem.i2`, `stelem.i4`, `stelem.i8`, `stelem.i`, `stelem` | Partial | Checked integer array stores; narrow stores truncate. Typed `stelem` requires a matching primitive token. Stores require write authority and initialize only the selected element. |
 | `ldc.i4`, `ldc.i4.s`, `ldc.i4.m1`, `ldc.i4.0`–`ldc.i4.8` | Complete within the admitted model | Push the encoded 32-bit integer constant. |
 | `ldc.i8` | Complete within the admitted model | Push the encoded 64-bit integer constant. |
-| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, or stack shuffles/discard. Object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
+| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, stack shuffles/discard, or a supplied primitive-array slot/call/return. General object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
 | `nop` | Complete within the admitted model | Advance without changing the stack or memory. |
 | `dup`, `pop` | Complete within the admitted model | Duplicate or discard a supported stack value; stack underflow fails. |
 | `ldarg`, `ldarg.s`, `ldarg.0`–`ldarg.3` | Partial | Load admitted argument values; struct instance methods have a managed-reference `this` at index zero; narrow integers are truncated and sign- or zero-extended to `i32`. Reference values undergo validity checks; class instance methods remain unsupported. |
@@ -33,7 +38,8 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `ldloca`, `ldloca.s` | Partial | Form a checked reference to byte-backed local storage. Taking the address of a managed-reference local is explicitly unsupported. |
 | `neg` | Partial | Wrapping negation of an `i32` or `i64`; the signed minimum maps to itself. No floating-point or reference operands. |
 | `add` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. Also accepts a checked reference as the first operand and an int32 or native integer byte offset as the second, preserving allocation identity and checking lifetime and bounds when forming the result. No floating-point operands or arbitrary numeric address fabrication. |
-| `sub`, `mul` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. No floating-point or reference/pointer operands. |
+| `sub` | Partial | Wrapping scalar subtraction; also subtract an int32/native byte offset from a checked reference, preserving its readonly restriction, or compute the native byte difference of two live references within one allocation. Null, cross-allocation differences and invalid resulting positions fail. |
+| `mul` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. No floating-point or reference/pointer operands. |
 | `div`, `div.un`, `rem`, `rem.un` | Partial | Same-width `i32`/`i64` quotient or remainder. Signed quotient truncates toward zero; signed remainder follows the dividend sign. Zero divisors fault. Signed minimum with divisor -1 faults for both signed operations under the admitted runtime assumption. No floating-point, mixed-width operands or exception handlers. |
 | `add.ovf`, `sub.ovf`, `mul.ovf`, `add.ovf.un`, `sub.ovf.un`, `mul.ovf.un` | Partial | Checked signed/unsigned arithmetic on same-width `i32`/`i64`. Compute the mathematical integer result, then reject values outside the destination range with a located overflow fault. No floating-point, reference arithmetic or exception handlers. |
 | `and`, `or`, `xor`, `not` | Partial | Bitwise operations on `i32`/`i64`; binary operands must have the same width. |
@@ -47,13 +53,13 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `conv.i8` | Partial | Sign-extend `i32` to `i64`, or preserve an `i64`. No floating-point or reference conversions. |
 | `conv.i` | Partial | Sign-extend an integer `i32` to the admitted 64-bit native width, or preserve an `i64`. No pointer/reference or floating-point conversion. |
 | `conv.u` | Partial | Model native unsigned integers as 64-bit: zero-extend `i32`, or preserve `i64`. Does not convert a managed reference to an integer address. |
-| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality as described below; the other comparisons remain numeric. No floating-point/unordered comparisons. |
+| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality as described below; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering remains unsupported. No floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted instruction boundary, including backward edges and self-loops. |
 | `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. All reachable targets must be valid instruction boundaries; each arm and the fallthrough participate in dependency and stack analysis. |
 | `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char) or same-assembly explicit- or sequential-layout, reference-free aggregates. Native integers use eight bytes under the validated profile. No reference types, floating-point, generic layouts or vector types. |
 | `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. Also accepts checked references, including readonly references and null. Admitted forward and backward successors. |
 | `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
-| `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
+| `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64` or two live references within one allocation, branching to admitted forward or backward targets. Cross-allocation reference ordering is unsupported. |
 | `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. Also supports checked reference equality as described below. No floating-point comparison. |
 | `ldind.i`, `stind.i` | Partial | Native-width integer load/store through checked managed references; eight bytes on the admitted target, with the same allocation, permission and lifetime checks. |
 | `ldind.i8`, `stind.i8` | Partial | Eight-byte integer load/store through a checked reference. Allocation bounds, permissions, initialization and lifetime rules apply; arbitrary numeric addresses are not accepted. |
@@ -115,16 +121,34 @@ Unprefixed block operations require eight-byte alignment on the admitted 64-bit 
 
 The exact managed-reference overloads of `Unsafe.InitBlock`, `InitBlockUnaligned`, `CopyBlock` and `CopyBlockUnaligned` use these same operations. Pointer overloads and arbitrary integer addresses remain unsupported.
 
+## Pointer subtraction and ordering
+
+Pointer subtraction uses byte offsets, signed int32/native displacements and native-width
+wrapping arithmetic, followed by the existing formation checks. Same-allocation differences
+return native integer bits; `clt.un`, `cgt.un`, `blt.un`, `ble.un`, `bgt.un` and `bge.un`
+(including short branches) compare allocation-relative offsets. Both operands must be non-null,
+live and well formed. Declared end positions are allowed without granting byte access.
+Cross-allocation differences and orderings are unsupported. Numeric-minus-pointer and signed
+reference orderings are not admitted. Overflow-checking `sub.ovf.un` remains scalar-only.
+
 ## Unsupported opcodes
+
+Supplied arrays admit `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`,
+`nint`, `nuint`, `bool` and `char` elements over existing storage. Their length, element type
+and allocation identity remain explicit across locals, calls and returns. Indexing checks
+null before bounds; negative and out-of-range indices raise `System.IndexOutOfRangeException`
+on a valid non-null array. Length does not require readable contents. Invalid storage and
+insufficient authority remain model faults. Array-root address-taking, object identity tests,
+array allocation and reference/floating-point elements remain outside this subset.
 
 The table above is exhaustive for reachable translation. Notable exclusions include:
 
 | Area | Examples rejected by extraction |
 | --- | --- |
-| Debugger and prefixes | `break`, `volatile.`, `readonly.`, `tail.`; `constrained.` outside the checked struct-call subset |
+| Debugger and prefixes | `break`, `volatile.`, `tail.`; `readonly.` outside the checked array-element subset; `constrained.` outside the checked struct-call subset |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*` |
-| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, `ldlen`, all `ldelem.*`/`stelem.*` forms, `ldelema`, `ldtoken` of a method or of a type outside a decided type test |
+| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, `newarr`, reference/floating-point `ldelem.*`/`stelem.*`, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` of other fields, `ldsflda` of constructor-initialized fields |
 | Dispatch and exceptions | Unconstrained `callvirt`, `calli`, `jmp`, `ldftn`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
