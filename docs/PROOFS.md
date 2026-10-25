@@ -1186,7 +1186,9 @@ allocating child call. This route retains exact final memory and remains useful 
 postcondition names fresh references.
 
 To omit numeric or interspersed declarations from the proof body, import
-`CIL.Safety.AllocationRefinement`. `LocalIndexMap.keep`, `.skip` and `.nil` describe the
+`CIL.Safety.AllocationRefinement` explicitly; `import CIL` leaves this optional proof library
+unloaded. Its dependencies still undergo the normal build and kernel replay when a consumer
+uses them. `LocalIndexMap.keep`, `.skip` and `.nil` describe the
 retained declarations in order. `LocalDeclarations` checks matching retained kinds and
 initializers and requires inserted dead declarations to be unmodeled. `MethodRenaming` checks the
 target code's relocated local operands; method indices, call targets, profiles, return
