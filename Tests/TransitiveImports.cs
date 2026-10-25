@@ -383,7 +383,15 @@ void FullTransitive()
     {
         Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,
             .. Import(aSidecar, a), .. Import(bSidecar, b)]);
-        RejectFull("Unapproved proof axioms: sorryAx");
+        var rejectedTrace = Path.Combine(root, "trace-rejected-b");
+        var outerTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", rejectedTrace);
+        try { RejectFull("Unapproved proof axioms: sorryAx"); }
+        finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", outerTrace); }
+        // A (id 0) imports B, so a failing B must stop before A's terms are captured.
+        if (Directory.EnumerateFiles(rejectedTrace, "*.jsonl").SelectMany(File.ReadLines)
+            .Any(line => line.Contains("LeanCILCaptureLeanCILFullLibrary0.lean", StringComparison.Ordinal)))
+            throw new InvalidOperationException("A's library was checked before its failing dependency B.");
     }
     finally { File.WriteAllText(bSidecar, originalB.ToJsonString()); }
     var substitution = Path.Combine(root, "rebundle-dependency-substitution");
