@@ -448,6 +448,28 @@ info: 'Tests.Automation.store_from_static_fact' depends on axioms: [propext, Quo
 -/
 #guard_msgs in #print axioms store_from_static_fact
 
+/-- Two vector stores; reached through a lookup hypothesis, so facts can name the body. -/
+def twoStoresMethod : CIL.Method := {
+  code := [.memory .store256, .memory .store256, .ret], locals := [], returnsValue := false }
+
+open CIL.Safety in
+/-- Facts at both levels in one run: each store takes the retry for its own fact's level, so
+    neither retry may exclude the other. -/
+theorem stores_from_mixed_facts (program : CIL.Program) (index : Nat)
+    (found : program[index]? = some twoStoresMethod) (first second : BitVec 256)
+    (near far : Reference) (memory middle final : Memory)
+    (storedFirst : ∀ rest, staticInstruction twoStoresMethod 0 .store256
+      (.scalar (.v256 first) :: .reference (.address near) :: rest) memory = .ok (middle, rest))
+    (storedSecond : ∀ rest, memoryInstruction .store256
+      (.scalar (.v256 second) :: .reference (.address far) :: rest) middle = .ok (final, rest)) :
+    run program 3 index 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 first), .reference (.address near), .scalar (.v256 second),
+        .reference (.address far)] memory = .ok (final, []) := by
+  cil_checked_steps [storedFirst, storedSecond]
+
+/-- info: 'Tests.Automation.stores_from_mixed_facts' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms stores_from_mixed_facts
+
 -- Naming `staticInstruction` explicitly, and stating either fact as a proof term, still applies.
 open CIL.Safety in
 example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)

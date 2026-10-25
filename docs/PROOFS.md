@@ -98,13 +98,14 @@ Each `.memory` operation has one equation per operand shape in
 `formValue`, `loadValue`, `storeValue` or `add`, so state facts at that level
 rather than passing `staticInstruction` or `memoryInstruction` to unfold. Only
 the static-field operations still go through `staticInstruction`. A fact stated
-at the `memoryInstruction` level is still accepted, through a slower fallback
-that runs only when such a fact is supplied; a failed step reports the per-shape
-goal. That fallback is part of `cil_checked_step`, `cil_checked_steps` and
-`cil_contract_steps` (and the loop tactics built on them) only: a hand-written
-memory step, or `cil_checked_step_equations`, with such a fact must
-`rw [CIL.Safety.step_memory_eq]` first or restate the fact at the `formValue`,
-`loadValue`, `storeValue` or `add` level. The memory step simp set of those
+at the `memoryInstruction` or `staticInstruction` level is still accepted, through
+a slower fallback that runs only when such a fact is supplied; a failed step
+reports the per-shape goal. That fallback is part of `cil_checked_step`,
+`cil_checked_steps` and `cil_contract_steps` (and the loop tactics built on them)
+only: a hand-written memory step, or `cil_checked_step_equations`, with such a fact
+must `rw [CIL.Safety.step_memory_eq]` first, and for a `memoryInstruction` fact
+also unfold `CIL.Safety.staticInstruction`, or restate the fact at the
+`formValue`, `loadValue`, `storeValue` or `add` level. The memory step simp set of those
 tactics rewrites `referenceAt` on `.null` and `.address r`, so pointer
 arithmetic on a known reference needs no extra fact, and a `referenceAt r = .ok a`
 fact about a symbolic `ManagedReference` applies; through `cil_checked_step_equations`

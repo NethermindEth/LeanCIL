@@ -54,7 +54,8 @@ or `add`, so state memory facts at that level; facts about `memoryInstruction`
 or `staticInstruction` still apply, through a slower retry in `cil_checked_step`,
 `cil_checked_steps`, `cil_contract_steps` and the loop tactics; a hand-written step
 or `cil_checked_step_equations` call with such a fact must
-`rw [CIL.Safety.step_memory_eq]` first or restate it at the per-shape level. Through
+`rw [CIL.Safety.step_memory_eq]` first, and for a `memoryInstruction` fact also unfold
+`CIL.Safety.staticInstruction`, or restate it at the per-shape level. Through
 `cil_checked_step_equations`, an `add`, `spanItem`, `copyBlock` or `initBlock` step
 needs `CIL.Safety.referenceAt_address` passed (or use `cil_checked_step`). A `referenceAt r = .ok a`
 fact about a symbolic `ManagedReference` applies. A `.feature` step

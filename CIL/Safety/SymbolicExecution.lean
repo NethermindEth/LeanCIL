@@ -284,7 +284,8 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
 /-- Closes a `.memory` step through the generic `step_memory_eq` with `facts`, constructors
     and `rfl`. A fact stated at the `memoryInstruction` or `staticInstruction` level fails once
     a per-shape memory equation rewrites past it, so the stepping tactics retry such facts
-    here. -/
+    here. A `memoryInstruction` fact closes the step only when `facts` also includes
+    `CIL.Safety.staticInstruction`, which unfolds past a `staticInstruction` fact. -/
 macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        rw [CIL.Safety.step_memory_eq]
@@ -486,9 +487,16 @@ elab_rules : tactic
             attempt (← `(tactic| cil_checked_memory_by_equations [$facts:term,*])) | return
         -- A `staticInstruction` fact must be tried before `staticInstruction` is unfolded,
         -- which rewrites past it; a `memoryInstruction` fact is reached only by that unfolding.
-        if ← factsMention facts.getElems ``CIL.Safety.staticInstruction then
+        let staticRetried ← factsMention facts.getElems ``CIL.Safety.staticInstruction
+        if staticRetried then
           if (← attempt (← `(tactic| cil_checked_memory_retry [$facts:term,*]))).isNone then return
+        -- Naming `staticInstruction` already unfolded it in that retry, so it would repeat.
+        let namesStatic ← facts.getElems.anyM fun fact => do
+          unless fact.raw.isIdent do return false
+          let resolved ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw
+          return resolved == some ``CIL.Safety.staticInstruction
         if ← factsMention facts.getElems ``CIL.Safety.memoryInstruction then
+          if staticRetried && namesStatic then throw equationError
           let retry ← `(tactic|
             cil_checked_memory_retry [CIL.Safety.staticInstruction, $facts:term,*])
           if (← attempt retry).isNone then return
