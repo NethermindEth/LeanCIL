@@ -391,9 +391,9 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
 | `exportsresolution` | Same loaded files and changed loaded module |
-| `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal |
-| `exportsfullordinary` | Ordinary caller full verification |
-| `exportsfullpair` | Two imported slots from one bundle |
+| `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal; caller and library proof-build stages required separately for each invocation |
+| `exportsfullordinary` | Ordinary caller full verification, requiring its direct proof check and the imported proof build |
+| `exportsfullpair` | Two imported slots from one bundle, requiring both imported proof builds and the caller check |
 | `exportsfullchecks` | Bundle, DLL, closure, statement digest and caller-premise rejection |
 | `exportsfulltheorems` | Wrong producer theorem statement and definition |
 | `exportsfullcomposition` | Transferred macro cannot replace the composition theorem with True |
