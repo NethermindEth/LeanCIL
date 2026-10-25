@@ -13,7 +13,7 @@ using Mono.Cecil.Cil;
 using Nethermind.LeanCIL;
 
 // Forced full verification of the RVA-table library runs only in the --full-composition leaf.
-bool fullComposition = args switch
+var fullComposition = args switch
 {
     [] => false,
     ["--full-composition"] => true,
@@ -195,7 +195,7 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
 end LibraryProof
 """);
 // ReadAgain has Read's exact body, so one author proof certifies both exports of the shared table.
-string againArtifact = Path.Combine(root, "AgainArtifact");
+var againArtifact = Path.Combine(root, "AgainArtifact");
 Run([.. cli, "extract", lib, "StaticFixture.Library::ReadAgain()", againArtifact]);
 foreach (string exported in new[] { libArtifact, againArtifact })
     File.WriteAllText(Path.Combine(exported, "verification.json"), JsonSerializer.Serialize(new
@@ -251,13 +251,13 @@ string[] ExtractApp(string output) => [.. cli, "extract", app, "StaticFixture.Ap
     "--import-sha256", "StaticFixture.Lib=" + Sha(lib), "--import-interface-sha256", "StaticFixture.Lib=" + published["interfaceDigest"]!.GetValue<string>()];
 Run(ExtractApp(appArtifact));
 // Forced full verification replays the RVA-table library against the current DLL.
-string bundle = Path.GetFullPath(published["fullVerificationLocator"]!.GetValue<string>(), libRoot);
-byte[] originalLib = File.ReadAllBytes(lib);
+var bundle = Path.GetFullPath(published["fullVerificationLocator"]!.GetValue<string>(), libRoot);
+var originalLib = File.ReadAllBytes(lib);
 string[] FullCommand(string artifact, string callerSource, bool package) => [.. cli, "verify", artifact,
     "--proof", callerSource, .. package ? new[] { "--proof-root", caller } : [], "--force-full-verify"];
 void FullVerify(string artifact, string callerSource, bool package, int slots)
 {
-    string trace = Path.Combine(root, "trace-" + Guid.NewGuid().ToString("N"));
+    var trace = Path.Combine(root, "trace-" + Guid.NewGuid().ToString("N"));
     string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
     try
     {
@@ -265,7 +265,7 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
         Run(FullCommand(artifact, callerSource, package));
     }
     finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
-    string[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+    var stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
         .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
     // One bundle gives one library build however many slots it fills; the caller has its own.
     if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != slots ||
@@ -309,35 +309,38 @@ void RewriteTable(ulong word)
 // publisher could, points an edited sidecar at it and extracts the caller against that sidecar.
 string Republish(Action<JsonObject> editExport, Action<JsonObject> editSidecar)
 {
-    string staging = Path.Combine(root, "rebundle-" + Guid.NewGuid().ToString("N"));
+    var staging = Path.Combine(root, "rebundle-" + Guid.NewGuid().ToString("N"));
     CopyTree(bundle, staging);
-    JsonObject inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(staging, "bundle.json")))!.AsObject();
+    var inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(staging, "bundle.json")))!.AsObject();
     foreach (string bundled in Directory.EnumerateDirectories(Path.Combine(staging, "exports")))
     {
-        string identityPath = Path.Combine(bundled, "identity.json");
-        JsonObject exportIdentity = JsonNode.Parse(File.ReadAllText(identityPath))!.AsObject();
+        var identityPath = Path.Combine(bundled, "identity.json");
+        var exportIdentity = JsonNode.Parse(File.ReadAllText(identityPath))!.AsObject();
         editExport(exportIdentity);
         File.WriteAllText(identityPath, exportIdentity.ToJsonString());
         inventory["files"]!["exports/" + Path.GetFileName(bundled) + "/identity.json"] = Sha(identityPath);
     }
     File.WriteAllText(Path.Combine(staging, "bundle.json"), inventory.ToJsonString());
-    string republished = Path.Combine(root, Sha(Path.Combine(staging, "bundle.json")));
+    var republished = Path.Combine(root, Sha(Path.Combine(staging, "bundle.json")));
     Directory.Move(staging, republished);
-    JsonObject contract = published.DeepClone().AsObject();
+    var contract = published.DeepClone().AsObject();
     editSidecar(contract);
     contract["fullVerificationLocator"] = republished;
     File.WriteAllText(sidecar, contract.ToJsonString());
-    string artifact = Path.Combine(root, "Republished-" + Guid.NewGuid().ToString("N"));
+    var artifact = Path.Combine(root, "Republished-" + Guid.NewGuid().ToString("N"));
     Run(ExtractApp(artifact));
     return artifact;
 }
 
 if (fullComposition)
 {
+    FullVerify(appArtifact, callerProof, package: true, slots: 1);
+    Console.WriteLine("PASS the separate caller returns the RVA-table value under full verification");
+
     // A cooperating publisher's bundle whose extraction record drops the table fails before any build.
     try
     {
-        string forgedStatics = Republish(identity => identity["staticIdentities"] = new JsonArray(), _ => { });
+        var forgedStatics = Republish(identity => identity["staticIdentities"] = new JsonArray(), _ => { });
         RejectFull(forgedStatics, "Full-verification static identity records disagree");
     }
     finally { File.WriteAllText(sidecar, published.ToJsonString()); }
@@ -348,8 +351,8 @@ if (fullComposition)
     try
     {
         RewriteTable(18);
-        string changedSha = Sha(lib);
-        string changed = Republish(identity => identity["assemblySha256"] = changedSha, contract =>
+        var changedSha = Sha(lib);
+        var changed = Republish(identity => identity["assemblySha256"] = changedSha, contract =>
         {
             contract["implementationSha256"] = changedSha;
             foreach (JsonNode? certification in contract["certifications"]!.AsArray())
@@ -366,19 +369,19 @@ if (fullComposition)
         "PASS a re-certified changed table passes ordinary import but fails the independent library proof");
 
     // Both assemblies' first tables had extraction-local index 0; ReadAgain shares Read's table.
-    string mixedArtifact = Path.Combine(root, "MixedArtifact");
-    string[] mixedImports = ExtractApp(mixedArtifact)[6..];
+    var mixedArtifact = Path.Combine(root, "MixedArtifact");
+    var mixedImports = ExtractApp(mixedArtifact)[6..];
     Run([.. cli, "extract", app, "StaticFixture.Application::Mixed()", mixedArtifact, .. mixedImports]);
     JsonObject mixedIdentity =
         JsonNode.Parse(File.ReadAllText(Path.Combine(mixedArtifact, "identity.json")))!.AsObject();
-    JsonArray mixedStatics = mixedIdentity["staticIdentities"]!.AsArray();
+    var mixedStatics = mixedIdentity["staticIdentities"]!.AsArray();
     if (mixedStatics.Count != 1 ||
         mixedStatics[0]!["identity"]!.GetValue<string>() != appStatic["identity"]!.GetValue<string>() ||
         mixedIdentity["imports"]!.AsArray().Count != 2)
         throw new InvalidOperationException(
             "Precondition: the mixed caller must own one table and import two readers of another.");
     // Both relocated readers of the shared table must meet the library contract in the linked program.
-    string mixedProof = Path.Combine(root, "MixedCaller.lean");
+    var mixedProof = Path.Combine(root, "MixedCaller.lean");
     File.WriteAllText(mixedProof, """
     import ExtractedImports
     namespace ExampleProof
@@ -391,10 +394,10 @@ if (fullComposition)
     """);
     // Ordinary verification twice: the second run restores the first's receipt and skips the proof check,
     // so the full run below starts with a warm receipt it must not use.
-    string[] ordinary = [.. cli, "verify", mixedArtifact, "--proof", mixedProof];
+    var ordinary = [.. cli, "verify", mixedArtifact, "--proof", mixedProof];
     string[] OrdinaryStages(string name)
     {
-        string trace = Path.Combine(root, name);
+        var trace = Path.Combine(root, name);
         string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
         Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
         try { Run(ordinary); }
@@ -435,7 +438,7 @@ Reject(value => ReadCertification(value)["staticIdentities"] = new JsonArray(),
 Reject(value => ReadCertification(value)["staticIdentities"]![0]!["identity"] = "0", "Invalid scoped static identity");
 Reject(value =>
 {
-    JsonNode identity = ReadCertification(value)["staticIdentities"]![0]!;
+    var identity = ReadCertification(value)["staticIdentities"]![0]!;
     identity["fieldName"] = "StaticFixture.Blob StaticFixture.Data::Missing";
     identity["identity"] = StaticIdentity.Key(identity["assemblyIdentity"]!.GetValue<string>(), identity["fieldName"]!.GetValue<string>());
 }, "Certified static field is not present");

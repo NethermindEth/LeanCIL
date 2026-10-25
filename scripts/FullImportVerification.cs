@@ -88,20 +88,20 @@ partial class Program
     // the fresh extraction is compared with all three after regeneration.
     static void RequireAgreedStaticRecords(JsonElement binding, FullSelection selection)
     {
-        string identity = binding.GetProperty("identity").GetString()!;
-        string profile = binding.GetProperty("profile").GetString()!;
-        ContractCertification[] certifications = selection.Contract.Certifications
+        var identity = binding.GetProperty("identity").GetString()!;
+        var profile = binding.GetProperty("profile").GetString()!;
+        var certifications = selection.Contract.Certifications
             .Where(item => item.Identity == identity && item.Profile == profile).ToArray();
-        int[] matches = selection.Inventory.Exports.EnumerateArray().Select((record, index) => (record, index))
+        var matches = selection.Inventory.Exports.EnumerateArray().Select((record, index) => (record, index))
             .Where(item => item.record.GetProperty("identity").GetString() == identity &&
                 item.record.GetProperty("profile").GetString() == profile)
             .Select(item => item.index).ToArray();
         if (certifications.Length != 1 || matches.Length != 1)
             throw new InvalidDataException("Full source bundle has no unique selected export/profile.");
-        JsonElement bundled = JsonSerializer.Deserialize<JsonElement>(
+        var bundled = JsonSerializer.Deserialize<JsonElement>(
             File.ReadAllText(Within(selection.Bundle, "exports/" + matches[0] + "/identity.json")));
-        StaticIdentityRecord[] pinned = StaticIdentitySet(binding);
-        bool agreed = pinned.SequenceEqual(StaticIdentitySet(bundled)) && pinned.SequenceEqual(
+        var pinned = StaticIdentitySet(binding);
+        var agreed = pinned.SequenceEqual(StaticIdentitySet(bundled)) && pinned.SequenceEqual(
             certifications[0].StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal));
         if (!agreed)
             throw new InvalidDataException("Full-verification static identity records disagree: " + identity);
@@ -300,7 +300,7 @@ partial class Program
         List<FullImport> imports = [];
         foreach (JsonElement binding in bindings)
         {
-            string identity = binding.GetProperty("identity").GetString()!;
+            var identity = binding.GetProperty("identity").GetString()!;
             FullSelection selection = SelectFullBundle(output, binding, overrides, usedOverrides);
             original[selection.Sidecar] = selection.SidecarSha256;
             original[selection.Implementation] = selection.ImplementationSha256;
@@ -308,7 +308,7 @@ partial class Program
             if (contract.Dependencies.Length != 0 || contract.IsReferenceAssembly)
                 throw new InvalidDataException(
                     "Full verification version 1 requires closed implementation libraries without transitive imports.");
-            string profile = binding.GetProperty("profile").GetString()!;
+            var profile = binding.GetProperty("profile").GetString()!;
             ContractExport export = contract.Exports.Single(item => item.Identity == identity);
             ContractCertification certification =
                 contract.Certifications.Single(item => item.Identity == identity && item.Profile == profile);
@@ -466,9 +466,9 @@ partial class Program
                 throw new InvalidDataException(
                     "Full verification rejects static-value and initialization assumptions: " + property);
         // The fresh extraction decides the reachable RVA tables; every pinned record must name exactly them.
-        StaticIdentityRecord[] statics = StaticIdentitySet(regenerated);
+        var statics = StaticIdentitySet(regenerated);
         StaticIdentity.Validate(statics);
-        bool staticsBound = statics.All(item => item.AssemblyIdentity == contract.AssemblyIdentity) &&
+        var staticsBound = statics.All(item => item.AssemblyIdentity == contract.AssemblyIdentity) &&
             statics.SequenceEqual(StaticIdentitySet(import.Selection.Binding)) &&
             statics.SequenceEqual(StaticIdentitySet(bundledIdentity)) &&
             statics.SequenceEqual(

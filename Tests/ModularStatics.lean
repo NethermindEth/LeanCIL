@@ -163,13 +163,27 @@ example : linkChecked [appBody] [collision] =
 private def changedTable : Library :=
   { entry := { libBody with staticSites := [(0, { libField with bytes := numberBytes 18 8 })] } }
 
--- Two imported readers of one table link only when both carry its exact descriptor.
-example : linkChecked [appBody] [library, library] = .ok (link [appBody] [library, library]) :=
+/-- Two readers may share exactly the same static descriptor. -/
+theorem shared_table_links :
+    linkChecked [appBody] [library, library] = .ok (link [appBody] [library, library]) :=
   linkChecked_of_compatible (by decide +kernel)
 
-example : linkChecked [appBody] [library, changedTable] =
+/-- Reusing an identity with different table bytes prevents checked linking. -/
+theorem changed_shared_table_rejected : linkChecked [appBody] [library, changedTable] =
     .error "Static identity collision 202: Lib::Lib::Table and Lib::Lib::Table" := rfl
 
+/-- A loaded table with different bytes cannot satisfy a contract's static-world premise. -/
+theorem changed_loaded_table_not_valid :
+    ¬ StaticWorldValid [{ appField with bytes := numberBytes 8 8 }] afterApp := by
+  intro world
+  have valid := world.2.2.2 _ (by simp) (101, (⟨0, 0⟩ : Reference)) (by decide +kernel) rfl
+  obtain ⟨_, allocation, present, live, kind, size, bytes⟩ := valid
+  have incompatible : read afterApp ⟨0, 0⟩ 8 1 ≠ .ok (numberBytes 8 8) := by decide +kernel
+  exact incompatible (by simpa [appField, numberBytes] using bytes)
+
+#print axioms shared_table_links
+#print axioms changed_shared_table_rejected
+#print axioms changed_loaded_table_not_valid
 #print axioms readTable_holds
 #print axioms readTableRepeat_holds
 #print axioms linked_readTable_holds
