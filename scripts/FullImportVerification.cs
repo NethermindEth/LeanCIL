@@ -447,7 +447,8 @@ partial class Program
         bool staticsBound = statics.All(item => item.AssemblyIdentity == contract.AssemblyIdentity) &&
             statics.SequenceEqual(StaticIdentitySet(import.Selection.Binding)) &&
             statics.SequenceEqual(StaticIdentitySet(bundledIdentity)) &&
-            statics.SequenceEqual(certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal));
+            statics.SequenceEqual(
+                certification.StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal));
         if (!staticsBound)
             throw new InvalidDataException(
                 "Full-verification static identities differ from the current implementation: " + export.Identity);
