@@ -632,7 +632,7 @@ elab "expect_facts_already_normal " "[" facts:term,* "]" : tactic => do
 
 /-- Checked stepping uses the fact as stated: the normaliser leaves a symbolic feature test
     folded, as the step leaves it, rather than restating the fact as a match on `f`. -/
-theorem feature_checked_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
+theorem checked_symbolic_feature_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (feature : CIL.Feature)
     (disabled : body.profile.evaluate feature = false) :
     CIL.Safety.step body (.feature feature) 0 [] frame [] memory =
@@ -643,9 +643,9 @@ theorem feature_checked_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safe
 /-- info: 'Tests.Automation.feature_step_symbolic_fact' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms feature_step_symbolic_fact
 /--
-info: 'Tests.Automation.feature_checked_step_symbolic_fact' depends on axioms: [propext, Quot.sound]
+info: 'Tests.Automation.checked_symbolic_feature_fact' depends on axioms: [propext, Quot.sound]
 -/
-#guard_msgs in #print axioms feature_checked_step_symbolic_fact
+#guard_msgs in #print axioms checked_symbolic_feature_fact
 
 -- A global theorem stated through `evaluate` is normalized like a local fact.
 def wideProfile : CIL.FeatureProfile := { avx2 := true }
