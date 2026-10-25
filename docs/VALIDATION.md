@@ -407,6 +407,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | Name | Cases |
 | --- | --- |
 | `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
+| `exportsprotected` | SDK-built protected static export, separately compiled derived caller and rehashed visibility mismatch rejection |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
 | `exportsresolution` | Same loaded files and changed loaded module |
 | `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal; caller and library proof-build stages required separately for each invocation |
@@ -429,7 +430,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsinitialized` | A static-readonly struct library exports a named initialization premise; its caller retains the scoped premise, malformed descriptors reject, and full verification remains unavailable |
 | `exportsprofiles` | One family theorem across three profiles, independent full composition, outcome families and scoped initialization premises; disagreeing flags, unequal programs, malformed selections, forged audit declarations and compiled-reference mutation reject |
 
-The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
+The base coverage ledger has 49 cases: 22 core, 3 protected, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
 The artifact-mode rejection follows real consumer positives so it still checks
 removal of an actual successful report. The default eight-argument
@@ -438,14 +439,14 @@ once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
 statics, fullstatics, transitive, transitiveoutcomes, discovery, typed, derived, initialized and profiles suites cannot enter that plan.
-The registry now has 22 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+The registry now has 23 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
 `exportstransitiveoutcomes`, `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with no core export bootstrap
 or nested post-call. Their fixture assertions are
-separate from the 46 base case IDs. A standalone fixture cannot use an empty
+separate from the 49 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after
 the actual child succeeds. It does not count individual child behaviors in
-the 46 base cases. It builds the producer library and creates real proof
+the 49 base cases. It builds the producer library and creates real proof
 packages and publication. The child builds, extracts and verifies its own
 caller. It needs no baseline caller artifact or verified report. The discovery
 leaf runs no core caller verification, restrictions, callbacks or full cases.
@@ -479,3 +480,10 @@ proposition and all program/metadata definitions. Replaying every generated theo
 kernel work from 36,782,462 to 32,494,315 raw heartbeats (11.7%); the structural proofs introduce
 additional auxiliary theorems, increasing the replay count from 169 to 181. These are kernel
 work measurements, not full consumer build or end-to-end verification timings.
+
+Shared runtime-scope encoding keeps the same 181 Equality theorems and reduces their replay
+from 32,494,315 to 26,201,571 raw heartbeats (19.4%). Including all 43 generated data definitions
+and the changed scope definition plus its equality theorem gives 32,502,723 versus 28,123,894
+raw heartbeats (13.5%). The latter includes the one-time scope construction and equivalence
+cost. Actual extractor output matches the measured source. Generic evidence mutations also
+reject altered runtime versions and public-key tokens; no scope comparison is relaxed.

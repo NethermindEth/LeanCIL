@@ -14,6 +14,12 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
     static string Bool(bool value) => value.ToString().ToLowerInvariant();
     static string List(IEnumerable<string> entries) => "[" + string.Join(", ", entries) + "]";
 
+    static string Scope(TypeReference type)
+    {
+        var scope = LayoutEvidence.Scope(type);
+        return scope == TypeTests.RuntimeScope ? "Extraction.runtimeScope" : Quote(scope);
+    }
+
     string Type(TypeReference type)
     {
         if (type is GenericParameter parameter)
@@ -26,7 +32,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {tuple}";
         if (type is GenericInstanceType generic)
         {
-            var result = $".constructor {Quote(LayoutEvidence.Scope(generic.ElementType))} {Quote(generic.ElementType.FullName)}";
+            var result = $".constructor {Scope(generic.ElementType)} {Quote(generic.ElementType.FullName)}";
             foreach (var argument in generic.GenericArguments) result = $".apply ({result}) ({Type(argument)})";
             return result;
         }
@@ -38,7 +44,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         }
         var index = layouts.Index(type);
         if (index >= 0) return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
-        return $".atom {Quote(LayoutEvidence.Scope(type))} {Quote(type.FullName)}";
+        return $".atom {Scope(type)} {Quote(type.FullName)}";
     }
 
     string Call(MethodReference reference, Instruction instruction)

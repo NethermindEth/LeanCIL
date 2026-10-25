@@ -28,6 +28,12 @@ The validator still checks targets, method tokens, type arguments, exact paramet
 types, instance metadata, reachability and argument counts. This changes proof construction;
 source binding, certificate audits and kernel replay are unchanged.
 
+Generated primitive and generic-constructor types reference `Extraction.runtimeScope` only
+when their full assembly identity matches it exactly. Its materialized UTF-8 bytes are
+definitionally equal to the original string, as proved by `runtimeScope_eq`. Version, culture
+and public-key token remain part of the identity; all other scopes retain their literal values.
+This representation avoids decoding the same string during each certificate decision.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a

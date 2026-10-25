@@ -42,6 +42,13 @@ void Reject(int sample, string name, Func<string, string> mutate)
         throw new InvalidOperationException("Invalid specialization was not rejected: " + name + "\n" + result.Output);
     Console.WriteLine("PASS generic evidence rejects " + name);
 }
+foreach (var (name, scope) in new[]
+{
+    ("wrong-runtime-version", "System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"),
+    ("wrong-runtime-token", "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=0000000000000000")
+})
+    Reject(0, name, source => ChangeDefinition(source, "method1Closed", line =>
+        line.Replace("Extraction.runtimeScope", System.Text.Json.JsonSerializer.Serialize(scope))));
 Reject(0, "wrong-type-argument", source => ChangeDefinition(source, "method1TypeArgumentsRaw", line => line.Replace("System.UInt64", "System.UInt32")));
 Reject(0, "wrong-closed-signature", source => ChangeDefinition(source, "method1Closed", line => line.Replace("System.UInt64", "System.UInt32")));
 Reject(7, "wrong-closed-local", source => ChangeDefinition(source, "method1Closed", line => line.Replace("locals := [.atom", "locals := [.byref (.atom").Replace("], initLocals", ")], initLocals")));

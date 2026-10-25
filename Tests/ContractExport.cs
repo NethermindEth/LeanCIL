@@ -49,6 +49,23 @@ File.WriteAllText(librarySource, "namespace ImportFixture; public static class L
     "public static implicit operator ConstantWord(ulong value) => new(value); public static readonly ConstantWord One = 1ul; } " +
     "public static class StaticReader { public static ulong Read() { ConstantWord copy = ConstantWord.One; copy.Value += 1; return copy.Value; } }\n");
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), "namespace ImportFixture; public static class Application { public static ulong Entry(ulong value) => Library.AddOne(value); }\n");
+if (cohort == "protected")
+{
+    File.WriteAllText(librarySource, """
+        namespace ImportFixture;
+        public class Library
+        {
+            protected static ulong AddOne(ulong value) => value + 1;
+        }
+        """);
+    File.WriteAllText(Path.Combine(appRoot, "Application.cs"), """
+        namespace ImportFixture;
+        public class Application : Library
+        {
+            public static ulong Entry(ulong value) => AddOne(value);
+        }
+        """);
+}
 Run(["dotnet", "build", cohort == "discovery" ? Path.Combine(libraryRoot, "Lib.csproj") : Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string library = Path.Combine(libraryRoot, "bin", "ImportFixture.Lib.dll");
 string app = Path.Combine(appRoot, "bin", "ImportFixture.App.dll");
@@ -190,6 +207,67 @@ if (cohort != "core")
             streamOutput: true, progress: "Contract discovery through SDK assets and carriers");
         completed.CompleteCase("discovery.fixture");
         completed.Finish();
+    }
+    else if (cohort == "protected")
+    {
+        using var producerModule = ModuleDefinition.ReadModule(library);
+        using var callerModule = ModuleDefinition.ReadModule(app);
+        var producerType = producerModule.Types.Single(type => type.FullName == "ImportFixture.Library");
+        var producerMethod = producerType.Methods.Single(method => method.Name == "AddOne");
+        var callerType = callerModule.Types.Single(type => type.FullName == "ImportFixture.Application");
+        var callerMethod = callerType.Methods.Single(method => method.Name == "Entry");
+        var calls = callerMethod.Body.Instructions.Where(instruction =>
+            instruction.Operand is MethodReference).ToArray();
+        if (!producerMethod.IsFamily || !producerMethod.IsStatic || producerMethod.IsVirtual ||
+            first["exports"]![0]!["visibility"]!.GetValue<string>() != "protected" ||
+            callerType.BaseType.FullName != producerType.FullName || calls.Length != 1 ||
+            calls[0].OpCode.Code != Mono.Cecil.Cil.Code.Call ||
+            calls[0].Operand is not MethodReference called || called.FullName != producerMethod.FullName ||
+            called.DeclaringType.Scope.Name != producerModule.Assembly.Name.Name)
+            throw new InvalidOperationException("Fixture did not publish a statically resolved protected call.");
+        completed.CompleteCase("protected.publication");
+
+        CallerVerify();
+        var report = JsonNode.Parse(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")))!;
+        if (report["schema"]!.GetValue<int>() != 4 || report["contractImports"]!.AsArray().Count != 1 ||
+            report["imports"]![0]!["acceptedVia"]!.GetValue<string>() != "published-certification" ||
+            !report["imports"]![0]!["deploymentObligation"]!.GetValue<string>()
+                .Contains("exact implementation bytes", StringComparison.Ordinal))
+            throw new InvalidOperationException("Derived caller lost its imported contract trust boundary.");
+        completed.CompleteCase("protected.caller");
+
+        // Rebind every metadata digest so rejection must check the actual DLL's visibility.
+        var tampered = first.DeepClone().AsObject();
+        tampered["exports"]![0]!["visibility"] = "public";
+        var descriptor = new JsonObject();
+        foreach (var field in new[] { "schema", "semanticsVersion", "formatVersion", "frameworkKey",
+            "assemblyIdentity", "targetFramework", "interfaceModules", "exports", "dependencies" })
+            descriptor[field] = tampered[field]!.DeepClone();
+        var tamperedDigest = ContentKey(descriptor.ToJsonString());
+        tampered["interfaceDigest"] = tamperedDigest;
+        foreach (var certification in tampered["certifications"]!.AsArray())
+            certification!["interfaceDigest"] = tamperedDigest;
+        var rejectedArtifact = Path.Combine(root, "WrongVisibility");
+        try
+        {
+            File.WriteAllText(sidecar, tampered.ToJsonString());
+            var rejection = Execute([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)",
+                rejectedArtifact, "--import", sidecar, "--import-implementation", "ImportFixture.Lib=" + library,
+                "--import-sha256", "ImportFixture.Lib=" + implementation,
+                "--import-interface-sha256", "ImportFixture.Lib=" + tamperedDigest]);
+            if (rejection.Code != 1 || !rejection.Output.Contains("matching visibility", StringComparison.Ordinal) ||
+                File.Exists(Path.Combine(rejectedArtifact, "identity.json")) ||
+                File.Exists(Path.Combine(rejectedArtifact, "verified.json")))
+                throw new InvalidOperationException(
+                    "Protected visibility mismatch was not rejected: " + rejection.Output);
+        }
+        finally
+        {
+            File.WriteAllText(sidecar, first.ToJsonString());
+        }
+        completed.CompleteCase("protected.visibility");
+        completed.Finish();
+        Console.WriteLine("PASS protected static export, separately compiled derived caller and visibility rejection");
     }
     else if (cohort == "audit")
     {
