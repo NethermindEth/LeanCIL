@@ -10,12 +10,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-bool fullComposition = args switch
-{
-    [] => false,
-    ["--full-composition"] => true,
-    _ => throw new ArgumentException("Usage: TransitiveImports.cs [--full-composition]")
-};
 string root = At("artifacts/TransitiveImports-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 string[] cli = ["dotnet", ExtractorPath];
@@ -99,8 +93,7 @@ void Export(string assembly, string artifact, string package, string sourceModul
         @interface = new[] { new { module = sourceModule, source = Path.Combine(package, sourceModule + ".lean") } },
         exports = new[] { new { method, artifact, contract = "ImportFixture.addOne", theorem } }
     }));
-    Run([.. cli, "export-contracts", manifest, "--output", sidecar,
-        .. fullComposition ? new[] { "--bundle", Path.Combine(root, "Bundles") } : []]);
+    Run([.. cli, "export-contracts", manifest, "--output", sidecar, "--bundle", Path.Combine(root, "Bundles")]);
 }
 string[] Import(string sidecar, string assembly)
 {
@@ -118,11 +111,7 @@ Export(a, aArtifact, aPackage, "APublished", Path.Combine(aPackage, "Conditional
     "ImportFixture.LibraryA::AddOne(ulong)", "ExampleProof.correctness", aSidecar);
 JsonObject originalA = JsonNode.Parse(File.ReadAllText(aSidecar))!.AsObject();
 JsonObject originalB = JsonNode.Parse(File.ReadAllText(bSidecar))!.AsObject();
-if (fullComposition)
-{
-    FullTransitive();
-    return;
-}
+FullTransitive();
 ImportReviewRegressions.ValidateGraph_WhenDuplicateImplementationHashDiffers_RejectsIdentity(ExtractorPath, originalB);
 ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
     ExtractorPath, bSidecar, b, Path.Combine(root, "AmbiguousVersions"));
@@ -259,11 +248,29 @@ void FullTransitive()
     Directory.Move(bBundle, hidden);
     try { RejectFull("Full verification source bundle is missing: " + bBundle); }
     finally { Directory.Move(hidden, bBundle); }
-    string bProofSource = Directory.EnumerateFiles(bBundle, "BProof.lean", SearchOption.AllDirectories).Single();
-    string bProofText = File.ReadAllText(bProofSource);
-    File.WriteAllText(bProofSource, bProofText.Replace("all_goals bv_omega", "all_goals sorry"));
-    try { RejectFull("Contract source bundle file is missing or changed: "); }
-    finally { File.WriteAllText(bProofSource, bProofText); }
+    // A cooperating publisher republishes B's bundle with a proof that no longer closes; only B's own
+    // library build can see that, and it runs before A's.
+    string staging = Path.Combine(root, "rebundle-b");
+    CopyTree(bBundle, staging);
+    string bProofSource = Directory.EnumerateFiles(staging, "BProof.lean", SearchOption.AllDirectories).Single();
+    File.WriteAllText(bProofSource, File.ReadAllText(bProofSource).Replace("cil_checked_steps", "sorry"));
+    JsonObject inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(staging, "bundle.json")))!.AsObject();
+    inventory["files"]![Path.GetRelativePath(staging, bProofSource).Replace('\\', '/')] = Sha(bProofSource);
+    File.WriteAllText(Path.Combine(staging, "bundle.json"), inventory.ToJsonString());
+    string republished = Path.Combine(root, Sha(Path.Combine(staging, "bundle.json")));
+    Directory.Move(staging, republished);
+    JsonObject repointed = originalB.DeepClone().AsObject();
+    repointed["fullVerificationLocator"] = republished;
+    File.WriteAllText(bSidecar, repointed.ToJsonString());
+    try
+    {
+        Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,
+            .. Import(aSidecar, a), .. Import(bSidecar, b)]);
+        RejectFull("Unapproved proof axioms: sorryAx");
+    }
+    finally { File.WriteAllText(bSidecar, originalB.ToJsonString()); }
+    Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,
+        .. Import(aSidecar, a), .. Import(bSidecar, b)]);
 
     string trace = Path.Combine(root, "trace-full");
     string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
@@ -275,7 +282,8 @@ void FullTransitive()
     // A and B each get a fresh extraction and library build; the caller has its own build.
     if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
         stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
-        stages.Count(stage => stage == "Building fresh Lean verification library") != 3 ||
+        stages.Count(stage => stage is "Building fresh Lean verification library" or
+            "Copying certified Lean verification library") != 3 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
         stages.Any(stage => stage.Contains("certified proof:", StringComparison.Ordinal)))
         throw new InvalidOperationException(
@@ -295,6 +303,6 @@ void FullTransitive()
         verified.GetProperty("compositionTheorem").GetString() == "LeanCILFullComposition.certified";
     if (!published)
         throw new InvalidOperationException("Full verification did not publish both checked bundles: " + verified);
-    Console.WriteLine("PASS App -> A -> B forced full verification replays both bundles and rejects a missing or " +
-        "tampered dependency bundle");
+    Console.WriteLine("PASS App -> A -> B forced full verification replays both bundles and rejects a missing " +
+        "dependency bundle in preflight and a republished one whose proof fails its own library build");
 }

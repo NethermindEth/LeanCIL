@@ -21,10 +21,12 @@ Library exports may depend only on the `leancil` source package. Extra source
 packages, static-value assumptions and initialization assumptions fail.
 
 A library export may itself import other libraries. Its fresh extraction is pinned
-to the caller's dependency graph nodes, and every import it makes is verified
-the same way from its own bundle before the library is built. A missing or
-changed dependency bundle fails; the dependency's published certification is
-never used in its place. The composition proves each dependency's contract on
+to the caller's dependency graph nodes. Every export reachable this way is
+re-extracted before any library is built; then each bundle is built once, after
+the bundles it depends on. Every bundle in the reachable closure is located and
+validated before the caller is checked. A missing, changed or failing dependency
+bundle fails the run; the dependency's published certification is never used in
+its place. The composition proves each dependency's contract on
 its own linked program, discharges the importer's `ImportsHold` with those
 proofs, and links the importer with its dependencies before linking it into the
 caller. The report marks each re-checked `contractDependencies` node with
