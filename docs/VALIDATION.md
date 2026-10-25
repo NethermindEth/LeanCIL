@@ -172,6 +172,11 @@ assertion permits only `propext` and `Quot.sound`. The same module checks both
 paths of a symbolic branch using a supplied truth hypothesis, and verifies that
 failed candidate summaries do not escape their transaction.
 
+`Tests.LegacyFeatures`, imported by `Tests.Automation`, uses only the reference
+interpreter tactic import. It checks enabled and disabled symbolic features from
+caller facts, plus a concrete feature reduced to its profile field. `cil_steps`
+keeps symbolic `FeatureProfile.evaluate` applications folded, as checked stepping does.
+
 `Tests.StoreFacts` checks symbolic carry and borrow stores whose write facts
 state `a + b + c`, `a - b - c` and the flag words in source form, through both
 `cil_checked_steps` and `cil_contract_steps`. A wrong stored value, address or
