@@ -97,8 +97,8 @@ local macro "frame_natural" : tactic => `(tactic| repeat' (first
   | (apply bind_congr; intro)
   | simp only [map_bind]))
 
--- Splitting every dispatcher arm takes about 450000 heartbeats.
-set_option maxHeartbeats 600000 in
+-- The bounded proof covers array and read-only reference cases as well as numeric values.
+set_option maxHeartbeats 2000000 in
 /-- A step that succeeds or throws in `frame` does the same in `frame` padded with `extra`,
     resuming in the padded frame: instructions only read locals the unpadded frame has. -/
 theorem step_appendLocals (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
