@@ -13,6 +13,8 @@ internal static class ExportVerificationSuites
              "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post"]),
         Entry("exportsaudit", "audit", "post-callback export integrity",
             ["audit.proof-source", "audit.wrapper-artifact"]),
+        Entry("exportsprotected", "protected", "protected static export and separately compiled derived caller",
+            ["protected.publication", "protected.caller", "protected.visibility"]),
         new("exportsresolution", "resolution", "Tests/FullModuleResolution.cs", [], "full module resolution",
             ["resolution.same-files", "resolution.changed-file"], ["Tests/FullModuleResolution.cs"]),
         Entry("exportsfullcomposition", "composition", "transferred composition statement integrity", ["full.composition-true"]),
@@ -67,7 +69,8 @@ internal static class ExportVerificationSuites
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>
         new(name, cohort, "Tests/ContractExport.cs", ["--cohort", cohort], description, cases,
-            cohort is "core" or "audit" ? ["Tests/ContractExport.cs"] : ["Tests/ContractExport.cs", "Tests/FullImportVerification.cs"]);
+            cohort is "core" or "audit" or "protected" ? ["Tests/ContractExport.cs"] :
+                ["Tests/ContractExport.cs", "Tests/FullImportVerification.cs"]);
 
     internal static ExportSuite[] Plan()
     {
