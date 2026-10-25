@@ -27,6 +27,32 @@ theorem Memory.Equivalent.referenceEqual {m n : Memory} (same : m.Equivalent n)
 
 #print axioms Memory.Equivalent.referenceEqual
 
+/-- Pointer subtraction and observations depend only on allocation metadata. -/
+theorem Memory.Equivalent.referencePositions {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) :
+    referencePositions m left right = referencePositions n left right := by
+  simp only [CIL.Safety.referencePositions, checkedAt, same.form]
+#print axioms Memory.Equivalent.referencePositions
+
+/-- Equivalent memories give the same native pointer difference. -/
+theorem Memory.Equivalent.referenceDifference {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) :
+    referenceDifference m left right = referenceDifference n left right := by
+  simp only [CIL.Safety.referenceDifference, same.referencePositions]
+#print axioms Memory.Equivalent.referenceDifference
+
+/-- Equivalent memories give the same unsigned pointer ordering. -/
+theorem Memory.Equivalent.referenceLess {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) : referenceLess m left right = referenceLess n left right := by
+  simp only [CIL.Safety.referenceLess, same.referencePositions]
+#print axioms Memory.Equivalent.referenceLess
+
+/-- Pointer offsets preserve allocation equivalence without inspecting byte contents. -/
+theorem Memory.Equivalent.referenceSubtract {m n : Memory} (same : m.Equivalent n)
+    (reference : ManagedReference) (offset : CIL.Value) :
+    referenceSubtract m reference offset = referenceSubtract n reference offset := by
+  simp only [CIL.Safety.referenceSubtract, checkedAt, same.add]
+#print axioms Memory.Equivalent.referenceSubtract
 theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
     (value : Value) : checkedValue m value = checkedValue n value := by
   cases value <;> simp only [CIL.Safety.checkedValue, same.formValue, same.spanValidate]
@@ -58,7 +84,8 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   unfold CIL.Safety.step
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
-    same.referenceNonNull, same.referenceEqual]
+    same.referenceNonNull, same.referenceEqual, same.referenceDifference,
+    same.referenceLess, same.referenceSubtract]
   all_goals repeat' first
     | (apply ResultEquivalent.bind (same.allocateStack _ _ _)
        intro left right related

@@ -169,6 +169,18 @@ theorem StepContract.stackAllocation {body : CIL.Method} {frame final : Frame}
 
 #print axioms StepContract.stackAllocation
 
+/-- A successful pointer subtraction forms a valid result without changing its capability. -/
+theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedReference)
+    (offset : CIL.Value) (success : referenceSubtract memory reference offset = .ok result) :
+    (Value.reference result).Valid memory ∧ (Value.readOnlyReference result).Valid memory := by
+  simp only [referenceSubtract, Bind.bind, Except.bind, Pure.pure, Except.pure] at success
+  repeat' first
+    | split at success
+    | solve | cases success
+    | solve |
+        cases success
+        constructor <;> apply checked_add_result_valid <;> assumption
+#print axioms referenceSubtract_valid
 /-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
     so it is the place that breaks when an instruction is added without an effect. -/
 theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
@@ -205,6 +217,8 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
                 · first
                   | rfl
                   | exact (checkedValue_valid _ _ _ (by assumption)).2
+                  | exact (referenceSubtract_valid _ _ _ _ (by assumption)).1
+                  | exact (referenceSubtract_valid _ _ _ _ (by assumption)).2
                   | apply loadLocal_result_valid; assumption
                   | apply localAddress_result_valid; assumption
                   | apply allocated_store_reference_valid; exact hm; assumption; assumption

@@ -384,3 +384,12 @@ its raw object-null kind separately from managed references. It can be truth-tes
 compared with another object null, duplicated or discarded. It cannot justify object
 parameters, locals or results, or a comparison against a managed reference. The scalar
 certificate binds the raw null literal, comparison operation and branch target exactly.
+
+Pointer subtraction and unsigned ordering require live, well-formed references. Differences
+and orderings additionally require both references to identify the same allocation; no relative
+runtime addresses are inferred from different allocation identities. The runtime correspondence
+assumes an allocation occupies one contiguous, non-wrapping address interval. Within that
+interval, unsigned address order matches offset order and address subtraction cancels its base.
+Differences retain their native-width two's-complement representation. Subtracting an int32 or
+native byte displacement reuses checked wrapping reference arithmetic and retains readonly
+restrictions. None of these observations reads, initializes or grants authority over storage.
