@@ -281,7 +281,15 @@ throws, unsupported execution and fuel exhaustion do not transfer. `Tests.Aggreg
 cover frame setup and interpreter behavior. `Tests.RetainedNumericLocals` keeps dead
 numeric declarations before and after a live local, transfers exact-memory executions
 and named exceptions through nested allocating calls, and checks that deleting a
-numeric local changes the allocation watermark and fails ordinary embedding. The extracted-loop suite checks
+numeric local changes the allocation watermark and fails ordinary embedding.
+`Tests.AllocationRenaming` checks private allocation holes, extending identity maps, relocated
+numeric homes and distinct activation labels. `Tests.AllocationExecutionRenaming` uses the
+concrete allocation-refinement API to transfer scalar results, caller-memory prefixes, a
+complete method contract and named exceptions through nested calls followed by dynamic
+allocation, including a child that reads its initialized numeric local. It independently
+checks different source/target allocation counters and rejects changed retained initializers,
+unchanged local operands, changed call targets and an exhausted stack quota.
+The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, a counted loop composed through its
 helper's contract and reused for a reimplemented helper, a loop that returns or
@@ -365,7 +373,7 @@ method steps through a shift and an even-lane multiply with those lemmas as fact
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

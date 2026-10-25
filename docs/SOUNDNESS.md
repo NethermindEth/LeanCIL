@@ -124,7 +124,33 @@ Scope and limits:
 
 `MethodEmbedsDeadLocals program index expected` relaxes only the local declarations: `EmbedsDeadLocals expected actual map` requires `Embeds expected (actual.withLocalsOf expected) map`, so every other field and the code are checked as above, and that `actual`'s locals and local kinds are `expected`'s followed by trailing locals that are each a `.reference` or `.span width writable` initialized to `.nullRef` or `.unmodeled`, with span widths restricted to 1, 2, 4 or 8 bytes. It also requires `expected`'s kinds and initializers to have equal length, every opaque vector local to lie among the kept locals, and no parameter homes, which the frame places after the locals and the extractor addresses by local count. Frame entry creates such a dead local as a root or span slot without allocating, so `enterFrame_deadLocals` shows that `actual` enters the frame of `actual.withLocalsOf expected` with the dead slots appended, in the same memory with the same allocation identities. `StepAppendLocals` is proved separately for every instruction constructor in `CIL.Safety.Embedding.AppendLocals`; the dispatcher `step_appendLocals` shows that a step that succeeds or throws behaves the same with the padded frame, since every local an instruction reads is below the padding, and `run_padded` lifts it to whole runs. `EmbedsDeadLocals.invoke_outcome` composes this with `invoke_outcome_refines`; `MethodEmbedsDeadLocals.invoke`, `.raises`, `.method_holds`, `.holds` and `EmbedsDeadLocals.invoke_raise` (`CIL.Safety.Embedding.DeadLocals`) are its instances, with the same transfer limits as above. `InvocationCertificate`s are not transferred, since their live state names the frame. There is no `MethodEmbedsDeadLocals.refines`: the padded run is related to the unpadded one directly, not through a `ProgramRefines`, so it does not combine with other replacements through `ProgramRefines.set`. To replace other methods as well, prove their `MethodEmbeds` against `program.set index expected`, the program with the dead-local method already replaced, and chain each `.invoke` with this one's.
 
-Trailing byref, pointer and span dead locals are covered. Span slots retain their element width and mutability, and hold an empty view or an unmodeled value without allocating. Unsupported span widths and nonempty scalar initializers remain rejected by the kernel-checked condition. Numeric dead locals are rejected: each allocates a home, which shifts the identity of every later allocation, and no relation between memories with renamed identities is modeled. A dead local before a kept one is rejected because it renumbers the kept local. `cil_embed` proves `MethodEmbedsDeadLocals` goals too and names the violated local condition.
+Trailing byref, pointer and span dead locals are covered. Span slots retain their element width and mutability, and hold an empty view or an unmodeled value without allocating. Unsupported span widths and nonempty scalar initializers remain rejected by the kernel-checked condition. Numeric and interspersed dead locals are outside this exact-memory embedding: their homes change later allocation identities or local operands. They use the separate allocation refinement below. `cil_embed` proves `MethodEmbedsDeadLocals` goals too and names the violated local condition.
+`CIL.Safety.AllocationRefinement` supplies a separate checked simulation for numeric and
+interspersed dead declarations. `MethodRenaming` retains local kinds and initializers in order and checks
+all relocated local operands while preserving method indices and execution metadata.
+Both methods must satisfy `OrdinaryFrame`: no opaque vector locals or vector/parameter
+argument homes, bounded layouts and supported span widths. `LocalDeclarations` preserves
+each retained initializer and permits only unmodeled inserted dead declarations. Actual
+source entry success supplies successful retained initialization; the target entry is proved.
+The initial memory must be well formed and its static bindings bounded by the allocation
+counter. These restrictions are premises of the public theorems.
+
+The relation is injective over the source allocation prefix. New paired allocations extend
+it without moving existing images, and extra target homes remain private outside that image.
+A separate activation relation preserves frame storage kinds and ownership through nested
+calls and expiry. `StepRenaming.stepTransport` proves the complete checked dispatcher;
+recursive execution extends the relation through every later allocation. The public
+`ProgramRenaming.invoke_scalars` and `.invoke_confined` instantiate this theorem and transfer
+exact scalar results and `MemoryBelow` claims on the initial caller prefix. `.raises` also
+requires valid input arguments and preserves named exceptions. No consumer-supplied step
+simulation is assumed. These results do not assert identical final allocation counters,
+identical fresh references or arbitrary reference-valued postconditions.
+
+`MethodContract.Holds.of_allocationRenaming` preserves the same contract and footprint.
+Its explicit premises require readiness from the original precondition, scalar result
+encoding and stability of the original postcondition under the proved caller-prefix
+relation. Confinement is transported from actual successful executions, rather than
+assumed for the renamed result.
 
 ## Shared proof contracts and reduction
 
