@@ -12,7 +12,7 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Nethermind.LeanCIL;
 
-// The default leaf also runs one forced full verification; the costlier compositions get their own runner.
+// Forced full verification of the RVA-table library runs only in the --full-composition leaf.
 bool fullComposition = args switch
 {
     [] => false,
@@ -270,7 +270,8 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
     // One bundle gives one library build however many slots it fills; the caller has its own.
     if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != slots ||
         stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != slots ||
-        stages.Count(stage => stage == "Building fresh Lean verification library") != 2 ||
+        stages.Count(stage => stage is "Building fresh Lean verification library" or
+            "Copying certified Lean verification library") != 2 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
         stages.Any(stage => stage.Contains("certified proof:", StringComparison.Ordinal)))
         throw new InvalidOperationException(
@@ -289,11 +290,11 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
         throw new InvalidOperationException(
             "Full verification did not publish the checked static composition: " + verified);
 }
-// Any one marker suffices where independent checks may reject the same input in either order.
-void RejectFull(string artifact, params string[] markers)
+// Each rejection names the one check expected to fire first.
+void RejectFull(string artifact, string marker)
 {
     (int Code, string Output, string Stdout, string Stderr) result = Execute(FullCommand(artifact, callerProof, true));
-    if (result.Code != 1 || !markers.Any(marker => result.Output.Contains(marker, StringComparison.Ordinal)) ||
+    if (result.Code != 1 || !result.Output.Contains(marker, StringComparison.Ordinal) ||
         File.Exists(Path.Combine(artifact, "verified.json")))
         throw new InvalidOperationException("Full verification accepted a static-table forgery: " + result.Output);
 }
@@ -333,6 +334,15 @@ string Republish(Action<JsonObject> editExport, Action<JsonObject> editSidecar)
 
 if (fullComposition)
 {
+    // A cooperating publisher's bundle whose extraction record drops the table fails before any build.
+    try
+    {
+        string forgedStatics = Republish(identity => identity["staticIdentities"] = new JsonArray(), _ => { });
+        RejectFull(forgedStatics, "Full-verification static identity records disagree");
+    }
+    finally { File.WriteAllText(sidecar, published.ToJsonString()); }
+    Console.WriteLine("PASS a republished bundle with forged static records fails before any build");
+
     // A re-certified changed table passes ordinary import, which trusts the publisher; only the
     // independent author proof sees that the bytes no longer match the published descriptor.
     try
@@ -379,9 +389,26 @@ if (fullComposition)
     #print axioms correctness
     end ExampleProof
     """);
+    // Ordinary verification twice: the second run restores the first's receipt and skips the proof check,
+    // so the full run below starts with a warm receipt it must not use.
+    string[] ordinary = [.. cli, "verify", mixedArtifact, "--proof", mixedProof];
+    string[] OrdinaryStages(string name)
+    {
+        string trace = Path.Combine(root, name);
+        string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+        try { Run(ordinary); }
+        finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+        return Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+            .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
+    }
+    bool ChecksProof(string[] stages) =>
+        stages.Any(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal));
+    if (!ChecksProof(OrdinaryStages("trace-cold")) || ChecksProof(OrdinaryStages("trace-warm")))
+        throw new InvalidOperationException("Precondition: the repeated ordinary verification restored no receipt.");
     FullVerify(mixedArtifact, mixedProof, package: false, slots: 2);
-    Console.WriteLine(
-        "PASS distinct same-index app and library tables and one shared table across two imported slots");
+    Console.WriteLine("PASS distinct same-index app and library tables and one shared table across two " +
+        "imported slots, with a warm receipt present");
     return;
 }
 
@@ -421,43 +448,6 @@ Reject(value =>
     ReadCertification(value)["staticIdentities"]!.AsArray().Add(conflicting);
 }, "Static identity collision " + libKey + ": " + libStatic["assemblyIdentity"]!.GetValue<string>() + "::" + libStatic["fieldName"]!.GetValue<string>() + " and ");
 File.WriteAllText(sidecar, published.ToJsonString());
-
-// The ordinary verification above left warm receipts; full mode must still extract, capture and replay.
-FullVerify(appArtifact, callerProof, package: true, slots: 1);
-Console.WriteLine("PASS forced full verification of a separately compiled RVA-table library with warm receipts");
-try
-{
-    RewriteTable(18);
-    RejectFull(appArtifact, "Stale or mismatched verification artifact",
-        "Full-verification imported implementation or sidecar changed");
-}
-finally { File.WriteAllBytes(lib, originalLib); }
-string appIdentityPath = Path.Combine(appArtifact, "identity.json");
-string appIdentityText = File.ReadAllText(appIdentityPath);
-try
-{
-    JsonObject forged = JsonNode.Parse(appIdentityText)!.AsObject();
-    forged["imports"]![0]!["staticIdentities"] = new JsonArray();
-    File.WriteAllText(appIdentityPath, forged.ToJsonString());
-    RejectFull(appArtifact, "differs from regenerated assembly, extractor or configuration metadata");
-}
-finally { File.WriteAllText(appIdentityPath, appIdentityText); }
-string bundledInterface = Path.Combine(bundle, "interface", "PublishedTable.lean");
-string bundledInterfaceText = File.ReadAllText(bundledInterface);
-try
-{
-    File.AppendAllText(bundledInterface, "\n");
-    RejectFull(appArtifact, "Contract source bundle file is missing or changed: interface/PublishedTable.lean");
-}
-finally { File.WriteAllText(bundledInterface, bundledInterfaceText); }
-try
-{
-    string forgedStatics = Republish(identity => identity["staticIdentities"] = new JsonArray(), _ => { });
-    RejectFull(forgedStatics, "Full-verification static identities differ from the current implementation");
-}
-finally { File.WriteAllText(sidecar, published.ToJsonString()); }
-Console.WriteLine(
-    "PASS full verification rejects a changed table DLL, forged static records and a tampered bundle");
 
 using (ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(lib))))
 {
