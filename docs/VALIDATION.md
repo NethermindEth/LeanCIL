@@ -160,11 +160,16 @@ internal ones without re-executing the callee, composes callers through the deri
 contracts, and proves that an unjustified stronger postcondition, a weaker
 precondition, a smaller footprint and a changed exception type each fail both the
 refinement premises and the derived contract on a concrete input. Its forwarders inherit
-`AddTo`'s and `IsZero`'s contracts through `MethodContract.Holds.forward` and
-`forward_out`, in order, permuted, with an unused argument, with a discarded out local and
-through a narrowed return;
-a body whose indices differ, an argument list missing one, and a result outside the narrow
-range are rejected.
+their callees' contracts through `MethodContract.Holds.forward` and `forward_out`: `Sum`,
+`SumSwapped` and `AddFrom` pass `AddTo` its arguments in order, swapped and reversed;
+`SumDiscard` inherits `AddFlag`'s contract with an uninitialized out local, and `CopyTo`
+inherits `AddFrom`'s with a zeroed local, a callee region footprint inside its own and an
+`Apart` fact from the local's freshness; `IsZeroForward`, `IsZeroIgnoring` and
+`IsZeroSecond` re-narrow `IsZero`'s boolean, the last two skipping an argument; and
+`IsSetForward` passes a boolean through a narrowed load. Rejected are a body whose loads
+differ, a selection that passes one argument twice, a result or load outside the narrow
+range, and two false contracts: `IsZeroSecond` as if it loaded its first argument, and
+`IsZeroIgnoring` with a dangling unused argument.
 
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
 `Confined`. `Tests.BufferContents` checks typed buffer contents: fills and

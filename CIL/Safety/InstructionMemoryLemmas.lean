@@ -196,6 +196,18 @@ theorem checkedValues_valid (m : Memory) (values result : List Value)
 #print axioms ValuesValid.preserve
 #print axioms checkedValues_valid
 
+/-- Values valid in `memory` pass the argument and result checks unchanged. -/
+theorem checkedValues_of_valid {memory : Memory} {values : List Value}
+    (valid : ValuesValid memory values) : values.mapM (checkedValue memory) = .ok values := by
+  induction values with
+  | nil => rfl
+  | cons value rest restChecked =>
+    have head := checkedValue_of_valid memory value (valid value (List.mem_cons_self ..))
+    have tail := restChecked fun other member => valid other (List.mem_cons_of_mem _ member)
+    simp only [List.mapM_cons, head, tail, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms checkedValues_of_valid
+
 theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
     {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) :
     (Value.scalar value).Valid m := by
