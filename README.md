@@ -248,6 +248,8 @@ requirements remain explicit contract preconditions; static-constructor and
 static-value assumptions are not supported in this mode. See
 [independent verification](docs/FULL_VERIFICATION.md) for the trust boundary and
 required producer evidence.
+Full verification checks caller and imported proofs again even when ordinary
+verification has already cached successful results.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter
