@@ -1084,6 +1084,47 @@ example with dead numeric locals on both sides of a live reference local and an
 allocating child call. Removing those declarations is a different simulation problem;
 equal scalar results alone do not imply equal final memory.
 
+### Generated profile templates
+
+Create ordinary extractions for the profiles your proof supports, then combine them:
+
+```sh
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' scalar scalar
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' sse42 x64-sse42
+leancil extract Dispatch.dll 'Dispatch::Choose(uint,uint)' v3 x64-v3
+leancil templates shared scalar sse42 v3
+```
+
+The command reruns exact extraction checking for every input and requires the same
+assembly bytes. `shared/Templates.lean` defines each method once, with a profile parameter,
+parameters for the feature flags it reads, and managed callee indices keyed by full method
+identity. Every original IL instruction keeps its pc. Conditional instructions and excluded
+paths become `if` expressions and unsupported padding; `cil_instruction_equations` generates
+kernel-checked equations for every pc.
+
+`TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
+`Templates`. Each binding proves `Extracted.program[i]? = some (Templates.methodN ...)`
+by `rfl`, including all metadata and callee indices. Compile a binding only against its
+corresponding extraction, recorded in `templates.json`. Add the shared module and selected
+binding module to your proof package, import that binding from the consumer proof, and use
+ordinary `leancil verify` with that extraction and proof package. The templates command
+generates proof source; it does not replace Lean checking or verification of the extraction.
+
+Only the input profiles receive extraction bindings. Unselected combinations of observed
+flags produce unsupported instructions, and no correctness claim about another extraction
+follows from generating a template. The full profile remains an explicit parameter; a
+behavioral proof must relate its feature fields to the flag arguments it uses. Profiles
+that produce different metadata, different instruction counts, or different instructions
+under identical observed flags are rejected. Static-site metadata, imported callee slots
+and the model's `newVector256` constructor form are currently unsupported in template generation.
+
+`Tests/ProfileTemplates.cs` compiles a real AVX2/SSE4.2 dispatch helper and checks one
+shared proof from `Tests/ProfileTemplatesProof.lean` against three profiles. A fourth
+extraction changes the managed callee numbering through a wrapper entry point. The suite
+replays the generated equations, extraction certificates, bindings and consumer proofs in
+the kernel, and rejects changed flag values, callees, branch targets, instruction equations,
+stale extraction source and incompatible profile-dependent parameter homes.
+
 ### Instruction equations for parametric bodies
 
 A body written once for every profile takes its feature flags and callee
