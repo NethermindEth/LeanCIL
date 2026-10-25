@@ -42,7 +42,16 @@ name = "Tests.LoopOutcome"
 name = "Tests.ConfinedFootprints"
 
 [[lean_lib]]
+name = "Tests.LocalSnapshots"
+
+[[lean_lib]]
 name = "Tests.ContractConsequence"
+
+[[lean_lib]]
+name = "Tests.InvocationCertificates"
+
+[[lean_lib]]
+name = "Tests.ValidCallTransport"
 
 [[lean_lib]]
 name = "Tests.BufferContents"
@@ -139,6 +148,9 @@ name = "Tests.ScalarEvidence"
 
 [[lean_lib]]
 name = "Tests.VectorFields"
+
+[[lean_lib]]
+name = "Tests.ProfileContract"
 
 [[lean_lib]]
 name = "Tests.InstructionEquations"

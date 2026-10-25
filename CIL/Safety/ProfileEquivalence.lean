@@ -7,7 +7,7 @@ import CIL.Safety.Execution
 The checked interpreter gives the same result for a program under two feature profiles
 whenever every instruction agrees on them (`CIL.Op.ProfileAgreement`): only feature tests
 and intrinsics consult the profile. `CIL.Safety.ProfileCertificate` lifts this to
-invocation certificates.
+invocation certificates and `CIL.Safety.ProfileContract` to method and outcome contracts.
 -/
 
 namespace CIL.Safety
