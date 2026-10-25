@@ -47,13 +47,12 @@ elab_rules : command
       ``CIL.Safety.Value.hasUnspecified, ``CIL.Value.hasUnspecified, ``List.any,
       ``List.take, ``List.drop, ``List.map, ``Bind.bind, ``Pure.pure, ``Except.bind, ``Except.pure,
       ``Option.bind] {}])
-    -- Unfold a dispatcher only once its discriminants are constructors, so just the selected
-    -- arm is kept.
+    -- Smart unfolding discharges constructor guards before traversing the selected arm.
     let arms (e : Expr) : MetaM Expr := transform e (pre := fun e => do
       unless [``CIL.Safety.step, ``CIL.step, ``CIL.binary, ``CIL.unary].any e.isAppOf do
         return .continue
       let some unfolded ← unfoldDefinition? e | return .continue
-      let arm ← whnfCore unfolded
+      let arm ← withDefault <| whnf unfolded
       if let some name := arm.getAppFn.constName? then
         if (← isMatcher name) then return .continue
       return .visit arm)

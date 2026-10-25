@@ -436,7 +436,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   unfold memoryInstruction at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
-    | solve | instruction_contract_close
+    | solve | cases h; instruction_contract_close
     | cases h
     | split at h
 
@@ -448,7 +448,7 @@ theorem instruction_contract (operation : CIL.Op) (stack values : List Value) (m
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply memoryInstruction_contract; assumption
-    | solve | instruction_contract_close
+    | solve | cases h; instruction_contract_close
     | cases h
     | split at h
 
