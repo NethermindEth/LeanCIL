@@ -1,5 +1,12 @@
 # Writing checked proofs
 
+Certificate validation streams fallthrough states and uses balanced indexes for branch
+destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original
+list-indexed rules without changing their entry, reachability, opcode or bounds requirements.
+`foldEntry` takes the optional lookup result, so a list-based caller writes
+`foldEntry roles[target]?`. Missing entries retain the original permissive fold-role result;
+the successor-state check independently rejects a target missing from its certificate.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a

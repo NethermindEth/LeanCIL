@@ -1,5 +1,23 @@
 # Validation coverage
 
+`Tests.CertificateFlow` covers streaming fallthrough, indexed forward/backward edges,
+missing states, out-of-bounds targets and mismatched certificate lengths. The feature and
+scalar equivalence theorems retain the original list-indexed rules, including rejection
+when the feature and scalar certificate lengths differ.
+
+`Tests/CertificateFlowScaling.lean` and `Tests/CertificateBranchScaling.lean` provide fixed
+512-nop and 512-branch workloads, each followed by a return, for kernel checking and independent
+replay. Their profiler reports tactic execution and kernel type-checking separately.
+Compile and replay each workload, for example:
+
+```sh
+lake env lean -o .lake/build/lib/lean/Tests/CertificateFlowScaling.olean Tests/CertificateFlowScaling.lean
+lake env leanchecker Tests.CertificateFlowScaling
+```
+
+Compare identical source with baseline and updated libraries; native evaluation alone does
+not measure this workload. The benchmark is separate from ordinary library builds.
+
 `Tests/ConsumerSupportUnion.cs` runs a fixed three-extraction consumer batch in two orders.
 Support imported only by later groups must build and replay once; direct and indirect
 extraction-dependent modules must replay in every consuming group, including repeated import
