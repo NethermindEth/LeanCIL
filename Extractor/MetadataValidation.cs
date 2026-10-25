@@ -145,10 +145,31 @@ internal static class MetadataValidation
         return new AggregateInfo(fields.Length * width, width, offsets);
     }
 
-    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, bool span = false, string architecture = "scalar")
+    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, string architecture = "scalar")
     {
+        if (type is PointerType pointer)
+        {
+            if (pointer.ElementType is TypeSpecification ||
+                pointer.ElementType.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
+                    MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 or
+                    MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr))
+                throw new InvalidDataException("Unsupported stack-storage pointer element type");
+            Type(pointer.ElementType, module, architecture: architecture);
+            return;
+        }
+        if (type is ArrayType array)
+        {
+            if (Arrays.Of(array) is null)
+                throw new InvalidDataException("Unsupported array shape or element type: " + type.FullName);
+            Type(array.ElementType, module, architecture: architecture);
+            return;
+        }
         if (type is ByReferenceType byRef)
         {
+            if (byRef.ElementType is ArrayType)
+                throw new InvalidDataException("Unsupported by-reference array root");
+            if (Spans.Width(byRef.ElementType) is not null)
+                throw new InvalidDataException("Unsupported by-reference span");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
             Type(byRef.ElementType, module, architecture: architecture);
@@ -160,8 +181,7 @@ internal static class MetadataValidation
             ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char") &&
             !(type is GenericInstanceType && type.FullName.StartsWith("System.Runtime.Intrinsics.Vector", StringComparison.Ordinal) && RuntimeModels.SupportedType(type)) &&
-            // Spans are admitted only as by-value returns and folded receivers; elsewhere their reference field would sit in unmodelled storage.
-            !((returns || span) && Spans.Width(type) is not null))
+            Spans.Width(type) is null)
             throw new InvalidDataException($"Unsupported type: {type.FullName}");
         RuntimeModels.ValidateTypeIdentity(type, module, architecture);
     }
@@ -171,7 +191,8 @@ internal static class MetadataValidation
     // With `blocked`, failures after entry selection are recorded and the walk continues past them;
     // without it, the first failure throws. Either way only profile-reachable code is checked.
     internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
-        IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null)
+        IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null,
+        string[]? typeArguments = null, Func<TypeReference, bool>? importedByref = null)
     {
         profile.Validate();
         initializedTypes ??= [];
@@ -186,7 +207,7 @@ internal static class MetadataValidation
             (module.Attributes & ModuleAttributes.ILOnly) == 0 ||
             (module.Attributes & ModuleAttributes.Required32Bit) != 0)
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
-        MethodDefinition entry = MethodSelector.Resolve(module, entrySignature);
+        MethodDefinition entry = ContractMethodMetadata.Select(module, entrySignature, typeArguments ?? [], profile.Architecture).Closed;
         MethodSpecialization specializations = new(module, profile.Architecture);
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
@@ -248,11 +269,15 @@ internal static class MetadataValidation
                 Type(method.ReturnType, module, returns: true, architecture: profile.Architecture);
             }, named: true);
             foreach (ParameterDefinition parameter in method.Parameters)
-                Check(method, null, () => Type(parameter.ParameterType, module, architecture: profile.Architecture), named: true);
-            Spans.Analysis? spans = null;
-            if (Check(method, null, () => spans = Spans.Analyze(method), named: true))
+                Check(method, null, () =>
+                {
+                    if (parameter.ParameterType is ByReferenceType && importedByref?.Invoke(parameter.ParameterType) == true) return;
+                    Type(parameter.ParameterType, module, architecture: profile.Architecture);
+                }, named: true);
+            if (Check(method, null, () => Spans.Analyze(method), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
-                    Check(method, null, () => Type(local.VariableType, module, span: spans!.Locals.Contains(local.Index), architecture: profile.Architecture), named: true);
+                    Check(method, null, () => Type(local.VariableType, module,
+                        architecture: profile.Architecture), named: true);
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;
@@ -269,6 +294,12 @@ internal static class MetadataValidation
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
+                if (instruction.OpCode.Code == Code.Callvirt)
+                {
+                    var resolved = ConstrainedCalls.Resolve(method, instruction, profile.Architecture);
+                    Enter(resolved.Target, reference, instruction);
+                    return;
+                }
                 if (ImportResolution.External(reference, module))
                 {
                     if (imports is null)
@@ -334,7 +365,7 @@ internal static class MetadataValidation
                 {
                     throw new InvalidDataException($"{error.Message}\n  Site: {instruction}", error);
                 }
-                Enter(value.Initializer, value.Initializer, instruction);
+                if (value.Initializer is { } initializer) Enter(initializer, initializer, instruction);
             }
             foreach (Instruction instruction in reachable)
             {
@@ -349,6 +380,10 @@ internal static class MetadataValidation
                     continue;
                 if (!Check(method, instruction, () =>
                     {
+                        // Fold recognition scans the whole body, but only reachable unsupported throws are rejected.
+                        if (instruction.OpCode.Code == Code.Newobj && instruction.Next?.OpCode.Code == Code.Throw)
+                            throw Call("Unsupported exception constructor", reference, method, instruction,
+                                "Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);
@@ -364,10 +399,10 @@ internal static class MetadataValidation
         {
             var index = i;
             var method = methods[index];
-            HashSet<Instruction>? nativeOperands = null;
+            NativeOperands.Certificate? nativeOperands = null;
             int[]? parameterHomes = null;
             if (!Check(method, null, () => (nativeOperands, parameterHomes) =
-                (NativeOperands.Analyze(method, profile), ParameterStorage.Analyze(method, profile)), named: true))
+                (NativeOperands.Certify(method, profile), ParameterStorage.Analyze(method, profile)), named: true))
                 continue;
             foreach (Instruction instruction in Reachability.Analyze(method, profile))
                 if (!skipped.Contains(instruction))

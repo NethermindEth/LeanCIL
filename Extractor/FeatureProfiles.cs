@@ -11,9 +11,8 @@ internal enum Feature
     X86Base64, Vector128Accelerated
 }
 
-// A profile describes runtime-visible capabilities, including runtime disabling.
-// BMI1 is deliberately independent of AVX2. The x86 prerequisites follow .NET's
-// documented inheritance, not merely combinations found on common processors.
+// Runtime-visible capabilities for .NET 10 CoreCLR, including runtime disabling.
+// Group constraints and measured x64/arm64 evidence are recorded in docs/RUNTIME-PROFILES.md.
 internal sealed record FeatureProfile(string Name, string Architecture, int NativeWidth,
     bool LittleEndian, bool AdvSimd = false, bool Sse2 = false, bool Ssse3 = false,
     bool Sse42 = false, bool Avx = false, bool Avx2 = false,
@@ -51,6 +50,12 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         // Every x86 ISA class derives from X86Base.
         if ((Sse2 || Ssse3 || Sse42 || Avx || Avx2 || Avx512F || Avx512FVL || Bmi1 || Sse41 || Avx512DQ || Avx512DQVL || Bmi2) && !X86Base64)
             throw new InvalidDataException($"Invalid execution profile: {Name}: x86 ISA flags require x86Base64");
+        if (Sse2 != X86Base64 || Ssse3 != Sse41 || Sse41 != Sse42 ||
+            Avx2 != Bmi1 || Avx2 != Bmi2 ||
+            Avx512F != Avx512FVL || Avx512F != Avx512DQ || Avx512F != Avx512DQVL ||
+            AdvSimd != ArmBase64 || Vector128Accelerated != (Sse2 || AdvSimd) ||
+            (Vector256Accelerated && !Avx2))
+            throw new InvalidDataException($"Invalid execution profile: {Name}: capabilities split a .NET 10 CoreCLR runtime group; see docs/RUNTIME-PROFILES.md");
     }
 
     internal static FeatureProfile Select(string name)
@@ -77,18 +82,19 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         {
             "scalar" => Scalar,
             "arm64-advsimd" => new(name, "arm64", 64, true, AdvSimd: true, ArmBase64: true, Vector128Accelerated: true),
-            "arm64-armbase" => new(name, "arm64", 64, true, ArmBase64: true),
-            "x64-sse41" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, X86Base64: true, Vector128Accelerated: true),
-            "x64-vector256" => new(name, "x64", 64, true, Vector256Accelerated: true),
-            "x64-bmi2" => new(name, "x64", 64, true, Bmi2: true, X86Base64: true),
+            "x64-sse2" => new(name, "x64", 64, true, Sse2: true, X86Base64: true, Vector128Accelerated: true),
             "x64-sse42" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, Sse42: true, X86Base64: true, Vector128Accelerated: true),
-            "x64-avx2" or "x64-avx2-bmi1" => new(name, "x64", 64, true,
-                Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true, Bmi1: name.EndsWith("-bmi1", StringComparison.Ordinal),
-                X86Base64: true, Vector128Accelerated: true),
-            "x64-avx512" or "x64-avx512-bmi1" => new(name, "x64", 64, true,
-                Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true,
-                Avx512F: true, Avx512FVL: true, Bmi1: name.EndsWith("-bmi1", StringComparison.Ordinal),
-                X86Base64: true, Vector128Accelerated: true),
+            // .NET 10 enables x86-64-v3 (AVX2 with BMI1/BMI2) and v4 (AVX-512 F/DQ/VL) only as whole groups.
+            "x64-v3" or "x64-v4" => new(name, "x64", 64, true,
+                Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true, Bmi1: true, Bmi2: true,
+                Avx512F: name == "x64-v4", Avx512FVL: name == "x64-v4", Avx512DQ: name == "x64-v4", Avx512DQVL: name == "x64-v4",
+                X86Base64: true, Vector128Accelerated: true, Vector256Accelerated: true),
+            "x64-avx2" or "x64-avx2-bmi1" or "x64-bmi2" or "x64-vector256" =>
+                throw new ArgumentException($"Retired execution profile: {name}; migrate to x64-v3 and reverify (docs/RUNTIME-PROFILES.md)"),
+            "x64-avx512" or "x64-avx512-bmi1" =>
+                throw new ArgumentException($"Retired execution profile: {name}; migrate to x64-v4 and reverify (docs/RUNTIME-PROFILES.md)"),
+            "x64-sse41" => throw new ArgumentException($"Retired execution profile: {name}; migrate to x64-sse42 and reverify (docs/RUNTIME-PROFILES.md)"),
+            "arm64-armbase" => throw new ArgumentException($"Retired execution profile: {name}; migrate to arm64-advsimd and reverify (docs/RUNTIME-PROFILES.md)"),
             _ => throw new ArgumentException($"Unknown execution profile: {name}")
         };
         profile.Validate();

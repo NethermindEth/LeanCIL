@@ -2,11 +2,18 @@
 #:property PublishAot=false
 #:include Verification.cs
 
-if (args is not [var directory])
-    throw new ArgumentException("Usage: dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>");
+if (args is not ([_] or [_, "--reuse", _]))
+    throw new ArgumentException("Usage: dotnet run --file scripts/PrepareLibrary.cs -- <output-directory> [--reuse <trusted-manifest-sha256>]");
+var directory = args[0];
+var trustedDigest = args.Length == 3 ? args[2] : null;
 
+// Fresh production must not inherit a supplied library from a consumer's environment.
+Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY", null);
 using var verifier = new Program { freshLibrary = true };
-var digest = verifier.PrepareLibrary(directory);
+// The reuse digest must come from a trusted producer, independently of the restored files.
+var digest = verifier.PrepareLibrary(directory, trustedDigest);
+if (trustedDigest is not null)
+    Console.WriteLine("Reusing certified library for identical sources and toolchain");
 Console.WriteLine("Certified library manifest SHA256: " + digest);
 if (Environment.GetEnvironmentVariable("GITHUB_OUTPUT") is { Length: > 0 } output)
     File.AppendAllText(output, "manifest-sha256=" + digest + Environment.NewLine);

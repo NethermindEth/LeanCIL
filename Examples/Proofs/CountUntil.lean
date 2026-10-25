@@ -36,7 +36,7 @@ theorem bump_holds : bumpContract.Holds Extracted.program bump := by
 def untilRaises (value limit : W32) : Option String :=
   if limit.toNat < value.toNat then some "System.InvalidOperationException" else none
 
-private def frame : Frame := ⟨0, [.bytes .word32 ⟨0, 0⟩, .bytes .word32 ⟨1, 0⟩], [0, 1], []⟩
+private def frame : Frame := ⟨0, [.bytes .word32 ⟨0, 0⟩, .bytes .word32 ⟨1, 0⟩], [0, 1], [], 0⟩
 private def guard : Nat := instructionLocation untilBody fun op =>
   match op with | .brnonzero _ => true | _ => false
 /-- The loop head holds the remaining count on the stack. -/

@@ -2,11 +2,13 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using Mono.Cecil;
 
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
+var queue = new GeneratedQueue(verification, assembly);
 var root = At("artifacts/SkipInitialization");
 Directory.CreateDirectory(root);
 Run(["lake", "build", "Tests.UnsafeCallEvidence"]);
@@ -28,8 +30,8 @@ void Prove(string name, string selector, string claim)
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness : " + claim + " := by rfl\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", selector, proof, output);
-    Console.WriteLine("PASS " + name);
+    queue.Add(new(selector, proof, output),
+        () => Console.WriteLine("PASS " + name));
 }
 
 Prove("Read", "SkipInitialization::Read(ulong&)",
@@ -42,6 +44,8 @@ Prove("Store", "SkipInitialization::Store(Examples.FourLimbs&,ulong,ulong,ulong,
         CIL.Safety.loadValue final (.address ⟨0, offset⟩) 8)) =
       .ok ([], [.ok (.i64 1), .ok (.i64 2), .ok (.i64 3), .ok (.i64 4)])
     """);
+
+queue.Flush();
 
 foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "arity", "parameter", "return", "instance", "scope", "version" })
 {
@@ -74,7 +78,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
             "void" => "Unsupported type: System.Void",
             "byref" => "Unsupported Unsafe element type: System.Int32&",
             "pointer" => "Unsupported Unsafe element type: System.Int32*",
-            "arity" or "parameter" or "return" => "Generic contract imports are not supported in version 1.",
+            "arity" or "parameter" or "return" => "External managed dependency: " + call.FullName,
             "instance" => "Invalid evaluation stack during reachability",
             "scope" => "Unsupported generic call: " + call.FullName,
             "version" => "Unsupported type identity: System.Void [System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",

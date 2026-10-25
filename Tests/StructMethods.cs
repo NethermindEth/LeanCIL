@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -11,6 +12,7 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/StructMethods");
 Directory.CreateDirectory(root);
+var queue = new GeneratedQueue(verification, assembly);
 var cases = 0;
 
 void Compare(string dll, string name, string suffix = "")
@@ -31,9 +33,11 @@ void Compare(string dll, string name, string suffix = "")
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", $"StructMethods::{name}({(narrow ? "byte" : "ulong")})", proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {name}{suffix}: {claims.Count} runtime comparisons");
+    queue.Add(new($"StructMethods::{name}({(narrow ? "byte" : "ulong")})", proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {name}{suffix}: {claims.Count} runtime comparisons");
+    });
 }
 
 // Mutating this, copying values, multiple argument indices and narrow parameter homes.
@@ -65,6 +69,8 @@ foreach (var shortForm in new[] { false, true })
     }
     Compare(dll, "Arguments", "-" + shortForm);
 }
+
+queue.Flush();
 
 var contract = At("Examples/Proofs/InstanceWriteRead.lean");
 verification.Verify(assembly, "Examples", "Counter::WriteRead(ulong)", contract, Path.Combine(root, "UniversalWriteRead"));

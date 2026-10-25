@@ -1,14 +1,66 @@
 import CIL.Safety.StaticMemoryEquivalence
 import CIL.Safety.Execution
+import CIL.Safety.StackAllocationEquivalence
+
+/-!
+# The checked interpreter respects memory equivalence
+
+`step`, `run` and `invoke` give equivalent results on `Memory.Equivalent` memories: the same
+faults, the same control flow and values, and equivalent final memory. Memory equivalence
+ignores how the view list is represented, so `write_run_equivalent` lets the optimized
+`write` replace the reference `writeAlwaysPrepend` without changing any checked execution.
+-/
 
 namespace CIL.Safety
 
+/-- Reference truth tests depend only on the allocation metadata of equivalent memories. -/
+theorem Memory.Equivalent.referenceNonNull {m n : Memory} (same : m.Equivalent n)
+    (value : ManagedReference) : referenceNonNull m value = referenceNonNull n value := by
+  simp only [CIL.Safety.referenceNonNull, same.formValue]
+
+#print axioms Memory.Equivalent.referenceNonNull
+
+/-- Reference equality ignores permission-list representation and byte contents. -/
+theorem Memory.Equivalent.referenceEqual {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) : referenceEqual m left right = referenceEqual n left right := by
+  simp only [CIL.Safety.referenceEqual, same.formValue, liveAllocation, same.allocations]
+
+#print axioms Memory.Equivalent.referenceEqual
+
+/-- Pointer subtraction and observations depend only on allocation metadata. -/
+theorem Memory.Equivalent.referencePositions {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) :
+    referencePositions m left right = referencePositions n left right := by
+  simp only [CIL.Safety.referencePositions, checkedAt, same.form]
+#print axioms Memory.Equivalent.referencePositions
+
+/-- Equivalent memories give the same native pointer difference. -/
+theorem Memory.Equivalent.referenceDifference {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) :
+    referenceDifference m left right = referenceDifference n left right := by
+  simp only [CIL.Safety.referenceDifference, same.referencePositions]
+#print axioms Memory.Equivalent.referenceDifference
+
+/-- Equivalent memories give the same unsigned pointer ordering. -/
+theorem Memory.Equivalent.referenceLess {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) : referenceLess m left right = referenceLess n left right := by
+  simp only [CIL.Safety.referenceLess, same.referencePositions]
+#print axioms Memory.Equivalent.referenceLess
+
+/-- Pointer offsets preserve allocation equivalence without inspecting byte contents. -/
+theorem Memory.Equivalent.referenceSubtract {m n : Memory} (same : m.Equivalent n)
+    (reference : ManagedReference) (offset : CIL.Value) :
+    referenceSubtract m reference offset = referenceSubtract n reference offset := by
+  simp only [CIL.Safety.referenceSubtract, checkedAt, same.add]
+#print axioms Memory.Equivalent.referenceSubtract
 theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
     (value : Value) : checkedValue m value = checkedValue n value := by
-  cases value <;> simp only [CIL.Safety.checkedValue, same.formValue]
+  cases value <;> simp only [CIL.Safety.checkedValue, same.formValue, same.spanValidate,
+    same.arrayValidate]
 
 theorem Memory.Equivalent.checkedValues {m n : Memory} (same : m.Equivalent n)
-    (values : List Value) : values.mapM (CIL.Safety.checkedValue m) = values.mapM (CIL.Safety.checkedValue n) := by
+    (values : List Value) :
+    values.mapM (CIL.Safety.checkedValue m) = values.mapM (CIL.Safety.checkedValue n) := by
   have equality : CIL.Safety.checkedValue m = CIL.Safety.checkedValue n := funext same.checkedValue
   rw [equality]
 
@@ -31,8 +83,17 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     ResultEquivalent FrameActionEquivalent (step body op pc args frame stack m)
       (step body op pc args frame stack n) := by
   unfold CIL.Safety.step
-  split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress]
-  all_goals repeat first
+  dsimp only
+  split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
+    same.referenceNonNull, same.referenceEqual, same.referenceDifference,
+    same.referenceLess, same.referenceSubtract]
+  all_goals repeat' first
+    | (apply ResultEquivalent.bind (same.allocateStack _ _ _)
+       intro left right related
+       obtain ⟨reference, owner, allocated⟩ := left
+       obtain ⟨otherReference, otherOwner, otherAllocated⟩ := right
+       obtain ⟨rfl, rfl, equivalent⟩ := related
+       exact .ok (.next equivalent _ _ _))
     | exact .error _
     | exact .ok (.next same _ _ _)
     | exact .ok (.call same _ _ _)
@@ -74,6 +135,8 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
          obtain ⟨rfl, stored⟩ := related
          exact .ok (.construct stored _ _ _ _ _ _))
 
+/-- Equivalent memories give the same run outcome: the same fault, or equivalent final
+    memory with the same returned values. -/
 theorem Memory.Equivalent.run {m n : Memory} (same : m.Equivalent n)
     (program : CIL.Program) (fuel method pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -145,7 +208,7 @@ theorem Memory.Equivalent.invoke {m n : Memory} (same : m.Equivalent n)
   obtain ⟨rfl, entered⟩ := related
   exact entered.run _ _ _ _ _ _ _
 
-/-- Replacing a legacy write by the optimized write preserves every subsequent
+/-- Replacing the reference `writeAlwaysPrepend` by `write` preserves every subsequent
     checked execution, including its exact located failure or returned values. -/
 theorem write_run_equivalent (memory : Memory) (reference : Reference)
     (bytes : List (BitVec 8)) (alignment : Nat) (locate : Fault → LocatedFault)
@@ -156,7 +219,8 @@ theorem write_run_equivalent (memory : Memory) (reference : Reference)
         run program fuel method pc args frame stack updated)
       (((writeAlwaysPrepend memory reference bytes alignment).mapError locate).bind fun updated =>
         run program fuel method pc args frame stack updated) := by
-  apply ResultEquivalent.bind ((write_equivalent_alwaysPrepend memory reference bytes alignment).mapError locate)
+  apply ResultEquivalent.bind
+    ((write_equivalent_alwaysPrepend memory reference bytes alignment).mapError locate)
   intro left right same
   exact same.run program fuel method pc args frame stack
 

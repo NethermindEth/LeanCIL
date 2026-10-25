@@ -2,6 +2,13 @@ import CIL.Safety.NumericLocalLoad
 import CIL.Safety.HomeProgress
 import CIL.Safety.FrameMemoryBelow
 
+/-!
+# Numeric local steps
+
+Creating a numeric local gives a fresh, initialized, writable home, and the checked `ldloc`
+and `stloc` steps on such a home are given in closed form for stepping proofs.
+-/
+
 namespace CIL.Safety
 
 /-- Fresh typed numeric storage has initialized readback and preserves older memory. -/
@@ -15,31 +22,44 @@ theorem make_numeric_local (memory : Memory) (activation : Nat)
       access result reference (localWidth kind) 1 true = .ok () ∧
       MemoryBelow memory.nextIdentity memory result := by
   have numeric : kind ≠ .reference := by
-    cases kind <;> cases value <;> simp_all [localNumber]
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have modeled : value ≠ .unmodeled := by
-    cases kind <;> cases value <;> simp_all [localNumber]
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+  have notSpan : ∀ width writable, kind ≠ .span width writable := by
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+  have notArray : ∀ element, kind ≠ .array element := by
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have bounded : localWidth kind < nativeLimit := by
-    cases kind <;> simp only [localWidth, nativeLimit] <;> first | exact CIL.NarrowKind.width_lt _ | simp
-  obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds memory activation (localWidth kind) wellFormed bounded (localAlignment_pos kind)
+    cases kind <;> simp only [localWidth, nativeLimit] <;>
+      first | exact CIL.NarrowKind.width_lt _ | simp
+  obtain ⟨reference, allocated, home⟩ := allocateHome_succeeds memory activation
+    (localWidth kind) wellFormed bounded (localAlignment_pos kind)
   have ready := allocateHome_write_access _ _ _ _ _ home
-  obtain ⟨result, written, stored, readback⟩ := store_numeric_local kind value number fits ready.access
+  obtain ⟨result, written, stored, readback⟩ :=
+    store_numeric_local kind value number fits ready.access
   have created : makeLocal activation kind value memory =
       .ok (.bytes kind reference, [reference.allocation], result) := by
-    cases kind <;> simp_all [makeLocal, home, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
   exact ⟨reference, result, created, readback, (ready.after_write written).access,
     makeLocal_preserves_caller_memory _ _ _ _ _ _ _ created⟩
 
+/-- `ldloc` of a numeric home holding `value`'s bytes pushes the normalized value. -/
 theorem step_load_numeric_local {body : CIL.Method} {pc index : Nat} {args stack : List Value}
     {frame : Frame} {memory : Memory} {reference : Reference}
     (kind : CIL.LocalKind) (value : CIL.Value) (number : Nat)
     (fits : localNumber kind value = .ok number)
     (slot : frame.locals[index]? = some (.bytes kind reference))
-    (loaded : read memory reference (localWidth kind) 1 = .ok (numberBytes number (localWidth kind))) :
+    (loaded : read memory reference (localWidth kind) 1 =
+      .ok (numberBytes number (localWidth kind))) :
     step body (.local index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (localResult kind value) :: stack) frame memory) := by
-  simp only [step, slot, load_numeric_local kind value number fits loaded,
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
+    Bool.false_or, Bool.false_eq_true, ite_false, slot,
+    load_numeric_local kind value number fits loaded,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
+/-- `stloc` of a numeric value into a writable home continues with the bytes written and
+    readable back. -/
 theorem step_store_numeric_local {body : CIL.Method} {pc index : Nat} {args rest : List Value}
     {frame : Frame} {memory : Memory} {reference : Reference}
     (kind : CIL.LocalKind) (value : CIL.Value) (number : Nat)
@@ -61,7 +81,9 @@ theorem step_store_numeric_local {body : CIL.Method} {pc index : Nat} {args rest
       rfl
     · simp only [List.getElem?_set_ne same]
   refine ⟨result, ?_, written, readback⟩
-  simp only [step, slot, stored, unchanged, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
+    Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, unchanged,
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms make_numeric_local
 #print axioms step_load_numeric_local

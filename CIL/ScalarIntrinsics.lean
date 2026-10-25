@@ -1,8 +1,17 @@
 import CIL.Types
 import CIL.IntegerArithmetic
 
+/-!
+# Scalar intrinsics
+
+Portable integer helpers such as `Math.Min`, `BitOperations.PopCount` and
+`BinaryPrimitives.ReverseEndianness`. Their results do not depend on the hardware, so every
+profile may evaluate them.
+-/
+
 namespace CIL
 
+/-- `Math.Min`, `Max`, `Clamp`, `Abs` and `Sign` on integers. -/
 inductive IntegerMath where
   | min | max | clamp | abs | sign
   deriving DecidableEq, Repr
@@ -43,14 +52,18 @@ inductive ScalarIntrinsic where
   | log2 (width : Nat) | roundUpToPowerOf2 (width : Nat)
   deriving DecidableEq, Repr
 
+/-- The number of set bits. -/
 def population (x : BitVec w) : Nat := ((List.range w).filter x.getLsbD).length
 
+/-- The number of zero bits above the highest set bit; `w` for zero. -/
 def leadingZeros (x : BitVec w) : Nat :=
   ((List.range w).takeWhile fun i => !x.getLsbD (w - 1 - i)).length
 
+/-- The number of zero bits below the lowest set bit; `w` for zero. -/
 def trailingZeros (x : BitVec w) : Nat :=
   ((List.range w).takeWhile fun i => !x.getLsbD i).length
 
+/-- Whether `x` is a positive power of two; with `signed`, a negative value is not. -/
 def isPowerOfTwo (x : BitVec w) (signed : Bool) : Bool :=
   x != 0 && (x &&& (x - 1)) == 0 && (!signed || !x.msb)
 
@@ -63,8 +76,11 @@ def reverseBytes (x : BitVec w) : BitVec w :=
   (List.range (w / 8)).foldl (fun result i =>
     (result <<< 8) ||| ((x >>> (8 * i)) &&& 255)) 0
 
+/-- A scalar intrinsic on its stack arguments, first argument first. An unsupported width
+    or ill-typed argument is stuck; count results are pushed as `i32`. -/
 def evalScalarIntrinsic : ScalarIntrinsic → List Value → Option Value
-  | .math operation width signed, args => (evalIntegerMath operation width signed args).toOption
+  | .math operation width signed, args =>
+    (evalIntegerMath operation width signed args).toOption
   | .isPow2 32 signed, [.i32 x] => some (.i32 (if isPowerOfTwo x signed then 1 else 0))
   | .isPow2 64 signed, [.i64 x] => some (.i32 (if isPowerOfTwo x signed then 1 else 0))
   | .log2 32, [.i32 x] => some (.i32 (BitVec.ofNat 32 x.toNat.log2))

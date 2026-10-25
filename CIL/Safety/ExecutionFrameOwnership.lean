@@ -1,8 +1,18 @@
 import CIL.Safety.ExecutionLifetime
 import CIL.Safety.FrameAllocations
 
+/-!
+# Frames keep owning their allocations
+
+The current frame's owned allocations stay live frame allocations of its activation across a
+checked step, and across a whole child run. Together with `ExecutionStaticWorld` this lets
+invariants over a frame survive nested calls.
+-/
+
 namespace CIL.Safety
 
+/-- A step keeps every allocation the resulting frame owns live and tagged with its activation,
+    including a home the step just allocated. -/
 theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (hm : m.WellFormed)
@@ -18,6 +28,25 @@ theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op
   have retained := owns.preserve effect.allocations bounds
   generalize action.frameAfter frame = final, action.memory = result at effect retained ⊢
   cases effect with
+  | stackAllocation effect =>
+    cases effect with
+    | empty => exact retained
+    | fresh allocated initialized =>
+      rename_i reference allocatedMemory size reserved
+      have fresh := allocateHome_fresh _ _ _ _ _ allocated
+      have new := allocateHome_owned _ _ _ _ _ allocated
+      have ext : AllocationExtension allocatedMemory result := by
+        rcases initialized with rfl | written
+        · exact .refl _
+        · exact write_extends_allocations _ _ _ _ _ written
+      have new := new.preserve ext (by
+        intro id member
+        obtain rfl := List.mem_singleton.mp member
+        exact fresh.2.2)
+      intro id member
+      rcases List.mem_cons.mp member with rfl | member
+      · exact new _ (by simp)
+      · exact retained id member
   | memory | store => exact retained
   | valueHome allocated stored | localHome allocated stored =>
     have fresh := allocateHome_fresh _ _ _ _ _ allocated
@@ -31,6 +60,8 @@ theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op
     · exact new _ (by simp)
     · exact retained id member
 
+/-- A child's whole run, from frame entry to its final memory, leaves the parent frame's
+    allocations live. -/
 theorem child_run_preserves_parent_frame (program : CIL.Program) (fuel method : Nat)
     (body : CIL.Method) (args values : List Value) (child parent : Frame)
     (m entered final : Memory) (hm : m.WellFormed)

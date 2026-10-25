@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -12,6 +13,7 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/TypeTests");
 Directory.CreateDirectory(root);
+var queue = new GeneratedQueue(verification, assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.TypeTests")!;
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 
@@ -46,8 +48,8 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
     var proof = Path.Combine(folder, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", $"TypeTests::{name}(int)", proof, Path.Combine(root, name + "-Verified"));
-    Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons");
+    queue.Add(new($"TypeTests::{name}(int)", proof, Path.Combine(root, name + "-Verified")),
+        () => Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons"));
 
     // A forged word must fail independently of the emitted instruction lemma.
     var pc = folds[0].Pc;
@@ -67,6 +69,8 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
         throw new InvalidOperationException("Forged type-test word was accepted for " + name + "\n" + result.Output);
     Console.WriteLine($"PASS {name}: forged type-test word rejected by the feature certificate");
 }
+
+queue.Flush();
 
 // A fold never hides reachable unsupported code.
 var live = Execute(Extract("extract", assembly, "Examples", "TypeTests::Word(int)", Path.Combine(root, "Word")));

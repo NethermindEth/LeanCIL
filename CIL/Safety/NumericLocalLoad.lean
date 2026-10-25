@@ -1,6 +1,14 @@
 import CIL.Safety.NumericLocalStore
 import CIL.Safety.ByteRoundTrip
 
+/-!
+# Loading numeric locals
+
+A numeric local home holding the bytes of an initial value loads back as that value, with
+narrow integers normalized as `localResult` describes; combined with the store lemma, a
+checked store followed by a load returns what was stored.
+-/
+
 namespace CIL.Safety
 
 /-- Decode a complete initialized typed home, including narrow integer normalization. -/
@@ -12,7 +20,8 @@ theorem load_numeric_local {memory : Memory} {reference : Reference}
     loadLocal memory (.bytes kind reference) = .ok (.scalar (localResult kind value)) := by
   rw [loadLocal_of_read loaded]
   cases kind <;> cases value <;>
-    simp_all [localNumber, localWidth, localResult, byteNumber_numberBytes]
+    simp_all [localNumber, CIL.Value.hasUnspecified, localWidth, localResult,
+      byteNumber_numberBytes]
 
   case aggregate.aggregate size bytes =>
     split at fits <;> simp_all
@@ -34,14 +43,14 @@ theorem load_numeric_local {memory : Memory} {reference : Reference}
     simp only [BitVec.toNat_ofNat]
     omega
 
-
 /-- A checked typed store initializes precisely the bytes needed by its load. -/
 theorem store_load_numeric_local {memory : Memory} {reference : Reference}
     (kind : CIL.LocalKind) (value : CIL.Value) (number : Nat)
     (fits : localNumber kind value = .ok number)
     (ready : access memory reference (localWidth kind) 1 true = .ok ()) :
     ∃ result,
-      storeLocal memory (.bytes kind reference) (.scalar value) = .ok (.bytes kind reference, result) ∧
+      storeLocal memory (.bytes kind reference) (.scalar value) =
+        .ok (.bytes kind reference, result) ∧
       loadLocal result (.bytes kind reference) = .ok (.scalar (localResult kind value)) := by
   obtain ⟨result, _, stored, loaded⟩ := store_numeric_local kind value number fits ready
   exact ⟨result, stored, load_numeric_local kind value number fits loaded⟩

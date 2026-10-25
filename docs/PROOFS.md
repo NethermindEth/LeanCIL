@@ -1,5 +1,19 @@
 # Writing checked proofs
 
+Certificate validation streams fallthrough states and uses balanced indexes for branch
+destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original
+list-indexed rules without changing their entry, reachability, opcode or bounds requirements.
+`foldEntry` takes the optional lookup result, so a list-based caller writes
+`foldEntry roles[target]?`. Missing entries retain the original permissive fold-role result;
+the successor-state check independently rejects a target missing from its certificate.
+
+Division intrinsic validation classifies each emitted intrinsic once and removes the common
+assembly scope once when recognizing a raw call's family. Its signature-byte table is generated
+from the existing signature strings at elaboration time; a kernel-checked equality proves the
+table exact without adding axioms. `DivisionIntrinsicsValid_iff_original` proves equivalence to
+the original signature lookup, malformed-family rejection, arity, reachability, profile
+availability and length checks for arbitrary raw metadata, including non-ASCII identities.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a
@@ -43,23 +57,48 @@ and [CallComposition](../CIL/Safety/CallComposition.lean) for manual proofs.
 At a return, the tactic leaves the equation between the computed checked result
 and the stated result as a proof goal. It closes that equation automatically
 only when `with_reducible rfl` succeeds after frame cleanup, list normalization
-and literal shift-count reduction. A mathematical result can need a separate
-`simp` or case split, especially when a narrow return extends a Boolean value.
-The remaining goal contains the returned values, rather than an unexecuted
-`run`. `cil_contract_steps` likewise leaves the return postcondition as a goal.
+and literal shift-count reduction. Cleanup also drops the narrowing of an
+`if p then 1 else 0` result, so a narrow Boolean return needs no unfolding of
+`NarrowKind.extend`. A follow-up `simp [leaveFrame, NarrowKind.extend]; split <;> rfl`
+after such a return now fails with "no goals" and must be deleted. Other
+mathematical results can need a separate `simp` or case split. The remaining goal contains the returned values, rather than an
+unexecuted `run`. `cil_contract_steps` likewise leaves the return postcondition
+as a goal.
 
-The single-step helper, `cil_checked_step [facts]`, selects its closing strategy
-from the opcode. Pure scalar operations try `rfl` even when facts are supplied.
-Memory operations, local operations, instruction-dispatcher arms and branches
-first use `cil_step` equations and the supplied facts. This keeps memory results
-in the form named by their facts, and resolves branch conditions before choosing
-the next program counter. Unknown opcode heads use the equation path.
+A run-to-run goal `run p (fuel + n) m 0 .. = run p fuel m n ..` closes with
+`cil_checked_steps` when the stepped state is syntactically the target: symbolic
+`fuel` stops stepping there. With literal fuel and a target equal only up to
+rewriting, `cil_checked_steps n [facts]` takes exactly `n` steps and leaves the
+residual `run` equation. A call counts as one step: the callee runs to its
+return and the residual starts at the caller's next instruction.
+Unlike `cil_contract_steps n`, which takes at most `n` steps and stops silently
+when one fails, it errors unless all `n` steps are taken, since a residual at the
+wrong pc would not match the target.
+`MemoryBelow.frame_round_trip` carries caller memory across `enterFrame` and
+`leaveFrame` when the callee body keeps it.
+
+The single-step helper, `cil_checked_step [facts]`, first tries each supplied
+step fact for the fetched opcode: a fact whose conclusion is
+`step body op pc args frame stack memory = result`, given as a hypothesis, a
+lemma, or an applied term such as `store value`. It is applied at
+reducible-and-instances transparency, then retried with the `@[cil_code]`
+definitions in its type unfolded, so a fact stated on the named body matches both
+a body reached through a lookup hypothesis and the literal body that an extracted
+program's lookup produces. Otherwise the helper selects
+its closing strategy from the opcode. Pure scalar operations try `rfl` even when
+facts are supplied. Memory operations, local operations, instruction-dispatcher
+arms and branches use `cil_step` equations and the supplied facts. This keeps
+memory results in the form named by their facts, and resolves branch conditions
+before choosing the next program counter. Unknown opcode heads use the equation path.
 
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas
 before unfolding the intrinsic evaluator. Register consumer lemmas in the form
 `CIL.evalIntrinsic operation operands = some result`. Nonnegative `BitVec.ofInt`
-literals become `BitVec.ofNat` literals so these equations can match. The tactic
-keeps the lemma's result form. It then removes literal stack `take`, `drop`,
+literals become `BitVec.ofNat` literals so these equations can match, so state
+`@[cil_eval]` lemmas with `BitVec.ofNat` operands. A supplied evaluation fact may
+instead use a numeral operand, such as `.i32 27`: when one is supplied, a second
+pass respells literal `BitVec.ofNat n k` operands as numerals and leaves symbolic
+`BitVec.ofNat n x` values unchanged. The tactic keeps the lemma's result form. It then removes literal stack `take`, `drop`,
 `reverse` and append expressions before the next step. These rewrites do not
 simplify consumer arithmetic or unfold consumer value definitions.
 
@@ -67,6 +106,35 @@ Value-only ops also have one equation per i32/i64 operand shape, generated by
 `cil_value_steps` when the library builds. Only an op with no equation falls back
 to unfolding the dispatcher. For a hand-written step, use
 `simp only [cil_step, facts]`.
+
+Each `.memory` operation has one equation per operand shape in
+`CIL.Safety.MemorySteps`. It rewrites a step to the operation's own body, such as
+`formValue`, `loadValue`, `storeValue` or `add`, so state facts at that level
+rather than passing `staticInstruction` or `memoryInstruction` to unfold. Only
+the static-field operations still go through `staticInstruction`. A fact stated
+at the `memoryInstruction` or `staticInstruction` level is still accepted, through
+a slower fallback that runs only when such a fact is supplied; a failed step
+reports the per-shape goal. That fallback is part of `cil_checked_step`,
+`cil_checked_steps` and `cil_contract_steps` (and the loop tactics built on them)
+only: a hand-written memory step, or `cil_checked_step_equations`, with such a fact
+must `rw [CIL.Safety.step_memory_eq]` first, and for a `memoryInstruction` fact
+also unfold `CIL.Safety.staticInstruction`, or restate the fact at the
+`formValue`, `loadValue`, `storeValue` or `add` level. The memory step simp set of those
+tactics rewrites `referenceAt` on `.null` and `.address r`, so pointer
+arithmetic on a known reference needs no extra fact, and a `referenceAt r = .ok a`
+fact about a symbolic `ManagedReference` applies; through `cil_checked_step_equations`
+an `add`, `spanItem`, `copyBlock` or `initBlock` step needs
+`CIL.Safety.referenceAt_address` passed as a fact. A `.feature f` step pushes `body.profile.evaluate f`. For a known feature,
+`cil_step` reduces that expression to the profile field; a symbolic `f` stays
+`body.profile.evaluate f`, so a fact about it applies as stated. `cil_step` unfolds a method definition or
+literal only as far as its profile, so a fact such as `profile.avx2 = true`
+decides the test. Inside `cil_checked_step`, `cil_checked_steps`,
+`cil_contract_steps` and the loop tactics, a local fact, proof term or global
+theorem stated through `evaluate` or a method's profile projection, including one
+quantified over every feature, is normalized to that form. Elsewhere, including
+`simp only [cil_step, facts]` and `cil_checked_step_equations`, state the fact on
+the field or first run
+`simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h`.
 
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
 by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
@@ -77,9 +145,22 @@ stated over an abstract `program` therefore steps exactly like one over
 `cil_raise_steps` fail when they cannot take a first step, instead of returning
 the goal unchanged.
 
-For steps depending on hypotheses, use `cil_checked_steps [truth, stored]`
-with the relevant proved facts. Branches always use equations before reflexivity,
-so a fact can decide the next program counter before the next lookup.
+A segment theorem over an abstract body states where its code sits with
+`CodeAt body start segment` ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of
+`body.code = leading ++ segment ++ tail` and `leading.length = start`.
+Pass `placed` directly to `cil_checked_steps [found, placed]`: `cil_lookup` uses
+the placement to fetch literal offsets, including both `start + 1 + 1` and `start + 2`.
+It also finds local placement hypotheses without listing them and accepts supplied
+placement expressions such as `region.append_left`. The fetched instruction must be
+inside the segment and agree with its code. `append`, `middle`, `take` and `drop` move a placement
+between a region and its segments, and `rfl` closes a concrete one.
+[Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
+
+For steps depending on hypotheses, use `cil_checked_steps [facts]` with the
+relevant proved facts. Branches always use equations before reflexivity, so a fact
+can decide the next program counter before the next lookup. A branch condition is
+decided from `v = 0` or `Not (v = 0)` on the condition value, or from a literal
+condition, so no `CIL.truth` restatement is needed.
 Both straight-line and loop-exit automation try return proofs only for fetched
 `.ret` instructions, including narrow returns, so other opcodes do not incur
 failed return-step simplification.
@@ -175,9 +256,32 @@ or at disjoint offsets of one. `Confined.read_apart` keeps a checked read of old
 apart from every entry, taking the allocation's age from `WellFormed`;
 `Confined.cells_apart` keeps every byte of an allocation no entry names, and
 `WordSnapshots.after_confined` (`CIL.Safety.ConfinedSnapshots`) keeps remembered words.
+`LocalSnapshots` (`CIL.Safety.LocalSnapshots`) remembers locals of every numeric kind, such
+as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a call, and
+`after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
+`snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
+
+Import `CIL.Safety.LocalSnapshotSteps` to step through numeric local stores and reloads with
+`cil_checked_steps (snapshots := snapshots) [facts]`. Use it on a checked `run` equality or
+an existential result such as `∃ after, run ... = .ok (after, result)`. The local context must
+justify `WritableHomes`, memory well-formedness, each home lookup and write access. The tactic
+introduces each store's new memory, updated snapshots and preserved access facts, so later
+stores need no manually split execution segments. Loads use the latest remembered value;
+overwrites replace it. It stops at an unsupported step or an unproved obligation, and fails
+if it takes no step. It does not infer authority, initialization, or preservation across calls
+and unrelated writes. Ordinary `cil_checked_steps [facts]` is unchanged.
+[Tests/LocalSnapshotSteps](../Tests/LocalSnapshotSteps.lean) contains complete vector/int32
+store-and-reload examples and rejection tests.
+
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
-the program does, so a cross-profile contract is a theorem quantified over the
-per-profile extractions.
+the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
+`OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of the first two for a contract
+indexed by `programStaticDescriptors`) carries a contract proved for a program whose methods
+all use profile `p` to `CIL.reprofile program q` for any `q` that agrees with `p` on the
+program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in
+`program.profileReads`, which `decide` checks for concrete profiles, so one proof covers every
+profile in a family. A separate per-profile extraction is covered once it is shown equal to
+the reprofiled program, by `rfl` when only the profiles differ.
 
 A contract may also type its result: `MethodContract Input Output` adds
 `results : Output → List Value`, and `post` speaks of the `Output`. `Returns`
@@ -252,7 +356,36 @@ stores and rejects a wrong value, address or memory state.
 either callee. `Tests/MethodContract.cs` verifies that caller proof unedited
 against a build whose helpers are reimplemented and renumbered, and refutes
 each contract with a concrete run on builds with an arithmetic or an aliasing
-bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
+bug; `invoke_ok_unique` ties a computed run to the contract's existential one,
+and `invoke_ok_observation_unique` does so for one observation of it, such as
+the returned values, so the refutation never compares memories.
+
+A contract whose precondition implies well-formed memory and a valid static
+world can also keep the `InvocationCertificate` of each call:
+`MethodContract.Holds.certified` turns `Holds` into `MethodContract.Certified`,
+whose clause adds the certificate with its visited-state and returned-state
+invariants; `Certified.holds` recovers `Holds`, and `Certified.weaken` keeps
+the certificate through a `Refines`. `InvocationCertificate.of_invoke`
+certifies any successful `invoke` from those two premises, and
+`InvocationCertificate.of_run` certifies a run of the frame that checked
+arguments enter. At a call site, `run_call_of_certified` (from a `Certified`
+callee) and `run_call_of_contract_certified` (from `Holds`, a well-formed caller
+memory and a valid static world) hand the continuation the callee's certificate,
+which `run_call_of_contract` drops. At a fetched call, `cil_certified_call
+certified input [facts]` leaves the precondition and then the continuation, and
+`cil_contract_certified_call holds input [facts]` leaves the precondition, the
+caller memory's `WellFormed`, its static world and then the continuation. Both
+accept `at site` like `cil_contract_call`.
+`Tests/InvocationCertificates.lean` uses each of them.
+
+`ValidCall memory inputs outputs` states that memory is well formed, every input
+buffer is readable and every output buffer writable. `CIL.Safety.CallingTransport`
+carries it to later memory so a caller can pass the same buffers again:
+`ValidCall.after_write` after any checked write, `after_enterFrame` after frame
+entry, `after_below` across memory that keeps old allocations' access
+(`AccessBelow`, or `MemoryBelow.accessBelow`), and `after_confined` across a call
+whose footprint the inputs lie `Apart` from. `mono` drops buffers, and
+`input_bound` / `output_bound` give the identity bound those relations take.
 
 ## Describe buffer contents
 
@@ -260,8 +393,19 @@ bug; `invoke_ok_unique` ties a computed run to the contract's existential one.
 holds, over the checked memory model. `Contents m base width xs` says element `i`
 of `xs : List (BitVec (8 * width))` reads back at `base.element width i` (offset
 `base.offset + width * i`, same allocation) as `numberBytes x.toNat width`, with
-the byte alignment scalar loads and stores use; `Contents.load_word` turns an
-8-byte element into the `loadValue` result. Contents grant no write authority:
+the byte alignment scalar loads and stores use. `Contents.load` (from
+`load_scalar_of_read`) turns an element at any `ScalarWidth` (1, 2, 4, 8, 16, 32
+or 64 bytes) into the `loadValue` result `numericOfWidth width x.toNat`: widths 1
+to 4 zero-extend to `.i32`, 16 and up are vectors, and width 8 yields
+`.i64 (BitVec.ofNat 64 x.toNat)`, so `Contents.load_word` (`load_word64_of_read`)
+stays the direct route to `.i64 x`. `byteNumber_elementBytes` decodes a whole
+buffer as the sum of its elements, element `i` scaled by `256 ^ (width * i)`, and
+`byteNumber_elementBytes_lt` bounds it by `256 ^ (width * xs.length)`. Rewriting
+with it at a literal width such as 8 makes the kernel unfold the powers and can
+hit deep recursion; prove the sum at symbolic width and instantiate, as
+`byteNumber_elementBytes_four` does for four limbs (instantiate, then
+`simp only [Nat.reduceMul, Nat.reducePow] at h`), or peel one limb at a time with
+`byteNumber_elementBytes_cons`. Contents grant no write authority:
 `Writable m base width start count` is write authority alone, and
 `Filled m base width xs room` is an initialized prefix followed by `room`
 writable elements that need not be readable. An empty `Contents` asserts
@@ -437,6 +581,55 @@ derived contracts at their call sites, in both returning and raising outcomes.
 Its rejections are proved negations: an unjustified stronger postcondition, a
 weaker precondition, a smaller footprint and a changed exception type each
 refute the `Refines` premise and the derived `Holds` on a concrete input.
+
+## Inherit a callee's contract in a forwarder
+
+Overload forwarders and instance-to-static wrappers compile to
+`ldarg*; call k; ret`. `MethodContract.Holds.forward` (`CIL.Safety.Forwarders`)
+gives such a method its callee's contract with the forwarder's own argument
+encoding, `contract.withArgs forwarded`, without stepping either body:
+
+```lean
+theorem sum_forwards : sumContract.Holds Extracted.program sum :=
+  add_public.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+    (fun _ _ _ _ member => .inl member)
+    (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
+```
+
+`Forwards body calleeBody loads callee narrow` fixes the body to
+`forwarderCode loads callee narrow` with no locals, vector argument homes or
+parameter homes, so frame entry and exit leave memory unchanged and the callee's
+precondition, footprint and postcondition carry over verbatim. The loads are data:
+each is an argument index and the narrowing the extractor attaches to `bool`,
+`byte`, `sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones).
+The callee's arguments must be the forwarder's at those indices, each kept by its
+load's narrowing (`LoadsUnchanged`); every forwarder argument must reach the
+callee or be valid under the precondition, since the forwarder's own invocation
+checks them all; the call must expose no unspecified vector bits; and a narrowed
+`ret (some kind)` must not change the callee's result (`ReturnsUnchanged`), which
+holds for a boolean. Use `Holds.weaken` afterwards to export a different contract.
+
+`MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which
+passes the address of a fresh numeric local (not a reference, span or array, which have
+no byte home) as a last out argument and drops it. `ForwardsOut.notArray` excludes every
+array element kind; `make_fitting_local` requires the same premise after `notSpan`.
+The local may hold any initializer that fits its kind; the extractor emits
+`.unmodeled` without `InitLocals` and the kind's zero with it. The callee runs in
+the memory after frame entry and the result is read after the local expires, so
+the forwarder's contract `outer` is related to the callee's `inner` through
+`extend input home` and premises over those memories. The callee's arguments must
+be the forwarder's selected by the loads followed by the home, each kept by its
+load's narrowing and none with unspecified vector bits; `outer.pre` must give a
+well-formed memory in which every forwarder argument is valid (`checked`), since
+the forwarder checks them all; `inner.pre` must follow from `outer.pre` with the
+home fresh, writable and holding its initializer (`LocalHolds`); the `inner`
+footprint must name fresh storage or lie inside `outer.footprint`; the two
+contracts must encode results alike, as scalars that survive the local's expiry
+and that a narrowed `ret` keeps; and `outer.post` must follow from `inner.post`
+once the frame has expired. The footprint is checked by the lemma
+(`Confined.across_frame`). The home's alignment is not surfaced, so a callee whose
+precondition requires it cannot be composed yet.
 
 ## Compose through imported contracts
 
@@ -801,3 +994,68 @@ The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for
 for the exact conditions and limits; `Tests/MethodEmbedding.lean` covers both
 outcomes, and `Tests/OutcomeEmbedding.lean` transfers a raising helper and its
 caller across an inserted dead block, with the relocated throw pc.
+
+An extraction can also declare locals the literal body never uses. Only one
+shape is covered: dead locals that trail the body's own locals and are
+references initialized to null or left unmodeled, which the extractor emits for
+byref and pointer locals. For those, `cil_embed` proves
+`MethodEmbedsDeadLocals` instead, and the same proof covers extractions with and
+without them (from `CIL.Safety.Embedding.DeadLocals`):
+
+```lean
+theorem stored_dead_embeds : MethodEmbedsDeadLocals [storedDead] 0 stored := by cil_embed
+
+theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [storedDead] (executionBound [stored] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) :=
+  stored_dead_embeds.invoke (stored_invocation memory value)
+```
+
+`.raises`, `.method_holds` and `.holds` transfer as for `MethodEmbeds`. A
+numeric dead local, such as a flag only one architecture's path reads, is still
+rejected: its home would shift every later allocation identity, and runs over
+renamed identities are not related yet. A dead span local allocates nothing
+either but is not covered yet, and a dead local before a kept one is rejected,
+since it renumbers the kept local.
+
+### Instruction equations for parametric bodies
+
+A body written once for every profile takes its feature flags and callee
+indices as parameters and keeps each feature-dependent instruction as an `if`,
+padding the other profile's side with `.unsupported` so every profile has the
+same pcs. `cil_instruction_equations` (from `CIL.InstructionEquations`) states
+one `@[cil_code ↓]` equation per pc for such a body, the same
+`code[pc]? = some op` equations the extractor emits for its own methods, so a
+lookup rewrites by one equation instead of unfolding the body:
+
+```lean
+import CIL.InstructionEquations
+import CIL.Safety.SymbolicExecution
+
+abbrev unreachable : CIL.Op := .unsupported "Unreachable under selected profile"
+
+def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
+  { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
+    .feature .avx2, .brzero 4,
+    if avx2 then .call callee 0 else unreachable,
+    if avx2 then .ret else unreachable,
+    if avx2 then unreachable else .ret] }
+
+cil_instruction_equations body
+
+-- body_instruction2 (sse42 avx2 : Bool) (callee : Nat) :
+--   (body sse42 avx2 callee).code[2]? = some (if avx2 = true then .call callee 0 else unreachable)
+-- cil_lookup fetches through the equation and decides the `if` from the fact.
+example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
+    ∃ op, (body sse42 avx2 callee).code[2]? = some op ∧ op = .call callee 0 :=
+  ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
+```
+
+A body whose code length depends on a parameter, such as an `if` around a
+whole block, is rejected with the first pc that is not determined. Only the
+kernel checks the equations: 100 instructions take about 0.1 s, 400 take 2.4 s
+and 1,500 take 32 s, growing with the square of the length like the extractor's
+own equations, and about eight times faster than writing each `:= rfl` by hand.
+`Tests/InstructionEquations.lean` covers lookups on symbolic flags and on
+concrete profiles, with the body sealed so only the equations can fetch, and a
+`cil_checked_steps` run decided by a fact about a symbolic flag.

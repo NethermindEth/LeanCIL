@@ -6,26 +6,21 @@ using System.Text.Json;
 
 string[] cli = ["dotnet", ExtractorPath];
 string root = At("artifacts/ProofWorkspace-" + Guid.NewGuid().ToString("N"));
-string fixture = Path.Combine(root, "Assembly");
+string consumer = Path.Combine(root, "Consumer");
 string package = Path.Combine(root, "Package");
 string workspace = Path.Combine(root, "Workspace");
-Directory.CreateDirectory(fixture);
 Directory.CreateDirectory(Path.Combine(package, "Client"));
-File.WriteAllText(Path.Combine(fixture, "Words.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize><DebugType>portable</DebugType></PropertyGroup></Project>
-""");
-File.WriteAllText(Path.Combine(fixture, "Words.cs"), """
-using System.Runtime.InteropServices;
-namespace Words;
-[StructLayout(LayoutKind.Sequential)]
-public readonly struct UInt256
-{
-    public readonly ulong U0, U1, U2, U3;
-    public static ulong Low(UInt256 value) => value.U0;
-}
-""");
-Run(["dotnet", "build", Path.Combine(fixture, "Words.csproj"), "-c", "Release"]);
-string assembly = Path.Combine(fixture, "bin", "Words.dll");
+const string consumerRevision = "00fcecf53e22b5c9090052779e14b3ba246fb117";
+const string method = "Nethermind.Int256.UInt256::get_IsZeroOrOne()";
+const string initializedType = "Nethermind.Int256.UInt256";
+Run(["git", "init", consumer]);
+Run(["git", "remote", "add", "origin", "https://github.com/NethermindEth/int256.git"], consumer);
+Run(["git", "fetch", "--depth", "1", "origin", consumerRevision], consumer);
+Run(["git", "checkout", "--detach", "FETCH_HEAD"], consumer);
+Run(["dotnet", "build", Path.Combine(consumer, "src", "Nethermind.Int256", "Nethermind.Int256.csproj"),
+    "-c", "Release"]);
+string assembly = Path.Combine(consumer, "src", "artifacts", "bin", "Nethermind.Int256", "release",
+    "Nethermind.Int256.dll");
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(package, "lakefile.toml"),
     "name = \"consumer\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
@@ -37,18 +32,25 @@ import Extracted
 import ExtractedSymbols
 namespace Client
 theorem methodCount : Extracted.program.length = 1 := rfl
+theorem methodIdentity : Extracted.method0Signature =
+    "System.Boolean Nethermind.Int256.UInt256::get_IsZeroOrOne()" := rfl
+#print axioms methodCount
+#print axioms methodIdentity
 end Client
 """);
 string proof = Path.Combine(package, "Proof.lean");
 File.WriteAllText(proof, """
 import Client.Support
 namespace WorkspaceProof
-theorem correctness : Extracted.program.length = 1 := Client.methodCount
+theorem selectedMethod : Extracted.program.length = 1 ∧ Extracted.method0Signature =
+    "System.Boolean Nethermind.Int256.UInt256::get_IsZeroOrOne()" :=
+  ⟨Client.methodCount, Client.methodIdentity⟩
+#print axioms selectedMethod
 end WorkspaceProof
 """);
 Run(["lake", "update"], package);
-string[] command = [.. cli, "workspace", assembly, "Words.UInt256::Low(Words.UInt256)",
-    "--profile", "arm64-armbase", "--proof", proof, "--output", workspace];
+string[] command = [.. cli, "workspace", assembly, method,
+    "--profile", "scalar", "--proof", proof, "--assume-initialized", initializedType, "--output", workspace];
 string created = Run(command);
 string editorProof = Path.Combine(workspace, "LeanCILProofWorkspace.lean");
 if (!created.Contains("Editor checking is not a certificate", StringComparison.Ordinal) || Sha(editorProof) != Sha(proof))
@@ -57,20 +59,21 @@ JsonElement manifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(
 if (!manifest.GetProperty("EditorOnly").GetBoolean() || Directory.EnumerateFiles(workspace, "verified.json", SearchOption.AllDirectories).Any())
     throw new InvalidOperationException("An editor workspace must never publish a certificate.");
 Run(["lake", "build", "+LeanCILProofWorkspace:olean"], workspace);
-File.AppendAllText(editorProof, "\ntheorem editorChange : True := True.intro\n");
+File.AppendAllText(editorProof, "\ntheorem editorChange : True := True.intro\n#print axioms editorChange\n");
 string changedProof = Sha(editorProof);
 Run(command);
 if (Sha(editorProof) != changedProof) throw new InvalidOperationException("Reopening a workspace overwrote proof edits.");
 Run(["lake", "build", "+LeanCILProofWorkspace:olean"], workspace);
 File.Copy(editorProof, proof, true);
 string output = Path.Combine(root, "Verification");
-Run([.. cli, "extract", assembly, "Words.UInt256::Low(Words.UInt256)", output, "arm64-armbase"]);
-Run([.. cli, "verify", output, "--proof", proof, "--proof-root", package, "--theorem", "WorkspaceProof.correctness", "--fresh"]);
+Run([.. cli, "extract", assembly, method, output, "scalar", "--assume-initialized", initializedType]);
+Run([.. cli, "verify", output, "--proof", proof, "--proof-root", package,
+    "--theorem", "WorkspaceProof.selectedMethod", "--fresh"]);
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 if (!report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid", StringComparison.Ordinal) ||
     report.GetProperty("libraryBuild").GetString() == "consumer-proof-cache")
     throw new InvalidOperationException("Workspace proof did not pass ordinary fresh extraction audit and hermetic verification.");
-Console.WriteLine("PASS four-limb UInt256 workspace, transitive symbols import, editable proof and fresh ordinary certification");
+Console.WriteLine("PASS real pinned UInt256 workspace, transitive symbols import, editable proof and fresh certification");
 
 void Reject(string[] arguments, string marker)
 {
@@ -79,7 +82,8 @@ void Reject(string[] arguments, string marker)
         throw new InvalidOperationException("Expected explicit stale workspace rejection without proof loss: " + result.Output);
 }
 
-File.WriteAllText(proof, File.ReadAllText(editorProof).Replace("\ntheorem editorChange : True := True.intro\n", "", StringComparison.Ordinal));
+File.WriteAllText(proof, File.ReadAllText(editorProof).Replace(
+    "\ntheorem editorChange : True := True.intro\n#print axioms editorChange\n", "", StringComparison.Ordinal));
 Run(command);
 foreach ((string path, string name) in new[]
 {
@@ -97,7 +101,7 @@ foreach ((string path, string name) in new[]
     finally { File.WriteAllBytes(path, original); }
 }
 string[] wrongProfile = [.. command];
-wrongProfile[Array.IndexOf(wrongProfile, "arm64-armbase")] = "scalar";
+wrongProfile[Array.IndexOf(wrongProfile, "scalar")] = "arm64-armbase";
 Reject(wrongProfile, "Stale editor workspace");
 string pdb = Path.ChangeExtension(assembly, ".pdb");
 byte[] savedPdb = File.ReadAllBytes(pdb);

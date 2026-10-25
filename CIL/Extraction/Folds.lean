@@ -1,16 +1,25 @@
 import CIL.Extraction.Generics
 
+/-!
+# Folded instruction sequences
+
+Some raw instruction sequences have no instruction-by-instruction translation and are
+emitted as a unit: `typeof(A) == typeof(B)` becomes its decided Boolean, `throw new E(...)`
+becomes one `throw`, and `stloc s; ldloca s` over a span local keeps the span on the stack.
+`foldRoles` finds these sequences from the raw body alone and gives each instruction its
+role, which the feature and scalar checks then enforce.
+-/
+
 namespace CIL.Extraction
 
-private def runtimeScope : String :=
-  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
-
+/-- Characters allowed in a plain metadata name. -/
 private def plainChar (c : Char) : Bool :=
   c.isAlphanum || c == '_' || c == '.' || c == '/' || c == '`'
 
 /-- Identifier-only names exclude modifiers, arrays and other decorated metadata spellings. -/
 private def plainName (name : List Char) : Bool := !name.isEmpty && name.all plainChar
 
+/-- A nonempty scope with no colon. -/
 private def plainScope (scope : List Char) : Bool := !scope.isEmpty && !scope.contains ':'
 
 /-- Split `scope::name` at its first colon; any other colon makes the identity unusable. -/
@@ -19,6 +28,7 @@ private def splitIdentity : List Char → List Char → Option (List Char × Lis
   | scope, c :: rest => if c == ':' then none else splitIdentity (c :: scope) rest
   | _, [] => none
 
+/-- `(scope, name)` when both are plain. -/
 private def leaf (scope name : List Char) : Option (List Char × List Char) :=
   if plainScope scope && plainName name then some (scope, name) else none
 
@@ -30,10 +40,12 @@ def namedType : TypeExpr → Option (List Char × List Char)
     leaf scope name
   | _ => none
 
+/-- Pointer, byref and generic instance types, which are never equal to a named type. -/
 private def constructed : TypeExpr → Bool
-  | .pointer _ | .byref _ | .apply .. => true
+  | .pointer _ | .byref _ | .array _ | .apply .. => true
   | _ => false
 
+/-- Conjunction of two three-valued answers: false wins over unknown. -/
 private def both : Option Bool → Option Bool → Option Bool
   | some false, _ | _, some false => some false
   | some true, some true => some true
@@ -42,7 +54,7 @@ private def both : Option Bool → Option Bool → Option Bool
 /-- Runtime identity of two closed metadata types, or `none` when metadata cannot decide it.
     Full names are never forwarded, but one name in two scopes may denote one type. -/
 def sameRuntimeType : TypeExpr → TypeExpr → Option Bool
-  | .pointer x, .pointer y | .byref x, .byref y => sameRuntimeType x y
+  | .pointer x, .pointer y | .byref x, .byref y | .array x, .array y => sameRuntimeType x y
   | .apply f x, .apply g y => both (sameRuntimeType f g) (sameRuntimeType x y)
   | a, b =>
     -- `void` is serialized without its scope, so equal spellings do not establish identity.
@@ -55,29 +67,37 @@ def sameRuntimeType : TypeExpr → TypeExpr → Option Bool
         some false
       else none
 
+/-- The type operand of `ldtoken` (208). -/
 private def typeHandle : RawInstruction → Option TypeExpr
   | ⟨_, 208, .type type⟩ => some type
   | _ => none
 
+/-- The exact call site of a static `System.Type` method with `parameters` parameters. -/
 private def typeMethod (name signature : String) (parameters : Nat) : CallSite := {
   declaringType := .atom runtimeScope "System.Type", name,
   target := .external (runtimeScope ++ "::" ++ signature),
   typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true,
-  returnType := .atom runtimeScope (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
-  parameterTypes := if name == "GetTypeFromHandle" then [.atom runtimeScope "System.RuntimeTypeHandle"]
+  returnType := .atom runtimeScope
+    (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+  parameterTypes := if name == "GetTypeFromHandle" then
+      [.atom runtimeScope "System.RuntimeTypeHandle"]
     else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] }
 
 private def getTypeFromHandle : CallSite :=
-  typeMethod "GetTypeFromHandle" "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
+  typeMethod "GetTypeFromHandle"
+    "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
 
-private def typeFromHandle (i : RawInstruction) : Bool :=
-  i.opcode == 40 && i.operand == .call getTypeFromHandle
+/-- Exactly `call Type.GetTypeFromHandle`. -/
+private def typeFromHandle (instruction : RawInstruction) : Bool :=
+  instruction.opcode == 40 && instruction.operand == .call getTypeFromHandle
 
 /-- `some true` for `op_Equality`, `some false` for `op_Inequality`. -/
-private def typeComparison (i : RawInstruction) : Option Bool :=
-  if i.opcode != 40 then none
-  else if i.operand == .call (typeMethod "op_Equality" "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2) then some true
-  else if i.operand == .call (typeMethod "op_Inequality" "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2) then some false
+private def typeComparison (instruction : RawInstruction) : Option Bool :=
+  if instruction.opcode != 40 then none
+  else if instruction.operand == .call (typeMethod "op_Equality"
+      "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2) then some true
+  else if instruction.operand == .call (typeMethod "op_Inequality"
+      "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2) then some false
   else none
 
 /-- The exact `typeof(A) == typeof(B)` encoding and its decided result. -/
@@ -90,27 +110,32 @@ def typeTest (a b c d e : RawInstruction) : Option Bool := do
   return same == equality
 
 /-- Raw instructions that are admitted only as part of a decided type test. -/
-def typeTestInstruction (i : RawInstruction) : Bool :=
-  (i.opcode == 208 && i.operand matches .type _) || match i.operand with
+def typeTestInstruction (instruction : RawInstruction) : Bool :=
+  (instruction.opcode == 208 && instruction.operand matches .type _) ||
+    match instruction.operand with
     | .call site => match site.declaringType with
       | .atom _ "System.Type" =>
-        site.name == "GetTypeFromHandle" || site.name == "op_Equality" || site.name == "op_Inequality"
+        site.name == "GetTypeFromHandle" || site.name == "op_Equality" ||
+          site.name == "op_Inequality"
       | _ => false
     | _ => false
 
-def localIndex (i : RawInstruction) : Option Nat :=
-  match i.opcode, i.operand with
+/-- The local a `ldloc`, `stloc` or `ldloca` instruction names, in any of its forms. -/
+def localIndex (instruction : RawInstruction) : Option Nat :=
+  match instruction.opcode, instruction.operand with
+  -- `ldloc.0` to `ldloc.3` and `stloc.0` to `stloc.3`.
   | 6, .none | 10, .none => some 0
   | 7, .none | 11, .none => some 1
   | 8, .none | 12, .none => some 2
   | 9, .none | 13, .none => some 3
+  -- `ldloc`, `ldloca` and `stloc`, short and long forms.
   | 17, .local n | 18, .local n | 19, .local n
   | 65036, .local n | 65037, .local n | 65038, .local n => some n
   | _, _ => none
 
-/-- Whether `i` names a span local; such locals are only touched by a receiver fold. -/
-def spanLocalOp (locals : List TypeExpr) (i : RawInstruction) : Bool :=
-  match localIndex i with
+/-- Whether `instruction` names a typed span local. -/
+def spanLocalOp (locals : List TypeExpr) (instruction : RawInstruction) : Bool :=
+  match localIndex instruction with
   | some index => (locals[index]?.map spanLocal).getD false
   | none => false
 
@@ -119,14 +144,48 @@ def receiverFold (locals : List TypeExpr) (a b : RawInstruction) : Bool :=
   a.opcode ∈ [10, 11, 12, 13, 19, 65038] && (b.opcode == 18 || b.opcode == 65037) &&
     localIndex a == localIndex b && spanLocalOp locals a
 
-private def messageLoad (i : RawInstruction) : Bool := i.opcode == 114 || i.opcode == 20
+/-- A receiver fold ends at a length call or an item call with a single index push. -/
+private def spanReceiverUse (code : List RawInstruction) : Bool :=
+  let member (instruction : RawInstruction) (name : String) :=
+    match instruction with
+    | ⟨_, 40, .call site⟩ => site.hasThis && site.name == name && spanLocal site.declaringType
+    | _ => false
+  match code with
+  | call :: _ =>
+    member call "get_Length" || match code with
+    | index :: call :: _ =>
+      index.opcode ∈ [2, 3, 4, 5, 14, 65033, 6, 7, 8, 9, 17, 65036,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] && member call "get_Item"
+    | _ => false
+  | _ => false
 
-/-- `newobj` of a plainly named `System.Runtime` constructor taking `count` arguments: the raised type. -/
+/-- `ldstr` (114) or `ldnull` (20): a message argument of a folded `throw`. -/
+private def messageLoad (instruction : RawInstruction) : Bool :=
+  instruction.opcode == 114 || instruction.opcode == 20
+
+/-- Admitted framework exceptions with parameterless/string constructors, plus the three
+    argument exceptions' two-string overloads. Other constructors remain unsupported. -/
+def exceptionConstructor (name : String) (count : Nat) : Bool :=
+  (count ≤ 1 && name ∈ ["System.Exception", "System.SystemException",
+    "System.ApplicationException", "System.ArithmeticException",
+    "System.DivideByZeroException", "System.OverflowException",
+    "System.InvalidOperationException", "System.NotSupportedException",
+    "System.NotImplementedException", "System.ArgumentException",
+    "System.ArgumentNullException", "System.ArgumentOutOfRangeException",
+    "System.IndexOutOfRangeException", "System.NullReferenceException",
+    "System.FormatException"]) ||
+  (count == 2 && name ∈ ["System.ArgumentException", "System.ArgumentNullException",
+    "System.ArgumentOutOfRangeException"])
+
+/-- An exact allowlisted `System.Runtime` constructor, including its complete signature. -/
 private def raisedType (count : Nat) : RawInstruction → Option String
   | ⟨_, 115, .call site⟩ => match site.declaringType, site.target with
-    | .atom scope name, .external _ =>
-      if scope == runtimeScope && plainName name.toList && site.name == ".ctor" && site.hasThis &&
-        !site.returnsValue && site.typeArguments.isEmpty && site.parameterCount == count then some name else none
+    | .atom scope name, .external signature =>
+      if scope == runtimeScope && exceptionConstructor name count &&
+        signature == runtimeScope ++ "::System.Void " ++ name ++ "::.ctor(" ++
+          ",".intercalate (List.replicate count "System.String") ++ ")" &&
+        site.name == ".ctor" && site.hasThis && !site.returnsValue &&
+        site.typeArguments.isEmpty && site.parameterCount == count then some name else none
     | _, _ => none
   | _ => none
 
@@ -137,6 +196,7 @@ def throwFold (code : List RawInstruction) : Option (Nat × String) :=
   | constructor :: ⟨_, 122, .none⟩ :: _ => (count, ·) <$> raisedType count constructor
   | _ => none
 
+/-- An instruction's part in a folded sequence. -/
 inductive FoldRole where
   /-- The first instruction: emits nothing, and may be a branch target. -/
   | head
@@ -152,7 +212,8 @@ inductive FoldRole where
 private def foldAt (locals : List TypeExpr) (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
   (match tail with
-    | b :: _ => if receiverFold locals a b then some [some .head, some .interior] else none
+    | b :: rest => if receiverFold locals a b && spanReceiverUse rest then
+        some [some .head, some .interior] else none
     | _ => none) <|>
   (match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
@@ -162,7 +223,8 @@ private def foldAt (locals : List TypeExpr) (a : RawInstruction) (tail : List Ra
     some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
 
 /-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural. -/
-def foldRolesFrom (locals : List TypeExpr) : List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
+def foldRolesFrom (locals : List TypeExpr) :
+    List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
   | _, [] => []
   | role :: pending, _ :: tail => role :: foldRolesFrom locals pending tail
   | [], a :: tail => match foldAt locals a tail with
@@ -171,11 +233,14 @@ def foldRolesFrom (locals : List TypeExpr) : List (Option FoldRole) → List Raw
 
 /-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
-  foldRolesFrom locals [] code
+  let singleUse := locals.zipIdx.map fun (type, index) =>
+    if (code.filter fun instruction => localIndex instruction == some index).length == 2
+      then type else .void
+  foldRolesFrom singleUse [] code
 
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
-def foldEntry (roles : List (Option FoldRole)) (target : Nat) : Bool :=
-  match roles[target]? with
+def foldEntry (role : Option (Option FoldRole)) : Bool :=
+  match role with
   | some (some .interior) | some (some (.result _)) | some (some (.raise _)) => false
   | _ => true
 

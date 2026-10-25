@@ -43,21 +43,38 @@ internal static class VerificationSelection
         foreach (Match match in Regex.Matches(runner, @"\[""([a-z]+)""\] = \(""(Tests/[^""\n]+\.cs)"""))
             inputs[match.Groups[1].Value] = new(StringComparer.Ordinal) { match.Groups[2].Value };
         if (!inputs.ContainsKey("unsafe")) throw new InvalidDataException("Could not read verification suite registry");
+        foreach (ExportSuite entry in ExportVerificationSuites.Plan())
+        {
+            if (!File.Exists(Path.Combine(root, entry.Script)))
+                throw new InvalidDataException("Missing registered export fixture: " + entry.Script);
+            if (entry.ChildScript is string child && !File.Exists(Path.Combine(root, child)))
+                throw new InvalidDataException("Missing registered export fixture: " + child);
+            inputs.Add(entry.Name, new(entry.Inputs.Append(entry.Script), StringComparer.Ordinal));
+        }
         inputs["core"] = new(StringComparer.Ordinal)
         {
             "Examples/Verify.cs", "Examples/Hardware/Hardware.cs", "scripts/Verify.cs",
             "Tests/LibraryCache.cs", "Tests/InitializedTypes.cs", "Tests/ConsumerVerification.cs",
             "Tests/MethodSelectors.cs", "Tests/MetadataMutator.cs", "Tests/Semantics.lean",
-            "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean", "Tests/StructuralLabels.lean", "Tests/DebugNames.lean", "Tests/MethodContract.lean", "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/Imports.lean", "Tests/LoopOutcome.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean", "Tests/ConfinedFootprints.lean", "Tests/ContractConsequence.lean", "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean", "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
-            "Tests/VerificationReuse.cs", "Tests/RuntimeExceptions.lean"
+            "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean",
+            "Tests/StructuralLabels.lean", "Tests/DebugNames.lean", "Tests/MethodContract.lean",
+            "Tests/ConstructContract.lean", "Tests/OutcomeContract.lean", "Tests/Imports.lean",
+            "Tests/LoopOutcome.lean", "Tests/OutcomeEmbedding.lean", "Tests/MethodEmbedding.lean",
+            "Tests/ConfinedFootprints.lean", "Tests/LocalSnapshots.lean", "Tests/ContractConsequence.lean",
+            "Tests/InvocationCertificates.lean", "Tests/ValidCallTransport.lean",
+            "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean",
+            "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
+            "Tests/VerificationReuse.cs", "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
+            "Tests/InstructionEquations.lean", "Tests/CodeAt.lean", "Tests/SimdLanes.lean"
         };
         inputs["core"].UnionWith(new[] { "Add", "Choose", "Calls", "Alias", "Struct", "StructCopy", "LargeStruct",
             "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));
+        inputs["core"].Add("Tests/ModularStatics.lean");
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
             "Throws", "SpanTables", "StaticValues", "TranslationAudit" }.Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "ScalarEvidence", "TypeTestEvidence",
-            "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence" }.Select(name => $"Tests/{name}.lean"));
-        inputs["imports"].UnionWith(["Tests/ContractImports/Lib.leancil.contracts", "Tests/ContractImports/ImportFixture.lean", "Tests/ContractImports/Caller.lean",
+            "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence", "ImportedLayouts" }.Select(name => $"Tests/{name}.lean"));
+        inputs["imports"].UnionWith(["Tests/ContractClosure.lean", "Tests/ContractImports/Lib.leancil.contracts", "Tests/ContractImports/ImportFixture.lean", "Tests/ContractImports/Caller.lean",
             "Tests/ContractImports/Lib/Lib.csproj", "Tests/ContractImports/Lib/Library.cs", "Tests/ContractImports/App/App.csproj", "Tests/ContractImports/App/Application.cs"]);
         inputs["unsafe"].UnionWith(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
 
@@ -68,6 +85,7 @@ internal static class VerificationSelection
             var pending = new Stack<string>(paths);
             while (pending.TryPop(out var path))
             {
+                if (path == "scripts/ExportVerificationSuites.cs") continue;
                 var source = Path.Combine(root, path);
                 if (!File.Exists(source)) continue;
                 var text = File.ReadAllText(source);
@@ -110,6 +128,9 @@ internal static class VerificationSelection
         foreach (var path in paths)
         {
             if (path.EndsWith(".md", StringComparison.Ordinal) || path == "LICENSE") continue;
+            // Other workflows run in their own jobs; only this workflow's definition feeds the suites.
+            if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
+            if (path == "scripts/ExportVerificationSuites.cs") return all;
             if (new[] { "CIL/", "Extractor/", "Examples/Assembly/", "Examples/FSharp/" }
                     .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Examples/Support.lean")
                 return all;

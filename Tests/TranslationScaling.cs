@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include CheckedExtractionPrefix.cs
 
 using System.Text.Json;
 
@@ -25,14 +26,38 @@ Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CI
 var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (!extracted.Contains("method5_evidence_validated") || extracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException("Expected six independently checked methods at the default heartbeat budget.");
-Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")]);
 var start = extracted.IndexOf("theorem translation_valid :", StringComparison.Ordinal);
 var end = extracted.IndexOf("@[cil_code] theorem lookup0", start, StringComparison.Ordinal);
+var monolithicSource = extracted[..start] +
+    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
+    "methodEvidence imports program := by decide\n" + extracted[end..];
+void RequireHeartbeatRejection(int code, string diagnostic)
+{
+    if (code == 0 || !diagnostic.Contains("maximum number of heartbeats", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Fixture no longer demonstrates the original default-budget failure: " + diagnostic);
+}
+if (args.Contains("--measure", StringComparer.Ordinal))
+{
+    var trace = Path.Combine(directory, "Trace-" + Guid.NewGuid().ToString("N"));
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+    Console.WriteLine("Fixed-workload prefix measurements: " + trace);
+    Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")],
+        progress: "Baseline complete compositional extraction");
+    var original = Path.Combine(directory, "FullMonolithic.lean");
+    File.WriteAllText(original, monolithicSource);
+    var result = Execute(["lake", "env", "lean", original], progress: "Baseline complete monolithic rejection");
+    RequireHeartbeatRejection(result.Code, result.Output);
+}
+var prefix = new CheckedExtractionPrefix(extracted, "theorem translation_valid :", directory);
+var positive = Path.Combine(directory, "Positive.lean");
+File.WriteAllText(positive, prefix.RemainingSource(extracted));
+Run(["lean", positive], leanPath: prefix.LeanPath, progress: "Checking compositional certificate suffix");
 var old = Path.Combine(directory, "Monolithic.lean");
-File.WriteAllText(old, extracted[..start] + "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by decide\n" + extracted[end..]);
-var monolithic = Execute(["lake", "env", "lean", old]);
-if (monolithic.Code == 0 || !monolithic.Output.Contains("maximum number of heartbeats"))
-    throw new InvalidOperationException("Fixture no longer demonstrates the original default-budget failure: " + monolithic.Output);
+File.WriteAllText(old, prefix.RemainingSource(monolithicSource));
+var monolithic = Execute(["lean", old], leanPath: prefix.LeanPath,
+    progress: "Checking monolithic certificate rejection");
+RequireHeartbeatRejection(monolithic.Code, monolithic.Output);
 Console.WriteLine("PASS six-method compiled fixture exceeds monolithic budget and passes compositional checking");
 
 var consumer = Path.Combine(directory, "Consumer");

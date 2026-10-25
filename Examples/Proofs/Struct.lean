@@ -18,10 +18,12 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
   obtain ⟨reference, entered, made, initialRead, writable, preserved⟩ :=
     make_numeric_local memory memory.nextIdentity (.aggregate 12)
       (.aggregate (List.replicate 12 0)) 0 wellFormed rfl
-  let frame : Frame := ⟨memory.nextIdentity, [.bytes (.aggregate 12) reference], [reference.allocation], []⟩
+  let frame : Frame := ⟨memory.nextIdentity, [.bytes (.aggregate 12) reference], [reference.allocation], [], 0⟩
+  have opaqueLocalsEmpty : Extracted.method0.opaqueVectorLocals = [] := rfl
   have setup : enterFrame Extracted.method0 [.scalar (.i64 x)] memory = .ok (frame, entered) := by
     simp only [enterFrame, Extracted.method0_locals, Extracted.method0_localKinds,
-      Extracted.method0_vectorArgs, Extracted.method0_parameterHomes, makeLocals, made, makeArgumentHomes, makeParameterHomes,
+      Extracted.method0_vectorArgs, Extracted.method0_parameterHomes, opaqueLocalsEmpty,
+      makeSelectedLocals, List.isEmpty, ↓reduceIte, makeLocals, made, makeArgumentHomes, makeParameterHomes,
       frame, Bind.bind, Except.bind, Pure.pure, Except.pure, List.map_nil, List.append_nil]
   have enteredWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made
   have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 reference.allocation (by simp)
@@ -58,11 +60,16 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
   have initStep (body : CIL.Method) (pc : Nat) (args rest : List Value) (f : Frame) :
       step body (.initAggregate 12) pc args f (.reference (.address reference) :: rest) entered =
         .ok (.next (pc + 1) rest f initialized) := by
-    simp only [step, pureArity, instruction, referenceAt, ordinaryAccessAlignment, initializedWrite,
+    simp only [step, pureArity, instruction, observerCount, unspecifiedOperands,
+      List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
+      Value.hasUnspecified, Bool.false_or, Bool.false_eq_true, ↓reduceIte,
+      referenceAt, ordinaryAccessAlignment, initializedWrite,
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   refine ⟨CIL.executionBound Extracted.program 0, leaveFrame frame tagged, ?_, ?_⟩
   · apply invoke_of_run (by simp only [cil_code] <;> rfl) rfl setup
-    cil_checked_steps [checkedValue, numericValue, initStep, instruction, localAddress, frame, formValue,
+    cil_checked_steps [checkedValue, numericValue, initStep, instruction,
+      observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+      Value.hasUnspecified, CIL.Value.hasUnspecified, localAddress, frame, formValue,
       enteredForm, initializedForm, payloadForm, taggedForm, payloadAddress, tagAddress,
       readAddress, loaded, initializedWrite, payloadWrite, tagWrite, referenceAt, ordinaryAccessAlignment,
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]

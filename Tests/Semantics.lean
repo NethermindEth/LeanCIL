@@ -19,6 +19,19 @@ theorem disabled_intrinsic :
 
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl
 
+theorem unsigned_compare_wraps :
+    CIL.binary .ltu (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 0) = some (.i32 0) := by decide
+
+theorem add_wraps_at_width :
+    CIL.binary .add (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 1) = some (.i64 0) := by decide
+
+theorem write_overwrites (m : CIL.Memory) (a : CIL.Address) (x y : CIL.Value) :
+    CIL.write (CIL.write m a x) a y a = some y := by simp [CIL.write]
+
+#print axioms unsigned_compare_wraps
+#print axioms add_wraps_at_width
+#print axioms write_overwrites
+
 -- New value-only instructions must reject invalid operands in the checked dispatcher.
 private def scalarBody : CIL.Method := { code := [], locals := [], returnsValue := true }
 private def scalarFrame : Frame := { activation := 0, locals := [], owned := [] }
@@ -28,7 +41,7 @@ theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsi
     (args stack : List Value) (frame : Frame) (memory : Memory) :
     step body (.intrinsic operation argc) pc args frame stack memory =
       .error (.unsupported "Intrinsic unavailable in target profile") := by
-  simp [step, disabled]
+  simp [step, disabled, observerCount, unspecifiedOperands]
 
 theorem checked_avx2_enabled :
     step { scalarBody with profile := { avx2 := true } } (.intrinsic (.avx2 .add64) 2)
@@ -62,9 +75,11 @@ theorem branches_reject_underflow :
     ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0)] Examples.empty).isOk) = true := rfl
 
-theorem branches_reject_references :
-    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+theorem signed_branches_reject_references :
+    ([CIL.Op.bgt 1, .ble 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [Examples.reference, Examples.reference] Examples.caller).isOk) = true := rfl
+
+#print axioms signed_branches_reject_references
 
 theorem branches_reject_mixed_widths :
     ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
@@ -119,9 +134,11 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
   refine ⟨result, ?_, ?_⟩
   · cases hw : checkedAt (.address reference) 4 (write memory reference (numberBytes bits.toNat 4) 1) <;>
       simp_all [instruction, storeLocal, localNumber, referenceAt, localWidth, ordinaryAccessAlignment,
+        observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
   · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
       simp_all [instruction, loadValue, localResult, dereference, ordinaryAccessAlignment,
+        observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem switch_unsigned_default :
@@ -182,7 +199,7 @@ theorem aggregate_roundtrip {memory : Memory} {reference : Reference}
         .ok (.bytes (.aggregate size) reference, result) ∧
       loadLocal result (.bytes (.aggregate size) reference) = .ok (.scalar (.aggregate bytes)) := by
   apply store_load_numeric_local (.aggregate size) (.aggregate bytes) (byteNumber bytes)
-  · simp [localNumber, length]
+  · simp [localNumber, length, CIL.Value.hasUnspecified]
   · exact ready
 
 #print axioms aggregate_roundtrip
@@ -356,11 +373,11 @@ theorem nested_expired :
 
 theorem constructor_zero_size :
     step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 0 0)
-      0 [] ⟨0, [], [], []⟩ [] Examples.empty = .error .invalidState := rfl
+      0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty = .error .invalidState := rfl
 
 theorem constructor_stack_underflow :
     step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 1 3)
-      0 [] ⟨0, [], [], []⟩ [] Examples.empty = .error .invalidState := rfl
+      0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty = .error .invalidState := rfl
 
 def constructorCaller : CIL.Method := {
   returnsValue := true, locals := [], code := [.newAggregate 1 0 3, .ret] }
@@ -445,11 +462,11 @@ theorem division_zero (signed remainder : Bool) (x : CIL.W64) :
 
 theorem division_underflow :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], []⟩ [] Examples.empty).isOk = false := rfl
+      (.divide false false) 0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty).isOk = false := rfl
 
 theorem division_managed_reference_rejected :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], []⟩
+      (.divide false false) 0 [] ⟨0, [], [], [], 0⟩
       [.scalar (.i32 2), .reference .null] Examples.empty).isOk = false := rfl
 
 
@@ -465,12 +482,12 @@ def divRemMethod (profile : CIL.FeatureProfile) : CIL.Method :=
 
 theorem divRem_checked_fault :
     CIL.Safety.step (divRemMethod { architecture := .x64, x86Base64 := true }) (.intrinsic (.x86Base .divRem64) 3) 0 []
-      ⟨0, [], [], []⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Examples.empty =
+      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Examples.empty =
       .error (.arithmetic .overflow) := rfl
 
 theorem divRem_requires_x86Base :
     CIL.Safety.step (divRemMethod CIL.FeatureProfile.scalar) (.intrinsic (.x86Base .divRem64) 3) 0 []
-      ⟨0, [], [], []⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Examples.empty =
+      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Examples.empty =
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 
 theorem divRem_pure_fault :

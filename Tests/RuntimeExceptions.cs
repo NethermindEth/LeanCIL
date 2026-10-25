@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 
@@ -28,6 +29,7 @@ Run(["dotnet", "build", Path.Combine(root, "RuntimeFaults.csproj"), "-c", "Relea
 string assembly = Path.Combine(root, "bin/RuntimeFaults.dll");
 Assembly runtimeAssembly = Assembly.Load(File.ReadAllBytes(assembly));
 Type runtimeType = runtimeAssembly.GetType("RuntimeFaults.Cases")!;
+var pending = new GeneratedQueue(verification, assembly, "RuntimeFaults");
 
 (string Name, string Selector, string Values, string Fault, int Pc, object[] Inputs)[] cases = [
     ("Add", "int,int", "[.scalar (.i32 2147483647), .scalar (.i32 1)]", "overflow", 2, [int.MaxValue, 1]),
@@ -82,6 +84,7 @@ theorem correctness :
     exact RaisesCLR.not_of_invoke (by simp [Settled]) (invoked empty) (by decide) raised
 end ExampleProof
 """);
-    verification.Verify(assembly, "RuntimeFaults", $"Cases::{name}({selector})", proof, Path.Combine(root, name));
-    Console.WriteLine($"PASS {name}: runtime type, named contract and wrong-type refutation");
+    pending.Add(new GeneratedVerification($"Cases::{name}({selector})", proof, Path.Combine(root, name)),
+        () => Console.WriteLine($"PASS {name}: runtime type, named contract and wrong-type refutation"));
 }
+pending.Flush();

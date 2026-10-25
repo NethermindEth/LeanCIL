@@ -4,6 +4,14 @@ import CIL.SIMD.AVX2
 import CIL.SIMD.AVX512
 import CIL.SIMD.BMI1
 
+/-!
+# Vector lane lemmas
+
+Lane projections of `pack128` and `pack256`, and the identities stepping proofs use to
+reduce ISA intrinsics on packed lanes to scalar results: lane carries across halves, sign
+masks, and the `ternaryLogic` tables of a full adder's carry and a subtractor's borrow.
+-/
+
 namespace CIL.Vector
 
 @[simp] theorem lane128_0 (a b : W64) : lane64 (pack128 a b) 0 = a := by
@@ -11,6 +19,7 @@ namespace CIL.Vector
   ext i hi
   simp only [BitVec.getElem_extractLsb']
   grind
+
 @[simp] theorem lane128_1 (a b : W64) : lane64 (pack128 a b) 1 = b := by
   simp only [lane64, pack128]
   ext i hi
@@ -22,16 +31,19 @@ namespace CIL.Vector
   ext i hi
   simp only [BitVec.getElem_extractLsb']
   grind
+
 @[simp] theorem lane256_1 (a b c d : W64) : lane64 (pack256 a b c d) 1 = b := by
   simp only [lane64, pack256]
   ext i hi
   simp only [BitVec.getElem_extractLsb']
   grind
+
 @[simp] theorem lane256_2 (a b c d : W64) : lane64 (pack256 a b c d) 2 = c := by
   simp only [lane64, pack256]
   ext i hi
   simp only [BitVec.getElem_extractLsb']
   grind
+
 @[simp] theorem lane256_3 (a b c d : W64) : lane64 (pack256 a b c d) 3 = d := by
   simp only [lane64, pack256]
   ext i hi
@@ -82,6 +94,12 @@ theorem sse_arm_alignment (a b c d : W64) :
     permute4x64 (pack256 a b c d) 0x90 = pack256 a a b c := by
   simp [permute4x64]
 
+/-- Control `0x1B` reverses the four lanes. -/
+theorem permute4x64_reverse (a0 a1 a2 a3 : W64) :
+    permute4x64 (pack256 a0 a1 a2 a3) (BitVec.ofNat 8 0x1B) = pack256 a3 a2 a1 a0 := by
+  simp [permute4x64]
+#print axioms permute4x64_reverse
+
 @[simp] theorem avx2_blend_incoming (a b c d : W64) :
     blend32 (pack256 a b c d) 0 3 = pack256 0 b c d := by
   simp only [blend32, lane32]
@@ -104,6 +122,7 @@ theorem avx2_incoming_blend_normal (a b c d : W64) :
   rw [hp]
   exact avx2_blend_incoming a a b c
 
+/-- An arithmetic shift right by 63 broadcasts the sign bit to the whole lane. -/
 theorem arithmetic_sign_mask (a : W64) :
     a.sshiftRight 63 = mask64 a.msb := by
   change a.sshiftRight 63 = if a.msb then BitVec.allOnes 64 else 0
@@ -114,6 +133,7 @@ theorem arithmetic_sign_mask (a : W64) :
   all_goals split <;> simp_all [BitVec.msb, BitVec.getMsbD]
   all_goals grind
 
+/-- Truth table `0xD4` is the carry out of `a + b` given the complement `r` of the carry in. -/
 theorem ternary_add (a b r : BitVec n) :
     ternaryLogic a b r 0xD4 = (a &&& b) ||| ((~~~r) &&& (a ||| b)) := by
   apply BitVec.eq_of_getLsbD_eq
@@ -125,6 +145,7 @@ theorem ternary_add (a b r : BitVec n) :
   generalize hr : r[i] = rr
   cases aa <;> cases bb <;> cases rr <;> decide
 
+/-- Truth table `0x8E` is the borrow out of `a - b` given borrow in `r`. -/
 theorem ternary_subtract (a b r : BitVec n) :
     ternaryLogic a b r 0x8E = ((~~~a) &&& b) ||| ((~~~(a ^^^ b)) &&& r) := by
   apply BitVec.eq_of_getLsbD_eq

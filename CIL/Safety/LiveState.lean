@@ -2,6 +2,15 @@ import CIL.Safety.LocalReferences
 import CIL.Safety.ExecutionStaticWorld
 import CIL.Safety.ReturnReferences
 
+/-!
+# Live state at instruction boundaries
+
+`LiveState` bundles the invariants the checked interpreter keeps between instructions:
+well-formed memory, valid arguments, stack and frame references, owned frame allocations
+and a valid static world. This file establishes it at method entry and shows that a
+completed call keeps the caller's state and pushes valid results.
+-/
+
 namespace CIL.Safety
 
 /-- Reference/storage invariants at a CIL boundary. This deliberately permits
@@ -16,10 +25,13 @@ structure LiveState (program : CIL.Program) (args : List Value) (frame : Frame)
   owned : FrameAllocations m frame.activation frame.owned
   statics : StaticWorldValid (programStaticDescriptors program) m
 
+/-- Entering a frame with valid arguments in a valid static world establishes the live
+    state with an empty stack. -/
 theorem enterFrame_live_state (program : CIL.Program) (body : CIL.Method) (args : List Value)
     (m result : Memory) (frame : Frame) (hm : m.WellFormed) (valid : ValuesValid m args)
     (world : StaticWorldValid (programStaticDescriptors program) m)
-    (h : enterFrame body args m = .ok (frame, result)) : LiveState program args frame [] result := by
+    (h : enterFrame body args m = .ok (frame, result)) :
+    LiveState program args frame [] result := by
   exact ⟨enterFrame_preserves_wellFormed _ _ _ _ _ hm h,
     valid.preserve hm (enterFrame_fresh _ _ _ _ _ h).1,
     by simp [ValuesValid], enterFrame_references_valid _ _ _ _ _ hm h,
@@ -45,7 +57,8 @@ theorem child_preserves_parent_state (program : CIL.Program) (fuel method : Nat)
     LiveState program args parent stack final := by
   have ext := entered_run_preserves_caller_allocations _ _ _ _ _ _ _ _ _ _ setup finish
   have childWF := enterFrame_preserves_wellFormed _ _ _ _ _ state.memory setup
-  have childWorld := enterFrame_preserves_static_world _ _ _ _ _ _ state.memory state.statics setup
+  have childWorld :=
+    enterFrame_preserves_static_world _ _ _ _ _ _ state.memory state.statics setup
   exact ⟨run_preserves_wellFormed _ _ _ _ _ _ _ _ _ _ childWF finish,
     state.arguments.preserve state.memory ext, state.stack.preserve state.memory ext,
     state.references.preserve state.memory ext,
@@ -53,6 +66,8 @@ theorem child_preserves_parent_state (program : CIL.Program) (fuel method : Nat)
     run_preserves_static_world _ _ _ _ _ _ _ _ _ _ childWF
       (enterFrame_owned _ _ _ _ _ setup) childWorld finish⟩
 
+/-- After a successful call, the caller's live state holds with the callee's results
+    pushed onto the remaining stack. -/
 theorem child_resume_live_state (program : CIL.Program) (fuel method : Nat)
     (body : CIL.Method) (childArgs values args rest : List Value) (child parent : Frame)
     (m entered final : Memory) (state : LiveState program args parent rest m)
@@ -60,7 +75,8 @@ theorem child_resume_live_state (program : CIL.Program) (fuel method : Nat)
     (finish : run program fuel method 0 childArgs child [] entered = .ok (final, values)) :
     LiveState program args parent (values ++ rest) final := by
   have preserved := child_preserves_parent_state _ _ _ _ _ _ _ _ _ _ _ _ _ state setup finish
-  exact { preserved with stack := (run_result_valid _ _ _ _ _ _ _ _ _ _ finish).append preserved.stack }
+  exact { preserved with
+    stack := (run_result_valid _ _ _ _ _ _ _ _ _ _ finish).append preserved.stack }
 
 #print axioms enterFrame_live_state
 #print axioms checked_entry_live_state

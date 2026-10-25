@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Buffers.Binary;
 using System.Reflection;
@@ -14,6 +15,7 @@ var runtime = Assembly.LoadFile(assembly).GetType("Examples.ValueBitCasts")!;
 using var metadata = ModuleDefinition.ReadModule(assembly);
 var selectors = metadata.GetType("Examples.ValueBitCasts").Methods.ToDictionary(method => method.Name, method => method.FullName);
 var root = At("artifacts/ValueBitCasts");
+var pending = new GeneratedQueue(verification, assembly);
 void Prove(string name, int width, string source, string target)
 {
     var bytes = Enumerable.Range(0, width).Select(i => (byte)(i * 17 + 3)).ToArray();
@@ -29,8 +31,8 @@ void Prove(string name, int width, string source, string target)
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by exact ⟨by rfl, by rfl, by rfl⟩\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", selectors[name], proof, output);
-    Console.WriteLine("PASS compiled BitCast full/partial/unknown masks: " + name);
+    pending.Add(new GeneratedVerification(selectors[name], proof, output),
+        () => Console.WriteLine("PASS compiled BitCast full/partial/unknown masks: " + name));
 }
 foreach (var width in new[] { 16, 32 })
 foreach (var element in new[] { "UInt32", "UInt64" })
@@ -82,6 +84,7 @@ foreach (var toVector in new[] { true, false })
 Prove("RoundTrip", 32, "(.aggregate 32)", "(.aggregate 32)");
 Prove("CopyLocal", 32, "(.aggregate 32)", ".vector256");
 Prove("ParameterCopy", 32, "(.aggregate 32)", "(.aggregate 32)");
+pending.Flush();
 
 foreach (var name in new[] { "WrongSize", "ReferenceLayout" })
 {

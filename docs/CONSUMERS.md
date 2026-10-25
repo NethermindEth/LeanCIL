@@ -1,5 +1,10 @@
 # Consumer packages and batch verification
 
+`leancil resolve-imports` derives `--import` and `--import-implementation` from
+SDK deps/NuGet asset selection; see [resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets).
+It only locates files. Pins, caller audits, kernel replay and deployment
+obligations are unchanged.
+
 The [README](../README.md#consumer-packages-and-batches) shows the commands. This page states what
 consumer and batch verification check, what they reuse, and how support is shared across machines.
 
@@ -85,8 +90,14 @@ Keep workspace generated files, caches and manifests out of that source package.
 The ordinary verifier still requires extraction identity checks, its fresh source
 package, exact theorem and certificate audits, and independent kernel replay.
 The workspace root itself is not a supported `--proof-root` because it contains
-reserved generated modules. The CI workspace fixture uses a four-limb struct
-named `UInt256`; it does not claim to test every external UInt256 implementation.
+reserved generated modules. The CI workspace fixture builds the real `Nethermind.Int256`
+consumer at revision `00fcecf53e22b5c9090052779e14b3ba246fb117` and opens
+`Nethermind.Int256.UInt256::get_IsZeroOrOne()` under the scalar profile. It uses the
+existing `--assume-initialized Nethermind.Int256.UInt256` caller premise; assembly
+and method admission rules are unchanged. The fixture checks transitive consumer and
+symbol imports, then verifies the unchanged selected-method proof through ordinary fresh
+verification. This tests workspace reproducibility, not an arithmetic contract for every
+UInt256 operation.
 
 ## Local support cache
 
@@ -146,9 +157,10 @@ across method gates.
 
 ## Replay
 
-Kernel replay and the theorem audit run the pinned toolchain's `lean` directly
-with the `LEAN_PATH` that `lake env` resolves after the build (and `LEAN_SYSROOT`
-set to that toolchain), instead of starting Lake again for each step. The
+Kernel replay and the theorem audit run the pinned toolchain's `leanchecker` and the
+library's `leancil-audit` directly with the `LEAN_PATH` that `lake env` resolves after
+the build (and `LEAN_SYSROOT` set to that toolchain), instead of starting Lake again
+for each step. The audit reads the replayed oleans and elaborates no consumer source. The
 resolved import paths are still compared with those resolved before the build.
 
 ## Batch verification
@@ -259,6 +271,33 @@ Replay explicitly passes `LEAN_NUM_THREADS` to the Lean frontend (default two)
 to bound concurrent imported environments; the frontend otherwise uses hardware
 concurrency even when that environment variable is set.
 
+## Library audits
+
+`leancil audit-library` replaces an elaborated `Audit.lean` (`run_cmd` over `env.constants` with
+`collectAxioms`, or `#print axioms`), which the audited code can forge:
+
+```sh
+leancil audit-library --project . --module MyLib --prefix MyLib. --prefix MyLemmas. \
+  --axioms propext,Quot.sound,Classical.choice
+```
+
+- It runs `lake build` for each `--module` in the package, resolves `LEAN_PATH` with `lake env`, and
+  takes the import closure of the listed modules outside the toolchain.
+- Every module in that closure is kernel-replayed with the pinned `leanchecker` routine. A CIL module skips
+  replay only when it and every module it imports are byte-identical to the verifier's certified library.
+- `leancil-audit` then reads those replayed oleans with `loadExts := false` and audits every `theorem`
+  they declare under a prefix: private theorems by their user name, auto-generated ones included. A prefix
+  names whole components, so `MyLib.` and `MyLib` match `MyLib.foo` but not `MyLibrary.foo`.
+- It fails when any prefix matches no theorem, when an axiom closure leaves `--axioms` (default
+  `propext`, `Quot.sound`, `Classical.choice`), or when an olean changes during the audit.
+  On success it prints the theorem count per prefix and the union of the axioms used.
+- `--results results.json` writes the audited modules, counts, axioms and rejected theorems.
+
+The package must pin the bundled Lean toolchain; it need not depend on `leancil`. Unlike `verify`, the
+audit reads the package's own build directory rather than a fresh copy, so it certifies the replayed bytes,
+not that they were compiled from the current sources. Building runs the package's Lake configuration and
+elaborators; the replay and the audit do not.
+
 ## Limits
 
 This mode supports Lean source packages; local path dependencies, custom Lake
@@ -269,3 +308,179 @@ Place handwritten proofs outside them.
 `Extracted.lean` is reserved for the selected artifact; do not keep another copy
 among consumer sources. Lake configuration and Lean elaborators are executable
 code, so use this mode with packages you trust.
+
+## Publishing verified contracts
+
+A library producer runs `leancil export-contracts manifest.json`. The command
+checks every selected export with fresh ordinary verification, an exact canonical
+contract theorem, extraction-certificate audit and independent kernel replay. It
+publishes a sidecar only after every export and the final input checks succeed.
+
+```json
+{
+  "schema": 1,
+  "assembly": "bin/Lib.dll",
+  "proofRoot": "proofs",
+  "interface": [{ "module": "Lib.Contracts", "source": "proofs/Lib/Contracts.lean" }],
+  "exports": [{
+    "method": "Lib.Library::AddOne(ulong)",
+    "artifact": "artifacts/AddOne",
+    "contract": "Lib.Contracts.addOne",
+    "theorem": "Lib.Proof.addOne_correct"
+  }]
+}
+```
+
+Paths are relative to the manifest. Each artifact must already contain an
+extraction identity and `verification.json` naming the author's proof source.
+The recorded method must be the export entry, its DLL must match `assembly`, and
+its execution profile must be an exact built-in profile. The consumer package
+under `proofRoot` must have resolved pinned dependencies. One method may list
+several artifact entries for different profiles; duplicate method/profile pairs
+fail. Unknown and duplicate JSON properties are rejected. Each `interface` source
+must be byte-identical to the module of that name under `proofRoot`, the module
+the author proof compiled against, so the published text is what was audited.
+
+The contract constant must have type `CIL.Safety.MethodContract` or
+`CIL.Safety.OutcomeContract`. The named author declaration must be a theorem with
+the exact canonical `Holds` proposition for the extracted program at entry zero.
+An unrelated theorem, a proof definition, user-defined field notation or extra
+assumptions do not establish this guarantee. The generated ExportAudit module
+imports the exact author proof copy in the same fresh verification session.
+
+Published interface modules must check with only the declared interface sources
+and the bundled framework/toolchain. They cannot require private implementation
+proofs or an `Extracted` module. Canonical contract closures are checked both in
+this isolated interface and in the actual proof environment. Their exact results
+must agree. Custom axioms, sorry and valueless opaque interface declarations are
+not exportable. Contract predicates and their reachable definitions determine the
+closure digest; the name alone does not determine it.
+
+Version 1 supports public or protected static, non-virtual, non-generic exports
+without imports. RVA static sites are supported. Each certification records the
+exact scoped static identities, and the producer checks their set against the
+generated program in Lean. It rejects recorded static-value and
+initialization assumptions because this sidecar version does not transport them.
+This restriction does not weaken the extractor's admission or profile rules.
+
+Static identities are stable across separate extractions and body-only rebuilds.
+They use the full assembly identity and full field name. `StaticWorldValid`
+describes the fields in its descriptor list and permits other loaded immutable
+fields in the same valid registry. Its `append`, `left`, `right` and `mono` lemmas
+support worlds over the same memory. Append requires equal identities to name equal
+descriptors, so two exports that read one shared table compose.
+
+An export that can run after its tables are loaded, including a repeated call,
+should take `StaticWorldValid published memory` as its precondition and restate it
+for the final memory in its postcondition. `published` lists literal descriptors
+(identity, assembly identity, field name and bytes) in an interface module. A
+published descriptor that differs from the extracted one leaves the author proof
+unprovable, so no separate equality audit is needed. `StaticIdentitiesAbsent`
+suits only a first-use contract: after the first call the field is loaded and the
+premise is false.
+
+Full verification proves `linkChecked` for the composed program inside
+`LeanCILFullComposition.certified`, which rejects conflicting descriptors and
+names both fields. A published-certification import has no linked program; there
+the extractor's static identity checks and the `StaticWorldValid` premises guard
+collisions. The raw `link` API remains a pure construction without that check.
+
+The default output is `<assembly-simple-name>.leancil.contracts` next to the DLL.
+Use `--output path.leancil.contracts` to select another path. Publication is atomic
+and a failed command preserves an existing sidecar unchanged. The old sidecar
+still binds the old DLL hash and cannot certify a changed implementation. A
+body-only rebuild can retain the same public interface and contract closure
+digests while its implementation hash and certification change. Consumers still
+check the selected deployment bytes and independently pin the interface with
+`--import-interface-sha256 Lib=<digest>`.
+
+`--bundle directory` also writes an immutable content-addressed source bundle.
+Its inventory binds the original producer inputs, complete consumer/dependency
+source closure, exact bundled framework sources, generated extraction and audit
+sources, and checked export statement metadata. The consumer's own
+`.lake/packages/leancil` copy is omitted because `framework/` already pins those
+sources. Every bundled file must still match the hash taken in the export's input
+snapshot, which includes the framework sources; a change fails the export
+before the bundle or sidecar is published. It contains no compiled DLL,
+`.olean`, local receipt or build cache. The selected implementation DLL remains a
+separate input. The bundle publishes before the sidecar, and its source locator
+is recorded in the sidecar. A source bundle is not proof certification and is not
+accepted as a trusted cache. Independent verification of a published library is
+a separate workflow.
+
+`bundle.json` also records `frameworkKey`, the strict compatibility key that the
+sidecar carries, and `leanCilRevision`, the leancil revision pinned by the
+producer's `proofRoot`. The revision is diagnostic: it names the sources to
+rebuild with, while acceptance compares only the framework key and file hashes.
+Any LeanCIL change to `CIL/` or the toolchain changes the framework key, so
+sidecars and bundles exported with an older framework are rejected by a newer
+verifier. Publishers re-export with the new LeanCIL; consumers that cannot upgrade
+the publisher keep the LeanCIL revision the bundle records.
+
+Run `dotnet run --file scripts/Test.cs -- --suite exports` for the producer/App
+round trip, unchanged caller after a library rebuild, rejecting exports and
+source-only bundle checks.
+
+## Published contract imports
+
+A consumer can verify a caller against an imported contract without the library's
+implementation proof package. Supply the contract sidecar and independently
+obtained implementation SHA-256 during extraction, as described in
+[Contract interfaces](CONTRACT-INTERFACES.md). Only the interface source modules
+are supplied to the consumer. The full-verification locator is not fetched.
+
+The interface stage compiles those sources, rejects undeclared dependencies and
+forbidden declarations, and checks each canonical exported-constant closure.
+It binds definition values, theorem types, inductive constructors and recursor
+computation rules. A postcondition helper cannot change behind an unchanged name
+and retain its old closure digest. Framework and toolchain stopping uses the
+constant's defining module, not its namespace.
+
+The App theorem must retain `HoldsGiven Extracted.program Extracted.ImportsHold
+claim`. Its imported conditions use the canonical `MethodContract.Holds` or
+`OutcomeContract.Holds` predicates at their absolute slots. The implementation
+proofs are not elaborated or replayed. The unchanged axiom audit applies to the
+caller theorem; imports are explicit hypotheses.
+
+Schema-4 reports identify these imports as `published-certification`. They record
+the accepted certification theorem and statement, current implementation digest,
+interface digest and deployment obligation. The publisher's certification is an
+explicit trust input. A digest does not prove that certification. Deployment must
+provide the exact implementation and satisfy the imported contracts.
+
+Proof reuse keys bind interface/closure digests, interface source bytes and
+`ExtractedImports`, independently of library implementation hashes and provenance.
+Each cache hit still checks current DLL/sidecar/profile identities and writes a
+new report with current deployment records. `--fresh` bypasses proof reuse.
+Reference-only input can check a caller proof for authoring, but exits with status
+1 and produces neither `verified.json` nor a successful proof receipt.
+## Transitive contract imports
+
+A library can export a theorem conditional on its own imports. Its exact statement
+is `CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold
+(fun linked => CIL.Safety.MethodContract.Holds contract linked 0)`, with the
+corresponding canonical `OutcomeContract.Holds` for an outcome contract.
+The producer freshly checks that statement and records the dependency identities.
+It does not claim that the open extracted prefix is closed.
+
+Supply every graph node with `--import`, `--import-sha256` and
+`--import-interface-sha256`. The existing `--import-implementation` option selects
+its DLL path. A dependency record binds its full assembly identity, implementation
+SHA-256 and interface digest. Each dependency must match the independently pinned
+node. A shared dependency has one identity and one selected implementation.
+Conflicting hashes, missing nodes and cycles fail before extraction. Cycle errors
+name the complete cycle path.
+
+The extraction identity records all nodes in `importGraph`. A verification report
+records their deployment bindings in `contractDependencies`. Only methods actually
+called by the selected App entry receive import slots. Published certifications
+remain the stated trust boundary for library implementations; caller proofs remain
+conditional on the published contracts. A source bundle or graph digest does not
+prove that those contracts hold.
+
+`MethodContract.relocateGiven` and `OutcomeContract.relocateGiven` turn a prefix
+proof into a contract at a relocated entry. They require an explicit closed
+completion, its prefix relation, satisfaction of imported contracts in that
+completion, and a relocation of the completion into the target program.
+Transitive graph implementation changes conservatively invalidate proof reuse.
+Static and initialization assumptions still cannot be exported in this feature.

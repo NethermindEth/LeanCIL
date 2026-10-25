@@ -48,7 +48,7 @@ variable (post : Memory → List Value → Prop) (frame : Frame) (m : Memory)
 
 example : ¬ LoopOutcome [stuck] 0 [] post (some "System.InvalidOperationException") ⟨0, frame, [], m⟩ :=
   loop_outcome_some_refuted (fuel := 1)
-    (outcome := .error ⟨0, 0, .unsupported "Non-memory instruction requires execution adapter"⟩) rfl
+    (outcome := .error ⟨0, 0, .unsupported "Not a memory instruction"⟩) rfl
     (by simp [Settled]) (by rintro _ ⟨⟩; simp)
 
 /-- A pc past the body is invalid state. -/

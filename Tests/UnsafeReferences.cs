@@ -2,11 +2,13 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using Mono.Cecil;
 
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
+var queue = new GeneratedQueue(verification, assembly);
 var root = At("artifacts/UnsafeReferences");
 const string memory = """
 def memory : CIL.Safety.Memory := { Examples.caller with
@@ -21,8 +23,8 @@ void Prove(string name, string selector, string claim)
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness : " + claim + " := by rfl\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", selector, proof, output);
-    Console.WriteLine("PASS checked byref reinterpretation: " + name);
+    queue.Add(new(selector, proof, output),
+        () => Console.WriteLine("PASS checked byref reinterpretation: " + name));
 }
 foreach (var name in new[] { "Word", "Half", "Vector", "Mutable" })
     Prove(name, $"UnsafeReferences::{name}(Examples.FourLimbs&)",
@@ -54,6 +56,8 @@ Prove("Uninitialized", "UnsafeReferences::Read(Examples.FourLimbs&)",
     "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .error ⟨0, 2, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩");
 Prove("PastEnd", "UnsafeReferences::PastEnd(Examples.FourLimbs&)",
     "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .error ⟨0, 4, .memory .outsideAllocation (.address ⟨0, 32⟩) 8⟩");
+queue.Flush();
+
 foreach (var mutation in new[] { "reference-field", "class", "pointer", "arity", "parameter", "return", "instance", "scope", "version" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);

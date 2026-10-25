@@ -82,7 +82,7 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
   "initializedTypes": ["Namespace.Type"],
   "entries": [
     { "signature": "Type::Method(ulong)", "profile": "scalar" },
-    { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-bmi2.json" }
+    { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-v3.json" }
   ]
 }
 ```
@@ -226,6 +226,51 @@ the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
 
+## Export contracts
+
+`leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]`
+checks a library's selected contracts and writes their bound sidecar. See
+[Publishing verified contracts](CONSUMERS.md#publishing-verified-contracts) for
+the manifest, exact theorem guarantee, version-1 restrictions and source bundle.
+All exports must pass before the sidecar is published.
+
+## Verify with imported contracts
+
+After import-aware extraction, `leancil verify output --proof Caller.lean` checks
+the caller under the published contracts. `--proof-root` uses the same interface
+audit for a consumer package. `--fresh` can use an empty `LEANCIL_CACHE_DIR`; no
+library implementation proof source, artifact or full bundle is required.
+
+The sidecar export adds `kind` (`method` or `outcome`). Each selected certification
+record requires `theorem`, `statement` and `statementDigest`. The driver checks
+its required `staticIdentities` list against the selected implementation's
+reachable static fields. Each entry contains `identity`, `assemblyIdentity` and
+`fieldName`. Extraction recomputes this list from the selected implementation's metadata and reachable instructions.
+The driver also checks
+the actual exported contract type structurally and computes its canonical closure
+from replayed oleans. `statementDigest` hashes the UTF-8 `statement` returned by
+that audit. The consumer records this provenance without obtaining the
+implementation proof. See [Contract interfaces](CONTRACT-INTERFACES.md).
+
+A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to
+`published-certification`, the implementation SHA-256, interface digest,
+certification theorem/statement/digest, `sidecarSha256`, `certificationAuthenticated`
+(always `false`: no pinned digest covers the certification text) and deployment
+obligation. CLI output prints the certification as an unauthenticated sidecar
+record with its sidecar SHA-256, and the obligation. The caller theorem remains
+conditional on those imported contracts.
+
+`--force-full-verify` freshly checks the selected library implementations and
+discharges those imports in a concrete linked CIL theorem. Repeat
+`--full-artifact Lib=directory` to select relocated copies of the published
+source bundles. Missing or invalid bundles fail without fallback. See
+[Independent imported-library verification](FULL_VERIFICATION.md) for the
+supported source format, checks and remaining trust boundaries.
+
+Reference-only extraction is an authoring input. Verification checks its caller
+proof, then exits with status 1 and an authoring-only diagnostic. It does not
+write `verified.json` or publish a successful proof receipt.
+
 Contract imports also require `--import-interface-sha256 Lib=<digest>` from an
 accepted publisher channel. This independently pins the interface descriptor
 and all executable Lean source bytes before compilation. See
@@ -255,7 +300,7 @@ No documentation text becomes evidence or a contract premise.
 
 ## Editor workspace
 
-`leancil workspace <assembly> <method> --profile <profile> --proof <file>`
-creates a source workspace for Lake and the Lean language server. See
-[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for package
-requirements, stale-input rejection and the separate certification step.
+`leancil workspace <assembly> <method> --profile <profile> --proof <file>` creates a
+source package for Lake and the Lean language server. See
+[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for pinned imports,
+stale-input rejection and the separate certification step. Editor checking is not a certificate.

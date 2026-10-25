@@ -34,6 +34,11 @@ jobs:
           dotnet run --file scripts/TestSelectVerification.cs
           dotnet run --file scripts/TestSummarizeVerification.cs
           dotnet run --file scripts/TestLeanDiagnostics.cs
+          dotnet run --file Tests/ConsumerTraceRetention.cs
+          dotnet run --file Tests/FileHashing.cs
+          dotnet run --file Tests/BatchInputs.cs
+          dotnet run --file Tests/ConsumerArtifactSnapshot.cs
+          dotnet run --file Tests/ConsumerSupportCandidates.cs
       - name: Select affected suites
         id: select
         env:
@@ -83,6 +88,8 @@ jobs:
           auto-config: false
           use-github-cache: false
           use-mathlib-cache: false
+      # A PR-scoped cache does not authenticate its producer or its native audit executable.
+      # Build once from source and share only this attempt's artifact and independently passed digest.
       - name: Build and kernel-replay the source-bound library
         id: certify
         shell: bash
@@ -120,7 +127,7 @@ jobs:
     needs: [select, prepare]
     if: needs.select.outputs.has-suites == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.suite == 'imports' && 90 || startsWith(matrix.suite, 'exports') && 120 || 30 }}
     strategy:
       fail-fast: false
       # Longest measured suites start first; eight runners bound concurrent load.

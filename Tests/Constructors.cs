@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -12,6 +13,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Constructors");
 Directory.CreateDirectory(root);
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 
 void Compare(string dll, string name, string suffix = "")
 {
@@ -39,9 +41,12 @@ void Compare(string dll, string name, string suffix = "")
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", $"Constructors::{name}({(name == "Default" ? "" : "ulong")})", proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {name}{suffix}: {claims.Count} runtime comparisons");
+    var selector = $"Constructors::{name}({(name == "Default" ? "" : "ulong")})";
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {name}{suffix}: {claims.Count} runtime comparisons");
+    });
 }
 
 foreach (var name in new[] { "Read", "Packed", "Nested", "Default", "Checked" }) Compare(assembly, name);
@@ -56,6 +61,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     module.Write(zeroed);
 }
 Compare(zeroed, "Read", "-Zeroed");
+queue.Flush();
 
 var contract = At("Examples/Proofs/ConstructorValue.lean");
 verification.Verify(assembly, "Examples", "Constructors::Return(ulong)", contract, Path.Combine(root, "UniversalValue"));

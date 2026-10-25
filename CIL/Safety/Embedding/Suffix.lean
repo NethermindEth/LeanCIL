@@ -1,17 +1,32 @@
 import CIL.Safety.Embedding.Simulation
 
+/-!
+# Relocated suffixes
+
+When the expected body is dead (`Op.live = false`) before pc `lower` and its code from
+`lower` on appears relabeled at pc `start` of the actual body, the actual body refines it
+under `suffixRename`. Branch targets must stay inside the suffix. A proof about a region,
+with the code outside it masked as `.unsupported`, then transfers to the real method
+through `Embedding.Simulation`.
+-/
+
 namespace CIL.Embedding
 
 open CIL
 
+/-- Maps expected pc `pc` at or after `lower` to `pc - lower + start`; earlier pcs, which
+    hold only dead code, go to `0`. -/
 def suffixRename (lower start pc : Nat) : Nat :=
   if pc < lower then 0 else pc - lower + start
 
+/-- Relabeling depends only on the renaming's values at the instruction's own targets. -/
 theorem _root_.CIL.Op.relabel_congr {left right : Nat → Nat} (op : Op)
     (same : ∀ target ∈ op.targets, left target = right target) :
     op.relabel left = op.relabel right := by
   induction op <;> simp_all [Op.relabel, Op.targets]
 
+/-- The expected code from `lower` on, relabeled and placed at `start` in `actual`, makes
+    `actual` refine `expected` under `suffixRename lower start`. -/
 theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start : Nat}
     (metadata : actual = { expected with code := actual.code, staticSites := actual.staticSites })
     (descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd)
@@ -26,6 +41,7 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     by simpa only using congrArg Method.returnsValue metadata,
     by simpa only using congrArg Method.locals metadata,
     by simpa only using congrArg Method.localKinds metadata,
+    by simpa only using congrArg Method.opaqueVectorLocals metadata,
     by simpa only using congrArg Method.vectorArgs metadata,
     by simpa only using congrArg Method.parameterHomes metadata, descriptors, ?_, ?_⟩
   · by_cases zero : lower = 0

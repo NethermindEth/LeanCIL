@@ -1,5 +1,14 @@
 import CIL.Safety.StepComposition
 
+/-!
+# Loop termination by measure
+
+Proves termination of a loop in the checked interpreter without fuel bounds or unrolling:
+an invariant over loop cutpoints and a strictly decreasing natural measure, where each
+iteration is a `LoopSegment` of actual execution (built with the stepping tactics), yield a
+successful run that satisfies the postcondition.
+-/
+
 namespace CIL.Safety
 
 /-- A loop cutpoint includes the checked frame, stack and memory. -/
@@ -9,6 +18,7 @@ structure LoopState where
   stack : List Value
   memory : Memory
 
+/-- Runs the checked interpreter from this cutpoint with the given fuel. -/
 def LoopState.run (state : LoopState) (program : CIL.Program) (method : Nat)
     (args : List Value) (fuel : Nat) :=
   Safety.run program fuel method state.pc args state.frame state.stack state.memory
@@ -19,9 +29,11 @@ def LoopSegment (program : CIL.Program) (method : Nat) (args : List Value)
     (source target : LoopState) (cost : Nat) : Prop :=
   ∀ fuel, source.run program method args (fuel + cost) = target.run program method args fuel
 
+/-- Some fuel runs the method from `state` to a successful return satisfying `post`. -/
 def LoopTerminates (program : CIL.Program) (method : Nat) (args : List Value)
     (post : Memory → List Value → Prop) (state : LoopState) : Prop :=
-  ∃ fuel final values, state.run program method args fuel = .ok (final, values) ∧ post final values
+  ∃ fuel final values,
+    state.run program method args fuel = .ok (final, values) ∧ post final values
 
 /-- An invariant and a strictly decreasing natural measure establish a finite,
     successful checked execution. Exit obligations include the desired postcondition.

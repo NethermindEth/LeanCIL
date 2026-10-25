@@ -25,7 +25,8 @@ theorem add_holds : addContract.Holds addProgram 0 := by
   have readback := write_readback _ _ _ _ _ wrote
   rw [length] at readback
   have store : storeValue m (.address res) (.i64 (x + y)) = .ok stored := by
-    simp only [storeValue, referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
+      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
@@ -33,6 +34,7 @@ theorem add_holds : addContract.Holds addProgram 0 := by
   have lb := load_word64_of_read readB
   refine ⟨10, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
+    observerCount, unspecifiedOperands, CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Calls.Extracted.program [addLib]
@@ -46,8 +48,26 @@ theorem root_composed : rootContract.Holds linked root :=
     (fun j bound => by cases j with | zero => exact addLib_closed | succ => simp at bound)
     (fun j bound _ => by cases j with | zero => exact add_holds | succ => simp at bound)
 
+def relocatedCompletion : CIL.Program :=
+  { code := [.ret], locals := [], returnsValue := false } ::
+    linked.map (CIL.Method.relocate (fun index => index + 1))
+
+theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1) := by
+  have imported : Tests.Imports.Calls.importsAdd linked :=
+    add_holds.relocate (f := linkSlot Tests.Imports.Calls.Extracted.program [addLib] 0)
+      addLib_closed (link_relocates Tests.Imports.Calls.Extracted.program [addLib] (j := 0) (by decide))
+  apply MethodContract.relocateGiven (f := fun index => index + 1)
+    root_given (link_links _ _) imported (Closed.of_check (by decide))
+  intro index bound
+  have found : linked[index]? = some (linked[index]'bound) := List.getElem?_eq_getElem bound
+  change (linked.map (CIL.Method.relocate (fun index => index + 1)))[index]? =
+    some ((linked[index]'bound).relocate (fun index => index + 1))
+  rw [List.getElem?_map, found]
+  rfl
+
 #print axioms add_holds
 #print axioms root_composed
+#print axioms root_prefix_relocated
 
 end Tests.Linking.Calls
 
@@ -105,6 +125,23 @@ theorem root_composed : rootContract.Holds linked root :=
     (fun j bound => by cases j with | zero => exact percentLib_closed | succ => simp at bound)
     (fun j bound _ => by cases j with | zero => exact percent_holds | succ => simp at bound)
 
+def relocatedCompletion : CIL.Program :=
+  { code := [.ret], locals := [], returnsValue := false } ::
+    linked.map (CIL.Method.relocate (fun index => index + 1))
+
+theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1) := by
+  have imported : Tests.Imports.Outcomes.importsPercent linked :=
+    percent_holds.relocate (f := linkSlot Tests.Imports.Outcomes.Extracted.program [percentLib] 0)
+      percentLib_closed (link_relocates Tests.Imports.Outcomes.Extracted.program [percentLib] (j := 0) (by decide))
+  apply OutcomeContract.relocateGiven (f := fun index => index + 1)
+    root_given (link_links _ _) imported (Closed.of_check (by decide))
+  intro index bound
+  have found : linked[index]? = some (linked[index]'bound) := List.getElem?_eq_getElem bound
+  change (linked.map (CIL.Method.relocate (fun index => index + 1)))[index]? =
+    some ((linked[index]'bound).relocate (fun index => index + 1))
+  rw [List.getElem?_map, found]
+  rfl
+
 /-- The relocated helper's exception reaches `Root` through two relocated calls. -/
 example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "System.ArgumentOutOfRangeException" :=
   root_composed.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
@@ -116,5 +153,6 @@ example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map (fun body => bo
 #print axioms check_holds
 #print axioms percent_holds
 #print axioms root_composed
+#print axioms root_prefix_relocated
 
 end Tests.Linking.Outcomes

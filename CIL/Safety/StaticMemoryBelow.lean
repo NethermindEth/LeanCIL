@@ -1,6 +1,14 @@
 import CIL.Safety.MemoryBelow
 import CIL.Safety.StaticMemoryLemmas
 
+/-!
+# Static resolution keeps older memory
+
+Resolving a readonly static either returns a cached binding unchanged or allocates fresh
+storage, so `MemoryBelow` holds at the memory's next identity. Callers use this to carry
+facts about existing allocations across a static load.
+-/
+
 namespace CIL.Safety
 
 /-- Resolving a readonly static field may allocate its storage, but cannot
@@ -32,7 +40,8 @@ theorem staticReference_preserves_memory_below (descriptor : CIL.StaticDescripto
         simpa [different] using retained.cells other old offset
       · intro other old offset writing
         have different : other ≠ id := by rw [fresh]; exact Nat.ne_of_lt old
-        simpa [permitted, viewContains, Ne.symm different] using retained.permissions other old offset writing
+        simpa [permitted, viewContains, Ne.symm different] using
+          retained.permissions other old offset writing
 
 #print axioms staticReference_preserves_memory_below
 end CIL.Safety

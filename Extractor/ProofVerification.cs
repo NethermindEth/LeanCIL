@@ -171,17 +171,24 @@ partial class Program
     internal static void VerifyArtifacts(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
-            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory]");
+            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]");
 
         var output = Path.GetFullPath(args[0]);
         string? proof = null;
         string? theorem = null;
         var fresh = false;
         string? proofRoot = null;
+        bool forceFull = false;
+        Dictionary<string, string> fullArtifacts = new(StringComparer.Ordinal);
 
         for (var index = 1; index < args.Length; index++)
         {
             var option = args[index];
+            if (option == "--force-full-verify" && !forceFull)
+            {
+                forceFull = true;
+                continue;
+            }
             if (option == "--fresh" && !fresh)
             {
                 fresh = true;
@@ -192,6 +199,12 @@ partial class Program
 
             switch (option)
             {
+                case "--full-artifact":
+                    string[] artifact = args[index].Split('=', 2);
+                    if (artifact.Length != 2 || string.IsNullOrWhiteSpace(artifact[0]) || string.IsNullOrWhiteSpace(artifact[1]) ||
+                        !fullArtifacts.TryAdd(artifact[0], Path.GetFullPath(artifact[1])))
+                        throw new ArgumentException("--full-artifact requires unique Lib=directory values.");
+                    break;
                 case "--proof-root" when proofRoot is null:
                     proofRoot = Path.GetFullPath(args[index]);
                     break;
@@ -232,6 +245,8 @@ partial class Program
             }
 
             File.Delete(reportPath);
+            if (fullArtifacts.Count > 0 && !forceFull)
+                throw new ArgumentException("--full-artifact requires --force-full-verify.");
             FailureReports.Delete(output);
             proof ??= Path.Combine(output, "Proof.lean");
             theorem ??= "ExampleProof.correctness";
@@ -251,7 +266,10 @@ partial class Program
             var identity = manifest.GetProperty("assemblyIdentity").GetString()!;
             var entry = manifest.GetProperty("entry").GetString()!;
 
-            using var verification = new Program { freshLibrary = fresh };
+            using Program verification = new() { freshLibrary = fresh || forceFull, forceFullVerification = forceFull };
+            if (forceFull) verification.fullImportAudit = (artifact, session, module, leanPath) =>
+                verification.VerifyFullImports(artifact, session, module, theorem, leanPath, fullArtifacts);
+            if (forceFull) verification.PreflightFullImports(output, fullArtifacts);
             var report = proofRoot is null
                 ? verification.Verify(assembly, identity, entry, proof, output,
                     theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: value => stage = value)
@@ -267,7 +285,18 @@ partial class Program
                 foreach (var name in staticValues.EnumerateArray())
                     Console.WriteLine($"  Caller assumption: {name.GetString()} keeps the value its static constructor stored.");
             foreach (string assumption in ContractImportAssumptions(manifest))
-                Console.WriteLine("  Conditional verification: assumes " + assumption + "; implementation contracts are not discharged by hashes or certification records.");
+                Console.WriteLine(report.compositionTheorem is null
+                    ? "  Conditional verification: assumes " + assumption + "; implementation contracts are not discharged by hashes or certification records."
+                    : "  Original caller premise: " + assumption + "; discharged in " + report.compositionTheorem + ".");
+            foreach (PublishedImport import in report.imports ?? [])
+            {
+                Console.WriteLine("  Imported contract accepted via " + import.acceptedVia + ": " + import.identity);
+                Console.WriteLine("  Published certification (unauthenticated sidecar record, sidecar SHA-256 " + import.sidecarSha256 + "): " +
+                    import.certificationTheorem + " : " + import.certificationStatement);
+                Console.WriteLine("  Deployment obligation: " + import.deploymentObligation);
+            }
+            if (report.compositionTheorem is not null)
+                Console.WriteLine("  Independently composed theorem: " + report.compositionTheorem);
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
             var refuted = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);

@@ -25,6 +25,10 @@
   "certifications": [{
     "identity": "ImportFixture.Lib, Version=0.1.0.0, Culture=neutral, PublicKeyToken=null::System.UInt64 ImportFixture.Library::AddOne(System.UInt64)",
     "profile": "scalar",
+    "theorem": "PublishedLibrary.certification",
+    "statement": "PublishedLibrary.addOne.Holds PublishedLibrary.program 0",
+    "statementDigest": "d1cd506356c7b08275eb5c97be31d2d8ee57840aba24e392fa0601d5d1c63085",
+    "staticIdentities": [],
     "implementationSha256": "IMPLEMENTATION",
     "interfaceDigest": "INTERFACE",
     "closureDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"

@@ -19,7 +19,7 @@ theorem correctness (x : W64) (fits : x.toNat < 2^32) :
     rw [ite_eq_left range]
     rfl
   let args : List CIL.Safety.Value := [.scalar (.i64 x)]
-  let frame : Frame := ⟨0, [], [], []⟩
+  let frame : Frame := ⟨0, [], [], [], 0⟩
   have loaded : CIL.Safety.step Extracted.method0 (.arg 0) 0 args frame [] Examples.empty =
       .ok (.next 1 [.scalar (.i64 x)] frame Examples.empty) := rfl
   have converted : CIL.Safety.step Extracted.method0 (.checkedConvert 32 false true) 1 args frame

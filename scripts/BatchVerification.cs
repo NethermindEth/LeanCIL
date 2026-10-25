@@ -26,12 +26,28 @@ partial class Program
         }
     }
 
+    static void ExtractGeneratedBatch(string mode, string identity, IReadOnlyList<GeneratedVerification> requests,
+        string profile)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "leancil-extractions-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(requests.Select(request => new
+            {
+                assembly = request.Assembly, identity, entry = request.Entry, output = request.Output, profile
+            })));
+            Run(["dotnet", ExtractorPath, "generated-extraction-batch", mode, path]);
+        }
+        finally { File.Delete(path); }
+    }
+
     void VerifyGeneratedBatch(string assembly, string identity, IReadOnlyList<GeneratedVerification> requests,
         string profile = "scalar")
     {
         if (requests.Count == 0) return;
         assembly = Path.GetFullPath(assembly);
-        requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof), Output = Path.GetFullPath(r.Output),
+        requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof),
+            Output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(r.Output)),
             Assembly = Path.GetFullPath(r.Assembly ?? assembly) }).ToArray();
         if (requests.Select(r => Path.GetFullPath(r.Output)).Distinct(StringComparer.OrdinalIgnoreCase).Count() != requests.Count)
             throw new ArgumentException("Batch outputs must be distinct");
@@ -42,13 +58,9 @@ partial class Program
             Directory.CreateDirectory(request.Output);
             File.Delete(Path.Combine(request.Output, "verified.json"));
         }
-        if (!extractorBuilt)
-        {
-            Run(["dotnet", "build", "Extractor", "-c", "Release",
-                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
-            extractorBuilt = true;
-        }
-        var before = requests.Select(r => Inputs(r.Proof)).ToArray();
+        EnsureExtractorBuilt();
+        var commonBefore = CommonInputs();
+        var before = requests.Select(r => Inputs(commonBefore, r.Proof)).ToArray();
         var session = Library(before[0]);
         var imports = new SortedSet<string>(StringComparer.Ordinal);
         string Body(string source)
@@ -62,10 +74,12 @@ partial class Program
         }
         var bodies = new StringBuilder();
         var hashes = new string[requests.Count];
+        ExtractGeneratedBatch("extract", identity, requests, profile);
         for (var i = 0; i < requests.Count; i++)
         {
             var request = requests[i];
-            Run(Extract("extract", request.Assembly!, identity, request.Entry, request.Output, profile));
+            if (HasContractImports(ExtractionIdentity.Read(request.Output)))
+                throw new InvalidDataException("Generated batch verification does not support contract imports.");
             hashes[i] = Sha(Path.Combine(request.Output, "identity.json"));
             bodies.AppendLine($"namespace BatchCase{i}");
             bodies.AppendLine(Body(File.ReadAllText(Path.Combine(request.Output, "Extracted.lean"))));
@@ -96,36 +110,39 @@ partial class Program
             var batchSource = string.Join("\n", imports.Select(n => "import " + n)) + "\n" + bodies;
             var source = Path.Combine(fresh, "Batch.lean");
             File.WriteAllText(source, batchSource);
-            var auditSource = new StringBuilder("import Batch\n");
-            for (var i = 0; i < requests.Count; i++)
-            {
-                var theorem = $"BatchCase{i}.{requests[i].Theorem}";
-                auditSource.AppendLine(ExtractionAuditSource.Replace("import Extracted", "", StringComparison.Ordinal)
-                    .Replace("Extracted.", $"BatchCase{i}.Extracted.", StringComparison.Ordinal)
-                    .Replace("ExtractionAudit.valid", $"BatchCase{i}.ExtractionAudit.valid", StringComparison.Ordinal));
-                auditSource.AppendLine($"run_cmd do\n  match (← Lean.getEnv).find? `{theorem} with\n  | some (.thmInfo _) => pure ()\n  | _ => throwError \"Expected a theorem\"\n#print axioms {theorem}");
-            }
-            File.WriteAllText(Path.Combine(fresh, "BatchAudit.lean"), auditSource.ToString());
+            // Building the batch runs its proofs' code; the library must survive it unchanged.
+            var bound = OleanHashes(fresh, session);
             Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "Batch.olean"), source],
                 leanPath: leanPath, progress: $"Checking {requests.Count} generated fixtures");
-            var audit = Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "BatchAudit.olean"), Path.Combine(fresh, "BatchAudit.lean")],
-                leanPath: leanPath, progress: $"Auditing {requests.Count} generated fixtures");
-            Run([checker, "Batch", "BatchAudit"], leanPath: leanPath, progress: $"Kernel replay of {requests.Count} generated fixtures");
+            var built = OleanHashes(fresh, session);
+            RequireOnlyAdded(bound, built, "Batch");
+            Run([checker, "Batch"], leanPath: leanPath, progress: $"Kernel replay of {requests.Count} generated fixtures");
+            var audited = AuditOleans(leanPath, ["Batch"], [.. Enumerable.Range(0, requests.Count).SelectMany(i => new[] {
+                ProofTheorem($"BatchCase{i}.{requests[i].Theorem}"),
+                ExtractionCertificate($"BatchCase{i}.Extracted.translation_valid", $"BatchCase{i}.") })]);
+            if (!Same(built, OleanHashes(fresh, session)))
+                throw new InvalidOperationException("Compiled artifacts changed during verification");
+            RequireAuditedModule(audited, "Batch", Path.Combine(fresh, "Batch.olean"));
+            ExtractGeneratedBatch("check", identity, requests, profile);
+            // Every input is checked after the last subprocess, including inputs for earlier fixtures.
+            var commonAfter = CommonInputs();
             var reports = new Report[requests.Count];
             for (var i = 0; i < requests.Count; i++)
             {
                 var request = requests[i];
                 var theorem = $"BatchCase{i}.{request.Theorem}";
-                var axioms = AuditedAxioms(audit, theorem);
-                AuditedAxioms(audit, $"BatchCase{i}.ExtractionAudit.valid");
-                Run(Extract("check", request.Assembly!, identity, request.Entry, request.Output, profile));
-                if (!Same(before[i], Inputs(request.Proof)) || hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
+                var axioms = AuditedAxioms(audited.theorems[2 * i]);
+                AuditedAxioms(audited.theorems[2 * i + 1]);
+                if (!Same(before[i], Inputs(commonAfter, request.Proof)) ||
+                    hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
                     throw new InvalidOperationException("Batch inputs changed during verification");
                 var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
-                reports[i] = new Report(3, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, audit, before[i],
-                    libraryKey, libraryBuild, audit, initializedTypes, Sha(source), theorem, staticValues: StaticValueAssumptions(extraction));
+                reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
+                    libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(source), theorem,
+                    staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction),
+                    contractDependencies: DeploymentDependencies(extraction));
             }
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)

@@ -9,7 +9,7 @@ namespace ExampleProof
 def inputs (lower upper divisor : W64) : List CIL.Safety.Value :=
   [.scalar (.i64 lower), .scalar (.i64 upper), .scalar (.i64 divisor)]
 
-def frame : Frame := ⟨0, [], [], []⟩
+def frame : Frame := ⟨0, [], [], [], 0⟩
 
 theorem run_fault {fuel pc : Nat} {op : CIL.Op} {args stack : List CIL.Safety.Value}
     {fault : ExecutionFault} (instructionFound : Extracted.method0.code[pc]? = some op)

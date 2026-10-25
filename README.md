@@ -84,7 +84,7 @@ Verified: ExampleProof.correctness
           BitVec.toNat result = (BitVec.toNat x + BitVec.toNat y) % 2 ^ 64
 ```
 
-Every invocation checks the proof afresh. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
+Every invocation validates the request's identity and required proof evidence. Authenticated caches can reuse unchanged certified builds; source/hash checks, audits and required kernel replay still apply. Use `--fresh` to disable local verification reuse. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
 List the methods of an assembly with `leancil list`, and check that generated files still match
 the assembly and extraction settings without running Lean with `leancil check`:
@@ -145,10 +145,12 @@ To prove another method, supply a unique method selector, write a Lean file impo
 | --- | --- |
 | `leancil list` | List canonical method signatures to copy into `extract` |
 | `leancil extract` | Validate a method and its reachable calls and generate `Extracted.lean` |
+| `leancil workspace` | Create an editable Lean package for one method/profile, with pinned imports and PDB symbols |
 | `leancil blockers` | Report what blocks extraction for listed method and profile pairs, without proofs |
 | `leancil check` | Regenerate the extraction in memory and compare it with the saved files |
 | `leancil verify` | Check, kernel-replay and audit a proof, then write `verified.json` |
 | `leancil verify-batch` | Verify many requests against one consumer snapshot |
+| `leancil audit-library` | Replay a Lake package and audit the axioms of every theorem under namespace prefixes ([details](docs/CONSUMERS.md#library-audits)) |
 
 All commands exit with code `0` on success. Failures print a diagnostic to standard error and exit with code `1`. Failed checks and verification attempts start with `Invalid:` and produce no standard output. For example, if the generated Lean file has been edited:
 
@@ -162,6 +164,17 @@ The [command-line reference](docs/CLI.md) covers method selectors, assembly iden
 settings, profiles, initialization assumptions and diagnostics.
 
 ## Consumer packages and batches
+
+For an editor workspace with the selected extraction, pinned imports and portable PDB symbols:
+
+```sh
+leancil workspace path/to/Nethermind.Int256.dll 'Nethermind.Int256.UInt256::get_IsZeroOrOne()' --profile scalar --proof proofs/IsZeroOrOne.lean --proof-root . --assume-initialized Nethermind.Int256.UInt256
+```
+
+The consumer package and proof must already exist. Reopening checks for stale assembly,
+profile, symbols and dependency inputs while preserving editor proof edits.
+**Editor checking is not a certificate**; copy the edited proof back and run ordinary
+`verify`. See [proof-authoring workspaces](docs/CONSUMERS.md#proof-authoring-workspace).
 
 For proofs split across a consumer's own Lean modules, pass the Lake package root:
 
@@ -207,6 +220,13 @@ For symbolic branches or memory operations, supply the proved conditions with
 store fact may state its value in source form. Loop segments use
 `CIL.Safety.LoopAutomation` and still require an invariant and a decreasing measure.
 
+`CodeAt` facts let the tactics resolve instructions within a known code segment without
+expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
+tracks local stores and updated snapshots. Supported forwarder bodies can inherit a
+callee's proved contract, and embedding proofs can ignore trailing unread byref or
+pointer locals. Contract refinement derives a public interface from a stronger proved
+contract; that interface can be exported and imported by callers.
+
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter
 expansion. See [proof automation validation](docs/VALIDATION.md#proof-automation)
@@ -226,23 +246,28 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | --- | --- | --- |
 | `ldc.i4` and its short forms, `ldc.i8`, `dup`, `pop` | Complete within the admitted model | Integer constants and supported stack values |
 | Argument/local loads and stores, `ldloca` | Partial | Admitted types; no address of a managed-reference local |
-| `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
-| Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons; termination requires a separate proof |
+| `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; wrapping arithmetic, with checked variants listed separately; no floating-point arithmetic |
+| Checked reference offsets, differences and unsigned ordering | Partial | Allocation-relative references; differences and ordering require live references within one allocation; no numeric address fabrication |
+| Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons and checked reference null/equality tests; termination requires a separate proof |
 | `call`, `ret` | Partial | Acyclic static/struct instance methods, concrete generic-method specializations and explicitly modelled runtime calls |
 | `ldtoken` | Partial | A type in a decided closed `typeof(A) == typeof(B)` or `!=` test, which folds to a constant, or a static data field for a `ReadOnlySpan<T>` table |
-| Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda`, `ldsfld` | Partial | Checked references, validated integer/aggregate layouts, restricted static data and static readonly struct values fixed by the static constructor |
+| Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda`, `ldsfld` | Partial | Checked references, validated integer/aggregate layouts, restricted static data and static readonly integer, enum or struct values fixed by the static constructor |
 | `initblk`, `cpblk`, `unaligned.` | Partial | Checked managed references, 32-bit byte counts and validated alignment prefixes; overlapping block copies rejected |
 | `switch`, `sizeof` | Partial | Forward jump tables and validated integer and reference-free aggregate sizes |
-| `newobj` | Partial | Validated reference-free struct constructors, composable through constructor contracts, and the modelled byte-span constructor; no class allocation |
+| `newobj` | Partial | Validated reference-free struct constructors, composable through constructor contracts, and primitive span pointer constructors over checked storage; no class allocation |
 | `throw` | Partial | Only `throw new E(...)` of a runtime exception with string or null arguments, as a located fault; no handlers |
 | Argument storage | Partial | Parameter assignment and addressing, shared aliases, narrow/native storage and frame lifetime checks |
 | Native integers | Partial | `nint`/`nuint` signatures, locals, fields, memory, casts, arithmetic and `sizeof` on validated 64-bit targets |
 | Checked integer conversions | Partial | Integer inputs; signed/unsigned bounds, narrow extension and native-width destinations |
 | Checked integer arithmetic | Partial | Signed/unsigned 32-/64-bit add, subtract and multiply; explicit overflow faults |
 | Integer division and remainder | Partial | Signed/unsigned 32-/64-bit operands; explicit zero-divisor and overflow faults |
-| All other opcodes | Unsupported | Includes `callvirt`, arrays and instruction prefixes |
+| `constrained.` + `callvirt` | Partial | Concrete same-assembly structs, including direct interface implementations; checked static target resolution, no boxing |
+| `localloc` / `stackalloc` | Partial | Bounded frame-owned storage with explicit resource quota, initialization and lifetime checks; primitive pointer and span views |
+| `ldlen`, integer `ldelem.*` / `stelem.*`, typed `ldelem` / `stelem` | Partial | Supplied primitive integer arrays over checked storage; null/bounds checks, initialized reads and appropriate access authority; no array allocation |
+| `ldelema`, `readonly.` + `ldelema` | Partial | Matching primitive element types; references retain allocation lifetime and readonly restrictions through locals, calls and returns; address formation grants no access authority |
+| All other opcodes | Unsupported | Includes unconstrained `callvirt`, `newarr`, reference/floating-point array elements and unsupported instruction prefixes |
 
-The extractor rejects unmodelled instructions, recursive managed calls, exception handling, class instance/virtual dispatch, managed object construction, reference-bearing aggregates, general arrays, unsupported packing, floating-point arithmetic, arbitrary external calls, static constructors, and unsupported signatures. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
+The extractor rejects unmodelled instructions, recursive managed calls, exception handling, class instance/virtual dispatch, managed object construction, reference-bearing aggregates, array operations outside the supplied primitive-integer subset, unsupported packing, floating-point arithmetic, arbitrary external calls, general static-constructor execution, and unsupported signatures. Supplied arrays do not model GC object layouts. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
 
 The memory model checks allocation identity, liveness, bounds, byte permissions, initialization, alignment and GC-sensitive intervals. It supports overlap and distinct private frames. It does not prove JIT/compiler correctness, concurrency, GC implementation correctness, OS memory behaviour or arbitrary .NET runtime equivalence. See [soundness and trusted base](docs/SOUNDNESS.md) for the precise boundary.
 

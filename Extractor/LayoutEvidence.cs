@@ -22,7 +22,7 @@ internal sealed class LayoutEvidence(TypeReference[] types, string architecture 
                 if (MetadataValidation.IsAggregate(field.Type, type.Module)) Include(field.Type);
             ordered.Add(type);
         }
-        foreach (var entry in entries) Include(entry);
+        foreach (TypeReference entry in entries.OrderBy(Identity, StringComparer.Ordinal)) Include(entry);
         return [.. ordered];
     }
 
@@ -30,6 +30,8 @@ internal sealed class LayoutEvidence(TypeReference[] types, string architecture 
         ? assembly.FullName : type.Module.Assembly.Name.FullName;
 
     internal static string Identity(TypeReference type) => Scope(type) + "::" + type.FullName;
+
+    internal string[] Identities => rawTypes.Select(Identity).ToArray();
 
     internal int Index(TypeReference type) => Array.FindIndex(rawTypes, entry => entry.FullName == type.FullName);
 
@@ -63,6 +65,7 @@ internal sealed class LayoutEvidence(TypeReference[] types, string architecture 
                 $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
             return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
                 (metadata.IsAutoLayout ? "auto := true, " : "") +
+                $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(implementation => JsonSerializer.Serialize(Identity(implementation.InterfaceType))))}], " +
                 $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
         })));
         lean.AppendLine("]");

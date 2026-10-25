@@ -6,17 +6,19 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-internal static class Program
+internal static partial class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory]\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
-    static int Main(string[] args)
+    static int Main(string[] args) => Run(args);
+
+    static int Run(string[] args, ExtractionBatch? batch = null)
     {
         if (args.Length == 0 || args is ["--help"] or ["-h"])
         {
-            Console.WriteLine(Usage);
+            Console.WriteLine(Usage + "\n       " + ImportResolver.Usage["Usage: ".Length..]);
             return 0;
         }
 
@@ -24,6 +26,22 @@ internal static class Program
         var stage = "arguments";
         try
         {
+            if (args[0] == "generated-extraction-batch")
+            {
+                stage = "extraction batch";
+                return RunExtractionBatch(args[1..]);
+            }
+            if (args[0] == "resolve-imports")
+            {
+                stage = "import resolution";
+                return ImportResolver.Run(args[1..]);
+            }
+            if (args[0] == "workspace")
+            {
+                stage = "editor workspace";
+                global::Program.CreateProofWorkspace(args[1..]);
+                return 0;
+            }
             if (args[0] == "list")
             {
                 if (args.Length != 2)
@@ -48,16 +66,21 @@ internal static class Program
                 stage = "admission report";
                 return Blockers.Run(args[1..]);
             }
-            if (args[0] == "workspace")
+            if (args[0] == "export-contracts")
             {
-                stage = "editor workspace";
-                global::Program.CreateProofWorkspace(args[1..]);
+                stage = "contract export";
+                global::Program.ExportContracts(args[1..]);
                 return 0;
             }
             if (args[0] == "verify-batch")
             {
                 stage = "proof selection";
                 return global::Program.VerifyBatch(args[1..]);
+            }
+            if (args[0] == "audit-library")
+            {
+                stage = "library audit";
+                return global::Program.AuditLibrary(args[1..]);
             }
             if (args[0] == "verify")
             {
@@ -70,6 +93,7 @@ internal static class Program
             string? expectedAssembly = null;
             string? assemblyOverride = null;
             List<string> importPaths = [];
+            List<string> entryTypeArguments = [];
             Dictionary<string, string> implementationPaths = new(StringComparer.Ordinal);
             Dictionary<string, string> importHashes = new(StringComparer.Ordinal);
             Dictionary<string, string> interfaceHashes = new(StringComparer.Ordinal);
@@ -89,9 +113,16 @@ internal static class Program
                             throw new ArgumentException(option + " requires Lib=<value>.");
                         Dictionary<string, string> selected = option == "--import-sha256" ? importHashes :
                             option == "--import-interface-sha256" ? interfaceHashes : implementationPaths;
-                        if (!selected.TryAdd(args[index][..separator], args[index][(separator + 1)..]))
+                        string value = args[index][(separator + 1)..];
+                        if (!selected.TryAdd(args[index][..separator], selected == implementationPaths ? value : value.ToLowerInvariant()))
                             throw new ArgumentException("Duplicate " + option + " assembly.");
                     }
+                }
+                else if (args[index] == "--type-argument")
+                {
+                    if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
+                        throw new ArgumentException("--type-argument requires a closed primitive full type name.");
+                    entryTypeArguments.Add(args[index]);
                 }
                 else if (args[index] == "--assume-initialized")
                 {
@@ -137,43 +168,61 @@ internal static class Program
                     throw new InvalidDataException("Initialization assumptions differ from the recorded extraction.");
                 initializedTypes.UnionWith(names);
             }
-            if (recorded is { } existing && existing.GetProperty("schema").GetInt32() is not (2 or 3))
+            if (recorded is { } existing && existing.GetProperty("schema").GetInt32() != 3)
                 throw new InvalidDataException("Unsupported extraction manifest schema; run leancil extract again.");
             var assemblyPath = recordedCheck
                 ? assemblyOverride ?? Path.GetFullPath(recorded!.Value.GetProperty("assemblyPath").GetString()!, output)
                 : positional[0];
-            var entry = recordedCheck ? recorded!.Value.GetProperty("entry").GetString()! : positional[1];
+            string entry = recordedCheck ? (recorded!.Value.TryGetProperty("entryDefinition", out JsonElement definition) ?
+                definition.GetString()! : recorded.Value.GetProperty("entry").GetString()!) : positional[1];
+            if (recorded is { } priorSelection && priorSelection.TryGetProperty("entryTypeArguments", out JsonElement savedArguments))
+            {
+                string[] saved = savedArguments.Deserialize<string[]>() ?? throw new InvalidDataException("Missing closed entry arguments.");
+                if (entryTypeArguments.Count > 0 && !entryTypeArguments.SequenceEqual(saved, StringComparer.Ordinal))
+                    throw new InvalidDataException("Closed entry arguments differ from the recorded extraction.");
+                entryTypeArguments = saved.ToList();
+            }
             FeatureProfile profile = recordedCheck
                 ? recorded!.Value.GetProperty("profile").Deserialize<FeatureProfile>() ?? throw new InvalidDataException("Missing execution profile")
                 : FeatureProfile.Select(positional.Count == 4 ? positional[3] : "scalar");
             stage = "assembly loading";
-            byte[] assembly = File.ReadAllBytes(assemblyPath);
+            var assemblySnapshot = batch?.ReadAssembly(assemblyPath);
+            byte[] assembly = assemblySnapshot?.Bytes ?? File.ReadAllBytes(assemblyPath);
             stage = "metadata and CIL validation";
-            VectorSignatures.Validate(assembly);
-            using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+            if (assemblySnapshot is null) VectorSignatures.Validate(assembly);
+            else assemblySnapshot.ValidateSignatures();
+            using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false));
             var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
             List<ImportResolution.Source> importSources = [];
+            if (recorded is { } recordedGraph && recordedGraph.TryGetProperty("importGraph", out JsonElement graphNodes))
+                foreach (JsonElement node in graphNodes.EnumerateArray())
+                {
+                    string name = AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name;
+                    string sidecar = global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("sidecarPath").GetString()!);
+                    string implementation = implementationPaths.GetValueOrDefault(name) ??
+                        global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
+                    string expected = importHashes.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
+                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
+                        (node.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
+                            throw new InvalidDataException("Import graph has no independent interface digest; extract again with --import-interface-sha256."));
+                    importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
+                }
             if (recorded is { } recordedImports && recordedImports.TryGetProperty("imports", out JsonElement importRecords))
                 foreach (JsonElement binding in importRecords.EnumerateArray())
                 {
-                    string sidecar = binding.GetProperty("sidecarPath").GetString()!;
+                    string sidecar = global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("sidecarPath").GetString()!);
                     if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
                     string name = AssemblyNameReference.Parse(binding.GetProperty("identity").GetString()!.Split("::", 2)[0]).Name;
-                    string implementation = implementationPaths.GetValueOrDefault(name) ?? binding.GetProperty("implementationPath").GetString()!;
+                    string implementation = implementationPaths.GetValueOrDefault(name) ??
+                        global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("implementationPath").GetString()!);
                     string expected = importHashes.GetValueOrDefault(name) ?? binding.GetProperty("implementationSha256").GetString()!;
                     string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
-                        (binding.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
+                        (binding.TryGetProperty("interfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import extraction has no independent interface digest; extract again with --import-interface-sha256."));
                     importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
                 }
-            foreach (AssemblyNameReference reference in module.AssemblyReferences)
-            {
-                string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
-                if (File.Exists(discovered) && !importPaths.Contains(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
-                    importPaths.Add(discovered);
-            }
             foreach (string sidecar in importPaths.Distinct(StringComparer.Ordinal))
             {
                 if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
@@ -184,21 +233,36 @@ internal static class Program
                     Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, name + ".dll"));
                 importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
             }
+            // check replays only the recorded import graph; sidecars appearing after extraction are outside it.
+            foreach (AssemblyNameReference reference in recorded is null ? module.AssemblyReferences : [])
+            {
+                string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
+                if (File.Exists(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
+                    importSources.Add(new(discovered, Path.GetFullPath(implementationPaths.GetValueOrDefault(reference.Name) ??
+                        Path.Combine(Path.GetDirectoryName(discovered)!, reference.Name + ".dll")),
+                        importHashes.GetValueOrDefault(reference.Name) ?? "", interfaceHashes.GetValueOrDefault(reference.Name) ?? "", Discovered: true));
+            }
             using ImportResolution imports = new(importSources);
             stage = "metadata and CIL validation";
-            MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports);
+            MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports,
+                typeArguments: entryTypeArguments.ToArray(), importedByref: type => imports.ValidateByref(type, profile));
+            StaticIdentityRecord[] staticIdentities = LeanEmitter.StaticIdentities(methods, profile);
+            imports.ValidateStatics(staticIdentities);
             string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            var assemblyHash = assemblySnapshot?.Hash ?? Hash(assembly);
+            var extractorHash = batch?.ExtractorHash ?? Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location));
             if (recorded is { } prior)
             {
                 stage = "extraction integrity";
-                if (prior.GetProperty("assemblySha256").GetString() != Hash(assembly))
+                if (prior.GetProperty("assemblySha256").GetString() != assemblyHash)
                     throw new InvalidDataException($"Stale or mismatched verification artifact: assembly has changed since extraction.\n  Assembly: {CliPaths.Display(assemblyPath)}");
-                if (prior.GetProperty("extractorSha256").GetString() != Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)))
+                if (prior.GetProperty("extractorSha256").GetString() != extractorHash)
                     throw new InvalidDataException("Stale or mismatched verification artifact: extractor has changed since extraction.");
             }
             stage = "metadata and CIL validation";
-            using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly));
-            string source = LeanEmitter.Emit(methods, profile, originalModule, imports);
+            using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false));
+            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, originalModule, imports, staticIdentities);
+            string source = emitted.Source;
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
                 .Where(i => i.OpCode.Code == Code.Ldsfld)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);
@@ -215,14 +279,26 @@ internal static class Program
             string manifest = JsonSerializer.Serialize(new
             {
                 schema = 3,
-                imports = imports.Bindings.Select(binding => JsonSerializer.SerializeToElement(binding, ContractInterface.Json)),
+                imports = imports.Bindings.Select(binding => JsonSerializer.SerializeToElement(binding with
+                {
+                    ImplementationPath = Path.GetRelativePath(output, binding.ImplementationPath).Replace('\\', '/'),
+                    SidecarPath = Path.GetRelativePath(output, binding.SidecarPath).Replace('\\', '/')
+                }, ContractInterface.Json)),
+                importGraph = imports.Nodes.Select(node => JsonSerializer.SerializeToElement(node with
+                {
+                    SidecarPath = Path.GetRelativePath(output, node.SidecarPath).Replace('\\', '/'),
+                    ImplementationPath = Path.GetRelativePath(output, node.ImplementationPath).Replace('\\', '/')
+                }, ContractInterface.Json)),
                 importModules = importModuleHashes,
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
-                    ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)),
+                    ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)).Replace('\\', '/'),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
-                assemblySha256 = Hash(assembly), entry = methods[0].FullName, profile, initializedTypes, staticValues,
+                assemblySha256 = assemblyHash, entry = methods[0].FullName,
+                entryDefinition = MethodSpecialization.Definition(methods[0]).FullName, entryTypeArguments,
+                layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes, staticValues,
+                staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
-                extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
+                extractorSha256 = extractorHash,
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
                     specialization = MethodSpecialization.Source(m),
                     locals = m.Body.Variables.Select(v => v.VariableType.FullName),
@@ -282,7 +358,7 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            CliDiagnostics.Write(exception, stage, args[0] is "check" or "verify");
+            CliDiagnostics.Write(exception, stage, args[0] is "check" or "verify" or "audit-library");
             return 1;
         }
         return 0;

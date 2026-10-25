@@ -131,7 +131,8 @@ partial class Program
             ConsumerDependency[] dependencies = ConsumerDependencies(settings.ProofRoot);
             string? symbols = File.Exists(Path.Combine(extraction, "Symbols.lean")) ? Sha(Path.Combine(extraction, "Symbols.lean")) : null;
             ConsumerSession prepared = PrepareConsumerSession(staging, settings.ProofRoot, dependencies, inputs, null,
-                extraction, [(WorkspaceProof, settings.Proof, extraction)], symbols, ConsumerSessionPurpose.Editor);
+                ExtractionIdentity.Read(extraction), [(WorkspaceProof, settings.Proof, extraction)], symbols,
+                purpose: ConsumerSessionPurpose.Editor);
             if (!Same(inputs, WorkspaceInputs(settings))) throw new InvalidDataException("Workspace inputs changed during generation.");
             SortedDictionary<string, string> managed = new(StringComparer.Ordinal);
             foreach (string path in prepared.Copied.Keys.Where(path => path != Path.Combine(staging, WorkspaceProof + ".lean")))

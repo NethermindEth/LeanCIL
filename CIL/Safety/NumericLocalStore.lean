@@ -1,6 +1,13 @@
 import CIL.Safety.Frames
 import CIL.Safety.WriteEffects
 
+/-!
+# Storing numeric locals
+
+A checked store of a supported numeric value into a writable typed local home writes its
+bytes (`numberBytes`) and reads them back.
+-/
+
 namespace CIL.Safety
 
 /-- Storing a supported numeric value initializes its entire typed local home. -/
@@ -13,16 +20,17 @@ theorem store_numeric_local {memory : Memory} {reference : Reference}
       storeLocal memory (.bytes kind reference) (.scalar value) =
         .ok (.bytes kind reference, result) ∧
       read result reference (localWidth kind) 1 = .ok (numberBytes number (localWidth kind)) := by
-  have length : (numberBytes number (localWidth kind)).length = localWidth kind := by simp [numberBytes]
+  have length : (numberBytes number (localWidth kind)).length = localWidth kind := by
+    simp [numberBytes]
   obtain ⟨result, written⟩ := write_succeeds (bytes := numberBytes number (localWidth kind))
     (by simpa only [length] using ready)
   have loaded := write_readback _ _ _ _ _ written
   rw [length] at loaded
   refine ⟨result, written, ?_, loaded⟩
   cases value <;> try cases fits
-  all_goals try solve | cases kind <;> simp [localNumber] at fits
-  all_goals simp [storeLocal, fits, written, checkedAt, Except.mapError,
-    Bind.bind, Except.bind, Pure.pure, Except.pure]
+  all_goals try solve | cases kind <;> simp [localNumber, CIL.Value.hasUnspecified] at fits
+  all_goals simp [storeLocal, Value.hasUnspecified, CIL.Value.hasUnspecified, fits, written,
+    checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms store_numeric_local
 

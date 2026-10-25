@@ -53,4 +53,8 @@ example : checkedIntrinsic (.vector (.equalsAll 128))
 
 example : checkedValue memory (.scalar (.snapshot .vector256 cells)) = .error .invalidState := by rfl
 
+-- Access lemmas must stay reachable without CIL.Safety.MethodContract (#253).
+example := @CIL.Safety.read_access
+example := @CIL.Safety.Memory.WellFormed.access_bound
+
 end Tests.ValueBitCasts

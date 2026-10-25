@@ -1,29 +1,44 @@
 import CIL.Safety.StepFlow
 
-/-! A run that starts inside a region closed under control flow never reads code outside it. -/
+/-!
+# Runs confined to a code region
+
+A run that starts inside a region closed under control flow never reads code outside it, so
+two programs that agree on that region run identically from it (`run_congr_region`).
+`regionClosedCheck` decides closure for regions given as method suffixes.
+-/
 
 namespace CIL.Safety
 
-/-- Fallthroughs, code targets and callee entries of every region instruction stay in the region. -/
+/-- Fallthroughs, code targets and callee entries of every region instruction stay in the
+    region. -/
 def RegionClosed (program : CIL.Program) (region : Nat → Nat → Prop) : Prop :=
-  ∀ method pc body op, region method pc → program[method]? = some body → body.code[pc]? = some op →
-    (op.continues = true → region method (pc + 1)) ∧ (∀ target ∈ op.targets, region method target) ∧
+  ∀ method pc body op, region method pc → program[method]? = some body →
+    body.code[pc]? = some op →
+    (op.continues = true → region method (pc + 1)) ∧
+    (∀ target ∈ op.targets, region method target) ∧
     ∀ callee ∈ op.callees, region callee 0
 
-/-- `other` has `program`'s methods with the same metadata and the same instruction at every region pc. -/
+/-- `other` has `program`'s methods with the same metadata and the same instruction at every
+    region pc. -/
 def AgreesOn (program other : CIL.Program) (region : Nat → Nat → Prop) : Prop :=
   other.length = program.length ∧
     ∀ method pc body, region method pc → program[method]? = some body →
-      ∃ body', other[method]? = some body' ∧ body' = { body with code := body'.code } ∧ body'.code[pc]? = body.code[pc]?
+      ∃ body', other[method]? = some body' ∧ body' = { body with code := body'.code } ∧
+        body'.code[pc]? = body.code[pc]?
 
-theorem Op.continues_of_callee {op : CIL.Op} {callee : Nat} (h : op.callees.head? = some callee) :
+/-- An instruction that calls a method also falls through to the next pc. -/
+theorem Op.continues_of_callee {op : CIL.Op} {callee : Nat}
+    (h : op.callees.head? = some callee) :
     op.continues = true := by
   cases op <;> simp_all [CIL.Op.callees, CIL.Op.continues]
 
 private theorem AgreesOn.found {program other : CIL.Program} {region : Nat → Nat → Prop}
     (agrees : AgreesOn program other region) {method pc : Nat} (inside : region method pc) :
-    (program[method]? = none ∧ other[method]? = none) ∨ ∃ body body', program[method]? = some body ∧
-      other[method]? = some body' ∧ body' = { body with code := body'.code } ∧ body'.code[pc]? = body.code[pc]? := by
+    (program[method]? = none ∧ other[method]? = none) ∨
+      ∃ body body', program[method]? = some body ∧
+        other[method]? = some body' ∧ body' = { body with code := body'.code } ∧
+        body'.code[pc]? = body.code[pc]? := by
   cases found : program[method]? with
   | none =>
     refine .inl ⟨rfl, ?_⟩
@@ -33,12 +48,14 @@ private theorem AgreesOn.found {program other : CIL.Program} {region : Nat → N
     obtain ⟨body', other', same, code⟩ := agrees.2 method pc body inside found
     exact .inr ⟨body, body', rfl, other', same, code⟩
 
-/-- Programs that agree on a closed region run identically from any of its pcs, faults included. -/
+/-- Programs that agree on a closed region run identically from any of its pcs, faults
+    included. -/
 theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat → Prop}
     (closed : RegionClosed program region) (agrees : AgreesOn program other region)
     (fuel method pc : Nat) (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (inside : region method pc) :
-    run other fuel method pc args frame stack m = run program fuel method pc args frame stack m := by
+    run other fuel method pc args frame stack m =
+      run program fuel method pc args frame stack m := by
   induction fuel generalizing method pc args frame stack m with
   | zero => rfl
   | succ fuel ih =>
@@ -102,7 +119,8 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
                 | ok value => exact ih method (pc + 1) args frame' _ _ resume
 
 /-- Replacing one method's code keeps agreement where the new code matches the old. -/
-theorem AgreesOn.set {program : CIL.Program} {region : Nat → Nat → Prop} {index : Nat} {body : CIL.Method}
+theorem AgreesOn.set {program : CIL.Program} {region : Nat → Nat → Prop} {index : Nat}
+    {body : CIL.Method}
     (found : program[index]? = some body) (code : List CIL.Op)
     (agree : ∀ pc, region index pc → code[pc]? = body.code[pc]?) :
     AgreesOn program (program.set index { body with code := code }) region := by
@@ -116,24 +134,28 @@ theorem AgreesOn.set {program : CIL.Program} {region : Nat → Nat → Prop} {in
   · exact ⟨candidate, by rw [List.getElem?_set_ne (Ne.symm same), fetched], rfl, rfl⟩
 
 /-- Code that agrees from `lower` on agrees at every pc at or after it. -/
-theorem code_agrees_of_drop {a b : List CIL.Op} {lower pc : Nat} (same : a.drop lower = b.drop lower)
-    (after : lower ≤ pc) : a[pc]? = b[pc]? := by
+theorem code_agrees_of_drop {a b : List CIL.Op} {lower pc : Nat}
+    (same : a.drop lower = b.drop lower) (after : lower ≤ pc) : a[pc]? = b[pc]? := by
   have := congrArg (·[pc - lower]?) same
   simpa only [List.getElem?_drop, Nat.add_sub_cancel' after] using this
 
-/-- Method `method` from pc `lower` on, for each `(method, lower)`; a callee entry needs `lower = 0`. -/
+/-- Method `method` from pc `lower` on, for each `(method, lower)`; a callee entry needs
+    `lower = 0`. -/
 def inStarts (starts : List (Nat × Nat)) (method pc : Nat) : Bool :=
   starts.any fun start => start.1 == method && start.2 ≤ pc
 
-/-- Decides `RegionClosed` for the region `inStarts starts` by scanning each listed suffix once. -/
+/-- Decides `RegionClosed` for the region `inStarts starts` by scanning each listed suffix
+    once. -/
 def regionClosedCheck (program : CIL.Program) (starts : List (Nat × Nat)) : Bool :=
   starts.all fun start => match program[start.1]? with
     | none => true
-    | some body => (List.range body.code.length).all fun pc => !(start.2 ≤ pc) || match body.code[pc]? with
+    | some body => (List.range body.code.length).all fun pc =>
+      !(start.2 ≤ pc) || match body.code[pc]? with
       | none => true
       | some op => (!op.continues || inStarts starts start.1 (pc + 1)) &&
           op.targets.all (inStarts starts start.1) && op.callees.all (inStarts starts · 0)
 
+/-- `regionClosedCheck` is sound for `RegionClosed`. -/
 theorem RegionClosed.of_check {program : CIL.Program} {starts : List (Nat × Nat)}
     (checked : regionClosedCheck program starts = true) :
     RegionClosed program fun method pc => inStarts starts method pc = true := by
@@ -147,7 +169,8 @@ theorem RegionClosed.of_check {program : CIL.Program} {starts : List (Nat × Nat
     decide_eq_false_iff_not, Nat.not_le] at scanned
   rcases scanned pc bound with early | late
   · omega
-  · simp only [fetched, Bool.and_eq_true, Bool.or_eq_true, Bool.not_eq_true', List.all_eq_true] at late
+  · simp only [fetched, Bool.and_eq_true, Bool.or_eq_true, Bool.not_eq_true',
+      List.all_eq_true] at late
     obtain ⟨⟨go, targets⟩, callees⟩ := late
     refine ⟨fun continues => ?_, targets, callees⟩
     rcases go with stop | next

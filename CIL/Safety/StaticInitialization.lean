@@ -1,5 +1,14 @@
 import CIL.Safety.ImmutableMemory
 
+/-!
+# Static initialization preserves the static world
+
+Resolving a static selected from the program's descriptors keeps `StaticWorldValid`: a
+first resolution allocates fresh immutable storage holding exactly the descriptor's bytes
+and registers it, and nothing older changes. `staticReference_valid_result` packages this as
+one success fact for a static load.
+-/
+
 namespace CIL.Safety
 
 theorem initialized_lookup_cells (bytes : List (BitVec 8)) :
@@ -13,6 +22,7 @@ theorem initialized_lookup_cells (bytes : List (BitVec 8)) :
     simp at leftBound
     simp [leftBound]
 
+/-- A first resolution, with no cached binding, returns a valid binding for the descriptor. -/
 theorem staticReference_new_binding_valid (descriptor : CIL.StaticDescriptor) (m result : Memory)
     (reference : Reference)
     (missing : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) = none)
@@ -46,7 +56,8 @@ theorem staticReference_new_binding_valid (descriptor : CIL.StaticDescriptor) (m
       simp [initialized, permitted, viewContains, bound]
     have accessOK : access initialized ⟨id, 0⟩ descriptor.bytes.length 1 false = .ok () := by
       have present : initialized.allocations id = some
-          ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩, true, [descriptor.bytes.length]⟩ := lookup
+          ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩, true,
+            [descriptor.bytes.length]⟩ := lookup
       have position : 0 < descriptor.bytes.length ∨ 0 = descriptor.bytes.length := by omega
       simp [access, form, liveAllocation, present, validPosition,
         nativeLimit, permission, position, Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -58,9 +69,12 @@ theorem staticReference_new_binding_valid (descriptor : CIL.StaticDescriptor) (m
     rw [cells]
     simp [List.map_map, Function.comp_def, Pure.pure, Except.pure]
 
-theorem staticReference_preserves_immutable (descriptor : CIL.StaticDescriptor) (m result : Memory)
-    (reference : Reference) (hm : m.WellFormed)
-    (h : staticReference descriptor m = .ok (result, reference)) : PreservesImmutable m result := by
+/-- Static resolution leaves every existing immutable allocation, its bytes and its read
+    permissions unchanged. -/
+theorem staticReference_preserves_immutable (descriptor : CIL.StaticDescriptor)
+    (m result : Memory) (reference : Reference) (hm : m.WellFormed)
+    (h : staticReference descriptor m = .ok (result, reference)) :
+    PreservesImmutable m result := by
   cases hc : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with
   | some binding =>
     obtain ⟨key, cached⟩ := binding
@@ -89,6 +103,7 @@ theorem staticReference_preserves_immutable (descriptor : CIL.StaticDescriptor) 
       · intro offset
         simpa [permitted, viewContains, different, Ne.symm different] using permissions offset
 
+/-- Resolving one of the world's descriptors keeps the static world valid. -/
 theorem staticReference_preserves_static_world (descriptor : CIL.StaticDescriptor)
     (descriptors : List CIL.StaticDescriptor) (m result : Memory) (reference : Reference)
     (hm : m.WellFormed) (world : StaticWorldValid descriptors m)
@@ -119,24 +134,35 @@ theorem staticReference_preserves_static_world (descriptor : CIL.StaticDescripto
         repeat' first | cases allocation | split at allocation
         rfl
       refine ⟨world.1, world.2.1, ?_, ?_⟩
-      · simp only [List.pairwise_cons, registry]
-        refine ⟨?_, world.2.2.1⟩
-        intro binding member
-        constructor
-        · have absent := List.find?_eq_none.mp hc binding member
-          have notSame : binding.1 ≠ descriptor.identity := by
-            simpa only [beq_iff_eq] using absent
-          exact Ne.symm notSame
-        · obtain ⟨a, present, _, _⟩ := static_registry_fields_live _ _ world binding member
-          rw [fresh.1]
-          exact Ne.symm (Nat.ne_of_lt (hm.1 _ _ present).1)
-      · intro binding member
+      · constructor
+        · simp only [List.pairwise_cons, registry]
+          refine ⟨?_, world.2.2.1.1⟩
+          intro binding member
+          constructor
+          · have absent := List.find?_eq_none.mp hc binding member
+            have notSame : binding.1 ≠ descriptor.identity := by
+              simpa only [beq_iff_eq] using absent
+            exact Ne.symm notSame
+          · obtain ⟨a, present, _, _⟩ := static_registry_fields_live _ _ world binding member
+            rw [fresh.1]
+            exact Ne.symm (Nat.ne_of_lt (hm.1 _ _ present).1)
+        · intro binding member
+          simp only [List.mem_cons, registry] at member
+          rcases member with rfl | member
+          · obtain ⟨_, a, present, live, kind, _, _⟩ := initialized
+            exact ⟨a, present, live, kind⟩
+          · obtain ⟨a, present, live, kind⟩ := world.2.2.1.2 binding member
+            exact ⟨a, (retained _ _ present kind).1, live, kind⟩
+      · intro other selectedOther binding member key
         simp only [List.mem_cons, registry] at member
         rcases member with rfl | member
-        · exact ⟨descriptor, selected, rfl, initialized⟩
-        · obtain ⟨old, oldSelected, key, valid⟩ := world.2.2.2 binding member
-          exact ⟨old, oldSelected, key, retained.binding _ _ valid⟩
+        · have same := world.2.1 other selectedOther descriptor selected key
+          subst other
+          exact initialized
+        · exact retained.binding _ _ (world.2.2.2 other selectedOther binding member key)
 
+/-- In a valid static world, resolving one of its descriptors succeeds, keeps the world valid
+    and returns a valid binding. -/
 theorem staticReference_valid_result (descriptor : CIL.StaticDescriptor)
     (descriptors : List CIL.StaticDescriptor) (m : Memory) (hm : m.WellFormed)
     (world : StaticWorldValid descriptors m) (selected : descriptor ∈ descriptors) :
@@ -148,12 +174,10 @@ theorem staticReference_valid_result (descriptor : CIL.StaticDescriptor)
   cases hc : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with
   | none => exact staticReference_new_binding_valid _ _ _ _ hc success
   | some binding =>
-    obtain ⟨actual, actualSelected, key, valid⟩ :=
-      world.2.2.2 binding (List.mem_of_find?_eq_some hc)
     have found : binding.1 = descriptor.identity := by
       simpa only [beq_iff_eq] using List.find?_some hc
-    have same := world.2.1 actual actualSelected descriptor selected (key.trans found)
-    subst actual
+    have valid :=
+      world.2.2.2 descriptor selected binding (List.mem_of_find?_eq_some hc) found.symm
     obtain ⟨rfl, rfl, _⟩ := cached_static_reference_checked _ _ _ _ _ _ hc success
     exact valid
 

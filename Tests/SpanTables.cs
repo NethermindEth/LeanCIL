@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -12,6 +13,7 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/SpanTables");
 Directory.CreateDirectory(root);
+var queue = new GeneratedQueue(verification, assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.SpanTables")!;
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.Safety.Execution"]);
 
@@ -22,12 +24,12 @@ string Scalar(object value) => value switch
 };
 string Claim(string dll, string name, int[] input, string outcome) =>
     $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => Scalar(v)))}] Examples.empty).map Prod.snd = {outcome}";
-void Prove(string dll, string name, string selector, string folder, IReadOnlyList<string> claims)
+void Prove(string dll, string selector, string folder, IReadOnlyList<string> claims, Action passed)
 {
     var proof = Path.Combine(root, folder + ".lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  and_intros <;> rfl\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, Path.Combine(root, folder));
+    queue.Add(new(selector, proof, Path.Combine(root, folder), Assembly: dll), passed);
 }
 
 // Reads agree with .NET, and an out-of-range index faults at get_Item with the type .NET raises.
@@ -51,8 +53,8 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
             return Claim(assembly, name, input, $".error ⟨{site.Groups[1].Value}, {site.Groups[2].Value}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩");
         }
     }).ToList();
-    Prove(assembly, name, selector, name + "-Verified", claims);
-    Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons");
+    Prove(assembly, selector, name + "-Verified", claims,
+        () => Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons"));
 
     // The receiver fold is bound by the feature certificate, independently of the instruction lemmas.
     if (!source.Contains("(.nop : Op)")) continue;
@@ -76,14 +78,16 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     blob.InitialValue = bytes;
     module.Write(tampered);
 }
-Prove(tampered, "Word", "SpanTables::Word(int)", "Tampered", [Claim(tampered, "Word", [0], ".ok [.scalar (.i32 1891)]")]);
-Console.WriteLine("PASS tampered RVA blob changes the proved word");
+Prove(tampered, "SpanTables::Word(int)", "Tampered",
+    [Claim(tampered, "Word", [0], ".ok [.scalar (.i32 1891)]")],
+    () => Console.WriteLine("PASS tampered RVA blob changes the proved word"));
+queue.Flush();
 
-// Any other use of the span local, or entry into the fold, stays unsupported.
+// Reused locals and computed indexes retain storage; entering an erased receiver is invalid.
 foreach (var (mutation, marker) in new[]
 {
-    ("second-read", "Unsupported span local use"),
-    ("computed-index", "Unsupported span local use"),
+    ("second-read", ""),
+    ("computed-index", ""),
     ("interior-branch", "Branch into a folded span receiver")
 })
 {
@@ -114,9 +118,18 @@ foreach (var (mutation, marker) in new[]
         }
         module.Write(dll);
     }
+    if (marker.Length == 0)
+    {
+        var expected = Scalar(runtime.GetMethod("Word")!.Invoke(null, [0])!);
+        Prove(dll, "SpanTables::Word(int)", "Supported-" + mutation,
+            [Claim(dll, "Word", [0], $".ok [{expected}]")],
+            () => Console.WriteLine("PASS stored static span: " + mutation));
+        continue;
+    }
     var result = Execute(Extract("extract", dll, "Examples", "SpanTables::Word(int)", output));
     if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) || !result.Output.Contains(marker))
         throw new InvalidOperationException("Incorrect span rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
-Console.WriteLine("PASS typed static spans, bounds faults, runtime comparisons, forged receivers and exact-pattern rejection");
+queue.Flush();
+Console.WriteLine("PASS typed static spans, bounds faults, reused locals, computed indexes and forged receivers");

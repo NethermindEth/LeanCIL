@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Numerics;
 using System.Reflection;
@@ -13,6 +14,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Division");
 Directory.CreateDirectory(root);
 var cases = 0;
+var queue = new GeneratedQueue(verification, assembly);
 
 // The universal contracts use nonzero divisors, with no restriction on dividends.
 foreach (var width in new[] { 32, 64 })
@@ -78,10 +80,13 @@ foreach (var operation in new[] { OpCodes.Div, OpCodes.Div_Un, OpCodes.Rem, OpCo
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
-    verification.Verify(dll, "Examples", selector, proof, output);
-    cases += claims.Count;
-    Console.WriteLine($"PASS {operation.Name} {width}: {claims.Count} runtime comparisons and proofs");
+    queue.Add(new(selector, proof, output, Assembly: dll), () =>
+    {
+        cases += claims.Count;
+        Console.WriteLine($"PASS {operation.Name} {width}: {claims.Count} runtime comparisons and proofs");
+    });
 }
+queue.Flush();
 
 // A different actual implementation must not satisfy the same universal contract.
 var wrongOutput = Path.Combine(root, "WrongQuotient");

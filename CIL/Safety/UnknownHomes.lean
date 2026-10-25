@@ -1,10 +1,20 @@
 import CIL.Safety.FrameProgress
 import CIL.Safety.FrameMemoryBelow
 
+/-!
+# Frames with unmodeled locals
+
+Entering a method whose locals are all numeric and `.unmodeled` (no known initial bytes)
+succeeds and gives each local a fresh, writable private home, allocated in increasing
+order above the caller's memory. `WritableHomes` records this without claiming the bytes
+are initialized; consumer proofs use it to set up a frame before the first store.
+-/
+
 namespace CIL.Safety
 
 /-- Typed writable storage, with no assertion that its bytes are initialized. -/
-inductive WritableHomes (memory : Memory) : Nat → List CIL.LocalKind → List LocalSlot → Prop where
+inductive WritableHomes (memory : Memory) :
+    Nat → List CIL.LocalKind → List LocalSlot → Prop where
   | nil (lower : Nat) : WritableHomes memory lower [] []
   | cons {lower kinds slots} (reference : Reference) (kind : CIL.LocalKind)
       (fresh : lower ≤ reference.allocation)
@@ -20,19 +30,25 @@ theorem WritableHomes.weaken {memory : Memory} {lower upper : Nat} {kinds slots}
   | cons reference kind fresh writable tail =>
     exact .cons reference kind (Nat.le_trans bound fresh) writable tail
 
+/-- Making one numeric `.unmodeled` local allocates a single writable home. -/
 theorem make_unknown_local (memory : Memory) (activation : Nat) (kind : CIL.LocalKind)
-    (wellFormed : memory.WellFormed) (numeric : kind ≠ .reference) :
+    (wellFormed : memory.WellFormed) (numeric : kind ≠ .reference)
+    (notSpan : ∀ width writable, kind ≠ .span width writable)
+    (notArray : ∀ element, kind ≠ .array element) :
     ∃ reference result,
       makeLocal activation kind .unmodeled memory =
         .ok (.bytes kind reference, [reference.allocation], result) ∧
       access result reference (localWidth kind) 1 true = .ok () := by
   obtain ⟨reference, result, home⟩ :=
-    allocateHome_succeeds memory activation (localWidth kind) wellFormed (localWidth_bounded kind) (localAlignment_pos kind)
+    allocateHome_succeeds memory activation (localWidth kind) wellFormed
+      (localWidth_bounded kind) (localAlignment_pos kind)
   refine ⟨reference, result, ?_, (allocateHome_write_access _ _ _ _ _ home).access⟩
   cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem make_unknown_locals (memory : Memory) (activation : Nat) (kinds : List CIL.LocalKind)
-    (wellFormed : memory.WellFormed) (numeric : ∀ kind ∈ kinds, kind ≠ .reference) :
+    (wellFormed : memory.WellFormed) (numeric : ∀ kind ∈ kinds, kind ≠ .reference)
+    (notSpan : ∀ kind ∈ kinds, ∀ width writable, kind ≠ .span width writable)
+    (notArray : ∀ kind ∈ kinds, ∀ element, kind ≠ .array element) :
     ∃ slots owned result,
       makeLocals activation kinds (kinds.map fun _ => .unmodeled) memory =
         .ok (slots, owned, result) ∧ WritableHomes result memory.nextIdentity kinds slots := by
@@ -41,9 +57,12 @@ theorem make_unknown_locals (memory : Memory) (activation : Nat) (kinds : List C
   | cons kind kinds ih =>
     obtain ⟨reference, middle, made, writable⟩ :=
       make_unknown_local memory activation kind wellFormed (numeric kind (by simp))
+        (notSpan kind (by simp)) (notArray kind (by simp))
     have middleWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made
     obtain ⟨slots, owned, result, rest, homes⟩ :=
       ih middle middleWF (fun k member => numeric k (by simp [member]))
+        (fun k member => notSpan k (by simp [member]))
+        (fun k member => notArray k (by simp [member]))
     have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 reference.allocation (by simp)
     have retained := makeLocals_preserves_caller_memory _ _ _ _ _ _ _ rest
     refine ⟨.bytes kind reference :: slots, reference.allocation :: owned, result, ?_, ?_⟩
@@ -53,6 +72,7 @@ theorem make_unknown_locals (memory : Memory) (activation : Nat) (kinds : List C
         ((retained.access reference fresh.2 (localWidth kind) 1 true).trans writable)
         (homes.weaken (Nat.succ_le_of_lt fresh.2))
 
+/-- The slot for each declared local is a writable home of its kind above `lower`. -/
 theorem WritableHomes.home_at {memory : Memory} {lower : Nat} {kinds slots}
     (homes : WritableHomes memory lower kinds slots) (index : Nat) (kind : CIL.LocalKind)
     (specified : kinds[index]? = some kind) :
@@ -68,22 +88,31 @@ theorem WritableHomes.home_at {memory : Memory} {lower : Nat} {kinds slots}
       exact ⟨reference, rfl, fresh, writable⟩
     | succ index =>
       obtain ⟨r, slot, bound, accessOK⟩ := ih index kind (by simpa using specified)
-      exact ⟨r, by simpa using slot, Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) bound), accessOK⟩
+      exact ⟨r, by simpa using slot,
+        Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) bound), accessOK⟩
 
+/-- Entering a method with only numeric `.unmodeled` locals and no vector arguments,
+    parameter homes or opaque vector locals succeeds, keeps the caller's memory below
+    `nextIdentity` and gives writable homes for every local. -/
 theorem unknown_frame_setup (body : CIL.Method)
     (initializers : body.locals = body.localKinds.map fun _ => .unmodeled)
     (numeric : ∀ kind ∈ body.localKinds, kind ≠ .reference)
-    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = []) (memory : Memory) (args : List Value)
+    (notSpan : ∀ kind ∈ body.localKinds, ∀ width writable, kind ≠ .span width writable)
+    (notArray : ∀ kind ∈ body.localKinds, ∀ element, kind ≠ .array element)
+    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = [])
+    (opaqueLocals : body.opaqueVectorLocals = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
     ∃ frame result,
       enterFrame body args memory = .ok (frame, result) ∧
       WritableHomes result memory.nextIdentity body.localKinds frame.locals ∧
       MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
   obtain ⟨slots, owned, result, made, homes⟩ :=
-    make_unknown_locals memory memory.nextIdentity body.localKinds wellFormed numeric
-  let frame : Frame := ⟨memory.nextIdentity, slots, owned, []⟩
+    make_unknown_locals memory memory.nextIdentity body.localKinds wellFormed numeric notSpan notArray
+  let frame : Frame := ⟨memory.nextIdentity, slots, owned, [], 0⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
-    simp only [enterFrame, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes, List.map_nil,
+    simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
+      initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes,
+      List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl
   exact ⟨frame, result, setup, homes, enterFrame_preserves_caller_memory _ _ _ _ _ setup,
@@ -100,7 +129,8 @@ theorem WritableHomes.home_bound {memory : Memory} {lower : Nat} {kinds slots}
     | zero =>
       have same : r = reference := (by simpa using found : initial = kind ∧ r = reference).2
       simpa only [same] using fresh
-    | succ index => exact Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) (ih index (by simpa using found)))
+    | succ index =>
+      exact Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) (ih index (by simpa using found)))
 
 /-- Separate private homes cannot overwrite each other's initialized bytes. -/
 theorem WritableHomes.ordered {memory : Memory} {lower : Nat} {kinds slots}

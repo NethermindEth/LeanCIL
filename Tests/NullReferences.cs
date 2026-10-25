@@ -132,7 +132,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
             "byref" => "Unsupported Unsafe element type: System.Int32&",
             "pointer" => "Unsupported Unsafe element type: System.Int32*",
             "parameter" when name == "Read" => "Invalid evaluation stack during reachability",
-            "arity" or "parameter" or "return" => "Generic contract imports are not supported in version 1.",
+            "arity" or "parameter" or "return" => "External managed dependency: " + call.FullName,
             "instance" => "Invalid evaluation stack during reachability",
             "scope" => "Unsupported generic call: " + call.FullName,
             "version" => "Unsupported type identity: System." + (name == "Read" ? "UInt64" : "Boolean") +

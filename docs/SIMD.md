@@ -2,7 +2,7 @@
 
 These tables list the overloads currently recognised by the extractor, not entire .NET API families. All families have **partial coverage**. Calls must match the runtime assembly identity, declaring type, generic arguments, parameter types and return type in [RuntimeModels.cs](../Extractor/RuntimeModels.cs). Other overloads are rejected.
 
-`V128<T>` and `V256<T>` below abbreviate `Vector128<T>` and `Vector256<T>`. Unqualified vector APIs belong to `System.Runtime.Intrinsics`; x86 families belong to `.X86`, and ARM families to `.Arm`. Names such as `Avx512F.VL` use C# notation for nested types.
+`V128<T>`, `V256<T>` and `V512<T>` below abbreviate `Vector128<T>`, `Vector256<T>` and `Vector512<T>`. Unqualified vector APIs belong to `System.Runtime.Intrinsics`; x86 families belong to `.X86`, and ARM families to `.Arm`. Names such as `Avx512F.VL` use C# notation for nested types.
 
 Values are modelled as bit patterns with lane zero in the least-significant bits. Integer arithmetic wraps at the lane width. Floating-point vector types appear in a few reinterpretation, selection and mask operations; this does **not** provide floating-point arithmetic semantics.
 
@@ -13,13 +13,13 @@ Values are modelled as bit patterns with lane zero in the least-significant bits
 | [Vector128 / Vector256](#vector128-and-vector256) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction, extraction, reductions, arithmetic shifts and bit reinterpretation |
 | [SSE](#sse) | `Sse2.ShiftLeftLogical128BitLane`, `Ssse3.AlignRight`; SSE4.1/4.2 getters only |
 | [AVX](#avx) | Selected `MoveMask`, `Blend`, `TestZ` overloads |
-| [AVX2](#avx2) | `Permute4x64`, `Blend`, `Add`, `CompareEqual`, `CompareGreaterThan`, widening even-lane `Multiply`, logical shifts |
-| [AVX512](#avx512) | F.VL alignment, ternary logic and unsigned comparisons; DQ mask extraction and DQ.VL low multiplication, all on 256-bit vectors |
+| [AVX2](#avx2) | `Permute4x64`, `Blend`, `Add`, `CompareEqual`, `CompareGreaterThan`, widening even-lane `Multiply`, bitwise operations, logical shifts |
+| [AVX512](#avx512) | F.VL alignment, ternary logic and unsigned comparisons; DQ mask extraction and DQ.VL low multiplication on 256-bit vectors; F unsigned comparisons and DQ mask extraction on 512-bit vectors |
 | [BMI](#bmi) | `Bmi1.BitFieldExtract(uint, byte, byte)`, `Bmi2.X64.MultiplyNoFlags(ulong, ulong)` |
 | [X86Base](#x86base) | `X86Base.X64.DivRem(ulong, ulong, ulong)` returning `(ulong Quotient, ulong Remainder)` |
 | [ARM](#arm) | `AdvSimd.ExtractVector128` on `ulong` lanes, `ArmBase.Arm64.MultiplyHigh(ulong, ulong)` |
 
-An enabled CPU feature does not imply support for all of its APIs. Float/double vectors are used only for selected bit operations, not floating-point arithmetic. Vector64 and Vector512 are not supported. See the [profile table](#feature-getters-profiles-and-execution-restrictions) for the exact flags enabled by each built-in profile.
+An enabled CPU feature does not imply support for all of its APIs. Float/double vectors are used only for selected bit operations, not floating-point arithmetic. Vector64 is not supported, and Vector512 only through the rows below that name it. See the [profile table](#feature-getters-profiles-and-execution-restrictions) for the exact flags enabled by each built-in profile.
 
 ## Vector128 and Vector256
 
@@ -38,12 +38,14 @@ Every row applies to both widths, with matching input/output widths. These porta
 | `Vector128<ulong>.AllBitsSet`, `Vector256<ulong>.AllBitsSet` | No arguments | All-one vector |
 | `Vector128.Create`, `Vector256.Create` | One `ulong`, or respectively two/four `ulong` arguments | Broadcast one value, or construct the individual lanes |
 | `Vector128.CreateScalar`, `Vector256.CreateScalar` | One `ulong` or one `uint` | Put the value in the low lane and zero the remaining bits |
+| `Vector128.CreateScalarUnsafe` (128-bit only) | One `ulong` | Put the value in the low lane; the upper lane is unspecified, and only `GetElement(0)`, `As*` and the AVX2 shift counts may read the result (see [SOUNDNESS](SOUNDNESS.md#runtime-assumptions)) |
+| `Vector512.Create` (512-bit only) | Two `V256<ulong>` | Concatenate, first operand in the low half |
 | `Vector128.ShiftRightArithmetic`, `Vector256.ShiftRightArithmetic` | Vector of `long` and `int` count | Signed 64-bit lane shifts; count modulo 64 |
 | `Vector128.ExtractMostSignificantBits<ulong>`, `Vector256.ExtractMostSignificantBits<ulong>` | Vector of `ulong` | Return a `uint` containing the two/four lane sign bits |
 | `Vector128.Sum<ulong>`, `Vector256.Sum<ulong>` | Vector of `ulong` | Wrapping sum of the 64-bit lanes |
 | `AsByte`, `AsUInt32`, `AsInt64`, `AsDouble`, `AsUInt64`, `AsInt32`, `AsSingle` on `Vector128` / `Vector256` | Source element type is `ulong`, `byte`, `uint`, `long`, `int` or `float`; target is the named type | Preserve the bit pattern. The extractor does not currently accept `double` as a source for these casts |
 
-No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 or Vector512 extraction support, and no general vector load/store API coverage. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
+No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to the rows naming it and to `ldobj`/`stobj`/`initobj` of `V512<ulong>`, and there is no general vector load/store API coverage. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
 
 ## SSE
 
@@ -80,12 +82,14 @@ All rows require `Avx2` and operate on 256-bit vectors.
 | `Avx2.CompareGreaterThan` | `V256<long>, V256<long>` → `V256<long>` | Signed per-lane greater-than masks |
 | `Avx2.Multiply` | `V256<uint>, V256<uint>` → `V256<ulong>` | Multiply unsigned 32-bit lanes 0, 2, 4 and 6 into four 64-bit products |
 | `Avx2.ShiftLeftLogical`, `Avx2.ShiftRightLogical` | `V256<ulong>, byte` → `V256<ulong>` | Logical shifts of each 64-bit lane; counts ≥64 yield zero |
+| `Avx2.ShiftLeftLogical`, `Avx2.ShiftRightLogical` | `V256<ulong>, V128<ulong>` -> `V256<ulong>` | Shift each lane by the count's lane 0; counts of 64 or more yield zero; the upper count lane is ignored |
+| `Avx2.And`, `Avx2.Or`, `Avx2.Xor`, `Avx2.AndNot` | `V256<ulong>, V256<ulong>` -> `V256<ulong>` | Bitwise operations; `AndNot(a, b)` is `~a & b` |
 
 These are the exact widths and overloads admitted. For example, accepting `Add` on `ulong` vectors does not enable `Add` on byte or 32-bit lanes.
 
 ## AVX512
 
-The currently mapped AVX512 operations use **256-bit operands**, including the VL APIs. They do not provide Vector512 support.
+The AVX512 operations use **256-bit operands**, including the VL APIs, except the last two rows, which take `V512<ulong>`.
 
 | Exact API | Arguments → result | Required feature | Model |
 | --- | --- | --- | --- |
@@ -96,8 +100,10 @@ The currently mapped AVX512 operations use **256-bit operands**, including the V
 | `Avx512F.VL.CompareGreaterThanOrEqual` | Two `V256<ulong>` → `V256<ulong>` | `Avx512FVL` | Unsigned per-lane greater-than-or-equal masks |
 | `Avx512DQ.MoveMask` | `V256<ulong>` → `int` | `Avx512DQ` | Collect the four 64-bit lane sign bits |
 | `Avx512DQ.VL.MultiplyLow` | Two `V256<ulong>` → `V256<ulong>` | `Avx512DQVL` | Low 64 bits of each lane product |
+| `Avx512F.CompareLessThan`, `Avx512F.CompareGreaterThan` | Two `V512<ulong>` -> `V512<ulong>` | `Avx512F` | Unsigned per-lane masks over eight lanes |
+| `Avx512DQ.MoveMask` | `V512<ulong>` -> `int` | `Avx512DQ` | Collect the eight 64-bit lane sign bits |
 
-The built-in `x64-avx512` profiles enable F/VL, **not DQ/DQ.VL**. The latter require a custom validated profile with their flags and prerequisites enabled.
+The built-in `x64-v4` profile enables F, DQ and both VL forms together.
 
 ## BMI
 
@@ -108,7 +114,7 @@ These operations use scalar integer operands, not vectors.
 | `Bmi1.BitFieldExtract` | `uint, byte start, byte length` → `uint` | `Bmi1` | Extract a bit field; start ≥32 yields zero, length is clipped to the remaining bits |
 | `Bmi2.X64.MultiplyNoFlags` | `ulong, ulong` → `ulong` | `Bmi2` | Return the high 64 bits of the unsigned 128-bit product |
 
-The pointer-output `MultiplyNoFlags` overload is not mapped. BMI1 and BMI2 are independent profile flags; enabling AVX2 does not implicitly enable them.
+The pointer-output `MultiplyNoFlags` overload is not mapped. The .NET 10 CoreCLR profile validator requires BMI1, BMI2 and AVX2 to agree.
 
 ## X86Base
 
@@ -134,23 +140,20 @@ Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `S
 | Built-in profile | Enabled capabilities |
 | --- | --- |
 | `scalar` | No hardware feature flags |
-| `x64-vector256` | `Vector256Accelerated` only |
-| `x64-sse41` | `X86Base64`, `Vector128Accelerated`, `Sse2`, `Ssse3`, `Sse41` |
-| `x64-sse42` | The above plus `Sse42` |
-| `x64-avx2` | The above plus `Avx`, `Avx2` |
-| `x64-avx2-bmi1` | The above plus `Bmi1` |
-| `x64-avx512` | `x64-avx2` capabilities plus `Avx512F`, `Avx512FVL` |
-| `x64-avx512-bmi1` | The above plus `Bmi1` |
-| `x64-bmi2` | `X86Base64`, `Bmi2` |
-| `arm64-armbase` | `ArmBase64` |
+| `x64-sse2` | `X86Base64`, `Sse2`, `Vector128Accelerated` |
+| `x64-sse42` | The above plus `Ssse3`, `Sse41`, `Sse42` |
+| `x64-v3` | The above plus `Avx`, `Avx2`, `Bmi1`, `Bmi2`, `Vector256Accelerated` |
+| `x64-v4` | The above plus `Avx512F`, `Avx512FVL`, `Avx512DQ`, `Avx512DQVL` |
 | `arm64-advsimd` | `ArmBase64`, `AdvSimd`, `Vector128Accelerated` |
 
-Every x86 ISA flag requires `X86Base64`, since each of those classes derives from `X86Base`. `Vector128Accelerated` and `Vector256Accelerated` are independent of the ISA flags: the built-ins set `Vector128Accelerated` with `Sse2` or `AdvSimd`, and only `x64-vector256` sets `Vector256Accelerated`. Use an explicit `@profile.json` when a different combination is needed. Custom profiles must supply every capability field and satisfy the architecture and prerequisite checks in [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs). Custom profiles written before `x86Base64` and `vector128Accelerated` existed must add both fields, with `x86Base64` true whenever an x86 ISA flag is set.
+Profiles target .NET 10 CoreCLR. Both the extractor and Lean certificate reject capability sets that split its runtime groups. Custom profiles must supply every field and satisfy the same constraints. A v3/v4 custom profile may disable `vector256Accelerated` for a runtime configured with `PreferredVectorBitWidth=128`; it cannot enable it without AVX2.
+
+See [runtime-profile evidence and migration](RUNTIME-PROFILES.md) for measured x64/arm64 versions, retired names and consumer migration. Changing a profile requires fresh extraction and proof verification; old certificates do not acquire the new capabilities.
 
 Pass the profile after the extraction output directory, for example:
 
 ```sh
-leancil extract MyAssembly.dll "Operations::Method(ulong)" artifacts/Method x64-avx2
+leancil extract MyAssembly.dll "Operations::Method(ulong)" artifacts/Method x64-v3
 ```
 
 A reachable ISA-specific intrinsic whose required flag is false is rejected. Profile-based reachability can exclude a branch; excluded instructions remain explicit unsupported placeholders, and changing profiles invalidates the artifacts.
@@ -162,3 +165,10 @@ Byte controls are consumed by the Lean evaluator as `i32` values in 0–255; oth
 The extraction inventory comes from [RuntimeModels.cs](../Extractor/RuntimeModels.cs) and [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs). Operand checks and operation evaluation are defined in [Intrinsics.lean](../CIL/SIMD/Intrinsics.lean), with bit-level functions in the [SIMD modules](../CIL/SIMD).
 
 Additional Lean definitions, such as portable vector multiplication, do not automatically add extractor mappings. These tables describe implemented support, not exhaustive testing of every overload or universal correctness of user methods. See [validation results](VALIDATION.md) for the tests run and the [opcode table](OPCODES.md) for non-intrinsic CIL support.
+
+`initobj` for the exact `Vector128<UInt64>`, `Vector256<UInt64>`, and
+`Vector512<UInt64>` runtime types clears 16, 32, and 64 bytes respectively. The
+translation certificate binds the raw opcode, full type identities, and byte
+width. These ordinary memory writes need no SIMD ISA capability and require a
+valid modeled profile. They retain ordinary write bounds and access checks.
+This support does not add vector512 field layouts or verify CoreCLR behavior.

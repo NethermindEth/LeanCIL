@@ -18,7 +18,7 @@ section Loop
 
 variable (initial : Memory) (base home : Reference) (v : W64) (n : W32)
 
-private def frame : Frame := ⟨initial.nextIdentity, [.bytes .word32 home], [home.allocation], []⟩
+private def frame : Frame := ⟨initial.nextIdentity, [.bytes .word32 home], [home.allocation], [], 0⟩
 
 private def header (state : W32 × Memory) : LoopState :=
   ⟨guard, frame initial home, [.scalar (.i32 n), .scalar (.i32 state.1)], state.2⟩
@@ -128,12 +128,14 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
     have addStep (body : CIL.Method) (pc : Nat) (args : List Value) (f : Frame) :
         step body (.memory (.add 8 true)) pc args f [.scalar (.i32 k), .reference (.address base)] m =
           .ok (.next (pc + 1) [.reference (.address (base.element 8 k.toNat))] f m) := by
-      simp only [step, staticInstruction, memoryInstruction, CIL.offsetValue, referenceAt, addressed, checkedAt,
+      simp only [step, cil_guard, Bool.false_or, Bool.false_eq_true, ite_false,
+        staticInstruction, memoryInstruction, CIL.offsetValue, referenceAt, addressed, checkedAt,
         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
     have storeStep (body : CIL.Method) (pc : Nat) (args : List Value) (f : Frame) :
         step body .store64 pc args f [.scalar (.i64 v), .reference (.address (base.element 8 k.toNat))] m =
           .ok (.next (pc + 1) [] f m1) := by
-      simp only [step, pureArity, instruction, storeValue, referenceAt, ordinaryAccessAlignment, stored, checkedAt,
+      simp only [step, cil_guard, Bool.false_or, Bool.false_eq_true, ite_false,
+        pureArity, instruction, storeValue, referenceAt, ordinaryAccessAlignment, stored, checkedAt,
         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
     have path : LoopReaches Extracted.program 0
         [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] (header initial home n (k, m))
@@ -174,10 +176,12 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (fo
       Confined [(base, 8 * n.toNat)] initial final := by
   obtain ⟨home, entered, made, _, homeWritable, preserved⟩ :=
     make_numeric_local initial initial.nextIdentity .word32 (.i32 0) 0 formed rfl
+  have opaqueLocalsEmpty : Extracted.method0.opaqueVectorLocals = [] := rfl
   have setup : enterFrame Extracted.method0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
       initial = .ok (frame initial home, entered) := by
     simp only [enterFrame, Extracted.method0_locals, Extracted.method0_localKinds, Extracted.method0_vectorArgs,
-      Extracted.method0_parameterHomes, makeLocals, made, makeArgumentHomes, makeParameterHomes, frame,
+      Extracted.method0_parameterHomes, opaqueLocalsEmpty, makeSelectedLocals, List.isEmpty, ite_true,
+      makeLocals, made, makeArgumentHomes, makeParameterHomes, frame,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.map_nil, List.append_nil]
   have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 home.allocation (by simp)
   have enteredWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ formed made

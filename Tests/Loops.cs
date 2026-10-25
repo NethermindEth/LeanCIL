@@ -341,9 +341,9 @@ theorem correctness :
     CIL.Safety.invoke Extracted.program 6 0 [.scalar (.i32 0)] Examples.empty =
       .error ⟨0, 10, .fuelExhausted⟩ ∧
     Extracted.method0.code[5]? = some .sub ∧
-    CIL.Safety.step Extracted.method0 .sub 5 [] ⟨0, [], [], []⟩
+    CIL.Safety.step Extracted.method0 .sub 5 [] ⟨0, [], [], [], 0⟩
       [.scalar (.i32 1), .scalar (.i32 4294967295)] Examples.empty =
-      .ok (.next 6 [.scalar (.i32 4294967294)] ⟨0, [], [], []⟩ Examples.empty) := ⟨rfl, rfl, rfl⟩
+      .ok (.next 6 [.scalar (.i32 4294967294)] ⟨0, [], [], [], 0⟩ Examples.empty) := ⟨rfl, rfl, rfl⟩
 """);
 Console.WriteLine("PASS insufficient fuel and maximum unsigned decrement boundary");
 
@@ -366,7 +366,7 @@ foreach (var name in new[] { "Countdown", "WrongCountdown" })
 // operation is unreachable under scalar, and must be rejected under AVX2.
 Prove(assembly, "Loops::FeatureCountdown(uint)", "FeatureLoop",
     "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 3)] Examples.empty).map Prod.snd = .ok [.scalar (.i32 0)] := rfl");
-var feature = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)", Path.Combine(root, "FeatureReject"), "x64-avx2"));
+var feature = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)", Path.Combine(root, "FeatureReject"), "x64-v3"));
 if (feature.Code == 0 || !feature.Output.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Feature loop failed to reject reachable array: " + feature.Output);
 Console.WriteLine("PASS fixed feature selection inside a loop");

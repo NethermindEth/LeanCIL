@@ -1,6 +1,30 @@
 import CIL.Safety.InstructionMemory
 
+/-!
+# Readonly statics in the checked interpreter
+
+`staticReference` resolves an extracted readonly static field to immutable storage, creating
+it on first use and revalidating a cached binding on every later use. `staticInstruction`
+runs the static and span instructions on top of it and hands every other memory instruction
+to `memoryInstruction`.
+-/
+
 namespace CIL.Safety
+
+/-- Decode a readonly field using its storage width and narrow signedness. -/
+def staticLoadedValue (descriptor : CIL.StaticDescriptor) : Option CIL.Value :=
+  match descriptor.scalar with
+  | none => some (.aggregate descriptor.bytes)
+  | some signed =>
+    let number := byteNumber descriptor.bytes
+    match descriptor.bytes.length with
+    | 1 => some (.i32 (if signed then (BitVec.ofNat 8 number).signExtend 32
+        else BitVec.ofNat 32 number))
+    | 2 => some (.i32 (if signed then (BitVec.ofNat 16 number).signExtend 32
+        else BitVec.ofNat 32 number))
+    | 4 => some (.i32 (BitVec.ofNat 32 number))
+    | 8 => some (.i64 (BitVec.ofNat 64 number))
+    | _ => none
 
 /-- Static initialization occurs before exposing the readonly view. Existing
     bindings are checked against the freshly extracted field bytes, lifetime
@@ -31,6 +55,8 @@ def staticReference (descriptor : CIL.StaticDescriptor) (m : Memory) :
       views := ⟨id, 0, descriptor.bytes.length, true, false⟩ :: memory.views
       staticBindings := (descriptor.identity, reference) :: memory.staticBindings }, reference)
 
+/-- Runs a memory instruction at `pc`. Static loads use the field identity extracted for that
+    pc; span constructors over raw pointers are accepted only inside extracted static data. -/
 def staticInstruction (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) := do
   match operation, stack with
@@ -45,7 +71,8 @@ def staticInstruction (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
       .error (.unsupported "Missing extracted static field identity")
     -- The translation certificate checks each initializer's result against these bytes.
     if descriptor.bytes == bytes && descriptor.initializer.isSome then
-      return (m, .scalar (.aggregate bytes) :: stack)
+      let some value := staticLoadedValue descriptor | .error .invalidState
+      return (m, .scalar value :: stack)
     else .error .invalidState
   | .spanCreate, .scalar (.i32 length) :: .reference (.address reference) :: rest =>
     if length.toInt < 0 then .error .invalidState else pure ()

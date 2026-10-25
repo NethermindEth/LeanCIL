@@ -1,7 +1,18 @@
 import CIL.Extraction.Generics
 
+/-!
+# Layout coverage
+
+`MethodLayoutsValid` checks only the layout uses it is given. `LayoutUsesComplete` closes
+that gap: it derives every layout-dependent site from the raw body (field accesses, struct
+loads, stores, copies, initializations, sizes, constructions and `Unsafe.Add`), plus every
+struct-typed local and homed parameter, and requires the extractor's list to be exactly
+that list.
+-/
+
 namespace CIL.Extraction
 
+/-- The raw layout index of a struct type. -/
 private def aggregateIndex : TypeExpr → Option Nat
   | .aggregate _ index => some index
   | _ => none
@@ -11,6 +22,7 @@ private def aggregateIndex : TypeExpr → Option Nat
 def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     (instruction : RawInstruction) : Option (List LayoutUse) := do
   match instruction.opcode, instruction.operand with
+  -- `ldfld`, `ldflda` and `stfld` on an instance field, whose declared type must match.
   | 0x7b, .field owner index type false
   | 0x7c, .field owner index type false
   | 0x7d, .field owner index type false =>
@@ -24,6 +36,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     if typeStorage layouts type != some storage then none else
       return [.field pc parent index (if instruction.opcode = 0x7b then .load
         else if instruction.opcode = 0x7c then .address else .store)]
+  -- `ldobj`, `stobj`, `initobj`, `cpobj` and `sizeof` of a struct.
   | opcode, .type type =>
     match aggregateIndex type with
     | none => return []
@@ -34,6 +47,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
       else if opcode = 0x70 then return [.size pc index .copy]
       else if opcode = 0xfe1c then return [.size pc index .sizeOf]
       else return []
+  -- `newobj` of a struct, then `Unsafe.SizeOf<T>` and `Unsafe.Add<T>`.
   | 0x73, .call site =>
     return (aggregateIndex site.declaringType).toList.map fun index => .size pc index .construct
   | 0x28, .call site =>
@@ -45,6 +59,8 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     | _, _ => return []
   | _, _ => return []
 
+/-- Every layout use of the method, in order: live instruction sites by pc, then struct
+    locals, then struct parameter homes. -/
 def expectedLayoutUses (layouts : List RawLayout) (closed : RawMethod)
     (parameters : RawArguments) (reachable : List Bool) : Option (List LayoutUse) := do
   if closed.code.length != reachable.length then none else
@@ -59,6 +75,7 @@ def expectedLayoutUses (layouts : List RawLayout) (closed : RawMethod)
         | _ => []
     return instructions.flatten ++ locals ++ homes.flatten
 
+/-- The extractor's layout uses are exactly the ones the raw body requires. -/
 def LayoutUsesComplete (layouts : List RawLayout) (closed : RawMethod)
     (parameters : RawArguments) (reachable : List Bool) (uses : List LayoutUse) : Prop :=
   expectedLayoutUses layouts closed parameters reachable = some uses

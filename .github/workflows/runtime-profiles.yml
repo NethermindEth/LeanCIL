@@ -1,0 +1,49 @@
+name: Runtime profile drift
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+  pull_request:
+    paths: ['CIL/Features.lean', 'Extractor/FeatureProfiles.cs', 'scripts/*RuntimeProfile*.cs', 'docs/evidence/runtime-profiles/**', '.github/workflows/runtime-profiles.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+          dotnet-version: '10.0.x'
+      - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Record the installed servicing runtime
+        run: |
+          mkdir -p artifacts
+          dotnet run --file scripts/ProbeRuntimeProfiles.cs -- artifacts/linux-runtime.json
+      - name: Check observed profiles in both validators
+        run: |
+          dotnet build Extractor/Extractor.csproj
+          lake build CIL.Features
+          dotnet run --file scripts/ValidateRuntimeProfiles.cs -- Extractor/bin/Nethermind.LeanCIL.dll artifacts/linux-runtime.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: runtime-profiles-${{ matrix.runner }}
+          path: |
+            artifacts/linux-runtime.json
+            artifacts/RuntimeProfileEvidence.lean

@@ -1,5 +1,13 @@
 import CIL.Safety.WordMemory
 
+/-!
+# Wide multiply
+
+`Math.BigMul(ulong, ulong, out ulong)` as the `bigMul64` memory instruction: it returns the
+high word of the exact 128-bit product and writes the low word through the out reference,
+changing no other cell and no allocation.
+-/
+
 namespace CIL.Safety
 
 /-- Exact unsigned 128-bit multiplication: checked low-word write and high-word return. -/
@@ -7,9 +15,13 @@ theorem bigMul64_of_write (memory result : Memory) (reference : Reference)
     (left right : CIL.W64) (rest : List Value)
     (stored : write memory reference (numberBytes (left * right).toNat 8) 1 = .ok result) :
     memoryInstruction .bigMul64
-      (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest) memory =
+      (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
+        memory =
       .ok (result, .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest) := by
   simp only [memoryInstruction, storeValue, referenceAt, checkedAt, stored,
+    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take_succ_cons, List.take_zero,
+    List.any_cons, List.any_nil, Value.hasUnspecified, CIL.Value.hasUnspecified,
+    Bool.false_or, Bool.false_eq_true, ite_false,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 /-- Write permission is sufficient; the out location need not be initialized.
@@ -19,11 +31,13 @@ theorem bigMul64_succeeds (memory : Memory) (reference : Reference)
     (writable : access memory reference 8 1 true = .ok ()) :
     ∃ result,
       memoryInstruction .bigMul64
-        (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest) memory =
+        (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
+          memory =
         .ok (result, .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest) ∧
       loadValue result (.address reference) 8 = .ok (.i64 (left * right)) ∧
       result.allocations = memory.allocations ∧
-      ∀ id offset, id ≠ reference.allocation ∨ offset < reference.offset ∨ reference.offset + 8 ≤ offset →
+      ∀ id offset,
+        id ≠ reference.allocation ∨ offset < reference.offset ∨ reference.offset + 8 ≤ offset →
         result.cells id offset = memory.cells id offset := by
   have width : (numberBytes (left * right).toNat 8).length = 8 := by simp [numberBytes]
   obtain ⟨result, stored⟩ := write_succeeds (bytes := numberBytes (left * right).toNat 8)

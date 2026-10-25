@@ -129,7 +129,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var binders = $"({string.Join(" ", variables)} : CIL.W{stackWidth})";
     var evaluation = $"CIL.evalIntegerMath .{operation} {width} {signed} [{string.Join(", ", loaded)}]";
     var invocation = $"CIL.Safety.invoke Extracted.program 8 0 [{inputsLean}] Examples.empty";
-    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], []⟩ [{stack}] Examples.empty = _\n";
+    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], [], 0⟩ [{stack}] Examples.empty = _\n";
     var instruction = $"(body := Extracted.method0) (op := .intrinsic (.scalar (.math .{operation} {width} {signed})) {argc})";
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nimport Tests.WrapperProofs\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\n" +
@@ -137,7 +137,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
         $"    {invocation} = .ok (Examples.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + prefix +
         $"  refine (CIL.Safety.run_next {instruction} (by rfl) (by rfl)\n" +
-        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], []⟩ Examples.empty) from ?_)).trans (by rfl)\n" +
+        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], [], 0⟩ Examples.empty) from ?_)).trans (by rfl)\n" +
         "  math_wrapper_step evaluated\n" +
         $"theorem wrapper_fault {binders} (fault : CIL.ArithmeticFault)\n" +
         $"    (evaluated : {evaluation} = .error fault) :\n" +
@@ -181,7 +181,7 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
         "instance" => "Invalid evaluation stack during reachability",
         "return" => "External managed dependency: System.Int64 System.Math::Min(System.Int32,System.Int32)",
         "argument" => "External managed dependency: System.Int32 System.Math::Min(System.Int32,System.Int64)",
-        "generic" => "Generic contract imports are not supported in version 1.",
+        "generic" => "Contract imports require an exact closed generic instantiation on a non-generic declaring type.",
         "unsupported" => "External managed dependency: System.Int32 System.Math::CopySign(System.Int32,System.Int32)",
         _ => throw new InvalidOperationException("Unknown runtime mutation: " + mutation)
     };

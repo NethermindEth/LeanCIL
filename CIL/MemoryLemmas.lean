@@ -1,5 +1,13 @@
 import CIL.Semantics
 
+/-!
+# Scalar memory lemmas
+
+Frame facts for the reference interpreter's memory: caller bytes, scalar locals and vector
+homes are separate address spaces, so a write to one leaves reads of the others unchanged.
+Stepping proofs use these to carry facts about caller memory across local updates.
+-/
+
 open CIL
 set_option maxRecDepth 8192
 set_option maxHeartbeats 2000000
@@ -14,6 +22,7 @@ namespace CIL
   | zero => rfl
   | succ count ih => rw [writeBytes, ih]; simp [write]
 
+/-- A caller-byte read depends only on caller bytes. -/
 theorem readBytes_congr (m n : Memory)
     (h : ∀ address, m (.byte address) = n (.byte address)) (base count : Nat) :
     readBytes m base count = readBytes n base count := by
@@ -65,6 +74,7 @@ theorem initLocals_other_frame (m : Memory) (frame other index : Nat) (values : 
     simp only [List.foldl_cons]
     rw [ih]
     simp [write, hn]
+
 theorem writeBytes_outside (m : Memory) (base word n address : Nat)
     (h : address < base ∨ base + n ≤ address) :
     writeBytes m base word n (.byte address) = m (.byte address) := by
@@ -83,6 +93,7 @@ theorem writeBytes_outside (m : Memory) (base word n address : Nat)
   | succ count ih =>
     rw [writeBytes, ih]
     simp [write]
+
 theorem writeBytes_append (m : Memory) (base word low high : Nat) :
     writeBytes m base word (low + high) =
       writeBytes (writeBytes m base word low) (base + low) (word / 256^low) high := by
@@ -107,6 +118,7 @@ theorem writeBytes_mod (m : Memory) (base word count : Nat) :
     rw [low]
     simp only [Nat.pow_succ, Nat.mod_mul_left_div_self]
     exact ih _ _ _
+
 theorem writeBytes_congr (m n : Memory)
     (h : ∀ address, m (.byte address) = n (.byte address)) (base word count : Nat) :
     ∀ address, writeBytes m base word count (.byte address) =
@@ -130,7 +142,8 @@ theorem writeBytes_congr (m n : Memory)
 theorem write_local_read_local (m : Memory) (frame index otherFrame otherIndex : Nat)
     (v : Value) :
     write m (.local frame index) v (.local otherFrame otherIndex) =
-      if otherFrame = frame ∧ otherIndex = index then some v else m (.local otherFrame otherIndex) := by
+      if otherFrame = frame ∧ otherIndex = index then some v
+      else m (.local otherFrame otherIndex) := by
   simp [write]
 
 @[simp] theorem write_local_read_byte (m : Memory) (frame index address : Nat) (v : Value) :
@@ -145,7 +158,8 @@ theorem write_byte_local_commute (m : Memory) (base frame index : Nat) (byte v :
   by_cases hb : address = .byte base <;> by_cases hl : address = .local frame index
   all_goals simp_all
 
-@[simp] theorem writeBytes_write_local (m : Memory) (base word count frame index : Nat) (v : Value) :
+@[simp] theorem writeBytes_write_local (m : Memory) (base word count frame index : Nat)
+    (v : Value) :
     writeBytes (write m (.local frame index) v) base word count =
       write (writeBytes m base word count) (.local frame index) v := by
   induction count generalizing m base word with

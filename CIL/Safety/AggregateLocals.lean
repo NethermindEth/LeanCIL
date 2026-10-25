@@ -1,6 +1,14 @@
 import CIL.Safety.AggregateHomeValues
 import CIL.Safety.Execution
 
+/-!
+# Stepping aggregate locals
+
+Exact results of the checked `step` for `ldloc` and `stloc` on a struct local that lives in
+a private aggregate home. A store writes only the home's bytes, so memory below the frame's
+watermark is untouched.
+-/
+
 namespace CIL.Safety
 
 /-- A private aggregate store changes only its bytes; older allocation metadata,
@@ -19,7 +27,8 @@ theorem step_store_aggregate {body : CIL.Method} {pc index watermark : Nat}
       loadLocal result (.bytes (.aggregate size) reference) = .ok (.scalar (.aggregate bytes)) ∧
       result.allocations = memory.allocations ∧
       MemoryBelow watermark memory result := by
-  obtain ⟨result, written, stored, loaded, value, allocations⟩ := store_local_aggregate size bytes length ready
+  obtain ⟨result, written, stored, loaded, value, allocations⟩ :=
+    store_local_aggregate size bytes length ready
   have unchanged : frame.locals.set index (.bytes (.aggregate size) reference) = frame.locals := by
     apply List.ext_getElem?
     intro other
@@ -30,8 +39,11 @@ theorem step_store_aggregate {body : CIL.Method} {pc index watermark : Nat}
     · simp only [List.getElem?_set_ne same]
   refine ⟨result, ?_, written, loaded, value, allocations,
     write_preserves_memory_below _ _ _ _ _ _ privateHome written⟩
-  simp only [step, slot, stored, unchanged, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
+    Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, unchanged, Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
 
+/-- Loading an aggregate local pushes the bytes its home currently reads. -/
 theorem step_load_aggregate {body : CIL.Method} {pc index : Nat}
     {args stack : List Value} {frame : Frame} {memory : Memory} {reference : Reference}
     {size : Fin (2^64)} {bytes : List (BitVec 8)}
@@ -39,7 +51,8 @@ theorem step_load_aggregate {body : CIL.Method} {pc index : Nat}
     (loaded : read memory reference size 1 = .ok bytes) :
     step body (.local index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: stack) frame memory) := by
-  simp only [step, slot, load_local_aggregate_of_read loaded,
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
+    Bool.false_or, Bool.false_eq_true, ite_false, slot, load_local_aggregate_of_read loaded,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_store_aggregate

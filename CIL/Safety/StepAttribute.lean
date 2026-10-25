@@ -1,4 +1,18 @@
 import Lean
 
--- `CIL.Safety.step` equations, one per dispatcher arm, so a step rewrites without unfolding the dispatcher.
+/-!
+# Step simp sets
+
+Three simp attributes used by the stepping tactics. They are registered in their own file
+because a simp attribute cannot be used in the module that declares it.
+-/
+
+-- `CIL.Safety.step` equations, one per dispatcher arm, so a step rewrites without
+-- unfolding the dispatcher.
 register_simp_attr cil_step
+-- Closed-form facts for the checks `step` makes before dispatch (unspecified bits, operand
+-- counts), so stepping can decide them by simp.
+register_simp_attr cil_guard
+-- `FeatureProfile.evaluate` equations, one per `Feature` constructor, so facts are normalised
+-- to the field a known feature test steps to.
+register_simp_attr cil_feature

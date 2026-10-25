@@ -1,10 +1,23 @@
 import CIL.Safety.Execution
+import CIL.Safety.SpanViewLemmas
+import CIL.Safety.ArrayViewLemmas
+
+/-!
+# Instruction effects and value validity
+
+Facts about the checked interpreter's straight-line instructions. `Value.Valid` says a value
+may sit on the stack: a numeric scalar, or a reference that still forms in memory. Every
+successful instruction has an `InstructionContract`: its only memory change is one checked
+write (an `InstructionEffect`), and it maps valid inputs to valid outputs. Well-formedness
+and allocation extension across instructions follow from these.
+-/
 
 namespace CIL.Safety
 
 theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m : Memory) :
     instructions (first ++ second) stack m =
-      (instructions first stack m).bind (fun (memory, values) => instructions second values memory) := by
+      (instructions first stack m).bind
+        (fun (memory, values) => instructions second values memory) := by
   induction first generalizing stack m with
   | nil => rfl
   | cons op first ih =>
@@ -15,6 +28,7 @@ theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m
       rcases result with ⟨memory, values⟩
       exact ih values memory
 
+/-- A fault in a prefix of straight-line code is the fault of the whole sequence. -/
 theorem instruction_fault_cannot_be_erased (first second : List CIL.Op) (stack : List Value)
     (m : Memory) (fault : ExecutionFault) (h : instructions first stack m = .error fault) :
     instructions (first ++ second) stack m = .error fault := by
@@ -36,9 +50,14 @@ theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List
     width. A span's accessible bytes are checked by the memory operation. -/
 def Value.Valid (m : Memory) : Value → Prop
   | .scalar value => numericValue value = true
+  | .bufferSpan view => view.validate m = .ok ()
+  | .array view => view.validate m = .ok ()
+  | .readOnlyReference .null => True
+  | .readOnlyReference (.address r) => form m r = .ok r
   | .reference .null | .span .null _ => True
   | .reference (.address r) | .span (.address r) _ => form m r = .ok r
 
+/-- Every value in the list is valid in `m`. -/
 def ValuesValid (m : Memory) (values : List Value) : Prop :=
   ∀ value ∈ values, value.Valid m
 
@@ -80,7 +99,8 @@ theorem formValue_returns_input (m : Memory) (r : ManagedReference) (value : Val
   | address r =>
     simp only [formValue] at h
     cases hf : form m r <;>
-      simp only [hf, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+      simp only [hf, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+        Except.pure] at h
     · cases h
     · rename_i formed
       have same := form_returns_input _ _ _ hf
@@ -103,6 +123,17 @@ theorem formValue_result_valid (m : Memory) (r : ManagedReference) (value : Valu
       subst formed
       exact hf
 
+/-- Forming a reference also validates the same address with a readonly restriction. -/
+theorem formValue_readOnly_valid (m : Memory) (reference : ManagedReference) (value : Value)
+    (formed : formValue m reference = .ok value) :
+    (Value.readOnlyReference reference).Valid m := by
+  have valid := formValue_result_valid m reference value formed
+  rw [formValue_returns_input m reference value formed] at valid
+  cases reference <;> exact valid
+
+#print axioms formValue_readOnly_valid
+
+/-- `checkedValue` either faults or returns its input, which is then valid. -/
 theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
   cases value with
@@ -115,9 +146,27 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
     · cases h
   | reference r =>
     exact ⟨formValue_returns_input _ _ _ h, formValue_result_valid _ _ _ h⟩
+  | bufferSpan view | array view =>
+    cases formed : view.validate m <;>
+      simp only [checkedValue, formed, checkedAt, Except.mapError, Bind.bind, Except.bind,
+        Pure.pure, Except.pure] at h
+    · cases h
+    · rename_i validated
+      cases validated
+      cases h
+      exact ⟨rfl, formed⟩
+  | readOnlyReference r =>
+    cases formed : formValue m r <;>
+      simp only [checkedValue, formed, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    · cases h
+    · cases h
+      have valid := formValue_result_valid _ _ _ formed
+      rw [formValue_returns_input _ _ _ formed] at valid
+      cases r <;> exact ⟨rfl, valid⟩
   | span r length =>
     simp only [checkedValue] at h
-    cases hf : formValue m r <;> simp only [hf, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    cases hf : formValue m r <;>
+      simp only [hf, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
     · cases h
     · have valid := formValue_result_valid _ _ _ hf
       have same := formValue_returns_input _ _ _ hf
@@ -129,6 +178,13 @@ theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid 
     checkedValue m value = .ok value := by
   cases value with
   | scalar value => simp only [Value.Valid] at valid; simp [checkedValue, valid]
+  | bufferSpan view | array view =>
+    simp only [Value.Valid] at valid
+    simp [checkedValue, valid, checkedAt, Except.mapError, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  | readOnlyReference r => cases r <;>
+      simp_all [Value.Valid, checkedValue, formValue, checkedAt, Except.mapError,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]
   | reference r => cases r <;>
       simp_all [Value.Valid, checkedValue, formValue, checkedAt, Except.mapError,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -136,6 +192,7 @@ theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid 
       simp_all [Value.Valid, checkedValue, formValue, checkedAt, Except.mapError,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
 
+/-- Valid values stay valid when memory only gains allocations. -/
 theorem ValuesValid.preserve {m result : Memory} {values : List Value}
     (valid : ValuesValid m values) (hm : m.WellFormed) (ext : AllocationExtension m result) :
     ValuesValid result values := by
@@ -143,6 +200,12 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   have hv := valid value member
   cases value with
   | scalar value => exact hv
+  | bufferSpan view => exact view.validate_preserved hv hm ext
+  | array view => exact view.validate_preserved hv hm ext
+  | readOnlyReference r =>
+    cases r with
+    | null => exact True.intro
+    | address r => exact ext.preserves_reference hm r r hv
   | reference r =>
     cases r with
     | null => exact True.intro
@@ -153,7 +216,8 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
     | address r => exact ext.preserves_reference hm r r hv
 
 theorem checkedValues_valid (m : Memory) (values result : List Value)
-    (h : values.mapM (checkedValue m) = .ok result) : result = values ∧ ValuesValid m result := by
+    (h : values.mapM (checkedValue m) = .ok result) :
+    result = values ∧ ValuesValid m result := by
   induction values generalizing result with
   | nil => cases h; exact ⟨rfl, by simp [ValuesValid]⟩
   | cons value values ih =>
@@ -178,8 +242,21 @@ theorem checkedValues_valid (m : Memory) (values result : List Value)
 #print axioms ValuesValid.preserve
 #print axioms checkedValues_valid
 
+/-- Values valid in `memory` pass the argument and result checks unchanged. -/
+theorem checkedValues_of_valid {memory : Memory} {values : List Value}
+    (valid : ValuesValid memory values) : values.mapM (checkedValue memory) = .ok values := by
+  induction values with
+  | nil => rfl
+  | cons value rest restChecked =>
+    have head := checkedValue_of_valid memory value (valid value (List.mem_cons_self ..))
+    have tail := restChecked fun other member => valid other (List.mem_cons_of_mem _ member)
+    simp only [List.mapM_cons, head, tail, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms checkedValues_of_valid
+
 theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
-    {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) : (Value.scalar value).Valid m := by
+    {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) :
+    (Value.scalar value).Valid m := by
   unfold loadValue at h
   repeat' first
     | rfl
@@ -245,12 +322,76 @@ structure InstructionContract (m result : Memory) (stack values : List Value) : 
   effect : InstructionEffect m result
   values : m.WellFormed → ValuesValid m stack → ValuesValid result values
 
+/-- An instruction whose outputs are valid whenever its inputs are valid afterwards meets its
+    contract, since its effect keeps the inputs valid. -/
 theorem InstructionContract.of_effect {m result : Memory} {stack values : List Value}
     (effect : InstructionEffect m result)
-    (preserve : ValuesValid result stack → ValuesValid result values) : InstructionContract m result stack values :=
+    (preserve : ValuesValid result stack → ValuesValid result values) :
+    InstructionContract m result stack values :=
   ⟨effect, fun hm valid => preserve (valid.preserve hm effect.allocations)⟩
 
+/-- Validation establishes the invariant for a span value pushed by a constructor. -/
+theorem checkedSpan_valid (view : SpanView) (memory : Memory) (width : Nat) (done : Unit)
+    (formed : checkedAt view.reference width (view.validate memory) = .ok done) :
+    (Value.bufferSpan view).Valid memory := by
+  cases done
+  exact checkedAt_ok formed
+
+/-- Removing write permission does not change a span's checked extent. -/
+theorem checkedReadOnlySpan_valid (view : SpanView) (memory : Memory) (width : Nat) (done : Unit)
+    (formed : checkedAt view.reference width (view.validate memory) = .ok done) :
+    (Value.bufferSpan view.asReadOnly).Valid memory := by
+  cases done
+  change view.validate memory = .ok ()
+  exact checkedAt_ok formed
+
+/-- A sliced value carries the extent checked by slicing. -/
+theorem checkedSpanSlice_valid (view result : SpanView) (memory : Memory) (start length : Nat)
+    (sliced : checkedAt view.reference 0 (view.slice memory start length) = .ok result) :
+    (Value.bufferSpan result).Valid memory :=
+  view.slice_valid result memory start length (checkedAt_ok sliced)
+
+/-- Both writable and readonly element references are live checked addresses. -/
+theorem checkedSpanElement_valid (view : SpanView) (memory : Memory) (width index : Nat)
+    (reference : Reference)
+    (found : checkedAt view.reference width (view.element memory index) = .ok reference) :
+    (if view.writable then Value.reference (.address reference)
+      else .readOnlyReference (.address reference)).Valid memory := by
+  have valid := view.element_formed memory index reference (checkedAt_ok found)
+  split <;> exact valid
+
+#print axioms checkedSpan_valid
+#print axioms checkedReadOnlySpan_valid
+#print axioms checkedSpanSlice_valid
+#print axioms checkedSpanElement_valid
+
+/-- Checked array addresses retain a live allocation-relative reference. -/
+theorem checkedArrayElement_valid (view : ArrayView) (memory : Memory) (index width : Nat)
+    (reference : Reference) (found : arrayElement memory view index width = .ok reference) :
+    (Value.reference (.address reference)).Valid memory := by
+  unfold arrayElement at found
+  repeat' first
+    | solve | exact view.element_formed memory index reference (checkedAt_ok found)
+    | cases found
+    | split at found
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at found
+
+#print axioms checkedArrayElement_valid
+
+/-- A readonly array address retains validity without gaining write permission through the view. -/
+theorem checkedArrayAddress_valid (view : ArrayView) (memory : Memory) (index width : Nat)
+    (writable : Bool)
+    (reference : Reference) (found : arrayElement memory view index width = .ok reference) :
+    (if writable then Value.reference (.address reference)
+      else .readOnlyReference (.address reference)).Valid memory := by
+  cases writable <;> exact checkedArrayElement_valid view memory index width reference found
+
+#print axioms checkedArrayAddress_valid
+
 set_option hygiene false in
+/-- Closes one success case of the instruction case analysis with `InstructionContract.of_effect`:
+    picks the effect from the hypotheses, then rebuilds the output stack from retained inputs
+    and validity lemmas for each pushed value. Used only by the instruction contract proofs. -/
 macro "instruction_contract_close" : tactic => `(tactic| (
   refine InstructionContract.of_effect ?_ ?_
   · first
@@ -276,7 +417,17 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | apply loadValue_scalar_valid; assumption
             | apply formValue_result_valid; assumption
             | apply checked_add_result_valid; assumption
-          · first | exact retained | exact retained.tail | exact retained.tail.tail | exact retained.tail.tail.tail))
+            | apply checkedSpan_valid; assumption
+            | apply checkedReadOnlySpan_valid; assumption
+            | apply checkedSpanSlice_valid; assumption
+            | apply checkedSpanElement_valid; assumption
+            | apply checkedArrayElement_valid; assumption
+            | apply checkedArrayAddress_valid; assumption
+          · first
+            | exact retained
+            | exact retained.tail
+            | exact retained.tail.tail
+            | exact retained.tail.tail.tail))
 
 set_option maxHeartbeats 800000 in
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
@@ -285,18 +436,19 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   unfold memoryInstruction at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
-    | solve | instruction_contract_close
+    | solve | cases h; instruction_contract_close
     | cases h
     | split at h
 
 set_option maxHeartbeats 800000 in
 theorem instruction_contract (operation : CIL.Op) (stack values : List Value) (m result : Memory)
-    (h : instruction operation stack m = .ok (result, values)) : InstructionContract m result stack values := by
+    (h : instruction operation stack m = .ok (result, values)) :
+    InstructionContract m result stack values := by
   unfold instruction at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply memoryInstruction_contract; assumption
-    | solve | instruction_contract_close
+    | solve | cases h; instruction_contract_close
     | cases h
     | split at h
 
@@ -323,7 +475,8 @@ theorem storeValue_preserves_wellFormed (m result : Memory) (reference : Managed
 #print axioms storeValue_preserves_wellFormed
 
 set_option maxHeartbeats 800000 in
-theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp) (stack values : List Value)
+theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp)
+    (stack values : List Value)
     (m result : Memory) (hm : m.WellFormed)
     (h : memoryInstruction operation stack m = .ok (result, values)) : result.WellFormed := by
   exact (memoryInstruction_effect _ _ _ _ _ h).wellFormed hm

@@ -1,12 +1,26 @@
 import CIL.Safety.Frames
+import CIL.Safety.StackAllocation
 import CIL.Safety.StaticMemory
+import CIL.Safety.ReferenceObservations
 import CIL.NativeEvaluation
+
+/-!
+# Checked interpreter
+
+The interpreter that safety proofs reason about. It runs the same instructions as
+`CIL.step`, but over allocation-aware memory and checked values, and it reports why it
+stopped: every fault is an `ExecutionFault` located at a method and pc instead of `none`.
+Value-only instructions are delegated to `CIL.step` through `pureArity`, so the two
+interpreters cannot disagree on arithmetic.
+-/
 
 namespace CIL.Safety
 
+/-- Whether a value has a well-formed numeric representation; a snapshot must hold
+    exactly as many bytes as its shape. -/
 def numericValue : CIL.Value → Bool
   | .snapshot shape bytes => bytes.length == shape.width
-  | .aggregate _ | .i8 _ | .i32 _ | .i64 _ | .v128 _ | .v256 _ => true
+  | .aggregate _ | .i8 _ | .i32 _ | .i64 _ | .v128 _ | .v128Low64 _ | .v256 _ | .v512 _ => true
   | _ => false
 
 theorem numericValue_snapshotValue (shape : CIL.SnapshotShape) (bytes : List (BitVec 8 × Bool))
@@ -33,18 +47,31 @@ theorem bitcastValue_numeric {source target : CIL.SnapshotShape} {input value : 
   unfold bitcastValue at h
   split at h
   · cases h
-  · rename_i sizes
-    split at h
-    · rename_i bytes found
-      cases h
-      apply numericValue_snapshotValue
-      have length := valueSnapshot_length found
-      simp only [bne_iff_ne, ne_eq, Decidable.not_not] at sizes
-      exact length.trans sizes
+  · split at h
     · cases h
+    · rename_i sizes
+      split at h
+      · rename_i bytes found
+        cases h
+        apply numericValue_snapshotValue
+        have length := valueSnapshot_length found
+        simp only [bne_iff_ne, ne_eq, Decidable.not_not] at sizes
+        exact length.trans sizes
+      · cases h
 
+/-- Checks that a value may be pushed: a reference or span base must form in memory and a
+    scalar must be numeric. -/
 def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .reference r => formValue m r
+  | .readOnlyReference r => do
+    let _ ← formValue m r
+    return .readOnlyReference r
+  | .array view => do
+    let _ ← checkedAt view.reference 0 (view.validate m)
+    return .array view
+  | .bufferSpan view => do
+    let _ ← checkedAt view.reference 0 (view.validate m)
+    return .bufferSpan view
   | .span r length => do
     let _ ← formValue m r
     return .span r length
@@ -66,12 +93,15 @@ def pureArity : CIL.Op → Option Nat
   | .intrinsic _ argc => some argc
   | _ => none
 
+/-- The operands of a value-only instruction, all of which must be numeric scalars. -/
 def scalars : List Value → ExecutionResult (List CIL.Value)
   | [] => .ok []
   | .scalar value :: rest => do
     if numericValue value then return value :: (← scalars rest) else .error .invalidState
   | _ => .error .invalidState
 
+/-- What a checked step asks the driver to do next. A constructor carries the caller-owned
+    temporary it builds into and that temporary's layout. -/
 inductive FrameAction where
   | next (pc : Nat) (stack : List Value) (frame : Frame) (memory : Memory)
   | call (callee : Nat) (args rest : List Value) (memory : Memory)
@@ -79,8 +109,14 @@ inductive FrameAction where
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
+/-- Evaluates an intrinsic. Operands with unspecified bits are allowed only where the
+    result does not observe them; arithmetic faults are reported, not swallowed. -/
 def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : ExecutionResult CIL.Value :=
-  match operation with
+  if operands.any CIL.Value.hasUnspecified then
+    match CIL.evalUnspecifiedIntrinsic operation operands with
+    | some value => .ok value
+    | none => .error (.unsupported "Intrinsic observes unspecified vector bits")
+  else match operation with
   | .scalar (.math kind width signed) =>
     (CIL.evalIntegerMath kind width signed operands).mapError ExecutionFault.arithmetic
   | .x86Base .divRem64 => (CIL.X86.divRemValue operands).mapError ExecutionFault.arithmetic
@@ -88,9 +124,98 @@ def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : E
     | some value => .ok value
     | none => .error .invalidState
 
+/-- Executes one instruction of `body`. Instructions that would observe unspecified vector
+    bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
+  let unknownArgument := match op with
+    | .arg index (some _) => (args[index]?.map Value.hasUnspecified).getD false
+    | _ => false
+  if unspecifiedOperands (observerCount op) stack || unknownArgument then
+    .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
+  | .sub, .scalar offset :: .reference value :: rest =>
+    let result ← referenceSubtract m value offset
+    return .next (pc + 1) (.reference result :: rest) frame m
+  | .sub, .scalar offset :: .readOnlyReference value :: rest =>
+    let result ← referenceSubtract m value offset
+    return .next (pc + 1) (.readOnlyReference result :: rest) frame m
+  | .sub, .reference right :: .reference left :: rest
+  | .sub, .reference right :: .readOnlyReference left :: rest
+  | .sub, .readOnlyReference right :: .reference left :: rest
+  | .sub, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let result ← referenceDifference m left right
+    return .next (pc + 1) (.scalar (.i64 result) :: rest) frame m
+  | .ltu, .reference right :: .reference left :: rest
+  | .ltu, .reference right :: .readOnlyReference left :: rest
+  | .ltu, .readOnlyReference right :: .reference left :: rest
+  | .ltu, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m left right
+    return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
+  | .gtu, .reference right :: .reference left :: rest
+  | .gtu, .reference right :: .readOnlyReference left :: rest
+  | .gtu, .readOnlyReference right :: .reference left :: rest
+  | .gtu, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m right left
+    return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
+  | .bltu target, .reference right :: .reference left :: rest
+  | .bltu target, .reference right :: .readOnlyReference left :: rest
+  | .bltu target, .readOnlyReference right :: .reference left :: rest
+  | .bltu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m left right
+    return .next (if less then target else pc + 1) rest frame m
+  | .bgeu target, .reference right :: .reference left :: rest
+  | .bgeu target, .reference right :: .readOnlyReference left :: rest
+  | .bgeu target, .readOnlyReference right :: .reference left :: rest
+  | .bgeu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m left right
+    return .next (if less then pc + 1 else target) rest frame m
+  | .bgtu target, .reference right :: .reference left :: rest
+  | .bgtu target, .reference right :: .readOnlyReference left :: rest
+  | .bgtu target, .readOnlyReference right :: .reference left :: rest
+  | .bgtu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m right left
+    return .next (if less then target else pc + 1) rest frame m
+  | .bleu target, .reference right :: .reference left :: rest
+  | .bleu target, .reference right :: .readOnlyReference left :: rest
+  | .bleu target, .readOnlyReference right :: .reference left :: rest
+  | .bleu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m right left
+    return .next (if less then pc + 1 else target) rest frame m
+  -- Reference observations preserve memory and do not grant byte access authority.
+  | .brzero target, .reference value :: rest
+  | .brzero target, .readOnlyReference value :: rest =>
+    let present ← referenceNonNull m value
+    return .next (if present then pc + 1 else target) rest frame m
+  | .brnonzero target, .reference value :: rest
+  | .brnonzero target, .readOnlyReference value :: rest =>
+    let present ← referenceNonNull m value
+    return .next (if present then target else pc + 1) rest frame m
+  | .eq, .reference right :: .reference left :: rest
+  | .eq, .reference right :: .readOnlyReference left :: rest
+  | .eq, .readOnlyReference right :: .reference left :: rest
+  | .eq, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let equal ← referenceEqual m left right
+    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
+  | .beq target, .reference right :: .reference left :: rest
+  | .beq target, .reference right :: .readOnlyReference left :: rest
+  | .beq target, .readOnlyReference right :: .reference left :: rest
+  | .beq target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let equal ← referenceEqual m left right
+    return .next (if equal then target else pc + 1) rest frame m
+  | .bne target, .reference right :: .reference left :: rest
+  | .bne target, .reference right :: .readOnlyReference left :: rest
+  | .bne target, .readOnlyReference right :: .reference left :: rest
+  | .bne target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let equal ← referenceEqual m left right
+    return .next (if equal then pc + 1 else target) rest frame m
+  | .stackAlloc initLocals, [.scalar size] =>
+    let bytes ← match size with
+      | .i32 bits => pure bits.toNat
+      | .i64 bits => pure bits.toNat
+      | _ => .error .invalidState
+    let (reference, owner, memory) ← allocateStack m frame bytes initLocals
+    return .next (pc + 1) [.reference reference] owner memory
   | .intrinsic operation argc, _ =>
     if !operation.available body.profile then .error (.unsupported "Intrinsic unavailable in target profile") else
     if stack.length < argc then .error .invalidState else
@@ -210,6 +335,7 @@ def run (program : CIL.Program) : Nat → Nat → Nat → List Value → Frame �
       let result ← (result.mapM (checkedValue memory)).mapError fun fault => ⟨method, pc, fault⟩
       return (memory, result)
 
+/-- Calls `method` with checked `args` in a fresh frame. -/
 def invoke (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : Memory) :
     Except LocatedFault (Memory × List Value) := do
   let some body := program[method]? | .error ⟨method, 0, .invalidState⟩

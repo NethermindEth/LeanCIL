@@ -1,7 +1,16 @@
 import CIL.Safety.InstructionMemory
 
+/-!
+# Little-endian byte encoding
+
+`numberBytes value width` encodes a number as `width` little-endian bytes and `byteNumber`
+decodes them. Decoding an encoding returns the value modulo `256^width`; the converse round
+trip is in `ByteRoundTrip`. Scalar loads and stores of checked memory go through this pair.
+-/
+
 namespace CIL.Safety
 
+/-- Encoding peels the lowest byte first. -/
 theorem numberBytes_succ (value width : Nat) :
     numberBytes value (width + 1) = BitVec.ofNat 8 value :: numberBytes (value / 256) width := by
   simp only [numberBytes, List.range_succ_eq_map, List.map_cons, List.map_map,
@@ -12,6 +21,7 @@ theorem numberBytes_succ (value width : Nat) :
   simp only [Function.comp_def, Nat.pow_succ, Nat.div_div_eq_div_mul]
   rw [Nat.mul_comm 256]
 
+/-- Decoding an encoding keeps the value modulo `256^width`. -/
 theorem byteNumber_numberBytes (value width : Nat) :
     byteNumber (numberBytes value width) = value % 256^width := by
   induction width generalizing value with

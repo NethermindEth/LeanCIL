@@ -22,7 +22,7 @@ void Verified(params string[] options)
         throw new InvalidOperationException("CLI proof failed: " + result.Output);
 
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-    if (report.GetProperty("schema").GetInt32() != 3 ||
+    if (report.GetProperty("schema").GetInt32() != 4 ||
         !report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid"))
         throw new InvalidOperationException("Missing mandatory extraction certificate audit in report.");
 
@@ -146,15 +146,16 @@ if (args.Length == 0)
     var importedProof = Path.Combine(importedRoot, "Proof.lean");
     File.WriteAllText(importedProof, "import Extracted\nimport CIL.AuditGood\ntheorem ExampleProof.correctness : True := AuditGood.helper\n");
     // This corpus deliberately differs from CI's shared certified library. Build
-    // and replay it independently rather than accepting that library's certificate.
+    // and replay it from source rather than accepting that library's certificate.
+    var uncertified = new Dictionary<string, string> { ["LEANCIL_CERTIFIED_LIBRARY"] = "" };
     var validImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof, "--fresh"],
-        progress: "Checking valid imported helper against modified library");
+        progress: "Checking valid imported helper against modified library", environment: uncertified);
     if (validImported.Code != 0 || validImported.Stderr.Length != 0 ||
         !validImported.Stdout.StartsWith("Verified: ExampleProof.correctness"))
         throw new InvalidOperationException("Valid imported CIL helper rejected: " + validImported.Output);
     File.WriteAllText(importedProof, "import Extracted\nimport CIL.AuditBad\ntheorem ExampleProof.correctness : False := AuditBad.helper\n");
     var invalidImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof, "--fresh"],
-        progress: "Rejecting forged imported helper against modified library");
+        progress: "Rejecting forged imported helper against modified library", environment: uncertified);
     if (invalidImported.Code != 1 || invalidImported.Stdout.Length != 0 ||
         !invalidImported.Stderr.Contains("Stage: kernel replay") ||
         !invalidImported.Stderr.Contains("AuditBad.helper") ||

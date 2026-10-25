@@ -1,6 +1,14 @@
 import CIL.Safety.LiveValues
 import CIL.Safety.FrameAllocations
 
+/-!
+# Frame references are valid
+
+Frame setup (locals, argument homes and parameter homes) yields slots whose references are
+valid in the resulting memory, and `Frame.ReferencesValid` survives any allocation
+extension. `LiveState` uses this to keep a frame's references valid across calls.
+-/
+
 namespace CIL.Safety
 
 theorem makeLocal_reference_valid (m result : Memory) (activation : Nat) (kind : CIL.LocalKind)
@@ -22,7 +30,8 @@ theorem makeArgumentHomes_references_valid (m result : Memory) (activation : Nat
     (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
     ∀ home ∈ homes, home.2.ReferencesValid result := by
   intro home member
-  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).references hm home.2 (List.mem_map.mpr ⟨home, member, rfl⟩)
+  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).references hm home.2
+    (List.mem_map.mpr ⟨home, member, rfl⟩)
 
 theorem makeParameterHomes_references_valid (m result : Memory) (activation : Nat)
     (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
@@ -30,8 +39,10 @@ theorem makeParameterHomes_references_valid (m result : Memory) (activation : Na
     (h : makeParameterHomes activation parameters args m = .ok (homes, owned, result)) :
     ∀ home ∈ homes, home.2.ReferencesValid result := by
   intro home member
-  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).references hm home.2 (List.mem_map.mpr ⟨home, member, rfl⟩)
+  exact (makeParameterHomes_setup _ _ _ _ _ _ _ h).references hm home.2
+    (List.mem_map.mpr ⟨home, member, rfl⟩)
 
+/-- Every reference held by the frame's local slots and argument homes is valid in `m`. -/
 def Frame.ReferencesValid (m : Memory) (frame : Frame) : Prop :=
   SlotsReferencesValid m frame.locals ∧ ∀ home ∈ frame.arguments, home.2.ReferencesValid m
 

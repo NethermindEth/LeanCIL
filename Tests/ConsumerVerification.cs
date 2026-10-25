@@ -1,8 +1,14 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ConsumerTraceDirectory.cs
 
 using System.Text.Json;
+
+Run(["dotnet", "run", "--file", At("Tests/ConsumerSourceResolution.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/ConsumerSupportUnion.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/ConsumerCertificateReuse.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/ConsumerFingerprintReuse.cs")]);
 
 var cli = new[] { "dotnet", args.Length == 0 ? ExtractorPath : Path.GetFullPath(args[0]) };
 var root = Path.GetFullPath(At("artifacts/ConsumerPackage"));
@@ -21,8 +27,7 @@ if (Directory.Exists(existingCache))
             CopyTree(candidate, Path.Combine(isolatedCache, Path.GetFileName(candidate)));
 }
 Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", isolatedCache);
-var testTrace = At("artifacts/ConsumerTrace-" + Guid.NewGuid().ToString("N"));
-Directory.CreateDirectory(testTrace);
+var testTrace = ConsumerTraceDirectory.Create(At("artifacts"), "ConsumerTrace");
 Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", testTrace);
 Directory.CreateDirectory(Path.Combine(root, "Client"));
 var revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
@@ -89,7 +94,7 @@ string LeanSummary(string text, params string[] required)
 Verify("--proof", proof, "--proof-root", root);
 var first = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 var inputs = first.GetProperty("inputs");
-if (first.GetProperty("schema").GetInt32() != 3 ||
+if (first.GetProperty("schema").GetInt32() != 4 ||
     !first.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid", StringComparison.Ordinal) ||
     !first.GetProperty("libraryBuild").GetString()!.StartsWith("consumer-", StringComparison.Ordinal))
     throw new InvalidOperationException("Consumer verification omitted certified base or exact extraction certificate audit.");
@@ -655,8 +660,7 @@ try
     // A long batch must report finished requests while later workspaces still run, or it looks hung.
     // The second workspace's proof build ends seconds after the first request's line unless lines wait for the end.
     Environment.SetEnvironmentVariable(batchVariable, "progress");
-    var progressTrace = At("artifacts/ConsumerProgressTrace-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(progressTrace);
+    var progressTrace = ConsumerTraceDirectory.Create(At("artifacts"), "ConsumerProgressTrace");
     var savedTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
     int CompletedBuilds() => Directory.EnumerateFiles(progressTrace, "*.jsonl").Sum(path =>
     {
@@ -696,7 +700,6 @@ try
     finally
     {
         Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", savedTrace);
-        Directory.Delete(progressTrace, true);
     }
     Console.WriteLine("PASS batch reports each request when its workspace finishes; summary and results keep request order");
 }

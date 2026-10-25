@@ -35,6 +35,31 @@ example : throwFold [i 115 argument, i 122] = none := by decide
 example : throwFold [i 115 (ctor owner "Fixture.Failure" 0), i 122] = none := by decide
 example : throwFold [i 115 divide, i 38, i 122] = none := by decide
 
+theorem rejects_non_exception : throwFold [i 115 (ctor runtime "System.Object" 0), i 122] = none := by decide
+#print axioms rejects_non_exception
+
+theorem rejects_missing_constructor :
+    throwFold [i 114 (.text "a"), i 114 (.text "b"), i 115 (ctor runtime "System.DivideByZeroException" 2), i 122] = none := by decide
+#print axioms rejects_missing_constructor
+
+private def wrongParameter : RawOperand := .call {
+  declaringType := .atom runtime "System.DivideByZeroException", name := ".ctor",
+  target := .external (runtime ++ "::System.Void System.DivideByZeroException::.ctor(System.Int32)"),
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false }
+
+theorem rejects_wrong_signature : throwFold [i 114 (.text "a"), i 115 wrongParameter, i 122] = none := by decide
+#print axioms rejects_wrong_signature
+
+theorem accepts_two_strings :
+    throwFold [i 20, i 114 (.text "message"), i 115 (ctor runtime "System.ArgumentOutOfRangeException" 2), i 122] =
+      some (2, "System.ArgumentOutOfRangeException") := by decide
+#print axioms accepts_two_strings
+
+theorem rejects_non_exception_certificate :
+    ¬ FeatureFlowValid (raw [i 115 (ctor runtime "System.Object" 0), i 122]) .scalar
+      [state [], state [none]] [true, true] [.nop, .throw "System.Object"] := by decide
+#print axioms rejects_non_exception_certificate
+
 -- 0: ldarg.0; 1: brtrue 5; 2: ldstr; 3: newobj ArgumentException(string); 4: throw; 5: ldarg.0; 6: ret
 private def guardRaw := raw [i 2, i 45 (.target 5), i 114 (.text "zero"), i 115 argument, i 122, i 2, i 42]
 private def guardStates : FeatureCertificate :=

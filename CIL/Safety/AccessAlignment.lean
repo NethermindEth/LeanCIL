@@ -1,6 +1,15 @@
 import CIL.Safety.AccessSlices
 import CIL.Safety.Relocation
 
+/-!
+# What a successful access guarantees
+
+Each successful checked access, value load or value store in the checked interpreter
+(`CIL/Safety/Execution.lean`) is traced back to the `AccessRequirements` it passed. The
+alignment result holds at every valid `Placement`, so it does not depend on where the
+allocator happened to put an allocation.
+-/
+
 namespace CIL.Safety
 
 /-- A successful access establishes the requested alignment at every legal
@@ -31,15 +40,17 @@ theorem loadValue_checked_read {m : Memory} {reference : ManagedReference}
   | address r =>
     cases ha : access m r width 1 false with
     | error fault =>
-      by_cases h16 : width = 16 <;> by_cases h32 : width = 32 <;>
+      by_cases h16 : width = 16 <;> by_cases h32 : width = 32 <;> by_cases h64 : width = 64 <;>
         simp_all [loadValue, dereference, read, checkedAt, loadSnapshot, referenceAt,
-          ordinaryAccessAlignment, CIL.SnapshotShape.width, readSnapshot, Except.mapError, Bind.bind, Except.bind]
+          ordinaryAccessAlignment, CIL.SnapshotShape.width, readSnapshot, Except.mapError,
+          Bind.bind, Except.bind]
       all_goals repeat' first | cases loaded | split at loaded
     | ok result => cases result; exact ⟨r, rfl, ha⟩
+
 /-- Byte alignment at the supported ordinary value-load boundary imposes no
     hidden natural/vector alignment on a caller offset. Other read obligations
     still come from the actual checked access. This is a model theorem, not a
-    theorem about CLR lowering; see ALIGNMENT.md for that correspondence audit. -/
+    theorem about CLR lowering; `docs/SOUNDNESS.md` states the alignment convention assumed. -/
 theorem loadValue_access_requirements {m : Memory} {reference : ManagedReference}
     {width : Nat} {value : CIL.Value} {signed : Bool}
     (loaded : loadValue m reference width signed = .ok value) :
@@ -69,6 +80,7 @@ theorem storeValue_checked_write {m final : Memory} {reference : ManagedReferenc
     | cases stored
     | split at stored
 
+/-- A successful value store passed the write `AccessRequirements` for some width. -/
 theorem storeValue_access_requirements {m final : Memory} {reference : ManagedReference}
     {value : CIL.Value} (stored : storeValue m reference value = .ok final) :
     ∃ r width allocation, reference = .address r ∧

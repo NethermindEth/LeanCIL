@@ -10,13 +10,16 @@ internal static class ParameterEvidence
 {
     static string Type(TypeReference type, ModuleDefinition module, LayoutEvidence layouts)
     {
-        // Only folded span locals reach here; Lean derives the same inert root from the type.
-        if (type is ByReferenceType || Spans.Width(type) is not null) return ".reference";
+        if (type is ByReferenceType or PointerType) return ".reference";
+        if (Arrays.Of(type) is { } element) return $".array .{element.Lean}";
+        if (Spans.Width(type) is { } width)
+            return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (type is GenericInstanceType vector && !ValueTuples.Is(type))
             return vector.ElementType.FullName switch
             {
                 "System.Runtime.Intrinsics.Vector128`1" => ".vector128",
                 "System.Runtime.Intrinsics.Vector256`1" => ".vector256",
+                "System.Runtime.Intrinsics.Vector512`1" => ".vector512",
                 _ => throw new InvalidDataException("Unsupported raw argument/local type: " + type.FullName)
             };
         return $".field ({layouts.RawFieldType(type, module)})";

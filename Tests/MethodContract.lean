@@ -127,7 +127,8 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have readback := write_readback _ _ _ _ _ wrote
   rw [length] at readback
   have store : storeValue m (.address res) (.i64 (x + y)) = .ok stored := by
-    simp only [storeValue, referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
+      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
@@ -135,6 +136,7 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have lb := load_word64_of_read readB
   refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
+    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
     fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 set_option maxHeartbeats 400000 in
@@ -177,9 +179,11 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have readback := write_readback _ _ _ _ _ wrote
   rw [length] at readback
   have store : storeValue m2 (.address r) (.i64 ((x + y) * 3 + y)) = .ok m3 := by
-    simp only [storeValue, referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
+      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
   have fr2 := access_reference_valid _ _ _ _ _ writable2
   cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
+    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
     staticInstruction, fr2, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   simp only [leaveFrame, List.foldl_nil]
   exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))),
@@ -202,6 +206,15 @@ theorem frame_confined (m entered home stored final : Memory) (frame : Frame) (s
   exact (body.forget_fresh (by simpa using fresh)).then_below
     (leaveFrame_preserves_memory_below frame stored _ owned) (Nat.le_of_eq (leaveFrame_nextIdentity frame stored).symm)
 
+-- A callee that writes only its own frame cannot change what the caller reads after the call.
+theorem call_keeps_caller_read (body : CIL.Method) (args : List Value) (m entered home : Memory) (frame : Frame)
+    (slot r : Reference) (bytes : List (BitVec 8)) (width alignment : Nat)
+    (enter : enterFrame body args m = .ok (frame, entered)) (fresh : m.nextIdentity ≤ slot.allocation)
+    (wrote : write entered slot bytes 1 = .ok home) (old : r.allocation < m.nextIdentity) :
+    read (leaveFrame frame home) r width alignment = read m r width alignment :=
+  (MemoryBelow.frame_round_trip enter (write_preserves_memory_below _ _ _ _ _ _ fresh wrote)).read r old width alignment
+
+#print axioms call_keeps_caller_read
 #print axioms root_holds
 #print axioms root_correct
 #print axioms frame_confined
@@ -236,5 +249,121 @@ example {program : CIL.Program} {before after : Memory} (kept : FrameInvariants 
     (world : StaticWorldValid (programStaticDescriptors program) before) :
     after.WellFormed ∧ StaticWorldValid (programStaticDescriptors program) after :=
   ⟨kept.formed, kept.staticWorld world⟩
+
+-- A loaded local reaches the stack as `localResult kind value` and its consumer must step by its
+-- equation; unfolding `CIL.step`, or re-elaborating a tactic per step, exceeds the budget.
+def loadedGuardBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := false, locals := [], code :=
+    [.local 0, .const32 4, .bltu 7, .local 0, .const32 0, .bge 7, .nop, .ret,
+      .local 1, .local 2, .bltu 7, .ret] }
+
+set_option maxHeartbeats 2000 in
+theorem loaded_unsigned_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
+    (word : CIL.W32) (home : Reference) (slot : frame.locals[0]? = some (.bytes .word32 home))
+    (load : loadLocal memory (.bytes .word32 home) = .ok (.scalar (localResult .word32 (.i32 word))))
+    (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned, run program fuel index (if word < 4#32 then 7 else 3) [] frame []
+      memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 0 [] frame [] memory = .ok (final, returned) ∧
+      post final returned := by
+  cil_contract_steps [slot, load] until continuation
+
+set_option maxHeartbeats 2000 in
+theorem loaded_signed_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
+    (word : CIL.W32) (home : Reference) (slot : frame.locals[0]? = some (.bytes .word32 home))
+    (load : loadLocal memory (.bytes .word32 home) = .ok (.scalar (localResult .word32 (.i32 word))))
+    (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned, run program fuel index (if 0 ≤ word.toInt then 7 else 6) [] frame []
+      memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 3 [] frame [] memory = .ok (final, returned) ∧
+      post final returned := by
+  cil_contract_steps [slot, load] until continuation
+
+set_option maxHeartbeats 2000 in
+theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
+    (low high : CIL.W64) (lowHome highHome : Reference)
+    (lowSlot : frame.locals[1]? = some (.bytes .word64 lowHome))
+    (highSlot : frame.locals[2]? = some (.bytes .word64 highHome))
+    (lowLoad : loadLocal memory (.bytes .word64 lowHome) = .ok (.scalar (localResult .word64 (.i64 low))))
+    (highLoad : loadLocal memory (.bytes .word64 highHome) = .ok (.scalar (localResult .word64 (.i64 high))))
+    (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned, run program fuel index (if low < high then 7 else 11) [] frame []
+      memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 8 [] frame [] memory = .ok (final, returned) ∧
+      post final returned := by
+  cil_contract_steps [lowSlot, highSlot, lowLoad, highLoad] until continuation
+
+-- A parameter-selected widening is fetched as `if true = true then ..` and must step by its
+-- equation; re-elaborating a tactic at every contract step exceeds the budget.
+def widenBody (signed : Bool) : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.arg 0, if signed then .convI8 else .convU8, .arg 1, .ret] }
+
+def widenArgs (scalarFirst : Bool) (input : Reference) (value : CIL.Value) : List Value :=
+  if scalarFirst then [.scalar value, .reference (.address input)] else [.reference (.address input), .scalar value]
+
+set_option maxHeartbeats 3500 in
+theorem selected_widening (signed : Bool) (program : CIL.Program) (index : Nat)
+    (found : program[index]? = some (widenBody signed)) (frame : Frame) (memory : Memory)
+    (input : Reference) (word : CIL.W32) (formed : form memory input = .ok input)
+    (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned,
+      run program fuel index 3 (widenArgs (true && true) input (.i32 word)) frame
+        [.reference (.address input), .scalar (.i64 (if signed then word.signExtend 64 else word.zeroExtend 64))]
+        memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned, run program fuel index 0 (widenArgs (true && true) input (.i32 word)) frame [] memory =
+      .ok (final, returned) ∧ post final returned := by
+  cases signed
+  all_goals
+    cil_contract_steps 3 [found, formed, widenArgs]
+    simpa only [ite_true, Bool.false_eq_true, ite_false] using continuation
+
+/-- info: 'Tests.MethodContract.loaded_unsigned_branch' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms loaded_unsigned_branch
+/-- info: 'Tests.MethodContract.loaded_signed_branch' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms loaded_signed_branch
+/-- info: 'Tests.MethodContract.loaded_limb_branch' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms loaded_limb_branch
+/-- info: 'Tests.MethodContract.selected_widening' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms selected_widening
+
+/-- A feature test and a vector load step by their own equations inside a contract proof. -/
+def featureLoadBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := [.feature .avx2, .pop, .arg 0, .memory .load128, .ret] }
+
+theorem feature_load_contract (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (wide : profile.avx2 = true) (found : program[index]? = some (featureLoadBody profile))
+    (memory : Memory) (source : Reference) (value : BitVec 128)
+    (formed : form memory source = .ok source)
+    (loaded : loadValue memory (.address source) 16 = .ok (.v128 value)) :
+    ∃ fuel result returned, invoke program fuel index [.reference (.address source)] memory =
+      .ok (result, returned) ∧ returned = [.scalar (.v128 value)] := by
+  cil_contract_steps [wide, formed, loaded, checkedValue, formValue, checkedAt]
+  rfl
+
+/-- info: 'Tests.MethodContract.feature_load_contract' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_load_contract
+
+/-- A body whose first instruction depends on a feature, stepped as a contract proof steps it. -/
+def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [],
+    code := [if profile.avx2 then .arg 1 else .arg 0, .fieldAt 0 8, .ret] }
+
+open CIL.Safety in
+theorem feature_op_contract_steps (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (scalar : profile.avx2 = false) (found : program[index]? = some (featureOpBody profile))
+    (frame : Frame) (memory : Memory) (left right : Reference) (limb : BitVec 64)
+    (formed : form memory left = .ok left)
+    (field : ∀ rest, instruction (.fieldAt 0 8) (.reference (.address left) :: rest) memory =
+      .ok (memory, .scalar (.i64 limb) :: rest)) :
+    ∃ fuel final values,
+      run program fuel index 0 [.reference (.address left), .reference (.address right)] frame [] memory =
+        .ok (final, values) ∧ final = leaveFrame frame memory ∧ values = [.scalar (.i64 limb)] := by
+  cil_contract_steps [scalar, formed, field]
+  exact ⟨rfl, rfl⟩
+
+#print axioms feature_op_contract_steps
 
 end Tests.MethodContract

@@ -1,0 +1,31 @@
+import Std
+
+/-!
+# Metadata type expressions
+
+A scope-qualified form of ECMA-335 signature types, used by extraction and by typed import
+slots to compare signatures as values.
+-/
+
+namespace CIL.Extraction
+
+/-- The assembly scope of the .NET 10 reference assembly that defines the primitive types. -/
+def runtimeScope : String :=
+  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+
+/-- Scoped metadata types shared by extraction and typed import slots. -/
+inductive TypeExpr where
+  | void
+  | atom (scope name : String)
+  | aggregate (identity : String) (index : Nat)
+  | enum (identity : String) (underlying : TypeExpr)
+  | parameter (index : Nat)
+  | byref (element : TypeExpr)
+  | pointer (element : TypeExpr)
+  /-- A zero-based, single-dimensional CLI array signature. -/
+  | array (element : TypeExpr)
+  | constructor (scope name : String)
+  | apply (constructor argument : TypeExpr)
+  deriving DecidableEq, Repr
+
+end CIL.Extraction

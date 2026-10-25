@@ -76,7 +76,7 @@ foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Add", StringC
     claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [Examples.reference, .scalar (.i{stackWidth} 5)] memory).map Prod.snd = .error ⟨0, 2, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩");
     claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [.reference .null, .scalar (.i{stackWidth} 0)] memory).map Prod.snd = .error ⟨0, 2, .memory .nullDereference .null 0⟩");
     var success = "Tests.UnsafeWrappers.add_ok _ _ _ _ _ _ _ rfl rfl rfl rfl";
-    var failure = "Tests.UnsafeWrappers.add_error _ _ _ _ _ _ _ rfl rfl rfl";
+    var failure = "Tests.UnsafeWrappers.add_error _ _ _ _ _ _ _ rfl rfl rfl rfl";
     Prove(method, claims, memory, "⟨" + string.Join(", ", Enumerable.Repeat(success, 5).Concat([failure, failure])) + "⟩");
 }
 
@@ -113,7 +113,7 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
             "void" => "Unsupported type: System.Void",
             "byref" => "Unsupported Unsafe element type: System.Int32&",
             "pointer" => "Unsupported Unsafe element type: System.Int32*",
-            "arity" or "offset" or "return" => "Generic contract imports are not supported in version 1.",
+            "arity" or "offset" or "return" => "External managed dependency: " + call.FullName,
             "scope" => "Unsupported generic call: " + call.FullName,
             "version" => "Unsupported aggregate layout: Examples.PackedLeaf",
             _ => throw new InvalidOperationException("Unknown Unsafe rejection fixture: " + mutation)
@@ -121,7 +121,8 @@ foreach (var mutation in new[] { "class", "float", "void", "byref", "pointer", "
         module.Write(dll);
     }
     var result = Execute(Extract("extract", dll, "Examples", "UnsafeLayouts::Add14int(Examples.PackedLeaf&,int)", output));
-    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")) ||
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "identity.json")) ||
+        File.Exists(Path.Combine(output, "verified.json")) ||
         !result.Output.Contains(expectedDiagnostic, StringComparison.Ordinal))
         throw new InvalidOperationException("Incorrect Unsafe rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);

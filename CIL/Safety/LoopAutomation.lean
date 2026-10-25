@@ -1,6 +1,15 @@
 import CIL.Safety.Loops
 import CIL.Safety.SymbolicExecution
 
+/-!
+# Loop path automation
+
+Fuel-free reasoning about loops in the checked interpreter. `LoopReaches` is a checked path
+between two loop states whose fuel cost is existential, so proofs compose fetched
+instructions without counting steps. `cil_loop_steps` walks a goal to an invariant cutpoint
+and `cil_loop_finish` walks it to a return; both reuse the symbolic stepping tactics.
+-/
+
 namespace CIL.Safety
 
 /-- Locate an invariant cutpoint by instruction shape. Missing matches point past
@@ -17,6 +26,7 @@ theorem loop_reaches_refl {program : CIL.Program} {method : Nat} {args : List Va
     {state : LoopState} : LoopReaches program method args state state :=
   ⟨0, fun _ => rfl⟩
 
+/-- Prepends one fetched non-branching step to a loop path. -/
 theorem loop_reaches_next {program : CIL.Program} {method pc next : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {target : LoopState}
@@ -32,6 +42,7 @@ theorem loop_reaches_next {program : CIL.Program} {method pc next : Nat}
   rw [← Nat.add_assoc, run_next found instruction stepped]
   exact segment fuel
 
+/-- A state terminates if its fetched instruction steps to a state that terminates. -/
 theorem loop_terminates_next {program : CIL.Program} {method pc next : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
@@ -42,6 +53,7 @@ theorem loop_terminates_next {program : CIL.Program} {method pc next : Nat}
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
   run_next_exists post found instruction stepped rest
 
+/-- A fetched `ret` whose checked results satisfy `post` terminates. -/
 theorem loop_terminates_return {program : CIL.Program} {method pc : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
@@ -68,28 +80,36 @@ theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : L
 
 /-- Compose actual fetched instructions until the requested invariant state.
     Fuel is inferred from the path, including NOPs and unconditional branches. -/
-macro "cil_loop_steps" "[" facts:term,* "]" : tactic =>
-  `(tactic| repeat first
-    | (simp only [$[$facts:term],*])
-    | exact CIL.Safety.loop_reaches_refl
-    | (apply CIL.Safety.loop_reaches_next
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step [CIL.truth, $[$facts:term],*]))
+syntax "cil_loop_steps" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| cil_loop_steps [$facts:term,*]) =>
+    cilWithNormalisedFacts facts.getElems fun facts prepared =>
+    `(tactic| repeat first
+      | (simp only [$[$facts:term],*])
+      | exact CIL.Safety.loop_reaches_refl
+      | (apply CIL.Safety.loop_reaches_next
+         · cil_lookup [$[$facts:term],*]
+         · cil_lookup [$[$facts:term],*]
+         · cil_checked_step_normalized [$[$prepared:term],*]))
 
 /-- Establish an exit path and its postcondition without choosing a fuel bound. -/
-macro "cil_loop_finish" "[" facts:term,* "]" : tactic =>
-  `(tactic| repeat first
-    | (simp only [$[$facts:term],*])
-    | (apply CIL.Safety.loop_terminates_return (op := .ret _)
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step [CIL.truth, $[$facts:term],*]
-       · rfl
-       · simp [$[$facts:term],*])
-    | (apply CIL.Safety.loop_terminates_next
-       · cil_lookup [$[$facts:term],*]
-       · cil_lookup [$[$facts:term],*]
-       · cil_checked_step [CIL.truth, $[$facts:term],*]))
+syntax "cil_loop_finish" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| cil_loop_finish [$facts:term,*]) =>
+    cilWithNormalisedFacts facts.getElems fun facts prepared =>
+    `(tactic| repeat first
+      | (simp only [$[$facts:term],*])
+      | (apply CIL.Safety.loop_terminates_return (op := .ret _)
+         · cil_lookup [$[$facts:term],*]
+         · cil_lookup [$[$facts:term],*]
+         · cil_checked_step_normalized [$[$prepared:term],*]
+         · rfl
+         · simp [$[$facts:term],*])
+      | (apply CIL.Safety.loop_terminates_next
+         · cil_lookup [$[$facts:term],*]
+         · cil_lookup [$[$facts:term],*]
+         · cil_checked_step_normalized [$[$prepared:term],*]))
 
 end CIL.Safety
