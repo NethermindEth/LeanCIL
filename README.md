@@ -252,7 +252,8 @@ and int32 locals. Snapshot facts do not supply write authority or justify a valu
 local kind. Supported forwarder bodies can inherit a
 callee's proved contract, and embedding proofs can ignore trailing unread byref,
 pointer or span locals. Allocation refinement also relates numeric and interspersed dead
-locals in ordinary frames: retained initializers, scalar results and caller-memory prefixes transfer,
+locals in ordinary frames, including inserted locals with valid initializers: retained
+initializers, scalar results and caller-memory prefixes transfer,
 as do named exceptions, while fresh allocation identities may differ. Import
 `CIL.Safety.AllocationRefinement` explicitly for this API; the `CIL` umbrella does not load
 its proof dependencies. See

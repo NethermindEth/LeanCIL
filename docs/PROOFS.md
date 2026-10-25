@@ -1204,7 +1204,11 @@ To omit numeric or interspersed declarations from the proof body, import
 unloaded. Its dependencies still undergo the normal build and kernel replay when a consumer
 uses them. `LocalIndexMap.keep`, `.skip` and `.nil` describe the
 retained declarations in order. `LocalDeclarations` checks matching retained kinds and
-initializers and requires inserted dead declarations to be unmodeled. `MethodRenaming` checks the
+initializers and requires each inserted initializer to satisfy `InitializerFits` for its kind.
+`LocalDeclarations.skip` takes the kind, initializer and this proof before the remaining
+declarations. It admits valid scalar, vector and aggregate values, and null managed slots;
+unmodeled values remain supported. Private initialized homes are written outside the entire
+mapped allocation image, preserving caller bytes and permissions. `MethodRenaming` checks the
 target code's relocated local operands; method indices, call targets, profiles, return
 metadata and static sites stay exact. `ProgramRenaming` supplies this correspondence for
 every source method. The target is the extraction with the additional dead declarations.

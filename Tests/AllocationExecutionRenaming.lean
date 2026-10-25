@@ -30,10 +30,10 @@ def sourceBody (code : List CIL.Op) : CIL.Method := {
   localKinds := [.word32, .word32]
   code }
 
-/-- Private word64 declarations precede, separate and follow the retained word32 homes. -/
+/-- Initialized private word64 homes precede, separate and follow the retained word32 homes. -/
 def targetBody (code : List CIL.Op) : CIL.Method := {
   returnsValue := true
-  locals := [.unmodeled, .i32 7, .unmodeled, .unmodeled, .unmodeled]
+  locals := [.i64 17, .i32 7, .i64 23, .unmodeled, .i64 31]
   localKinds := [.word64, .word32, .word64, .word32, .word64]
   code := code.map indices.operation }
 
@@ -41,7 +41,8 @@ def targetBody (code : List CIL.Op) : CIL.Method := {
 theorem bodies_related (code : List CIL.Op) :
     Nonempty (MethodRenaming (sourceBody code) (targetBody code)) := by
   refine ⟨⟨indices, ⟨rfl, rfl, rfl⟩,
-    .skip _ (.keep _ _ (.skip _ (.keep _ _ (.skip _ .nil)))), ?_, ?_, rfl⟩⟩
+    .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
+      (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil)))), ?_, ?_, rfl⟩⟩
   all_goals constructor <;> first
     | rfl
     | (intro kind member
@@ -53,15 +54,37 @@ theorem bodies_related (code : List CIL.Op) :
 theorem changed_initializer_rejected :
     ¬ LocalDeclarations indices [.word32, .word32] [.i32 7, .unmodeled]
       [.word64, .word32, .word64, .word32, .word64]
-      [.unmodeled, .i32 8, .unmodeled, .unmodeled, .unmodeled] := by
+      [.i64 17, .i32 8, .i64 23, .unmodeled, .i64 31] := by
   intro declarations
   cases declarations
   rename_i retained
   cases retained
 #print axioms changed_initializer_rejected
 
+/-- Incompatible inserted word widths cannot establish the declaration relation. -/
+theorem incompatible_dead_initializer_rejected :
+    ¬ LocalDeclarations (.skip .nil) [] [] [.word32] [.i64 0] := by
+  intro declarations
+  cases declarations with
+  | skip kind initial fits rest => simp [InitializerFits] at fits
+#print axioms incompatible_dead_initializer_rejected
+
+/-- Initializer compatibility retains width, aggregate-length and unspecified-bit checks. -/
+theorem invalid_dead_initializers_rejected :
+    ¬ InitializerFits .byte (.i32 256) ∧
+    ¬ InitializerFits (.aggregate 2) (.aggregate [0]) ∧
+    ¬ InitializerFits .vector128 (.v128Low64 0) ∧
+    ¬ InitializerFits (.span 3 false) .nullRef := by simp [InitializerFits]
+#print axioms invalid_dead_initializers_rejected
+
 /-- The child reads seven from its retained initializer after allocating its numeric homes. -/
 def childCode : List CIL.Op := [.local 0, .ret]
+
+/-- The inserted nonzero initializer really writes the fresh private home during frame entry. -/
+theorem private_initializer_readback :
+    (enterFrame (targetBody childCode) [] initial).map
+      (fun result => read result.2 ⟨1, 0⟩ 8 1) = .ok (.ok (numberBytes 17 8)) := by rfl
+#print axioms private_initializer_readback
 
 /-- A returned child value is stored before later dynamic allocation changes fresh identities. -/
 def allocationPrefix : List CIL.Op :=
@@ -203,3 +226,59 @@ theorem changed_callee_rejected :
 #print axioms changed_callee_rejected
 
 end Tests.AllocationExecutionRenaming
+
+namespace Tests.InitializedLocalControls
+open CIL.Safety
+
+/-- A compact method has no local declarations and returns a fixed scalar. -/
+def compact : CIL.Method := {
+  locals := [], returnsValue := true, code := [.const32 7, .ret] }
+
+/-- The target inserts exactly one unused declaration with its supplied initializer. -/
+def inserted (kind : CIL.LocalKind) (initial : CIL.Value) : CIL.Method := {
+  compact with localKinds := [kind], locals := [initial] }
+
+/-- The compact method's checked execution succeeds for arbitrary caller memory. -/
+theorem compact_returns (memory : Memory) :
+    invoke [compact] 3 0 [] memory = .ok (memory, [.scalar (.i32 7)]) := by rfl
+#print axioms compact_returns
+
+/-- A valid initializer supplies the existing ordinary-frame width requirements. -/
+theorem inserted_ready (kind : CIL.LocalKind) (initial : CIL.Value)
+    (fits : InitializerFits kind initial) : OrdinaryFrame (inserted kind initial) := by
+  refine ⟨rfl, rfl, rfl, ?_⟩
+  intro selected member
+  have same : selected = kind := List.mem_singleton.mp member
+  subst selected
+  refine ⟨localWidth_bounded kind, ?_⟩
+  intro width writable same
+  subst kind
+  exact fits.1
+#print axioms inserted_ready
+
+/-- The exact operand map permits any admitted initializer for the one deleted declaration. -/
+theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
+    (fits : InitializerFits kind initial) :
+    ProgramRenaming [compact] [inserted kind initial] := by
+  intro method body found
+  cases method with
+  | zero =>
+    cases found
+    refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil, ⟨rfl, rfl, rfl⟩,
+      .skip kind initial fits .nil, ?_, inserted_ready kind initial fits, rfl⟩⟩⟩
+    exact ⟨rfl, rfl, rfl, by intro selected member; cases member⟩
+  | succ method => cases found
+#print axioms inserted_related
+
+/-- Every admitted initializer, including arbitrary zero or nonzero words, preserves the caller.
+    No initializer value is observed by the constant-returning method. -/
+theorem inserted_preserves_caller (kind : CIL.LocalKind) (initial : CIL.Value)
+    (fits : InitializerFits kind initial)
+    (memory : Memory) (formed : memory.WellFormed) (statics : memory.StaticBindingsBounded) :
+    ∃ final, invoke [inserted kind initial] 3 0 [] memory =
+      .ok (final, [.scalar (.i32 7)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  exact (inserted_related kind initial fits).invoke_confined formed statics
+    (values := [.i32 7]) (compact_returns memory) (.refl _ _)
+#print axioms inserted_preserves_caller
+
+end Tests.InitializedLocalControls

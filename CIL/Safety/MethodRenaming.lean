@@ -5,7 +5,7 @@ import CIL.Safety.FrameEntryRenaming
 # Methods with relocated retained locals
 
 The relation fixes every instruction and call target while relocating local operands.
-Retained declarations keep their initializers; inserted declarations are unmodeled.
+Retained declarations keep their initializers; inserted declarations have valid initializers.
 -/
 
 namespace CIL.Safety

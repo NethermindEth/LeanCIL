@@ -130,7 +130,9 @@ interspersed dead declarations. `MethodRenaming` retains local kinds and initial
 all relocated local operands while preserving method indices and execution metadata.
 Both methods must satisfy `OrdinaryFrame`: no opaque vector locals or vector/parameter
 argument homes, bounded layouts and supported span widths. `LocalDeclarations` preserves
-each retained initializer and permits only unmodeled inserted dead declarations. Actual
+each retained initializer and checks inserted values with `InitializerFits`. Their actual
+initialization writes affect only fresh private homes outside the mapped allocation image;
+null managed slots do not allocate. Invalid kinds, widths and initializer values are rejected. Actual
 source entry success supplies successful retained initialization; the target entry is proved.
 The initial memory must be well formed and its static bindings bounded by the allocation
 counter. These restrictions are premises of the public theorems.
