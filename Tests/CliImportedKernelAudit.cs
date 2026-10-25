@@ -1,22 +1,35 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
 #:include ConsumerTraceDirectory.cs
 
 using System.Diagnostics;
 using System.Text.Json;
 
-if (args is not ([] or ["--measure-baseline"]))
-    throw new ArgumentException("Usage: dotnet run --file Tests/CliImportedKernelAudit.cs -- [--measure-baseline]");
-var baseline = args.Length != 0;
+if (args is not ([] or ["--measure-baseline"] or ["--fresh-preparation"]))
+    throw new ArgumentException("Usage: CliImportedKernelAudit.cs [--measure-baseline | --fresh-preparation]");
+var baseline = args is ["--measure-baseline"];
+var freshPreparation = args is ["--fresh-preparation"];
 var cli = new[] { "dotnet", At("Extractor/bin/Nethermind.LeanCIL.dll") };
 var assembly = At("Examples/Assembly/bin/Examples.dll");
+var importedRoot = At("artifacts/CliImportedKernelAudit-" + Guid.NewGuid().ToString("N"));
+var certifiedBase = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY");
+var baseDigest = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256");
+if (!baseline && !freshPreparation && string.IsNullOrWhiteSpace(certifiedBase))
+{
+    // Local runs prepare the unchanged framework before measuring its source extension.
+    certifiedBase = Path.Combine(importedRoot, "base");
+    using var producer = new Program();
+    producer.PrepareCertifiedFingerprints();
+    baseDigest = producer.PrepareLibrary(certifiedBase);
+}
 var trace = ConsumerTraceDirectory.Create(At("artifacts"), "CliImportedKernelAuditTrace");
 Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
 var timer = Stopwatch.StartNew();
 
 // Helpers outside the CIL aggregate compile only after the isolated base library audit.
-var importedRoot = At("artifacts/CliImportedKernelAudit-" + Guid.NewGuid().ToString("N"));
 var importedTool = Path.Combine(importedRoot, "tool");
 CopyTree(Path.GetDirectoryName(cli[1])!, importedTool);
 var sources = Path.Combine(importedTool, "verification", "CIL");
@@ -38,8 +51,8 @@ Run([.. importedCli, "extract", assembly, "Arithmetic::Add(ulong,ulong)", import
 var importedProof = Path.Combine(importedRoot, "Proof.lean");
 File.WriteAllText(importedProof,
     "import Extracted\nimport CIL.AuditGood\ntheorem ExampleProof.correctness : True := AuditGood.helper\n");
-// This corpus deliberately differs from CI's shared certified library. Build
-// and replay it from source rather than accepting that library's certificate.
+// The original certificate cannot authorize the additional source files. The producer
+// binds them to a new manifest without certifying their as-yet-uncompiled declarations.
 var uncertified = new Dictionary<string, string>
 {
     ["LEANCIL_CERTIFIED_LIBRARY"] = "",
@@ -59,8 +72,10 @@ if (!baseline)
     foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig" })
         File.Copy(At(name), Path.Combine(corpus, name));
     var prepared = Path.Combine(importedRoot, "prepared");
-    var preparation = Run(["dotnet", "run", "--file", Path.Combine(scripts, "PrepareLibrary.cs"), "--", prepared],
-        progress: "Preparing modified CLI library once", environment: uncertified);
+    string[] preparationOptions = freshPreparation ? [] :
+        ["--extend", certifiedBase!, baseDigest ?? throw new InvalidOperationException("Missing trusted base digest")];
+    var preparation = Run(["dotnet", "run", "--file", Path.Combine(scripts, "PrepareLibrary.cs"), "--", prepared,
+        .. preparationOptions], progress: "Preparing modified CLI library once", environment: uncertified);
     const string digestPrefix = "Certified library manifest SHA256: ";
     var digest = preparation.Split('\n').Single(line => line.StartsWith(digestPrefix))[digestPrefix.Length..].Trim();
     if (digest.Length != 64 || digest != Sha(Path.Combine(prepared, "cache-manifest.json")))
@@ -102,12 +117,14 @@ double Seconds(string name) => stages.Where(stage => stage.GetProperty("stage").
 const string buildStage = "Building fresh Lean verification library";
 const string replayStage = "Joint kernel replay of fresh Lean verification library";
 const string copyStage = "Copying certified Lean verification library";
-if (Count(buildStage) != (baseline ? 2 : 1) || Count(replayStage) != (baseline ? 2 : 1) ||
+var expectedPreparations = baseline ? 2 : freshPreparation ? 1 : 0;
+if (Count(buildStage) != expectedPreparations || Count(replayStage) != expectedPreparations ||
+    Count("Extending certified library sources") != (baseline || freshPreparation ? 0 : 1) ||
     Count(copyStage) != (baseline ? 0 : 2))
     throw new InvalidOperationException("Imported helper checks repeated or skipped their certified base preparation.");
 var measurements = new
 {
-    baseline, wallSeconds = timer.Elapsed.TotalSeconds,
+    baseline, freshPreparation, wallSeconds = timer.Elapsed.TotalSeconds,
     freshBuilds = Count(buildStage), freshBuildSeconds = Seconds(buildStage),
     baseReplays = Count(replayStage), baseReplaySeconds = Seconds(replayStage),
     privateCopies = Count(copyStage), privateCopySeconds = Seconds(copyStage)

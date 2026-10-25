@@ -31,16 +31,25 @@ took 76.20 seconds before batching and 31.72 seconds afterward.
 dotnet run --file Tests/PrimitiveArrays.cs -- --measure
 ```
 
-`Tests/CliImportedKernelAudit.cs`, called by the CLI suite, builds and kernel-replays its
-modified source corpus once with the ordinary library producer. Both standalone
+`Tests/CliImportedKernelAudit.cs`, called by the CLI suite, extends the producer's certified
+base with two previously uncompiled helper sources. Both standalone
 `verify --fresh` calls use private copies authenticated by that producer's manifest digest. The valid
 helper succeeds; the forged `AuditBad.helper` fails specifically during kernel replay and
 removes the previous certificate. Both helpers remain outside the audited base aggregate.
 The fixture also rejects using the modified corpus's certificate with the unmodified tool.
-Trace assertions require one fresh build, one base replay and two successful private copies.
+Trace assertions require zero fresh base builds/replays, one source extension and two successful
+private copies. New helper declarations never inherit certification from that extension.
 Run `dotnet run --file Tests/CliImportedKernelAudit.cs` after building the extractor and example
-assembly; add `-- --measure-baseline` to measure the original two-build workload. Each run
+assembly; `-- --fresh-preparation` measures one fresh preparation, and `-- --measure-baseline`
+measures the original two-build workload. Without a supplied base, a local run prepares it
+before measuring the extension. Each run
 writes `timings.json` beneath its isolated `artifacts/CliImportedKernelAudit-*` directory.
+
+`Tests/LibrarySourceExtension.cs` independently checks manifest authentication, private copies,
+changed/self-rehashed compiled artifacts, existing-source edits/removals, configuration changes,
+compiled-module shadows (including case variants on case-insensitive filesystems), and preservation
+of an existing destination. Its synthetic compiled bytes exercise preparation integrity only;
+the CLI fixture supplies the end-to-end kernel checks against real compiled declarations.
 
 `Tests/ConsumerBatchSetup.cs` runs the fixed mixed-outcome consumer checks used by the core
 suite. Imported axioms, unchecked declarations, expected-rejection mismatches and invalid
