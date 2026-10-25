@@ -124,7 +124,7 @@ def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .scalar value => kind ≠ .reference ∧ ∃ number, localNumber kind value = .ok number
   | .reference _ => kind = .reference
   | .span _ _ => False
-  | .readOnlyReference _ => False
+  | .readOnlyReference _ => kind = .reference
   | .bufferSpan view => kind = .span view.width view.writable ∧ view.width ∈ [1, 2, 4, 8]
   | .array view => kind = .array view.elementType
 
@@ -141,7 +141,14 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
       storeLocal home slot value = .ok (final, result) := by
   cases value with
   | span r length => cases fits
-  | readOnlyReference _ => cases fits
+  | readOnlyReference reference =>
+    change kind = .reference at fits
+    subst kind
+    have formed := checkedValue_of_valid m (.readOnlyReference reference) valid
+    refine ⟨.root none, [], m, .readOnlyRoot reference, m, rfl, ?_⟩
+    cases reference <;> simp_all [checkedValue, formValue, Value.Valid, checkedAt,
+      Except.mapError, storeLocal, Value.hasUnspecified, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
   | array view =>
     change kind = .array view.elementType at fits
     subst kind

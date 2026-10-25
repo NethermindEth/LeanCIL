@@ -128,7 +128,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
 private def arrayEmission : Op → Bool
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
-  | .memory (.arrayAddress _) => true
+  | .memory (.arrayAddress ..) => true
   | _ => false
 
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode. -/
@@ -139,13 +139,13 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
   | some (.arrayLoad width signed, _), .memory (.arrayLoad actual polarity) =>
     width == actual && signed == polarity
   | some (.arrayStore width, _), .memory (.arrayStore actual) => width == actual
-  | some (.arrayAddress element, _), .memory (.arrayAddress actual) => element == actual
+  | some (.arrayAddress element _, _), .memory (.arrayAddress actual _) => element == actual
   | _, _ => false
 /-- Opcodes whose emitted encoding the scalar check fixes: integer constants, arithmetic,
     shifts, `neg`, `not`, conversions and compare-branches. -/
 def scalarCovered (opcode : Nat) : Bool :=
   arrayCovered opcode || (21 <= opcode && opcode <= 33) || scalarBinary opcode || conversion opcode ||
-    compareBranch opcode || opcode ∈ [20, 44, 45, 57, 58, 98, 99, 100, 101, 102]
+    compareBranch opcode || opcode ∈ [20, 44, 45, 57, 58, 98, 99, 100, 101, 102, 65054]
 
 /-- The emitted operation each covered non-branch opcode must produce. -/
 private def scalarEncodingMatches (opcode : Nat) (emitted : Op) : Bool :=
@@ -223,6 +223,8 @@ private def literal (instruction : RawInstruction) : Option Op :=
 def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Op) :
     Bool :=
   if arrayCovered instruction.opcode || arrayEmission emitted then arrayMatches instruction stack emitted
+  else if instruction.opcode == 65054 then
+    instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
     instruction.operand == .none && match emitted with | .memory .nullRef => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
@@ -640,6 +642,27 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
       | .setLocal actual _ => actual == index
       | _ => false) : Option Bool).getD false
 
+/-- Whether the immediately preceding raw instruction is a readonly prefix. -/
+private def followsReadOnly (raw : RawMethod) (pc : Nat) : Bool :=
+  pc > 0 && (raw.code[pc - 1]?).any (fun instruction => instruction.opcode == 65054)
+
+/-- A readonly prefix is inseparable from its element address, including branch entry. -/
+private def readOnlySiteMatches (raw : RawMethod) (pc : Nat) (instruction : RawInstruction)
+    (emitted : Op) : Bool :=
+  let entered (target : Nat) := raw.code.any fun source => match source.operand with
+    | .target destination => destination == target
+    | .targets destinations => destinations.contains target
+    | _ => false
+  if instruction.opcode == 65054 then
+    instruction.operand == .none &&
+      (raw.code[pc + 1]?).any (fun next => next.opcode == 143) && !entered (pc + 1)
+  else if instruction.opcode == 143 then
+    match emitted with
+    | .memory (.arrayAddress _ writable) =>
+      writable == !followsReadOnly raw pc && (!followsReadOnly raw pc || !entered pc)
+    | _ => false
+  else true
+
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, emit the right encoding, and give every successor,
     which must be reachable, exactly the resulting stack kinds. -/
@@ -651,6 +674,7 @@ private def checkScalarSite (raw : RawMethod) (features : FeatureCertificate)
   | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       spanCreateMatches instruction emitted &&
+      readOnlySiteMatches raw pc instruction emitted &&
       scalarEmissionMatches role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack role, featureSuccessors pc instruction feature with
