@@ -128,7 +128,7 @@ var signatures = new Dictionary<string, string>
 // Each suite can run in its own checkout, with only the projects it needs.
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
 if (suite is "all" or "core")
-    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "scripts/Verify.cs"]);
+    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs"]);
@@ -203,6 +203,9 @@ Passed("batched extraction and proof checking, independent identities and negati
 
 RunFixture("Tests/JointReplay.cs", [], streamOutput: true, progress: "Joint kernel replay checks");
 Passed("joint kernel replay, untargeted-import fallback and forged declaration attribution");
+
+RunFixture("Tests/AllocationImports.cs", [], streamOutput: true, progress: "Selective allocation imports");
+Passed("explicit allocation refinement imports, retained local initializers and complete kernel replay");
 
 RunFixture("Tests/InitializedTypes.cs", [], streamOutput: true, progress: "Initialization assumptions");
 Passed("explicit type initialization assumptions and identity");

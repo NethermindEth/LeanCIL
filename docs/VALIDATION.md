@@ -487,3 +487,11 @@ and the changed scope definition plus its equality theorem gives 32,502,723 vers
 raw heartbeats (13.5%). The latter includes the one-time scope construction and equivalence
 cost. Actual extractor output matches the measured source. Generic evidence mutations also
 reject altered runtime versions and public-key tokens; no scope comparison is relaxed.
+
+The core `Tests/AllocationImports.cs` fixture checks that the CIL umbrella omits allocation
+refinement, builds both explicit allocation acceptance modules, and jointly replays every
+additional imported module. The current closure contains 49 production and two test modules;
+all remain mandatory checks while ordinary consumers avoid loading their 197 MiB of oleans.
+The compiled namespace audit checks their theorem axiom closures even on warm builds and binds
+the audited paths and module bytes to those replayed. An isolated theorem depending on
+`sorryAx` passes kernel replay but must fail that audit; build output is also checked.

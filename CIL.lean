@@ -181,12 +181,12 @@ import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
 import CIL.Safety.Segment
 import CIL.Safety.SegmentLocals
-import CIL.Safety.AllocationRefinement
 
 /-!
 # LeanCIL
 
 The root of the `CIL` library; importing `CIL` brings in every module listed above.
+Allocation-renaming proofs are optional: import `CIL.Safety.AllocationRefinement` explicitly.
 
 * `CIL.Types`, `CIL.Instructions`, `CIL.Layout` and `CIL.Memory`: values, opcodes, aggregate
   layouts and byte memory.
