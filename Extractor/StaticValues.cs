@@ -6,11 +6,37 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// A static readonly struct field whose static constructor stores `M(constants)` exactly once,
-// unconditionally. Lean rechecks that M returns Bytes; recognizing the store is trusted.
+// Readonly fields have one unconditional store, from a literal or M(constants).
+// Lean rechecks stored bytes; recognizing the constructor store remains trusted.
 internal static class StaticValues
 {
-    internal sealed record Value(FieldDefinition Field, MethodDefinition Initializer, string[] Arguments, byte[] Bytes);
+    internal sealed record Value(FieldDefinition Field, MethodDefinition? Initializer, string[] Arguments,
+        byte[] Bytes, string? Literal = null);
+
+    internal static string Scalar(FieldDefinition field) => MetadataValidation.IsAggregate(field.FieldType, field.Module)
+        ? "none" : "some " + (EnumTypes.Storage(field.FieldType).FullName is "System.SByte" or "System.Int16"
+            ? "true" : "false");
+
+    static int Width(FieldDefinition field, string architecture) =>
+        MetadataValidation.IsAggregate(field.FieldType, field.Module)
+            ? MetadataValidation.Layout(field.FieldType, field.Module, architecture)
+            : MetadataValidation.PrimitiveWidth(field.FieldType);
+
+    static string LeanWord(Word word) => word.Width == 8
+        ? $".i64 {word.Bits.ToString(CultureInfo.InvariantCulture)}"
+        : $".i32 {word.Bits.ToString(CultureInfo.InvariantCulture)}";
+
+    static byte[] Bytes(Slot? value, FieldDefinition field, string architecture)
+    {
+        var width = Width(field, architecture);
+        if (MetadataValidation.IsAggregate(field.FieldType, field.Module))
+        {
+            if (value is Snapshot snapshot && snapshot.Data.Length == width) return snapshot.Data;
+        }
+        else if (value is Word word && word.Width == (width == 8 ? 8 : 4))
+            return Enumerable.Range(0, width).Select(index => (byte)(word.Bits >> (8 * index))).ToArray();
+        throw Unsupported(field, "Its initializer does not return a complete value of the field's storage type.");
+    }
 
     abstract record Slot;
     sealed record Word(int Width, ulong Bits) : Slot;
@@ -36,10 +62,11 @@ internal static class StaticValues
         FieldDefinition? field = reference.Resolve();
         if (field is null || reference.DeclaringType.Scope != module || reference.DeclaringType is TypeSpecification ||
             field.Module != module || reference.FullName != field.FullName || !field.IsStatic || !field.IsInitOnly ||
-            (field.Attributes & FieldAttributes.HasFieldRVA) != 0 || !MetadataValidation.IsAggregate(field.FieldType, module) ||
+            (field.Attributes & FieldAttributes.HasFieldRVA) != 0 ||
             field.DeclaringType.HasGenericParameters)
-            throw new InvalidDataException($"Unsupported static field load: {reference.FullName}\n  Only static readonly fields of a reference-free struct declared in this assembly are loaded.");
-        MetadataValidation.Layout(field.FieldType, module, architecture);
+            throw new InvalidDataException($"Unsupported static field load: {reference.FullName}\n  Only same-assembly static readonly integer, enum or reference-free struct fields are loaded.");
+        RuntimeModels.ValidateTypeIdentity(field.FieldType, module, architecture);
+        _ = Width(field, architecture);
         return field;
     }
 
@@ -82,6 +109,18 @@ internal static class StaticValues
                 throw Unsupported(field, $"It copies {source.FullName}, which is not stored earlier in the same static constructor.");
             return Resolve(source, module, architecture) with { Field = field };
         }
+        if (store > 0 && !MetadataValidation.IsAggregate(field.FieldType, module) &&
+            (Constant(code[store - 1]) || Conversion(code[store - 1])))
+        {
+            var first = store - 1;
+            while (first > 0 && Conversion(code[first])) first--;
+            if (!Constant(code[first])) throw Unsupported(field, "Its literal initializer is not an integer constant.");
+            var literalStack = new Stack<Slot>();
+            for (var index = first; index < store; index++) Step(code[index], literalStack, field);
+            if (literalStack.Count != 1 || literalStack.Pop() is not Word literal)
+                throw Unsupported(field, "Its literal initializer has an invalid stack.");
+            return new(field, null, [], Bytes(literal, field, architecture), LeanWord(literal));
+        }
         if (store == 0 || code[store - 1] is not { OpCode.Code: Code.Call, Operand: MethodDefinition initializer } ||
             initializer.Module != module || !initializer.IsStatic || initializer.HasGenericParameters ||
             initializer.ReturnType.FullName != field.FieldType.FullName ||
@@ -103,11 +142,8 @@ internal static class StaticValues
         foreach (var method in Closure(initializer, module))
             if (method.Body.Instructions.Any(i => i.OpCode.Code is Code.Ldsfld or Code.Ldsflda or Code.Stsfld))
                 throw Unsupported(field, $"Its initializer accesses static fields, in {method.FullName}.");
-        if (Run(initializer, arguments, field, module, 0, architecture) is not Snapshot { Data: byte[] bytes } ||
-            bytes.Length != MetadataValidation.Layout(field.FieldType, module, architecture))
-            throw Unsupported(field, $"{initializer.FullName} does not return a complete value.");
-        return new Value(field, initializer, arguments.Select(a => a is Word { Width: 8, Bits: var b }
-            ? $".i64 {b.ToString(CultureInfo.InvariantCulture)}" : $".i32 {((Word)a).Bits.ToString(CultureInfo.InvariantCulture)}").ToArray(), bytes);
+        var bytes = Bytes(Run(initializer, arguments, field, module, 0, architecture), field, architecture);
+        return new Value(field, initializer, arguments.Select(a => LeanWord((Word)a)).ToArray(), bytes);
     }
 
     // Same-assembly methods reachable by direct calls; unmodelled code beyond them is a documented assumption.

@@ -139,6 +139,8 @@ inductive Op where
 structure StaticInitializer where
   method : Nat
   arguments : List Value
+  /-- A direct integer literal store; no method is called when this is present. -/
+  literal : Option Value := none
   deriving DecidableEq, Repr
 
 /-- A static field the method reads: its bytes as extracted, and where they came from. -/
@@ -148,6 +150,8 @@ structure StaticDescriptor where
   bytes : List (BitVec 8)
   /-- `some` for a value fixed by its static constructor, `none` for RVA data. -/
   initializer : Option StaticInitializer := none
+  /-- Integer fields use their byte width and this signed-load flag; aggregates use `none`. -/
+  scalar : Option Bool := none
   assemblyIdentity : String := ""
   deriving DecidableEq, Repr
 

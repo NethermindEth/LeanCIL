@@ -339,7 +339,7 @@ internal static class MetadataValidation
                 {
                     throw new InvalidDataException($"{error.Message}\n  Site: {instruction}", error);
                 }
-                Enter(value.Initializer, value.Initializer, instruction);
+                if (value.Initializer is { } initializer) Enter(initializer, initializer, instruction);
             }
             foreach (Instruction instruction in reachable)
             {
