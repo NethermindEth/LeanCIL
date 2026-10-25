@@ -5,6 +5,7 @@ import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
 import CIL.Safety.MemorySteps
 import CIL.Safety.CallComposition
+import CIL.Safety.CodeAt
 
 /-!
 # Checked symbolic execution
@@ -195,6 +196,56 @@ elab_rules : tactic
       replaceMainGoal []
     catch _ => fetched.restore
 
+/-- Close an instruction lookup from a placed segment, without unfolding the abstract body. -/
+syntax "cil_lookup_placed" "[" term,* "]" : tactic
+
+open Lean Meta in
+/-- Recognize a natural-number position as a literal offset after a segment's start. -/
+private partial def placementOffset (start position : Expr) : MetaM Nat := do
+  if ← isDefEq position start then return 0
+  if let some positionValue ← getNatValue? position then
+    if let some startValue ← getNatValue? start then
+      if startValue ≤ positionValue then return positionValue - startValue
+  if position.isAppOf ``HAdd.hAdd || position.isAppOfArity ``Nat.add 2 then
+    if let some amount ← getNatValue? position.appArg! then
+      return (← placementOffset start position.getAppArgs[position.getAppArgs.size - 2]!) + amount
+  throwError "The position is not a literal offset from this placement"
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_lookup_placed [$facts:term,*]) => withMainContext do
+    let original ← saveState
+    let mut placements : Array Expr := #[]
+    for declaration in ← getLCtx do
+      if declaration.type.isAppOfArity ``CodeAt 3 then
+        placements := placements.push declaration.toExpr
+    for fact in facts.getElems do
+      let saved ← saveState
+      try
+        let proof ← Term.withoutErrToSorry <| Term.elabTerm fact none
+        let type ← instantiateMVars (← inferType proof)
+        if type.isAppOfArity ``CodeAt 3 then placements := placements.push proof
+        else saved.restore
+      catch _ => saved.restore
+    for placement in placements do
+      let saved ← saveState
+      try
+        let type ← inferType placement
+        let start := type.getAppArgs[1]!
+        let some (_, lookup, _) := (← getMainTarget).eq?
+          | throwError "Expected an instruction lookup"
+        let position := lookup.getAppArgs.back!
+        let index ← placementOffset start position
+        let placedTerm ← Term.exprToSyntax placement
+        let indexTerm : Term := ⟨Syntax.mkNumLit (toString index)⟩
+        evalTactic (← `(tactic| cil_strict
+          (simpa only [Nat.add_assoc, Nat.add_zero, Nat.reduceAdd] using
+            (CodeAt.lookup $placedTerm $indexTerm rfl))))
+        return
+      catch _ => saved.restore
+    original.restore
+    throwError "No placed segment contains this instruction"
+
 -- Reducible `assumption` keeps a failed candidate lookup from unfolding every hypothesis.
 -- A branch leaves `(v != 0) = true` in the pc: the negation lemmas decide it from
 -- `Not (v = 0)`, and the trailing `rfl` decides it once `v = 0` or a literal closes it.
@@ -204,6 +255,7 @@ macro_rules
     | with_reducible assumption
     | (simp only [cil_code, Nat.reduceAdd]; cil_lookup_rfl [$[$facts:term],*])
     | cil_lookup_rfl [$[$facts:term],*]
+    | cil_lookup_placed [$[$facts:term],*]
     | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
         Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; done)
     | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,

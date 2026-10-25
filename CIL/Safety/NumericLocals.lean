@@ -27,6 +27,8 @@ theorem make_numeric_local (memory : Memory) (activation : Nat)
     cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have notSpan : ∀ width writable, kind ≠ .span width writable := by
     cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+  have notArray : ∀ element, kind ≠ .array element := by
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have bounded : localWidth kind < nativeLimit := by
     cases kind <;> simp only [localWidth, nativeLimit] <;>
       first | exact CIL.NarrowKind.width_lt _ | simp

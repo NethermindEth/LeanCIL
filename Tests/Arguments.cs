@@ -116,7 +116,8 @@ using (var module = ModuleDefinition.ReadModule(escapeDll))
     module.Write(rejectedDll);
 }
 var rejection = Execute(Extract("extract", rejectedDll, "Examples", "Arguments::Escape(uint&)", rejectedOutput));
-if (rejection.Code == 0 || !rejection.Output.Contains("Address of managed-reference argument is unsupported"))
+if (rejection.Code == 0 ||
+    !rejection.Output.Contains("Address of managed-reference or array-root argument is unsupported"))
     throw new InvalidOperationException("Incorrect nested-reference rejection: " + rejection.Output);
 
 // The unchanged universal overwrite contract rejects storing back into the wrong argument.

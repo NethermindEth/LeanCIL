@@ -134,8 +134,11 @@ the goal unchanged.
 A segment theorem over an abstract body states where its code sits with
 `CodeAt body start segment` ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of
 `body.code = leading ++ segment ++ tail` and `leading.length = start`.
-`placed.lookup i rfl` proves `body.code[start + i]? = some op` to
-pass as a lookup hypothesis; `append`, `middle`, `take` and `drop` move a placement
+Pass `placed` directly to `cil_checked_steps [found, placed]`: `cil_lookup` uses
+the placement to fetch literal offsets, including both `start + 1 + 1` and `start + 2`.
+It also finds local placement hypotheses without listing them and accepts supplied
+placement expressions such as `region.append_left`. The fetched instruction must be
+inside the segment and agree with its code. `append`, `middle`, `take` and `drop` move a placement
 between a region and its segments, and `rfl` closes a concrete one.
 [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
 
@@ -243,6 +246,19 @@ apart from every entry, taking the allocation's age from `WellFormed`;
 as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a call, and
 `after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
 `snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
+
+Import `CIL.Safety.LocalSnapshotSteps` to step through numeric local stores and reloads with
+`cil_checked_steps (snapshots := snapshots) [facts]`. Use it on a checked `run` equality or
+an existential result such as `∃ after, run ... = .ok (after, result)`. The local context must
+justify `WritableHomes`, memory well-formedness, each home lookup and write access. The tactic
+introduces each store's new memory, updated snapshots and preserved access facts, so later
+stores need no manually split execution segments. Loads use the latest remembered value;
+overwrites replace it. It stops at an unsupported step or an unproved obligation, and fails
+if it takes no step. It does not infer authority, initialization, or preservation across calls
+and unrelated writes. Ordinary `cil_checked_steps [facts]` is unchanged.
+[Tests/LocalSnapshotSteps](../Tests/LocalSnapshotSteps.lean) contains complete vector/int32
+store-and-reload examples and rejection tests.
+
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
 the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
 `OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of the first two for a contract

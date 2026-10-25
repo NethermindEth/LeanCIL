@@ -20,6 +20,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return parameter.Type == GenericParameterType.Method ? $".parameter {parameter.Position}" :
                 $".atom \"\" {Quote("type-parameter:" + parameter.FullName)}";
         if (type is ByReferenceType byRef) return $".byref ({Type(byRef.ElementType)})";
+        if (type is ArrayType { IsVector: true } array) return $".array ({Type(array.ElementType)})";
         if (type is PointerType pointer) return $".pointer ({Type(pointer.ElementType)})";
         if (ValueTuples.Is(type) && layouts.Index(type) is >= 0 and var tuple)
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {tuple}";

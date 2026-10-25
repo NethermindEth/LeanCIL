@@ -159,6 +159,29 @@ A null managed reference is a distinct value, not address zero. `Unsafe.NullRef<
 
 Static data is immutable, extraction-bound RVA storage with field identities retained separately from contents. Static initializers that could execute unmodelled code are rejected.
 
+Supplied one-dimensional primitive integer arrays retain an element type, length and checked
+allocation-relative data reference. The runtime correspondence premise must identify these with
+the actual array's element type, length and backing bytes; constructing a model view does not
+establish that correspondence. Array operations reuse existing allocation, lifetime,
+initialization and authority checks. A readonly permission set grants no write authority, while
+aliases over the same allocation observe the same bytes. A valid null array raises the named
+`System.NullReferenceException`; an out-of-range index on a valid non-null array raises
+`System.IndexOutOfRangeException`. Invalid extents, expired storage and missing authority remain
+model faults and cannot prove either expected exception. Array allocation, reference elements,
+multidimensional arrays and taking the address of an array root are outside this subset.
+The scalar certificate checks array opcode families, integer widths, load signedness, native
+integer distinctions and typed element tokens against the emitted operations.
+
+For `readonly.; ldelema`, the certificate additionally binds the readonly flag to the
+immediately preceding raw prefix and disallows branch entry between the two instructions.
+Restricted references keep their tag through argument checks, calls, returns and local stores.
+A local holding a restricted reference uses `LocalSlot.readOnlyRoot`; loading it cannot produce
+an unrestricted reference. Reads still require initialized readable bytes. Stores through the
+restricted view fail even when memory contains write authority, and unsupported reference
+adapters cannot strip the tag. This is an access restriction, not an immutability or uniqueness
+claim: writes through other authorized aliases remain visible. The subset excludes reference
+element arrays and their covariance/type-check behavior.
+
 Generated static identities are unsigned natural numbers from SHA-256 of the
 full assembly identity and full field name. The assembly identity text is
 `Name, Version=a.b.c.d, Culture=<culture or neutral>, PublicKeyToken=<16 lowercase
@@ -238,7 +261,18 @@ Portable consumer support manifests require an independently trusted SHA256 and 
 
 Local consumer support generations are a cache, not part of the trusted base. A restored module is reused only when its local HMAC receipt and every file hash verify, its recorded source hashes and compiled imports match the current snapshot, and Lake leaves its bytes unchanged after the build; otherwise every module is replayed. Each such artifact was kernel-replayed (or restored under the same rules) by an earlier successful verification. The key binds the variables Lean, Lake and elan read, not the whole process environment: an elaborator that reads another variable is not tracked by Lake's own traces either, and its output is still kernel-replayed when first certified. Name such variables in `LEANCIL_CACHE_ENVIRONMENT`, or use `--fresh`.
 
-Batch verification shares a source snapshot, workspace builds and kernel replay only between requests with identical generated CIL. Each request's theorem audit loads only its own proof module's replayed oleans and runs none of their code, so no request's notations or elaborators can affect any printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
+Batch verification shares a source snapshot across requests. Requests with identical generated CIL share a workspace build and kernel replay; other groups may share only certified extraction-independent support. Each request's theorem audit loads only its own proof module's replayed oleans and runs none of their code, so no request's notations or elaborators can affect any printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
+
+For multi-extraction consumer batches, the first workspace prebuilds support found in all
+requests' source import closures. This scheduling scan recognizes repeated import commands,
+including `public`, `meta`, `import all` and nested comments; ambiguous sources
+and unrecognized syntax remain ordinary per-group work. The scan grants no trust.
+Every built module enters the compiled import graph and kernel replay, including modules
+outside the first proof's closure. Only after replay, theorem audits and source/artifact
+stability checks pass are extraction-independent artifacts shared with later workspaces.
+The compiled graph excludes indirect imports of `Extracted` and `ExtractedSymbols` even
+when their source imports were not recognized by the scheduling scan. Failed optional
+support builds do not bypass normal group builds or certify their unfinished outputs.
 
 ## Theorem audit
 
@@ -384,3 +418,12 @@ its raw object-null kind separately from managed references. It can be truth-tes
 compared with another object null, duplicated or discarded. It cannot justify object
 parameters, locals or results, or a comparison against a managed reference. The scalar
 certificate binds the raw null literal, comparison operation and branch target exactly.
+
+Pointer subtraction and unsigned ordering require live, well-formed references. Differences
+and orderings additionally require both references to identify the same allocation; no relative
+runtime addresses are inferred from different allocation identities. The runtime correspondence
+assumes an allocation occupies one contiguous, non-wrapping address interval. Within that
+interval, unsigned address order matches offset order and address subtraction cancels its base.
+Differences retain their native-width two's-complement representation. Subtracting an int32 or
+native byte displacement reuses checked wrapping reference arithmetic and retains readonly
+restrictions. None of these observations reads, initializes or grants authority over storage.
