@@ -38,7 +38,14 @@ internal static class ExportVerificationSuites
         new("exportstyped", "typed", "Tests/GenericLayoutImports.cs", [], "independent typed generic and layout imports", [],
             ["Tests/GenericLayoutImports.cs", "Tests/ContractImports/TypedImportInterface.lean",
              "Tests/ContractImports/TypedIdentityProof.lean", "Tests/ContractImports/TypedCopyProof.lean",
-             "Tests/ContractImports/TypedIdentityCaller.lean", "Tests/ContractImports/TypedCopyCaller.lean"], Standalone: true)
+             "Tests/ContractImports/TypedIdentityCaller.lean", "Tests/ContractImports/TypedCopyCaller.lean"],
+            Standalone: true),
+        new("exportsderived", "derived", "Tests/DerivedContractExports.cs", [],
+            "derived public contracts through DLL export and import", [],
+            ["Tests/DerivedContractExports.cs", "Tests/ContractImports/DerivedInterface.lean",
+             "Tests/ContractImports/DerivedPercentProof.lean", "Tests/ContractImports/DerivedAddProof.lean",
+             "Tests/ContractImports/DerivedShiftCaller.lean", "Tests/ContractImports/DerivedSumCaller.lean"],
+            Standalone: true)
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>
