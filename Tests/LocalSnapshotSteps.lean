@@ -57,6 +57,33 @@ theorem overwrite_and_reload {entered memory : Memory} {frame : Frame} {boundary
 
 #print axioms overwrite_and_reload
 
+/-- Keep a 256-bit vector across stores and reloads of a 128-bit vector and an int32. -/
+@[cil_code] def mixedVectors : CIL.Method := {
+  code := [.arg 0, .setLocal 0, .arg 1, .setLocal 1, .arg 2, .setLocal 2,
+    .local 1, .pop, .local 2, .pop, .local 0, .ret]
+  locals := [.v256 0, .v128 0, .i32 0], returnsValue := true }
+
+/-- Different vector widths share one snapshot invariant and preserve the full wide value. -/
+theorem mixed_vector_widths {entered memory : Memory} {frame : Frame} {boundary : Nat}
+    {wideHome vectorHome intHome : Reference}
+    (homes : WritableHomes entered boundary [.vector256, .vector128, .word32] frame.locals)
+    (formed : memory.WellFormed)
+    (wideSlot : frame.locals[0]? = some (.bytes .vector256 wideHome))
+    (vectorSlot : frame.locals[1]? = some (.bytes .vector128 vectorHome))
+    (intSlot : frame.locals[2]? = some (.bytes .word32 intHome))
+    (wideReady : access memory wideHome 32 1 true = .ok ())
+    (vectorReady : access memory vectorHome 16 1 true = .ok ())
+    (intReady : access memory intHome 4 1 true = .ok ())
+    (wide : BitVec 256) (vector : BitVec 128) (count : BitVec 32) :
+    ∃ after, run [mixedVectors] 13 0 0
+      [.scalar (.v256 wide), .scalar (.v128 vector), .scalar (.i32 count)] frame [] memory =
+        .ok (after, [.scalar (.v256 wide)]) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  cil_checked_steps (snapshots := snapshots)
+    [wideSlot, vectorSlot, intSlot, wideReady, vectorReady, intReady]
+
+#print axioms mixed_vector_widths
+
 /-- A compiled signed-byte local carries its narrow annotation on both instructions. -/
 @[cil_code] def narrowLocal : CIL.Method := {
   code := [.arg 0, .setLocal 0 (some .signed8), .local 0 (some .signed8), .ret]
