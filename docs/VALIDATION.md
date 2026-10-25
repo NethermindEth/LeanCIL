@@ -1,5 +1,15 @@
 # Validation coverage
 
+`Tests/VerificationCache.cs` checks certified-library copying against the pinned manifest,
+source snapshot and toolchain key, rejects changed/missing/extra files and rehashed
+manifests, and independently detects destination corruption. On Unix it also checks that
+both streamed artifacts and copied metadata retain their file modes.
+`Tests/LibraryCopyScaling.cs` compares separate validation/copying with hashing during
+copying, retaining independent destination validation in both paths. It alternates four
+pairs over the same framework/native build files and records file count, bytes and wall
+time. An optional argument selects the donor `.lake/build` directory; the synthetic
+performance fixture is never supplied to a verifier as a certified library.
+
 `Tests/ConsumerFingerprintReuse.cs` checks authenticated canonical fingerprints across
 independent verifier processes using two framework modules and a multipart fixture. It
 covers corrupt receipts, changed or missing parts, module names, auditor/runtime bytes,
