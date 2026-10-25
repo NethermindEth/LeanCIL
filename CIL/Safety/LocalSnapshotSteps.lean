@@ -69,6 +69,7 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
   let body ← Term.exprToSyntax found.appArg!
   let pc ← Term.exprToSyntax arguments[3]!
   let args ← Term.exprToSyntax arguments[4]!
+  let frame ← Term.exprToSyntax arguments[5]!
   let stack ← whnf arguments[6]!
   unless stack.isAppOfArity ``List.cons 3 do throwError "The local store has no operand"
   let value ← whnf stack.getAppArgs[1]!
@@ -81,7 +82,8 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
   let operation ← whnf instruction.appArg!
   let index ← Term.exprToSyntax operation.getAppArgs[0]!
   let proof ← Term.withoutErrToSorry <| Term.elabTerm (← `(term| LocalSnapshots.store
-    (body := $body) (pc := $pc) (args := $args) (stack := $rest) (index := $index)
+    (body := $body) (pc := $pc) (args := $args) (frame := $frame)
+    (stack := $rest) (index := $index)
     $snapshot ?_ ?_ ?_ ?_ $value ?_ ?_ ?_ ?_)) none
   let pending ← getMVars proof
   -- The home lookup determines its kind before the numeric encoding can be checked.
@@ -109,6 +111,30 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
   evalTactic (← `(tactic| cil_strict rw [run_next $methodFound $instructionFound $stepped]))
   return updated
 
+/-- Read the remembered value at the current run's exact frame and stack. -/
+private def snapshotLoad (snapshot methodFound instructionFound : Term)
+    (facts : Array Term) : TacticM Unit := withMainContext do
+  let some runTerm := (← getMainTarget).find? (·.isAppOf ``run)
+    | throwError "Expected a checked run"
+  let arguments := runTerm.getAppArgs
+  let methodProof ← Term.elabTerm methodFound none
+  let some (_, _, found) := (← inferType methodProof).eq?
+    | throwError "Expected a method lookup"
+  let body ← Term.exprToSyntax found.appArg!
+  let pc ← Term.exprToSyntax arguments[3]!
+  let args ← Term.exprToSyntax arguments[4]!
+  let frame ← Term.exprToSyntax arguments[5]!
+  let stack ← Term.exprToSyntax arguments[6]!
+  let instructionProof ← Term.elabTerm instructionFound none
+  let some (_, _, instruction) := (← inferType instructionProof).eq?
+    | throwError "Expected an instruction lookup"
+  let operation ← whnf instruction.appArg!
+  let index ← Term.exprToSyntax operation.getAppArgs[0]!
+  evalTactic (← `(tactic| cil_strict rw [run_next $methodFound $instructionFound
+    (LocalSnapshots.load (body := $body) (pc := $pc) (args := $args) (frame := $frame)
+      (stack := $stack) (index := $index) $snapshot _
+      (by first | rfl | simp [rememberLocal, localResult, $[$facts:term],*]))]))
+
 /-- Step with explicit numeric snapshots, introducing each store's memory and new snapshots. -/
 syntax "cil_checked_steps" "(" &"snapshots" ":=" term ")" "[" term,* "]" : tactic
 
@@ -127,9 +153,7 @@ elab_rules : tactic
           if operation == ``CIL.Op.setLocal then
             snapshotStore snapshot methodFound instructionFound prepared
           else if operation == ``CIL.Op.local then
-            evalTactic (← `(tactic| cil_strict rw [run_next $methodFound $instructionFound
-              (LocalSnapshots.load $snapshot _
-                (by first | rfl | simp [rememberLocal, localResult, $[$prepared:term],*]))]))
+            snapshotLoad snapshot methodFound instructionFound prepared
             pure snapshot
           else if operation == ``CIL.Op.ret then
             evalTactic (← `(tactic| cil_strict

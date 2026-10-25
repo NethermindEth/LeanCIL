@@ -57,6 +57,25 @@ theorem overwrite_and_reload {entered memory : Memory} {frame : Frame} {boundary
 
 #print axioms overwrite_and_reload
 
+/-- A compiled signed-byte local carries its narrow annotation on both instructions. -/
+@[cil_code] def narrowLocal : CIL.Method := {
+  code := [.arg 0, .setLocal 0 (some .signed8), .local 0 (some .signed8), .ret]
+  locals := [.i32 0], localKinds := [.narrow .signed8], returnsValue := true }
+
+/-- The snapshot remembers the truncated and extended value, not the original operand. -/
+theorem narrow_round_trip {entered memory : Memory} {frame : Frame} {boundary : Nat}
+    {home : Reference}
+    (homes : WritableHomes entered boundary [.narrow .signed8] frame.locals)
+    (formed : memory.WellFormed)
+    (slot : frame.locals[0]? = some (.bytes (.narrow .signed8) home))
+    (ready : access memory home 1 1 true = .ok ()) (bits : BitVec 32) :
+    ∃ after, run [narrowLocal] 5 0 0 [.scalar (.i32 bits)] frame [] memory =
+      .ok (after, [.scalar (.i32 ((bits.setWidth 8).signExtend 32))]) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  cil_checked_steps (snapshots := snapshots) [slot, ready]
+
+#print axioms narrow_round_trip
+
 /-- A snapshot collection grants no authority to write a local. -/
 theorem missing_authority {entered memory : Memory} {frame : Frame} {boundary : Nat}
     {vectorHome : Reference}
