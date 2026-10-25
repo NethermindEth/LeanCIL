@@ -10,7 +10,9 @@ import Lean.Meta.Tactic.AuxLemma
 consistently. It aligns the two bodies outside the kernel, explains the first
 violated condition if there is one, and otherwise hands the pc map to the kernel,
 which checks every `Embeds` field by evaluation. The alignment is untrusted: a
-wrong map only makes the kernel reject the proof.
+wrong map only makes the kernel reject the proof. A `MethodEmbedsDeadLocals` goal is
+proved the same way against the method with its trailing dead locals dropped, after
+checking that those locals qualify.
 -/
 
 namespace CIL.MethodBinding
@@ -135,6 +137,31 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option (String ×
         at actual pc {q + 1}\n  {describe (q + 1)}", some q)
   return none
 
+/-- Why `actual`'s locals are not `expected`'s followed by trailing dead root locals, as
+    `EmbedsDeadLocals` requires, or `none` when they are. -/
+def deadLocalsFailure (expected actual : Method) : Option String :=
+  let kept := expected.locals.length
+  let deadKinds := actual.localKinds.drop expected.localKinds.length
+  let deadInitials := actual.locals.drop kept
+  if expected.localKinds.length != kept then
+    some s!"expected declares {expected.localKinds.length} local kinds for {kept} locals"
+  else if actual.locals.take kept != expected.locals then
+    some s!"actual locals do not start with the expected locals\n  \
+      expected: {reprStr expected.locals}\n  actual:   {reprStr actual.locals}"
+  else if actual.localKinds.take kept != expected.localKinds then
+    some s!"actual local kinds do not start with the expected local kinds\n  \
+      expected: {reprStr expected.localKinds}\n  actual:   {reprStr actual.localKinds}"
+  else if !rootLocals deadKinds deadInitials then
+    some s!"a dropped local is not a reference initialized to null or left unmodeled, so \
+      frame entry would allocate for it\n  kinds:        {reprStr deadKinds}\n  \
+      initializers: {reprStr deadInitials}"
+  else if !expected.opaqueVectorLocals.all (· < kept) then
+    some s!"an opaque vector local is not among the kept locals: \
+      {reprStr expected.opaqueVectorLocals}"
+  else if !actual.parameterHomes.isEmpty then
+    some "the actual method has parameter homes, which the frame places after the locals"
+  else none
+
 private def methodType : Expr := mkConst ``CIL.Method
 
 private unsafe def evaluateUnsafe (T : Type) (type value : Expr) : MetaM T := evalExpr T type value
@@ -144,9 +171,23 @@ private unsafe def evaluateUnsafe (T : Type) (type value : Expr) : MetaM T := ev
 @[implemented_by evaluateUnsafe]
 private opaque evaluate (T : Type) (type value : Expr) : MetaM T
 
-/-- Proves `MethodEmbeds program index expected` for closed terms; on failure names the
-    first violated condition. The pc map is checked by the kernel, not trusted. -/
+/-- Proves `MethodEmbeds program index expected`, or `MethodEmbedsDeadLocals program index
+    expected`, for closed terms; on failure names the first violated condition. The pc map is
+    checked by the kernel, not trusted. -/
 syntax (name := cilEmbed) "cil_embed" : tactic
+
+/-- `ctor` applied to `prefixArgs` and an `Eq.refl` of the left side of each remaining
+    equation field; only the kernel compares the sides. -/
+private def reflFields (ctor : Name) (prefixArgs : Array Expr) : MetaM Expr := do
+  let mut fieldsType ← instantiateForall (← inferType (mkConst ctor)) prefixArgs
+  let mut fields : Array Expr := #[]
+  while fieldsType.isForall do
+    let some (_, lhs, _) := fieldsType.bindingDomain!.eq? |
+      throwError "cil_embed: unexpected `{ctor}` field {fieldsType.bindingDomain!}"
+    let proof ← mkEqRefl lhs
+    fields := fields.push proof
+    fieldsType := fieldsType.bindingBody!.instantiate1 proof
+  return mkAppN (mkConst ctor) (prefixArgs ++ fields)
 
 /-- Elaborates `cil_embed`: evaluates the goal's terms, aligns the bodies, reports the first
     failure, or builds the `Embeds` proof from `Eq.refl` fields as an auxiliary lemma. -/
@@ -155,8 +196,10 @@ syntax (name := cilEmbed) "cil_embed" : tactic
   let type ← instantiateMVars (← goal.getType)
   let fail (message : MessageData) : TacticM Unit :=
     throwError m!"cil_embed: the expected body does not embed into the extracted method\n{message}"
-  unless type.isAppOfArity ``CIL.MethodEmbeds 3 do
-    throwError "cil_embed: the goal must be `MethodEmbeds program index expected`, not {type}"
+  let dropsLocals := type.isAppOfArity ``CIL.MethodEmbedsDeadLocals 3
+  unless type.isAppOfArity ``CIL.MethodEmbeds 3 || dropsLocals do
+    throwError "cil_embed: the goal must be `MethodEmbeds program index expected` or \
+      `MethodEmbedsDeadLocals program index expected`, not {type}"
   if type.hasFVar || type.hasMVar then
     throwError "cil_embed: program, index and expected body must be closed terms"
   let program := type.appFn!.appFn!.appArg!
@@ -167,8 +210,12 @@ syntax (name := cilEmbed) "cil_embed" : tactic
   let expectedValue ← evaluate Method methodType expected
   let some actualValue := programValue[indexValue]? |
     fail m!"method index {indexValue}: the program has {programValue.length} methods"
+  if dropsLocals then
+    if let some reason := deadLocalsFailure expectedValue actualValue then
+      fail m!"method index {indexValue}\n{reason}"
+  let embedded := if dropsLocals then actualValue.withLocalsOf expectedValue else actualValue
   let map := (alignLive expectedValue.code.toArray actualValue.code.toArray).toList
-  if let some (reason, actualPc) := embedFailure expectedValue actualValue map then
+  if let some (reason, actualPc) := embedFailure expectedValue embedded map then
     let source ← match actualPc with
       | some pc => CIL.DebugNames.sourceLine indexValue pc
       | none => pure ""
@@ -177,17 +224,11 @@ syntax (name := cilEmbed) "cil_embed" : tactic
   -- The kernel reduces this to the extracted method; `expected` is never selected.
   let actual ← mkAppM ``Option.getD #[lookup, expected]
   let mapExpr := toExpr map
-  -- Each field is closed by `Eq.refl` of its left side; only the kernel compares the sides.
-  let mut fieldsType ←
-    instantiateForall (← inferType (mkConst ``CIL.Embeds.mk)) #[expected, actual, mapExpr]
-  let mut fields : Array Expr := #[]
-  while fieldsType.isForall do
-    let some (_, lhs, _) := fieldsType.bindingDomain!.eq? |
-      throwError "cil_embed: unexpected `Embeds` field {fieldsType.bindingDomain!}"
-    let proof ← mkEqRefl lhs
-    fields := fields.push proof
-    fieldsType := fieldsType.bindingBody!.instantiate1 proof
-  let embeds := mkAppN (mkConst ``CIL.Embeds.mk) (#[expected, actual, mapExpr] ++ fields)
+  let embeds ← if dropsLocals then do
+      let target ← mkAppM ``CIL.Method.withLocalsOf #[actual, expected]
+      let core ← reflFields ``CIL.Embeds.mk #[expected, target, mapExpr]
+      reflFields ``CIL.EmbedsDeadLocals.mk #[expected, actual, mapExpr, core]
+    else reflFields ``CIL.Embeds.mk #[expected, actual, mapExpr]
   let found ← mkEqRefl lookup
   let some unfolded ← unfoldDefinition? type | throwError "cil_embed: could not unfold {type}"
   let .app (.app (.const ``Exists _) _) outer := unfolded |

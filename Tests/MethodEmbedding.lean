@@ -1,4 +1,5 @@
 import CIL.Embedding.Tactic
+import CIL.Safety.Embedding.DeadLocals
 import CIL.Safety.Embedding.Simulation
 import CIL.Safety.SymbolicExecution
 import Tests.MulScalarFixture
@@ -156,6 +157,87 @@ example : MethodEmbeds mulScalar 0 (fullBody profile 9 5 8) := by cil_embed
 
 end MulScalar
 
+section DeadLocals
+
+/-- Reads its one local, a null reference, then returns argument 0. -/
+@[cil_code] def stored : Method := {
+  code := [.local 0, .pop, .arg 0, .ret]
+  locals := [.nullRef], localKinds := [.reference], returnsValue := true }
+
+/-- `stored` as extracted with two unused reference locals after its own, as a profile-specific
+    extraction emits them. -/
+def storedDead : Method := {
+  stored with
+  locals := [.nullRef, .nullRef, .unmodeled]
+  localKinds := [.reference, .reference, .reference] }
+
+-- The dead references are root slots, so dropping them keeps every allocation in place.
+theorem stored_dead_embeds : MethodEmbedsDeadLocals [storedDead] 0 stored := by cil_embed
+
+theorem stored_embeds : MethodEmbedsDeadLocals [stored] 0 stored := by cil_embed
+
+/-- One stepped proof about `stored`: it returns its argument and leaves memory alone. -/
+theorem stored_invocation (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [stored] (executionBound [stored] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps
+
+-- The same proof covers the extraction without and with the dead locals.
+theorem stored_returns (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [stored] (executionBound [stored] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) :=
+  stored_embeds.invoke (stored_invocation memory value)
+
+theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [storedDead] (executionBound [stored] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) :=
+  stored_dead_embeds.invoke (stored_invocation memory value)
+
+/-- Throws at once; its extraction carries an unused null reference. -/
+def thrower : Method := { code := [.throw "Overflow"], locals := [], returnsValue := false }
+
+/-- `thrower` as extracted with a dead local. -/
+def throwerDead : Method := { thrower with locals := [.nullRef], localKinds := [.reference] }
+
+-- A throw proved for the expected body is raised by the extraction with the dead local.
+theorem thrower_dead_raises (memory : Safety.Memory) :
+    Safety.Raises [throwerDead] 0 [] memory "Overflow" :=
+  have embeds : MethodEmbedsDeadLocals [throwerDead] 0 thrower := by cil_embed
+  embeds.raises ⟨1, _, rfl, rfl⟩
+
+-- A dead numeric local allocates a home and shifts later allocation identities.
+/--
+error: cil_embed: the expected body does not embed into the extracted method
+method index 0
+a dropped local is not a reference initialized to null or left unmodeled, so frame entry would allocate for it
+-/
+#guard_msgs (substring := true) in
+example : MethodEmbedsDeadLocals
+    [{ stored with locals := [.nullRef, .unmodeled], localKinds := [.reference, .word64] }] 0
+    stored := by
+  cil_embed
+
+-- A dead local before a kept one would renumber the kept local.
+/--
+error: cil_embed: the expected body does not embed into the extracted method
+method index 0
+actual locals do not start with the expected locals
+-/
+#guard_msgs (substring := true) in
+example : MethodEmbedsDeadLocals
+    [{ stored with locals := [.unmodeled, .nullRef], localKinds := [.word32, .reference] }] 0
+    stored := by
+  cil_embed
+
+-- `MethodEmbeds` still demands equal locals.
+example : ¬ MethodEmbeds [storedDead] 0 stored := by
+  rintro ⟨actual, map, found, embedded⟩
+  cases found
+  have locals := embedded.locals
+  simp [storedDead, stored] at locals
+
+end DeadLocals
+
 -- Tactic proofs and the transport theorems use only the standard axioms.
 /-- info: 'Tests.MethodEmbedding.mulscalar_embeds' depends on axioms: [propext] -/
 #guard_msgs in #print axioms mulscalar_embeds
@@ -174,5 +256,29 @@ end MulScalar
 
 /-- info: 'CIL.MethodEmbeds.certificate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms MethodEmbeds.certificate
+
+/-- info: 'Tests.MethodEmbedding.stored_dead_returns' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms stored_dead_returns
+
+/-- info: 'Tests.MethodEmbedding.stored_dead_embeds' depends on axioms: [propext] -/
+#guard_msgs in #print axioms stored_dead_embeds
+
+/-- info: 'Tests.MethodEmbedding.stored_embeds' depends on axioms: [propext] -/
+#guard_msgs in #print axioms stored_embeds
+
+/-- info: 'Tests.MethodEmbedding.stored_invocation' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms stored_invocation
+
+/-- info: 'Tests.MethodEmbedding.stored_returns' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms stored_returns
+
+/-- info: 'Tests.MethodEmbedding.thrower_dead_raises' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms thrower_dead_raises
+
+/-- info: 'CIL.MethodEmbedsDeadLocals.method_holds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms CIL.MethodEmbedsDeadLocals.method_holds
+
+/-- info: 'CIL.MethodEmbedsDeadLocals.holds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms CIL.MethodEmbedsDeadLocals.holds
 
 end Tests.MethodEmbedding
