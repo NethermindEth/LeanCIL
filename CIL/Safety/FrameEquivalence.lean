@@ -13,6 +13,25 @@ proof in `CIL/Safety/ExecutionEquivalence.lean` is assembled from these.
 
 namespace CIL.Safety
 
+/-- Span validation observes only allocation descriptors. -/
+theorem Memory.Equivalent.spanValidate {m n : Memory} (same : m.Equivalent n) (view : SpanView) :
+    view.validate m = view.validate n := by
+  simp only [SpanView.validate, liveAllocation, same.allocations]
+
+/-- Slicing respects observational memory equivalence. -/
+theorem Memory.Equivalent.spanSlice {m n : Memory} (same : m.Equivalent n)
+    (view : SpanView) (start length : Nat) : view.slice m start length = view.slice n start length := by
+  simp only [SpanView.slice, same.spanValidate]
+
+/-- Indexed addresses respect observational memory equivalence. -/
+theorem Memory.Equivalent.spanElement {m n : Memory} (same : m.Equivalent n)
+    (view : SpanView) (index : Nat) : view.element m index = view.element n index := by
+  simp only [SpanView.element, same.spanValidate, same.form]
+
+#print axioms Memory.Equivalent.spanValidate
+#print axioms Memory.Equivalent.spanSlice
+#print axioms Memory.Equivalent.spanElement
+
 theorem Memory.Equivalent.loadSnapshot {m n : Memory} (same : m.Equivalent n)
     (r : ManagedReference) (shape : CIL.SnapshotShape) :
     loadSnapshot m r shape = loadSnapshot n r shape := by
@@ -30,6 +49,8 @@ theorem Memory.Equivalent.loadLocal {m n : Memory} (same : m.Equivalent n)
   | root value => cases value <;> simp only [CIL.Safety.loadLocal, same.formValue]
   | bytes kind reference => simp only [CIL.Safety.loadLocal, same.read, same.loadSnapshot]
   | opaque128 value => cases value <;> rfl
+  | span width writable value =>
+    cases value <;> simp only [CIL.Safety.loadLocal, same.spanValidate]
 
 theorem Memory.Equivalent.localAddress {m n : Memory} (same : m.Equivalent n)
     (slot : LocalSlot) :
@@ -60,6 +81,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       cases scalar <;> first | exact .error _ | exact .ok ⟨rfl, same⟩
     | reference _ => exact .error _
     | span _ _ => exact .error _
+    | bufferSpan _ | readOnlyReference _ => exact .error _
   | root root =>
     cases value with
     | reference reference =>
@@ -70,6 +92,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       exact .ok ⟨rfl, same⟩
     | scalar scalar => cases scalar <;> exact .error _
     | span reference length => exact .error _
+    | bufferSpan _ | readOnlyReference _ => exact .error _
   | bytes kind reference =>
     cases value with
     | scalar value =>
@@ -91,6 +114,18 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
            exact .ok ⟨rfl, related⟩)
     | reference reference => exact .error _
     | span reference length => exact .error _
+    | bufferSpan _ | readOnlyReference _ => exact .error _
+  | span width writable stored =>
+    cases value
+    case scalar scalar => cases scalar <;> exact .error _
+    all_goals simp only [CIL.Safety.storeLocal, Value.hasUnspecified,
+      Bool.false_and, Bool.false_eq_true, ↓reduceIte, same.spanValidate]
+    all_goals repeat' first
+      | contradiction
+      | exact .error _
+      | exact .ok ⟨rfl, same⟩
+      | (apply ResultEquivalent.bind_same; intro)
+      | split
 
 /-- Two frame-builder results agree on the built value and owned ids, and their memories are
     equivalent. -/
@@ -103,6 +138,9 @@ theorem Memory.Equivalent.makeLocal {m n : Memory} (same : m.Equivalent n)
       (CIL.Safety.makeLocal activation kind initial n) := by
   cases kind <;> simp only [CIL.Safety.makeLocal]
   all_goals first
+  | (split
+     · exact .error _
+     · cases initial <;> first | exact .error _ | exact .ok ⟨rfl, rfl, same⟩)
   | (apply ResultEquivalent.bind (same.allocateHome _ _ _)
      intro left right related
      obtain ⟨reference, memory⟩ := left
@@ -221,6 +259,7 @@ theorem Memory.Equivalent.makeArgumentHomes {m n : Memory} (same : m.Equivalent 
       cases value with
       | reference reference => exact .error _
       | span reference length => exact .error _
+      | bufferSpan _ | readOnlyReference _ => exact .error _
       | scalar value =>
         cases value <;> first | exact .error _ | skip
         apply ResultEquivalent.bind (same.allocateHome _ _ _)

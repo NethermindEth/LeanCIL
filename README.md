@@ -228,20 +228,22 @@ The [opcode support table](docs/OPCODES.md) lists every opcode currently transla
 | `ldc.i4` and its short forms, `ldc.i8`, `dup`, `pop` | Complete within the admitted model | Integer constants and supported stack values |
 | Argument/local loads and stores, `ldloca` | Partial | Admitted types; no address of a managed-reference local |
 | `add`, `sub`, `mul`, bitwise operations, shifts, selected comparisons/conversions | Partial | Supported integer operand shapes; no floating-point or checked-overflow arithmetic |
-| Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons; termination requires a separate proof |
+| Supported branches | Partial | Validated cyclic control flow; integer conditions/comparisons and checked reference null/equality tests; termination requires a separate proof |
 | `call`, `ret` | Partial | Acyclic static/struct instance methods, concrete generic-method specializations and explicitly modelled runtime calls |
 | `ldtoken` | Partial | A type in a decided closed `typeof(A) == typeof(B)` or `!=` test, which folds to a constant, or a static data field for a `ReadOnlySpan<T>` table |
-| Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda`, `ldsfld` | Partial | Checked references, validated integer/aggregate layouts, restricted static data and static readonly struct values fixed by the static constructor |
+| Integer `ldind.*` / `stind.*`, `ldobj`, `stobj`, `cpobj`, `initobj`, fields, `ldsflda`, `ldsfld` | Partial | Checked references, validated integer/aggregate layouts, restricted static data and static readonly integer, enum or struct values fixed by the static constructor |
 | `initblk`, `cpblk`, `unaligned.` | Partial | Checked managed references, 32-bit byte counts and validated alignment prefixes; overlapping block copies rejected |
 | `switch`, `sizeof` | Partial | Forward jump tables and validated integer and reference-free aggregate sizes |
-| `newobj` | Partial | Validated reference-free struct constructors, composable through constructor contracts, and the modelled byte-span constructor; no class allocation |
+| `newobj` | Partial | Validated reference-free struct constructors, composable through constructor contracts, and primitive span pointer constructors over checked storage; no class allocation |
 | `throw` | Partial | Only `throw new E(...)` of a runtime exception with string or null arguments, as a located fault; no handlers |
 | Argument storage | Partial | Parameter assignment and addressing, shared aliases, narrow/native storage and frame lifetime checks |
 | Native integers | Partial | `nint`/`nuint` signatures, locals, fields, memory, casts, arithmetic and `sizeof` on validated 64-bit targets |
 | Checked integer conversions | Partial | Integer inputs; signed/unsigned bounds, narrow extension and native-width destinations |
 | Checked integer arithmetic | Partial | Signed/unsigned 32-/64-bit add, subtract and multiply; explicit overflow faults |
 | Integer division and remainder | Partial | Signed/unsigned 32-/64-bit operands; explicit zero-divisor and overflow faults |
-| All other opcodes | Unsupported | Includes `callvirt`, arrays and instruction prefixes |
+| `constrained.` + `callvirt` | Partial | Concrete same-assembly structs, including direct interface implementations; checked static target resolution, no boxing |
+| `localloc` / `stackalloc` | Partial | Bounded frame-owned storage with explicit resource quota, initialization and lifetime checks; primitive pointer and span views |
+| All other opcodes | Unsupported | Includes unconstrained `callvirt`, arrays and unsupported instruction prefixes |
 
 The extractor rejects unmodelled instructions, recursive managed calls, exception handling, class instance/virtual dispatch, managed object construction, reference-bearing aggregates, general arrays, unsupported packing, floating-point arithmetic, arbitrary external calls, static constructors, and unsupported signatures. Not every combination of the model's standalone instructions is exposed by the extractor. New features require validation, semantics, proofs and regressions.
 

@@ -127,7 +127,11 @@ var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Tes
 if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
-    projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
+    projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs"]);
+if (suite is "all" or "evidence")
+    projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/StackAllocation.cs"]);
+if (suite is "all" or "evidence")
+    projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "unsafe") projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
 foreach (var (name, entry) in independentSuites)
@@ -203,8 +207,19 @@ Passed("external consumer proof package and transitive source identity");
 RunFixture("Tests/MethodSelectors.cs", [], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
-Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding", "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels", "Tests.DebugNames", "Tests.MethodContract", "Tests.ConstructContract", "Tests.OutcomeContract", "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints", "Tests.ContractConsequence", "Tests.BufferContents", "Tests.Linking", "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts"], streamOutput: true, progress: "Building Lean library, semantics and automation tests");
-Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, contract consequence, buffer contents, linking and store fact tests");
+Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding",
+    "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels",
+    "Tests.DebugNames", "Tests.MethodContract", "Tests.ConstructContract", "Tests.OutcomeContract",
+    "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints",
+    "Tests.LocalSnapshots", "Tests.ContractConsequence", "Tests.InvocationCertificates",
+    "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
+    "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
+    "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.SimdLanes"],
+    streamOutput: true, progress: "Building Lean library, semantics and automation tests");
+Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
+    + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
+    + "local snapshot, contract consequence, invocation certificate, call transport, buffer contents, linking, "
+    + "store fact, profile contract, instruction equation, code placement and SIMD lane tests");
 
 // Verify each extracted method and immediately check its artifact identity.
 foreach (var (name, signature) in signatures)

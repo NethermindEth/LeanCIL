@@ -18,7 +18,7 @@ section Loop
 
 variable (initial : Memory) (base home : Reference) (v : W64) (n : W32)
 
-private def frame : Frame := ⟨initial.nextIdentity, [.bytes .word32 home], [home.allocation], []⟩
+private def frame : Frame := ⟨initial.nextIdentity, [.bytes .word32 home], [home.allocation], [], 0⟩
 
 private def header (state : W32 × Memory) : LoopState :=
   ⟨guard, frame initial home, [.scalar (.i32 n), .scalar (.i32 state.1)], state.2⟩

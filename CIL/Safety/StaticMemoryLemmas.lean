@@ -188,6 +188,17 @@ theorem StaticInstructionContract.of_effect {body : CIL.Method} {m result : Memo
     StaticInstructionContract body m result stack values :=
   ⟨effect, fun hm valid => preserve (valid.preserve hm effect.allocations)⟩
 
+/-- Readonly loads produce scalar data, never a reference requiring a liveness premise. -/
+theorem staticLoadedValue_valid (descriptor : CIL.StaticDescriptor) (value : CIL.Value)
+    (memory : Memory) (loaded : staticLoadedValue descriptor = some value) :
+    (Value.scalar value).Valid memory := by
+  unfold staticLoadedValue at loaded
+  split at loaded
+  · cases loaded; trivial
+  · split at loaded <;> cases loaded <;> trivial
+
+#print axioms staticLoadedValue_valid
+
 /-- Every successful static instruction satisfies `StaticInstructionContract`. -/
 theorem staticInstruction_contract (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     (stack values : List Value) (m result : Memory)
@@ -209,6 +220,7 @@ theorem staticInstruction_contract (body : CIL.Method) (pc : Nat) (operation : C
             | exact retained.head
             | apply staticReference_reference_valid; assumption
             | apply formValue_reference_valid; assumption
+            | apply staticLoadedValue_valid; assumption
           · first | exact retained | exact retained.tail | exact retained.tail.tail
     | cases h
     | split at h

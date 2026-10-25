@@ -24,7 +24,7 @@ theorem word_frame_setup (body : CIL.Method) (specs : List (Option (BitVec 64)))
       MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
   obtain ⟨slots, owned, result, made, homes⟩ :=
     make_word_locals memory memory.nextIdentity specs wellFormed
-  let frame : Frame := ⟨memory.nextIdentity, slots, owned, []⟩
+  let frame : Frame := ⟨memory.nextIdentity, slots, owned, [], 0⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
       kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes,

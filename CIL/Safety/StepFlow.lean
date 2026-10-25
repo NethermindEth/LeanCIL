@@ -24,13 +24,14 @@ def FrameAction.callee : FrameAction → Option Nat
   | .call callee .. | .construct callee .. => some callee
   | _ => none
 
+set_option maxHeartbeats 400000 in
 /-- Only `.call`, `.newVector256` and `.newAggregate` enter a method, and each enters the
     one it names. -/
 theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body op pc args frame stack m = .ok action) : action.callee = op.callees.head? := by
-  unfold step at h
-  split at h
+  cases op <;> unfold step at h
+  all_goals split at h
   all_goals
     (try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.mapError] at h)
     repeat' (first | contradiction | split at h)

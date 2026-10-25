@@ -63,7 +63,9 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
     (reachable : List Bool) (code : List Op) : Prop :=
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
   all3 (fun instruction live emitted => !live ||
-      unsafeHelper layouts instruction == emittedUnsafeHelper emitted)
+      if instruction.opcode == 20 && instruction.operand == .none &&
+          emittedUnsafeHelper emitted == some .nullRef then true
+      else unsafeHelper layouts instruction == emittedUnsafeHelper emitted)
     closed.code reachable code = true
 
 instance (layouts : List RawLayout) (closed : RawMethod)

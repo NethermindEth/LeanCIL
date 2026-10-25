@@ -12,12 +12,18 @@ internal static class InstructionTranslation
         return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);
     }
     internal static string Translate(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
-        FeatureProfile? profile = null, HashSet<Instruction>? nativeOperands = null, int[]? parameterHomes = null, ImportResolution? imports = null)
+        FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
+        int[]? parameterHomes = null, ImportResolution? imports = null)
     {
         if (imports is not null && imports.TryTranslate(i, methods.Length, out string imported)) return imported;
         profile ??= FeatureProfile.Scalar;
+        nativeOperands ??= NativeOperands.Certify(m, profile);
+        if (i.OpCode.Code == Code.Add && nativeOperands.Incoming.TryGetValue(i, out var incoming) &&
+            incoming.Length >= 2 && incoming[^2] == NativeOperands.Kind.Reference &&
+            incoming[^1] is NativeOperands.Kind.Word32 or NativeOperands.Kind.Native)
+            return ".memory (.add 1 true)";
         var translated = TranslateCore(i, m, methods, methodIndex, profile, parameterHomes ?? ParameterStorage.Analyze(m, profile));
-        return (nativeOperands ?? NativeOperands.Analyze(m, profile)).Contains(i) ? $".nativeBinary ({translated})" : translated;
+        return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;
     }
 
     static string TranslateCore(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
@@ -28,6 +34,19 @@ internal static class InstructionTranslation
         if (typeTests.Results.TryGetValue(i, out bool same)) return same ? ".const32 1" : ".const32 0";
         if (typeTests.Operands.Contains(i)) return ".nop";
         var throws = Throws.Analyze(m);
+        if (i.OpCode.Code == Code.Constrained)
+        {
+            if (i.Next is null) throw new InvalidDataException("Constrained prefix has no call");
+            ConstrainedCalls.Resolve(m, i.Next, profile.Architecture);
+            return ".nop";
+        }
+        if (i.OpCode.Code == Code.Callvirt)
+        {
+            var resolved = ConstrainedCalls.Resolve(m, i, profile.Architecture).Target;
+            var index = Array.IndexOf(methods, resolved);
+            if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
+            return $".call {index} {resolved.Parameters.Count + 1}";
+        }
         if (throws.Raises.TryGetValue(i, out string? raised)) return $".throw \"{raised}\"";
         if (throws.Operands.Contains(i) || Spans.Analyze(m).Operands.Contains(i)) return ".nop";
         int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);
@@ -91,10 +110,12 @@ internal static class InstructionTranslation
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => ".nop",
+            Code.Localloc => $".stackAlloc {(m.Body.InitLocals ? "true" : "false")}",
             Code.Cpblk => $".memory (.copyBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Initblk => $".memory (.initBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Starg or Code.Starg_S => Parameter("setLocal"),
-            Code.Ldarga or Code.Ldarga_S => Parameter("localAddr"),
+            Code.Ldarga or Code.Ldarga_S => Parameter(
+                Spans.Width(((ParameterDefinition)i.Operand).ParameterType) is null ? "localAddr" : "local"),
             Code.Conv_I => ".convI8",
             Code.Ldind_I => ".load64", Code.Stind_I => ".store64",
             Code.Conv_Ovf_I1 => ".checkedConvert 8 true false", Code.Conv_Ovf_I1_Un => ".checkedConvert 8 true true",
@@ -121,6 +142,7 @@ internal static class InstructionTranslation
             Code.Stind_I1 => ".storeScalar 1", Code.Stind_I2 => ".storeScalar 2", Code.Stind_I4 => ".storeScalar 4",
             Code.Conv_I1 => ".convI1", Code.Conv_I2 => ".convI2", Code.Conv_U2 => ".convU2",
             Code.Neg => ".neg",
+            Code.Ldnull => ".memory .nullRef",
             Code.Cgt => ".gt",
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",
@@ -148,7 +170,8 @@ internal static class InstructionTranslation
             Code.Ldarg or Code.Ldarg_S => Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
             Code.Ldloc or Code.Ldloc_S => LocalOp("local", Local()),
-            Code.Ldloca or Code.Ldloca_S => LocalOp("localAddr", Local()),
+            Code.Ldloca or Code.Ldloca_S => LocalOp(
+                Spans.Width(((VariableDefinition)i.Operand).VariableType) is null ? "localAddr" : "local", Local()),
             Code.Stloc_0 => LocalOp("setLocal", 0), Code.Stloc_1 => LocalOp("setLocal", 1), Code.Stloc_2 => LocalOp("setLocal", 2), Code.Stloc_3 => LocalOp("setLocal", 3),
             Code.Stloc or Code.Stloc_S => LocalOp("setLocal", Local()),
             Code.Ldfld => Field("field"), Code.Ldflda => Field("fieldAddr"), Code.Stfld => Field("setField"),

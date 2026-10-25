@@ -24,7 +24,9 @@ Reject(Command(add), "static initialisation");
 Reject(Command(add, "Examples.Arithmetic"), "type with a static constructor");
 Reject(Command(add, type, type), "Duplicate initialization assumption");
 Reject(Command("InitializedTypes::.cctor()", type), "static initialisation");
-Reject(Command("InitializedTypes::ReadConstant()", type), "Unsupported");
+Reject(Command("InitializedTypes::ReadConstant()"), "static initialisation");
+Run(Command("InitializedTypes::ReadConstant()", type));
+Run([.. cli, "check", output]);
 Reject(Command("InitializedTypes::CallHelper(ulong)", type), "static initialisation");
 Run(Command("InitializedTypes::CallHelper(ulong)", type, "Examples.InitializedHelper"));
 Run([.. cli, "check", output]);
@@ -50,4 +52,4 @@ if (!verified.Contains("Caller assumption: " + type))
 var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 if (report.GetProperty("initializedTypes")[0].GetString() != type)
     throw new InvalidOperationException("Verification report omitted initialization precondition.");
-Console.WriteLine("PASS initialization opt-in, helper boundaries, unsupported static reads, artifact identity and proof reporting");
+Console.WriteLine("PASS initialization opt-in, helper boundaries, readonly static reads, artifact identity and proof reporting");

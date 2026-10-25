@@ -94,6 +94,12 @@ theorem sse_arm_alignment (a b c d : W64) :
     permute4x64 (pack256 a b c d) 0x90 = pack256 a a b c := by
   simp [permute4x64]
 
+/-- Control `0x1B` reverses the four lanes. -/
+theorem permute4x64_reverse (a0 a1 a2 a3 : W64) :
+    permute4x64 (pack256 a0 a1 a2 a3) (BitVec.ofNat 8 0x1B) = pack256 a3 a2 a1 a0 := by
+  simp [permute4x64]
+#print axioms permute4x64_reverse
+
 @[simp] theorem avx2_blend_incoming (a b c d : W64) :
     blend32 (pack256 a b c d) 0 3 = pack256 0 b c d := by
   simp only [blend32, lane32]

@@ -5,6 +5,7 @@ import CIL.Extraction.DivisionIntrinsics
 import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 import CIL.Extraction.ImportLayouts
+import CIL.Extraction.Constrained
 
 /-!
 # Translation validity
@@ -31,6 +32,7 @@ structure MethodEvidence where
   featureStates : FeatureCertificate
   scalarStates : ScalarCertificate
   layoutUses : List LayoutUse
+  dispatchTypes : List DispatchType := []
 
 /-- The program's method table, as the call check sees it. -/
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=
@@ -38,7 +40,7 @@ def specializationTable (evidence : List MethodEvidence) : List SpecializedMetho
 
 /-- The zero value of each local kind, used when the method zero-initializes its locals. -/
 private def initialLocal : LocalKind → Value
-  | .reference => .nullRef
+  | .reference | .span .. => .nullRef
   | .byte => .i8 0
   | .narrow _ | .word32 => .i32 0
   | .word64 => .i64 0
@@ -57,14 +59,43 @@ def returnNarrow (layouts : List RawLayout) (type : TypeExpr) : Option NarrowKin
   | .unsigned16 | .character => some .unsigned16
   | _ => none
 
+/-- Integer static-field storage and its narrow-load signedness. -/
+private def staticScalarType : TypeExpr → Option (Nat × Bool)
+  | .enum _ underlying => staticScalarType underlying
+  | .atom scope name =>
+    if scope != runtimeScope then none else
+    match name with
+    | "System.SByte" => some (1, true)
+    | "System.Byte" | "System.Boolean" => some (1, false)
+    | "System.Int16" => some (2, true)
+    | "System.UInt16" | "System.Char" => some (2, false)
+    | "System.Int32" | "System.UInt32" => some (4, false)
+    | "System.Int64" | "System.UInt64" | "System.IntPtr" | "System.UIntPtr" => some (8, false)
+    | _ => none
+  | _ => none
+
+/-- A readonly scalar load has exactly the width and extension of its raw field type. -/
+private def staticLoadMatches (closed : RawMethod) (method : Method) (pc : Nat) : Bool :=
+  match closed.code[pc]?, method.staticSites.find? (fun site => site.1 == pc) with
+  | some instruction, some (_, descriptor) =>
+    if instruction.opcode != 126 then false else
+    match instruction.operand with
+    | .field _ _ type _ =>
+      match staticScalarType type with
+      | some (width, signed) => descriptor.bytes.length == width && descriptor.scalar == some signed
+      | none => descriptor.scalar.isNone
+    | _ => false
+  | _, _ => false
+
 /-- Bind non-instruction method fields that affect frame setup and return behavior. -/
 def MethodShapeValid (layouts : List RawLayout) (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
   method.locals = method.localKinds.map (fun kind =>
     if closed.initLocals then initialLocal kind else .unmodeled) ∧
   method.vectorLocals = [] ∧ method.vectorArgs = [] ∧
-  method.code.all (fun op => match op with
+  method.code.zipIdx.all (fun (op, pc) => match op with
     | .ret narrow => narrow == returnNarrow layouts closed.returnType
+    | .memory (.staticValue _) => staticLoadMatches closed method pc
     | _ => true) = true
 
 instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) :
@@ -80,20 +111,22 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ParameterHomesValid layouts item.parameterInput item.reachable method ∧
   MethodLayoutsValid rawLayouts layouts method item.layoutUses ∧
   FeatureFlowValid item.closed method.profile item.featureStates item.reachable method.code ∧
-  ManagedCallsValid (specializationTable all) imports item.closed item.reachable method ∧
+  ManagedCallsValid (specializationTable all) imports
+    (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid rawLayouts item.closed method ∧
   UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
   DivisionIntrinsicsValid item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   VectorInitializationsValid item.closed item.reachable method ∧
-  ScalarFlowValid item.closed item.featureStates item.scalarStates method.code
+  ScalarFlowValid item.closed item.featureStates item.scalarStates method.code ∧
+  ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable method
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
     (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)

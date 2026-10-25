@@ -122,6 +122,36 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {Method(original, method)}");
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
         lean.AppendLine($"def method{number}Closed : Extraction.RawMethod := {Method(method, method)}");
+        lean.AppendLine($"def method{number}DispatchTypes : List Extraction.DispatchType := {DispatchTypes(method)}");
         lean.AppendLine($"theorem method{number}_specialization_validated : Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw method{number}Closed method{number}RawArguments := {LeanEmitter.Decide}");
     }
+
+    string DispatchTypes(MethodDefinition method)
+    {
+        var receivers = method.Body.Instructions.Where(instruction => instruction.OpCode.Code == Code.Constrained)
+            .Select(instruction => ((TypeReference)instruction.Operand).Resolve())
+            .Where(type => type.Module == method.Module).ToArray();
+        var types = receivers.Concat(receivers.SelectMany(type => type.Interfaces)
+                .Select(implementation => implementation.InterfaceType.Resolve())
+                .Where(type => type.Module == method.Module))
+            .DistinctBy(type => type.MetadataToken.ToUInt32()).OrderBy(type => type.MetadataToken.ToUInt32());
+        return List(types.Select(type =>
+        {
+            var original = (TypeDefinition)originalModule.LookupToken(type.MetadataToken);
+            return $"{{ identity := {Type(original)}, valueType := {Bool(original.IsValueType)}, " +
+                $"interfaceType := {Bool(original.IsInterface)}, " +
+                $"interfaces := {List(original.Interfaces.Select(implementation => Type(implementation.InterfaceType)))}, " +
+                $"methods := {List(original.Methods.Select(DispatchMethod))} }}";
+        }));
+    }
+
+    string DispatchMethod(MethodDefinition method) =>
+        $"{{ token := {method.MetadataToken.ToUInt32()}, name := {Quote(method.Name)}, " +
+        $"hasThis := {Bool(method.HasThis)}, isPublic := {Bool(method.IsPublic)}, " +
+        $"isAbstract := {Bool(method.IsAbstract)}, isVirtual := {Bool(method.IsVirtual)}, " +
+        $"hasBody := {Bool(method.HasBody)}, genericArity := {method.GenericParameters.Count}, " +
+        $"explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, " +
+        $"attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, " +
+        $"returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Type(parameter.ParameterType)))}, " +
+        $"overrides := {List(method.Overrides.Where(slot => slot.DeclaringType.Scope is ModuleDefinition).Select(slot => slot.Resolve().MetadataToken.ToUInt32().ToString(CultureInfo.InvariantCulture)))} }}";
 }
