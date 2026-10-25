@@ -78,6 +78,9 @@ name = "Tests.RegionRun"
 name = "Tests.StoreFacts"
 
 [[lean_lib]]
+name = "Tests.SimdLanes"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]
