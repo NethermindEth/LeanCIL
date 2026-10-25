@@ -206,8 +206,8 @@ Every load, store, copy, initialization, field or lane access of one or more
 bytes through null faults with `nullDereference`, the model's
 `NullReferenceException`, and no address is formed from it; zero-length block
 operations access nothing, as above. Extraction evidence binds each call to its operation in
-both directions, as for `SkipInit`. `ldnull` remains unsupported: this is a null
-byref, not a null object reference.
+both directions, as for `SkipInit`. `NullRef` produces a null byref; the bounded
+`ldnull` support above produces an object null and does not permit mixing it with managed pointers.
 
 The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and byte-span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references remains unsupported.
 
