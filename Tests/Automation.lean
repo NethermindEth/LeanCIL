@@ -404,7 +404,8 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
 
 @[cil_code] def permuteStoreProgram : CIL.Program := [permuteStoreMethod]
 
--- A store fact stated at the `memoryInstruction` level, as consumers wrote before per-shape equations, still applies.
+-- A store fact stated at the `memoryInstruction` level, as consumers wrote before per-shape
+-- equations, still applies without `staticInstruction` passed to unfold.
 open CIL.Safety in
 theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory final : Memory)
     (stored : ∀ rest, memoryInstruction .store256
@@ -413,7 +414,93 @@ theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory
     run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
       [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 (CIL.Vector.pack256 a b c d)),
         .reference (.address destination)] memory = .ok (final, []) := by
-  cil_checked_steps [staticInstruction, stored]
+  cil_checked_steps [stored]
+
+open CIL.Safety in
+/-- A `memoryInstruction` fact closes a single store step without `staticInstruction` passed. -/
+theorem store_from_instruction_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+    (bits : BitVec 256) (destination : Reference) (memory final : Memory)
+    (stored : memoryInstruction .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [stored]
+
+/--
+info: 'Tests.Automation.store_from_instruction_fact' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in #print axioms store_from_instruction_fact
+
+open CIL.Safety in
+/-- A fact one level up, on `staticInstruction`, still closes the store: the retry tries it
+    before unfolding `staticInstruction`, which would rewrite past it. -/
+theorem store_from_static_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+    (bits : BitVec 256) (destination : Reference) (memory final : Memory)
+    (stored : staticInstruction body 2 .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [stored]
+
+/--
+info: 'Tests.Automation.store_from_static_fact' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in #print axioms store_from_static_fact
+
+/-- Two vector stores; reached through a lookup hypothesis, so facts can name the body. -/
+def twoStoresMethod : CIL.Method := {
+  code := [.memory .store256, .memory .store256, .ret], locals := [], returnsValue := false }
+
+open CIL.Safety in
+/-- Facts at both levels in one run: each store takes the retry for its own fact's level, so
+    neither retry may exclude the other. -/
+theorem stores_from_mixed_facts (program : CIL.Program) (index : Nat)
+    (found : program[index]? = some twoStoresMethod) (first second : BitVec 256)
+    (near far : Reference) (memory middle final : Memory)
+    (storedFirst : ∀ rest, staticInstruction twoStoresMethod 0 .store256
+      (.scalar (.v256 first) :: .reference (.address near) :: rest) memory = .ok (middle, rest))
+    (storedSecond : ∀ rest, memoryInstruction .store256
+      (.scalar (.v256 second) :: .reference (.address far) :: rest) middle = .ok (final, rest)) :
+    run program 3 index 0 [] { activation := 0, locals := [], owned := [] }
+      [.scalar (.v256 first), .reference (.address near), .scalar (.v256 second),
+        .reference (.address far)] memory = .ok (final, []) := by
+  cil_checked_steps [storedFirst, storedSecond]
+
+/-- info: 'Tests.Automation.stores_from_mixed_facts' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms stores_from_mixed_facts
+
+-- Naming `staticInstruction` explicitly, and stating either fact as a proof term, still applies.
+open CIL.Safety in
+example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+    (destination : Reference) (memory final : Memory)
+    (stored : memoryInstruction .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [staticInstruction, stored]
+
+open CIL.Safety in
+example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+    (destination : Reference) (memory final : Memory)
+    (stored : memoryInstruction .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [(stored)]
+
+open CIL.Safety in
+example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+    (destination : Reference) (memory final : Memory)
+    (stored : staticInstruction body 2 .store256
+      [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
+    step body (.memory .store256) 2 args frame
+      [.scalar (.v256 bits), .reference (.address destination)] memory =
+      .ok (.next 3 [] frame final) := by
+  cil_checked_step [(stored)]
 
 -- The same store from a `storeValue` fact: the per-shape memory equation exposes it without unfolding a dispatcher.
 open CIL.Safety in
@@ -768,6 +855,20 @@ theorem quantified_body_step_facts (frame stored : Frame) (memory written : Memo
 /-- info: 'Tests.Automation.quantified_body_step_facts' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms quantified_body_step_facts
 
+open CIL.Safety in
+/-- A supplied step fact is found after an earlier tactic `have` wraps the target in metadata;
+    the `setLocal` equation alone cannot read the abstract frame's slot. -/
+theorem step_fact_after_have (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
+    (store : step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written)) :
+    step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+      .ok (.next 1 [] stored written) := by
+  have unchanged : value = value := rfl
+  cil_checked_step [store]
+
+/-- info: 'Tests.Automation.step_fact_after_have' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms step_fact_after_have
+
 @[cil_code] def nonzeroMethod : CIL.Method := {
   code := [.arg 0, .brnonzero 4, .arg 1, .ret, .arg 0, .ret]
   locals := [], returnsValue := true }
@@ -845,7 +946,7 @@ theorem evaluated_then_stored (v : CIL.Vector.V256) (destination : Reference) (m
     run permuteStoreProgram 3 0 0 [] { activation := 0, locals := [], owned := [] }
       [.scalar (.i32 (BitVec.ofInt 32 27)), .scalar (.v256 v), .reference (.address destination)] memory =
       .ok (final, []) := by
-  cil_checked_steps [staticInstruction, stored, eval_reverse_lanes]
+  cil_checked_steps [stored, eval_reverse_lanes]
 
 #print axioms evaluated_then_stored
 

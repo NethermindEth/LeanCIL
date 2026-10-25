@@ -282,9 +282,11 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
     | cil_checked_step_by_equations [$[$facts:term],*]
     | cil_checked_step_by_unfolding [$[$facts:term],*])
 
-/-- Closes a `.memory` step through the generic `step_memory_eq`. A fact stated at the
-    `memoryInstruction` level fails once a per-shape memory equation rewrites past it, so
-    the stepping tactics retry such facts here. -/
+/-- Closes a `.memory` step through the generic `step_memory_eq` with `facts`, constructors
+    and `rfl`. A fact stated at the `memoryInstruction` or `staticInstruction` level fails once
+    a per-shape memory equation rewrites past it, so the stepping tactics retry such facts
+    here. A `memoryInstruction` fact closes the step only when `facts` also includes
+    `CIL.Safety.staticInstruction`, which unfolds past a `staticInstruction` fact. -/
 macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        rw [CIL.Safety.step_memory_eq]
@@ -297,20 +299,16 @@ macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
        all_goals ((repeat constructor) <;> rfl)))
 
 open Lean Elab Tactic Meta in
-/-- Whether a supplied fact is, or is stated about, `memoryInstruction` or `staticInstruction`;
-    a compound term is assumed to be. -/
-def mentionsMemoryInstruction (facts : Array Term) : TacticM Bool := withMainContext do
-  let mentions := fun (e : Expr) => (e.find? fun sub =>
-    sub.isConstOf ``CIL.Safety.memoryInstruction ||
-      sub.isConstOf ``CIL.Safety.staticInstruction).isSome
+/-- Whether a supplied fact is, or is stated about, the definition `level`; a compound term is
+    assumed to be. -/
+def factsMention (facts : Array Term) (level : Name) : TacticM Bool := withMainContext do
+  let mentions := fun (e : Expr) => (e.find? (·.isConstOf level)).isSome
   facts.anyM fun fact => do
     unless fact.raw.isIdent do return true
     if let some decl := (← getLCtx).findFromUserName? fact.raw.getId then
       return mentions (← instantiateMVars decl.type)
     let some name ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw | return true
-    let info ← getConstInfo name
-    return name == ``CIL.Safety.memoryInstruction || name == ``CIL.Safety.staticInstruction ||
-      mentions info.type
+    return name == level || mentions (← getConstInfo name).type
 
 open Lean Elab Tactic Meta in
 /-- Whether a supplied fact's type satisfies `test`: a hypothesis, a constant, or an applied
@@ -396,13 +394,14 @@ def cilReducedOp? (op : Expr) : MetaM (Option Expr) := do
 
 /-- One checked `step` goal, with facts already normalised: a supplied step fact for the
     fetched op, as given or with its `@[cil_code]` bodies unfolded, or else a strategy chosen
-    by opcode (scalar, intrinsic, memory with its fallbacks, or the generic equations). -/
+    by opcode (scalar, intrinsic, memory with its retry, or the generic equations). -/
 syntax "cil_checked_step_normalized" "[" term,* "]" : tactic
 
 open Lean Elab Tactic Meta in
 /-- The supplied facts that state a `step` result for the goal's op, or for any op. -/
 def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
-  let target ← instantiateMVars target
+  -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
+  let target := (← instantiateMVars target).consumeMData
   let some (_, lhs, _) := target.eq? | return #[]
   unless lhs.isAppOfArity ``CIL.Safety.step 7 do return #[]
   let head := (← whnfR lhs.getAppArgs[1]!).getAppFn.constName?
@@ -483,17 +482,27 @@ elab_rules : tactic
         let attempt := fun (tactic : Syntax) => do
           try withoutRecover (evalTactic tactic); return none
           catch error => saved.restore; return some error
+        -- `step_memory_eq` matches every `.memory` step, so the unfolding fallback, which runs
+        -- only when no equation applies, cannot apply here.
         let some equationError ←
             attempt (← `(tactic| cil_checked_memory_by_equations [$facts:term,*])) | return
-        let progressed := (← attempt (← `(tactic| simp only [cil_step]))).isNone
-        saved.restore
-        let unfolding ← `(tactic| cil_checked_step_by_unfolding [$facts:term,*])
-        let some unfoldingError ←
-            (if progressed then pure (some equationError) else attempt unfolding) | return
-        if ← mentionsMemoryInstruction facts.getElems then
+        -- A `staticInstruction` fact must be tried before `staticInstruction` is unfolded,
+        -- which rewrites past it; a `memoryInstruction` fact is reached only by that unfolding.
+        let staticRetried ← factsMention facts.getElems ``CIL.Safety.staticInstruction
+        if staticRetried then
           if (← attempt (← `(tactic| cil_checked_memory_retry [$facts:term,*]))).isNone then return
+        -- Naming `staticInstruction` already unfolded it in that retry, so it would repeat.
+        let namesStatic ← facts.getElems.anyM fun fact => do
+          unless fact.raw.isIdent do return false
+          let resolved ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw
+          return resolved == some ``CIL.Safety.staticInstruction
+        if ← factsMention facts.getElems ``CIL.Safety.memoryInstruction then
+          if staticRetried && namesStatic then throw equationError
+          let retry ← `(tactic|
+            cil_checked_memory_retry [CIL.Safety.staticInstruction, $facts:term,*])
+          if (← attempt retry).isNone then return
         -- Report the per-shape goal, where facts belong, rather than the whole-instruction retry's.
-        throw unfoldingError
+        throw equationError
       else
         `(tactic| cil_checked_step_equations [$facts:term,*])
     evalTactic strategy
