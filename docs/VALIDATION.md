@@ -268,7 +268,10 @@ in the tactic, and non-trailing ones, and still reports a changed live instructi
 under dead locals; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
 throws, unsupported execution and fuel exhaustion do not transfer. `Tests.AggregateSetup` and `Tests.Semantics`
-cover frame setup and interpreter behavior. The extracted-loop suite checks
+cover frame setup and interpreter behavior. `Tests.RetainedNumericLocals` keeps dead
+numeric declarations before and after a live local, transfers exact-memory executions
+and named exceptions through nested allocating calls, and checks that deleting a
+numeric local changes the allocation watermark and fails ordinary embedding. The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, a counted loop composed through its
 helper's contract and reused for a reimplemented helper, a loop that returns or
@@ -352,7 +355,7 @@ method steps through a shift and an even-lane multiply with those lemmas as fact
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

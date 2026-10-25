@@ -1066,6 +1066,18 @@ renamed identities are not related yet. A dead local before a kept one is reject
 since it renumbers the kept local. Span slots retain their width, mutability and empty
 or unmodeled state; padding does not create or change any allocation.
 
+For numeric or interspersed dead locals, keep the extracted declarations and original
+local indices in the expected body and use ordinary `MethodEmbeds`. Unreachable code
+can still be omitted or marked `.unsupported`; declaring an unused numeric local
+continues to allocate its home. This preserves the identities of later parent and
+callee allocations and allows exact-memory contract transport. The int256 multiply
+fixture follows this route: its scalar body retains all 22 word64 and four vector256
+homes used across its architecture-specific paths. See
+[Tests/RetainedNumericLocals.lean](../Tests/RetainedNumericLocals.lean) for a smaller
+example with dead numeric locals on both sides of a live reference local and an
+allocating child call. Removing those declarations is a different simulation problem;
+equal scalar results alone do not imply equal final memory.
+
 ### Instruction equations for parametric bodies
 
 A body written once for every profile takes its feature flags and callee

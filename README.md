@@ -230,6 +230,11 @@ and int32 locals. Supported forwarder bodies can inherit a
 callee's proved contract, and embedding proofs can ignore trailing unread byref,
 pointer or span locals. Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
+For unused numeric locals, retain the extracted declarations and local indices in
+the expected body and use ordinary embedding. This preserves later allocation
+identities; [the retained-local example](Tests/RetainedNumericLocals.lean) covers
+interspersed numeric homes and nested allocating calls. Numeric-local deletion
+still requires a separate allocation-renaming simulation.
 
 `cil_embed [facts]` binds a shared body template to an extraction using proved feature
 flag and callee equalities. Local definitions also work without a fact list; relevant
