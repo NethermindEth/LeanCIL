@@ -41,7 +41,8 @@ example : foldRoles [words] itemCode = [none, some .head, some .interior, none, 
 example : foldRoles [intType] itemCode = List.replicate 7 none := by decide
 example : foldRoles [words] [i 10, i 18 (.local 1)] = [none, none] := by decide
 -- Only the store may be entered from elsewhere.
-example : foldEntry (foldRoles [words] itemCode) 1 ∧ ¬ foldEntry (foldRoles [words] itemCode) 2 := by decide
+example : foldEntry (foldRoles [words] itemCode)[1]? ∧
+    ¬ foldEntry (foldRoles [words] itemCode)[2]? := by decide
 
 example : FeatureFlowValid (raw [words] itemCode) .scalar itemStates (List.replicate 7 true) itemOps := by decide
 -- The receiver must stay on the stack: a real store or address is not the fold.
