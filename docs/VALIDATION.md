@@ -224,7 +224,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
-| `exportsderived` | Standalone derived-contract fixture: exact internal method and outcome contracts proved on the actual extraction, public ones exported only through `Holds.weaken`, callers verified from the sidecar on normal and named-exception paths; stronger posts, weaker pres, smaller footprints and renamed exceptions are refuted on the actual extraction, and a renamed exception fails only its refinement proof at the exporter |
+| `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -248,7 +248,12 @@ leaf runs no core caller verification, restrictions, callbacks or full cases.
 The typed leaf explicitly owns its fixture and five input proof/interface
 modules. Shared model and proof dependencies retain their existing owners.
 The derived leaf likewise owns its fixture and the five `Derived*` interface,
-producer and caller modules in `Tests/ContractImports`.
+producer and caller modules in `Tests/ContractImports`. It proves exact internal
+method and outcome contracts on the actual extraction and exports public ones
+derived only through `Holds.weaken`. Callers verify from the sidecar alone, on
+normal and named-exception paths. Stronger posts, weaker preconditions, smaller
+footprints and renamed exceptions are refuted on the same extraction; at the
+exporter, one renamed exception fails only its refinement proof.
 
 New cohort durations are unmeasured. The existing CI caps remain 90 minutes
 for imports, 120 for each exports leaf, and 30 for other suites. The matrix
