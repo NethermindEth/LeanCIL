@@ -103,46 +103,62 @@ theorem narrow_round_trip {entered memory : Memory} {frame : Frame} {boundary : 
 
 #print axioms narrow_round_trip
 
-/-- A snapshot collection grants no authority to write a local. -/
+/-- An isolated store has no later argument or load obligations. -/
+@[cil_code] def storeOnly : CIL.Method := {
+  code := [.setLocal 0, .ret], locals := [.v128 0], returnsValue := false }
+
+/-- A snapshot collection grants no authority; adding exactly that authority permits the run. -/
 theorem missing_authority {entered memory : Memory} {frame : Frame} {boundary : Nat}
     {vectorHome : Reference}
-    (_homes : WritableHomes entered boundary [.vector128, .word32] frame.locals)
-    (_formed : memory.WellFormed)
-    (_slot : frame.locals[0]? = some (.bytes .vector128 vectorHome))
-    (_vector : BitVec 128) : True := by
+    (homes : WritableHomes entered boundary [.vector128] frame.locals)
+    (formed : memory.WellFormed)
+    (slot : frame.locals[0]? = some (.bytes .vector128 vectorHome))
+    (vector : BitVec 128) :
+    access memory vectorHome 16 1 true = .ok () →
+      ∃ after, run [storeOnly] 3 0 0 [] frame [.scalar (.v128 vector)] memory =
+        .ok (after, []) := by
   have snapshots := LocalSnapshots.empty memory frame.locals
-  fail_if_success
+  fail_if_success (cil_strict (
     have : ∃ after,
-      run [storeBoth] 8 0 1 [] frame [.scalar (.v128 _vector)] memory = .ok (after, []) := by
-      cil_checked_steps (snapshots := snapshots) []
-  trivial
+      run [storeOnly] 3 0 0 [] frame [.scalar (.v128 vector)] memory = .ok (after, []) := by
+      solve | cil_checked_steps (snapshots := snapshots) [slot]))
+  intro ready
+  cil_checked_steps (snapshots := snapshots) [slot, ready]
 
 #print axioms missing_authority
 
 /-- Write authority cannot justify storing an int32 into a vector home. -/
 theorem wrong_local_kind {entered memory : Memory} {frame : Frame} {boundary : Nat}
     {vectorHome : Reference}
-    (_homes : WritableHomes entered boundary [.vector128, .word32] frame.locals)
-    (_formed : memory.WellFormed)
-    (_slot : frame.locals[0]? = some (.bytes .vector128 vectorHome))
-    (_ready : access memory vectorHome 16 1 true = .ok ()) : True := by
+    (homes : WritableHomes entered boundary [.vector128] frame.locals)
+    (formed : memory.WellFormed)
+    (slot : frame.locals[0]? = some (.bytes .vector128 vectorHome))
+    (ready : access memory vectorHome 16 1 true = .ok ()) :
+    ∃ after, run [storeOnly] 3 0 0 [] frame [.scalar (.v128 42)] memory = .ok (after, []) := by
   have snapshots := LocalSnapshots.empty memory frame.locals
-  fail_if_success
+  fail_if_success (cil_strict (
     have : ∃ after,
-        run [storeBoth] 8 0 1 [] frame [.scalar (.i32 42)] memory = .ok (after, []) := by
-      cil_checked_steps (snapshots := snapshots) []
-  trivial
+        run [storeOnly] 3 0 0 [] frame [.scalar (.i32 42)] memory = .ok (after, []) := by
+      solve | cil_checked_steps (snapshots := snapshots) [slot, ready]))
+  cil_checked_steps (snapshots := snapshots) [slot, ready]
 
 #print axioms wrong_local_kind
 
-/-- An empty collection cannot turn an uninitialized load into a known value. -/
-theorem unknown_load (memory : Memory) (frame : Frame) : True := by
+/-- An isolated load returns exactly the remembered value. -/
+@[cil_code] def loadOnly : CIL.Method := {
+  code := [.local 0, .ret], locals := [.v128 0], returnsValue := true }
+
+/-- An empty collection cannot justify a load; a supplied snapshot permits the same run. -/
+theorem unknown_load (memory : Memory) (frame : Frame) (vector : BitVec 128) :
+    LocalSnapshots memory frame.locals (rememberLocal (fun _ => none) 0 (.v128 vector)) →
+      ∃ after, run [loadOnly] 3 0 0 [] frame [] memory = .ok (after, [.scalar (.v128 vector)]) := by
   have snapshots := LocalSnapshots.empty memory frame.locals
-  fail_if_success
+  fail_if_success (cil_strict (
     have : ∃ after,
-      run [storeBoth] 5 0 4 [] frame [] memory = .ok (after, [.scalar (.i32 0)]) := by
-      cil_checked_steps (snapshots := snapshots) []
-  trivial
+      run [loadOnly] 3 0 0 [] frame [] memory = .ok (after, [.scalar (.v128 vector)]) := by
+      solve | cil_checked_steps (snapshots := snapshots) []))
+  intro known
+  cil_checked_steps (snapshots := known) []
 
 #print axioms unknown_load
 
