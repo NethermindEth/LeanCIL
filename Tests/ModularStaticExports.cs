@@ -12,6 +12,13 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Nethermind.LeanCIL;
 
+// The default leaf also runs one forced full verification; the costlier compositions get their own runner.
+bool fullComposition = args switch
+{
+    [] => false,
+    ["--full-composition"] => true,
+    _ => throw new ArgumentException("Expected no arguments or --full-composition.")
+};
 string root = At("artifacts/ModularStaticExports-" + Guid.NewGuid().ToString("N"));
 string libRoot = Path.Combine(root, "Lib");
 string appRoot = Path.Combine(root, "App");
@@ -28,19 +35,24 @@ File.WriteAllText(Path.Combine(libRoot, "Library.cs"), """
 namespace StaticFixture;
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit, Size = 8, Pack = 1)]
 public struct Blob { }
-public static class Library { public static ulong Read() => 0; }
+public static class Library { public static ulong Read() => 0; public static ulong ReadAgain() => 0; }
 """);
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), """
 namespace StaticFixture;
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit, Size = 8, Pack = 1)]
 public struct AppBlob { }
-public static class Application { public static ulong Own() => 0; public static ulong Entry() => Library.Read(); }
+public static class Application
+{
+    public static ulong Own() => 0;
+    public static ulong Entry() => Library.Read();
+    public static ulong Mixed() => Own() + Library.Read() + Library.ReadAgain();
+}
 """);
 Run(["dotnet", "build", Path.Combine(appRoot, "App.csproj"), "-c", "Release"]);
 string lib = Path.Combine(libRoot, "bin", "StaticFixture.Lib.dll");
 string app = Path.Combine(appRoot, "bin", "StaticFixture.App.dll");
 
-void InstallTable(string assembly, string owner, string methodName, string blob, ulong word)
+void InstallTable(string assembly, string owner, string blob, ulong word, params string[] readers)
 {
     using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(assembly)));
     TypeDefinition data = new("StaticFixture", "Data", Mono.Cecil.TypeAttributes.Public | Mono.Cecil.TypeAttributes.Abstract |
@@ -51,17 +63,20 @@ void InstallTable(string assembly, string owner, string methodName, string blob,
     FieldDefinition field = new("Table", Mono.Cecil.FieldAttributes.Static | Mono.Cecil.FieldAttributes.InitOnly |
         Mono.Cecil.FieldAttributes.HasFieldRVA, storage) { InitialValue = BitConverter.GetBytes(word) };
     data.Fields.Add(field);
-    MethodDefinition method = module.GetType(owner).Methods.Single(candidate => candidate.Name == methodName);
-    method.Body.Instructions.Clear();
-    ILProcessor il = method.Body.GetILProcessor();
-    il.Append(il.Create(OpCodes.Ldsflda, field));
-    il.Append(il.Create(OpCodes.Ldind_I8));
-    il.Append(il.Create(OpCodes.Ret));
+    foreach (string reader in readers)
+    {
+        MethodDefinition method = module.GetType(owner).Methods.Single(candidate => candidate.Name == reader);
+        method.Body.Instructions.Clear();
+        ILProcessor il = method.Body.GetILProcessor();
+        il.Append(il.Create(OpCodes.Ldsflda, field));
+        il.Append(il.Create(OpCodes.Ldind_I8));
+        il.Append(il.Create(OpCodes.Ret));
+    }
     module.Write(assembly);
 }
 
-InstallTable(lib, "StaticFixture.Library", "Read", "StaticFixture.Blob", 17);
-InstallTable(app, "StaticFixture.Application", "Own", "StaticFixture.AppBlob", 7);
+InstallTable(lib, "StaticFixture.Library", "StaticFixture.Blob", 17, "Read", "ReadAgain");
+InstallTable(app, "StaticFixture.Application", "StaticFixture.AppBlob", 7, "Own");
 if ((ulong)Assembly.Load(File.ReadAllBytes(lib)).GetType("StaticFixture.Library")!.GetMethod("Read")!.Invoke(null, null)! != 17 ||
     (ulong)Assembly.Load(File.ReadAllBytes(app)).GetType("StaticFixture.Application")!.GetMethod("Own")!.Invoke(null, null)! != 7)
     throw new InvalidOperationException("The RVA fixtures must read their distinct runtime data.");
@@ -179,11 +194,15 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
     17, rfl, rfl, staticReference_preserves_wellFormed _ _ _ _ formed resolved, preserved⟩
 end LibraryProof
 """);
-File.WriteAllText(Path.Combine(libArtifact, "verification.json"), JsonSerializer.Serialize(new
-{
-    schema = 1, proof = Path.GetRelativePath(libArtifact, proof), theorem = "LibraryProof.correctness",
-    proofRoot = Path.GetRelativePath(libArtifact, package)
-}));
+// ReadAgain has Read's exact body, so one author proof certifies both exports of the shared table.
+string againArtifact = Path.Combine(root, "AgainArtifact");
+Run([.. cli, "extract", lib, "StaticFixture.Library::ReadAgain()", againArtifact]);
+foreach (string exported in new[] { libArtifact, againArtifact })
+    File.WriteAllText(Path.Combine(exported, "verification.json"), JsonSerializer.Serialize(new
+    {
+        schema = 1, proof = Path.GetRelativePath(exported, proof), theorem = "LibraryProof.correctness",
+        proofRoot = Path.GetRelativePath(exported, package)
+    }));
 Run(["lake", "update"], package);
 Run(["lake", "update"], caller);
 string manifest = Path.Combine(root, "export.json");
@@ -191,13 +210,19 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
 {
     schema = 1, assembly = lib, proofRoot = package,
     @interface = new[] { new { module = "PublishedTable", source = contract } },
-    exports = new[] { new { method = "StaticFixture.Library::Read()", artifact = libArtifact, contract = "PublishedTable.read", theorem = "LibraryProof.correctness" } }
+    exports = new[] { ("Read", libArtifact), ("ReadAgain", againArtifact) }.Select(export => new
+    {
+        method = "StaticFixture.Library::" + export.Item1 + "()", artifact = export.Item2, contract = "PublishedTable.read",
+        theorem = "LibraryProof.correctness"
+    })
 }));
 string sidecar = Path.Combine(libRoot, "StaticFixture.Lib.leancil.contracts");
-Run([.. cli, "export-contracts", manifest, "--output", sidecar]);
+Run([.. cli, "export-contracts", manifest, "--output", sidecar, "--bundle", Path.Combine(root, "Bundles")]);
 JsonObject published = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
-if (published["certifications"]![0]!["staticIdentities"]!.AsArray().Count != 1 ||
-    published["certifications"]![0]!["staticIdentities"]![0]!["identity"]!.GetValue<string>() != libKey)
+JsonNode ReadCertification(JsonObject contract) => contract["certifications"]!.AsArray()
+    .Single(item => item!["identity"]!.GetValue<string>().EndsWith("::Read()", StringComparison.Ordinal))!;
+if (published["certifications"]!.AsArray().Any(item => item!["staticIdentities"]!.AsArray().Count != 1 ||
+    item["staticIdentities"]![0]!["identity"]!.GetValue<string>() != libKey))
     throw new InvalidOperationException("Published certification lost its kernel-bound static identity.");
 string callerProof = Path.Combine(caller, "CallerProof.lean");
 File.WriteAllText(callerProof, """
@@ -225,6 +250,123 @@ string[] ExtractApp(string output) => [.. cli, "extract", app, "StaticFixture.Ap
     "--import", sidecar, "--import-implementation", "StaticFixture.Lib=" + lib,
     "--import-sha256", "StaticFixture.Lib=" + Sha(lib), "--import-interface-sha256", "StaticFixture.Lib=" + published["interfaceDigest"]!.GetValue<string>()];
 Run(ExtractApp(appArtifact));
+// Forced full verification replays the RVA-table library against the current DLL.
+string bundle = Path.GetFullPath(published["fullVerificationLocator"]!.GetValue<string>(), libRoot);
+byte[] originalLib = File.ReadAllBytes(lib);
+string[] FullCommand(string artifact, string callerSource, bool package) => [.. cli, "verify", artifact,
+    "--proof", callerSource, .. package ? new[] { "--proof-root", caller } : [], "--force-full-verify"];
+void FullVerify(string artifact, string callerSource, bool package, int slots)
+{
+    string trace = Path.Combine(root, "trace-" + Guid.NewGuid().ToString("N"));
+    string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+        Run(FullCommand(artifact, callerSource, package));
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+    string[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
+    // One bundle gives one library build however many slots it fills; the caller has its own.
+    if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != slots ||
+        stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != slots ||
+        stages.Count(stage => stage == "Building fresh Lean verification library") != 2 ||
+        stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
+        stages.Any(stage => stage.Contains("certified proof:", StringComparison.Ordinal)))
+        throw new InvalidOperationException("Full verification reused a receipt instead of replaying: " + string.Join(", ", stages));
+    JsonElement verified = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
+    JsonElement[] imports = verified.GetProperty("imports").EnumerateArray().ToArray();
+    // The published statement must carry the checked static link, not only the raw link.
+    if (imports.Length != slots || imports.Any(import =>
+            import.GetProperty("acceptedVia").GetString() != "independently-verified" ||
+            import.GetProperty("sourceBundleDigest").GetString() != Path.GetFileName(bundle) ||
+            import.GetProperty("staticIdentities").GetArrayLength() != 1 ||
+            import.GetProperty("staticIdentities")[0].GetProperty("identity").GetString() != libKey) ||
+        verified.GetProperty("compositionTheorem").GetString() != "LeanCILFullComposition.certified" ||
+        !verified.GetProperty("compositionAudit").GetString()!.Contains("linkChecked", StringComparison.Ordinal))
+        throw new InvalidOperationException("Full verification did not publish the checked static composition: " + verified);
+}
+// Any one marker suffices where independent checks may reject the same input in either order.
+void RejectFull(string artifact, params string[] markers)
+{
+    (int Code, string Output, string Stdout, string Stderr) result = Execute(FullCommand(artifact, callerProof, true));
+    if (result.Code != 1 || !markers.Any(marker => result.Output.Contains(marker, StringComparison.Ordinal)) ||
+        File.Exists(Path.Combine(artifact, "verified.json")))
+        throw new InvalidOperationException("Full verification accepted a static-table forgery: " + result.Output);
+}
+void RewriteTable(ulong word)
+{
+    using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(lib)));
+    module.GetType("StaticFixture.Data").Fields.Single(field => field.Name == "Table").InitialValue = BitConverter.GetBytes(word);
+    module.Write(lib);
+}
+// Republishes the bundle with edited export records under its new content identity, as a cooperating
+// publisher could, points an edited sidecar at it and extracts the caller against that sidecar.
+string Republish(Action<JsonObject> editExport, Action<JsonObject> editSidecar)
+{
+    string staging = Path.Combine(root, "rebundle-" + Guid.NewGuid().ToString("N"));
+    CopyTree(bundle, staging);
+    JsonObject inventory = JsonNode.Parse(File.ReadAllText(Path.Combine(staging, "bundle.json")))!.AsObject();
+    foreach (string bundled in Directory.EnumerateDirectories(Path.Combine(staging, "exports")))
+    {
+        string identityPath = Path.Combine(bundled, "identity.json");
+        JsonObject exportIdentity = JsonNode.Parse(File.ReadAllText(identityPath))!.AsObject();
+        editExport(exportIdentity);
+        File.WriteAllText(identityPath, exportIdentity.ToJsonString());
+        inventory["files"]!["exports/" + Path.GetFileName(bundled) + "/identity.json"] = Sha(identityPath);
+    }
+    File.WriteAllText(Path.Combine(staging, "bundle.json"), inventory.ToJsonString());
+    string republished = Path.Combine(root, Sha(Path.Combine(staging, "bundle.json")));
+    Directory.Move(staging, republished);
+    JsonObject contract = published.DeepClone().AsObject();
+    editSidecar(contract);
+    contract["fullVerificationLocator"] = republished;
+    File.WriteAllText(sidecar, contract.ToJsonString());
+    string artifact = Path.Combine(root, "Republished-" + Guid.NewGuid().ToString("N"));
+    Run(ExtractApp(artifact));
+    return artifact;
+}
+
+if (fullComposition)
+{
+    // A re-certified changed table passes ordinary import, which trusts the publisher; only the
+    // independent author proof sees that the bytes no longer match the published descriptor.
+    try
+    {
+        RewriteTable(18);
+        string changedSha = Sha(lib);
+        string changed = Republish(identity => identity["assemblySha256"] = changedSha, contract =>
+        {
+            contract["implementationSha256"] = changedSha;
+            foreach (JsonNode? certification in contract["certifications"]!.AsArray())
+                certification!["implementationSha256"] = changedSha;
+        });
+        RejectFull(changed, "descriptor = PublishedTable.table");
+    }
+    finally
+    {
+        File.WriteAllBytes(lib, originalLib);
+        File.WriteAllText(sidecar, published.ToJsonString());
+    }
+    Console.WriteLine("PASS a re-certified changed table passes ordinary import but fails the independent library proof");
+
+    // Both assemblies' first tables had extraction-local index 0; ReadAgain shares Read's table.
+    string mixedArtifact = Path.Combine(root, "MixedArtifact");
+    Run([.. cli, "extract", app, "StaticFixture.Application::Mixed()", mixedArtifact, .. ExtractApp(mixedArtifact)[6..]]);
+    JsonObject mixedIdentity = JsonNode.Parse(File.ReadAllText(Path.Combine(mixedArtifact, "identity.json")))!.AsObject();
+    if (mixedIdentity["staticIdentities"]!.AsArray().Count != 1 ||
+        mixedIdentity["staticIdentities"]![0]!["identity"]!.GetValue<string>() != appStatic["identity"]!.GetValue<string>() ||
+        mixedIdentity["imports"]!.AsArray().Count != 2)
+        throw new InvalidOperationException("Precondition: the mixed caller must own one table and import two readers of another.");
+    string mixedProof = Path.Combine(root, "MixedCaller.lean");
+    File.WriteAllText(mixedProof, "import ExtractedImports\nnamespace ExampleProof\ntheorem correctness : " +
+        "_root_.CIL.Safety.HoldsGiven _root_.Extracted.program _root_.Extracted.ImportsHold (fun _ => True) := by\n" +
+        "  intro linked links imported\n  trivial\nend ExampleProof\n");
+    FullVerify(mixedArtifact, mixedProof, package: false, slots: 2);
+    Console.WriteLine("PASS distinct same-index app and library tables and one shared table across two imported slots");
+    return;
+}
+
 Run([.. cli, "verify", appArtifact, "--proof", callerProof, "--proof-root", caller, "--fresh"]);
 JsonObject report = JsonNode.Parse(File.ReadAllText(Path.Combine(appArtifact, "verified.json")))!.AsObject();
 if (report["imports"]![0]!["staticIdentities"]![0]!["identity"]!.GetValue<string>() != libKey)
@@ -241,23 +383,59 @@ void Reject(Action<JsonObject> mutate, string marker)
     if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal) || File.Exists(Path.Combine(rejected, "Extracted.lean")))
         throw new InvalidOperationException("Static certification rejection failed: " + result.Output);
 }
-Reject(value => value["certifications"]![0]!.AsObject().Remove("staticIdentities"), "Missing contract interface field: staticIdentities");
-Reject(value => value["certifications"]![0]!["staticIdentities"] = new JsonArray(), "static identities differ from the selected implementation");
-Reject(value => value["certifications"]![0]!["staticIdentities"]![0]!["identity"] = "0", "Invalid scoped static identity");
+Reject(value => ReadCertification(value).AsObject().Remove("staticIdentities"), "Missing contract interface field: staticIdentities");
+Reject(value => ReadCertification(value)["staticIdentities"] = new JsonArray(), "static identities differ from the selected implementation");
+Reject(value => ReadCertification(value)["staticIdentities"]![0]!["identity"] = "0", "Invalid scoped static identity");
 Reject(value =>
 {
-    JsonNode identity = value["certifications"]![0]!["staticIdentities"]![0]!;
+    JsonNode identity = ReadCertification(value)["staticIdentities"]![0]!;
     identity["fieldName"] = "StaticFixture.Blob StaticFixture.Data::Missing";
     identity["identity"] = StaticIdentity.Key(identity["assemblyIdentity"]!.GetValue<string>(), identity["fieldName"]!.GetValue<string>());
 }, "Certified static field is not present");
-Reject(value => value["certifications"]![0]!["staticIdentities"]!.AsArray().Add(libStatic.DeepClone()), "Invalid or duplicate contract certification");
+Reject(value => ReadCertification(value)["staticIdentities"]!.AsArray().Add(libStatic.DeepClone()), "Invalid or duplicate contract certification");
 Reject(value =>
 {
     JsonNode conflicting = libStatic.DeepClone();
     conflicting["fieldName"] = "StaticFixture.Blob StaticFixture.Data::Collision";
-    value["certifications"]![0]!["staticIdentities"]!.AsArray().Add(conflicting);
+    ReadCertification(value)["staticIdentities"]!.AsArray().Add(conflicting);
 }, "Static identity collision " + libKey + ": " + libStatic["assemblyIdentity"]!.GetValue<string>() + "::" + libStatic["fieldName"]!.GetValue<string>() + " and ");
 File.WriteAllText(sidecar, published.ToJsonString());
+
+// The ordinary verification above left warm receipts; full mode must still extract, capture and replay.
+FullVerify(appArtifact, callerProof, package: true, slots: 1);
+Console.WriteLine("PASS forced full verification of a separately compiled RVA-table library with warm receipts");
+try
+{
+    RewriteTable(18);
+    RejectFull(appArtifact, "Stale or mismatched verification artifact",
+        "Full-verification imported implementation or sidecar changed");
+}
+finally { File.WriteAllBytes(lib, originalLib); }
+string appIdentityPath = Path.Combine(appArtifact, "identity.json");
+string appIdentityText = File.ReadAllText(appIdentityPath);
+try
+{
+    JsonObject forged = JsonNode.Parse(appIdentityText)!.AsObject();
+    forged["imports"]![0]!["staticIdentities"] = new JsonArray();
+    File.WriteAllText(appIdentityPath, forged.ToJsonString());
+    RejectFull(appArtifact, "differs from regenerated assembly, extractor or configuration metadata");
+}
+finally { File.WriteAllText(appIdentityPath, appIdentityText); }
+string bundledInterface = Path.Combine(bundle, "interface", "PublishedTable.lean");
+string bundledInterfaceText = File.ReadAllText(bundledInterface);
+try
+{
+    File.AppendAllText(bundledInterface, "\n");
+    RejectFull(appArtifact, "Contract source bundle file is missing or changed: interface/PublishedTable.lean");
+}
+finally { File.WriteAllText(bundledInterface, bundledInterfaceText); }
+try
+{
+    string forgedStatics = Republish(identity => identity["staticIdentities"] = new JsonArray(), _ => { });
+    RejectFull(forgedStatics, "Full-verification static identities differ from the current implementation");
+}
+finally { File.WriteAllText(sidecar, published.ToJsonString()); }
+Console.WriteLine("PASS full verification rejects a changed table DLL, forged caller or bundle static records and a tampered bundle");
 
 using (ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(lib))))
 {

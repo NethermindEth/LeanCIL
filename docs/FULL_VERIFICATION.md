@@ -18,9 +18,24 @@ Full mode uses no proof receipts, portable support or successful proof caches.
 It validates source inventory and framework/toolchain bytes. It rebases proof
 paths into a fresh package and ignores original absolute filesystem locations.
 The first version supports closed library exports with the `leancil` source
-dependency only. Transitive library imports, extra source packages, static sites
-and initialization assumptions fail. Package configuration is generated from the
-validated source inventory; no Git history is inferred from a source bundle.
+dependency only. Transitive library imports, extra source packages, static-value
+assumptions and initialization assumptions fail. Package configuration is
+generated from the validated source inventory; no Git history is inferred from a
+source bundle.
+
+Libraries may read immutable RVA static tables. The fresh extraction decides
+each export's reachable tables. Their scoped identities must equal the
+certification's, the caller binding's and the bundled extraction's records, and
+each must name a field of the library assembly. Table bytes come only from the
+fresh extraction, so a re-certified DLL with changed bytes fails the author
+proof that ties them to the published `StaticWorldValid` descriptors. The
+composed theorem states `linkChecked` for the whole linked program: the
+caller's tables and every imported table, including one table read through
+several imports, have one descriptor per identity. `StaticWorldValid` premises
+remain preconditions of the contracts and of the caller's claim; the composed
+theorem does not establish the runtime's static state at the call. Mutable
+statics, static constructors and `ldsfld` of constructor-initialized fields
+remain unsupported.
 
 Imports from one source bundle share one staged package and one fresh library
 build. The author source first passes the ordinary fresh export, extraction,
