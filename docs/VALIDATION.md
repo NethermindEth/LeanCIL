@@ -11,6 +11,27 @@ Run `dotnet run --file Tests/CliImportedKernelAudit.cs` after building the extra
 assembly; add `-- --measure-baseline` to measure the original two-build workload. Each run
 writes `timings.json` beneath its isolated `artifacts/CliImportedKernelAudit-*` directory.
 
+`Tests/ConsumerBatchSetup.cs` runs the fixed mixed-outcome consumer checks used by the core
+suite. Imported axioms, unchecked declarations, expected-rejection mismatches and invalid
+execution proofs retain their own outcomes and certificate assertions. Successful requests
+after rejected proofs verify that failures do not contaminate their shared session. The
+checks use one certified-base preparation instead of three; `--separate` reproduces the old
+two isolated rejections followed by the seven-request batch. Both modes write stage counts
+and timings under `artifacts/ConsumerBatchSetup-*`, with caches disabled for the measured
+requests. When a certified artifact is supplied, copy counts are asserted as one versus three.
+Mutable-source, environment, provenance, receipt-tampering and process-progress tests remain
+separate. The core test copies only its exact framework cache entry into its private cache.
+
+```sh
+dotnet run --file Tests/ConsumerBatchSetup.cs -- --separate
+dotnet run --file Tests/ConsumerBatchSetup.cs
+```
+
+One local comparison of these nine requests, against the same certified base, took
+113.79 seconds separately and 65.66 seconds batched. Base copies fell from three to one,
+consumer builds from five to three, and replay invocations from six to three. This is a
+measurement of the selected cases, not the whole core suite or a CI wall-time guarantee.
+
 `Tests/VerificationCache.cs` checks certified-library copying against the pinned manifest,
 source snapshot and toolchain key, rejects changed/missing/extra files and rehashed
 manifests, and independently detects destination corruption. On Unix it also checks that

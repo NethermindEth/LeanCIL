@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 #:include ConsumerTraceDirectory.cs
+#:include ConsumerBatchOutcomes.cs
 
 using System.Text.Json;
 
@@ -19,12 +20,11 @@ var existingCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
 var isolatedCache = At("artifacts/ConsumerCache-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(isolatedCache);
-if (Directory.Exists(existingCache))
+using (var setup = new Program())
 {
-    foreach (var candidate in Directory.EnumerateDirectories(existingCache))
-        if (File.Exists(Path.Combine(candidate, "cache-manifest.json")) &&
-            File.Exists(Path.Combine(candidate, "lakefile.toml")) && Sha(Path.Combine(candidate, "lakefile.toml")) == Sha(At("lakefile.toml")))
-            CopyTree(candidate, Path.Combine(isolatedCache, Path.GetFileName(candidate)));
+    var (key, _) = setup.LibraryIdentity(CommonInputs());
+    var candidate = Path.Combine(existingCache, key);
+    if (Directory.Exists(candidate)) CopyTree(candidate, Path.Combine(isolatedCache, key));
 }
 Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", isolatedCache);
 var testTrace = ConsumerTraceDirectory.Create(At("artifacts"), "ConsumerTrace");
@@ -75,21 +75,6 @@ string Reject(string marker, params string[] options)
     if (result.Code != 1 || !result.Output.Contains(marker) || File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("Expected consumer proof rejection: " + result.Output);
     return result.Output;
-}
-// A proof-checking failure leads with a bounded summary of the Lean errors; the full output follows.
-string LeanSummary(string text, params string[] required)
-{
-    var start = text.IndexOf("Lean errors (", StringComparison.Ordinal);
-    var end = text.IndexOf("Full Lean output follows under Details.", StringComparison.Ordinal);
-    var details = end < 0 ? -1 : text.IndexOf("Details:", end, StringComparison.Ordinal);
-    if (start < 0 || end < start || details < end)
-        throw new InvalidOperationException("Proof-checking failure did not lead with a Lean error summary: " + text);
-    var summary = text[start..end];
-    if (summary.Split('\n').Length > 60 || summary.Contains("depends on axioms", StringComparison.Ordinal) ||
-        summary.Contains("trace:", StringComparison.Ordinal) || required.Any(item => !summary.Contains(item, StringComparison.Ordinal)) ||
-        !text[details..].Contains("Command failed", StringComparison.Ordinal))
-        throw new InvalidOperationException("Unexpected Lean error summary:\n" + summary + "\nFull text:\n" + text);
-    return summary;
 }
 Verify("--proof", proof, "--proof-root", root);
 var first = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
@@ -495,7 +480,7 @@ Console.WriteLine("PASS tampered consumer support and proof receipts fall back t
 // A changed imported proof must fail, regardless of any existing consumer caches.
 File.WriteAllText(sharedPath, shared.Replace("x + y", "x - y"));
 var importedFailure = Reject("error:");
-LeanSummary(importedFailure, "Client/Shared.lean:", "(building Client.Shared)", "x - y");
+CheckConsumerLeanSummary(importedFailure, "Client/Shared.lean:", "(building Client.Shared)", "x - y");
 Console.WriteLine("PASS proof-checking failure leads with the located Lean errors of the failing module");
 File.WriteAllText(sharedPath, shared + "\n-- Imported-source identity changed.\n");
 Verify();
@@ -504,24 +489,6 @@ if (inputs.GetProperty("consumer:" + sharedPath).GetString() ==
     restored.GetProperty("inputs").GetProperty("consumer:" + sharedPath).GetString())
     throw new InvalidOperationException("Imported source edit did not change report identity.");
 Console.WriteLine("PASS incorrect imported lemma rejected, settings reused and source hashes updated");
-
-File.WriteAllText(sharedPath, shared.Replace("theorem execution", "axiom execution").Replace(" := by rfl", ""));
-Reject("Unapproved proof axioms");
-File.WriteAllText(sharedPath, shared);
-Console.WriteLine("PASS axiom hidden in imported consumer module rejected");
-
-File.WriteAllText(sharedPath, "import Lean\n" + shared + "\n" + """
-set_option debug.skipKernelTC true
-run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
-  name := `Client.forged
-  levelParams := []
-  type := Lean.mkConst ``False
-  value := Lean.mkConst ``True.intro
-})
-""");
-Reject("while replaying declaration");
-File.WriteAllText(sharedPath, shared);
-Console.WriteLine("PASS kernel replay rejects unchecked declarations in consumer imports");
 
 // A custom Lake output directory must not hide unused declarations from replay.
 var lakefile = Path.Combine(root, "lakefile.toml");
@@ -582,8 +549,6 @@ Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "InitializedTy
 Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "Arithmetic::Add(ulong,ulong)", batchB]);
 Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "Arithmetic::WrongAdd(ulong,ulong)", batchC]);
 var alternate = Path.Combine(root, "ProofAlternate.lean");
-var forged = Path.Combine(root, "Client", "Forged.lean");
-var forgedProof = Path.Combine(root, "ProofForged.lean");
 var batchManifest = At("artifacts/ConsumerBatch.json");
 var batchResults = At("artifacts/ConsumerBatchResults.json");
 var batchVariable = "LAKE_LEANCIL_TEST_" + Guid.NewGuid().ToString("N");
@@ -600,52 +565,12 @@ try
 {
     File.WriteAllText(alternate, File.ReadAllText(proof).Replace("namespace ExampleProof", "namespace AlternateProof")
         .Replace("end ExampleProof", "end AlternateProof"));
-    File.WriteAllText(forged, """
-        import Lean
-        set_option debug.skipKernelTC true
-        run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
-          name := `Client.Batch.forged
-          levelParams := []
-          type := Lean.mkConst ``False
-          value := Lean.mkConst ``True.intro
-        })
-        """);
-    File.WriteAllText(forgedProof, "import Client.Forged\n" + File.ReadAllText(proof));
-    File.WriteAllText(Path.Combine(batchC, "verified.json"), "{}");
-    var (code, text) = Batch(
-        BatchRequest(batchA, proof, "ExampleProof.correctness", "rejected"),
-        BatchRequest(batchA, proof, "ExampleProof.correctness"),
-        BatchRequest(batchB, forgedProof, "ExampleProof.correctness"),
-        BatchRequest(batchB, proof, "ExampleProof.correctness"),
-        BatchRequest(batchB, alternate, "AlternateProof.correctness"),
-        BatchRequest(batchC, proof, "ExampleProof.correctness"),
-        BatchRequest(batchC, proof, "ExampleProof.correctness", "rejected"));
-    var statuses = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(batchResults))!
-        .Select(item => item.GetProperty("status").GetString() + "/" + item.GetProperty("stage").GetString()).ToArray();
-    string[] expected = ["failed/proof checking", "verified/extraction integrity", "failed/kernel replay", "verified/extraction integrity",
-        "verified/extraction integrity", "failed/proof checking", "rejected/proof checking"];
-    if (code != 1 || !statuses.SequenceEqual(expected) || !text.Contains("while replaying declaration") ||
-        !text.Contains("Batch: 4 passed, 3 failed of 7 requests."))
-        throw new InvalidOperationException("Unexpected batch outcomes: " + string.Join(", ", statuses) + "\n" + text);
-    // WrongAdd breaks the shared helper both batchC proofs import; the FAIL diagnostics lead with that error.
-    LeanSummary(text, "Client/Shared.lean:", "(building Client.Shared)");
-    // The last request for each output owns its certificate, as in sequential runs.
-    var certificateA = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(batchA, "verified.json")));
-    var certificateB = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(batchB, "verified.json")));
-    if (certificateA.GetProperty("initializedTypes")[0].GetString() != "Examples.InitializedTypes" ||
-        certificateB.GetProperty("theorem").GetString() != "AlternateProof.correctness" ||
-        !certificateB.GetProperty("inputs").TryGetProperty("proof:" + alternate, out _) ||
-        File.Exists(Path.Combine(batchC, "verified.json")))
-        throw new InvalidOperationException("Batch certificates were not bound per request or a stale certificate survived.");
-    Console.WriteLine("PASS batch requests keep independent outcomes, certificates and expected rejections");
-
+    CheckConsumerBatchOutcomes(cli, root, proof, batchA, batchB, batchC, alternate);
     // A relevant Lake variable forces fresh support: the first workspace certifies
     // it and the second reuses those exact artifacts within the same session.
-    File.Delete(forged);
-    File.Delete(forgedProof);
     Environment.SetEnvironmentVariable(batchVariable, "batch");
     var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
-    (code, text) = Batch(BatchRequest(batchA, proof, "ExampleProof.correctness"),
+    var (code, text) = Batch(BatchRequest(batchA, proof, "ExampleProof.correctness"),
         BatchRequest(batchB, alternate, "AlternateProof.correctness"));
     var replays = NewReplayCommands(previous);
     if (code != 0 || replays.Length != 2 || replays.Count(command => command.Contains("Client.Independent")) != 1)
@@ -707,8 +632,6 @@ finally
 {
     Environment.SetEnvironmentVariable(batchVariable, null);
     File.Delete(alternate);
-    File.Delete(forged);
-    File.Delete(forgedProof);
 }
 
 // A batch session exports one manifest covering every workspace, so a producer need not split
