@@ -666,8 +666,8 @@ private def readOnlySiteMatches (raw : RawMethod) (pc : Nat) (instruction : RawI
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, emit the right encoding, and give every successor,
     which must be reachable, exactly the resulting stack kinds. -/
-private def checkScalarSite (raw : RawMethod) (features : FeatureCertificate)
-    (certificate : ScalarCertificate) :
+private def checkScalarSite (raw : RawMethod)
+    (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Op → Bool
   | _, none, none, .unsupported _ => true
@@ -679,9 +679,7 @@ private def checkScalarSite (raw : RawMethod) (features : FeatureCertificate)
       (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack role, featureSuccessors pc instruction feature with
       | some after, some successors =>
-        successors.all fun target => match features[target]? with
-          | some (some _) => certificate[target]? == some (some after)
-          | _ => false
+        successors.all (successor after)
       | _, _ => false)
   | _, _, _, _ => false
 
@@ -692,13 +690,62 @@ def ScalarFlowValid (raw : RawMethod) (features : FeatureCertificate)
   raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
-  all3 (fun (instruction, feature) stack emitted =>
-      checkScalarSite raw features certificate instruction feature stack emitted)
-    ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code = true
+  all3Flow (fun lookup instruction (feature, stack) emitted =>
+      checkScalarSite raw (fun after target => match lookup target with
+        | some (some _, incoming) => incoming == some after
+        | _ => false) instruction feature stack emitted)
+    (.ofList (features.zip certificate)) 0
+    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx (features.zip certificate) code = true
 
 instance (raw : RawMethod) (features : FeatureCertificate) (certificate : ScalarCertificate)
     (code : List Op) : Decidable (ScalarFlowValid raw features certificate code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- Pairing feature and scalar states preserves both the reachability and exact stack
+    check, including targets missing from either certificate. -/
+theorem scalarSuccessor_zip (features : FeatureCertificate) (certificate : ScalarCertificate)
+    (target : Nat) (after : List ScalarKind) :
+    (match (features.zip certificate)[target]? with
+      | some (some _, incoming) => incoming == some after
+      | _ => false) =
+    (match features[target]? with
+      | some (some _) => certificate[target]? == some (some after)
+      | _ => false) := by
+  simp only [List.zip, List.getElem?_zipWith]
+  cases features[target]? with
+  | none => rfl
+  | some feature =>
+    cases certificate[target]? with
+    | none => cases feature <;> rfl
+    | some stack => cases feature <;> cases stack <;> rfl
+
+#print axioms scalarSuccessor_zip
+
+/-- Streaming scalar validation preserves all list-indexed site checks and lengths. -/
+theorem ScalarFlowValid_iff_list (raw : RawMethod) (features : FeatureCertificate)
+    (certificate : ScalarCertificate) (code : List Op) :
+    ScalarFlowValid raw features certificate code ↔
+      raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
+      raw.code.length = code.length ∧ certificate[0]? = some (some []) ∧
+      all3 (fun (instruction, feature) stack emitted =>
+          checkScalarSite raw (fun after target => match features[target]? with
+            | some (some _) => certificate[target]? == some (some after)
+            | _ => false)
+            instruction feature stack emitted)
+        ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code =
+        true := by
+  unfold ScalarFlowValid
+  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
+  simp only [scalarSuccessor_zip]
+  by_cases featureLength : raw.code.length = features.length
+  · by_cases scalarLength : raw.code.length = certificate.length
+    · rw [all3_zip_states _ _ _ _ _ (featureLength.symm.trans scalarLength)]
+      simp only [List.length_zipIdx, List.length_zip]
+      exact Nat.le_trans (Nat.min_le_left _ _) (Nat.le_of_eq featureLength)
+    · simp [scalarLength]
+  · simp [featureLength]
+
+#print axioms ScalarFlowValid_iff_list
 
 /-- At every reachable pc the emitted instruction is the scalar encoding the raw one implies. -/
 theorem ScalarFlowValid.instruction_checked {raw : RawMethod} {features : FeatureCertificate}
@@ -711,11 +758,14 @@ theorem ScalarFlowValid.instruction_checked {raw : RawMethod} {features : Featur
     (featureAt : features[pc]? = some (some feature))
     (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
     scalarEmissionMatches role instruction stack emitted = true := by
-  have pairAt : ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features)[pc]? =
-      some (((instruction, role), pc), some feature) := by
-    apply List.getElem?_zip_eq_some.mpr
-    exact ⟨by simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt], featureAt⟩
-  have checked := all3_at valid.2.2.2.2 pairAt stackAt emittedAt
+  have pairAt : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
+      some ((instruction, role), pc) := by
+    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]
+  have statesAt : (features.zip certificate)[pc]? = some (some feature, some stack) :=
+    List.getElem?_zip_eq_some.mpr ⟨featureAt, stackAt⟩
+  have sites := valid.2.2.2.2
+  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at sites
+  have checked := all3_at sites pairAt statesAt emittedAt
   simp only [checkScalarSite, Bool.and_eq_true] at checked
   exact checked.1.2
 

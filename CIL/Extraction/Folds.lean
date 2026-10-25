@@ -239,8 +239,8 @@ def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Opti
   foldRolesFrom singleUse [] code
 
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
-def foldEntry (roles : List (Option FoldRole)) (target : Nat) : Bool :=
-  match roles[target]? with
+def foldEntry (role : Option (Option FoldRole)) : Bool :=
+  match role with
   | some (some .interior) | some (some (.result _)) | some (some (.raise _)) => false
   | _ => true
 
