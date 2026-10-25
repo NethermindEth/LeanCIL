@@ -3,6 +3,9 @@ import CIL.Safety.ReturnArity
 import CIL.Safety.ReturnReferences
 import CIL.Safety.UnknownHomes
 import CIL.Safety.ReturnMemory
+import CIL.Safety.FrameProgress
+import CIL.Safety.WordMemory
+import CIL.Safety.NumericLocals
 
 /-!
 # Forwarder contracts
@@ -11,15 +14,16 @@ A forwarder loads some of its arguments, calls another method with them and retu
 method's result: overload forwarders and instance-to-static wrappers compile to
 `ldarg*; call callee; ret`. `MethodContract.Holds.forward` gives such a method the callee's
 contract with the forwarder's own argument encoding, from the callee's `Holds` and premises
-that the arguments and the returned value pass through unchanged; the argument order is
-data (`indices`), so no forwarder body is stepped by hand. Its frame
-allocates nothing, so the callee's precondition, footprint and postcondition carry over
-verbatim.
+that the arguments and the returned value pass through unchanged; the loads are data
+(`loads`: an argument index and the narrowing the extractor attaches to small integer
+parameters), so no forwarder body is stepped by hand. Its frame allocates nothing, so the
+callee's precondition, footprint and postcondition carry over verbatim.
 
 `MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call callee; ret`, which also
-passes a fresh local as an out argument and drops it. The callee then runs in the memory
-after frame entry and its result is read after the local expires, so the forwarder's
-contract is related to the callee's by premises over those two memories.
+passes a fresh local as an out argument and drops it. The local may be uninitialized or
+zero-initialized, as the extractor emits it without or with `InitLocals`. The callee then
+runs in the memory after frame entry and its result is read after the local expires, so the
+forwarder's contract is related to the callee's by premises over those two memories.
 -/
 
 namespace CIL.Safety
@@ -30,44 +34,55 @@ def ReturnsUnchanged : Option CIL.NarrowKind → List Value → Prop
   | none, _ => True
   | some kind, values => ∃ bits, values = [.scalar (.i32 bits)] ∧ kind.extend bits = bits
 
-/-- The body that loads the arguments at `indices` in order, calls `callee` with them and
-    returns its result through `ret narrow`. -/
-def forwarderCode (indices : List Nat) (callee : Nat) (narrow : Option CIL.NarrowKind) :
-    List CIL.Op :=
-  indices.map (fun index => .arg index) ++ [.call callee indices.length, .ret narrow]
+/-- What `.arg index narrow` pushes unchanged: any argument for a plain load, and an i32
+    already in the narrow range for a narrowed one. -/
+def LoadsUnchanged : Option CIL.NarrowKind → Value → Prop
+  | none, _ => True
+  | some kind, value => ∃ bits, value = .scalar (.i32 bits) ∧ kind.extend bits = bits
 
-/-- `body` forwards its arguments at `indices` to `callee`, whose body is `calleeBody`,
-    from a frame that allocates nothing, and declares the callee's return arity. -/
-structure Forwards (body calleeBody : CIL.Method) (indices : List Nat) (callee : Nat)
-    (narrow : Option CIL.NarrowKind) : Prop where
-  code : body.code = forwarderCode indices callee narrow
+/-- Plain loads of the arguments at `indices`, as emitted for parameters wider than 16 bits. -/
+def plainLoads (indices : List Nat) : List (Nat × Option CIL.NarrowKind) :=
+  indices.map fun index => (index, none)
+
+/-- Plain loads push every argument unchanged. -/
+theorem plainLoads_unchanged (indices : List Nat) (values : List Value) :
+    ∀ pair ∈ (plainLoads indices).zip values, LoadsUnchanged pair.1.2 pair.2 := by
+  intro ⟨⟨index, narrow⟩, value⟩ member
+  have loaded := (List.of_mem_zip member).1
+  simp only [plainLoads, List.mem_map, Prod.mk.injEq] at loaded
+  obtain ⟨_, _, _, rfl⟩ := loaded
+  trivial
+
+#print axioms plainLoads_unchanged
+
+/-- The body that performs `loads` in order, calls `callee` with the loaded values and
+    returns its result through `ret narrow`. -/
+def forwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
+    (narrow : Option CIL.NarrowKind) : List CIL.Op :=
+  loads.map (fun load => .arg load.1 load.2) ++ [.call callee loads.length, .ret narrow]
+
+/-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
+    `calleeBody`, from a frame that allocates nothing, and declares the callee's return
+    arity. -/
+structure Forwards (body calleeBody : CIL.Method) (loads : List (Nat × Option CIL.NarrowKind))
+    (callee : Nat) (narrow : Option CIL.NarrowKind) : Prop where
+  code : body.code = forwarderCode loads callee narrow
   locals : body.locals = []
   localKinds : body.localKinds = []
   vectorArgs : body.vectorArgs = []
   parameterHomes : body.parameterHomes = []
   returnsValue : body.returnsValue = calleeBody.returnsValue
 
-/-- `contract` with the arguments encoded by `forwarded` instead: what a forwarder to a
-    method proving `contract` satisfies. -/
-def MethodContract.forward {Input Output : Type} (contract : MethodContract Input Output)
-    (forwarded : Input → List Value) : MethodContract Input Output :=
-  { contract with args := forwarded }
-
-/-- Values valid in `memory` pass the argument and result checks unchanged. -/
-theorem checkedValues_of_valid {memory : Memory} {values : List Value}
-    (valid : ValuesValid memory values) : values.mapM (checkedValue memory) = .ok values := by
-  induction values with
-  | nil => rfl
-  | cons value rest restChecked =>
-    have head := checkedValue_of_valid memory value (valid value (List.mem_cons_self ..))
-    have tail := restChecked fun other member => valid other (List.mem_cons_of_mem _ member)
-    simp only [List.mapM_cons, head, tail, Bind.bind, Except.bind, Pure.pure, Except.pure]
-
-#print axioms checkedValues_of_valid
+/-- `contract` with the arguments encoded by `args` instead: what a forwarder to a method
+    proving `contract` satisfies. -/
+def MethodContract.withArgs {Input Output : Type} (contract : MethodContract Input Output)
+    (args : Input → List Value) : MethodContract Input Output :=
+  { contract with args := args }
 
 /-- A frame that allocates nothing: entry keeps memory and the frame owns no allocation. -/
-theorem Forwards.enterFrame {body calleeBody : CIL.Method} {indices : List Nat} {callee : Nat}
-    {narrow : Option CIL.NarrowKind} (forwards : Forwards body calleeBody indices callee narrow)
+theorem Forwards.enterFrame {body calleeBody : CIL.Method}
+    {loads : List (Nat × Option CIL.NarrowKind)} {callee : Nat}
+    {narrow : Option CIL.NarrowKind} (forwards : Forwards body calleeBody loads callee narrow)
     (args : List Value) (memory : Memory) :
     CIL.Safety.enterFrame body args memory =
       .ok (⟨memory.nextIdentity, [], [], []⟩, memory) := by
@@ -83,30 +98,51 @@ theorem Forwards.enterFrame {body calleeBody : CIL.Method} {indices : List Nat} 
 
 #print axioms Forwards.enterFrame
 
-/-- Loading the arguments at `indices` from `pc` on pushes `loaded` in order; any
-    continuation from the following pc composes. -/
+/-- A load of a checked argument that its narrowing keeps pushes that argument. -/
+theorem step_load_unchanged {body : CIL.Method} {index pc : Nat}
+    {narrow : Option CIL.NarrowKind} {args stack : List Value} {frame : Frame}
+    {memory : Memory} {value : Value} (present : args[index]? = some value)
+    (checked : checkedValue memory value = .ok value) (unchanged : LoadsUnchanged narrow value) :
+    step body (.arg index narrow) pc args frame stack memory =
+      .ok (.next (pc + 1) (value :: stack) frame memory) := by
+  cases narrow with
+  | none =>
+    simp only [step_argument_eq, present, checked, Bind.bind, Except.bind, Pure.pure,
+      Except.pure]
+  | some kind =>
+    obtain ⟨bits, rfl, same⟩ := unchanged
+    simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, present,
+      Option.map_some, Option.getD_some, Value.hasUnspecified, CIL.Value.hasUnspecified,
+      Bool.false_or, Bool.false_eq_true, ↓reduceIte, same, checked, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+
+#print axioms step_load_unchanged
+
+/-- Performing `loads` from `pc` on pushes `loaded` in order when each load keeps its
+    argument; any continuation from the following pc composes. -/
 theorem run_load_arguments {program : CIL.Program} {method : Nat} {body : CIL.Method}
     {args : List Value} {frame : Frame} {memory : Memory} {post : Memory → List Value → Prop}
     (found : program[method]? = some body) (valid : ValuesValid memory args) :
-    ∀ (indices : List Nat) (pc : Nat) (stack loaded : List Value),
-      (∀ position index, indices[position]? = some index →
-        body.code[pc + position]? = some (.arg index)) →
-      indices.map (fun index => args[index]?) = loaded.map some →
+    ∀ (loads : List (Nat × Option CIL.NarrowKind)) (pc : Nat) (stack loaded : List Value),
+      (∀ position load, loads[position]? = some load →
+        body.code[pc + position]? = some (.arg load.1 load.2)) →
+      loads.map (fun load => args[load.1]?) = loaded.map some →
+      (∀ pair ∈ loads.zip loaded, LoadsUnchanged pair.1.2 pair.2) →
       (∃ fuel result returned,
-        run program fuel method (pc + indices.length) args frame (loaded.reverse ++ stack)
+        run program fuel method (pc + loads.length) args frame (loaded.reverse ++ stack)
           memory = .ok (result, returned) ∧ post result returned) →
       ∃ fuel result returned,
         run program fuel method pc args frame stack memory = .ok (result, returned) ∧
           post result returned := by
-  intro indices
-  induction indices with
+  intro loads
+  induction loads with
   | nil =>
-    intro pc stack loaded _ selected continuation
+    intro pc stack loaded _ selected _ continuation
     cases loaded with
     | nil => simpa using continuation
     | cons _ _ => cases selected
-  | cons index rest restLoads =>
-    intro pc stack loaded fetched selected continuation
+  | cons load rest restLoads =>
+    intro pc stack loaded fetched selected narrowed continuation
     cases loaded with
     | nil => cases selected
     | cons value values =>
@@ -114,13 +150,12 @@ theorem run_load_arguments {program : CIL.Program} {method : Nat} {body : CIL.Me
       obtain ⟨present, selected⟩ := selected
       have checked := checkedValue_of_valid memory value
         (valid value (List.mem_of_getElem? present))
-      have stepped : step body (.arg index) pc args frame stack memory =
-          .ok (.next (pc + 1) (value :: stack) frame memory) := by
-        simp only [step_argument_eq, present, checked, Bind.bind, Except.bind, Pure.pure,
-          Except.pure]
-      refine run_next_exists post found (by simpa using fetched 0 index rfl) stepped ?_
+      have stepped := step_load_unchanged (body := body) (pc := pc) (stack := stack)
+        (frame := frame) present checked (narrowed (load, value) (by simp))
+      refine run_next_exists post found (by simpa using fetched 0 load rfl) stepped ?_
       refine restLoads (pc + 1) (value :: stack) values
-        (fun position other located => ?_) selected ?_
+        (fun position other located => ?_) selected
+        (fun pair member => narrowed pair (by simp [member])) ?_
       · simpa [Nat.add_assoc, Nat.add_comm 1 position] using
           fetched (position + 1) other located
       · simpa [Nat.add_assoc, Nat.add_comm 1 rest.length] using continuation
@@ -218,25 +253,29 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
 
 /-- A forwarder inherits its callee's contract: it meets `pre`, `footprint` and `post`
     unchanged, with arguments encoded by `forwarded`. The callee's arguments must be the
-    forwarder's at `indices`; each forwarder argument must reach the callee or be valid
-    under `pre`, since the forwarder checks them all; the call must expose no unspecified
-    vector bits; and a narrowed return must not change the callee's result. -/
+    forwarder's selected by `loads`, each kept by its load's narrowing; each forwarder
+    argument must reach the callee or be valid under `pre`, since the forwarder checks them
+    all; the call must expose no unspecified vector bits; and a narrowed return must not
+    change the callee's result. -/
 theorem MethodContract.Holds.forward {Input Output : Type}
     {contract : MethodContract Input Output}
     {program : CIL.Program} {method callee : Nat} {body calleeBody : CIL.Method}
-    {indices : List Nat} {narrow : Option CIL.NarrowKind} {forwarded : Input → List Value}
+    {loads : List (Nat × Option CIL.NarrowKind)} {narrow : Option CIL.NarrowKind}
+    {forwarded : Input → List Value}
     (holds : contract.Holds program callee)
     (found : program[method]? = some body) (calleeFound : program[callee]? = some calleeBody)
-    (forwards : Forwards body calleeBody indices callee narrow)
+    (forwards : Forwards body calleeBody loads callee narrow)
     (selected : ∀ input,
-      indices.map (fun index => (forwarded input)[index]?) = (contract.args input).map some)
+      loads.map (fun load => (forwarded input)[load.1]?) = (contract.args input).map some)
+    (narrowed : ∀ input initial, contract.pre input initial →
+      ∀ pair ∈ loads.zip (contract.args input), LoadsUnchanged pair.1.2 pair.2)
     (covered : ∀ input initial, contract.pre input initial → ∀ value ∈ forwarded input,
       value ∈ contract.args input ∨ value.Valid initial)
     (known : ∀ input initial, contract.pre input initial →
       (contract.args input).any Value.hasUnspecified = false)
     (unchanged : ∀ input initial final out, contract.post input initial final out →
       ReturnsUnchanged narrow (contract.results out)) :
-    (contract.forward forwarded).Holds program method := by
+    (contract.withArgs forwarded).Holds program method := by
   intro input initial permitted
   obtain ⟨_, _, _, invoked, _, _⟩ := holds input initial permitted
   obtain ⟨_, _, _, _, _, calleeChecked, _, _⟩ := invoke_success_setup invoked
@@ -245,15 +284,15 @@ theorem MethodContract.Holds.forward {Input Output : Type}
     subst same
     exact fun value member =>
       (covered input initial permitted value member).elim (valid value) id
-  have length : (contract.args input).length = indices.length := by
+  have length : (contract.args input).length = loads.length := by
     simpa using (congrArg List.length (selected input)).symm
-  have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode indices callee narrow)[pc]? := by
+  have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode loads callee narrow)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
   refine invoke_exists_of_run found (checkedValues_of_valid forwardedValid)
     (forwards.enterFrame _ _) ?_
-  refine run_load_arguments found forwardedValid indices 0 [] (contract.args input)
-    (fun position index located => ?_) (selected input) ?_
-  · have bound : position < indices.length := (List.getElem?_eq_some_iff.mp located).1
+  refine run_load_arguments found forwardedValid loads 0 [] (contract.args input)
+    (fun position load located => ?_) (selected input) (narrowed input initial permitted) ?_
+  · have bound : position < loads.length := (List.getElem?_eq_some_iff.mp located).1
     rw [Nat.zero_add, fetched, forwarderCode,
       List.getElem?_append_left (by simpa using bound), List.getElem?_map, located]
     rfl
@@ -266,120 +305,148 @@ theorem MethodContract.Holds.forward {Input Output : Type}
 
 #print axioms MethodContract.Holds.forward
 
-/-- The body that loads the arguments at `indices` in order and then the address of local 0,
-    calls `callee` with them and returns its result through `ret narrow`. -/
-def outForwarderCode (indices : List Nat) (callee : Nat) (narrow : Option CIL.NarrowKind) :
-    List CIL.Op :=
-  indices.map (fun index => .arg index) ++
-    [.localAddr 0, .call callee (indices.length + 1), .ret narrow]
+/-- The body that performs `loads` in order, loads the address of local 0, calls `callee`
+    with them and returns its result through `ret narrow`. -/
+def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
+    (narrow : Option CIL.NarrowKind) : List CIL.Op :=
+  loads.map (fun load => .arg load.1 load.2) ++
+    [.localAddr 0, .call callee (loads.length + 1), .ret narrow]
 
-/-- `body` forwards its arguments at `indices` to `callee`, whose body is `calleeBody`, with
-    the address of its only local, an `.unmodeled` home of `kind`, as a last out argument
-    whose contents it drops; it declares the callee's return arity. -/
-structure ForwardsOut (body calleeBody : CIL.Method) (indices : List Nat) (callee : Nat)
-    (narrow : Option CIL.NarrowKind) (kind : CIL.LocalKind) : Prop where
-  code : body.code = outForwarderCode indices callee narrow
-  locals : body.locals = [.unmodeled]
+/-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
+    `calleeBody`, with the address of its only local, a numeric home of `kind` created from
+    `initial`, as a last out argument whose contents it drops; it declares the callee's
+    return arity. `initial` is `.unmodeled` without `InitLocals` and the kind's zero with it. -/
+structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Option CIL.NarrowKind))
+    (callee : Nat) (narrow : Option CIL.NarrowKind) (kind : CIL.LocalKind) (initial : CIL.Value) :
+    Prop where
+  code : body.code = outForwarderCode loads callee narrow
+  locals : body.locals = [initial]
   localKinds : body.localKinds = [kind]
   numeric : kind ≠ .reference
+  fits : InitializerFits kind initial
   opaqueVectorLocals : body.opaqueVectorLocals = []
   vectorArgs : body.vectorArgs = []
   parameterHomes : body.parameterHomes = []
   returnsValue : body.returnsValue = calleeBody.returnsValue
 
-/-- A callee confined to fresh frame storage and to entries inside `footprint`, run between a
-    frame entry and exit that keep memory below the caller's `nextIdentity`, is confined to
-    `footprint` as the caller sees it. -/
-theorem Confined.across_frame {footprint inner : List (Reference × Nat)}
-    {initial entered final left : Memory}
-    (entry : MemoryBelow initial.nextIdentity initial entered)
-    (enterGrows : initial.nextIdentity ≤ entered.nextIdentity)
-    (framed : Confined inner entered final)
-    (exit : MemoryBelow initial.nextIdentity final left)
-    (exitGrows : final.nextIdentity ≤ left.nextIdentity)
-    (covered : ∀ entry ∈ inner,
-      initial.nextIdentity ≤ entry.1.allocation ∨ ∃ outer ∈ footprint, Within entry outer) :
-    Confined footprint initial left := by
-  have old : ∀ {id}, id < initial.nextIdentity → id < entered.nextIdentity :=
-    fun bound => Nat.lt_of_lt_of_le bound enterGrows
-  have narrow : ∀ {id offset}, id < initial.nextIdentity → Outside footprint id offset →
-      Outside inner id offset := fun bound outside entry member => by
-    rcases covered entry member with fresh | ⟨outer, contains, same, start, finish⟩
-    · exact Or.inl (by omega)
-    · rcases outside outer contains with different | below | above
-      · exact Or.inl (same ▸ different)
-      · exact Or.inr (Or.inl (by omega))
-      · exact Or.inr (Or.inr (by omega))
-  exact ⟨Nat.le_trans enterGrows (Nat.le_trans framed.grows exitGrows),
-    fun id bound => (exit.allocations id bound).trans
-      ((framed.allocations id (old bound)).trans (entry.allocations id bound)),
-    fun id bound offset outside => (exit.cells id bound offset).trans
-      ((framed.cells id (old bound) offset (narrow bound outside)).trans
-        (entry.cells id bound offset)),
-    fun id bound offset => (exit.permissions id bound offset true).trans
-      ((framed.writable id (old bound) offset).trans (entry.permissions id bound offset true)),
-    fun id bound offset outside => (exit.permissions id bound offset false).trans
-      ((framed.readable id (old bound) offset (narrow bound outside)).trans
-        (entry.permissions id bound offset false))⟩
+/-- What a fresh numeric home created from `initial` holds: nothing known when `initial` is
+    `.unmodeled`, and otherwise the bytes of `initial`'s number at the home's width. -/
+def LocalHolds (kind : CIL.LocalKind) (initial : CIL.Value) (memory : Memory)
+    (home : Reference) : Prop :=
+  initial = .unmodeled ∨ ∃ number, localNumber kind initial = .ok number ∧
+    read memory home (localWidth kind) 1 = .ok (numberBytes number (localWidth kind))
 
-#print axioms Confined.across_frame
+/-- A numeric local with a fitting initializer is one fresh writable home holding that
+    initializer. -/
+theorem make_fitting_local (memory : Memory) (activation : Nat) (kind : CIL.LocalKind)
+    (initial : CIL.Value) (wellFormed : memory.WellFormed) (numeric : kind ≠ .reference)
+    (fits : InitializerFits kind initial) :
+    ∃ reference result,
+      makeLocal activation kind initial memory =
+        .ok (.bytes kind reference, [reference.allocation], result) ∧
+      access result reference (localWidth kind) 1 true = .ok () ∧
+      LocalHolds kind initial result reference := by
+  by_cases unknown : initial = .unmodeled
+  · subst unknown
+    obtain ⟨reference, result, made, writable⟩ :=
+      make_unknown_local memory activation kind wellFormed numeric
+    exact ⟨reference, result, made, writable, Or.inl rfl⟩
+  · obtain ⟨number, encoded⟩ := initializer_numeric_number fits numeric unknown
+    obtain ⟨reference, result, made, readback, writable, -⟩ :=
+      make_numeric_local memory activation kind initial number wellFormed encoded
+    exact ⟨reference, result, made, writable, Or.inr ⟨number, encoded, readback⟩⟩
+
+#print axioms make_fitting_local
+
+/-- Entering a `ForwardsOut` body creates its local as one fresh writable home holding its
+    initializer, keeps the caller's memory below `nextIdentity` and stays well formed. -/
+theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
+    {loads : List (Nat × Option CIL.NarrowKind)} {callee : Nat} {narrow : Option CIL.NarrowKind}
+    {kind : CIL.LocalKind} {initial : CIL.Value}
+    (forwards : ForwardsOut body calleeBody loads callee narrow kind initial)
+    (args : List Value) (memory : Memory) (wellFormed : memory.WellFormed) :
+    ∃ home result,
+      CIL.Safety.enterFrame body args memory =
+        .ok (⟨memory.nextIdentity, [.bytes kind home], [home.allocation], []⟩, result) ∧
+      memory.nextIdentity ≤ home.allocation ∧
+      access result home (localWidth kind) 1 true = .ok () ∧
+      LocalHolds kind initial result home ∧
+      MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
+  obtain ⟨home, result, made, writable, holds⟩ :=
+    make_fitting_local memory memory.nextIdentity kind initial wellFormed forwards.numeric
+      forwards.fits
+  have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 home.allocation (by simp)
+  refine ⟨home, result, ?_, fresh.1, writable, holds,
+    makeLocal_preserves_caller_memory _ _ _ _ _ _ _ made,
+    makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made⟩
+  simp only [CIL.Safety.enterFrame, forwards.opaqueVectorLocals, makeSelectedLocals,
+    List.isEmpty_nil, ite_true, forwards.localKinds, forwards.locals, makeLocals, made,
+    forwards.vectorArgs, makeArgumentHomes, forwards.parameterHomes, makeParameterHomes,
+    List.map_nil, Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
+
+#print axioms ForwardsOut.enterFrame
 
 /-- A forwarder that passes a fresh local as a last out argument and drops it meets `outer`
-    when its callee meets `inner` at `extend input home`, `home` being that local. The
-    callee's arguments must be the forwarder's at `indices` and then `home`; its
-    precondition must follow from `outer.pre` in the memory after frame entry, where `home` is
-    fresh and writable; its footprint may name fresh storage or lie inside `outer.footprint`;
-    its postcondition must give `outer.post` once the frame has expired; and its results must
-    be scalars, which survive the expiry of `home`. -/
+    when its callee meets `inner` at `extend input home`, `home` being that local. Each
+    argument must be valid under `outer.pre` (`checked`), since the forwarder checks them
+    all. The callee's arguments must be the forwarder's selected by `loads`, each kept by its
+    load's narrowing, and then `home`; its precondition must follow from `outer.pre` in the
+    memory after frame entry, where `home` is fresh, writable over the local's width and
+    holds its initializer; its footprint may name fresh storage or lie inside
+    `outer.footprint`; its postcondition must give `outer.post` once the frame has expired;
+    and its results must be scalars, which survive the expiry of `home`. The home's
+    alignment is not surfaced. -/
 theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     {outer : MethodContract Outer Output} {inner : MethodContract Inner Output}
     {program : CIL.Program} {method callee : Nat} {body calleeBody : CIL.Method}
-    {indices : List Nat} {narrow : Option CIL.NarrowKind} {kind : CIL.LocalKind}
+    {loads : List (Nat × Option CIL.NarrowKind)} {narrow : Option CIL.NarrowKind}
+    {kind : CIL.LocalKind} {initial : CIL.Value}
     (extend : Outer → Reference → Inner)
     (holds : inner.Holds program callee)
     (found : program[method]? = some body) (calleeFound : program[callee]? = some calleeBody)
-    (forwards : ForwardsOut body calleeBody indices callee narrow kind)
+    (forwards : ForwardsOut body calleeBody loads callee narrow kind initial)
     (selected : ∀ input home,
-      indices.map (fun index => (outer.args input)[index]?) ++
+      loads.map (fun load => (outer.args input)[load.1]?) ++
           [some (.reference (.address home))] =
         (inner.args (extend input home)).map some)
-    (checked : ∀ input initial, outer.pre input initial →
-      initial.WellFormed ∧ ValuesValid initial (outer.args input))
-    (known : ∀ input initial home, outer.pre input initial →
+    (checked : ∀ input memory, outer.pre input memory →
+      memory.WellFormed ∧ ValuesValid memory (outer.args input))
+    (narrowed : ∀ input memory home, outer.pre input memory →
+      ∀ pair ∈ loads.zip (inner.args (extend input home)), LoadsUnchanged pair.1.2 pair.2)
+    (known : ∀ input memory home, outer.pre input memory →
       (inner.args (extend input home)).any Value.hasUnspecified = false)
-    (unchanged : ∀ input entered final out, inner.post input entered final out →
+    (unchanged : ∀ input memory home entered final out, outer.pre input memory →
+      inner.post (extend input home) entered final out →
       ReturnsUnchanged narrow (inner.results out))
     (results : ∀ out, outer.results out = inner.results out)
-    (scalars : ∀ input entered final out, inner.post input entered final out →
+    (scalars : ∀ input memory home entered final out, outer.pre input memory →
+      inner.post (extend input home) entered final out →
       ∀ value ∈ inner.results out, ∃ scalar, value = .scalar scalar)
-    (entered : ∀ input initial entered home, outer.pre input initial →
-      MemoryBelow initial.nextIdentity initial entered → entered.WellFormed →
-      initial.nextIdentity ≤ home.allocation →
+    (prepared : ∀ input memory entered home, outer.pre input memory →
+      MemoryBelow memory.nextIdentity memory entered → entered.WellFormed →
+      memory.nextIdentity ≤ home.allocation →
       access entered home (localWidth kind) 1 true = .ok () →
+      LocalHolds kind initial entered home →
       inner.pre (extend input home) entered)
-    (footprint : ∀ input initial home, outer.pre input initial →
-      initial.nextIdentity ≤ home.allocation →
+    (footprint : ∀ input memory home, outer.pre input memory →
+      memory.nextIdentity ≤ home.allocation →
       ∀ entry ∈ inner.footprint (extend input home),
-        initial.nextIdentity ≤ entry.1.allocation ∨
+        memory.nextIdentity ≤ entry.1.allocation ∨
           ∃ outerEntry ∈ outer.footprint input, Within entry outerEntry)
-    (returned : ∀ input initial entered final left home out, outer.pre input initial →
-      MemoryBelow initial.nextIdentity initial entered →
-      MemoryBelow initial.nextIdentity final left → initial.nextIdentity ≤ home.allocation →
+    (returned : ∀ input memory entered final left home out, outer.pre input memory →
+      MemoryBelow memory.nextIdentity memory entered →
+      MemoryBelow memory.nextIdentity final left → memory.nextIdentity ≤ home.allocation →
       Confined (inner.footprint (extend input home)) entered final →
-      Confined (outer.footprint input) initial left →
-      inner.post (extend input home) entered final out → outer.post input initial left out) :
+      Confined (outer.footprint input) memory left →
+      inner.post (extend input home) entered final out → outer.post input memory left out) :
     outer.Holds program method := by
   intro input initial permitted
   obtain ⟨formed, outerValid⟩ := checked input initial permitted
-  obtain ⟨frame, memory, setup, homes, entryBelow, memoryFormed⟩ :=
-    unknown_frame_setup body (by rw [forwards.locals, forwards.localKinds]; rfl)
-      (by rw [forwards.localKinds]; simpa using forwards.numeric) forwards.vectorArgs
-      forwards.parameterHomes forwards.opaqueVectorLocals initial (outer.args input) formed
-  obtain ⟨home, slot, fresh, writable⟩ :=
-    homes.home_at 0 kind (by rw [forwards.localKinds]; rfl)
+  obtain ⟨home, memory, setup, fresh, writable, initialized, entryBelow, memoryFormed⟩ :=
+    forwards.enterFrame (outer.args input) initial formed
   have owned := enterFrame_fresh _ _ _ _ _ setup
-  have calleePre := entered input initial memory home permitted entryBelow memoryFormed fresh
-    writable
+  have calleePre := prepared input initial memory home permitted entryBelow memoryFormed fresh
+    writable initialized
   obtain ⟨loaded, rest, split, loadedSome, restSome⟩ :=
     List.map_eq_append_iff.mp (selected input home).symm
   have restHome : rest = [.reference (.address home)] := by
@@ -390,28 +457,39 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       | nil => simpa using restSome
       | cons _ _ => cases restSome
   subst restHome
-  have length : (inner.args (extend input home)).length = indices.length + 1 := by
+  have length : (inner.args (extend input home)).length = loads.length + 1 := by
     rw [split]; simpa using (congrArg List.length loadedSome)
   have fetched : ∀ pc : Nat,
-      body.code[pc]? = (outForwarderCode indices callee narrow)[pc]? := by
+      body.code[pc]? = (outForwarderCode loads callee narrow)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
+  have loadedNarrowed : ∀ pair ∈ loads.zip loaded, LoadsUnchanged pair.1.2 pair.2 := by
+    intro pair member
+    refine narrowed input initial home permitted pair ?_
+    have same : loads.length = loaded.length := by
+      have lengths := congrArg List.length loadedSome
+      simp only [List.length_map] at lengths
+      omega
+    rw [split, ← List.append_nil loads, List.zip_append same]
+    exact List.mem_append_left _ member
   have memoryValid := outerValid.preserve formed owned.1
   refine invoke_exists_of_run found (checkedValues_of_valid outerValid) setup ?_
-  refine run_load_arguments found memoryValid indices 0 [] loaded
-    (fun position index located => ?_) loadedSome.symm ?_
-  · have bound : position < indices.length := (List.getElem?_eq_some_iff.mp located).1
+  refine run_load_arguments found memoryValid loads 0 [] loaded
+    (fun position load located => ?_) loadedSome.symm loadedNarrowed ?_
+  · have bound : position < loads.length := (List.getElem?_eq_some_iff.mp located).1
     rw [Nat.zero_add, fetched, outForwarderCode,
       List.getElem?_append_left (by simpa using bound), List.getElem?_map, located]
     rfl
   rw [Nat.zero_add, List.append_nil]
-  have addressed : step body (.localAddr 0) indices.length (outer.args input) frame
+  let frame : Frame := ⟨initial.nextIdentity, [.bytes kind home], [home.allocation], []⟩
+  have addressed : step body (.localAddr 0) loads.length (outer.args input) frame
       loaded.reverse memory =
-        .ok (.next (indices.length + 1) (.reference (.address home) :: loaded.reverse) frame
+        .ok (.next (loads.length + 1) (.reference (.address home) :: loaded.reverse) frame
           memory) := by
     have formedHome := access_reference_valid _ _ _ _ _ writable
     simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-      Bool.false_or, Bool.false_eq_true, ↓reduceIte, slot, localAddress, formValue, checkedAt,
-      formedHome, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+      Bool.false_or, Bool.false_eq_true, ↓reduceIte, frame, List.getElem?_cons_zero,
+      localAddress, formValue, checkedAt, formedHome, Except.mapError, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
   refine run_next_exists _ found (by simp [fetched, outForwarderCode]) addressed ?_
   have stack : .reference (.address home) :: loaded.reverse =
       (inner.args (extend input home)).reverse := by
@@ -423,13 +501,16 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     (by rw [length]; simp [fetched, outForwarderCode])
     (by
       rw [fetched, outForwarderCode, List.getElem?_append_right (by simp; omega)]
-      simp [show indices.length + 1 + 1 - indices.length = 2 by omega])
-    forwards.returnsValue (unchanged (extend input home) memory) calleePre
-    (known input initial home permitted) (fun final values valid returns => ?_)
+      simp [show loads.length + 1 + 1 - loads.length = 2 by omega])
+    forwards.returnsValue
+    (fun final out satisfied =>
+      unchanged input initial home memory final out permitted satisfied)
+    calleePre (known input initial home permitted) (fun final values valid returns => ?_)
     (fun final values framed returns => ?_)
   · obtain ⟨out, encoded, satisfied⟩ := returns
     intro value member
-    obtain ⟨scalar, same⟩ := scalars _ _ _ out satisfied value (encoded ▸ member)
+    obtain ⟨scalar, same⟩ :=
+      scalars input initial home memory final out permitted satisfied value (encoded ▸ member)
     subst same
     exact valid _ member
   · have exitBelow := leaveFrame_preserves_memory_below frame final _ exitFresh

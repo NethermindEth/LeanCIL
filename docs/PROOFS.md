@@ -508,35 +508,43 @@ refute the `Refines` premise and the derived `Holds` on a concrete input.
 Overload forwarders and instance-to-static wrappers compile to
 `ldarg*; call k; ret`. `MethodContract.Holds.forward` (`CIL.Safety.Forwarders`)
 gives such a method its callee's contract with the forwarder's own argument
-encoding, `contract.forward forwarded`, without stepping either body:
+encoding, `contract.withArgs forwarded`, without stepping either body:
 
 ```lean
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
-  add_public.forward (indices := [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ _ member => .inl member)
+  add_public.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+    (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 ```
 
-`Forwards body calleeBody indices callee narrow` fixes the body to
-`forwarderCode indices callee narrow` with no locals, vector argument homes or
+`Forwards body calleeBody loads callee narrow` fixes the body to
+`forwarderCode loads callee narrow` with no locals, vector argument homes or
 parameter homes, so frame entry and exit leave memory unchanged and the callee's
-precondition, footprint and postcondition carry over verbatim. The argument order
-is data: the callee's arguments must be the forwarder's at `indices`, every
-forwarder argument must reach the callee or be valid under the precondition (the
-forwarder's own invocation checks them all), the call must expose no unspecified vector bits, and a narrowed
+precondition, footprint and postcondition carry over verbatim. The loads are data:
+each is an argument index and the narrowing the extractor attaches to `bool`,
+`byte`, `sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones).
+The callee's arguments must be the forwarder's at those indices, each kept by its
+load's narrowing (`LoadsUnchanged`); every forwarder argument must reach the
+callee or be valid under the precondition, since the forwarder's own invocation
+checks them all; the call must expose no unspecified vector bits; and a narrowed
 `ret (some kind)` must not change the callee's result (`ReturnsUnchanged`), which
 holds for a boolean. Use `Holds.weaken` afterwards to export a different contract.
 
 `MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which
-passes the address of a fresh `.unmodeled` local as a last out argument and drops
-it. The callee runs in the memory after frame entry and the result is read after
-the local expires, so the forwarder's contract `outer` is related to the callee's
-`inner` through `extend input home` and premises over those memories: `inner.pre`
-from `outer.pre` with the home fresh and writable, an `inner` footprint that names
-fresh storage or lies inside `outer.footprint`, and `outer.post` from `inner.post`
-once the frame has expired. The footprint is checked by the lemma
-(`Confined.across_frame`); returned values must be scalars, which survive the
-local's expiry.
+passes the address of a fresh numeric local as a last out argument and drops it.
+The local is uninitialized (`.unmodeled`) or holds its kind's zero, as the
+extractor emits it without or with `InitLocals`. The callee runs in the memory
+after frame entry and the result is read after the local expires, so the
+forwarder's contract `outer` is related to the callee's `inner` through
+`extend input home` and premises over those memories: every forwarder argument
+valid under `outer.pre` (`checked`), since the forwarder checks them all;
+`inner.pre` from `outer.pre` with the home fresh, writable and holding its
+initializer (`LocalHolds`); an `inner` footprint that names fresh storage or lies
+inside `outer.footprint`; and `outer.post` from `inner.post` once the frame has
+expired. The footprint is checked by the lemma (`Confined.across_frame`); returned
+values must be scalars, which survive the local's expiry. The home's alignment is
+not surfaced, so a callee whose precondition requires it cannot be composed yet.
 
 ## Compose through imported contracts
 
