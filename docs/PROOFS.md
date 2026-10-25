@@ -881,17 +881,19 @@ lookup rewrites by one equation instead of unfolding the body:
 import CIL.InstructionEquations
 import CIL.Safety.SymbolicExecution
 
+abbrev unreachable : CIL.Op := .unsupported "Unreachable under selected profile"
+
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
     .feature .avx2, .brzero 4,
-    if avx2 then .call callee 0 else .unsupported "Unreachable under selected profile",
-    if avx2 then .ret else .unsupported "Unreachable under selected profile",
-    if avx2 then .unsupported "Unreachable under selected profile" else .ret] }
+    if avx2 then .call callee 0 else unreachable,
+    if avx2 then .ret else unreachable,
+    if avx2 then unreachable else .ret] }
 
 cil_instruction_equations body
 
 -- body_instruction2 (sse42 avx2 : Bool) (callee : Nat) :
---   (body sse42 avx2 callee).code[2]? = some (if avx2 = true then .call callee 0 else ...)
+--   (body sse42 avx2 callee).code[2]? = some (if avx2 = true then .call callee 0 else unreachable)
 -- cil_lookup fetches through the equation and decides the `if` from the fact.
 example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
     ∃ op, (body sse42 avx2 callee).code[2]? = some op ∧ op = .call callee 0 :=

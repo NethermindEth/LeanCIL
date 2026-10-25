@@ -169,9 +169,12 @@ of uninitialized, past-end, overlapping, unjoined and stale contents.
 
 `Tests.InstructionEquations` checks that `cil_instruction_equations` states one
 equation per pc of a body over two feature flags and a callee index, keeping each
-feature test as an `if`; that `cil_lookup` fetches through them from a sealed body;
-that facts or literal flags decide the test, in lookups and in a checked run; and
-that a run proved over the flags binds two profiles. A body whose length depends on a flag is rejected.
+feature test as an `if`, and of bodies with no parameters, with implicit and
+hypothesis parameters, and composed with `++` and `List.replicate`; that
+`cil_lookup` fetches through them from a sealed body; that facts or literal flags
+decide the test, in lookups and in a checked run; and that a run proved over the
+flags binds two profiles. A body whose length depends on a flag, at its first pc
+or a later one, is rejected with nothing declared.
 
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro

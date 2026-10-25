@@ -211,7 +211,9 @@ Run([
     "Tests.ContractConsequence", "Tests.BufferContents", "Tests.Linking", "Tests.ModularStatics", "Tests.StepFlow",
     "Tests.RegionRun", "Tests.StoreFacts", "Tests.InstructionEquations"],
     streamOutput: true, progress: "Building Lean library, semantics and automation tests");
-Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, contract consequence, buffer contents, linking and store fact tests");
+Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, " +
+    "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, " +
+    "contract consequence, buffer contents, linking, store fact and instruction equation tests");
 
 // Verify each extracted method and immediately check its artifact identity.
 foreach (var (name, signature) in signatures)
