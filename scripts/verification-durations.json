@@ -2,6 +2,7 @@
   "workflowRun": "https://github.com/NethermindEth/LeanCIL/actions/runs/40063600830",
   "measurement": "Completed job duration in seconds, including setup and verification",
   "estimated": {
+    "exportsprotected": "Provisional estimate for one protected export, derived caller and visibility rejection; update from CI",
     "exportsfullstatics": "Not yet measured in CI: 378 s locally with a certified library, times 3 as for exportsstatics and exportstransitive",
     "exportstransitive": "Provisional expanded-coverage estimate: chain, four-node diamond, warm receipts and staged mutation; update from CI",
     "exportstransitiveoutcomes": "Provisional new-coverage estimate for three producer exports and deep outcome composition; update from CI",
@@ -44,6 +45,7 @@
     "exportsmutationordinary": 604,
     "exportsmutationshadow": 473,
     "exportsmutationsource": 858,
+    "exportsprotected": 450,
     "exportsresolution": 70,
     "exportsstatics": 374,
     "exportstransitive": 2700,
