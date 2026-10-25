@@ -26,7 +26,7 @@ def addInternal : MethodContract DerivedInterface.AddInput where
   post input _ final values := values = [] ∧
     read final input.sum 8 1 = .ok (numberBytes (input.leftValue + input.rightValue).toNat 8)
 
-/-- Stepped on the actual extraction: `AddTo` writes the sum into `sum` and nothing else. -/
+/-- `AddTo` writes the sum into `sum` and nothing else. -/
 theorem add_internal : addInternal.Holds Extracted.program 0 := by
   rintro ⟨left, right, sum, region, leftValue, rightValue⟩ memory ⟨readLeft, readRight, writable⟩
   dsimp only [addInternal, DerivedInterface.addArguments] at *
@@ -54,7 +54,7 @@ theorem add_internal : addInternal.Holds Extracted.program 0 := by
 #print axioms add_internal
 
 /-- The region covers the internal footprint, and `left` survives because it lies apart from
-    `sum`; the frame fact comes from the internal footprint, not from stepping `AddTo`. -/
+    `sum`; the frame fact follows from the internal footprint alone. -/
 theorem add_public_refines : addInternal.Refines DerivedInterface.addPublic where
   args _ := rfl
   results _ := rfl

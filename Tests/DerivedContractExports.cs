@@ -81,18 +81,22 @@ foreach ((string method, string artifact, _, _, string proof) in exports)
         theorem = proof + ".correctness", proofRoot = Path.GetRelativePath(artifact, package).Replace('\\', '/')
     }));
 }
-string manifest = Path.Combine(root, "export.json");
-File.WriteAllText(manifest, JsonSerializer.Serialize(new
+string Manifest(string name, string? onlyProof = null)
 {
-    schema = 1, assembly = lib, proofRoot = package,
-    @interface = new[] { new { module = interfaceModule, source = interfaceSource } },
-    exports = exports.Select(export => new
+    string path = Path.Combine(root, name + ".json");
+    File.WriteAllText(path, JsonSerializer.Serialize(new
     {
-        method = export.Method, artifact = export.Artifact, contract = export.Contract,
-        theorem = export.Proof + ".correctness"
-    }).ToArray()
-}));
-Run([.. cli, "export-contracts", manifest, "--output", sidecar]);
+        schema = 1, assembly = lib, proofRoot = package,
+        @interface = new[] { new { module = interfaceModule, source = interfaceSource } },
+        exports = exports.Where(export => onlyProof is null || export.Proof == onlyProof).Select(export => new
+        {
+            method = export.Method, artifact = export.Artifact, contract = export.Contract,
+            theorem = export.Proof + ".correctness"
+        }).ToArray()
+    }));
+    return path;
+}
+Run([.. cli, "export-contracts", Manifest("export"), "--output", sidecar]);
 
 // The exporter accepts each derived theorem as the exact canonical Holds statement of its public contract.
 JsonObject published = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
@@ -146,8 +150,9 @@ foreach ((string name, string from, string to, string proof, string exact, strin
     if (changed == publicText)
         throw new InvalidOperationException("Precondition: the public contract must contain " + from);
     File.WriteAllText(interfaceSource, changed);
+    // Only the affected export is attempted, so the unchanged one is not verified again.
     (int Code, string Output, string Stdout, string Stderr) rejected =
-        Execute([.. cli, "export-contracts", manifest, "--output", sidecar]);
+        Execute([.. cli, "export-contracts", Manifest("reject-" + proof, proof), "--output", sidecar]);
     File.WriteAllText(interfaceSource, publicText);
     if (rejected.Code != 1 || Sha(sidecar) != certified ||
         AxiomLine(rejected.Output, proof + "." + exact).Contains("sorryAx", StringComparison.Ordinal) ||

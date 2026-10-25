@@ -22,7 +22,7 @@ def percentExact : OutcomeContract CIL.W64 CIL.W64 where
   post value _ _ output := output = value
   raises value _ := if value ≤ 100 then none else some "System.ArgumentOutOfRangeException"
 
-/-- Stepped on the actual extraction: each input returns itself or throws as named. -/
+/-- Each input returns itself or throws the named exception. -/
 theorem percent_exact : percentExact.Holds Extracted.program 0 := by
   rintro value memory -
   by_cases within : value ≤ 100
