@@ -127,7 +127,8 @@ var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Tes
 if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
-    projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs"]);
+    projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
+        "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/StackAllocation.cs"]);
 if (suite is "all" or "evidence")
@@ -211,7 +212,7 @@ Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.Metho
     "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels",
     "Tests.DebugNames", "Tests.MethodContract", "Tests.ConstructContract", "Tests.OutcomeContract",
     "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints",
-    "Tests.LocalSnapshots", "Tests.ContractConsequence", "Tests.InvocationCertificates",
+    "Tests.LocalSnapshots", "Tests.LocalSnapshotSteps", "Tests.ContractConsequence", "Tests.InvocationCertificates",
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.SimdLanes"],

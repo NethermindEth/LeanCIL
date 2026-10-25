@@ -113,15 +113,6 @@ cil_value_steps (target : Nat) [branch] 0
 cil_value_steps [nop] 0
 cil_value_steps (id : CIL.Feature) [feature] 0
 
--- One equation per `Feature`: a known feature test reduces to the profile field a caller's
--- fact names, and a symbolic `evaluate id` stays folded so a fact about it still applies.
-open Lean Meta Elab Command in
-run_cmd do
-  let some equations ← liftTermElabM <| getEqnsFor? ``CIL.FeatureProfile.evaluate
-    | throwError "FeatureProfile.evaluate has no equations"
-  for name in equations do
-    elabCommand (← `(attribute [cil_step, cil_feature] $(mkIdent name)))
-
 open Lean Meta in
 /-- `(m ..).profile` for a method definition or literal, unfolding only to the structure head;
     an opaque or case-split body is left for a caller's fact. -/

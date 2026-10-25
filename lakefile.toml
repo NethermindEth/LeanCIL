@@ -45,6 +45,9 @@ name = "Tests.ConfinedFootprints"
 name = "Tests.LocalSnapshots"
 
 [[lean_lib]]
+name = "Tests.LocalSnapshotSteps"
+
+[[lean_lib]]
 name = "Tests.ContractConsequence"
 
 [[lean_lib]]
@@ -183,3 +186,18 @@ name = "Tests.ReferenceTests"
 [[lean_exe]]
 name = "leancil-audit"
 root = "CIL.OleanAudit"
+
+[[lean_lib]]
+name = "Tests.PointerOperations"
+
+[[lean_lib]]
+name = "Tests.PrimitiveArrays"
+
+[[lean_lib]]
+name = "Tests.ArrayElementReferences"
+
+[[lean_lib]]
+name = "Tests.ReadOnlyArrayReferences"
+
+[[lean_lib]]
+name = "Tests.LegacyFeatures"

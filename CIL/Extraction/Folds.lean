@@ -42,7 +42,7 @@ def namedType : TypeExpr → Option (List Char × List Char)
 
 /-- Pointer, byref and generic instance types, which are never equal to a named type. -/
 private def constructed : TypeExpr → Bool
-  | .pointer _ | .byref _ | .apply .. => true
+  | .pointer _ | .byref _ | .array _ | .apply .. => true
   | _ => false
 
 /-- Conjunction of two three-valued answers: false wins over unknown. -/
@@ -54,7 +54,7 @@ private def both : Option Bool → Option Bool → Option Bool
 /-- Runtime identity of two closed metadata types, or `none` when metadata cannot decide it.
     Full names are never forwarded, but one name in two scopes may denote one type. -/
 def sameRuntimeType : TypeExpr → TypeExpr → Option Bool
-  | .pointer x, .pointer y | .byref x, .byref y => sameRuntimeType x y
+  | .pointer x, .pointer y | .byref x, .byref y | .array x, .array y => sameRuntimeType x y
   | .apply f x, .apply g y => both (sameRuntimeType f g) (sameRuntimeType x y)
   | a, b =>
     -- `void` is serialized without its scope, so equal spellings do not establish identity.

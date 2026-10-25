@@ -26,6 +26,9 @@ theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
   unfold step at executed
   dsimp only at executed
   repeat' first
+    | solve |
+        simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
+          reduceCtorEq, and_false, exists_false] at executed
     | split at executed
     | solve |
       have same : values = stack := (checkedValues_valid _ _ _ (by assumption)).1
@@ -65,6 +68,9 @@ theorem step_return_known (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
   unfold step at executed
   dsimp only at executed
   repeat' first
+    | solve |
+        simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
+          reduceCtorEq, and_false, exists_false] at executed
     | split at executed
     | solve |
       have same : values = stack := (checkedValues_valid _ _ _ (by assumption)).1

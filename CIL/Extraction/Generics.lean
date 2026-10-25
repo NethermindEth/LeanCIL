@@ -52,6 +52,18 @@ def spanStorage : TypeExpr → Option StorageType
 /-- Whether a local is a supported primitive span. -/
 def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
 
+/-- Primitive array element identity is derived from the exact runtime metadata scope. -/
+def arrayElementType : TypeExpr → Option ArrayElement
+  | .atom scope name =>
+    if scope != runtimeScope then none else match name with
+      | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
+      | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
+      | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
+      | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
+      | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
+      | "System.Boolean" => some .boolean | "System.Char" => some .character
+      | _ => none
+  | _ => none
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
@@ -62,6 +74,7 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
+  | .array element => StorageType.array <$> arrayElementType element
   | .pointer (.atom scope name) =>
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
@@ -81,6 +94,7 @@ def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
   | .parameter index => arguments[index]?
   | .byref element => TypeExpr.byref <$> substituteType arguments element
   | .pointer element => TypeExpr.pointer <$> substituteType arguments element
+  | .array element => TypeExpr.array <$> substituteType arguments element
   | .enum identity underlying => TypeExpr.enum identity <$> substituteType arguments underlying
   | .apply constructor argument => do
     return .apply (← substituteType arguments constructor) (← substituteType arguments argument)
@@ -183,7 +197,7 @@ private def allowedConstraint (layouts : List RawLayout) (argument : TypeExpr)
 /-- A closed, non-reference type argument with a known storage. -/
 private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : Bool :=
   substituteType [] type == some type && match typeStorage layouts type with
-    | some .reference | some (.span ..) | none => false
+    | some .reference | some (.span ..) | some (.array _) | none => false
     | some _ => true
 
 /-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/

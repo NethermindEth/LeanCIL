@@ -17,6 +17,7 @@ namespace CIL.Safety
     physical home, and a managed root may start null. -/
 def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
   match kind with
+  | .array _ => initial = .unmodeled ∨ initial = .nullRef
   | .span width _ => width ∈ [1, 2, 4, 8] ∧ (initial = .unmodeled ∨ initial = .nullRef)
   | _ => initial = .unmodeled ∨ match kind, initial with
   | .aggregate size, .aggregate bytes => bytes.length = size.val
@@ -30,6 +31,7 @@ def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
 theorem initializer_numeric_number {kind : CIL.LocalKind} {initial : CIL.Value}
     (fits : InitializerFits kind initial) (numeric : kind ≠ .reference)
     (notSpan : ∀ width writable, kind ≠ .span width writable)
+    (notArray : ∀ element, kind ≠ .array element)
     (known : initial ≠ .unmodeled) : ∃ number, localNumber kind initial = .ok number := by
   cases kind <;> cases initial <;>
     simp_all [InitializerFits, localNumber, CIL.Value.hasUnspecified]
@@ -41,6 +43,10 @@ theorem localWidth_bounded (kind : CIL.LocalKind) : localWidth kind < nativeLimi
 theorem makeLocal_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind)
     (initial : CIL.Value) (wellFormed : m.WellFormed) (fits : InitializerFits kind initial) :
     ∃ slot owned result, makeLocal activation kind initial m = .ok (slot, owned, result) := by
+  by_cases array : ∃ element, kind = .array element
+  · obtain ⟨element, rfl⟩ := array
+    cases initial <;> simp_all [InitializerFits, makeLocal]
+  have notArray : ∀ element, kind ≠ .array element := by simpa using array
   by_cases span : ∃ width writable, kind = .span width writable
   · obtain ⟨width, writable, rfl⟩ := span
     cases initial <;> simp_all [InitializerFits, makeLocal]
@@ -54,7 +60,7 @@ theorem makeLocal_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind
     by_cases unknown : initial = .unmodeled
     · refine ⟨.bytes kind reference, [reference.allocation], memory, ?_⟩
       cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
-    · obtain ⟨number, value⟩ := initializer_numeric_number fits root notSpan unknown
+    · obtain ⟨number, value⟩ := initializer_numeric_number fits root notSpan notArray unknown
       obtain ⟨slot, result, stored⟩ := fresh_home_storeLocal_succeeds _ _ _ _ _ _ _ home value
       refine ⟨slot, [reference.allocation], result, ?_⟩
       cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -118,8 +124,9 @@ def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .scalar value => kind ≠ .reference ∧ ∃ number, localNumber kind value = .ok number
   | .reference _ => kind = .reference
   | .span _ _ => False
-  | .readOnlyReference _ => False
+  | .readOnlyReference _ => kind = .reference
   | .bufferSpan view => kind = .span view.width view.writable ∧ view.width ∈ [1, 2, 4, 8]
+  | .array view => kind = .array view.elementType
 
 /-- Every parameter home names an existing argument that fits its kind. -/
 def ParameterArgumentsFit (parameters : List (Nat × CIL.LocalKind)) (args : List Value) :
@@ -134,7 +141,22 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
       storeLocal home slot value = .ok (final, result) := by
   cases value with
   | span r length => cases fits
-  | readOnlyReference _ => cases fits
+  | readOnlyReference reference =>
+    change kind = .reference at fits
+    subst kind
+    have formed := checkedValue_of_valid m (.readOnlyReference reference) valid
+    refine ⟨.root none, [], m, .readOnlyRoot reference, m, rfl, ?_⟩
+    cases reference <;> simp_all [checkedValue, formValue, Value.Valid, checkedAt,
+      Except.mapError, storeLocal, Value.hasUnspecified, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  | array view =>
+    change kind = .array view.elementType at fits
+    subst kind
+    refine ⟨.array view.elementType none, [], m,
+      .array view.elementType (some view), m, rfl, ?_⟩
+    change view.validate m = .ok () at valid
+    simp [storeLocal, Value.hasUnspecified, valid, checkedAt, Except.mapError,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
   | bufferSpan view =>
     obtain ⟨rfl, widthValid⟩ := fits
     refine ⟨.span view.width view.writable none, [], m,
@@ -154,6 +176,8 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | scalar value =>
     obtain ⟨numeric, number, numbered⟩ := fits
     have notSpan : ∀ width writable, kind ≠ .span width writable := by
+      cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+    have notArray : ∀ element, kind ≠ .array element := by
       cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
     obtain ⟨r, home, allocated⟩ := allocateHome_succeeds m activation (localWidth kind) hm
       (localWidth_bounded kind) (localAlignment_pos kind)

@@ -134,8 +134,11 @@ the goal unchanged.
 A segment theorem over an abstract body states where its code sits with
 `CodeAt body start segment` ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of
 `body.code = leading ++ segment ++ tail` and `leading.length = start`.
-`placed.lookup i rfl` proves `body.code[start + i]? = some op` to
-pass as a lookup hypothesis; `append`, `middle`, `take` and `drop` move a placement
+Pass `placed` directly to `cil_checked_steps [found, placed]`: `cil_lookup` uses
+the placement to fetch literal offsets, including both `start + 1 + 1` and `start + 2`.
+It also finds local placement hypotheses without listing them and accepts supplied
+placement expressions such as `region.append_left`. The fetched instruction must be
+inside the segment and agree with its code. `append`, `middle`, `take` and `drop` move a placement
 between a region and its segments, and `rfl` closes a concrete one.
 [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
 
@@ -243,6 +246,19 @@ apart from every entry, taking the allocation's age from `WellFormed`;
 as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a call, and
 `after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
 `snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
+
+Import `CIL.Safety.LocalSnapshotSteps` to step through numeric local stores and reloads with
+`cil_checked_steps (snapshots := snapshots) [facts]`. Use it on a checked `run` equality or
+an existential result such as `∃ after, run ... = .ok (after, result)`. The local context must
+justify `WritableHomes`, memory well-formedness, each home lookup and write access. The tactic
+introduces each store's new memory, updated snapshots and preserved access facts, so later
+stores need no manually split execution segments. Loads use the latest remembered value;
+overwrites replace it. It stops at an unsupported step or an unproved obligation, and fails
+if it takes no step. It does not infer authority, initialization, or preservation across calls
+and unrelated writes. Ordinary `cil_checked_steps [facts]` is unchanged.
+[Tests/LocalSnapshotSteps](../Tests/LocalSnapshotSteps.lean) contains complete vector/int32
+store-and-reload examples and rejection tests.
+
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
 the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
 `OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of the first two for a contract
@@ -551,6 +567,54 @@ derived contracts at their call sites, in both returning and raising outcomes.
 Its rejections are proved negations: an unjustified stronger postcondition, a
 weaker precondition, a smaller footprint and a changed exception type each
 refute the `Refines` premise and the derived `Holds` on a concrete input.
+
+## Inherit a callee's contract in a forwarder
+
+Overload forwarders and instance-to-static wrappers compile to
+`ldarg*; call k; ret`. `MethodContract.Holds.forward` (`CIL.Safety.Forwarders`)
+gives such a method its callee's contract with the forwarder's own argument
+encoding, `contract.withArgs forwarded`, without stepping either body:
+
+```lean
+theorem sum_forwards : sumContract.Holds Extracted.program sum :=
+  add_public.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+    (fun _ _ _ _ member => .inl member)
+    (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
+```
+
+`Forwards body calleeBody loads callee narrow` fixes the body to
+`forwarderCode loads callee narrow` with no locals, vector argument homes or
+parameter homes, so frame entry and exit leave memory unchanged and the callee's
+precondition, footprint and postcondition carry over verbatim. The loads are data:
+each is an argument index and the narrowing the extractor attaches to `bool`,
+`byte`, `sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones).
+The callee's arguments must be the forwarder's at those indices, each kept by its
+load's narrowing (`LoadsUnchanged`); every forwarder argument must reach the
+callee or be valid under the precondition, since the forwarder's own invocation
+checks them all; the call must expose no unspecified vector bits; and a narrowed
+`ret (some kind)` must not change the callee's result (`ReturnsUnchanged`), which
+holds for a boolean. Use `Holds.weaken` afterwards to export a different contract.
+
+`MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which
+passes the address of a fresh numeric local (not a reference or span, which have
+no home) as a last out argument and drops it.
+The local may hold any initializer that fits its kind; the extractor emits
+`.unmodeled` without `InitLocals` and the kind's zero with it. The callee runs in
+the memory after frame entry and the result is read after the local expires, so
+the forwarder's contract `outer` is related to the callee's `inner` through
+`extend input home` and premises over those memories. The callee's arguments must
+be the forwarder's selected by the loads followed by the home, each kept by its
+load's narrowing and none with unspecified vector bits; `outer.pre` must give a
+well-formed memory in which every forwarder argument is valid (`checked`), since
+the forwarder checks them all; `inner.pre` must follow from `outer.pre` with the
+home fresh, writable and holding its initializer (`LocalHolds`); the `inner`
+footprint must name fresh storage or lie inside `outer.footprint`; the two
+contracts must encode results alike, as scalars that survive the local's expiry
+and that a narrowed `ret` keeps; and `outer.post` must follow from `inner.post`
+once the frame has expired. The footprint is checked by the lemma
+(`Confined.across_frame`). The home's alignment is not surfaced, so a callee whose
+precondition requires it cannot be composed yet.
 
 ## Compose through imported contracts
 
@@ -915,6 +979,29 @@ The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for
 for the exact conditions and limits; `Tests/MethodEmbedding.lean` covers both
 outcomes, and `Tests/OutcomeEmbedding.lean` transfers a raising helper and its
 caller across an inserted dead block, with the relocated throw pc.
+
+An extraction can also declare locals the literal body never uses. Only one
+shape is covered: dead locals that trail the body's own locals and are
+references initialized to null or left unmodeled, which the extractor emits for
+byref and pointer locals. For those, `cil_embed` proves
+`MethodEmbedsDeadLocals` instead, and the same proof covers extractions with and
+without them (from `CIL.Safety.Embedding.DeadLocals`):
+
+```lean
+theorem stored_dead_embeds : MethodEmbedsDeadLocals [storedDead] 0 stored := by cil_embed
+
+theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [storedDead] (executionBound [stored] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) :=
+  stored_dead_embeds.invoke (stored_invocation memory value)
+```
+
+`.raises`, `.method_holds` and `.holds` transfer as for `MethodEmbeds`. A
+numeric dead local, such as a flag only one architecture's path reads, is still
+rejected: its home would shift every later allocation identity, and runs over
+renamed identities are not related yet. A dead span local allocates nothing
+either but is not covered yet, and a dead local before a kept one is rejected,
+since it renumbers the kept local.
 
 ### Instruction equations for parametric bodies
 
