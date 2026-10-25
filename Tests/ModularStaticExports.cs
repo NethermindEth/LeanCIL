@@ -16,9 +16,10 @@ using Nethermind.LeanCIL;
 var fullComposition = args switch
 {
     [] => false,
-    ["--full-composition"] => true,
-    _ => throw new ArgumentException("Expected no arguments or --full-composition.")
+    ["--full-composition"] or ["--transitive-composition"] => true,
+    _ => throw new ArgumentException("Expected no arguments, --full-composition or --transitive-composition.")
 };
+var transitiveOnly = args is ["--transitive-composition"];
 string root = At("artifacts/ModularStaticExports-" + Guid.NewGuid().ToString("N"));
 string libRoot = Path.Combine(root, "Lib");
 string appRoot = Path.Combine(root, "App");
@@ -336,6 +337,11 @@ string Republish(Action<JsonObject> editExport, Action<JsonObject> editSidecar)
 
 if (fullComposition)
 {
+    if (transitiveOnly)
+    {
+        FullTransitiveStatic();
+        return;
+    }
     FullVerify(appArtifact, callerProof, package: true, slots: 1);
     Console.WriteLine("PASS the separate caller returns the RVA-table value under full verification");
 
