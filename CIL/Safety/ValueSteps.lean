@@ -47,13 +47,12 @@ elab_rules : command
       ``CIL.Safety.Value.hasUnspecified, ``CIL.Value.hasUnspecified, ``List.any,
       ``List.take, ``List.drop, ``List.map, ``Bind.bind, ``Pure.pure, ``Except.bind, ``Except.pure,
       ``Option.bind] {}])
-    -- Unfold a dispatcher only once its discriminants are constructors, so just the selected
-    -- arm is kept.
+    -- Smart unfolding discharges constructor guards before traversing the selected arm.
     let arms (e : Expr) : MetaM Expr := transform e (pre := fun e => do
       unless [``CIL.Safety.step, ``CIL.step, ``CIL.binary, ``CIL.unary].any e.isAppOf do
         return .continue
       let some unfolded ← unfoldDefinition? e | return .continue
-      let arm ← whnfCore unfolded
+      let arm ← withDefault <| whnf unfolded
       if let some name := arm.getAppFn.constName? then
         if (← isMatcher name) then return .continue
       return .visit arm)
@@ -112,15 +111,6 @@ cil_value_steps (targets : List Nat) [switch] 1
 cil_value_steps (target : Nat) [branch] 0
 cil_value_steps [nop] 0
 cil_value_steps (id : CIL.Feature) [feature] 0
-
--- One equation per `Feature`: a known feature test reduces to the profile field a caller's
--- fact names, and a symbolic `evaluate id` stays folded so a fact about it still applies.
-open Lean Meta Elab Command in
-run_cmd do
-  let some equations ← liftTermElabM <| getEqnsFor? ``CIL.FeatureProfile.evaluate
-    | throwError "FeatureProfile.evaluate has no equations"
-  for name in equations do
-    elabCommand (← `(attribute [cil_step, cil_feature] $(mkIdent name)))
 
 open Lean Meta in
 /-- `(m ..).profile` for a method definition or literal, unfolding only to the structure head;

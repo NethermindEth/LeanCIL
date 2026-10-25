@@ -75,9 +75,11 @@ theorem branches_reject_underflow :
     ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0)] Examples.empty).isOk) = true := rfl
 
-theorem branches_reject_references :
-    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+theorem signed_branches_reject_references :
+    ([CIL.Op.bgt 1, .ble 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [Examples.reference, Examples.reference] Examples.caller).isOk) = true := rfl
+
+#print axioms signed_branches_reject_references
 
 theorem branches_reject_mixed_widths :
     ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>

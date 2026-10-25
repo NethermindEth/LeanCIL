@@ -66,6 +66,9 @@ def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .readOnlyReference r => do
     let _ ← formValue m r
     return .readOnlyReference r
+  | .array view => do
+    let _ ← checkedAt view.reference 0 (view.validate m)
+    return .array view
   | .bufferSpan view => do
     let _ ← checkedAt view.reference 0 (view.validate m)
     return .bufferSpan view
@@ -131,6 +134,54 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   if unspecifiedOperands (observerCount op) stack || unknownArgument then
     .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
+  | .sub, .scalar offset :: .reference value :: rest =>
+    let result ← referenceSubtract m value offset
+    return .next (pc + 1) (.reference result :: rest) frame m
+  | .sub, .scalar offset :: .readOnlyReference value :: rest =>
+    let result ← referenceSubtract m value offset
+    return .next (pc + 1) (.readOnlyReference result :: rest) frame m
+  | .sub, .reference right :: .reference left :: rest
+  | .sub, .reference right :: .readOnlyReference left :: rest
+  | .sub, .readOnlyReference right :: .reference left :: rest
+  | .sub, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let result ← referenceDifference m left right
+    return .next (pc + 1) (.scalar (.i64 result) :: rest) frame m
+  | .ltu, .reference right :: .reference left :: rest
+  | .ltu, .reference right :: .readOnlyReference left :: rest
+  | .ltu, .readOnlyReference right :: .reference left :: rest
+  | .ltu, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m left right
+    return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
+  | .gtu, .reference right :: .reference left :: rest
+  | .gtu, .reference right :: .readOnlyReference left :: rest
+  | .gtu, .readOnlyReference right :: .reference left :: rest
+  | .gtu, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m right left
+    return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
+  | .bltu target, .reference right :: .reference left :: rest
+  | .bltu target, .reference right :: .readOnlyReference left :: rest
+  | .bltu target, .readOnlyReference right :: .reference left :: rest
+  | .bltu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m left right
+    return .next (if less then target else pc + 1) rest frame m
+  | .bgeu target, .reference right :: .reference left :: rest
+  | .bgeu target, .reference right :: .readOnlyReference left :: rest
+  | .bgeu target, .readOnlyReference right :: .reference left :: rest
+  | .bgeu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m left right
+    return .next (if less then pc + 1 else target) rest frame m
+  | .bgtu target, .reference right :: .reference left :: rest
+  | .bgtu target, .reference right :: .readOnlyReference left :: rest
+  | .bgtu target, .readOnlyReference right :: .reference left :: rest
+  | .bgtu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m right left
+    return .next (if less then target else pc + 1) rest frame m
+  | .bleu target, .reference right :: .reference left :: rest
+  | .bleu target, .reference right :: .readOnlyReference left :: rest
+  | .bleu target, .readOnlyReference right :: .reference left :: rest
+  | .bleu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let less ← referenceLess m right left
+    return .next (if less then pc + 1 else target) rest frame m
   -- Reference observations preserve memory and do not grant byte access authority.
   | .brzero target, .reference value :: rest
   | .brzero target, .readOnlyReference value :: rest =>
