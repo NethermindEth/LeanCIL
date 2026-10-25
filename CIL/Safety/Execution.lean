@@ -66,6 +66,9 @@ def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .readOnlyReference r => do
     let _ ← formValue m r
     return .readOnlyReference r
+  | .array view => do
+    let _ ← checkedAt view.reference 0 (view.validate m)
+    return .array view
   | .bufferSpan view => do
     let _ ← checkedAt view.reference 0 (view.validate m)
     return .bufferSpan view

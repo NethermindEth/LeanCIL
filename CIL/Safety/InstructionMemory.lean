@@ -1,5 +1,6 @@
 import CIL.Safety.SnapshotMemory
 import CIL.Safety.SpanViews
+import CIL.Safety.ArrayViews
 import CIL.Semantics
 
 /-!
@@ -24,6 +25,8 @@ inductive Value where
   | span (reference : ManagedReference) (length : Nat)
   /-- A typed primitive buffer view, including whether writes through it are permitted. -/
   | bufferSpan (view : SpanView)
+  /-- A supplied primitive array; its length is immutable and does not grant byte authority. -/
+  | array (view : ArrayView)
   /-- A reference obtained through a readonly view; scalar loads preserve this restriction. -/
   | readOnlyReference (reference : ManagedReference)
   deriving DecidableEq, Repr
@@ -242,6 +245,20 @@ def formValue (memory : Memory) (reference : ManagedReference) : ExecutionResult
     let result ← checkedAt reference 0 (form memory r)
     return .reference (.address result)
 
+/-- Array indices use unsigned bounds checks, so negative int32/native values are out of range. -/
+def arrayIndex : CIL.Value → Option Nat
+  | .i32 bits => some bits.toNat
+  | .i64 bits => some bits.toNat
+  | _ => none
+
+/-- Array access distinguishes actual CLR null/bounds exceptions from malformed model states. -/
+def arrayElement (memory : Memory) (view : ArrayView) (index width : Nat) :
+    ExecutionResult Reference := do
+  if width != view.elementType.width then .error .invalidState else pure ()
+  let _ ← checkedAt view.reference 0 (view.validate memory)
+  if view.reference == .null then .error (.thrown "System.NullReferenceException") else pure ()
+  if index < view.length then pure () else .error (.thrown "System.IndexOutOfRangeException")
+  checkedAt view.reference width (view.element memory index)
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
     Operands with unspecified bits are rejected first. The static-field and span-construction
     operations need extracted metadata, so `staticInstruction` runs them and they are
@@ -311,6 +328,33 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .skipInit, .reference r :: rest =>
     let _ ← formValue memory r
     return (memory, rest)
+  -- Arrays retain the supplied length; reads and writes use checked element storage.
+  | .arrayLength, .array view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.reference == .null then .error (.thrown "System.NullReferenceException") else
+      return (memory, .scalar (.i64 (BitVec.ofNat 64 view.length)) :: rest)
+  | .arrayLoad width signed, .scalar index :: .array view :: rest =>
+    let some index := arrayIndex index | .error .invalidState
+    let reference ← arrayElement memory view index width
+    let value ← loadValue memory (.address reference) width signed
+    return (memory, .scalar value :: rest)
+  | .arrayStore width, .scalar value :: .scalar index :: .array view :: rest =>
+    let some index := arrayIndex index | .error .invalidState
+    let reference ← arrayElement memory view index width
+    let number ← match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
+      | 8, .i64 bits => .ok bits.toNat
+      | _, _ => .error .invalidState
+    let updated ← checkedAt (.address reference) width
+      (write memory reference (numberBytes number width) 1)
+    return (updated, rest)
+  | .arrayLength, .reference .null :: _ => .error (.thrown "System.NullReferenceException")
+  | .arrayLoad .., .scalar index :: .reference .null :: _ =>
+    let some _ := arrayIndex index | .error .invalidState
+    .error (.thrown "System.NullReferenceException")
+  | .arrayStore _, .scalar _ :: .scalar index :: .reference .null :: _ =>
+    let some _ := arrayIndex index | .error .invalidState
+    .error (.thrown "System.NullReferenceException")
   -- Spans
   | .spanFromReference width writable, .scalar (.i32 length) :: .reference reference :: rest =>
     if length.toInt < 0 then .error (.thrown "System.ArgumentOutOfRangeException") else pure ()
@@ -551,6 +595,9 @@ def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
       | .reference reference => formValue m reference
       | .scalar value => if value.initialized then .ok (.scalar value) else .error .invalidState
       | .span reference length => .ok (.span reference length)
+      | .array view => do
+        let _ ← checkedAt view.reference 0 (view.validate m)
+        pure (.array view)
       | .bufferSpan view => do
         let _ ← checkedAt view.reference 0 (view.validate m)
         pure (.bufferSpan view)

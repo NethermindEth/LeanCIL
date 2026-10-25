@@ -95,6 +95,7 @@ theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value
   | root root => cases h
   | opaque128 _ => cases h
   | span _ _ _ => cases h
+  | array _ _ => cases h
   | bytes kind r => exact formValue_result_valid m (.address r) value h
 
 theorem ValuesValid.drop {m : Memory} {values : List Value}

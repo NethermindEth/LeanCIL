@@ -1,5 +1,6 @@
 import CIL.Safety.Execution
 import CIL.Safety.SpanViewLemmas
+import CIL.Safety.ArrayViewLemmas
 
 /-!
 # Instruction effects and value validity
@@ -50,6 +51,7 @@ theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List
 def Value.Valid (m : Memory) : Value → Prop
   | .scalar value => numericValue value = true
   | .bufferSpan view => view.validate m = .ok ()
+  | .array view => view.validate m = .ok ()
   | .readOnlyReference .null => True
   | .readOnlyReference (.address r) => form m r = .ok r
   | .reference .null | .span .null _ => True
@@ -134,13 +136,13 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
     · cases h
   | reference r =>
     exact ⟨formValue_returns_input _ _ _ h, formValue_result_valid _ _ _ h⟩
-  | bufferSpan view =>
+  | bufferSpan view | array view =>
     cases formed : view.validate m <;>
       simp only [checkedValue, formed, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at h
     · cases h
-    · rename_i unit
-      cases unit
+    · rename_i validated
+      cases validated
       cases h
       exact ⟨rfl, formed⟩
   | readOnlyReference r =>
@@ -166,7 +168,7 @@ theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid 
     checkedValue m value = .ok value := by
   cases value with
   | scalar value => simp only [Value.Valid] at valid; simp [checkedValue, valid]
-  | bufferSpan view =>
+  | bufferSpan view | array view =>
     simp only [Value.Valid] at valid
     simp [checkedValue, valid, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
@@ -189,6 +191,7 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   cases value with
   | scalar value => exact hv
   | bufferSpan view => exact view.validate_preserved hv hm ext
+  | array view => exact view.validate_preserved hv hm ext
   | readOnlyReference r =>
     cases r with
     | null => exact True.intro

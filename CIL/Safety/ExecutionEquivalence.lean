@@ -55,7 +55,8 @@ theorem Memory.Equivalent.referenceSubtract {m n : Memory} (same : m.Equivalent 
 #print axioms Memory.Equivalent.referenceSubtract
 theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
     (value : Value) : checkedValue m value = checkedValue n value := by
-  cases value <;> simp only [CIL.Safety.checkedValue, same.formValue, same.spanValidate]
+  cases value <;> simp only [CIL.Safety.checkedValue, same.formValue, same.spanValidate,
+    same.arrayValidate]
 
 theorem Memory.Equivalent.checkedValues {m n : Memory} (same : m.Equivalent n)
     (values : List Value) :
