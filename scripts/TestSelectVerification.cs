@@ -141,6 +141,7 @@ Test("independent export cohort map preserves 19 leaves, 46 base cases and one d
         ["exportsstatics"] = ("statics", []),
         ["exportsfullstatics"] = ("fullstatics", []),
         ["exportstransitive"] = ("transitive", []),
+        ["exportsfulltransitive"] = ("fulltransitive", []),
         ["exportsdiscovery"] = ("discovery", ["discovery.fixture"]),
         ["exportstyped"] = ("typed", []),
         ["exportsderived"] = ("derived", [])
@@ -154,7 +155,7 @@ Test("independent export cohort map preserves 19 leaves, 46 base cases and one d
         {
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
-            var standalone = entry.Cohort is "statics" or "fullstatics" or "transitive" or "typed" or "derived";
+            var standalone = entry.Cohort is "statics" or "fullstatics" or "transitive" or "fulltransitive" or "typed" or "derived";
             Require(entry.Standalone == standalone, "Wrong standalone fixture kind: " + entry.Name);
             Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
                 "Wrong bootstrapped child fixture: " + entry.Name);
@@ -162,7 +163,7 @@ Test("independent export cohort map preserves 19 leaves, 46 base cases and one d
             {
                 "resolution" => "Tests/FullModuleResolution.cs",
                 "statics" or "fullstatics" => "Tests/ModularStaticExports.cs",
-                "transitive" => "Tests/TransitiveImports.cs",
+                "transitive" or "fulltransitive" => "Tests/TransitiveImports.cs",
                 "typed" => "Tests/GenericLayoutImports.cs",
                 "derived" => "Tests/DerivedContractExports.cs",
                 _ => "Tests/ContractExport.cs"
@@ -171,7 +172,7 @@ Test("independent export cohort map preserves 19 leaves, 46 base cases and one d
                 "Wrong fixture: " + entry.Name);
             string[] arguments = entry.Cohort switch
             {
-                "fullstatics" => ["--full-composition"],
+                "fullstatics" or "fulltransitive" => ["--full-composition"],
                 "resolution" => [],
                 _ => standalone ? [] : ["--cohort", entry.Cohort]
             };
@@ -215,10 +216,11 @@ Test("export coverage detects each omitted completion and invalid selection", ()
     foreach (string[] invalid in new string[][] {
         ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"],
         ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "fullstatics"], ["--cohort", "transitive"],
-        ["--cohort", "typed"], ["--cohort", "derived"] })
+        ["--cohort", "fulltransitive"], ["--cohort", "typed"], ["--cohort", "derived"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     string[] nonFullCohorts =
-        ["core", "audit", "resolution", "statics", "fullstatics", "transitive", "discovery", "typed", "derived", "unknown"];
+        ["core", "audit", "resolution", "statics", "fullstatics", "transitive", "fulltransitive", "discovery", "typed",
+            "derived", "unknown"];
     foreach (string cohort in nonFullCohorts)
     {
         Require(!ExportVerificationSuites.IsFull(cohort),
@@ -268,7 +270,8 @@ Test("export leaf selection, strict files and shared inputs", () =>
     Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
     Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
         ["exportsfullstatics", "exportsstatics"]);
-    Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
+    Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]).Order(StringComparer.Ordinal),
+        ["exportsfulltransitive", "exportstransitive"]);
     Equal(VerificationSelection.Select(["Tests/ContractDiscovery.cs"]), ["exportsdiscovery"]);
     Equal(VerificationSelection.Select(["Tests/GenericLayoutImports.cs"]), ["exportstyped"]);
     string[] typedFixtures =

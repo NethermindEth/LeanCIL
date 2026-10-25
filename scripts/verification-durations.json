@@ -34,6 +34,7 @@
     "exportsfullordinary": 851,
     "exportsfullpair": 1229,
     "exportsfullstatics": 1130,
+    "exportsfulltransitive": 1200,
     "exportsfulltheorems": 705,
     "exportsmutationconsumer": 896,
     "exportsmutationordinary": 604,

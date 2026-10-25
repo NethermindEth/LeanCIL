@@ -397,6 +397,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
 | `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof |
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
+| `exportsfulltransitive` | The same fixture with `--full-composition`: forced full verification of App -> A -> B replays both bundles; a missing or tampered B bundle fails |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
 | `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
@@ -409,10 +410,10 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, fullstatics, transitive, discovery, typed and derived suites cannot enter that plan.
-The registry now has 19 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
-`exportstyped` and `exportsderived` run directly, with no core export bootstrap or nested post-call.
-Their fixture assertions are
+statics, fullstatics, transitive, fulltransitive, discovery, typed and derived suites cannot enter that plan.
+The registry now has 20 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+`exportsfulltransitive`, `exportstyped` and `exportsderived` run directly, with no core export bootstrap
+or nested post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after
