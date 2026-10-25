@@ -394,7 +394,7 @@ if (fullComposition)
     """);
     // Ordinary verification twice: the second run restores the first's receipt and skips the proof check,
     // so the full run below starts with a warm receipt it must not use.
-    var ordinary = [.. cli, "verify", mixedArtifact, "--proof", mixedProof];
+    string[] ordinary = [.. cli, "verify", mixedArtifact, "--proof", mixedProof];
     string[] OrdinaryStages(string name)
     {
         var trace = Path.Combine(root, name);
