@@ -115,7 +115,7 @@ theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program 0 :=
   rw [readback, zero] at kept
   exact absurd (Except.ok.inj kept) (by decide)
 
--- A `sorryAx` here would make a refutation vacuous, so the axiom sets are pinned.
+-- An explicit `sorry` is only a warning, so each refutation's axioms are pinned to fail the build.
 /-- info: 'DerivedAddProof.Rejected.smaller_footprint_not_refines'
   depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in

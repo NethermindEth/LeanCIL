@@ -136,9 +136,28 @@ theorem stronger_post_rejected : ¬ percentTooStrong.Holds Extracted.program 0 :
   rw [same.2] at bound
   exact absurd bound (by decide)
 
+/-- `percentExact` with a pre that excludes every throwing input, so it names no exception. -/
+def percentInRangeOutcome : OutcomeContract CIL.W64 CIL.W64 :=
+  { percentExact with pre := fun value _ => value ≤ 100, raises := fun _ _ => none }
+
 /-- The normal-only contract `Percent` meets when its pre excludes every throwing input. -/
-def percentInRange : MethodContract CIL.W64 CIL.W64 :=
-  { percentExact.toMethodContract with pre := fun value _ => value ≤ 100 }
+def percentInRange : MethodContract CIL.W64 CIL.W64 := percentInRangeOutcome.toMethodContract
+
+/-- Under the stronger pre the exact contract names no exception and refines the in-range one. -/
+theorem percent_in_range_refines : percentExact.Refines percentInRangeOutcome :=
+  .of_method ⟨fun _ => rfl, fun _ => rfl, fun _ _ _ => trivial,
+    fun _ _ _ _ member => (nomatch member), fun _ _ _ _ _ _ same => same⟩
+    fun value _ within => by
+      have bound : value ≤ 100#64 := within
+      simp [percentInRangeOutcome, percentExact, bound]
+
+#print axioms percent_in_range_refines
+
+/-- `Percent` meets the in-range contract, derived without stepping it again. -/
+theorem percent_in_range : percentInRange.Holds Extracted.program 0 :=
+  (percent_exact.weaken percent_in_range_refines).normal fun _ _ _ => rfl
+
+#print axioms percent_in_range
 
 /-- A weaker pre that admits 101, where `Percent` throws instead of returning. -/
 def percentUnguarded : MethodContract CIL.W64 CIL.W64 :=
@@ -171,7 +190,7 @@ theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program 0
         "System.ArgumentException" := holds.raising (input := 101) empty_formed (by decide)
     exact absurd (raises_unique renamed percent_above) (by decide)
 
--- A `sorryAx` here would make a refutation vacuous, so the axiom sets are pinned.
+-- An explicit `sorry` is only a warning, so each refutation's axioms are pinned to fail the build.
 /-- info: 'DerivedPercentProof.Rejected.stronger_post_not_refines'
   depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
