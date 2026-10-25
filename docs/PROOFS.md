@@ -7,6 +7,13 @@ list-indexed rules without changing their entry, reachability, opcode or bounds 
 `foldEntry roles[target]?`. Missing entries retain the original permissive fold-role result;
 the successor-state check independently rejects a target missing from its certificate.
 
+Division intrinsic validation classifies each emitted intrinsic once and removes the common
+assembly scope once when recognizing a raw call's family. Its signature-byte table is generated
+from the existing signature strings at elaboration time; a kernel-checked equality proves the
+table exact without adding axioms. `DivisionIntrinsicsValid_iff_original` proves equivalence to
+the original signature lookup, malformed-family rejection, arity, reachability, profile
+availability and length checks for arbitrary raw metadata, including non-ASCII identities.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a
@@ -128,6 +135,32 @@ quantified over every feature, is normalized to that form. Elsewhere, including
 `simp only [cil_step, facts]` and `cil_checked_step_equations`, state the fact on
 the field or first run
 `simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h`.
+
+### Consumer stepping regressions
+
+The consumer failures reported in #252 are covered by the following proofs. These
+use the public tactics with symbolic values and memory; they do not replace the
+checked interpreter with consumer-specific execution rules.
+
+| Case | Regression |
+| --- | --- |
+| Supplied store/load facts take priority over generic equations | `Tests.Automation.step_facts_first`, `applied_step_facts_first` |
+| Zero, nonzero and literal branch conditions | `Tests.Automation.branch_from_zero`, `branch_from_nonzero`, `literal_branch` |
+| Memory operations use their own equations | `Tests.Automation.asRef_fact_stack`, `load128_fact_stack`, `add_fact_stack` |
+| Profile facts decide instruction lookup | `Tests.Automation.feature_op_checked`, `Tests.MethodContract.feature_op_contract_steps` |
+| Intrinsic evaluation facts normalize the next stack | `Tests.Automation.evaluated_then_stored`, `evaluated_by_applied_hypothesis` |
+| Signed, unsigned and loaded-limb comparisons | `Tests.MethodContract.loaded_signed_branch`, `loaded_unsigned_branch`, `loaded_limb_branch` |
+| Signed/unsigned widening and both argument orders | `Tests.MethodContract.ordered_widening` |
+
+Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all
+eight combinations of signed conversion, scalar position and reversed arguments
+in 12,000 heartbeats, using one `cil_contract_steps 3` invocation per case. Its
+arbitrary continuation preserves the actual widened stack and memory, rather than
+merely checking that some execution exists. These budgets detect elaboration
+regressions independently of machine speed; they are not wall-clock benchmarks.
+`ordered_widening_returns` composes that prefix with a concrete suffix which
+discards both operands and returns zero, proving that the continuation premise is
+satisfiable for every case. The widened value is checked by the prefix theorem.
 
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`:
 by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
@@ -275,6 +308,11 @@ program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags 
 `program.profileReads`, which `decide` checks for concrete profiles, so one proof covers every
 profile in a family. A separate per-profile extraction is covered once it is shown equal to
 the reprofiled program, by `rfl` when only the profiles differ.
+
+For a program with no profile reads, use the same `ProfileAgreement.of_flags` rule:
+an equality `empty : program.profileReads = []` discharges its premise with
+`by simp [empty]`. This replaces `profileIndependentCheck` and
+`profile_independent_agreement`; no separate profile-independent checker is needed.
 
 A contract may also type its result: `MethodContract Input Output` adds
 `results : Output → List Value`, and `post` speaks of the `Output`. `Returns`
@@ -960,6 +998,22 @@ example {fuel : Nat} {args : List CIL.Safety.Value} {m : CIL.Safety.Memory} {r :
     (h : CIL.Safety.invoke (Extracted.program.set 2 (Full.fullBody Extracted.profile 9 5 7)) fuel 2 args m = .ok r) :
     CIL.Safety.invoke Extracted.program fuel 2 args m = .ok r := bound.invoke h
 ```
+
+An expected body can be a shared template with local flag and callee parameters.
+Use `cil_embed [sse, avx, called]` when those hypotheses equate the parameters to
+the extraction's concrete flags and callee indices. The tactic rewrites only the
+supplied facts before alignment and unfolds local definitions; it does not infer
+flag equalities from the extracted code. Relevant parameters that remain open are
+rejected. The rewrite proof and the complete instruction map are kernel checked,
+including branch targets and callee indices. The no-argument form still handles
+closed bodies directly.
+
+`Tests/ProfileEmbedding.lean` binds one template and one open theorem to three valid
+profiles, including shifted branch targets, without restating the template body for
+each profile. It also rejects unresolved flags, incorrect flag and callee values,
+and a changed branch target. An irrelevant open argument may be removed by supplying
+the definition that ignores it in the fact list; this is justified by reduction,
+not an assumption about that argument's value.
 
 `bound.certificate` transports an `InvocationCertificate` and
 `bound.descriptors` the program's static descriptor list; `ProgramRefines.set`

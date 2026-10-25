@@ -207,3 +207,6 @@ name = "Tests.CertificateFlow"
 
 [[lean_lib]]
 name = "Tests.RetainedNumericLocals"
+
+[[lean_lib]]
+name = "Tests.ProfileEmbedding"

@@ -297,3 +297,10 @@ XML must contain the selected compiler member ID and matching assembly name.
 Unresolved cref, include and inheritdoc need expansion first. The supplied XML
 hash identifies bytes; it does not prove that they came from the DLL build.
 No documentation text becomes evidence or a contract premise.
+
+## Editor workspace
+
+`leancil workspace <assembly> <method> --profile <profile> --proof <file>` creates a
+source package for Lake and the Lean language server. See
+[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for pinned imports,
+stale-input rejection and the separate certification step. Editor checking is not a certificate.
