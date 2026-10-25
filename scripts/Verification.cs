@@ -1385,7 +1385,8 @@ unsafe def main (args : List String) : IO Unit := do
         string interfaceDigest, string acceptedVia, string certificationTheorem, string certificationStatement,
         string certificationStatementDigest, JsonElement staticIdentities, string deploymentObligation,
         string? sidecarSha256 = null, bool certificationAuthenticated = false, string? sourceBundleDigest = null,
-        JsonElement? typedSignature = null, JsonElement? layouts = null, string[]? typeArguments = null);
+        JsonElement? typedSignature = null, JsonElement? layouts = null, string[]? typeArguments = null,
+        JsonElement[]? initializationAssumptions = null);
 
     static PublishedImport[] PublishedImports(JsonElement extraction) => extraction.TryGetProperty("imports", out JsonElement imports)
         ? imports.EnumerateArray().Select(import => new PublishedImport(import.GetProperty("slot").GetInt32(),
@@ -1400,7 +1401,8 @@ unsafe def main (args : List String) : IO Unit := do
             sidecarSha256: import.GetProperty("sidecarSha256").GetString()!,
             typedSignature: import.TryGetProperty("typedSignature", out JsonElement typed) ? typed : null,
             layouts: import.TryGetProperty("publishedLayouts", out JsonElement layouts) ? layouts : null,
-            typeArguments: import.TryGetProperty("typeArguments", out JsonElement arguments) ? arguments.Deserialize<string[]>() : null)).ToArray()
+            typeArguments: import.TryGetProperty("typeArguments", out JsonElement arguments) ? arguments.Deserialize<string[]>() : null,
+            initializationAssumptions: InitializationAssumptions(import))).ToArray()
         : [];
 
     static bool HasContractImports(ExtractionIdentity extraction) =>
@@ -1464,7 +1466,12 @@ unsafe def main (args : List String) : IO Unit := do
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
         string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
-        DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null);
+        DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null,
+        JsonElement[]? initializationAssumptions = null);
+
+    static JsonElement[] InitializationAssumptions(JsonElement extraction) =>
+        extraction.TryGetProperty("initializationAssumptions", out var assumptions)
+            ? assumptions.EnumerateArray().ToArray() : [];
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
@@ -1786,7 +1793,8 @@ unsafe def main (args : List String) : IO Unit := do
                 staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root),
                 imports: fullResult?.Imports ?? PublishedImports(extraction.Root),
                 contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction.Root),
-                compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
+                compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
+                initializationAssumptions: InitializationAssumptions(extraction.Root));
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
 

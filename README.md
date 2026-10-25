@@ -251,6 +251,13 @@ module for each input. Prove the template once and use the generated bindings fo
 selected profiles; see [generated profile templates](docs/PROOFS.md#generated-profile-templates)
 for the supported domain and checking workflow.
 
+Exported contracts can carry an explicit type-initialization premise for libraries
+with static constructors, including types containing `static readonly` struct fields.
+The sidecar binds each premise to an assembly, type and profile; importing callers
+retain it in their generated artifacts and verification reports. This is a runtime
+assumption, not a proof that the CLR initializer ran. Constructor-initialized field
+values remain unsupported for export. See [contract interfaces](docs/CONTRACT-INTERFACES.md).
+
 `leancil verify --force-full-verify` independently checks supported imported
 libraries and their reachable contract dependencies against separately pinned
 implementation DLLs, interfaces and source bundles. Conditional exports and shared

@@ -114,7 +114,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 20 leaves, 46 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 21 leaves, 46 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -144,7 +144,8 @@ Test("independent export cohort map preserves 20 leaves, 46 base cases and one d
         ["exportstransitiveoutcomes"] = ("transitiveoutcomes", []),
         ["exportsdiscovery"] = ("discovery", ["discovery.fixture"]),
         ["exportstyped"] = ("typed", []),
-        ["exportsderived"] = ("derived", [])
+        ["exportsderived"] = ("derived", []),
+        ["exportsinitialized"] = ("initialized", [])
     };
     void ExactPlan(IEnumerable<ExportSuite> plan)
     {
@@ -156,7 +157,8 @@ Test("independent export cohort map preserves 20 leaves, 46 base cases and one d
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
             var standalone =
-                entry.Cohort is "statics" or "fullstatics" or "transitive" or "transitiveoutcomes" or "typed" or "derived";
+                entry.Cohort is "statics" or "fullstatics" or "transitive" or "transitiveoutcomes" or "typed" or
+                    "derived" or "initialized";
 
             Require(entry.Standalone == standalone, "Wrong standalone fixture kind: " + entry.Name);
             Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
@@ -169,6 +171,7 @@ Test("independent export cohort map preserves 20 leaves, 46 base cases and one d
                 "transitiveoutcomes" => "Tests/TransitiveOutcomes.cs",
                 "typed" => "Tests/GenericLayoutImports.cs",
                 "derived" => "Tests/DerivedContractExports.cs",
+                "initialized" => "Tests/InitializedExports.cs",
                 _ => "Tests/ContractExport.cs"
             };
             Require(entry.Script == script,
@@ -282,6 +285,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
     foreach (string name in typedFixtures)
         Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]), ["exportstyped"]);
     Equal(VerificationSelection.Select(["Tests/DerivedContractExports.cs"]), ["exportsderived"]);
+    Equal(VerificationSelection.Select(["Tests/InitializedExports.cs"]), ["exportsinitialized"]);
     string[] derivedFixtures =
         ["DerivedInterface", "DerivedPercentProof", "DerivedAddProof", "DerivedShiftCaller", "DerivedSumCaller"];
     foreach (string name in derivedFixtures)
@@ -333,7 +337,8 @@ Test("a missing registered export fixture fails selection", () =>
             ("Tests/TransitiveOutcomes.cs", "standalone transitive outcomes"),
             ("Tests/ContractDiscovery.cs", "discovery child"),
             ("Tests/GenericLayoutImports.cs", "standalone typed"),
-            ("Tests/DerivedContractExports.cs", "standalone derived")
+            ("Tests/DerivedContractExports.cs", "standalone derived"),
+            ("Tests/InitializedExports.cs", "standalone initialized")
         ];
         foreach ((string fixture, string kind) in fixtures)
         {

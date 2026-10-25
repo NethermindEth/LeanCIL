@@ -1676,7 +1676,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
                     staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: fullResult?.Imports ?? PublishedImports(extraction),
                     contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction),
-                    compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit);
+                    compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
+                    initializationAssumptions: InitializationAssumptions(extraction));
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));

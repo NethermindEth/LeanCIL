@@ -4,7 +4,8 @@
   "estimated": {
     "exportsfullstatics": "Not yet measured in CI: 378 s locally with a certified library, times 3 as for exportsstatics and exportstransitive",
     "exportstransitive": "Provisional expanded-coverage estimate: chain, four-node diamond, warm receipts and staged mutation; update from CI",
-    "exportstransitiveoutcomes": "Provisional new-coverage estimate for three producer exports and deep outcome composition; update from CI"
+    "exportstransitiveoutcomes": "Provisional new-coverage estimate for three producer exports and deep outcome composition; update from CI",
+    "exportsinitialized": "Provisional new-coverage estimate for initialized export, caller and metadata rejections; update from CI"
   },
   "seconds": {
     "arguments": 261,
@@ -36,6 +37,7 @@
     "exportsfullordinary": 851,
     "exportsfullpair": 1229,
     "exportsfullstatics": 1130,
+    "exportsinitialized": 900,
     "exportsfulltransitive": 1200,
     "exportsfulltheorems": 705,
     "exportsmutationconsumer": 896,

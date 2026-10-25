@@ -55,6 +55,9 @@ partial class Program
             throw new InvalidDataException("Full-verification imported implementation or sidecar changed: " +
                 binding.GetProperty("identity").GetString());
         ContractInterface contract = ContractInterface.Read(sidecarBytes);
+        var selected = contract.Exports.Single(export => export.Identity == binding.GetProperty("identity").GetString());
+        if (InitializationAssumption.ForProfile(selected, binding.GetProperty("profile").GetString()!).Length != 0)
+            throw new InvalidDataException("Full verification rejects initialization assumptions.");
         (string bundle, string digest, ContractBundleManifest inventory) =
             LocateFullBundle(contract, sidecar, overrides, used);
         return new(binding, sidecar, sidecarSha256, implementation, implementationSha256, contract, bundle, digest,
@@ -709,7 +712,7 @@ partial class Program
         byte[] generated = File.ReadAllBytes(Path.Combine(artifact, "Extracted.lean"));
         JsonElement regenerated =
             JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "identity.json")));
-        foreach (string property in new[] { "initializedTypes", "staticValues" })
+        foreach (string property in new[] { "initializedTypes", "initializationAssumptions", "staticValues" })
             if (regenerated.TryGetProperty(property, out JsonElement assumptions) && assumptions.GetArrayLength() != 0)
                 throw new InvalidDataException(
                     "Full verification rejects static-value and initialization assumptions: " + property);
