@@ -34,30 +34,164 @@ partial class Program
         return parts;
     }
 
-    // Exclude only Lean's persisted linter diagnostics, never strings in
-    // declarations or other environment extensions. Keep every module part.
+    // Normalization reads module parts directly, without importing toolchain oleans.
+    // Bind the native implementation and runtime, including shared-library replacements.
+    string ConsumerFingerprintTools(string executableHash)
+    {
+        var native = Directory.EnumerateFiles(Toolchain, "*", SearchOption.AllDirectories).Where(path =>
+            path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".dylib", StringComparison.Ordinal) ||
+            path.EndsWith(".so", StringComparison.Ordinal) ||
+            Path.GetFileName(path).Contains(".so.", StringComparison.Ordinal));
+        var files = HashFiles(native.Select(path => (Path.GetRelativePath(Toolchain, path), path)));
+        return ContentKey("canonical-fingerprints-v1\n" + VerificationPolicy + "\n" +
+            System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
+            Sha(LeanExecutable) + "\n" + executableHash + "\n" + JsonSerializer.Serialize(files));
+    }
+
+    sealed record FingerprintInput(string Name, string Source, SortedDictionary<string, string> Parts, string Key);
+
+    SortedDictionary<string, string>? RestoreConsumerFingerprint(string key, string directory,
+        SortedDictionary<string, string> raw)
+    {
+        if (!RestoreSuccess(key, directory)) return null;
+        try
+        {
+            var parts = JsonSerializer.Deserialize<SortedDictionary<string, string>>(
+                File.ReadAllText(Path.Combine(directory, "fingerprints.json")));
+            if (parts is null || !parts.Keys.SequenceEqual(raw.Keys) ||
+                !parts.Values.All(value => Regex.IsMatch(value, "^[0-9a-f]{64}$"))) return null;
+            TouchSuccess(Path.Combine(SuccessCacheRoot, key));
+            return parts;
+        }
+        catch (Exception error) when (error is IOException or JsonException) { return null; }
+    }
+
+    // Remove only persisted linter diagnostics; declarations, strings and every other
+    // environment extension are serialized unchanged, in the original module-part order.
+    static Dictionary<string, SortedDictionary<string, string>> NormalizeConsumerParts(
+        string session, string executable, Dictionary<string, string> modules)
+    {
+        if (modules.Count == 0) return new(StringComparer.Ordinal);
+        var temporary = Path.Combine(Path.GetTempPath(), "leancil-normalize-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporary);
+        try
+        {
+            var paths = modules.Select((pair, index) => (Name: pair.Key, Source: pair.Value,
+                Destination: Path.Combine(temporary, index + ".olean"),
+                Suffixes: new[] { "", ".server", ".private" }
+                    .Where(suffix => File.Exists(pair.Value + suffix)).ToArray())).ToArray();
+            if (paths.Any(item => !item.Suffixes.Contains("")))
+                throw new InvalidDataException("Missing module fingerprint input.");
+            var input = Path.Combine(temporary, "modules.json");
+            File.WriteAllText(input, JsonSerializer.Serialize(paths.Select(item => new object[]
+            {
+                item.Name,
+                new object[]
+                {
+                    item.Suffixes.Select(suffix => item.Source + suffix).ToArray(),
+                    item.Suffixes.Select(suffix => item.Destination + suffix).ToArray()
+                }
+            })));
+            Run([executable, "--fingerprints", input], session,
+                progress: "Fingerprinting portable consumer modules");
+            return paths.ToDictionary(item => item.Name, item =>
+            {
+                var parts = ConsumerModuleParts(item.Destination);
+                if (!parts.Keys.ToHashSet(StringComparer.Ordinal)
+                        .SetEquals(item.Suffixes.Select(suffix => ".olean" + suffix)))
+                    throw new InvalidDataException("Incomplete normalized module parts: " + item.Name);
+                return parts;
+            }, StringComparer.Ordinal);
+        }
+        finally { Directory.Delete(temporary, true); }
+    }
+
+    static void TraceConsumerFingerprints(string session, DateTimeOffset started, TimeSpan elapsed,
+        int reused, int serialized)
+    {
+        CacheProgress($"canonical module fingerprints ({reused} reused, {serialized} serialized)");
+        Trace("Canonical module fingerprints", started, session, elapsed, 0, "",
+            ["reused", reused.ToString(), "serialized", serialized.ToString(),
+                "normalization-processes", serialized > 0 ? "1" : "0"]);
+    }
+
+    // Receipts reuse only the linter-stripped byte transformation. Source/import binding,
+    // certificate eligibility and replay remain the callers' independent obligations.
     Dictionary<string, SortedDictionary<string, string>> PortableConsumerModuleParts(
         string session, Dictionary<string, string> modules)
     {
+        var started = DateTimeOffset.UtcNow;
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var executable = CheckedAuditExecutable();
+        if (!UseSuccessCache || modules.Count == 0)
+        {
+            var normalized = NormalizeConsumerParts(session, executable, modules);
+            TraceConsumerFingerprints(session, started, elapsed.Elapsed, 0, modules.Count);
+            return normalized;
+        }
+        var tools = ConsumerFingerprintTools(auditExecutableSha!);
+        var inputs = modules.Select(pair =>
+        {
+            var parts = ConsumerModuleParts(pair.Value);
+            if (!parts.ContainsKey(".olean")) throw new InvalidDataException("Missing module: " + pair.Key);
+            var key = ContentKey(tools + "\n" + pair.Key) + "-" + ContentKey(JsonSerializer.Serialize(parts));
+            return new FingerprintInput(pair.Key, pair.Value, parts, key);
+        }).ToArray();
         var temporary = Path.Combine(Path.GetTempPath(), "leancil-fingerprints-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
         try
         {
-            var paths = modules.Select((pair, index) => (pair.Key, Source: pair.Value,
-                Destination: Path.Combine(temporary, index + ".olean"))).ToArray();
-            var input = Path.Combine(temporary, "modules.json");
-            File.WriteAllText(input, JsonSerializer.Serialize(paths.Select(item => new object[]
+            var results = new Dictionary<string, SortedDictionary<string, string>>(StringComparer.Ordinal);
+            var missing = new List<(FingerprintInput Input, string Source, string Receipt)>();
+            foreach (var (item, index) in inputs.Select((item, index) => (item, index)))
             {
-                item.Key,
-                new object[]
+                var receipt = Path.Combine(temporary, "receipts", index.ToString());
+                if (RestoreConsumerFingerprint(item.Key, receipt, item.Parts) is { } restored)
                 {
-                    new[] { "", ".server", ".private" }.Where(suffix => File.Exists(item.Source + suffix)).Select(suffix => item.Source + suffix).ToArray(),
-                    new[] { "", ".server", ".private" }.Where(suffix => File.Exists(item.Source + suffix)).Select(suffix => item.Destination + suffix).ToArray()
+                    results.Add(item.Name, restored);
+                    continue;
                 }
-            })));
-            Run([CheckedAuditExecutable(), "--fingerprints", input], session,
-                progress: "Fingerprinting portable consumer modules");
-            return paths.ToDictionary(item => item.Key, item => ConsumerModuleParts(item.Destination));
+                var source = Path.Combine(temporary, index + ".input.olean");
+                foreach (var (part, hash) in item.Parts)
+                {
+                    var suffix = part[".olean".Length..];
+                    File.Copy(item.Source + suffix, source + suffix);
+                    if (Sha(source + suffix) != hash)
+                        throw new InvalidDataException("Module changed while copying fingerprint inputs: " + item.Name);
+                }
+                missing.Add((item, source, receipt));
+            }
+            if (missing.Count > 0)
+            {
+                var normalized = NormalizeConsumerParts(session, executable,
+                    missing.ToDictionary(item => item.Input.Name, item => item.Source, StringComparer.Ordinal));
+                foreach (var item in missing)
+                {
+                    var parts = normalized[item.Input.Name];
+                    if (!parts.Keys.SequenceEqual(item.Input.Parts.Keys))
+                        throw new InvalidDataException("Incomplete normalized module parts: " + item.Input.Name);
+                    results.Add(item.Input.Name, parts);
+                }
+            }
+            CheckedAuditExecutable();
+            if (tools != ConsumerFingerprintTools(auditExecutableSha!))
+                throw new InvalidDataException("Fingerprint tools changed during normalization.");
+            foreach (var item in inputs)
+                if (!Same(item.Parts, ConsumerModuleParts(item.Source)))
+                    throw new InvalidDataException("Module changed during fingerprint normalization: " + item.Name);
+            foreach (var item in missing)
+            {
+                if (!Same(item.Input.Parts, ConsumerModuleParts(item.Source)))
+                    throw new InvalidDataException("Fingerprint input snapshot changed: " + item.Input.Name);
+                Directory.CreateDirectory(item.Receipt);
+                File.WriteAllText(Path.Combine(item.Receipt, "fingerprints.json"),
+                    JsonSerializer.Serialize(results[item.Input.Name]));
+                PublishSuccess(item.Input.Key, item.Receipt);
+            }
+            if (UseSuccessCache && Directory.Exists(SuccessCacheRoot)) EvictStaleSupport();
+            TraceConsumerFingerprints(session, started, elapsed.Elapsed, inputs.Length - missing.Count, missing.Count);
+            return results;
         }
         finally { Directory.Delete(temporary, true); }
     }

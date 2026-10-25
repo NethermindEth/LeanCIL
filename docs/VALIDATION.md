@@ -1,5 +1,13 @@
 # Validation coverage
 
+`Tests/ConsumerFingerprintReuse.cs` checks authenticated canonical fingerprints across
+independent verifier processes using two framework modules and a multipart fixture. It
+covers corrupt receipts, changed or missing parts, module names, auditor/runtime bytes,
+fresh and disabled caches, diagnostic normalization, source/import invalidation and
+kernel replay. `--measure` uses the fixed full framework plus fixture workload and records
+wall time, raw input bytes, serialization counts and native normalization time. Supply a
+baseline worker DLL before `--measure` to compare the same seven requests.
+
 `Tests/ConsumerCertificateReuse.cs` measures four independent verifier processes with
 distinct proof sources. Unchanged generated certificates retain their authenticated build
 outputs; changed extraction text and self-rehashed corrupt artifacts force rebuilding both
