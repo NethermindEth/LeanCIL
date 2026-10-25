@@ -134,8 +134,11 @@ the goal unchanged.
 A segment theorem over an abstract body states where its code sits with
 `CodeAt body start segment` ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of
 `body.code = leading ++ segment ++ tail` and `leading.length = start`.
-`placed.lookup i rfl` proves `body.code[start + i]? = some op` to
-pass as a lookup hypothesis; `append`, `middle`, `take` and `drop` move a placement
+Pass `placed` directly to `cil_checked_steps [found, placed]`: `cil_lookup` uses
+the placement to fetch literal offsets, including both `start + 1 + 1` and `start + 2`.
+It also finds local placement hypotheses without listing them and accepts supplied
+placement expressions such as `region.append_left`. The fetched instruction must be
+inside the segment and agree with its code. `append`, `middle`, `take` and `drop` move a placement
 between a region and its segments, and `rfl` closes a concrete one.
 [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
 

@@ -39,10 +39,33 @@ theorem run_sum_segment {program : CIL.Program} {method fuel start : Nat} {body 
         memory =
       run program fuel method (start + 3) [.scalar (.i64 left), .scalar (.i64 right)] frame
         [.scalar (.i64 (left + right))] memory := by
-  have loadLeft : body.code[start]? = some (.arg 0) := placed.lookup 0 rfl
-  have loadRight : body.code[start + 1]? = some (.arg 1) := placed.lookup 1 rfl
-  have addition : body.code[start + 2]? = some .add := placed.lookup 2 rfl
-  cil_checked_steps [found, loadLeft, loadRight, addition]
+  cil_checked_steps [found, placed]
+
+/-- Nested additions and a single offset fetch the same placed instruction. -/
+theorem lookup_nested {body : CIL.Method} {start : Nat}
+    (placed : CodeAt body start sumSegment) :
+    body.code[start + 1 + 1]? = some .add ∧ body.code[start + 2]? = some .add := by
+  constructor <;> cil_lookup [placed]
+
+#print axioms lookup_nested
+
+/-- A supplied placement expression is enough even without a local placement hypothesis. -/
+theorem lookup_supplied {body : CIL.Method} {start : Nat}
+    (region : CodeAt body start (sumSegment ++ [.ret])) :
+    body.code[start + 2]? = some .add := by
+  cil_lookup [region.append_left]
+
+#print axioms lookup_supplied
+
+/-- A placement cannot justify another instruction, body, or an index outside its segment. -/
+theorem placement_limits {body other : CIL.Method} {start : Nat}
+    (_placed : CodeAt body start sumSegment) : True := by
+  fail_if_success have : body.code[start + 2]? = some .ret := by cil_lookup [_placed]
+  fail_if_success have : body.code[start + 3]? = some .ret := by cil_lookup [_placed]
+  fail_if_success have : other.code[start]? = some (.arg 0) := by cil_lookup [_placed]
+  trivial
+
+#print axioms placement_limits
 
 /-- info: 'Tests.CodeAt.run_sum_segment' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms run_sum_segment
