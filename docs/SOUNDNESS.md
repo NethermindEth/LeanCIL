@@ -261,7 +261,18 @@ Portable consumer support manifests require an independently trusted SHA256 and 
 
 Local consumer support generations are a cache, not part of the trusted base. A restored module is reused only when its local HMAC receipt and every file hash verify, its recorded source hashes and compiled imports match the current snapshot, and Lake leaves its bytes unchanged after the build; otherwise every module is replayed. Each such artifact was kernel-replayed (or restored under the same rules) by an earlier successful verification. The key binds the variables Lean, Lake and elan read, not the whole process environment: an elaborator that reads another variable is not tracked by Lake's own traces either, and its output is still kernel-replayed when first certified. Name such variables in `LEANCIL_CACHE_ENVIRONMENT`, or use `--fresh`.
 
-Batch verification shares a source snapshot, workspace builds and kernel replay only between requests with identical generated CIL. Each request's theorem audit loads only its own proof module's replayed oleans and runs none of their code, so no request's notations or elaborators can affect any printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
+Batch verification shares a source snapshot across requests. Requests with identical generated CIL share a workspace build and kernel replay; other groups may share only certified extraction-independent support. Each request's theorem audit loads only its own proof module's replayed oleans and runs none of their code, so no request's notations or elaborators can affect any printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
+
+For multi-extraction consumer batches, the first workspace prebuilds support found in all
+requests' source import closures. This scheduling scan recognizes repeated import commands,
+including `public`, `meta`, `import all` and nested comments; ambiguous sources
+and unrecognized syntax remain ordinary per-group work. The scan grants no trust.
+Every built module enters the compiled import graph and kernel replay, including modules
+outside the first proof's closure. Only after replay, theorem audits and source/artifact
+stability checks pass are extraction-independent artifacts shared with later workspaces.
+The compiled graph excludes indirect imports of `Extracted` and `ExtractedSymbols` even
+when their source imports were not recognized by the scheduling scan. Failed optional
+support builds do not bypass normal group builds or certify their unfinished outputs.
 
 ## Theorem audit
 

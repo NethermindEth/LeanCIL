@@ -51,18 +51,18 @@ theorem lookup_nested {body : CIL.Method} {start : Nat}
 
 /-- A supplied placement expression is enough even without a local placement hypothesis. -/
 theorem lookup_supplied {body : CIL.Method} {start : Nat}
-    (region : CodeAt body start (sumSegment ++ [.ret])) :
+    (region : True ∧ CodeAt body start (sumSegment ++ [.ret])) :
     body.code[start + 2]? = some .add := by
-  cil_lookup [region.append_left]
+  cil_lookup [region.2.append_left]
 
 #print axioms lookup_supplied
 
 /-- A placement cannot justify another instruction, body, or an index outside its segment. -/
-theorem placement_limits {body other : CIL.Method} {start : Nat}
+theorem placement_limits {body _other : CIL.Method} {start : Nat}
     (_placed : CodeAt body start sumSegment) : True := by
   fail_if_success have : body.code[start + 2]? = some .ret := by cil_lookup [_placed]
   fail_if_success have : body.code[start + 3]? = some .ret := by cil_lookup [_placed]
-  fail_if_success have : other.code[start]? = some (.arg 0) := by cil_lookup [_placed]
+  fail_if_success have : _other.code[start]? = some (.arg 0) := by cil_lookup [_placed]
   trivial
 
 #print axioms placement_limits
