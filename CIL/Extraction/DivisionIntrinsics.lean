@@ -1,4 +1,5 @@
 import CIL.Extraction.Features
+import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
 # Division intrinsics and opaque vector locals
@@ -129,23 +130,134 @@ def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat)
   if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
   let (_, _, _, intrinsic, arity) ←
     divisionSignatures.find? fun (owner, name, signature, _, arity) =>
-      site.declaringType == .atom intrinsicsScope owner && site.name == name &&
-      site.parameterCount == arity &&
+      site.name == name && site.parameterCount == arity &&
+      site.declaringType == .atom intrinsicsScope owner &&
       site.target == .external (intrinsicsScope ++ "::" ++ signature)
   let (returnType, parameterTypes) ← divisionCallTypes intrinsic
   if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
   return (intrinsic, arity)
 
+/-- Checking names and arities first preserves the original admitted-signature lookup and metadata
+    checks, without any assumptions on the raw instruction. -/
+theorem divisionIntrinsic_eq_original (instruction : RawInstruction) :
+    divisionIntrinsic instruction = (do
+      if instruction.opcode != 40 then none else
+      let .call site := instruction.operand | none
+      if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
+      let (_, _, _, intrinsic, arity) ←
+        divisionSignatures.find? fun (owner, name, signature, _, arity) =>
+          site.declaringType == .atom intrinsicsScope owner && site.name == name &&
+          site.parameterCount == arity &&
+          site.target == .external (intrinsicsScope ++ "::" ++ signature)
+      let (returnType, parameterTypes) ← divisionCallTypes intrinsic
+      if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
+      return (intrinsic, arity)) := by
+  simp only [divisionIntrinsic, Bool.and_assoc, Bool.and_left_comm, Bool.and_comm]
+#print axioms divisionIntrinsic_eq_original
+
+/-- The exact UTF-8 bytes of an identity, including non-ASCII metadata. -/
+private def identityBytes (identity : String) : List UInt8 :=
+  identity.toByteArray.data.toList
+
+/-- Signature bytes materialized once; the kernel checks their equality to the signature table. -/
+private def divisionSignatureBytes : List (String × String × List UInt8) := by
+  run_tac do
+    let expression ← Lean.Elab.Term.elabTerm
+      (← `(divisionSignatures.map fun (owner, name, signature, _, _) =>
+        (owner, name, identityBytes signature))) none
+    Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
+    let expression ← Lean.instantiateMVars expression
+    let values ← unsafe Lean.Meta.evalExpr (List (String × String × List UInt8))
+      (← Lean.Meta.inferType expression) expression
+    Lean.Elab.Tactic.closeMainGoal `divisionSignatureBytes (Lean.toExpr values)
+
+set_option maxRecDepth 4096 in
+/-- The materialized bytes contain exactly the original signatures and owner/name metadata. -/
+private theorem divisionSignatureBytes_eq : divisionSignatureBytes =
+    divisionSignatures.map (fun (owner, name, signature, _, _) =>
+      (owner, name, identityBytes signature)) := by
+  rfl
+#print axioms divisionSignatureBytes_eq
+
+/-- Remove an exact byte prefix, rejecting mismatches and truncated identities. -/
+private def stripIdentityPrefix : List UInt8 → List UInt8 → Option (List UInt8)
+  | [], bytes => some bytes
+  | first :: expected, actual :: bytes =>
+    if first == actual then stripIdentityPrefix expected bytes else none
+  | _, _ => none
+
+/-- Prefix removal succeeds exactly for the original prefix followed by the returned bytes. -/
+private theorem stripIdentityPrefix_eq (expected bytes suffix : List UInt8) :
+    stripIdentityPrefix expected bytes = some suffix ↔ bytes = expected ++ suffix := by
+  induction expected generalizing bytes with
+  | nil => simp [stripIdentityPrefix]
+  | cons first expected ih =>
+    cases bytes with
+    | nil => simp [stripIdentityPrefix]
+    | cons actual bytes =>
+      by_cases equal : first = actual
+      · subst actual
+        simp [stripIdentityPrefix, ih]
+      · simp [stripIdentityPrefix, equal, beq_iff_eq, Ne.symm equal]
+#print axioms stripIdentityPrefix_eq
+
+/-- The unqualified signature of an external target under the exact intrinsic scope. -/
+private def intrinsicSignature (target : MethodId) : Option (List UInt8) :=
+  match target with
+  | .managed _ => none
+  | .external identity =>
+    stripIdentityPrefix (identityBytes (intrinsicsScope ++ "::")) (identityBytes identity)
+
+/-- Removing the common scope preserves exact external identity equality. -/
+private theorem intrinsicSignature_matches (target : MethodId) (signature : String) :
+    (intrinsicSignature target == some (identityBytes signature)) =
+      (target == .external (intrinsicsScope ++ "::" ++ signature)) := by
+  apply Bool.eq_iff_iff.mpr
+  cases target with
+  | managed token => simp [intrinsicSignature, beq_iff_eq]
+  | external identity =>
+    simp only [intrinsicSignature, beq_iff_eq, stripIdentityPrefix_eq, MethodId.external.injEq]
+    simp only [identityBytes]
+    rw [← ByteArray.toList_data_append, ← String.toByteArray_append, Array.toList_inj]
+    constructor
+    · intro equal
+      exact String.toByteArray_inj.mp (ByteArray.ext equal)
+    · intro equal
+      cases equal
+      rfl
+#print axioms intrinsicSignature_matches
+
 /-- A call that resembles an admitted entry by identity, or by owner and name; such a call
     must then match an entry exactly. -/
 private def divisionCallFamily (instruction : RawInstruction) : Bool :=
   match instruction.operand with
-  | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
-      site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
-      site.name == name && match site.declaringType with
-        | .atom _ declared => declared == owner
-        | _ => false
+  | .call site => match intrinsicSignature site.target with
+    | none => divisionSignatures.any fun (owner, name, _, _, _) =>
+        site.name == name && match site.declaringType with
+          | .atom _ declared => declared == owner
+          | _ => false
+    | some signature => divisionSignatureBytes.any fun (owner, name, expected) =>
+        (some signature == some expected) ||
+        site.name == name && match site.declaringType with
+          | .atom _ declared => declared == owner
+          | _ => false
   | _ => false
+
+/-- Sharing scope removal preserves family recognition by either full identity or owner/name. -/
+private theorem divisionCallFamily_eq_original (instruction : RawInstruction) :
+    divisionCallFamily instruction = (match instruction.operand with
+      | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
+          site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
+          site.name == name && match site.declaringType with
+            | .atom _ declared => declared == owner
+            | _ => false
+      | _ => false) := by
+  cases operand : instruction.operand <;> simp only [divisionCallFamily, operand]
+  rename_i site
+  cases signature : intrinsicSignature site.target <;>
+    simp [divisionSignatureBytes_eq, List.any_map, Function.comp_def,
+      ← intrinsicSignature_matches, signature]
+#print axioms divisionCallFamily_eq_original
 
 /-- The intrinsic and arity of an emitted admitted intrinsic. -/
 def emittedDivisionIntrinsic : Op → Option (Intrinsic × Nat)
@@ -158,6 +270,39 @@ def emittedDivisionIntrinsic : Op → Option (Intrinsic × Nat)
     | _ => none
   | _ => none
 
+/-- An emitted division intrinsic must match the raw call and be available. Other emitted
+    operations must not replace a call in the admitted family, including malformed calls. -/
+private def divisionSiteMatches (profile : FeatureProfile) (raw : RawInstruction)
+    (emitted : Op) : Bool :=
+  match emittedDivisionIntrinsic emitted with
+  | none => !divisionCallFamily raw
+  | some expected => match divisionIntrinsic raw with
+    | none => false
+    | some actual => decide (actual = expected) && Intrinsic.available profile expected.1
+
+/-- Dispatching on the emitted operation preserves every original site check, including
+    malformed raw metadata, arity mismatches and unavailable intrinsics. -/
+private theorem divisionSiteMatches_eq (profile : FeatureProfile) (raw : RawInstruction)
+    (emitted : Op) :
+    divisionSiteMatches profile raw emitted =
+      ((if divisionCallFamily raw || (emittedDivisionIntrinsic emitted).isSome then
+        (divisionIntrinsic raw).isSome &&
+          decide (divisionIntrinsic raw = emittedDivisionIntrinsic emitted)
+       else true) &&
+      match emittedDivisionIntrinsic emitted with
+      | some (intrinsic, _) => Intrinsic.available profile intrinsic
+      | none => true) := by
+  cases emittedResult : emittedDivisionIntrinsic emitted with
+  | none =>
+    cases rawResult : divisionIntrinsic raw <;> cases family : divisionCallFamily raw <;>
+      simp [divisionSiteMatches, emittedResult, family]
+  | some expected =>
+    rcases expected with ⟨intrinsic, arity⟩
+    cases rawResult : divisionIntrinsic raw <;>
+      simp [divisionSiteMatches, emittedResult, rawResult]
+
+#print axioms divisionSiteMatches_eq
+
 /-- The profile is valid, the three lists have equal length, and at every live pc a
     resembling call or an emitted admitted intrinsic requires an exact match between the two,
     and every emitted one is available under the profile. -/
@@ -165,14 +310,46 @@ def DivisionIntrinsicsValid (closed : RawMethod) (reachable : List Bool) (method
     Prop :=
   method.profile.Valid ∧ closed.code.length = reachable.length ∧
     closed.code.length = method.code.length ∧
-  all3 (fun raw live emitted => !live ||
-    (if divisionCallFamily raw || (emittedDivisionIntrinsic emitted).isSome then
-      (divisionIntrinsic raw).isSome &&
-        decide (divisionIntrinsic raw = emittedDivisionIntrinsic emitted)
+  all3 (fun raw live emitted => !live || divisionSiteMatches method.profile raw emitted)
+    closed.code reachable method.code = true
+
+/-- The optimized validator is equivalent to the original signature-family, exact-call
+    and availability rules for all inputs, including unequal certificate lengths. -/
+theorem DivisionIntrinsicsValid_iff_original (closed : RawMethod) (reachable : List Bool)
+    (method : Method) :
+    DivisionIntrinsicsValid closed reachable method ↔
+    let classify := fun instruction : RawInstruction => (do
+      if instruction.opcode != 40 then none else
+      let .call site := instruction.operand | none
+      if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
+      let (_, _, _, intrinsic, arity) ←
+        divisionSignatures.find? fun (owner, name, signature, _, arity) =>
+          site.declaringType == .atom intrinsicsScope owner && site.name == name &&
+          site.parameterCount == arity &&
+          site.target == .external (intrinsicsScope ++ "::" ++ signature)
+      let (returnType, parameterTypes) ← divisionCallTypes intrinsic
+      if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
+      return (intrinsic, arity))
+    let family := fun instruction : RawInstruction => match instruction.operand with
+      | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
+          site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
+          site.name == name && match site.declaringType with
+            | .atom _ declared => declared == owner
+            | _ => false
+      | _ => false
+    method.profile.Valid ∧ closed.code.length = reachable.length ∧
+    closed.code.length = method.code.length ∧
+    all3 (fun raw live emitted => !live ||
+    (if family raw || (emittedDivisionIntrinsic emitted).isSome then
+      (classify raw).isSome && decide (classify raw = emittedDivisionIntrinsic emitted)
      else true) &&
     match emittedDivisionIntrinsic emitted with
     | some (intrinsic, _) => Intrinsic.available method.profile intrinsic
-    | none => true) closed.code reachable method.code = true
+    | none => true) closed.code reachable method.code = true := by
+  simp only [DivisionIntrinsicsValid, divisionSiteMatches_eq, divisionIntrinsic_eq_original,
+    divisionCallFamily_eq_original]
+
+#print axioms DivisionIntrinsicsValid_iff_original
 
 instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Decidable (DivisionIntrinsicsValid closed reachable method) :=

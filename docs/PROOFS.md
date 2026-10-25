@@ -7,6 +7,13 @@ list-indexed rules without changing their entry, reachability, opcode or bounds 
 `foldEntry roles[target]?`. Missing entries retain the original permissive fold-role result;
 the successor-state check independently rejects a target missing from its certificate.
 
+Division intrinsic validation classifies each emitted intrinsic once and removes the common
+assembly scope once when recognizing a raw call's family. Its signature-byte table is generated
+from the existing signature strings at elaboration time; a kernel-checked equality proves the
+table exact without adding axioms. `DivisionIntrinsicsValid_iff_original` proves equivalence to
+the original signature lookup, malformed-family rejection, arity, reachability, profile
+availability and length checks for arbitrary raw metadata, including non-ASCII identities.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a
@@ -275,6 +282,11 @@ program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags 
 `program.profileReads`, which `decide` checks for concrete profiles, so one proof covers every
 profile in a family. A separate per-profile extraction is covered once it is shown equal to
 the reprofiled program, by `rfl` when only the profiles differ.
+
+For a program with no profile reads, use the same `ProfileAgreement.of_flags` rule:
+an equality `empty : program.profileReads = []` discharges its premise with
+`by simp [empty]`. This replaces `profileIndependentCheck` and
+`profile_independent_agreement`; no separate profile-independent checker is needed.
 
 A contract may also type its result: `MethodContract Input Output` adds
 `results : Output → List Value`, and `post` speaks of the `Output`. `Returns`
