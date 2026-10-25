@@ -481,6 +481,24 @@ def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray
   replaceMainGoal []
 
 open Lean Elab Tactic Meta in
+/-- Supplied memory-dispatch facts whose opcode constructor matches the current memory operation.
+    A fact quantified over every operation also matches; unrelated operation facts do not. -/
+def memoryFacts (operation : Expr) (function : Name) (facts : Array Term) :
+    TacticM (Array Term) := do
+  let operation ← whnfR operation
+  unless operation.isAppOfArity ``CIL.Op.memory 1 do return #[]
+  let head := (← whnfR operation.appArg!).getAppFn.constName?
+  let states (type : Expr) : MetaM Bool := forallTelescope type fun _ conclusion => do
+    let some (_, lhs, _) := conclusion.eq? | return false
+    unless lhs.isAppOf function do return false
+    let position := if function == ``CIL.Safety.staticInstruction then 2 else 0
+    let some factOperation := lhs.getAppArgs[position]? | return false
+    match (← whnfR factOperation).getAppFn.constName?, head with
+    | some factHead, some goalHead => return factHead == goalHead
+    | _, _ => return true
+  facts.filterM (suppliedFactSatisfies · states)
+
+open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     -- A body reached through a lookup hypothesis stays named; one reached by unfolding a
@@ -534,19 +552,31 @@ elab_rules : tactic
           catch error => saved.restore; return some error
         -- `step_memory_eq` matches every `.memory` step, so the unfolding fallback, which runs
         -- only when no equation applies, cannot apply here.
+        -- Preserve matching supplied abstractions before a per-shape equation bypasses them.
+        let matchingStatic :=
+          !(← memoryFacts args[1]! ``CIL.Safety.staticInstruction facts.getElems).isEmpty
+        let matchingMemory :=
+          !(← memoryFacts args[1]! ``CIL.Safety.memoryInstruction facts.getElems).isEmpty
+        let namesStatic ← facts.getElems.anyM fun fact => do
+          unless fact.raw.isIdent do return false
+          let resolved ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw
+          return resolved == some ``CIL.Safety.staticInstruction
+        if matchingStatic then
+          if (← attempt (← `(tactic| cil_checked_memory_retry [$facts:term,*]))).isNone then return
+        let triedMemory := matchingMemory && !(matchingStatic && namesStatic)
+        if triedMemory then
+          if (← attempt (← `(tactic|
+              cil_checked_memory_retry [CIL.Safety.staticInstruction, $facts:term,*]))).isNone then
+            return
         let some equationError ←
             attempt (← `(tactic| cil_checked_memory_by_equations [$facts:term,*])) | return
         -- A `staticInstruction` fact must be tried before `staticInstruction` is unfolded,
         -- which rewrites past it; a `memoryInstruction` fact is reached only by that unfolding.
         let staticRetried ← factsMention facts.getElems ``CIL.Safety.staticInstruction
-        if staticRetried then
+        if staticRetried && !matchingStatic then
           if (← attempt (← `(tactic| cil_checked_memory_retry [$facts:term,*]))).isNone then return
         -- Naming `staticInstruction` already unfolded it in that retry, so it would repeat.
-        let namesStatic ← facts.getElems.anyM fun fact => do
-          unless fact.raw.isIdent do return false
-          let resolved ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw
-          return resolved == some ``CIL.Safety.staticInstruction
-        if ← factsMention facts.getElems ``CIL.Safety.memoryInstruction then
+        if !triedMemory && (← factsMention facts.getElems ``CIL.Safety.memoryInstruction) then
           if staticRetried && namesStatic then throw equationError
           let retry ← `(tactic|
             cil_checked_memory_retry [CIL.Safety.staticInstruction, $facts:term,*])

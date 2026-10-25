@@ -52,8 +52,10 @@ to normalize guards on known scalar/reference/vector constructors without
 evaluating their BitVec payloads. Use the `cil_step` equations for instruction
 reasoning. A `.memory` step now rewrites to `formValue`, `loadValue`, `storeValue`
 or `add`, so state memory facts at that level; facts about `memoryInstruction`
-or `staticInstruction` still apply, through a slower retry in `cil_checked_step`,
-`cil_checked_steps`, `cil_contract_steps` and the loop tactics; a hand-written step
+or `staticInstruction` are tried first when their operation constructor matches,
+so their abstract results survive stepping. Other supplied dispatch facts retain
+the generic fallback in `cil_checked_step`, `cil_checked_steps`, `cil_contract_steps`
+and the loop tactics; a hand-written step
 or `cil_checked_step_equations` call with such a fact must
 `rw [CIL.Safety.step_memory_eq]` first, and for a `memoryInstruction` fact also unfold
 `CIL.Safety.staticInstruction`, or restate it at the per-shape level. Through
