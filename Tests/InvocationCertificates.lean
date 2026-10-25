@@ -146,9 +146,9 @@ theorem echo_anywhere : echoAnywhere.Holds program echoMethod := by
   refine ⟨echoFuel, memory, _, ?_, Confined.refl _ memory, v, rfl, rfl⟩
   cil_checked_steps []
 
-/-- Some fuel runs `Echo(v)` from `memory` to its return, and every state that run visits
-    is live. This is the visited-state clause of its certificate: neither `Holds` nor
-    `run_call_of_contract_formed` supplies it. -/
+/-- Names the frame `Echo(v)` enters from `memory` and a fuel at which that frame's run
+    returns `v`, and says every state of that run is live. This is the visited-state clause
+    of its certificate: neither `Holds` nor `run_call_of_contract_formed` supplies it. -/
 def EchoVisitsLive (memory : Memory) (v : CIL.W64) : Prop :=
   ∃ fuel frame entered final, enterFrame echo [.scalar (.i64 v)] memory = .ok (frame, entered) ∧
     run program fuel echoMethod 0 [.scalar (.i64 v)] frame [] entered =
@@ -162,16 +162,11 @@ def EchoVisitsLive (memory : Memory) (v : CIL.W64) : Prop :=
 def relayContract : MethodContract CIL.W64 CIL.W64 :=
   { echoContract with post := fun v initial _ out => out = v ∧ EchoVisitsLive initial v }
 
-/-- The caller supplies the entry premises, so a callee without a precondition still hands
-    over its certificate, whose visited-state clause is the postcondition. -/
-theorem relay_holds : relayContract.Holds program relayMethod := by
-  rintro v memory ⟨formed, world⟩
-  dsimp only [relayContract, echoContract]
-  cil_contract_steps []
-  cil_contract_certified_call echo_anywhere v []
-  · trivial
-  · exact formed
-  · exact world
+-- Hygiene would rename the `rfl` patterns into binders instead of substitutions.
+set_option hygiene false in
+/-- Closes a relay goal after its call: the callee's certificate supplies the run and
+    visited-state clause of `EchoVisitsLive`, and `Relay` returns what `Echo` returned. -/
+macro "relay_finish" : tactic => `(tactic| (
   rintro calleeFuel final values certificate framed ⟨out, rfl, rfl⟩
   obtain ⟨-, body, frame, entered, lookup, -, setup, finished, -, visits, -⟩ := certificate
   cases lookup
@@ -181,6 +176,23 @@ theorem relay_holds : relayContract.Holds program relayMethod := by
       (leaveFrame_preserves_memory_below _ final _ fun _ member => nomatch member)
       (Nat.le_of_eq (leaveFrame_nextIdentity _ final).symm), out, rfl, rfl,
     calleeFuel, frame, entered, final, setup, finished, visits⟩
+  ))
+
+/-- The call `Relay` makes at pc 1, standing in for a `bind_call` site. -/
+theorem relaySite.call : relay.code[1]? = some (.call echoMethod 1) := rfl
+
+/-- The caller supplies the entry premises, so a callee without a precondition still hands
+    over its certificate, whose visited-state clause is the postcondition. -/
+theorem relay_holds : relayContract.Holds program relayMethod := by
+  rintro v memory ⟨formed, world⟩
+  dsimp only [relayContract, echoContract]
+  -- `Relay` has no locals and `arg` leaves memory unchanged, so the call memory is `memory`.
+  cil_contract_steps []
+  cil_contract_certified_call echo_anywhere v []
+  · trivial
+  · exact formed
+  · exact world
+  relay_finish
 
 /-- Through a certified callee, the precondition of `Echo` supplies the entry premises. -/
 theorem relay_holds_of_certified : relayContract.Holds program relayMethod := by
@@ -189,19 +201,33 @@ theorem relay_holds_of_certified : relayContract.Holds program relayMethod := by
   cil_contract_steps []
   cil_certified_call echo_certified v []
   · exact ⟨formed, world⟩
-  rintro calleeFuel final values certificate framed ⟨out, rfl, rfl⟩
-  obtain ⟨-, body, frame, entered, lookup, -, setup, finished, -, visits, -⟩ := certificate
-  cases lookup
+  relay_finish
+
+/-- The `at site` form of `cil_contract_certified_call` checks the call instruction. -/
+theorem relay_holds_at_site : relayContract.Holds program relayMethod := by
+  rintro v memory ⟨formed, world⟩
+  dsimp only [relayContract, echoContract]
   cil_contract_steps []
-  -- `Relay` owns no allocation, so leaving its frame keeps all memory below its watermark.
-  exact ⟨framed.then_below
-      (leaveFrame_preserves_memory_below _ final _ fun _ member => nomatch member)
-      (Nat.le_of_eq (leaveFrame_nextIdentity _ final).symm), out, rfl, rfl,
-    calleeFuel, frame, entered, final, setup, finished, visits⟩
+  cil_contract_certified_call echo_anywhere v at relaySite []
+  · trivial
+  · exact formed
+  · exact world
+  relay_finish
+
+/-- The `at site` form of `cil_certified_call` checks the call instruction. -/
+theorem relay_holds_of_certified_at_site : relayContract.Holds program relayMethod := by
+  rintro v memory ⟨formed, world⟩
+  dsimp only [relayContract, echoContract]
+  cil_contract_steps []
+  cil_certified_call echo_certified v at relaySite []
+  · exact ⟨formed, world⟩
+  relay_finish
 
 #print axioms echo_anywhere
 #print axioms relay_holds
 #print axioms relay_holds_of_certified
+#print axioms relay_holds_at_site
+#print axioms relay_holds_of_certified_at_site
 
 /-! A refutation that observes only the returned values. -/
 
