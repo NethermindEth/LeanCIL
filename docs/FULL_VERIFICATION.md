@@ -31,12 +31,12 @@ compared before any build; the fresh extraction is compared with them after it
 runs. Table bytes come only from the fresh extraction, so a re-certified DLL
 with changed bytes fails the author proof that ties them to the published
 `StaticWorldValid` descriptors. The composed theorem states `linkChecked` for
-the whole linked program: the caller's tables and every imported table, including one table read through
-several imports, have one descriptor per identity. `StaticWorldValid` premises
-remain preconditions of the contracts and of the caller's claim; the composed
-theorem does not establish the runtime's static state at the call. Mutable
-statics, static constructors and `ldsfld` of constructor-initialized fields
-remain unsupported.
+the whole linked program: the caller's tables and every imported table,
+including one table read through several imports, have one descriptor per
+identity. `StaticWorldValid` premises remain preconditions of the contracts and
+of the caller's claim; the composed theorem does not establish the runtime's
+static state at the call. Mutable statics, static constructors and `ldsfld` of
+constructor-initialized fields remain unsupported.
 
 Imports from one source bundle share one staged package and one fresh library
 build. The author source first passes the ordinary fresh export, extraction,
