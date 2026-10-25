@@ -432,7 +432,8 @@ theorem discard_forwards : discardContract.Holds Extracted.program discard :=
   add_flag_holds.forward_out (loads := plainLoads [0, 1]) (narrow := some .unsigned8)
     (kind := .word64) (initial := .unmodeled)
     (fun input home => ⟨input.a, input.b, home, home, input.x, input.y⟩)
-    discard.found addFlag.found ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, .inl rfl, rfl, rfl, rfl, rfl⟩
+    discard.found addFlag.found
+    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, .inl rfl, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readA, readB⟩ => ⟨formed, fun value member => by
       simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
@@ -450,6 +451,22 @@ theorem discard_forwards : discardContract.Holds Extracted.program discard :=
       ⟨flag, confined.read_apart formed readA nofun⟩)
 
 #print axioms discard_forwards
+
+/-- Array locals hold array descriptors and allocate no writable byte home for `ldloca`. -/
+theorem array_local_has_no_home (activation : Nat) (element : CIL.ArrayElement) (memory : Memory) :
+    makeLocal activation (.array element) .unmodeled memory =
+      .ok (.array element none, [], memory) := rfl
+
+#print axioms array_local_has_no_home
+
+/-- An array local cannot satisfy the fresh-byte-home shape required by out forwarding. -/
+theorem array_out_forwarder_rejected (body calleeBody : CIL.Method)
+    (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
+    (narrow : Option CIL.NarrowKind) (element : CIL.ArrayElement) (initial : CIL.Value) :
+    ¬ ForwardsOut body calleeBody loads callee narrow (.array element) initial :=
+  fun forwards => forwards.notArray element rfl
+
+#print axioms array_out_forwarder_rejected
 
 /-- `AddFrom(res, b, a)` passes `AddTo` its arguments in reverse. -/
 def fromArgs (input : AddInput) : List Value :=
@@ -492,7 +509,8 @@ theorem copy_forwards : copyContract.Holds Extracted.program copyTo :=
   add_from_forwards.forward_out (loads := plainLoads [0, 1]) (narrow := none)
     (kind := .word64) (initial := .i64 0)
     (fun input home => ⟨home, input.b, input.res, input.region, 0, input.y⟩)
-    copyTo.found addFrom.found ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, .inr trivial, rfl, rfl, rfl, rfl⟩
+    copyTo.found addFrom.found
+    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, .inr trivial, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readB, writable, _⟩ => ⟨formed, fun value member => by
       simp only [copyContract, List.mem_cons, List.not_mem_nil, or_false] at member
