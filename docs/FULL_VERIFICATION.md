@@ -89,9 +89,9 @@ remain trust boundaries. These checks establish CIL theorems, not correctness
 of CoreCLR or a JIT.
 
 The graph regression covers an actual arithmetic caller through A → B and a
-single caller importing both A and B. In the latter diamond, A's dependency
-reuses the same selected B identity; both implementations are checked once even
-when an ordinary proof receipt is already available. Separate fixtures preserve
+single caller importing A and C, both of which depend on B. This four-node
+diamond reuses the same selected B identity; all three implementations are checked
+once even when an ordinary proof receipt is already available. Separate fixtures preserve
 a named exceptional outcome through three forwarders and a table-reading contract
 through a transitive dependency. The table fixture retains its explicit
 `StaticWorldValid` premise and checks the final `linkChecked` composition audit.

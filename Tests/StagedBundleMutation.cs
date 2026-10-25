@@ -69,5 +69,6 @@ var staging = Path.GetDirectoryName(Path.GetDirectoryName(target)!)!;
 if (rejected.Code != 1 || !rejected.Output.Contains(
         "Full-verification staged bundle changed before its build: " + staging, StringComparison.Ordinal) ||
     File.Exists(Path.Combine(artifact, "verified.json")))
-    throw new InvalidOperationException("A changed later staged bundle was not rejected before its build: " + rejected.Output);
+    throw new InvalidOperationException(
+        "A changed later staged bundle was not rejected before its build: " + rejected.Output);
 Console.WriteLine("PASS B's actual producer build changes staged A, which rejects before A's proof build");

@@ -114,7 +114,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 19 leaves, 46 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 20 leaves, 46 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -141,6 +141,7 @@ Test("independent export cohort map preserves 19 leaves, 46 base cases and one d
         ["exportsstatics"] = ("statics", []),
         ["exportsfullstatics"] = ("fullstatics", []),
         ["exportstransitive"] = ("transitive", []),
+        ["exportstransitiveoutcomes"] = ("transitiveoutcomes", []),
         ["exportsdiscovery"] = ("discovery", ["discovery.fixture"]),
         ["exportstyped"] = ("typed", []),
         ["exportsderived"] = ("derived", [])
@@ -155,7 +156,7 @@ Test("independent export cohort map preserves 19 leaves, 46 base cases and one d
             Require(entry.Cohort == expected[entry.Name].Cohort, "Wrong cohort: " + entry.Name);
             Equal(entry.Cases, expected[entry.Name].Cases);
             var standalone =
-                entry.Cohort is "statics" or "fullstatics" or "transitive" or "typed" or "derived";
+                entry.Cohort is "statics" or "fullstatics" or "transitive" or "transitiveoutcomes" or "typed" or "derived";
 
             Require(entry.Standalone == standalone, "Wrong standalone fixture kind: " + entry.Name);
             Require(entry.ChildScript == (entry.Cohort == "discovery" ? "Tests/ContractDiscovery.cs" : null),
@@ -165,6 +166,7 @@ Test("independent export cohort map preserves 19 leaves, 46 base cases and one d
                 "resolution" => "Tests/FullModuleResolution.cs",
                 "statics" or "fullstatics" => "Tests/ModularStaticExports.cs",
                 "transitive" => "Tests/TransitiveImports.cs",
+                "transitiveoutcomes" => "Tests/TransitiveOutcomes.cs",
                 "typed" => "Tests/GenericLayoutImports.cs",
                 "derived" => "Tests/DerivedContractExports.cs",
                 _ => "Tests/ContractExport.cs"
@@ -217,10 +219,10 @@ Test("export coverage detects each omitted completion and invalid selection", ()
     foreach (string[] invalid in new string[][] {
         ["--cohort"], ["--cohort", "unknown"], ["--cohort", "core", "--cohort", "core"], ["core"],
         ["--cohort", "resolution"], ["--cohort", "statics"], ["--cohort", "fullstatics"], ["--cohort", "transitive"],
-        ["--cohort", "typed"], ["--cohort", "derived"] })
+        ["--cohort", "transitiveoutcomes"], ["--cohort", "typed"], ["--cohort", "derived"] })
         MustReject(() => ExportVerificationSuites.Select(invalid));
     string[] nonFullCohorts =
-        ["core", "audit", "resolution", "statics", "fullstatics", "transitive", "discovery", "typed",
+        ["core", "audit", "resolution", "statics", "fullstatics", "transitive", "transitiveoutcomes", "discovery", "typed",
             "derived", "unknown"];
 
     foreach (string cohort in nonFullCohorts)
@@ -285,8 +287,8 @@ Test("export leaf selection, strict files and shared inputs", () =>
     foreach (string name in derivedFixtures)
         Equal(VerificationSelection.Select(["Tests/ContractImports/" + name + ".lean"]),
             name is "DerivedInterface" or "DerivedPercentProof"
-                ? ["exportsderived", "exportstransitive"] : ["exportsderived"]);
-    Equal(VerificationSelection.Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitive"]);
+                ? ["exportsderived", "exportstransitiveoutcomes"] : ["exportsderived"]);
+    Equal(VerificationSelection.Select(["Tests/TransitiveOutcomes.cs"]), ["exportstransitiveoutcomes"]);
     Equal(VerificationSelection.Select(["Tests/StagedBundleMutation.cs"]), ["exportstransitive"]);
     Require(VerificationSelection.Select(["Tests/ImportedLayouts.lean"]).Contains("evidence", StringComparer.Ordinal),
         "Imported-layout model evidence lost its existing suite owner");
@@ -328,6 +330,7 @@ Test("a missing registered export fixture fails selection", () =>
             ("Tests/FullModuleResolution.cs", "resolution"),
             ("Tests/ModularStaticExports.cs", "standalone static"),
             ("Tests/TransitiveImports.cs", "standalone transitive"),
+            ("Tests/TransitiveOutcomes.cs", "standalone transitive outcomes"),
             ("Tests/ContractDiscovery.cs", "discovery child"),
             ("Tests/GenericLayoutImports.cs", "standalone typed"),
             ("Tests/DerivedContractExports.cs", "standalone derived")

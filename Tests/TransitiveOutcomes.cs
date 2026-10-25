@@ -140,5 +140,6 @@ if (report.GetProperty("contractDependencies").GetArrayLength() != 3 ||
     report.GetProperty("contractDependencies").EnumerateArray().Any(node =>
         node.GetProperty("acceptedVia").GetString() != "independently-verified") ||
     report.GetProperty("compositionTheorem").GetString() != "LeanCILFullComposition.certified")
-    throw new InvalidOperationException("The named exceptional contract lost its independently checked dependency closure.");
+    throw new InvalidOperationException(
+        "The named exceptional contract lost its independently checked dependency closure.");
 Console.WriteLine("PASS App -> C -> A -> B preserves the normal bound and named ArgumentOutOfRangeException");

@@ -3,7 +3,8 @@
   "measurement": "Completed job duration in seconds, including setup and verification",
   "estimated": {
     "exportsfullstatics": "Not yet measured in CI: 378 s locally with a certified library, times 3 as for exportsstatics and exportstransitive",
-    "exportstransitive": "Not yet measured in CI with forced full verification: 528 s locally with a certified library, times 3.3 as before"
+    "exportstransitive": "Provisional expanded-coverage estimate: chain, four-node diamond, warm receipts and staged mutation; update from CI",
+    "exportstransitiveoutcomes": "Provisional new-coverage estimate for three producer exports and deep outcome composition; update from CI"
   },
   "seconds": {
     "arguments": 261,
@@ -43,7 +44,8 @@
     "exportsmutationsource": 858,
     "exportsresolution": 70,
     "exportsstatics": 374,
-    "exportstransitive": 1750,
+    "exportstransitive": 2700,
+    "exportstransitiveoutcomes": 1800,
     "exportstyped": 1846,
     "failures": 125,
     "fsharp": 264,

@@ -398,7 +398,8 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationshadow` | Executed original-root module shadow |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
 | `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof; a Top → App → library chain independently composes the table reader with its static-world premise |
-| `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions, then forced full verification of App -> A -> B replaying both bundles; a missing B bundle fails in preflight and a republished B bundle with a failing proof fails B's own library build; a simultaneous A/B diamond checks B once despite warm receipts, and `TransitiveOutcomes.cs` preserves normal returns and the named exceptional outcome through two forwarders |
+| `exportstransitive` | App → A → B and a four-node diamond where A and C share B; full mode rechecks each selected export despite warm receipts, rejects changed deployment pins and cycles before building, rejects forged dependency composition, and detects B changing staged A before A builds |
+| `exportstransitiveoutcomes` | App → C → A → B independently preserves normal returns and the named exceptional outcome through three forwarders |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
 | `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
@@ -411,8 +412,8 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, fullstatics, transitive, discovery, typed and derived suites cannot enter that plan.
-The registry now has 19 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+statics, fullstatics, transitive, transitiveoutcomes, discovery, typed and derived suites cannot enter that plan.
+The registry now has 20 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
 `exportstyped` and `exportsderived` run directly, with no core export bootstrap
 or nested post-call. Their fixture assertions are
 
