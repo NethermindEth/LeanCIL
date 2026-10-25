@@ -452,3 +452,12 @@ byte subtraction, pointer differences and four unsigned orderings. It independen
 subtraction as addition and requires the Lean scalar certificate to reject it. The Lean fixtures
 cover negative offsets and differences, end positions, readonly preservation, every unsigned
 branch, and null, cross-allocation, invalid-position and signed-comparison rejection.
+
+Managed-call proof construction is covered by `Tests/ExtractionGenerics.lean` and the
+15 generated generic-method samples in `Tests/GenericEvidence.cs`. Direct tactic rejection
+checks cover changed signedness, assembly scope, generic arguments and argument count.
+The fixed three-method int256 scalar Equality extraction retains every public certificate
+proposition and all program/metadata definitions. Replaying every generated theorem reduces
+kernel work from 36,782,462 to 32,494,315 raw heartbeats (11.7%); the structural proofs introduce
+additional auxiliary theorems, increasing the replay count from 169 to 181. These are kernel
+work measurements, not full consumer build or end-to-end verification timings.

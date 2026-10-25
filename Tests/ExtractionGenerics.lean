@@ -30,4 +30,64 @@ example : typeStorage [{
   }] (.aggregate "B" 0) = none := by decide
 example : substituteType [word] (.apply (.constructor "scope" "Box`1") (.parameter 0)) =
     some (.apply (.constructor "scope" "Box`1") word) := by decide
+
+/-- A call whose scoped signature and generic arguments match the selected closed method. -/
+def caller (parameter : TypeExpr) : RawMethod := { closed with code := [⟨0, 40, .call {
+  declaringType := .atom "Test" "Owner", name := "Call", target := .managed 1,
+  typeArguments := [word], parameterCount := 1, hasThis := false, returnsValue := true,
+  returnType := word, parameterTypes := [.byref parameter] }⟩] }
+
+/-- The emitted target and argument count are independently checked against the call site. -/
+def callCode : Method := { locals := [], returnsValue := true, code := [.call 0 1] }
+
+/-- Structural proof construction retains the complete managed-call predicate. -/
+theorem structural_call : ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
+    callCode := by
+  cil_managed_calls [caller, closed, raw, word, callCode]
+#print axioms structural_call
+
+/-- Equal storage width does not permit substituting a signed parameter. -/
+theorem signed_parameter_rejected :
+    ¬ ManagedCallsValid [⟨[word], closed⟩] []
+      (caller (.atom runtimeScope "System.Int64")) [true] callCode := by
+  fail_if_success
+    have invalid : ManagedCallsValid [⟨[word], closed⟩] []
+        (caller (.atom runtimeScope "System.Int64")) [true] callCode := by
+      cil_managed_calls [caller, closed, raw, word, callCode]
+  decide +kernel
+#print axioms signed_parameter_rejected
+
+/-- A matching type name from another assembly remains a different parameter type. -/
+theorem parameter_scope_rejected :
+    ¬ ManagedCallsValid [⟨[word], closed⟩] []
+      (caller (.atom "attacker" "System.UInt64")) [true] callCode := by
+  fail_if_success
+    have invalid : ManagedCallsValid [⟨[word], closed⟩] []
+        (caller (.atom "attacker" "System.UInt64")) [true] callCode := by
+      cil_managed_calls [caller, closed, raw, word, callCode]
+  decide +kernel
+#print axioms parameter_scope_rejected
+
+/-- A closed signature cannot stand in for different method type arguments. -/
+theorem generic_argument_rejected :
+    ¬ ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] []
+      (caller word) [true] callCode := by
+  fail_if_success
+    have invalid : ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] []
+        (caller word) [true] callCode := by
+      cil_managed_calls [caller, closed, raw, word, callCode]
+  decide +kernel
+#print axioms generic_argument_rejected
+
+/-- Structural proof construction rejects a call with an altered argument count. -/
+theorem argument_count_rejected :
+    ¬ ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
+      { callCode with code := [.call 0 2] } := by
+  fail_if_success
+    have invalid : ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
+        { callCode with code := [.call 0 2] } := by
+      cil_managed_calls [caller, closed, raw, word, callCode]
+  decide +kernel
+#print axioms argument_count_rejected
+
 end Tests.ExtractionGenerics

@@ -20,6 +20,14 @@ for every raw call site; a separate kernel-checked equality validates the genera
 table. Prefix truncation, trailing bytes, non-ASCII names and call-shape mismatches remain
 rejected. This changes certificate checking cost, not the admitted feature getters.
 
+Generated managed-call certificates use `cil_managed_calls` to prove the unchanged
+`ManagedCallsValid` proposition. The tactic unfolds the supplied generated definitions and
+proves identical scoped types and generic arguments by reflexivity. Remaining checks use
+kernel decision; unsupported proof shapes fall back to the original complete decision.
+The validator still checks targets, method tokens, type arguments, exact parameter and return
+types, instance metadata, reachability and argument counts. This changes proof construction;
+source binding, certificate audits and kernel replay are unchanged.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a
