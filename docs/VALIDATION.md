@@ -180,6 +180,11 @@ assertion permits only `propext` and `Quot.sound`. The same module checks both
 paths of a symbolic branch using a supplied truth hypothesis, and verifies that
 failed candidate summaries do not escape their transaction.
 
+`Tests.LegacyFeatures`, imported by `Tests.Automation`, uses only the reference
+interpreter tactic import. It checks enabled and disabled symbolic features from
+caller facts, plus a concrete feature reduced to its profile field. `cil_steps`
+keeps symbolic `FeatureProfile.evaluate` applications folded, as checked stepping does.
+
 `Tests.StoreFacts` checks symbolic carry and borrow stores whose write facts
 state `a + b + c`, `a - b - c` and the flag words in source form, through both
 `cil_checked_steps` and `cil_contract_steps`. A wrong stored value, address or
@@ -259,7 +264,10 @@ naming `CIL.step.eq_def` elaborates.
 
 `Tests.SimdLanes` checks the SIMD lane lemmas as a multi-limb routine uses them: the
 carry and borrow cascades built from intrinsic comparison masks reproduce 256-bit sums
-and differences for every input, including a carry that crosses an all-ones lane where a
+and differences for every input. The 512-bit forms cover all eight lane carry-ins and the
+outgoing carry or borrow; boundary fixtures propagate across all eight lanes and reject an
+unshifted generate mask. Broadcast all-ones and operand-swapped AVX-512 greater-than
+sources feed the same 256-bit cascade. Tests include a carry across an all-ones lane where a
 single repair hop is wrong, and 128-bit sums and differences follow from their lane
 carries. Each intrinsic equation (lane add, multiply, equal, unsigned and signed compare,
 `MoveMask`, shifts by immediate and by vector count, permute, sum and even-lane multiply)
