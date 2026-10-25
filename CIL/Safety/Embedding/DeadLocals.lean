@@ -63,6 +63,29 @@ theorem Frame.appendLocals_set {frame : Frame} {extra : List LocalSlot} {index :
 
 #print axioms CIL.Safety.Frame.appendLocals_set
 
+/-- A dynamic stack allocation reads only the frame's activation and reserved bytes, so it
+    does the same in a padded frame and returns that frame padded. -/
+theorem allocateStack_appendLocals (memory : Memory) (frame : Frame) (extra : List LocalSlot)
+    (size : Nat) (initLocals : Bool) :
+    allocateStack memory (frame.appendLocals extra) size initLocals =
+      (fun allocated => (allocated.1, allocated.2.1.appendLocals extra, allocated.2.2)) <$>
+        allocateStack memory frame size initLocals := by
+  unfold allocateStack
+  simp only [Frame.appendLocals]
+  by_cases limit : (size ≥ nativeLimit || memory.stackLimit > maxDynamicStack) = true
+  · simp [limit, Bind.bind, Except.bind, Functor.map, Except.map]
+  by_cases empty : (size == 0) = true
+  · simp [limit, empty, Functor.map, Except.map, Pure.pure, Except.pure]
+  by_cases full : (frame.stackBytes > memory.stackLimit ||
+      stackReservation size > memory.stackLimit - frame.stackBytes) = true
+  · simp [limit, empty, full, Bind.bind, Except.bind, Functor.map, Except.map]
+  cases allocateHome memory frame.activation size stackAlignment <;>
+    cases initLocals <;>
+    simp [limit, empty, full, Bind.bind, Except.bind, Functor.map, Except.map, Pure.pure,
+      Except.pure] <;> split <;> simp_all
+
+#print axioms allocateStack_appendLocals
+
 /-- Closes `step` on a padded frame against the unpadded step mapped through the padding,
     splitting both sides in lockstep; fails on a branch that reads a local the unpadded frame
     lacks. -/
@@ -74,8 +97,8 @@ local macro "frame_natural" : tactic => `(tactic| repeat' (first
   | (apply bind_congr; intro)
   | simp only [map_bind]))
 
--- Splitting every dispatcher arm takes about 300000 heartbeats.
-set_option maxHeartbeats 400000 in
+-- Splitting every dispatcher arm takes about 450000 heartbeats.
+set_option maxHeartbeats 600000 in
 /-- A step that succeeds or throws in `frame` does the same in `frame` padded with `extra`,
     resuming in the padded frame: instructions only read locals the unpadded frame has. -/
 theorem step_appendLocals (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
@@ -98,6 +121,9 @@ theorem step_appendLocals (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : L
       revert kept
       cases stack <;> simp only [step, found] <;> repeat' split
       all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
+  case stackAlloc =>
+    simp only [step, allocateStack_appendLocals, bind_map_left]
+    frame_natural
   all_goals (simp only [step]; frame_natural)
 
 #print axioms step_appendLocals

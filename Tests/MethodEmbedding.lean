@@ -222,12 +222,24 @@ theorem thrower_dead_fault (memory : Safety.Memory) :
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
-a dropped local is not a reference, so frame entry would allocate a home for it
+a dropped local is not a reference, and only reference dead locals are supported
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbedsDeadLocals
     [{ stored with locals := [.nullRef, .unmodeled], localKinds := [.reference, .word64] }] 0
     stored := by
+  cil_embed
+
+-- A span local allocates nothing either, but is not yet covered.
+/--
+error: cil_embed: the expected body does not embed into the extracted method
+method index 0
+a dropped local is not a reference, and only reference dead locals are supported
+-/
+#guard_msgs (substring := true) in
+example : MethodEmbedsDeadLocals
+    [{ stored with locals := [.nullRef, .nullRef], localKinds := [.reference, .span 4 false] }]
+    0 stored := by
   cil_embed
 
 -- A dead local before a kept one would renumber the kept local.
