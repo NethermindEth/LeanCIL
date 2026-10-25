@@ -216,3 +216,6 @@ name = "Tests.ProfileEmbedding"
 
 [[lean_lib]]
 name = "Tests.FeatureGetter"
+
+[[lean_lib]]
+name = "Tests.Segment"

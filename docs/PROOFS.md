@@ -195,6 +195,27 @@ placement expressions such as `region.append_left`. The fetched instruction must
 inside the segment and agree with its code. `append`, `middle`, `take` and `drop` move a placement
 between a region and its segments, and `rfl` closes a concrete one.
 [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
+`Segment program method start finish pre post` packages a checked prefix as a composable
+contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame,
+stack and memory. Each admitted input supplies an output state and a cost, with an exact
+`run (fuel + cost) = run fuel` equation for every continuation fuel. `Segment.trans` composes
+adjacent contracts and adds their costs; `Segment.run_exists` applies a successful continuation.
+`Segment.consequence` changes assertions by proved
+implications. `SegmentState.exact` describes a known state. For these exact-state contracts,
+`cil_segment 3 [found, placed, facts]` proves the boundary using `cil_checked_steps` and fails
+unless the complete equation closes. `cil_segment_steps [facts]` proves a `SegmentRun`
+boundary directly. Neither tactic invents a memory or availability premise.
+
+For numeric-local framing, record successful write equations in `SegmentLocalEffects`.
+The destinations must occur in `segmentStores code`, read from the placed instructions.
+`Segment.frameLocals` combines these effects with the initial `LocalSnapshots` and
+`WritableHomes` to derive snapshots for `untouchedLocals code known`. Effects compose through
+`append` or `trans`; one frame-rule application replaces separate disjoint-read proofs for
+all retained locals. The numeric slot identities must remain fixed, and the frame-rule placement must belong to
+the running method and end at the contract boundary. Indirect writes and
+calls need a proved memory effect; absence of a direct `setLocal` is not evidence that an
+aliased byte-backed local keeps its value. [Tests/Segment](../Tests/Segment.lean) composes the
+UInt256 Add Vector128 reference prefix and Multiply AVX2 vector-input stages with these rules.
 
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the
 relevant proved facts. Branches always use equations before reflexivity, so a fact
@@ -322,6 +343,57 @@ program. `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags 
 `program.profileReads`, which `decide` checks for concrete profiles, so one proof covers every
 profile in a family. A separate per-profile extraction is covered once it is shown equal to
 the reprofiled program, by `rfl` when only the profiles differ.
+
+`leancil export-contracts` accepts one manifest entry for such a family:
+
+```json
+{
+  "method": "Library::Supported()",
+  "contract": "Public.supported",
+  "theorem": "Proof.family",
+  "program": "Reference.program",
+  "referenceProfile": "x64-sse2",
+  "profiles": [
+    { "profile": "x64-sse2", "artifact": "extractions/sse2" },
+    { "profile": "x64-sse42", "artifact": "extractions/sse42" },
+    { "profile": "x64-v3", "artifact": "extractions/v3" }
+  ]
+}
+```
+
+The surrounding manifest still provides `schema`, `assembly`, `proofRoot` and `interface`.
+Each artifact's `verification.json` selects the shared proof source under `proofRoot`.
+The family theorem has shape
+`∀ q : FeatureProfile, Predicate q → contract.Holds (reprofile Reference.program q) 0`,
+where the concrete predicate is decidable. Both method and outcome contracts are supported.
+The selected artifacts must include `referenceProfile`. Its extraction is checked against the
+same DLL, copied into a reserved generated module, and compiled separately from author macros.
+Its compiled artifacts are frozen before author code runs and checked again afterward.
+Every profile must prove by `rfl` that the named reference program equals this fixed program;
+a definition that changes with the current extraction cannot substitute a different body.
+The reference program must use `referenceProfile` uniformly. Each profile receives its own
+ordinary extraction check, layout check, theorem audit and kernel replay; generated proofs
+instantiate the predicate with `by decide +kernel` and establish the exact program equality
+with `rfl`. Because the family theorem already concludes a reprofiled program, no second
+transport or handwritten per-profile proof file is needed.
+
+This manifest form covers same-flag transport: a separate checked `ProfileAgreement.of_flags`
+obligation rejects any selected profile that disagrees on a reference program read flag,
+including intrinsic prerequisites, and reports the flag's name. It deliberately does not
+accept general families whose observed branches differ. Use profile templates for those
+proofs. Even an otherwise valid family is rejected when extraction pruning, method numbering,
+instructions or metadata make its program differ from the reprofiled reference. The exact
+equality and agreement statements are independently audited, so proof-source macros cannot
+replace these checks. Nothing is published unless all selected profiles pass.
+Published source bundles retain every selected extraction; full verification freshly extracts
+both the selected profile and its fixed reference from the pinned implementation DLL, then
+repeats the family checks before composing the caller theorem.
+
+Profiles must be distinct built-in names and match their artifacts. A family entry cannot
+also specify `artifact`; ordinary single-profile entries are unchanged. Family transport
+currently requires a closed extraction without imported-contract slots. Explicit type-initialization
+premises remain bound to each exported profile; static-value assumptions remain unsupported.
+Full source-bundle verification rejects initialization premises, as for single-profile exports.
 
 For a program with no profile reads, use the same `ProfileAgreement.of_flags` rule:
 an equality `empty : program.profileReads = []` discharges its premise with

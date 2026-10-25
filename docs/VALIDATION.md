@@ -67,6 +67,9 @@ stores, reloads and overwrites with abstract homes and memory, plus signed-byte 
 The mixed-width case carries Vector256, Vector128 and int32 locals through one snapshot
 invariant and returns the full arbitrary 256-bit input after the other locals are written.
 Missing write authority, mismatched local kinds and unknown local contents remain rejected.
+Each rejection uses an isolated store or load and a matching successful run with only the
+missing authority, correct value kind or remembered contents supplied. Strict proof elaboration
+prevents an incomplete rejected proof from inserting a placeholder.
 The ordinary shared tactic tests run unchanged.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer
@@ -251,6 +254,12 @@ state `a + b + c`, `a - b - c` and the flag words in source form, through both
 source memory leaves the run stuck at that store, with the exact unsolved goal
 asserted.
 
+`Tests.Segment` composes the UInt256 Add Vector128 eight-op reference prefix and Multiply
+AVX2 input stages at positions 44–56. Formation, checked loads and stores, intrinsic
+availability and exact permutation semantics remain premises. Two actual vector writes
+frame all other numeric snapshots using separated homes. Negative cases reject aliased
+homes, hidden indirect writes, changed endpoint states, fuel costs and mismatched composition
+positions or assertions, and placements from a different body or end boundary. Every new theorem is kernel checked with its axiom set reported.
 `Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the
 lookups its `CodeAt` placement yields, with the error asserted when stepping has no
 placement, hands that segment theorem the middle of a larger placed region, closes a
@@ -356,7 +365,7 @@ method steps through a shift and an even-lane multiply with those lemmas as fact
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
@@ -410,6 +419,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
 | `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
 | `exportsinitialized` | A static-readonly struct library exports a named initialization premise; its caller retains the scoped premise, malformed descriptors reject, and full verification remains unavailable |
+| `exportsprofiles` | One family theorem across three profiles, independent full composition, outcome families and scoped initialization premises; disagreeing flags, unequal programs, malformed selections, forged audit declarations and compiled-reference mutation reject |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -419,9 +429,9 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, fullstatics, transitive, transitiveoutcomes, discovery, typed, derived and initialized suites cannot enter that plan.
-The registry now has 21 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
-`exportstransitiveoutcomes`, `exportstyped`, `exportsderived` and `exportsinitialized` run directly, with no core export bootstrap
+statics, fullstatics, transitive, transitiveoutcomes, discovery, typed, derived, initialized and profiles suites cannot enter that plan.
+The registry now has 22 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+`exportstransitiveoutcomes`, `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with no core export bootstrap
 or nested post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.

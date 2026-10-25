@@ -164,8 +164,11 @@ partial class Program
             (string digest, string statement) = CheckExportStatement(session, proofModule, leanPath);
             checkedExport = new(export, actual, digest, statement, audit, proofModule + "Author");
         }, [ExportTheoremRequest(contract, published.Kind, export.Conditional),
-            ExportTheoremRequest(contract, published.Kind, export.Conditional) with { name = export.Request.Theorem },
-            PublicLayoutsRequest(export.Profile), .. InitializationAuditRequests(export)]);
+            export.Request.Program is null
+                ? ExportTheoremRequest(contract, published.Kind, export.Conditional) with { name = export.Request.Theorem }
+                : ProofTheorem(export.Request.Theorem),
+            PublicLayoutsRequest(export.Profile), .. InitializationAuditRequests(export),
+            .. ProfileFamilyAudits(export)], ProfileFamilySources(export));
         ConsumerRequest request = new(manifest.Assembly, export.Request.Artifact, export.Proof, ExportTheorem, null,
             ExportAudit: specification);
         ConsumerOutcome outcome = VerifyConsumerRequests(manifest.ProofRoot, [request], null, batch: false)[0];
@@ -296,6 +299,9 @@ partial class Program
         int[] projection = ImportedLayoutMetadata.Projection(layouts, layoutIdentities);
         if (FeatureProfile.Select(profile.Name) != profile)
             throw new InvalidDataException("Contract exports require an exact built-in profile.");
+        if (request.Profiles is { } profiles && profiles.Single().Profile != profile.Name)
+            throw new InvalidDataException("Profile family artifact does not match its selected profile: " +
+                profiles.Single().Profile);
         if (identity.GetProperty("entry").GetString() != method.FullName ||
             identity.GetProperty("assemblyIdentity").GetString() != module.Assembly.Name.FullName ||
             identity.GetProperty("assemblySha256").GetString() != Sha(manifest.Assembly))
@@ -314,6 +320,8 @@ partial class Program
         StaticIdentity.ValidateFields(statics, module);
         JsonElement[] imports =
             identity.TryGetProperty("imports", out JsonElement imported) ? imported.EnumerateArray().ToArray() : [];
+        if (request.Program is not null && imports.Length != 0)
+            throw new InvalidDataException("Profile-family transport requires a closed program without contract imports.");
         ContractDependency[] dependencies = imports.Select(binding => new ContractDependency(
                 binding.GetProperty("identity").GetString()!.Split("::", 2)[0],
                 binding.GetProperty("implementationSha256").GetString()!,
@@ -389,11 +397,16 @@ partial class Program
             : holds + " _root_.Extracted.program 0";
         string architecture = FeatureProfile.Select(export.Profile).Architecture;
         string layoutIndices = string.Join(", ", export.LayoutIndices);
+        var certification = export.Request.Program is null
+            ? $"theorem LeanCILExportAudit.certified : {statement} := _root_.{export.Request.Theorem}"
+            : ProfileFamilySource(export, statement);
         return $$"""
 import CIL.Safety.Linking
+import Extracted
 import CIL.Safety.OutcomeContract
+import CIL.Safety.ProfileContract
 import CIL.Extraction.LayoutProjection
-theorem LeanCILExportAudit.certified : {{statement}} := _root_.{{export.Request.Theorem}}
+{{certification}}
 #print axioms LeanCILExportAudit.certified
 theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectionValid
     _root_.Extracted.rawLayouts _root_.Extracted.computedLayouts

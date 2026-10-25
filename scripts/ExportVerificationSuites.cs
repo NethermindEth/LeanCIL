@@ -57,7 +57,12 @@ internal static class ExportVerificationSuites
             Standalone: true),
         new("exportsinitialized", "initialized", "Tests/InitializedExports.cs", [],
             "scoped initialization assumptions in exported and imported contracts", [],
-            ["Tests/InitializedExports.cs", "Tests/TransitiveImports/Conditional.lean"], Standalone: true)
+            ["Tests/InitializedExports.cs", "Tests/TransitiveImports/Conditional.lean"], Standalone: true),
+        new("exportsprofiles", "profiles", "Tests/ProfileFamilies.cs", [],
+            "one contract family across independently checked profile extractions", [],
+            ["Tests/ProfileFamilies.cs", "Tests/ContractImports/ProfileFamilyContract.lean",
+             "Tests/ContractImports/ProfileFamilyProof.lean", "Tests/ContractImports/ProfileFamilyCaller.lean"],
+            Standalone: true)
     ];
 
     static ExportSuite Entry(string name, string cohort, string description, string[] cases) =>
