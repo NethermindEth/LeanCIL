@@ -610,13 +610,41 @@ macro "cil_checked_next_at " methodFound:term:max instructionFound:term:max
       (by cil_checked_step_normalized [$[$facts:term],*])) ?_
     cil_stack_cleanup))
 
+/-- Close a child invocation with supplied exact-run or invocation-certificate evidence. -/
+syntax "cil_checked_child" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_checked_child [$facts:term,*]) => withMainContext do
+    let mut candidates := facts.getElems
+    for declaration in ← getLCtx do
+      unless declaration.isImplementationDetail do
+        let type := declaration.type.consumeMData
+        if type.isAppOf `CIL.Safety.InvocationCertificate ||
+            (type.eq?.any fun (_, left, _) => left.isAppOf ``CIL.Safety.invoke) then
+          candidates := candidates.push (← Term.exprToSyntax declaration.toExpr)
+    for candidate in candidates do
+      let saved ← saveState
+      try
+        let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm candidate none
+        let type := (← instantiateMVars (← inferType proof)).consumeMData
+        if type.isAppOf `CIL.Safety.InvocationCertificate then
+          evalTactic (← `(tactic| cil_strict exact ($candidate).1))
+        else if type.eq?.any (fun (_, left, _) => left.isAppOf ``CIL.Safety.invoke) then
+          evalTactic (← `(tactic| cil_strict exact $candidate))
+        else throwError "Not an invocation fact"
+        return
+      catch _ => saved.restore
+    throwError "No child invocation evidence matches the requested fuel and state"
+
 /-- Takes a fetched call through `run_call_of_invoke`, given the lookups, stepping both the
     callee and the caller's continuation to completion. -/
 macro "cil_checked_call_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| cil_strict refine CIL.Safety.run_call_of_invoke $methodFound $instructionFound
     (by cil_checked_step_normalized [$[$facts:term],*])
-    (by cil_checked_steps_normalized [$[$facts:term],*]; done)
+    (by first | cil_checked_child [$[$facts:term],*]
+              | (cil_checked_steps_normalized [$[$facts:term],*]; done))
     (by cil_checked_steps_normalized [$[$facts:term],*]; done))
 
 /-- `cil_checked_call_at`, except that only the callee runs to its return; the caller's
@@ -626,7 +654,8 @@ macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
   `(tactic| (
     cil_strict refine CIL.Safety.run_call_of_invoke $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
-      (by cil_checked_steps_normalized [$[$facts:term],*]; done) ?_
+      (by first | cil_checked_child [$[$facts:term],*]
+                | (cil_checked_steps_normalized [$[$facts:term],*]; done)) ?_
     cil_stack_cleanup))
 
 open Lean Elab Tactic Meta in

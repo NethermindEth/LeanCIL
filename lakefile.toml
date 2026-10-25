@@ -30,6 +30,9 @@ name = "Tests.DebugNames"
 name = "Tests.MethodContract"
 
 [[lean_lib]]
+name = "Tests.ContractCalls"
+
+[[lean_lib]]
 name = "Tests.OutcomeContract"
 
 [[lean_lib]]
