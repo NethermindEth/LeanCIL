@@ -393,8 +393,9 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
     CIL.evalIntrinsic (.avx2 .permute4x64)
       [.v256 (CIL.Vector.pack256 a b c d), .i32 (BitVec.ofNat 32 27)] =
       some (.v256 (CIL.Vector.pack256 d c b a)) := by
-  change some (CIL.Value.v256 (CIL.Vector.permute4x64 (CIL.Vector.pack256 a b c d) 27)) = _
-  simp [CIL.Vector.permute4x64]
+  change some (CIL.Value.v256
+    (CIL.Vector.permute4x64 (CIL.Vector.pack256 a b c d) (BitVec.ofNat 8 0x1B))) = _
+  rw [CIL.Vector.permute4x64_reverse]
 
 @[cil_code] def permuteStoreMethod : CIL.Method := {
   profile := { architecture := .x64, avx2 := true }

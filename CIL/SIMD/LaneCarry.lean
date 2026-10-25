@@ -262,13 +262,6 @@ theorem add_ult_eq_overflow (a b : BitVec w) :
     omega
 #print axioms add_ult_eq_overflow
 
-/-- Which operand the wrapped sum is compared against does not matter. -/
-theorem add_ult_comm (a b : BitVec w) : (a + b).ult b = (a + b).ult a := by
-  have swapped := add_ult_eq_overflow b a
-  rw [BitVec.add_comm b a] at swapped
-  rw [swapped, add_ult_eq_overflow, Nat.add_comm]
-#print axioms add_ult_comm
-
 /-- A lane that generates a carry cannot also propagate one: its wrapped sum is not all ones. -/
 theorem generate_not_propagate (a b : BitVec w) (generated : (a + b).ult a = true) :
     (a + b == BitVec.allOnes w) = false := by
@@ -316,33 +309,10 @@ theorem add_mask64 (x : W64) (p : Bool) : x + mask64 p = x - (if p then 1 else 0
     rfl
 #print axioms add_mask64
 
-/-- Masking with a comparison keeps `x` where the comparison holds and clears it elsewhere. -/
-theorem and_mask64 (x : W64) (p : Bool) : x &&& mask64 p = if p then x else 0 := by
-  cases p
-  · simp [mask64]
-  · change x &&& BitVec.allOnes 64 = x
-    exact BitVec.and_allOnes
-#print axioms and_mask64
-
 /-- Conjunction of comparison masks. -/
 theorem mask64_and_mask64 (p q : Bool) : mask64 p &&& mask64 q = mask64 (p && q) := by
   cases p <;> cases q <;> decide
 #print axioms mask64_and_mask64
-
-/-- Disjunction of comparison masks. -/
-theorem mask64_or_mask64 (p q : Bool) : mask64 p ||| mask64 q = mask64 (p || q) := by
-  cases p <;> cases q <;> decide
-#print axioms mask64_or_mask64
-
-/-- Exclusive or of comparison masks. -/
-theorem mask64_xor_mask64 (p q : Bool) : mask64 p ^^^ mask64 q = mask64 (p ^^ q) := by
-  cases p <;> cases q <;> decide
-#print axioms mask64_xor_mask64
-
-/-- Complement of a comparison mask. -/
-theorem not_mask64 (p : Bool) : ~~~mask64 p = mask64 (!p) := by
-  cases p <;> decide
-#print axioms not_mask64
 
 /-! ### Carry lookahead on packed flags -/
 
@@ -389,11 +359,10 @@ theorem getLsbD_cascade (generate propagate : BitVec w) (i : Nat) (inWord : i < 
 #print axioms getLsbD_cascade
 
 /-- Doubling a packed flag word shifts every flag up one position. -/
-theorem two_mul_eq_shiftLeft (x : BitVec w) : 2 * x = x <<< 1 := by
+theorem two_mul_eq_shiftLeft (x : BitVec w) : (2 : BitVec w) * x = x <<< 1 := by
   apply BitVec.eq_of_toNat_eq
-  rw [BitVec.toNat_mul, BitVec.toNat_shiftLeft, Nat.shiftLeft_eq, Nat.pow_one]
-  simp only [BitVec.toNat_ofNat, BitVec.natCast_eq_ofNat]
-  rw [Nat.mod_mul_mod, Nat.mul_comm]
+  rw [BitVec.toNat_mul, BitVec.toNat_shiftLeft, Nat.shiftLeft_eq, Nat.pow_one,
+    BitVec.ofNat_eq_ofNat, BitVec.toNat_ofNat, Nat.mod_mul_mod, Nat.mul_comm]
 #print axioms two_mul_eq_shiftLeft
 
 /-- Lane flags from a wide sum drive the ripple to the true lane carries: when bit `j` of

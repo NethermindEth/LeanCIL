@@ -4,13 +4,15 @@ import CIL.SIMD.LaneCarry
 /-!
 # Packed-lane lemmas for integer intrinsics
 
-Lane forms of the 128- and 256-bit integer intrinsics: lanewise maps and zips of `pack128` and
-`pack256`, the numeric value of a packed vector, `moveMask64` as sign bits, the exact products
+Lane forms of the integer intrinsics: lane projections of `pack512`, of bitwise operations, of
+lanewise maps and zips and of count shifts; lanewise maps and zips of `pack128` and `pack256`;
+the numeric value of a packed vector; `moveMask64` as sign bits, the exact products
 of `multiplyEven32`, `permute4x64`, shifts by immediate, `sum64` and the AVX-512DQ `mul64`.
 On top of `LaneCarry` they give the carry and borrow repair of a wide addition or subtraction
 done lane by lane, in the shapes that stepping `evalIntrinsic` produces.
 
-None of these lemmas is `@[simp]`; consumers rewrite with them explicitly.
+Only the `pack512` lane projections are `@[simp]`, like the `pack128` and `pack256` ones in
+`VectorLemmas`; consumers rewrite with the rest explicitly.
 -/
 
 open CIL
@@ -74,6 +76,136 @@ theorem lane64_map256 (f : W64 → W64) (x : V256) {i : Nat} (lane : i < 4) :
   | 2, _ => exact lane256_2 _ _ _ _
   | 3, _ => exact lane256_3 _ _ _ _
 #print axioms lane64_map256
+
+/-- Lane 0 of `pack512` is its lane-0 argument. -/
+@[simp] theorem lane512_0 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
+    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 0 = a0 := by
+  simp only [lane64, pack512, pack256]
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  grind
+#print axioms lane512_0
+
+/-- Lane 1 of `pack512` is its lane-1 argument. -/
+@[simp] theorem lane512_1 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
+    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 1 = a1 := by
+  simp only [lane64, pack512, pack256]
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  grind
+#print axioms lane512_1
+
+/-- Lane 2 of `pack512` is its lane-2 argument. -/
+@[simp] theorem lane512_2 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
+    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 2 = a2 := by
+  simp only [lane64, pack512, pack256]
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  grind
+#print axioms lane512_2
+
+/-- Lane 3 of `pack512` is its lane-3 argument. -/
+@[simp] theorem lane512_3 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
+    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 3 = a3 := by
+  simp only [lane64, pack512, pack256]
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  grind
+#print axioms lane512_3
+
+/-- Lane 4 of `pack512` is its lane-4 argument. -/
+@[simp] theorem lane512_4 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
+    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 4 = a4 := by
+  simp only [lane64, pack512, pack256]
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  grind
+#print axioms lane512_4
+
+/-- Lane 5 of `pack512` is its lane-5 argument. -/
+@[simp] theorem lane512_5 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
+    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 5 = a5 := by
+  simp only [lane64, pack512, pack256]
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  grind
+#print axioms lane512_5
+
+/-- Lane 6 of `pack512` is its lane-6 argument. -/
+@[simp] theorem lane512_6 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
+    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 6 = a6 := by
+  simp only [lane64, pack512, pack256]
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  grind
+#print axioms lane512_6
+
+/-- Lane 7 of `pack512` is its lane-7 argument. -/
+@[simp] theorem lane512_7 (a0 a1 a2 a3 a4 a5 a6 a7 : W64) :
+    lane64 (pack512 a0 a1 a2 a3 a4 a5 a6 a7) 7 = a7 := by
+  simp only [lane64, pack512, pack256]
+  ext i hi
+  simp only [BitVec.getElem_extractLsb']
+  grind
+#print axioms lane512_7
+
+/-- Bitwise and acts lane by lane. -/
+theorem lane64_and (left right : BitVec width) (index : Nat) :
+    lane64 (left &&& right) index = lane64 left index &&& lane64 right index := by
+  ext bit bound
+  simp [lane64, BitVec.getElem_extractLsb'] <;> grind
+#print axioms lane64_and
+
+/-- Bitwise or acts lane by lane. -/
+theorem lane64_or (left right : BitVec width) (index : Nat) :
+    lane64 (left ||| right) index = lane64 left index ||| lane64 right index := by
+  ext bit bound
+  simp [lane64, BitVec.getElem_extractLsb'] <;> grind
+#print axioms lane64_or
+
+/-- Bitwise exclusive or acts lane by lane. -/
+theorem lane64_xor (left right : BitVec width) (index : Nat) :
+    lane64 (left ^^^ right) index = lane64 left index ^^^ lane64 right index := by
+  ext bit bound
+  simp [lane64, BitVec.getElem_extractLsb'] <;> grind
+#print axioms lane64_xor
+
+/-- `andNot` acts lane by lane on lanes inside the vector. -/
+theorem lane64_andNot (left right : BitVec width) (index : Nat)
+    (_bounded : 64 * (index + 1) ≤ width) :
+    lane64 ((~~~left) &&& right) index = (~~~lane64 left index) &&& lane64 right index := by
+  ext bit bound
+  simp [lane64, BitVec.getElem_extractLsb'] <;> grind
+#print axioms lane64_andNot
+
+/-- Lane `i` of a 512-bit lanewise operation is the operation on lane `i`. -/
+theorem lane64_zip512 (f : W64 → W64 → W64) (x y : V512) {i : Nat} (lane : i < 8) :
+    lane64 (zip512 f x y) i = f (lane64 x i) (lane64 y i) := by
+  have alternatives : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3 ∨ i = 4 ∨ i = 5 ∨ i = 6 ∨ i = 7 := by
+    omega
+  rcases alternatives with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp [zip512]
+#print axioms lane64_zip512
+
+/-- Lane `i` of a left shift by a vector count: cleared for counts of 64 or more, else shifted. -/
+theorem lane64_shiftLeftCount64 (value : V256) (count : W64) {i : Nat} (lane : i < 4) :
+    lane64 (shiftLeftCount64 value count) i =
+      if count.toNat >= 64 then 0 else lane64 value i <<< count.toNat := by
+  unfold shiftLeftCount64
+  split
+  · simp [lane64]
+  · exact lane64_map256 _ _ lane
+#print axioms lane64_shiftLeftCount64
+
+/-- Lane `i` of a logical right shift by a vector count: cleared for counts of 64 or more, else
+    shifted. -/
+theorem lane64_shiftRightCount64 (value : V256) (count : W64) {i : Nat} (lane : i < 4) :
+    lane64 (shiftRightCount64 value count) i =
+      if count.toNat >= 64 then 0 else lane64 value i >>> count.toNat := by
+  unfold shiftRightCount64
+  split
+  · simp [lane64]
+  · exact lane64_map256 _ _ lane
+#print axioms lane64_shiftRightCount64
 
 /-- Every lane of the all-ones vector is all ones. -/
 theorem lane64_allOnes256 {i : Nat} (lane : i < 4) :
@@ -157,16 +289,16 @@ private theorem getLsbD_signFold (flags : Nat → Bool) (count : Nat) (fits : co
 #print axioms getLsbD_signFold
 
 /-- Bit `i` of `moveMask64` is the sign bit of lane `i`; bits 4 and above are clear. -/
-theorem getLsbD_moveMask64_eq (x : V256) (i : Nat) :
+theorem getLsbD_moveMask64 (x : V256) (i : Nat) :
     (moveMask64 x).getLsbD i = (decide (i < 4) && (lane64 x i).msb) :=
   getLsbD_signFold (fun index => (lane64 x index).msb) 4 (by decide) i
-#print axioms getLsbD_moveMask64_eq
+#print axioms getLsbD_moveMask64
 
 /-- Bit `i` of `moveMask64` is the sign bit of lane `i`. -/
-theorem getLsbD_moveMask64 (x : V256) {i : Nat} (lane : i < 4) :
+theorem getLsbD_moveMask64_of_lt (x : V256) {i : Nat} (lane : i < 4) :
     (moveMask64 x).getLsbD i = (lane64 x i).msb := by
-  rw [getLsbD_moveMask64_eq, decide_eq_true lane, Bool.true_and]
-#print axioms getLsbD_moveMask64
+  rw [getLsbD_moveMask64, decide_eq_true lane, Bool.true_and]
+#print axioms getLsbD_moveMask64_of_lt
 
 /-- Bit `i` of `moveMask512` is the sign bit of lane `i`; bits 8 and above are clear. -/
 theorem getLsbD_moveMask512 (x : V512) (i : Nat) :
@@ -179,7 +311,7 @@ theorem getLsbD_moveMask64_compare (compare : W64 → W64 → Bool) (x y : V256)
     (lane : i < 4) :
     (moveMask64 (zip256 (fun a b => mask64 (compare a b)) x y)).getLsbD i =
       compare (lane64 x i) (lane64 y i) := by
-  rw [getLsbD_moveMask64 _ lane, lane64_zip256 _ _ _ lane, msb_mask64]
+  rw [getLsbD_moveMask64_of_lt _ lane, lane64_zip256 _ _ _ lane, msb_mask64]
 #print axioms getLsbD_moveMask64_compare
 
 /-- The sign mask of four comparison results is the 4-bit flag word. -/
@@ -248,9 +380,10 @@ theorem sub128_lanes (x y : V128) :
 #print axioms sub128_lanes
 
 /-- The lane carries of a 256-bit sum from the intrinsic masks: `generate` marks lanes whose
-    sum compares below `x` (AVX-512 `CompareLessThan`), `propagate` lanes whose sum equals the
-    all-ones vector (`CompareEqual`), and bit `i` of the cascade is the carry into lane `i`;
-    bit 4 is the carry out of the whole sum. -/
+    sum compares below `x`, `propagate` lanes whose sum equals the all-ones vector, and bit `i`
+    of the cascade is the carry into lane `i`; bit 4 is the carry out of the whole sum. AVX-512
+    `.ltu64` and portable `.vector (.ltu64 256)` produce the `generate` comparison, and AVX2
+    `.eq64` and portable `.vector (.eq64 256)` the `propagate` one. -/
 theorem cascade_add256 (x y : V256) {i : Nat} (lane : i ≤ 4) :
     let sum := zip256 (· + ·) x y
     let generate := moveMask64 (zip256 (fun a b => mask64 (a.ult b)) sum x)
@@ -268,7 +401,8 @@ theorem cascade_add256 (x y : V256) {i : Nat} (lane : i ≤ 4) :
 
 /-- The lane borrows of a 256-bit difference from the intrinsic masks: `generate` marks lanes
     where `x` compares below `y`, `propagate` lanes where they are equal, and bit `i` of the
-    cascade is the borrow into lane `i`; bit 4 is the borrow out of the whole difference. -/
+    cascade is the borrow into lane `i`; bit 4 is the borrow out of the whole difference. The
+    same `.ltu64` and `.eq64` intrinsics as for `cascade_add256` produce the comparisons. -/
 theorem cascade_sub256 (x y : V256) {i : Nat} (lane : i ≤ 4) :
     let generate := moveMask64 (zip256 (fun a b => mask64 (a.ult b)) x y)
     let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b)) x y)
@@ -281,10 +415,41 @@ theorem cascade_sub256 (x y : V256) {i : Nat} (lane : i ≤ 4) :
     rw [getLsbD_moveMask64_compare _ _ _ below]
 #print axioms cascade_sub256
 
+/-- A 256-bit sum is the lane sums plus the carry-in vector decoded from the cascade bits of
+    the intrinsic masks, as a vector routine computes it. -/
+theorem add256_cascade (x y : V256) :
+    let sum := zip256 (· + ·) x y
+    let generate := moveMask64 (zip256 (fun a b => mask64 (a.ult b)) sum x)
+    let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b)) sum (~~~0))
+    let carries := propagate ^^^ (propagate + (generate <<< 1))
+    x + y = zip256 (· + ·) sum (pack256 0 (if carries.getLsbD 1 then 1 else 0)
+      (if carries.getLsbD 2 then 1 else 0) (if carries.getLsbD 3 then 1 else 0)) := by
+  intro sum generate propagate carries
+  rw [show carries.getLsbD 1 = _ from cascade_add256 x y (i := 1) (by decide),
+    show carries.getLsbD 2 = _ from cascade_add256 x y (i := 2) (by decide),
+    show carries.getLsbD 3 = _ from cascade_add256 x y (i := 3) (by decide)]
+  exact add256_lanes x y
+#print axioms add256_cascade
+
+/-- A 256-bit difference is the lane differences less the borrow-in vector decoded from the
+    cascade bits of the intrinsic masks, as a vector routine computes it. -/
+theorem sub256_cascade (x y : V256) :
+    let generate := moveMask64 (zip256 (fun a b => mask64 (a.ult b)) x y)
+    let propagate := moveMask64 (zip256 (fun a b => mask64 (a == b)) x y)
+    let borrows := propagate ^^^ (propagate + (generate <<< 1))
+    x - y = zip256 (· - ·) (zip256 (· - ·) x y) (pack256 0 (if borrows.getLsbD 1 then 1 else 0)
+      (if borrows.getLsbD 2 then 1 else 0) (if borrows.getLsbD 3 then 1 else 0)) := by
+  intro generate propagate borrows
+  rw [show borrows.getLsbD 1 = _ from cascade_sub256 x y (i := 1) (by decide),
+    show borrows.getLsbD 2 = _ from cascade_sub256 x y (i := 2) (by decide),
+    show borrows.getLsbD 3 = _ from cascade_sub256 x y (i := 3) (by decide)]
+  exact sub256_lanes x y
+#print axioms sub256_cascade
+
 /-! ### Multiplication -/
 
 /-- An even 32-bit lane is the low half of the 64-bit lane that holds it. -/
-theorem lane32_even (x : BitVec n) (i : Nat) : lane32 x (2 * i) = (lane64 x i).setWidth 32 := by
+theorem lane32_even (x : BitVec w) (i : Nat) : lane32 x (2 * i) = (lane64 x i).setWidth 32 := by
   apply BitVec.eq_of_getLsbD_eq
   intro bit below
   simp only [lane32, lane64, BitVec.getLsbD_extractLsb', BitVec.getLsbD_setWidth, below,
@@ -363,30 +528,6 @@ theorem lane64_permute4x64 (x : V256) (control : BitVec 8) {i : Nat} (lane : i <
   | 3, _ => exact lane256_3 _ _ _ _
 #print axioms lane64_permute4x64
 
-/-- Control `0x1B` reverses the four lanes. -/
-theorem permute4x64_reverse (a0 a1 a2 a3 : W64) :
-    permute4x64 (pack256 a0 a1 a2 a3) (BitVec.ofNat 8 0x1B) = pack256 a3 a2 a1 a0 := by
-  simp [permute4x64]
-#print axioms permute4x64_reverse
-
-/-- Control `0x4E` swaps the 128-bit halves. -/
-theorem permute4x64_swap_halves (a0 a1 a2 a3 : W64) :
-    permute4x64 (pack256 a0 a1 a2 a3) (BitVec.ofNat 8 0x4E) = pack256 a2 a3 a0 a1 := by
-  simp [permute4x64]
-#print axioms permute4x64_swap_halves
-
-/-- Control `0x93` moves every lane up one place, the top lane wrapping to lane 0. -/
-theorem permute4x64_rotate_up (a0 a1 a2 a3 : W64) :
-    permute4x64 (pack256 a0 a1 a2 a3) (BitVec.ofNat 8 0x93) = pack256 a3 a0 a1 a2 := by
-  simp [permute4x64]
-#print axioms permute4x64_rotate_up
-
-/-- Control `0x39` moves every lane down one place, lane 0 wrapping to the top. -/
-theorem permute4x64_rotate_down (a0 a1 a2 a3 : W64) :
-    permute4x64 (pack256 a0 a1 a2 a3) (BitVec.ofNat 8 0x39) = pack256 a1 a2 a3 a0 := by
-  simp [permute4x64]
-#print axioms permute4x64_rotate_down
-
 /-! ### Evaluation with an immediate operand -/
 
 /-- An `i32` immediate below 256 is read as that byte. -/
@@ -455,6 +596,20 @@ theorem intrinsic_avx512_ltu256 (x y : V256) :
     evalIntrinsic (.avx512 .ltu64) [.v256 x, .v256 y] =
       some (.v256 (zip256 (fun a b => mask64 (a.ult b)) x y)) := rfl
 #print axioms intrinsic_avx512_ltu256
+
+/-- `Avx2.CompareGreaterThan` on signed lanes gives a lanewise mask of `x > y` as integers. -/
+theorem intrinsic_avx2_signedgt256 (x y : V256) :
+    evalIntrinsic (.avx2 .signedgt64) [.v256 x, .v256 y] =
+      some (.v256 (zip256 (fun a b => mask64 (decide (b.toInt < a.toInt))) x y)) := rfl
+#print axioms intrinsic_avx2_signedgt256
+
+/-- Lane `i` of the signed greater-than mask: all ones exactly when lane `i` of `x` exceeds that
+    of `y` as a signed integer. -/
+theorem lane64_signedgt256 (x y : V256) {i : Nat} (lane : i < 4) :
+    lane64 (zip256 (fun a b => mask64 (decide (b.toInt < a.toInt))) x y) i =
+      mask64 (decide ((lane64 y i).toInt < (lane64 x i).toInt)) :=
+  lane64_zip256 _ _ _ lane
+#print axioms lane64_signedgt256
 
 /-- `Avx2.Multiply` on unsigned lanes multiplies the even 32-bit lanes into 64-bit products. -/
 theorem intrinsic_multiplyEven32 (x y : V256) :
