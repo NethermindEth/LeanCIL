@@ -286,6 +286,52 @@ example : zip256 (fun a b => mask64 (decide (b.toInt < a.toInt))) (pack256 (BitV
 
 /-! ### Stepping a method through the intrinsics -/
 
+/-! ## Intrinsic evaluation on packed lanes -/
+
+/-- AVX2 lane addition evaluates to the lanewise sums of packed operands. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.avx2 .add64) [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (a0 + b0) (a1 + b1) (a2 + b2) (a3 + b3))) := by
+  rw [intrinsic_avx2_add256, zip256_pack256]
+
+/-- AVX2 equality evaluates to one all-ones or zero mask per packed lane. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.avx2 .eq64) [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (mask64 (a0 == b0)) (mask64 (a1 == b1))
+        (mask64 (a2 == b2)) (mask64 (a3 == b3)))) := by
+  rw [intrinsic_avx2_eq256, zip256_pack256]
+
+/-- AVX-512 unsigned less-than evaluates to one mask per packed lane. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.avx512 .ltu64)
+        [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (mask64 (a0.ult b0)) (mask64 (a1.ult b1))
+        (mask64 (a2.ult b2)) (mask64 (a3.ult b3)))) := by
+  rw [intrinsic_avx512_ltu256, zip256_pack256]
+
+/-- AVX2 signed greater-than masks exactly the lanes where the first operand is larger. -/
+example (x y : V256) {i : Nat} (lane : i < 4) (value : V256)
+    (evaluated : evalIntrinsic (.avx2 .signedgt64) [.v256 x, .v256 y] = some (.v256 value)) :
+    lane64 value i = mask64 (decide ((lane64 y i).toInt < (lane64 x i).toInt)) := by
+  rw [intrinsic_avx2_signedgt256] at evaluated
+  cases evaluated
+  exact lane64_signedgt256 x y lane
+
+/-- The portable lane multiply evaluates to the wrapping lanewise products. -/
+example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    evalIntrinsic (.vector (.mul64 256))
+        [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
+      some (.v256 (pack256 (a0 * b0) (a1 * b1) (a2 * b2) (a3 * b3))) := by
+  rw [intrinsic_mul256, zip256_pack256]
+
+/-- AVX-512DQ `MoveMask` of a packed mask vector gathers the four conditions as bits. -/
+example (lane0 lane1 lane2 lane3 : Bool) :
+    evalIntrinsic (.avx512DQ .moveMask64)
+        [.v256 (pack256 (mask64 lane0) (mask64 lane1) (mask64 lane2) (mask64 lane3))] =
+      some (.i32 (BitVec.ofNat 32
+        (lane0.toNat + 2 * lane1.toNat + 4 * lane2.toNat + 8 * lane3.toNat))) := by
+  rw [intrinsic_avx512dq_movemask256, moveMask64_pack256_mask64]
+
 /-- Shifts the high halves of one vector down and multiplies them by the low halves of
     another: one partial-product row of a multi-limb multiply. -/
 @[cil_code] def partialProductMethod : CIL.Method := {
