@@ -282,6 +282,10 @@ static-value assumptions are not supported in this mode. See
 required producer evidence.
 Full verification checks caller and imported proofs again even when ordinary
 verification has already cached successful results.
+An `export-contracts` manifest can list several profile artifacts for one method and one
+family theorem. Each extraction is checked independently, with kernel-checked flag agreement
+and exact equality to the reprofiled reference program. See the
+[profile-family manifest example](docs/PROOFS.md) for the same-flag transport requirements.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter

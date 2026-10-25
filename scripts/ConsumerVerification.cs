@@ -947,7 +947,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         SortedDictionary<string, string> snapshot, string? certifiedLibrary, ExtractionIdentity extraction,
         IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
         IReadOnlyDictionary<string, string>? exportAudits = null,
-        ConsumerSessionPurpose purpose = ConsumerSessionPurpose.Verification)
+        ConsumerSessionPurpose purpose = ConsumerSessionPurpose.Verification,
+        IReadOnlyDictionary<string, string>? generatedSources = null)
     {
         foreach (var dependency in dependencies)
         {
@@ -1033,6 +1034,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .Append(extractionAuditPath).ToList();
         copied.AddRange(importModules.Select(module => Path.Combine(frameworkCopy, module.Replace('.', Path.DirectorySeparatorChar) + ".lean")));
         if (symbols is not null) copied.Add(symbolsPath);
+        if (generatedSources is not null)
+        {
+            var packageRoots = dependencies.Select(dependency =>
+                Within(session, Path.GetRelativePath(root, dependency.Source))).Prepend(session);
+            var directories = ConsumerSourceDirectories(session, packageRoots);
+            foreach (var (module, source) in generatedSources)
+            {
+                RejectContractSourceShadow(module, directories);
+                var path = Within(frameworkCopy, module.Replace('.', '/') + ".lean");
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, source);
+                AddConsumerLibrary(frameworkCopy, module);
+                copied.Add(path);
+            }
+        }
         foreach ((string module, string proof, string _) in proofs)
         {
             string target = Path.Combine(session, module + ".lean");
@@ -1054,7 +1070,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return new(frameworkCopy, copied.ToDictionary(path => path, Sha));
     }
 
-    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked, AuditRequest[]? Theorems = null);
+    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked,
+        AuditRequest[]? Theorems = null, Dictionary<string, string>? GeneratedSources = null);
 
     sealed record ConsumerRequest(string Assembly, string Output, string Proof, string Theorem, string? Settings,
         bool ExpectRejection = false, ConsumerExportAudit? ExportAudit = null);
@@ -1134,7 +1151,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         SortedDictionary<string, string> BoundRequestInputs(int index, SortedDictionary<string, string> common)
         {
             SortedDictionary<string, string> inputs = RequestInputs(common, proofs[index], requests[index].Settings);
-            if (requests[index].ExportAudit is { } audit) inputs["export-audit"] = ContentKey(audit.Source);
+            if (requests[index].ExportAudit is { } audit)
+            {
+                inputs["export-audit"] = ContentKey(audit.Source);
+                foreach (var (module, source) in audit.GeneratedSources ?? [])
+                    inputs["export-generated:" + module] = ContentKey(source);
+            }
             return inputs;
         }
         foreach (var i in all)
@@ -1321,13 +1343,23 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             bound["<generated>/ExtractionAudit.lean"] = ContentKey(ExtractionAuditSource);
             foreach ((string module, string source) in extractions[members[0]].Sources)
                 bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
+            var generatedSources = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var member in members)
+                foreach (var (module, source) in requests[member].ExportAudit?.GeneratedSources ?? [])
+                {
+                    if (generatedSources.TryGetValue(module, out var previous) && previous != source)
+                        throw new InvalidDataException("Conflicting generated export module: " + module);
+                    generatedSources[module] = source;
+                    bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
+                }
             var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
             // Groups share one Symbols.lean hash or none.
             var symbolHash = symbols[members[0]];
             var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, extractions[members[0]],
                 members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash,
                 members.Where(i => requests[i].ExportAudit is not null).ToDictionary(
-                    i => names[Array.IndexOf(members, i)], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal));
+                    i => names[Array.IndexOf(members, i)], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
+                generatedSources: generatedSources);
             var frameworkCopy = prepared.FrameworkCopy;
             string[] interfaceModules = extractions[members[0]].Sources.Keys.Where(module => module != "ExtractedImports").ToArray();
             Dictionary<string, string> InterfaceArtifacts() => ModuleArtifacts(frameworkCopy)
@@ -1411,6 +1443,31 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Stage(members, "extraction certificate audit");
             var extractionAudit = Run(["lake", "build", "+ExtractionAudit:olean"], frameworkCopy,
                 progress: "Checking consumer extraction certificate");
+            // Generated reference modules must be fixed before consumer configuration or proof code can run.
+            SortedDictionary<string, string> GeneratedArtifacts()
+            {
+                var directory = Path.Combine(frameworkCopy, ".lake/build/lib/lean");
+                return HashFiles(generatedSources.Keys.SelectMany(module =>
+                {
+                    var path = Within(directory, module.Replace('.', '/') + ".olean");
+                    return Directory.EnumerateFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + "*")
+                        .Select(part => (Path.GetRelativePath(directory, part), part));
+                }));
+            }
+            if (generatedSources.Count > 0)
+                Run(["lake", "build", .. generatedSources.Keys.Select(module => "+" + module + ":olean")],
+                    frameworkCopy, progress: "Checking fixed export reference modules");
+            var fixedGeneratedArtifacts = GeneratedArtifacts();
+            if (generatedSources.Keys.Any(module => !fixedGeneratedArtifacts.ContainsKey(
+                (module.Replace('.', '/') + ".olean").Replace('/', Path.DirectorySeparatorChar))))
+                throw new InvalidDataException("Missing compiled export reference module");
+            void RequireGeneratedArtifacts()
+            {
+                var current = GeneratedArtifacts();
+                if (current.Count != fixedGeneratedArtifacts.Count || fixedGeneratedArtifacts.Any(pair =>
+                    !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
+                    throw new InvalidDataException("Generated export artifacts changed during proof checking");
+            }
             if (first && share)
             {
                 var packageRoots = dependencies.Select(dependency =>
@@ -1436,6 +1493,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     progress: "Checking consumer contract interfaces and import assumptions");
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
             var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies");
+            RequireGeneratedArtifacts();
             var buildFailure = build.Code == 0 ? null
                 : new InvalidOperationException($"Command failed ({build.Code}): {string.Join(' ', command)}\n{build.Output}");
             string[] importDirectories = [];
@@ -1614,6 +1672,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             bool contractExportAudit = proceeding.Any(i => requests[i].ExportAudit is not null);
             if (contractExportAudit || fullImportAudit is not null)
             {
+                RequireGeneratedArtifacts();
                 string auditKind = contractExportAudit ? "contract export audit" : "full import audit";
                 if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
                     throw new InvalidOperationException("Sources changed during " + auditKind);

@@ -561,8 +561,11 @@ partial class Program
                 transfers[index] = independent.CaptureFullTerms(session, proofModule,
                     FullLibraryPrefix + slot.Import.Id, contract.InterfaceModules, leanPath);
             }, [ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional),
-                ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional)
-                    with { name = slot.Author }]);
+                slot.Request.Program is null
+                    ? ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional)
+                        with { name = slot.Author }
+                    : ProofTheorem(slot.Author), .. ProfileFamilyAudits(prepared[index])],
+                ProfileFamilySources(prepared[index]));
             return new ConsumerRequest(implementation, slot.Artifact, prepared[index].Proof, ExportTheorem, null,
                 ExportAudit: audit);
         }).ToArray();
@@ -668,7 +671,10 @@ partial class Program
             record.GetProperty("statement").GetString() == certification.Statement;
         if (!recordBound)
             throw new InvalidDataException("Full source bundle export statement or closure binding mismatch.");
-        JsonElement request = originalManifest.GetProperty("exports")[selected];
+        var originalRequests = originalManifest.GetProperty("exports")
+            .Deserialize<ContractExportRequest[]>(ContractExportManifest.Json)
+            ?? throw new InvalidDataException("Missing bundled export requests.");
+        var request = ContractExportManifest.ExpandExports(originalRequests, consumer)[selected];
         string bundledIdentityPath = Within(bundle, "exports/" + selected + "/identity.json");
         JsonElement bundledIdentity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(bundledIdentityPath));
         bool extractionMatches =
@@ -680,8 +686,7 @@ partial class Program
             throw new InvalidDataException(
                 "Full source bundle extraction metadata differs from the selected implementation, method or profile.");
         string author = record.GetProperty("theorem").GetString()!;
-        if (request.GetProperty("theorem").GetString() != author || !ContractInterface.Constant(author) ||
-            request.GetProperty("contract").GetString() != export.ContractConstant)
+        if (request.Theorem != author || !ContractInterface.Constant(author) || request.Contract != export.ContractConstant)
             throw new InvalidDataException("Full source bundle author theorem binding mismatch.");
         if (!record.TryGetProperty("proofPath", out JsonElement recordedProof) ||
             recordedProof.ValueKind != JsonValueKind.String)
@@ -708,6 +713,15 @@ partial class Program
                 "--import-sha256", name + "=" + nodeSha256, "--import-interface-sha256", name + "=" + nodeInterface]);
         }
         Run(extraction, progress: "Fresh extraction of the current imported library DLL");
+        string? referenceArtifact = null;
+        if (request.Program is not null)
+        {
+            referenceArtifact = Path.Combine(staging, "reference-" + import.Id);
+            var referenceExtraction = extraction.ToArray();
+            referenceExtraction[5] = referenceArtifact;
+            referenceExtraction[6] = request.ReferenceProfile!;
+            Run(referenceExtraction, progress: "Fresh extraction of the fixed reference profile");
+        }
         // Composition compiles these exact bytes, which the library run below binds to the DLL.
         byte[] generated = File.ReadAllBytes(Path.Combine(artifact, "Extracted.lean"));
         JsonElement regenerated =
@@ -735,7 +749,11 @@ partial class Program
             new(1, Path.GetRelativePath(artifact, proof), author, Path.GetRelativePath(artifact, consumer));
         File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(settings, Json));
         return new(import, author, artifact, Encoding.UTF8.GetString(generated), ContractInterface.Hash(generated),
-            new(entry, artifact, export.ContractConstant, author, export.TypeArguments), statics, imported);
+            request with
+            {
+                Method = entry, Artifact = artifact, TypeArguments = export.TypeArguments,
+                ReferenceArtifact = referenceArtifact
+            }, statics, imported);
     }
 
     // A record's scoped static identities in identity order; a missing list is malformed, not empty.
