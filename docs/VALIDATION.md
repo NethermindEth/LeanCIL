@@ -16,6 +16,24 @@ for the identical six-method workload. The consumer still verifies the original 
 each variant retains its original certificate audit and rejection assertions. A changed
 prefix is rejected before any suffix can use the checked module.
 
+`Tests.CertificateFlow` covers streaming fallthrough, indexed forward/backward edges,
+missing states, out-of-bounds targets and mismatched certificate lengths. The feature and
+scalar equivalence theorems retain the original list-indexed rules, including rejection
+when the feature and scalar certificate lengths differ.
+
+`Tests/CertificateFlowScaling.lean` and `Tests/CertificateBranchScaling.lean` provide fixed
+512-nop and 512-branch workloads, each followed by a return, for kernel checking and independent
+replay. Their profiler reports tactic execution and kernel type-checking separately.
+Compile and replay each workload, for example:
+
+```sh
+lake env lean -o .lake/build/lib/lean/Tests/CertificateFlowScaling.olean Tests/CertificateFlowScaling.lean
+lake env leanchecker Tests.CertificateFlowScaling
+```
+
+Compare identical source with baseline and updated libraries; native evaluation alone does
+not measure this workload. The benchmark is separate from ordinary library builds.
+
 `Tests/ConsumerSupportUnion.cs` runs a fixed three-extraction consumer batch in two orders.
 Support imported only by later groups must build and replay once; direct and indirect
 extraction-dependent modules must replay in every consuming group, including repeated import
@@ -222,7 +240,10 @@ It composes adjacent placements and splits them back with `cons_iff`, `take` and
 `exists_eq_append` needs by placing the empty segment past the end of a body.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
-bodies with mapped program counters; `Tests.OutcomeEmbedding` checks transport of
+bodies with mapped program counters, and with trailing dead reference locals dropped,
+beside kept opaque vector locals too. It rejects numeric dead locals, in the kernel and
+in the tactic, and non-trailing ones, and still reports a changed live instruction
+under dead locals; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
 throws, unsupported execution and fuel exhaustion do not transfer. `Tests.AggregateSetup` and `Tests.Semantics`
 cover frame setup and interpreter behavior. The extracted-loop suite checks
@@ -242,7 +263,17 @@ exception never satisfy an expected loop exception.
 internal ones without re-executing the callee, composes callers through the derived
 contracts, and proves that an unjustified stronger postcondition, a weaker
 precondition, a smaller footprint and a changed exception type each fail both the
-refinement premises and the derived contract on a concrete input.
+refinement premises and the derived contract on a concrete input. Its forwarders inherit
+their callees' contracts through `MethodContract.Holds.forward` and `forward_out`: `Sum`,
+`SumSwapped` and `AddFrom` pass `AddTo` its arguments in order, swapped and reversed;
+`SumDiscard` inherits `AddFlag`'s contract with an uninitialized out local, and `CopyTo`
+inherits `AddFrom`'s with a zeroed local, a callee region footprint inside its own and an
+`Apart` fact from the local's freshness; `IsZeroForward`, `IsZeroIgnoring` and
+`IsZeroSecond` re-narrow `IsZero`'s boolean, the last two skipping an argument; and
+`IsSetForward` passes a boolean through a narrowed load. Rejected are a body whose loads
+differ, a selection that passes one argument twice, a result or load outside the narrow
+range, and two false contracts: `IsZeroSecond` as if it loaded its first argument, and
+`IsZeroIgnoring` with a dangling unused argument.
 
 `Tests.InvocationCertificates` builds invocation certificates from a computed
 invocation and from a computed run, keeps them through a certified contract and
@@ -349,6 +380,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
+| `exportsderived` | Standalone derived public contracts: `Holds.weaken` exports, sidecar-only callers, refuted weakenings |
 
 The base coverage ledger has 46 cases: 22 core, 2 callback, 2 resolution and
 20 full cases. Each leaf rejects an omitted, repeated or unexpected completion.
@@ -358,8 +390,8 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, transitive, discovery and typed suites cannot enter that plan.
-The registry now has 17 leaves. `exportsstatics`, `exportstransitive` and `exportstyped` run
+statics, transitive, discovery, typed and derived suites cannot enter that plan.
+The registry now has 18 leaves. `exportsstatics`, `exportstransitive`, `exportstyped` and `exportsderived` run
 directly, with no core export bootstrap or nested post-call. Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
@@ -371,6 +403,13 @@ caller. It needs no baseline caller artifact or verified report. The discovery
 leaf runs no core caller verification, restrictions, callbacks or full cases.
 The typed leaf explicitly owns its fixture and five input proof/interface
 modules. Shared model and proof dependencies retain their existing owners.
+The derived leaf likewise owns its fixture and the five `Derived*` interface,
+producer and caller modules in `Tests/ContractImports`. It proves exact internal
+method and outcome contracts on the actual extraction and exports public ones
+derived only through `Holds.weaken`. Callers verify from the sidecar alone, on
+normal and named-exception paths. Stronger posts, weaker preconditions, smaller
+footprints and renamed exceptions are refuted on the same extraction; at the
+exporter, one renamed exception fails only its refinement proof.
 
 New cohort durations are unmeasured. The existing CI caps remain 90 minutes
 for imports, 120 for each exports leaf, and 30 for other suites. The matrix

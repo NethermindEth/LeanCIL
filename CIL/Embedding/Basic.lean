@@ -12,6 +12,8 @@ instance on `Op` is involved.
 
 `CIL.Safety.Embedding` proves that a successful run of the expected body is one of the
 actual body, so a proof about a hand-written body transfers to the extracted method.
+`EmbedsDeadLocals` also lets the actual body declare trailing locals that frame entry
+creates without allocating.
 -/
 
 namespace CIL
@@ -127,5 +129,41 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
 /-- Method `index` of `program` has a body that `expected` embeds into. -/
 def MethodEmbeds (program : Program) (index : Nat) (expected : Method) : Prop :=
   ∃ actual map, program[index]? = some actual ∧ Embeds expected actual map
+
+/-- `actual` with the locals and local kinds of `expected` in place of its own. -/
+def Method.withLocalsOf (actual expected : Method) : Method :=
+  { actual with locals := expected.locals, localKinds := expected.localKinds }
+
+/-- True for a local that frame entry creates without allocating memory: a managed
+    reference initialized to null or left unmodeled. -/
+def rootLocal : LocalKind → Value → Bool
+  | .reference, .nullRef | .reference, .unmodeled => true
+  | _, _ => false
+
+/-- True when `kinds` and `initials` describe the same number of locals, each a root local. -/
+def rootLocals (kinds : List LocalKind) (initials : List Value) : Bool :=
+  kinds.length == initials.length && (kinds.zip initials).all fun (kind, initial) =>
+    rootLocal kind initial
+
+open Embedding in
+/-- `expected` embeds into `actual` under `map` once `actual`'s locals past `expected`'s are
+    dropped. Those extra locals must be trailing root locals, which allocate nothing, so every
+    other local and every allocation keeps its place; opaque locals must lie among the kept
+    ones, and `actual` may have no parameter homes, which the frame places after the locals. -/
+structure EmbedsDeadLocals (expected actual : Method) (map : List Nat) : Prop where
+  embeds : Embeds expected (actual.withLocalsOf expected) map
+  locals : actual.locals = expected.locals ++ actual.locals.drop expected.locals.length
+  localKinds :
+    actual.localKinds = expected.localKinds ++ actual.localKinds.drop expected.localKinds.length
+  initialized : expected.localKinds.length = expected.locals.length
+  dead : rootLocals (actual.localKinds.drop expected.localKinds.length)
+    (actual.locals.drop expected.locals.length) = true
+  opaqueVectorLocals : expected.opaqueVectorLocals.all (· < expected.localKinds.length) = true
+  parameterHomes : actual.parameterHomes = []
+
+/-- Method `index` of `program` has a body that `expected` embeds into once its trailing dead
+    root locals are dropped. -/
+def MethodEmbedsDeadLocals (program : Program) (index : Nat) (expected : Method) : Prop :=
+  ∃ actual map, program[index]? = some actual ∧ EmbedsDeadLocals expected actual map
 
 end CIL
