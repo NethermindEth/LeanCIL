@@ -249,6 +249,9 @@ Return arity and fully specified results share one checked dispatcher proof. The
 step, run and invocation theorems retain their statements while avoiding duplicate case analysis
 during compilation and kernel replay.
 
+Allocation-renaming proofs share dispatcher reasoning across ordinary instructions and
+reference-aware arithmetic and branches, avoiding separate proofs of overlapping cases.
+
 Import `CIL.Safety.SymbolicExecution` and use `cil_checked_steps` to compose
 checked instruction steps. It first tries definitional equality when no facts
 are supplied, then uses local instruction equations and simplification as needed.

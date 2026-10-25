@@ -11,6 +11,12 @@ avoiding repeated case analysis of branches already excluded by that opcode.
 Trailing-local proofs normalize maps over monadic binds before trying congruence, so shared
 computations need not be split into their possible results to prove the continuation unchanged.
 
+Ordinary allocation-renaming instructions share the proof of `Memory.Renamed.instructionResult`.
+Reference-aware subtraction, comparisons and branches share `Memory.Renamed.stepReference` and
+`FixedStepFamily.reference`. These replace `stepSubtract`, `stepCompare`, `stepUnsignedBranch`
+and `stepEqualityBranch`, and their four separate family constructors. `stepTransport` and its
+successful/exceptional execution guarantees retain their statements.
+
 Certificate validation streams fallthrough states and uses balanced indexes for branch
 destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original
 list-indexed rules without changing their entry, reachability, opcode or bounds requirements.

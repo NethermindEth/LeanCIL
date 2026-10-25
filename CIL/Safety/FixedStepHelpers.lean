@@ -85,18 +85,18 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
       · exact .error .invalidState
 #print axioms Memory.Renamed.stepFallback
 
-/-- Nonallocating instruction families keep dispatcher proofs independently bounded. -/
+/-- Nonallocating families separate reference observations, numeric and boundary steps. -/
 inductive FixedStepFamily where
-  | subtract | compare | unsignedBranch | equalityBranch | numeric | boundary | other | excluded
+  | reference | numeric | boundary | other | excluded
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Op → FixedStepFamily
   | .local .. | .localAddr _ | .setLocal .. | .vectorLocal _ | .vectorLocalAddr _
   | .setVectorLocal _ | .stackAlloc _ | .newVector256 .. | .newAggregate .. | .memory _ => .excluded
-  | .sub => .subtract
-  | .ltu | .gtu | .eq => .compare
-  | .bltu _ | .bgeu _ | .bgtu _ | .bleu _ => .unsignedBranch
-  | .brzero _ | .brnonzero _ | .beq _ | .bne _ => .equalityBranch
+  | .sub => .reference
+  | .ltu | .gtu | .eq => .reference
+  | .bltu _ | .bgeu _ | .bgtu _ | .bleu _ => .reference
+  | .brzero _ | .brnonzero _ | .beq _ | .bne _ => .reference
   | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
   | .divide .. => .numeric
   | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .throw _ | .ret _ => .boundary
