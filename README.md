@@ -233,6 +233,12 @@ Contract stepping also handles signed and unsigned widening in either argument o
 the [consumer stepping regressions](docs/PROOFS.md#consumer-stepping-regressions)
 cover all eight wrapper combinations under a fixed heartbeat budget.
 
+`Segment` contracts compose checked prefixes through exact intermediate states and fuel costs.
+`cil_segment` proves an exact-state contract from `CodeAt` placements and checked step facts.
+A local frame rule preserves untouched numeric snapshots from actual write effects and
+separate writable homes; placement alone never grants memory preservation.
+See [composable segments](docs/PROOFS.md) and [their acceptance tests](Tests/Segment.lean).
+
 `CodeAt` facts let the tactics resolve instructions within a known code segment without
 expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
 tracks numeric local stores and updated snapshots, including mixed Vector128, Vector256

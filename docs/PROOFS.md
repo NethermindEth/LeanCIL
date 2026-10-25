@@ -187,6 +187,27 @@ placement expressions such as `region.append_left`. The fetched instruction must
 inside the segment and agree with its code. `append`, `middle`, `take` and `drop` move a placement
 between a region and its segments, and `rfl` closes a concrete one.
 [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this way.
+`Segment program method start finish pre post` packages a checked prefix as a composable
+contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame,
+stack and memory. Each admitted input supplies an output state and a cost, with an exact
+`run (fuel + cost) = run fuel` equation for every continuation fuel. `Segment.trans` composes
+adjacent contracts and adds their costs; `Segment.run_exists` applies a successful continuation.
+`Segment.consequence` changes assertions by proved
+implications. `SegmentState.exact` describes a known state. For these exact-state contracts,
+`cil_segment 3 [found, placed, facts]` proves the boundary using `cil_checked_steps` and fails
+unless the complete equation closes. `cil_segment_steps [facts]` proves a `SegmentRun`
+boundary directly. Neither tactic invents a memory or availability premise.
+
+For numeric-local framing, record successful write equations in `SegmentLocalEffects`.
+The destinations must occur in `segmentStores code`, read from the placed instructions.
+`Segment.frameLocals` combines these effects with the initial `LocalSnapshots` and
+`WritableHomes` to derive snapshots for `untouchedLocals code known`. Effects compose through
+`append` or `trans`; one frame-rule application replaces separate disjoint-read proofs for
+all retained locals. The numeric slot identities must remain fixed, and the frame-rule placement must belong to
+the running method and end at the contract boundary. Indirect writes and
+calls need a proved memory effect; absence of a direct `setLocal` is not evidence that an
+aliased byte-backed local keeps its value. [Tests/Segment](../Tests/Segment.lean) composes the
+UInt256 Add Vector128 reference prefix and Multiply AVX2 vector-input stages with these rules.
 
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the
 relevant proved facts. Branches always use equations before reflexivity, so a fact

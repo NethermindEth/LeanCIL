@@ -251,6 +251,12 @@ state `a + b + c`, `a - b - c` and the flag words in source form, through both
 source memory leaves the run stuck at that store, with the exact unsolved goal
 asserted.
 
+`Tests.Segment` composes the UInt256 Add Vector128 eight-op reference prefix and Multiply
+AVX2 input stages at positions 44–56. Formation, checked loads and stores, intrinsic
+availability and exact permutation semantics remain premises. Two actual vector writes
+frame all other numeric snapshots using separated homes. Negative cases reject aliased
+homes, hidden indirect writes, changed endpoint states, fuel costs and mismatched composition
+positions or assertions, and placements from a different body or end boundary. Every new theorem is kernel checked with its axiom set reported.
 `Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the
 lookups its `CodeAt` placement yields, with the error asserted when stepping has no
 placement, hands that segment theorem the middle of a larger placed region, closes a
@@ -356,7 +362,7 @@ method steps through a shift and an even-lane multiply with those lemmas as fact
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
