@@ -266,13 +266,13 @@ theorem enterFrame_deadLocals {expected actual : CIL.Method} {map : List Nat}
 
 #print axioms enterFrame_deadLocals
 
-/-- Each method `j` of `small` runs as the same method of `program` once its frames carry the
-    slots `extra j` after their locals: the code is the same, every step that succeeds or
+/-- Each method `j` of `unpadded` runs as the same method of `program` once its frames carry
+    the slots `extra j` after their locals: the code is the same, every step that succeeds or
     throws is the same, and frame entry agrees up to that padding. -/
-structure PaddedRefines (small program : CIL.Program) (extra : Nat → List LocalSlot) :
+structure PaddedRefines (unpadded program : CIL.Program) (extra : Nat → List LocalSlot) :
     Prop where
-  method : ∀ index body, small[index]? = some body → ∃ target, program[index]? = some target ∧
-    target.code = body.code ∧
+  method : ∀ index body, unpadded[index]? = some body →
+    ∃ target, program[index]? = some target ∧ target.code = body.code ∧
     (∀ op pc args frame stack memory outcome,
       step body op pc args frame stack memory = outcome → StepKept outcome →
       step target op pc args frame stack memory = outcome) ∧
@@ -280,12 +280,12 @@ structure PaddedRefines (small program : CIL.Program) (extra : Nat → List Loca
       (fun setup => (setup.1.appendLocals (extra index), setup.2)) <$>
         enterFrame body args memory
 
-/-- A result or thrown exception of a run of `small` is the same outcome of the run of
+/-- A result or thrown exception of a run of `unpadded` is the same outcome of the run of
     `program` in the padded frame; pcs and faults are unchanged. -/
-theorem run_padded {small program : CIL.Program} {extra : Nat → List LocalSlot}
-    (refines : PaddedRefines small program extra) :
+theorem run_padded {unpadded program : CIL.Program} {extra : Nat → List LocalSlot}
+    (refines : PaddedRefines unpadded program extra) :
     ∀ fuel method pc args frame stack (memory : Memory) outcome,
-      run small fuel method pc args frame stack memory = outcome → Transported outcome →
+      run unpadded fuel method pc args frame stack memory = outcome → Transported outcome →
       run program fuel method pc args (frame.appendLocals (extra method)) stack memory =
         outcome := by
   intro fuel
@@ -298,7 +298,7 @@ theorem run_padded {small program : CIL.Program} {extra : Nat → List LocalSlot
   | succ fuel ih =>
     intro method pc args frame stack memory outcome ran transported
     rw [run] at ran ⊢
-    cases fetched : small[method]? with
+    cases fetched : unpadded[method]? with
     | none =>
       simp only [fetched] at ran
       subst ran
@@ -338,7 +338,7 @@ theorem run_padded {small program : CIL.Program} {extra : Nat → List LocalSlot
             exact ih method target' args frame' stack' memory' outcome ran transported
           | call callee arguments rest memory' =>
             dsimp only [FrameAction.appendLocals, Functor.map, Except.map]
-            cases child : small[callee]? with
+            cases child : unpadded[callee]? with
             | none =>
               simp only [child] at ran
               subst ran
@@ -354,7 +354,7 @@ theorem run_padded {small program : CIL.Program} {extra : Nat → List LocalSlot
                 simp only [entered] at ran ⊢; subst ran; rfl
               | ok setup =>
                 simp only [entered] at ran ⊢
-                cases childRan : run small fuel callee 0 arguments setup.1 [] setup.2 with
+                cases childRan : run unpadded fuel callee 0 arguments setup.1 [] setup.2 with
                 | error fault =>
                   simp only [childRan] at ran
                   subst ran
@@ -368,7 +368,7 @@ theorem run_padded {small program : CIL.Program} {extra : Nat → List LocalSlot
                     transported
           | construct callee arguments rest frame' temporary kind memory' =>
             dsimp only [FrameAction.appendLocals, Functor.map, Except.map]
-            cases child : small[callee]? with
+            cases child : unpadded[callee]? with
             | none =>
               simp only [child] at ran
               subst ran
@@ -384,7 +384,7 @@ theorem run_padded {small program : CIL.Program} {extra : Nat → List LocalSlot
                 simp only [entered] at ran ⊢; subst ran; rfl
               | ok setup =>
                 simp only [entered] at ran ⊢
-                cases childRan : run small fuel callee 0 arguments setup.1 [] setup.2 with
+                cases childRan : run unpadded fuel callee 0 arguments setup.1 [] setup.2 with
                 | error fault =>
                   simp only [childRan] at ran
                   subst ran
@@ -412,15 +412,15 @@ theorem run_padded {small program : CIL.Program} {extra : Nat → List LocalSlot
 
 #print axioms run_padded
 
-/-- A result or thrown exception of an invocation of `small` is the same outcome of the
+/-- A result or thrown exception of an invocation of `unpadded` is the same outcome of the
     invocation of `program`. -/
-theorem invoke_padded {small program : CIL.Program} {extra : Nat → List LocalSlot}
-    (refines : PaddedRefines small program extra) {fuel method : Nat} {args : List Value}
+theorem invoke_padded {unpadded program : CIL.Program} {extra : Nat → List LocalSlot}
+    (refines : PaddedRefines unpadded program extra) {fuel method : Nat} {args : List Value}
     {memory : Memory} {outcome : Except LocatedFault (Memory × List Value)}
-    (invoked : invoke small fuel method args memory = outcome)
+    (invoked : invoke unpadded fuel method args memory = outcome)
     (transported : Transported outcome) : invoke program fuel method args memory = outcome := by
   unfold invoke at invoked ⊢
-  cases fetched : small[method]? with
+  cases fetched : unpadded[method]? with
   | none =>
     simp only [fetched] at invoked
     subst invoked

@@ -914,11 +914,12 @@ for the exact conditions and limits; `Tests/MethodEmbedding.lean` covers both
 outcomes, and `Tests/OutcomeEmbedding.lean` transfers a raising helper and its
 caller across an inserted dead block, with the relocated throw pc.
 
-An extraction can also declare locals the literal body never uses, such as a
-reference local a profile-specific path drops. When they trail the body's own
-locals and are references initialized to null or left unmodeled, `cil_embed`
-proves `MethodEmbedsDeadLocals` instead, and the same proof covers extractions
-with and without them (from `CIL.Safety.Embedding.DeadLocals`):
+An extraction can also declare locals the literal body never uses. Only one
+shape is covered: dead locals that trail the body's own locals and are
+references initialized to null or left unmodeled, which the extractor emits for
+byref and `ReadOnlySpan` locals. For those, `cil_embed` proves
+`MethodEmbedsDeadLocals` instead, and the same proof covers extractions with and
+without them (from `CIL.Safety.Embedding.DeadLocals`):
 
 ```lean
 theorem stored_dead_embeds : MethodEmbedsDeadLocals [storedDead] 0 stored := by cil_embed
@@ -930,5 +931,7 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 ```
 
 `.raises`, `.method_holds` and `.holds` transfer as for `MethodEmbeds`. A
-numeric dead local is rejected, since its home would shift every later
-allocation identity, and so is a dead local before a kept one.
+numeric dead local, such as a flag only one architecture's path reads, is still
+rejected: its home would shift every later allocation identity, and runs over
+renamed identities are not related yet. A dead local before a kept one is
+rejected too, since it renumbers the kept local.

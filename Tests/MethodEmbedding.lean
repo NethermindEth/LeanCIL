@@ -289,6 +289,55 @@ example : MethodEmbedsDeadLocals
     { stored with parameterHomes := [(0, .word32)] } := by
   cil_embed
 
+/-- Returns argument 0 past an opaque 128-bit vector local it never reads. -/
+@[cil_code] def vectorKept : Method := {
+  code := [.arg 0, .ret]
+  locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0]
+  returnsValue := true }
+
+/-- `vectorKept` as extracted with an unused reference local after its opaque one. -/
+def vectorDead : Method := {
+  vectorKept with
+  locals := [.unmodeled, .nullRef]
+  localKinds := [.vector128, .reference] }
+
+/-- An opaque local is kept in place while a trailing dead reference is dropped. -/
+theorem vector_dead_embeds : MethodEmbedsDeadLocals [vectorDead] 0 vectorKept := by cil_embed
+
+/-- `vectorKept` returns its argument; its opaque local allocates nothing. -/
+theorem vector_invocation (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [vectorKept] (executionBound [vectorKept] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps
+
+/-- Frame entry with opaque locals pads the same way, so the invocation transfers. -/
+theorem vector_dead_returns (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [vectorDead] (executionBound [vectorKept] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) :=
+  vector_dead_embeds.invoke (vector_invocation memory value)
+
+-- A live instruction that differs is still reported under dead locals.
+/--
+error: cil_embed: the expected body does not embed into the extracted method
+method index 0
+expected pc 2 maps to actual pc 2
+  expected: CIL.Op.arg 0 none
+  actual:   CIL.Op.arg 1 none
+  the instructions differ
+-/
+#guard_msgs (substring := true) in
+example : MethodEmbedsDeadLocals
+    [{ storedDead with code := [.local 0, .pop, .arg 1, .ret] }] 0 stored := by
+  cil_embed
+
+/-- A numeric dead local fails the kernel-checked condition itself, not only the tactic. -/
+theorem numeric_dead_rejected : ¬ MethodEmbedsDeadLocals
+    [{ stored with locals := [.nullRef, .unmodeled], localKinds := [.reference, .word64] }] 0
+    stored := by
+  rintro ⟨actual, map, found, embeds⟩
+  cases found
+  exact absurd embeds.dead (by decide)
+
 -- `MethodEmbeds` still demands equal locals.
 example : ¬ MethodEmbeds [storedDead] 0 stored := by
   rintro ⟨actual, map, found, embedded⟩
@@ -352,5 +401,21 @@ end DeadLocals
 /-- info: 'CIL.MethodEmbedsDeadLocals.holds' depends on axioms:
   [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms CIL.MethodEmbedsDeadLocals.holds
+
+/-- info: 'Tests.MethodEmbedding.vector_dead_returns' depends on axioms:
+  [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms vector_dead_returns
+
+/-- info: 'Tests.MethodEmbedding.vector_dead_embeds' depends on axioms:
+  [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms vector_dead_embeds
+
+/-- info: 'Tests.MethodEmbedding.vector_invocation' depends on axioms:
+  [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms vector_invocation
+
+/-- info: 'Tests.MethodEmbedding.numeric_dead_rejected' depends on axioms:
+  [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms numeric_dead_rejected
 
 end Tests.MethodEmbedding

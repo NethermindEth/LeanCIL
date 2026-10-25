@@ -138,8 +138,10 @@ source memory leaves the run stuck at that store, with the exact unsolved goal
 asserted.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
-bodies with mapped program counters, and with trailing dead reference locals dropped, rejecting
-numeric and non-trailing dead locals; `Tests.OutcomeEmbedding` checks transport of
+bodies with mapped program counters, and with trailing dead reference locals dropped,
+beside kept opaque vector locals too. It rejects numeric dead locals, in the kernel and
+in the tactic, and non-trailing ones, and still reports a changed live instruction
+under dead locals; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
 throws, unsupported execution and fuel exhaustion do not transfer. `Tests.AggregateSetup` and `Tests.Semantics`
 cover frame setup and interpreter behavior. The extracted-loop suite checks
