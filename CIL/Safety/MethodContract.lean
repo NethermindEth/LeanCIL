@@ -459,6 +459,44 @@ theorem Within.trans {inner middle outer : Reference × Nat} (left : Within inne
     (right : Within middle outer) : Within inner outer :=
   ⟨left.1.trans right.1, Nat.le_trans right.2.1 left.2.1, Nat.le_trans left.2.2 right.2.2⟩
 
+/-- A callee confined to fresh frame storage and to entries inside `footprint`, run between a
+    frame entry and exit that keep memory below the caller's `nextIdentity`, is confined to
+    `footprint` as the caller sees it. -/
+theorem Confined.across_frame {footprint inner : List (Reference × Nat)}
+    {initial entered final left : Memory}
+    (entryBelow : MemoryBelow initial.nextIdentity initial entered)
+    (enterGrows : initial.nextIdentity ≤ entered.nextIdentity)
+    (framed : Confined inner entered final)
+    (exitBelow : MemoryBelow initial.nextIdentity final left)
+    (exitGrows : final.nextIdentity ≤ left.nextIdentity)
+    (covered : ∀ entry ∈ inner,
+      initial.nextIdentity ≤ entry.1.allocation ∨ ∃ outer ∈ footprint, Within entry outer) :
+    Confined footprint initial left := by
+  have old : ∀ {id}, id < initial.nextIdentity → id < entered.nextIdentity :=
+    fun bound => Nat.lt_of_lt_of_le bound enterGrows
+  have narrow : ∀ {id offset}, id < initial.nextIdentity → Outside footprint id offset →
+      Outside inner id offset := fun bound outside entry member => by
+    rcases covered entry member with fresh | ⟨outer, contains, same, start, finish⟩
+    · exact Or.inl (by omega)
+    · rcases outside outer contains with different | below | above
+      · exact Or.inl (same ▸ different)
+      · exact Or.inr (Or.inl (by omega))
+      · exact Or.inr (Or.inr (by omega))
+  exact ⟨Nat.le_trans enterGrows (Nat.le_trans framed.grows exitGrows),
+    fun id bound => (exitBelow.allocations id bound).trans
+      ((framed.allocations id (old bound)).trans (entryBelow.allocations id bound)),
+    fun id bound offset outside => (exitBelow.cells id bound offset).trans
+      ((framed.cells id (old bound) offset (narrow bound outside)).trans
+        (entryBelow.cells id bound offset)),
+    fun id bound offset => (exitBelow.permissions id bound offset true).trans
+      ((framed.writable id (old bound) offset).trans
+        (entryBelow.permissions id bound offset true)),
+    fun id bound offset outside => (exitBelow.permissions id bound offset false).trans
+      ((framed.readable id (old bound) offset (narrow bound outside)).trans
+        (entryBelow.permissions id bound offset false))⟩
+
+#print axioms Confined.across_frame
+
 /-- `exported` follows from `internal`: same encodings, weaker pre, covering footprint,
     implied post. -/
 structure MethodContract.Refines {Input Output : Type}

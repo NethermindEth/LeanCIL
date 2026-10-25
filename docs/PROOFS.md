@@ -568,6 +568,55 @@ Its rejections are proved negations: an unjustified stronger postcondition, a
 weaker precondition, a smaller footprint and a changed exception type each
 refute the `Refines` premise and the derived `Holds` on a concrete input.
 
+## Inherit a callee's contract in a forwarder
+
+Overload forwarders and instance-to-static wrappers compile to
+`ldarg*; call k; ret`. `MethodContract.Holds.forward` (`CIL.Safety.Forwarders`)
+gives such a method its callee's contract with the forwarder's own argument
+encoding, `contract.withArgs forwarded`, without stepping either body:
+
+```lean
+theorem sum_forwards : sumContract.Holds Extracted.program sum :=
+  add_public.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+    (fun _ _ _ _ member => .inl member)
+    (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
+```
+
+`Forwards body calleeBody loads callee narrow` fixes the body to
+`forwarderCode loads callee narrow` with no locals, vector argument homes or
+parameter homes, so frame entry and exit leave memory unchanged and the callee's
+precondition, footprint and postcondition carry over verbatim. The loads are data:
+each is an argument index and the narrowing the extractor attaches to `bool`,
+`byte`, `sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones).
+The callee's arguments must be the forwarder's at those indices, each kept by its
+load's narrowing (`LoadsUnchanged`); every forwarder argument must reach the
+callee or be valid under the precondition, since the forwarder's own invocation
+checks them all; the call must expose no unspecified vector bits; and a narrowed
+`ret (some kind)` must not change the callee's result (`ReturnsUnchanged`), which
+holds for a boolean. Use `Holds.weaken` afterwards to export a different contract.
+
+`MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which
+passes the address of a fresh numeric local (not a reference, span or array, which have
+no byte home) as a last out argument and drops it. `ForwardsOut.notArray` excludes every
+array element kind; `make_fitting_local` requires the same premise after `notSpan`.
+The local may hold any initializer that fits its kind; the extractor emits
+`.unmodeled` without `InitLocals` and the kind's zero with it. The callee runs in
+the memory after frame entry and the result is read after the local expires, so
+the forwarder's contract `outer` is related to the callee's `inner` through
+`extend input home` and premises over those memories. The callee's arguments must
+be the forwarder's selected by the loads followed by the home, each kept by its
+load's narrowing and none with unspecified vector bits; `outer.pre` must give a
+well-formed memory in which every forwarder argument is valid (`checked`), since
+the forwarder checks them all; `inner.pre` must follow from `outer.pre` with the
+home fresh, writable and holding its initializer (`LocalHolds`); the `inner`
+footprint must name fresh storage or lie inside `outer.footprint`; the two
+contracts must encode results alike, as scalars that survive the local's expiry
+and that a narrowed `ret` keeps; and `outer.post` must follow from `inner.post`
+once the frame has expired. The footprint is checked by the lemma
+(`Confined.across_frame`). The home's alignment is not surfaced, so a callee whose
+precondition requires it cannot be composed yet.
+
 ## Compose through imported contracts
 
 A callee from another assembly has no body in the caller's extraction. Give it
