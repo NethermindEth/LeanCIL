@@ -487,8 +487,9 @@ partial class Program
                         "Independent library export closure or canonical statement mismatch.");
                 transfers[index] = independent.CaptureFullTerms(session, proofModule,
                     FullLibraryPrefix + slot.Import.Id, contract.InterfaceModules, leanPath);
-            }, [ExportTheoremRequest(export.ContractConstant, export.Kind),
-                ExportTheoremRequest(export.ContractConstant, export.Kind) with { name = slot.Author }]);
+            }, [ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional),
+                ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional)
+                    with { name = slot.Author }]);
             return new ConsumerRequest(implementation, slot.Artifact, prepared[index].Proof, ExportTheorem, null,
                 ExportAudit: audit);
         }).ToArray();
