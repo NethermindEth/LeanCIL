@@ -35,6 +35,14 @@ theorem step_preserves_static_world (descriptors : List CIL.StaticDescriptor)
   have effect := step_effect _ _ _ _ _ _ _ _ h
   generalize action.frameAfter frame = final, action.memory = result at effect ⊢
   cases effect with
+  | stackAllocation effect =>
+    cases effect with
+    | empty => exact world
+    | fresh allocated initialized =>
+      have ready := allocateHome_preserves_static_world _ _ _ _ _ _ hm world allocated
+      rcases initialized with rfl | written
+      · exact ready
+      · exact write_preserves_static_world _ _ _ _ _ _ ready written
   | memory effect => exact effect.staticWorld descriptors hm sites world
   | store _ stored => exact storeLocal_preserves_static_world _ _ _ _ _ _ world stored
   | valueHome allocated stored =>

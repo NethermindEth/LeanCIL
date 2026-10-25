@@ -2,6 +2,12 @@
 
 For checked-step and loop tactics, see [proof automation](#proof-automation).
 
+`Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
+covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
+initialization and copies. It rejects missing initialization assumptions, mutable fields,
+repeated stores, branches and address-taking during initialization. Independent Lean checks
+reject forged scalar signedness, width and literal evidence. It runs in the evidence suite.
+
 The repository pins .NET SDK **10.0.402** and Lean **4.35.0**. The checks below cover semantic behavior, extracted contracts, artifact integrity and rejection cases.
 
 ```sh
@@ -26,6 +32,7 @@ The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integ
 | Block memory and alignment prefixes | 251 checks; ten malformed-prefix/type cases rejected; universal out-of-bounds fill rejection |
 | Layout-based Unsafe helpers | 418 checks across 19 element types and all three managed offset overloads; ten malformed generic calls rejected |
 | Null managed references | `IsNullRef` of `NullRef` and of a live argument, reads and writes through `NullRef` (indirect and field) and an optional `ref` local: ten outcomes compared with .NET, each `NullReferenceException` matched to a located null-dereference fault; forged `NullRef`/`IsNullRef` translations rejected by the call binding; 22 malformed generic calls rejected |
+| Reference/null observations | Emitted CIL fixtures compare .NET and checked Lean execution for `ceq`, `brtrue`, `brfalse`, `beq`, `bne.un` and bounded `ldnull`; an independently changed equality operation must fail scalar evidence. Semantic fixtures cover readonly views, null, lifetime, invalid addresses, end pointers and disjoint allocation interiors. A null-message throw fixture preserves existing folding. |
 | Integer Math helpers | 21,804 runtime comparisons across 40 overloads; universal signed-minimum proof; incorrect implementation and seven malformed calls rejected |
 | `X86Base.X64.DivRem` through `ValueTuple<ulong, ulong>` Item1/Item2 reads | Runtime tuple offset probe; 500 checked-execution boundary cases across five read shapes compared with hardware and a `UInt128` oracle, including divide-by-zero and overflow faults; universal quotient and fault proof; remainder substituted for quotient rejected; eight forged calls, scopes and tuple layouts rejected |
 | Library, scalar/SIMD semantics, allocation, permissions, initialization, lifetime and symbolic automation | Passed |
@@ -80,9 +87,10 @@ The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integ
 | Invalid packing, oversized layout, auto layout, reference/float fields, inline arrays, generics, explicit offsets on sequential fields, nested reference-bearing and recursive fields | Ten intended metadata rejections |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, static initializer and forged runtime scope | Seven intended metadata rejections |
 | Identity-bound static RVA data | Passed |
-| Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; forged receiver folds fail the feature certificate; tampered RVA bytes change the proved word; other span local uses, computed indices and branches into the fold rejected |
+| Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; forged receiver folds fail the feature certificate; tampered RVA bytes change the proved word; branches into the fold rejected |
+| Memory-backed primitive spans | Compiled readonly and writable slices passed to helpers; sequence-content read and update contracts, and readonly/writable caller composition without unfolding helper bodies; creation over an existing reference; forged element widths and write capabilities rejected by specialization evidence; empty end slices, invalid indexes and slices, alias visibility, missing write authority, uninitialized reads and expired local storage; by-reference and floating-point span signatures rejected |
 | Static readonly struct values | `Zero`, `One` and `MinValue` limbs proved and compared with the values .NET's static constructor stored, also through an out parameter; a changed constructor argument changes the proved limbs; forged value bytes fail `translation_valid`; a missing initialization assumption, a `newobj` initializer, `ldsflda`, a store outside the static constructor and a second store rejected; Lean regressions for the load semantics and a self-justifying initializer |
-| Static `ReadOnlySpan<byte>` lookup tables | First and last byte proved; past-end read and write to immutable data rejected; tampered RVA bytes change the proved value; six intended span metadata rejections |
+| Static `ReadOnlySpan<byte>` lookup tables | First and last byte proved; past-end read and write to immutable data rejected; tampered RVA bytes change the proved value; four intended span metadata rejections and positive stored-span parameter/local fixtures |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |
 
 The addition theorem proves modular arithmetic correctness for arbitrary 64-bit inputs in the checked execution model. The unsigned-short theorem proves reduction modulo 65,536 for arbitrary 32-bit inputs. The invalid-access and expired-reference theorems classify faults and rule out successful execution for every fuel budget. The subtraction theorem independently refutes the intended addition result. Other example claims have the quantifiers and inputs displayed in their theorem statements; concrete examples do not establish universal method correctness.
@@ -106,6 +114,19 @@ Struct construction validation: 56 runtime comparisons passed, covering packed a
 F# validation: 324 comparisons with actual .NET execution passed for addition, unsigned branching, managed calls, mutable structs and by-reference stores. The existing addition, store/load and constructor contracts passed unchanged against the F# assembly. Subtraction failed the addition contract, and a list-returning function was rejected during extraction. These examples require no F#-specific CIL semantics or proof shortcuts.
 
 ## Contracts and extraction evidence
+
+`Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results
+with and without localsinit, rejects uninitialized reads and escaped storage, and checks
+insufficient-budget failure. Mutating the emitted initialization flag is rejected by the Lean
+certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
+`Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack
+items and non-native 64-bit size operands. These run in the `evidence` suite.
+
+`Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls, including
+mutation through the receiver, and rejects forged generated call targets and malformed prefix,
+branch and interface-constraint metadata. `Tests/ConstrainedResolution.cs` checks the extractor's
+resolution rules; `Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target,
+signature, ambiguity and prefix rejection. These run in the `evidence` suite.
 
 The core and universal-contract suites cover checked execution and memory preservation. Choose and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect compiled implementation. Countdown validation covers original instructions, inserted NOPs and reordered blocks, and rejects wrong results and nontermination.
 
@@ -136,6 +157,15 @@ state `a + b + c`, `a - b - c` and the flag words in source form, through both
 `cil_checked_steps` and `cil_contract_steps`. A wrong stored value, address or
 source memory leaves the run stuck at that store, with the exact unsolved goal
 asserted.
+
+`Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the
+lookups its `CodeAt` placement yields, with the error asserted when stepping has no
+placement, hands that segment theorem the middle of a larger placed region, closes a
+concrete placement by `rfl` and refutes a shifted one and one running past the code.
+It composes adjacent placements and splits them back with `cons_iff`, `take` and
+`drop`, including past the segment's end, and recovers the positional
+`leading ++ segment ++ tail` form from a nonempty placement alone, proving the bound
+`exists_eq_append` needs by placing the empty segment past the end of a body.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
 bodies with mapped program counters, and with trailing dead reference locals dropped,
@@ -173,21 +203,59 @@ differ, a selection that passes one argument twice, a result or load outside the
 range, and two false contracts: `IsZeroSecond` as if it loaded its first argument, and
 `IsZeroIgnoring` with a dangling unused argument.
 
+`Tests.InvocationCertificates` builds invocation certificates from a computed
+invocation and from a computed run, keeps them through a certified contract and
+its refinement, proves a caller whose postcondition is the visited-state clause of
+its callee's certificate, through a certified callee and through a callee without
+a precondition, and refutes a contract from the returned values of a computed run.
+`Tests.ValidCallTransport` carries `ValidCall` through writes, frame entry, memory
+kept below a watermark and a call confined apart from the inputs, and shows that a
+confined call over an input can revoke its read authority.
+
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through
-`Confined`. `Tests.BufferContents` checks typed buffer contents: fills and
-in-place transforms of any length, unchanged neighbouring bytes and sibling
-slices of one allocation, a producer that extends its prefix while its room
-stays unreadable, empty buffers at invalid and sentinel positions, and rejection
-of uninitialized, past-end, overlapping, unjoined and stale contents.
+`Confined`. `Tests.LocalSnapshots` keeps vector, int32, byte and narrow locals
+known across stores, overwrites, writes elsewhere and confined calls, and steps
+a load from a snapshot fact. `Tests.BufferContents` checks typed buffer
+contents: fills and in-place transforms of any length, unchanged neighbouring
+bytes and sibling slices of one allocation, a producer that extends its prefix
+while its room stays unreadable, empty buffers at invalid and sentinel
+positions, and rejection of uninitialized, past-end, overlapping, unjoined and
+stale contents.
+
+`Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under
+x86-64-v3, and carries it to x86-64-v4, to v3 without 256-bit acceleration and to every
+profile with AVX2 on. A raising method's outcome contract carries over too, in outcome,
+CLR-named and descriptor-indexed forms, with agreement decided from the flags the program
+reads. The baseline profile, with AVX2 off, fails both the agreement check and the contract,
+and turning off one of the four flags an AVX-512 DQ multiply needs fails the check.
+
+`Tests.InstructionEquations` checks that `cil_instruction_equations` states one
+equation per pc of a body over two feature flags and a callee index, keeping each
+feature test as an `if`, and of bodies with no parameters, with implicit and
+hypothesis parameters, and composed with `++` and `List.replicate`; that
+`cil_lookup` fetches through them from a sealed body; that facts or literal flags
+decide the test, in lookups and in a checked run; and that a run proved over the
+flags binds two profiles. A body whose length depends on a flag, at its first pc
+or a later one, is rejected with nothing declared.
 
 `Tests.InterpreterEquations` checks that each shared equation lemma is stored by
 its LeanCIL module rather than rebuilt by the importer, and that a tactic macro
 naming `CIL.step.eq_def` elaborates.
 
+`Tests.SimdLanes` checks the SIMD lane lemmas as a multi-limb routine uses them: the
+carry and borrow cascades built from intrinsic comparison masks reproduce 256-bit sums
+and differences for every input, including a carry that crosses an all-ones lane where a
+single repair hop is wrong, and 128-bit sums and differences follow from their lane
+carries. Each intrinsic equation (lane add, multiply, equal, unsigned and signed compare,
+`MoveMask`, shifts by immediate and by vector count, permute, sum and even-lane multiply)
+rewrites a packed or symbolic operand to its lane values, the bitwise lane projections
+cover a mask blend, and concrete 256-bit values are checked by kernel evaluation. A
+method steps through a shift and an even-lane multiply with those lemmas as facts.
+
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.ConfinedFootprints Tests.BufferContents Tests.Linking Tests.StoreFacts
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

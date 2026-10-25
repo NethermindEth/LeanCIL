@@ -133,7 +133,7 @@ def localIndex (instruction : RawInstruction) : Option Nat :=
   | 65036, .local n | 65037, .local n | 65038, .local n => some n
   | _, _ => none
 
-/-- Whether `instruction` names a span local; such locals are only touched by a receiver fold. -/
+/-- Whether `instruction` names a typed span local. -/
 def spanLocalOp (locals : List TypeExpr) (instruction : RawInstruction) : Bool :=
   match localIndex instruction with
   | some index => (locals[index]?.map spanLocal).getD false
@@ -143,6 +143,21 @@ def spanLocalOp (locals : List TypeExpr) (instruction : RawInstruction) : Bool :
 def receiverFold (locals : List TypeExpr) (a b : RawInstruction) : Bool :=
   a.opcode ∈ [10, 11, 12, 13, 19, 65038] && (b.opcode == 18 || b.opcode == 65037) &&
     localIndex a == localIndex b && spanLocalOp locals a
+
+/-- A receiver fold ends at a length call or an item call with a single index push. -/
+private def spanReceiverUse (code : List RawInstruction) : Bool :=
+  let member (instruction : RawInstruction) (name : String) :=
+    match instruction with
+    | ⟨_, 40, .call site⟩ => site.hasThis && site.name == name && spanLocal site.declaringType
+    | _ => false
+  match code with
+  | call :: _ =>
+    member call "get_Length" || match code with
+    | index :: call :: _ =>
+      index.opcode ∈ [2, 3, 4, 5, 14, 65033, 6, 7, 8, 9, 17, 65036,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] && member call "get_Item"
+    | _ => false
+  | _ => false
 
 /-- `ldstr` (114) or `ldnull` (20): a message argument of a folded `throw`. -/
 private def messageLoad (instruction : RawInstruction) : Bool :=
@@ -197,7 +212,8 @@ inductive FoldRole where
 private def foldAt (locals : List TypeExpr) (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
   (match tail with
-    | b :: _ => if receiverFold locals a b then some [some .head, some .interior] else none
+    | b :: rest => if receiverFold locals a b && spanReceiverUse rest then
+        some [some .head, some .interior] else none
     | _ => none) <|>
   (match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
@@ -217,7 +233,10 @@ def foldRolesFrom (locals : List TypeExpr) :
 
 /-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
-  foldRolesFrom locals [] code
+  let singleUse := locals.zipIdx.map fun (type, index) =>
+    if (code.filter fun instruction => localIndex instruction == some index).length == 2
+      then type else .void
+  foldRolesFrom singleUse [] code
 
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
 def foldEntry (roles : List (Option FoldRole)) (target : Nat) : Bool :=

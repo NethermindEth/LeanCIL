@@ -341,9 +341,9 @@ theorem correctness :
     CIL.Safety.invoke Extracted.program 6 0 [.scalar (.i32 0)] Examples.empty =
       .error ⟨0, 10, .fuelExhausted⟩ ∧
     Extracted.method0.code[5]? = some .sub ∧
-    CIL.Safety.step Extracted.method0 .sub 5 [] ⟨0, [], [], []⟩
+    CIL.Safety.step Extracted.method0 .sub 5 [] ⟨0, [], [], [], 0⟩
       [.scalar (.i32 1), .scalar (.i32 4294967295)] Examples.empty =
-      .ok (.next 6 [.scalar (.i32 4294967294)] ⟨0, [], [], []⟩ Examples.empty) := ⟨rfl, rfl, rfl⟩
+      .ok (.next 6 [.scalar (.i32 4294967294)] ⟨0, [], [], [], 0⟩ Examples.empty) := ⟨rfl, rfl, rfl⟩
 """);
 Console.WriteLine("PASS insufficient fuel and maximum unsigned decrement boundary");
 

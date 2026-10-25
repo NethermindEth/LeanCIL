@@ -35,6 +35,8 @@ structure RawLayout where
   fields : List RawField
   /-- Auto layout; CoreCLR keeps declaration order only among fields of equal width. -/
   auto : Bool := false
+  /-- Direct interface identities, used when checking closed generic constraints. -/
+  interfaces : List String := []
   deriving DecidableEq, Repr
 
 /-- A struct's field offsets and size, with the alignment it imposes when nested. -/

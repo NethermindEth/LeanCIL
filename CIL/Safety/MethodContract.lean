@@ -436,6 +436,22 @@ theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args
   rw [Nat.add_comm] at down
   exact Except.ok.inj (up.symm.trans down)
 
+/-- One computed observation of a successful invocation fixes that observation for every fuel
+    whose invocation succeeds, so a refutation compares only the observed part, such as the
+    returned values. -/
+theorem invoke_ok_observation_unique {α : Type} {program : CIL.Program}
+    {method fuel witnessFuel : Nat}
+    {args : List Value} {memory : Memory} (observe : Memory × List Value → α)
+    {outcome : Memory × List Value} {observed : α}
+    (witness : (invoke program witnessFuel method args memory).map observe = .ok observed)
+    (normal : invoke program fuel method args memory = .ok outcome) :
+    observe outcome = observed := by
+  cases execution : invoke program witnessFuel method args memory with
+  | error fault => simp [execution, Except.map] at witness
+  | ok actual =>
+    rw [invoke_ok_unique normal execution]
+    simpa [execution, Except.map] using witness
+
 theorem Within.refl (entry : Reference × Nat) : Within entry entry :=
   ⟨rfl, Nat.le_refl _, Nat.le_refl _⟩
 
@@ -550,6 +566,7 @@ theorem MethodContract.Holds.weaken {Input Output : Type}
 #print axioms call_frame_invariants
 #print axioms run_call_of_contract_formed
 #print axioms invoke_ok_unique
+#print axioms invoke_ok_observation_unique
 
 /-- Opens a contract goal: tidies the stack and, for an `invoke` goal, enters the frame via
     `invoke_exists_of_run` so stepping can start at pc 0. Used by `cil_contract_steps`. -/
@@ -563,6 +580,16 @@ macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
            (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
 
+open Lean Elab Tactic Meta in
+/-- Fails on a `step` goal whose op reduces to `ret`, which only `run_return_exists` takes.
+    Compiled once here: an inline `run_tac` block is elaborated again at every step. -/
+elab "cil_step_not_return" : tactic => withMainContext do
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
+  let some (_, lhs, _) := target.eq? | return
+  unless lhs.isAppOfArity ``CIL.Safety.step 7 do return
+  if (← cilReducedOp? lhs.getAppArgs[1]!).any (·.isAppOf ``CIL.Op.ret) then
+    throwError "Return requires run_return_exists"
+
 /-- One step of a contract goal: a non-return instruction through `run_next_exists`, or a
     `ret` through `run_return_exists`, leaving the postcondition. Fails at a call. -/
 macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
@@ -571,11 +598,7 @@ macro "cil_contract_step" "[" facts:term,* "]" : tactic =>
         (by cil_lookup [$[$facts:term],*])
         (by cil_lookup [$[$facts:term],*])
         (by
-          run_tac do
-            let target ← Lean.instantiateMVars (← Lean.Elab.Tactic.getMainTarget)
-            let operation := (target.getArg! 1).getArg! 1
-            if (← CIL.Safety.cilReducedOp? operation).any (·.isAppOf ``CIL.Op.ret) then
-              throwError "Return requires run_return_exists"
+          cil_step_not_return
           cil_checked_step_normalized [$[$facts:term],*]) ?_
        cil_stack_cleanup)
     | (cil_strict refine CIL.Safety.run_return_exists (op := .ret _)

@@ -78,6 +78,9 @@ structure Memory where
   nextIdentity : Nat
   /-- Loaded assembly fields retain identity independently of their contents. -/
   staticBindings : List (Nat × Reference) := []
+  /-- Admitted dynamic-stack bytes per activation; deployment must justify this quota.
+      Zero is the default, so existing memory grants no dynamic stack storage. -/
+  stackLimit : Nat := 0
 
 /-- Why a memory operation was rejected. -/
 inductive Fault where

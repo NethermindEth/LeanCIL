@@ -85,7 +85,7 @@ theorem Forwards.enterFrame {body calleeBody : CIL.Method}
     {narrow : Option CIL.NarrowKind} (forwards : Forwards body calleeBody loads callee narrow)
     (args : List Value) (memory : Memory) :
     CIL.Safety.enterFrame body args memory =
-      .ok (⟨memory.nextIdentity, [], [], []⟩, memory) := by
+      .ok (⟨memory.nextIdentity, [], [], [], 0⟩, memory) := by
   have noLocals : makeSelectedLocals memory.nextIdentity body.opaqueVectorLocals [] []
       memory = .ok ([], [], memory) := by
     unfold makeSelectedLocals
@@ -313,9 +313,9 @@ def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat
     [.localAddr 0, .call callee (loads.length + 1), .ret narrow]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
-    `calleeBody`, with the address of its only local, a numeric home of `kind` created from
+    `calleeBody`, with the address of its only local, a byte home of `kind` created from
     `initial`, as a last out argument whose contents it drops; it declares the callee's
-    return arity. Any initializer that fits the kind is accepted; the extractor emits
+    return arity. References and spans allocate no home, so `kind` is neither. Any initializer that fits the kind is accepted; the extractor emits
     `.unmodeled` without `InitLocals` and the kind's zero with it. -/
 structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Option CIL.NarrowKind))
     (callee : Nat) (narrow : Option CIL.NarrowKind) (kind : CIL.LocalKind) (initial : CIL.Value) :
@@ -324,6 +324,7 @@ structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Optio
   locals : body.locals = [initial]
   localKinds : body.localKinds = [kind]
   numeric : kind ≠ .reference
+  notSpan : ∀ width writable, kind ≠ .span width writable
   fits : InitializerFits kind initial
   opaqueVectorLocals : body.opaqueVectorLocals = []
   vectorArgs : body.vectorArgs = []
@@ -337,10 +338,11 @@ def LocalHolds (kind : CIL.LocalKind) (initial : CIL.Value) (memory : Memory)
   initial = .unmodeled ∨ ∃ number, localNumber kind initial = .ok number ∧
     read memory home (localWidth kind) 1 = .ok (numberBytes number (localWidth kind))
 
-/-- A numeric local with a fitting initializer is one fresh writable home holding that
-    initializer. -/
+/-- A local of a kind that is neither a reference nor a span, with a fitting initializer,
+    is one fresh writable home holding that initializer. -/
 theorem make_fitting_local (memory : Memory) (activation : Nat) (kind : CIL.LocalKind)
     (initial : CIL.Value) (wellFormed : memory.WellFormed) (numeric : kind ≠ .reference)
+    (notSpan : ∀ width writable, kind ≠ .span width writable)
     (fits : InitializerFits kind initial) :
     ∃ reference result,
       makeLocal activation kind initial memory =
@@ -350,9 +352,9 @@ theorem make_fitting_local (memory : Memory) (activation : Nat) (kind : CIL.Loca
   by_cases unknown : initial = .unmodeled
   · subst unknown
     obtain ⟨reference, result, made, writable⟩ :=
-      make_unknown_local memory activation kind wellFormed numeric
+      make_unknown_local memory activation kind wellFormed numeric notSpan
     exact ⟨reference, result, made, writable, Or.inl rfl⟩
-  · obtain ⟨number, encoded⟩ := initializer_numeric_number fits numeric unknown
+  · obtain ⟨number, encoded⟩ := initializer_numeric_number fits numeric notSpan unknown
     obtain ⟨reference, result, made, readback, writable, -⟩ :=
       make_numeric_local memory activation kind initial number wellFormed encoded
     exact ⟨reference, result, made, writable, Or.inr ⟨number, encoded, readback⟩⟩
@@ -368,14 +370,14 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
     (args : List Value) (memory : Memory) (wellFormed : memory.WellFormed) :
     ∃ home result,
       CIL.Safety.enterFrame body args memory =
-        .ok (⟨memory.nextIdentity, [.bytes kind home], [home.allocation], []⟩, result) ∧
+        .ok (⟨memory.nextIdentity, [.bytes kind home], [home.allocation], [], 0⟩, result) ∧
       memory.nextIdentity ≤ home.allocation ∧
       access result home (localWidth kind) 1 true = .ok () ∧
       LocalHolds kind initial result home ∧
       MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
   obtain ⟨home, result, made, writable, holds⟩ :=
     make_fitting_local memory memory.nextIdentity kind initial wellFormed forwards.numeric
-      forwards.fits
+      forwards.notSpan forwards.fits
   have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 home.allocation (by simp)
   refine ⟨home, result, ?_, fresh.1, writable, holds,
     makeLocal_preserves_caller_memory _ _ _ _ _ _ _ made,
@@ -481,7 +483,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       List.getElem?_append_left (by simpa using bound), List.getElem?_map, located]
     rfl
   rw [Nat.zero_add, List.append_nil]
-  let frame : Frame := ⟨memory.nextIdentity, [.bytes kind home], [home.allocation], []⟩
+  let frame : Frame := ⟨memory.nextIdentity, [.bytes kind home], [home.allocation], [], 0⟩
   have addressed : step body (.localAddr 0) loads.length (outer.args input) frame
       loaded.reverse entered =
         .ok (.next (loads.length + 1) (.reference (.address home) :: loaded.reverse) frame

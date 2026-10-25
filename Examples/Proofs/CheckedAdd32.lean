@@ -18,7 +18,7 @@ theorem correctness (x y : W32) (fits : x.toNat + y.toNat < 2^32) :
     rw [ite_eq_left range]
     rfl
   let args : List CIL.Safety.Value := [.scalar (.i32 x), .scalar (.i32 y)]
-  let frame : Frame := ⟨0, [], [], []⟩
+  let frame : Frame := ⟨0, [], [], [], 0⟩
   let result := BitVec.ofNat 32 (x.toNat + y.toNat)
   have executed : CIL.Safety.step Extracted.method0 (.checkedArithmetic .add false) 2 args frame
       [.scalar (.i32 y), .scalar (.i32 x)] Examples.empty =
