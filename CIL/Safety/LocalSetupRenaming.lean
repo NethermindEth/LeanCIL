@@ -1,12 +1,13 @@
 import CIL.Safety.FrameHomeRenaming
 import CIL.Safety.LocalSlotRenaming
 import CIL.Safety.LocalStoreRenaming
+import CIL.Safety.FrameProgress
 
 /-!
 # Local setup under renaming
 
 Retained locals preserve their physical home and checked initializer. Numeric homes
-allocate paired identities; deleted unmodeled homes remain private to the target.
+allocate paired identities; deleted homes with valid initializers remain private to the target.
 -/
 
 namespace CIL.Safety
@@ -208,5 +209,89 @@ theorem Memory.Renamed.skipLocalUnmodeled {mapping : AllocationRenaming}
         rw [← related.targetLimit]
         exact Nat.ne_of_lt (mapping.bounded sourceIdentity bound)
 #print axioms Memory.Renamed.skipLocalUnmodeled
+
+/-- Initializing an unmapped numeric home preserves every mapped allocation and permission. -/
+private theorem Memory.Renamed.storePrivateLocal {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target after : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : Reference)
+    (privateHome : ∀ identity, identity < mapping.sourceLimit →
+      mapping.image identity ≠ reference.allocation)
+    (kind : CIL.LocalKind) (initial : CIL.Value) (number : Nat)
+    (encoded : localNumber kind initial = .ok number) {slot : LocalSlot}
+    (stored : CIL.Safety.storeLocal target (.bytes kind reference) (.scalar initial) =
+      .ok (slot, after)) :
+    Memory.Renamed mapping scopes source after := by
+  cases initial
+  case snapshot shape bytes =>
+    cases kind <;> simp [localNumber, CIL.Value.hasUnspecified] at encoded
+  case v128Low64 low => simp [localNumber, CIL.Value.hasUnspecified] at encoded
+  all_goals
+    simp only [CIL.Safety.storeLocal, encoded, checkedAt, Except.mapError,
+      Bind.bind, Except.bind, Pure.pure, Except.pure] at stored
+    cases written : CIL.Safety.write target reference (numberBytes number (localWidth kind)) 1 <;>
+      simp only [written] at stored
+    · cases stored
+    · cases stored
+      exact related.writePrivate reference privateHome _ _ written
+#print axioms Memory.Renamed.storePrivateLocal
+
+/-- Valid inserted initializers use only private target homes, without a source setup premise. -/
+theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (targetFormed : target.WellFormed)
+    (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value)
+    (fits : InitializerFits kind initial) (bounded : localWidth kind < nativeLimit)
+    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]) :
+    ∃ later slot owned targetAfter,
+      mapping.Extends later ∧ makeLocal activation kind initial target =
+        .ok (slot, owned, targetAfter) ∧
+      Memory.Renamed later scopes source targetAfter ∧
+      ∀ identity ∈ owned, identity < later.targetLimit ∧
+        ∀ sourceIdentity, sourceIdentity < later.sourceLimit →
+          later.image sourceIdentity ≠ identity := by
+  by_cases unknown : initial = .unmodeled
+  · subst initial
+    exact related.skipLocalUnmodeled targetFormed activation kind bounded spanWidth
+  have privateHome : ∀ identity, identity < mapping.skipTarget.sourceLimit →
+      mapping.skipTarget.image identity ≠ target.nextIdentity := by
+    intro identity bound
+    rw [← related.targetLimit]
+    exact Nat.ne_of_lt (mapping.bounded identity bound)
+  let retainedKind := kind
+  cases kind with
+  | reference =>
+    cases initial <;> simp [InitializerFits] at fits unknown
+    refine ⟨mapping, .root (some .null), [], target, .refl mapping, rfl, related, ?_⟩
+    intro identity member; cases member
+  | array element =>
+    cases initial <;> simp [InitializerFits] at fits unknown
+    refine ⟨mapping, .array element (some ⟨.null, 0, element⟩), [], target,
+      .refl mapping, rfl, related, ?_⟩
+    intro identity member; cases member
+  | span width writable =>
+    cases initial <;> simp [InitializerFits] at fits unknown
+    refine ⟨mapping, .span width writable (some ⟨.null, 0, width, writable⟩), [], target,
+      .refl mapping, ?_, related, ?_⟩
+    all_goals simp_all [makeLocal]
+  | byte | word32 | word64 | narrow _ | aggregate _ | vector128 | vector256 | vector512 =>
+    obtain ⟨home, allocated, homes⟩ := related.skipHome targetFormed activation
+      (localWidth retainedKind) (localAlignment retainedKind) bounded (localAlignment_pos _)
+    obtain ⟨number, encoded⟩ := initializer_numeric_number fits (by simp)
+      (by intros; simp) (by intros; simp) unknown
+    obtain ⟨slot, after, stored⟩ := fresh_home_storeLocal_succeeds _ _ _ _ _ _ _ allocated encoded
+    have remains := homes.storePrivateLocal _ privateHome _ _ _ encoded stored
+    refine ⟨mapping.skipTarget, slot, [target.nextIdentity], after,
+      mapping.skipTarget_extends, ?_, remains, ?_⟩
+    · simp only [makeLocal, retainedKind, allocated, unknown, ite_false, Bind.bind,
+        Except.bind, stored, Pure.pure, Except.pure]
+    · intro identity member
+      have equal := List.mem_singleton.mp member
+      subst identity
+      constructor
+      · change target.nextIdentity < mapping.targetLimit + 1
+        rw [related.targetLimit]
+        exact Nat.lt_succ_self _
+      · exact privateHome
+#print axioms Memory.Renamed.skipLocalInitialized
 
 end CIL.Safety

@@ -170,7 +170,8 @@ theorem initialized_helper_frames :
     ⟨rfl, rfl, rfl, entry_ready.2.layouts⟩
   have selected : LocalDeclarations indices initializedSource.localKinds initializedSource.locals
       initializedTarget.localKinds initializedTarget.locals :=
-    .skip .word32 (.keep .word64 (.i64 0) (.skip .word32 .nil))
+    .skip .word32 .unmodeled (by simp [InitializerFits])
+      (.keep .word64 (.i64 0) (.skip .word32 .unmodeled (by simp [InitializerFits]) .nil))
   have sourceEntry : ∃ frame after, enterFrame initializedSource [] caller = .ok (frame, after) :=
     ⟨_, _, rfl⟩
   obtain ⟨frame, after, entered⟩ := sourceEntry

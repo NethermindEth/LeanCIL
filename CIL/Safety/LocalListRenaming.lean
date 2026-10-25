@@ -7,13 +7,13 @@ import CIL.Safety.FrameSetupLemmas
 # Frame setup with interleaved dead declarations
 
 Local lists are built by the actual frame allocator. Retained initializers receive
-paired homes and deleted unmodeled declarations receive private target homes. The result
+paired homes and valid inserted declarations receive private target homes. The result
 binds the executable local operand map, ownership and evolving allocation correspondence.
 -/
 
 namespace CIL.Safety
 
-/-- Retained declarations preserve their initializer; inserted dead homes are unmodeled. -/
+/-- Retained initializers remain exact; inserted dead homes must have compatible initializers. -/
 inductive LocalDeclarations : LocalIndexMap → List CIL.LocalKind → List CIL.Value →
     List CIL.LocalKind → List CIL.Value → Prop
   | nil : LocalDeclarations .nil [] [] [] []
@@ -23,10 +23,10 @@ inductive LocalDeclarations : LocalIndexMap → List CIL.LocalKind → List CIL.
       LocalDeclarations (.keep indices) (kind :: sourceKinds) (initial :: sourceValues)
         (kind :: targetKinds) (initial :: targetValues)
   | skip {indices sourceKinds sourceValues targetKinds targetValues}
-      (kind : CIL.LocalKind)
+      (kind : CIL.LocalKind) (initial : CIL.Value) (fits : InitializerFits kind initial)
       (rest : LocalDeclarations indices sourceKinds sourceValues targetKinds targetValues) :
       LocalDeclarations (.skip indices) sourceKinds sourceValues
-        (kind :: targetKinds) (.unmodeled :: targetValues)
+        (kind :: targetKinds) (initial :: targetValues)
 
 /-- Corresponding retained slots remain bounded across subsequent calls. -/
 def LocalSlot.Renamed (mapping : AllocationRenaming) (source target : LocalSlot) : Prop :=
@@ -175,10 +175,11 @@ theorem Memory.Renamed.makeLocalsInitialized {mapping : AllocationRenaming}
     · exact .keep ((show LocalSlot.Renamed paired slot (paired.localSlot slot) from
         ⟨slotBound, rfl⟩).extend following) renamedSlots
     · exact ((OwnedAllocations.mapped paired owned ownedBounds).extend following).append ownedRest
-  | @skip indices sourceKinds sourceValues targetKinds targetValues kind selected induction =>
+  | @skip indices sourceKinds sourceValues targetKinds targetValues kind initial fits
+      selected induction =>
     obtain ⟨bounded, spanWidth⟩ := ready kind List.mem_cons_self
     obtain ⟨skipped, slot, owned, home, extension, madeHome, homes, privateOwned⟩ :=
-      related.skipLocalUnmodeled targetFormed targetActivation kind bounded spanWidth
+      related.skipLocalInitialized targetFormed targetActivation kind initial fits bounded spanWidth
     have targetSetup := makeLocal_setup _ _ _ _ _ _ _ madeHome
     have nextStatic : ∀ binding ∈ source.staticBindings,
         binding.2.allocation < skipped.sourceLimit :=
