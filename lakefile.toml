@@ -189,3 +189,6 @@ name = "Tests.PointerOperations"
 
 [[lean_lib]]
 name = "Tests.PrimitiveArrays"
+
+[[lean_lib]]
+name = "Tests.ArrayElementReferences"

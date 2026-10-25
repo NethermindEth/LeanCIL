@@ -10,6 +10,11 @@ Independent changes to load width or signedness must fail the Lean scalar certif
 initialization, authority, invalid extents, local storage and neighboring-byte preservation.
 Both run in the evidence suite.
 
+`Tests/ArrayElementReferences.cs` checks compiled `ldelema` returns, helper reads and writes
+against runtime behavior, preserving neighboring contents and rejecting a forged element type.
+`Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired
+references and address formation without granting memory authority. Both run in the evidence suite.
+
 `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
 covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
 initialization and copies. It rejects missing initialization assumptions, mutable fields,
