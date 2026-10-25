@@ -380,7 +380,8 @@ unprovable, so no separate equality audit is needed. `StaticIdentitiesAbsent`
 suits only a first-use contract: after the first call the field is loaded and the
 premise is false.
 
-Full verification proves `linkChecked` for the composed program inside
+Forced full verification replays libraries with RVA tables against their
+current DLLs and proves `linkChecked` for the composed program inside
 `LeanCILFullComposition.certified`, which rejects conflicting descriptors and
 names both fields. A published-certification import has no linked program; there
 the extractor's static identity checks and the `StaticWorldValid` premises guard

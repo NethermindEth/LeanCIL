@@ -261,13 +261,18 @@ It composes adjacent placements and splits them back with `cons_iff`, `take` and
 `exists_eq_append` needs by placing the empty segment past the end of a body.
 
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
-bodies with mapped program counters, and with trailing dead reference locals dropped,
-beside kept opaque vector locals too. It rejects numeric dead locals, in the kernel and
+bodies with mapped program counters, and with trailing dead reference and span locals dropped,
+beside kept opaque vector locals too. It checks empty and unmodeled span slots, both mutabilities
+and every supported width, and rejects unsupported widths and scalar span initializers.
+It rejects numeric dead locals, in the kernel and
 in the tactic, and non-trailing ones, and still reports a changed live instruction
 under dead locals; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
 throws, unsupported execution and fuel exhaustion do not transfer. `Tests.AggregateSetup` and `Tests.Semantics`
-cover frame setup and interpreter behavior. The extracted-loop suite checks
+cover frame setup and interpreter behavior. `Tests.RetainedNumericLocals` keeps dead
+numeric declarations before and after a live local, transfers exact-memory executions
+and named exceptions through nested allocating calls, and checks that deleting a
+numeric local changes the allocation watermark and fails ordinary embedding. The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, a counted loop composed through its
 helper's contract and reused for a reimplemented helper, a loop that returns or
@@ -351,7 +356,7 @@ method steps through a shift and an even-lane multiply with those lemmas as fact
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
@@ -387,9 +392,9 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
 | `exportsresolution` | Same loaded files and changed loaded module |
-| `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal |
-| `exportsfullordinary` | Ordinary caller full verification |
-| `exportsfullpair` | Two imported slots from one bundle |
+| `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal; caller and library proof-build stages required separately for each invocation |
+| `exportsfullordinary` | Ordinary caller full verification, requiring its direct proof check and the imported proof build |
+| `exportsfullpair` | Two imported slots from one bundle, requiring both imported proof builds and the caller check |
 | `exportsfullchecks` | Bundle, DLL, closure, statement digest and caller-premise rejection |
 | `exportsfulltheorems` | Wrong producer theorem statement and definition |
 | `exportsfullcomposition` | Transferred macro cannot replace the composition theorem with True |
@@ -398,6 +403,7 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
+| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof |
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |
 | `exportstyped` | Standalone closed-generic and imported-layout fixture with its own SDK setup and existing assertions |
@@ -411,9 +417,10 @@ removal of an actual successful report. The default eight-argument
 once. Its optional `--cohort NAME` selects one full cohort. Unknown, missing or
 duplicate selections fail before fixture setup.
 The full plan contains only its ten explicit base cohorts. Later standalone
-statics, transitive, discovery, typed and derived suites cannot enter that plan.
-The registry now has 18 leaves. `exportsstatics`, `exportstransitive`, `exportstyped` and `exportsderived` run
-directly, with no core export bootstrap or nested post-call. Their fixture assertions are
+statics, fullstatics, transitive, discovery, typed and derived suites cannot enter that plan.
+The registry now has 19 leaves. `exportsstatics`, `exportsfullstatics`, `exportstransitive`,
+`exportstyped` and `exportsderived` run directly, with no core export bootstrap or nested post-call.
+Their fixture assertions are
 separate from the 46 base case IDs. A standalone fixture cannot use an empty
 base completion ledger to claim coverage.
 `exportsdiscovery` records one separate `discovery.fixture` completion after
