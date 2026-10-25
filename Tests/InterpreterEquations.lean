@@ -27,7 +27,8 @@ run_cmd do
       (`CIL.Safety.pureArity.eq_1, `CIL.Safety.Equations), (`CIL.Safety.pureArity.eq_def, `CIL.Safety.Equations),
       (`CIL.Safety.scalars.eq_1, `CIL.Safety.Equations), (`CIL.Safety.scalars.eq_def, `CIL.Safety.Equations),
       (`CIL.binary.eq_1, `CIL.Safety.Equations), (`CIL.binary.eq_def, `CIL.Safety.Equations),
-      (`CIL.unary.eq_1, `CIL.Safety.Equations), (`CIL.unary.eq_def, `CIL.Safety.Equations)] do
+      (`CIL.unary.eq_1, `CIL.Safety.Equations), (`CIL.unary.eq_def, `CIL.Safety.Equations),
+      (`CIL.FeatureProfile.evaluate.eq_1, `CIL.Safety.ValueSteps)] do
     let some index := env.getModuleIdxFor? name | throwError "{name} is not stored by an import"
     let stored := env.header.moduleNames[index.toNat]!
     unless stored == owner do throwError "{name} is stored by {stored}, expected {owner}"

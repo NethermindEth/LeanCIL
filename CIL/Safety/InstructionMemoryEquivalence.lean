@@ -34,7 +34,8 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     ResultEquivalent MemoryFirstEquivalent (memoryInstruction operation stack m)
       (memoryInstruction operation stack n) := by
   unfold CIL.Safety.memoryInstruction
-  split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add]
+  split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
+    same.spanValidate, same.spanSlice, same.spanElement]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩

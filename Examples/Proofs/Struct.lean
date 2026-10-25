@@ -18,7 +18,7 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
   obtain ⟨reference, entered, made, initialRead, writable, preserved⟩ :=
     make_numeric_local memory memory.nextIdentity (.aggregate 12)
       (.aggregate (List.replicate 12 0)) 0 wellFormed rfl
-  let frame : Frame := ⟨memory.nextIdentity, [.bytes (.aggregate 12) reference], [reference.allocation], []⟩
+  let frame : Frame := ⟨memory.nextIdentity, [.bytes (.aggregate 12) reference], [reference.allocation], [], 0⟩
   have opaqueLocalsEmpty : Extracted.method0.opaqueVectorLocals = [] := rfl
   have setup : enterFrame Extracted.method0 [.scalar (.i64 x)] memory = .ok (frame, entered) := by
     simp only [enterFrame, Extracted.method0_locals, Extracted.method0_localKinds,

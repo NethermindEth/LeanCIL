@@ -1,4 +1,5 @@
 import CIL.Safety.Execution
+import CIL.Safety.SpanViewLemmas
 
 /-!
 # Instruction effects and value validity
@@ -48,6 +49,9 @@ theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List
     width. A span's accessible bytes are checked by the memory operation. -/
 def Value.Valid (m : Memory) : Value → Prop
   | .scalar value => numericValue value = true
+  | .bufferSpan view => view.validate m = .ok ()
+  | .readOnlyReference .null => True
+  | .readOnlyReference (.address r) => form m r = .ok r
   | .reference .null | .span .null _ => True
   | .reference (.address r) | .span (.address r) _ => form m r = .ok r
 
@@ -130,6 +134,23 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
     · cases h
   | reference r =>
     exact ⟨formValue_returns_input _ _ _ h, formValue_result_valid _ _ _ h⟩
+  | bufferSpan view =>
+    cases formed : view.validate m <;>
+      simp only [checkedValue, formed, checkedAt, Except.mapError, Bind.bind, Except.bind,
+        Pure.pure, Except.pure] at h
+    · cases h
+    · rename_i unit
+      cases unit
+      cases h
+      exact ⟨rfl, formed⟩
+  | readOnlyReference r =>
+    cases formed : formValue m r <;>
+      simp only [checkedValue, formed, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    · cases h
+    · cases h
+      have valid := formValue_result_valid _ _ _ formed
+      rw [formValue_returns_input _ _ _ formed] at valid
+      cases r <;> exact ⟨rfl, valid⟩
   | span r length =>
     simp only [checkedValue] at h
     cases hf : formValue m r <;>
@@ -145,6 +166,13 @@ theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid 
     checkedValue m value = .ok value := by
   cases value with
   | scalar value => simp only [Value.Valid] at valid; simp [checkedValue, valid]
+  | bufferSpan view =>
+    simp only [Value.Valid] at valid
+    simp [checkedValue, valid, checkedAt, Except.mapError, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  | readOnlyReference r => cases r <;>
+      simp_all [Value.Valid, checkedValue, formValue, checkedAt, Except.mapError,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]
   | reference r => cases r <;>
       simp_all [Value.Valid, checkedValue, formValue, checkedAt, Except.mapError,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -160,6 +188,11 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   have hv := valid value member
   cases value with
   | scalar value => exact hv
+  | bufferSpan view => exact view.validate_preserved hv hm ext
+  | readOnlyReference r =>
+    cases r with
+    | null => exact True.intro
+    | address r => exact ext.preserves_reference hm r r hv
   | reference r =>
     cases r with
     | null => exact True.intro
@@ -272,6 +305,41 @@ theorem InstructionContract.of_effect {m result : Memory} {stack values : List V
     InstructionContract m result stack values :=
   ⟨effect, fun hm valid => preserve (valid.preserve hm effect.allocations)⟩
 
+/-- Validation establishes the invariant for a span value pushed by a constructor. -/
+theorem checkedSpan_valid (view : SpanView) (memory : Memory) (width : Nat) (done : Unit)
+    (formed : checkedAt view.reference width (view.validate memory) = .ok done) :
+    (Value.bufferSpan view).Valid memory := by
+  cases done
+  exact checkedAt_ok formed
+
+/-- Removing write permission does not change a span's checked extent. -/
+theorem checkedReadOnlySpan_valid (view : SpanView) (memory : Memory) (width : Nat) (done : Unit)
+    (formed : checkedAt view.reference width (view.validate memory) = .ok done) :
+    (Value.bufferSpan view.asReadOnly).Valid memory := by
+  cases done
+  change view.validate memory = .ok ()
+  exact checkedAt_ok formed
+
+/-- A sliced value carries the extent checked by slicing. -/
+theorem checkedSpanSlice_valid (view result : SpanView) (memory : Memory) (start length : Nat)
+    (sliced : checkedAt view.reference 0 (view.slice memory start length) = .ok result) :
+    (Value.bufferSpan result).Valid memory :=
+  view.slice_valid result memory start length (checkedAt_ok sliced)
+
+/-- Both writable and readonly element references are live checked addresses. -/
+theorem checkedSpanElement_valid (view : SpanView) (memory : Memory) (width index : Nat)
+    (reference : Reference)
+    (found : checkedAt view.reference width (view.element memory index) = .ok reference) :
+    (if view.writable then Value.reference (.address reference)
+      else .readOnlyReference (.address reference)).Valid memory := by
+  have valid := view.element_formed memory index reference (checkedAt_ok found)
+  split <;> exact valid
+
+#print axioms checkedSpan_valid
+#print axioms checkedReadOnlySpan_valid
+#print axioms checkedSpanSlice_valid
+#print axioms checkedSpanElement_valid
+
 set_option hygiene false in
 /-- Closes one success case of the instruction case analysis with `InstructionContract.of_effect`:
     picks the effect from the hypotheses, then rebuilds the output stack from retained inputs
@@ -301,6 +369,10 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | apply loadValue_scalar_valid; assumption
             | apply formValue_result_valid; assumption
             | apply checked_add_result_valid; assumption
+            | apply checkedSpan_valid; assumption
+            | apply checkedReadOnlySpan_valid; assumption
+            | apply checkedSpanSlice_valid; assumption
+            | apply checkedSpanElement_valid; assumption
           · first
             | exact retained
             | exact retained.tail

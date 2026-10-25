@@ -8,7 +8,7 @@ open CIL.Safety
 open CIL (W32)
 namespace ExampleProof
 
-private def frame : Frame := ⟨0, [.bytes .word32 ⟨0, 0⟩], [0], []⟩
+private def frame : Frame := ⟨0, [.bytes .word32 ⟨0, 0⟩], [0], [], 0⟩
 private def guard : Nat := instructionLocation Extracted.method0 fun op =>
   match op with | .brnonzero _ => true | _ => false
 private def header (state : W32 × Memory) : LoopState :=

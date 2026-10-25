@@ -156,7 +156,7 @@ theorem numeric_frame_setup (body : CIL.Method) (specs : List NumericLocalSpec)
   obtain ⟨slots, owned, result, made, homes⟩ :=
     make_numeric_locals memory memory.nextIdentity specs wellFormed
   simp only [numericKinds, numericInitializers] at made
-  let frame : Frame := ⟨memory.nextIdentity, slots, owned, []⟩
+  let frame : Frame := ⟨memory.nextIdentity, slots, owned, [], 0⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
       kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes,

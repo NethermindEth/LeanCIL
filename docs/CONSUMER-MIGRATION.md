@@ -54,7 +54,8 @@ or `add`, so state memory facts at that level; facts about `memoryInstruction`
 or `staticInstruction` still apply, through a slower retry in `cil_checked_step`,
 `cil_checked_steps`, `cil_contract_steps` and the loop tactics; a hand-written step
 or `cil_checked_step_equations` call with such a fact must
-`rw [CIL.Safety.step_memory_eq]` first or restate it at the per-shape level. Through
+`rw [CIL.Safety.step_memory_eq]` first, and for a `memoryInstruction` fact also unfold
+`CIL.Safety.staticInstruction`, or restate it at the per-shape level. Through
 `cil_checked_step_equations`, an `add`, `spanItem`, `copyBlock` or `initBlock` step
 needs `CIL.Safety.referenceAt_address` passed (or use `cil_checked_step`). A `referenceAt r = .ok a`
 fact about a symbolic `ManagedReference` applies. A `.feature` step
@@ -63,8 +64,9 @@ fact form. Those checked-step tactics normalize a fact stated through
 `FeatureProfile.evaluate` or on a method's profile projection (local, proof term, global theorem
 or quantified over every feature) to it; elsewhere, including `simp only [cil_step, facts]` and
 `cil_checked_step_equations`, state it on the field or run
-`simp only [CIL.Safety.reduceMethodProfile, CIL.FeatureProfile.evaluate] at h` first. In custom dispatch tactics, inspect the operation before trying step
-lemmas for other operations; unifying an unrelated step equation may unfold
+`simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h` first; a fact about a
+symbolic feature `body.profile.evaluate f` applies as stated. In custom dispatch tactics,
+inspect the operation before trying step lemmas for other operations; unifying an unrelated step equation may unfold
 large symbolic stacks. No global heartbeat increase or weakened safety condition
 is part of this migration.
 

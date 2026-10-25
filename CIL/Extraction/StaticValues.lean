@@ -3,11 +3,11 @@ import CIL.Safety.Execution
 /-!
 # Static readonly values
 
-A `static readonly` struct field set once by its static constructor loads as a constant.
-The extractor records the call `M(constants)` that produced the value; `StaticValuesValid`
-reruns each such call in the checked interpreter from empty memory and requires exactly
-the emitted bytes. See the static-value section of `docs/SOUNDNESS.md` for what stays
-trusted.
+A `static readonly` integer, enum or struct field set once by its static constructor loads
+as a constant. The extractor records its literal or the call `M(constants)` that produced
+the value. `StaticValuesValid` checks literal storage or reruns the call in the checked
+interpreter from empty memory and requires exactly the emitted bytes. See the static-value
+section of `docs/SOUNDNESS.md` for what stays trusted.
 -/
 
 namespace CIL.Extraction
@@ -27,15 +27,29 @@ def withoutStaticValues (program : Program) : Program :=
   program.map fun body =>
     { body with staticSites := body.staticSites.filter (·.2.initializer.isNone) }
 
+/-- A stored integer truncates to its field width; aggregate initializers preserve every byte. -/
+def staticStoredBytes (descriptor : StaticDescriptor) (value : Value) : Option (List (BitVec 8)) :=
+  match descriptor.scalar, value with
+  | none, .aggregate bytes => some bytes
+  | some _, .i32 word =>
+    if descriptor.bytes.length ∈ [1, 2, 4] then
+      some (Safety.numberBytes word.toNat descriptor.bytes.length) else none
+  | some _, .i64 word =>
+    if descriptor.bytes.length == 8 then some (Safety.numberBytes word.toNat 8) else none
+  | _, _ => none
+
 /-- The initializer call returns exactly the descriptor's bytes; RVA descriptors have none. -/
 def initializerYields (program : Program) (descriptor : StaticDescriptor) : Bool :=
   match descriptor.initializer with
   | none => true
   | some init =>
-    match Safety.invoke (withoutStaticValues program) initializerFuel init.method
+    match init.literal with
+    | some value => init.method == 0 && init.arguments.isEmpty && descriptor.scalar.isSome &&
+        staticStoredBytes descriptor value == some descriptor.bytes
+    | none => match Safety.invoke (withoutStaticValues program) initializerFuel init.method
         (init.arguments.map .scalar) initializerMemory with
-    | .ok (_, [.scalar (.aggregate bytes)]) => bytes == descriptor.bytes
-    | _ => false
+      | .ok (_, [.scalar value]) => staticStoredBytes descriptor value == some descriptor.bytes
+      | _ => false
 
 /-- Every constructor-fixed static value in the program is the result of its initializer. -/
 def StaticValuesValid (program : Program) : Prop :=

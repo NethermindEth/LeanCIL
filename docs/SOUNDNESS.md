@@ -8,6 +8,38 @@ and interface pins, so a wrong selection can only fail, never certify other byte
 
 ## What is defined and proved
 
+Dynamic stack allocation uses the existing allocation-relative memory model. Each successful
+nonempty `localloc` creates a fresh frame-owned allocation, grants access to exactly its byte
+extent and charges its size rounded to 16 bytes against the activation's resource quota.
+`Memory.stackLimit` defaults to zero and admits at most 65,536 bytes per activation. A proof
+using a positive quota must justify that deployment assumption; this quota excludes the
+runtime's ordinary frame, call and probing overhead and does not establish available physical
+thread-stack space. The model reports `stackAllocationFailure` when the quota is insufficient.
+That resource failure is not automatically a named CLR exception, nor does a successful model
+execution prove that the runtime cannot exhaust its physical stack.
+
+The emitted initialization flag must match the raw method's `localsinit` bit. Without it, new
+bytes remain unreadable until written; with it, the payload is zero-initialized. A zero-byte
+request returns null without reserving storage. Frame exit expires all dynamic allocations,
+and the existing return checks reject escaped references and spans. Pointer values retain
+allocation provenance; numeric address fabrication remains unsupported. Memory equivalence
+now also requires equal stack quotas, and frame records track the charged dynamic bytes.
+
+These initialization and lifetime rules follow the
+[CLI localloc specification](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.localloc?view=net-10.0).
+Zero-size null results and 16-byte reservation rounding follow the .NET 10.0.0 CoreCLR
+[x64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenxarch.cpp)
+and [ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp)
+implementations. This source correspondence is an explicit runtime assumption, not a proof
+of the JIT or of resource availability on every deployment.
+
+Concrete constrained struct calls retain their original prefix and interface slot in raw
+specialization evidence. A mandatory Lean validator independently resolves the slot from the
+serialized type, interface, method and explicit-override declarations, then checks the emitted
+direct-call target and signature. Faithful metadata decoding and complete serialization of those
+declarations remain trusted. The admitted subset has no runtime vtable lookup or boxing fallback;
+this does not prove general CLR dispatch correct.
+
 `CIL.Safety.RuntimeExceptions` adds a fixed naming view of checked execution
 faults. `RaisesCLR` and `OutcomeContract.HoldsCLR` name `.thrown exception`
 directly, arithmetic overflow as `System.OverflowException`, and integer
@@ -29,7 +61,7 @@ Specialization can make `typeof(A) == typeof(B)` (or `!=`) a constant. `CIL.Extr
 
 `foldRoles` also recognizes `throw new E(...)`: `ldstr`/`ldnull` loads, an exact allowlisted `System.Runtime` exception constructor, then `throw`. `exceptionConstructor` lists the supported exception types with parameterless or one-string constructors, and the two-string overloads of `ArgumentException`, `ArgumentNullException` and `ArgumentOutOfRangeException`. Both extraction and the feature certificate reject other types and constructor signatures; null arguments are admitted only as strings, not as arbitrary constructor parameter types. The feature certificate accepts only `nop` for the loads and `newobj`, and `.throw "E"` for the `throw`, and rejects any non-fallthrough edge past the first instruction, so the raised object is always the one constructed. The checked interpreter fails with `ExecutionFault.thrown "E"` at the `throw`. The model does not run the constructor: resource exhaustion, such as an out-of-memory condition, is not distinguished. Methods with exception handlers are rejected, so nothing observes the exception before execution ends.
 
-`foldRoles` also folds `stloc s; ldloca s` when `s` is a primitive `ReadOnlySpan<T>` local: both emit `nop`, so the span value replaces the address of `s` as the receiver of the next call. A span local has no storage; the feature certificate rejects every other access to it, so no later read can observe the skipped store. Passing the value instead of `&s` is equivalent because nothing between the `ldloca` and the call can write `s`: the extractor admits only one load or constant before `get_Item`, or `get_Length` directly. `CreateSpan<T>` requires a reference to the start of an immutable static allocation whose size is a multiple of the element width, and `get_Item` forms an element reference through the checked `add`, so every element access stays within the static field.
+`foldRoles` folds `stloc s; ldloca s` for a single-use primitive `ReadOnlySpan<T>` receiver: both emit `nop`, leaving the span value on the stack. The feature certificate checks that the local has exactly those two accesses and that the receiver is followed by `get_Length` or a single load or constant before `get_Item`; branches cannot enter the folded sequence. Other supported span uses retain typed local or parameter storage. Memory-backed views retain allocation identity, element width, bounds and lifetime, and never grant authority or initialize bytes. Readonly views prohibit stores through their element references but do not prevent writable aliases from updating the same allocation. `CreateSpan<T>` over static data requires the start of an immutable allocation whose size is a multiple of the element width; checked indexing stays within that field.
 
 Generated Lean and the identity manifest retain the original generic definition and concrete type arguments; each specialized method retains its original metadata token. Assembly hashing and regeneration-based artifact checks bind this information and the generated instructions to the compiled input. These checks establish artifact consistency, not a formal proof of the extractor's implementation.
 
@@ -156,7 +188,7 @@ at the selected profile. This analysis remains trusted metadata processing, not
 a proof of CLR execution or library correctness. Static-value and type-init
 assumptions are still rejected by the closed-export producer.
 
-A static readonly struct field set by its static constructor is admitted only for `ldsfld`, under `--assume-initialized` for its declaring type, and loads as a constant aggregate. Two parts are trusted: the extractor's recognition that the constructor stores `M(constants)` (or a copy of such a field stored earlier) exactly once and unconditionally, and the runtime assumption that nothing writes the field after that store. The extractor rejects other stores in the module and `ldsflda` of the field in the constructor or its same-assembly callees, and never forms the field's address in an extracted method; writes through `Unsafe`, reflection or other unmodelled code are excluded by assumption, as the JIT also treats an initialized `static readonly` field as constant. The value itself is kernel checked: `StaticValuesValid`, part of `TranslationValid`, reruns `M` on its recorded arguments from empty memory, with constructor-initialized sites removed so that no initializer can read a value it justifies, and requires exactly the emitted bytes. `M` runs under the selected profile, so this also assumes the profile matches the runtime during initialization. Reports list each such field as a caller assumption next to the initialization assumption. Unsafe reference arithmetic wraps at the modeled native width and retains allocation provenance; every resulting reference must pass formation checks. A valid end sentinel grants no access permission.
+A static readonly integer, enum or reference-free struct field set by its static constructor is admitted only for `ldsfld`, under `--assume-initialized` for its declaring type, and loads as a constant scalar or aggregate. Two parts are trusted: the extractor's recognition that the constructor stores an integer literal, `M(constants)`, or a copy of such a field stored earlier exactly once and unconditionally, and the runtime assumption that nothing writes the field after that store. The extractor rejects other stores in the module and `ldsflda` of the field in the constructor or its same-assembly callees, and never forms the field's address in an extracted method; writes through `Unsafe`, reflection or other unmodelled code are excluded by assumption, as the JIT also treats an initialized `static readonly` field as constant. The value itself is kernel checked: `StaticValuesValid`, part of `TranslationValid`, reruns `M` on its recorded arguments from empty memory, with constructor-initialized sites removed so that no initializer can read a value it justifies, and requires exactly the emitted bytes after storage-width truncation. Direct literal descriptors are checked against their emitted bytes with the same integer-storage rules; recognizing and faithfully decoding the literal expression remains trusted. The per-method shape validator binds scalar load width and signedness to the raw field type, including enum storage. `M` runs under the selected profile, so this also assumes the profile matches the runtime during initialization. Reports list each such field as a caller assumption next to the initialization assumption. Unsafe reference arithmetic wraps at the modeled native width and retains allocation provenance; every resulting reference must pass formation checks. A valid end sentinel grants no access permission.
 
 ## Trusted computing base
 
@@ -178,7 +210,7 @@ No `sorry`, `admit`, new axioms, native proof evaluation, or unchecked correctne
 
 Feature certificates record abstract incoming states at every original instruction. Lean checks entry state, abstract transfers, all required successors, joins, the reachable mask and emitted feature-dependent operations, including decided type tests. Closure and weakening theorems support the analysis. This is not a full concrete-interpreter simulation theorem for every raw CLI opcode. Raw metadata fidelity, unsupported transformations, static-data serialization and general instruction translation remain part of the trusted boundary.
 
-Scalar certificates additionally record the complete incoming stack of `word32`, `word64`, `native`, `reference` or `other` kinds at each feature-reachable PC. `ScalarFlowValid` checks the empty entry, code/certificate lengths, raw maximum stack, independently derived raw transfers and exact incoming-stack agreement on every required successor, including joins and backedges. Managed call parameter and result types are bound exactly to the specialized callee's closed signature. Call operands must match the reversed parameter-kind list and a reference receiver where required. External parameter types must match the raw full signature after method and declaring-type argument substitution; unsupported type spellings stay opaque. Local and argument stores must match the declared home kind, with the explicit 64-bit storage rule below. Returns require the declared result representation and no extra stack values; only native/int64 storage interchange is permitted. External result kinds require the recorded runtime type to agree with the return spelling in the full raw method identity; unknown types remain `other` and cannot justify scalar arithmetic or conversions. Only supported integer producers receive an integer kind; unhandled producers, including floating conversions and reference/array loads, remain `other`. This is a type-flow check of the recorded raw input, not a proof that metadata decoding or raw serialization is faithful.
+Scalar certificates additionally record the complete incoming stack of `word32`, `word64`, `native`, `reference`, `nullObject` or `other` kinds at each feature-reachable PC. `ScalarFlowValid` checks the empty entry, code/certificate lengths, raw maximum stack, independently derived raw transfers and exact incoming-stack agreement on every required successor, including joins and backedges. Managed call parameter and result types are bound exactly to the specialized callee's closed signature. Call operands must match the reversed parameter-kind list and a reference receiver where required. External parameter types must match the raw full signature after method and declaring-type argument substitution; unsupported type spellings stay opaque. Local and argument stores must match the declared home kind, with the explicit 64-bit storage rule below. Returns require the declared result representation and no extra stack values; only native/int64 storage interchange is permitted. External result kinds require the recorded runtime type to agree with the return spelling in the full raw method identity; unknown types remain `other` and cannot justify scalar arithmetic or conversions. Only supported integer producers receive an integer kind; unhandled producers, including floating conversions and reference/array loads, remain `other`. This is a type-flow check of the recorded raw input, not a proof that metadata decoding or raw serialization is faithful.
 
 For every reachable covered opcode, `ScalarFlowValid` requires an exact emitted operation before any general stack-effect check can accept it. The covered families are integer literals (`ldc.i4.*`, `ldc.i4.s`, `ldc.i4`, `ldc.i8`), wrapping and checked add/subtract/multiply, signed/unsigned divide and remainder, bitwise operations, shifts, negation, integer comparisons, all admitted checked/unchecked integer conversions, and all twenty short and long compare-and-branch encodings with their exact target. Literal encodings must have their signed operand range and exact bit pattern, including high-bit-set 64-bit words. Conversion width, result signedness, input signedness and checkedness are matched independently. Mixed native/int32 binary and compare-and-branch operands require exactly one `nativeBinary` wrapper; homogeneous operands forbid it, and native/int64 mixtures and non-integer branch operands are rejected. Mixed `bne.un`, `bge.un`, `bgt.un`, `ble.un` and `blt.un` are rejected as in the extractor: on .NET 10 CoreCLR zero-extends an int32 argument there but sign-extends an int32 constant, so inlining changes the outcome. Mixed `clt.un` and `cgt.un` sign-extend for both argument and constant operands, direct and inlined, tiered and fully optimized, on x64 and arm64; this is an observed runtime fact, like the native runtime comparisons, not a proof. The admitted profiles have a 64-bit native width.
 
@@ -224,7 +256,7 @@ The wrong-addition fixture has a finite execution witness plus a uniqueness theo
 
 The scalar certificate permits interchange between `word64` and `native` only at a metadata-bound 64-bit local home, argument home or return boundary. Both have the checked interpreter representation `i64` on the validated 64-bit target. This representation rule does not permit a mixed native/int64 arithmetic operation, int32 widening, or recovery of numeric width from `other`.
 
-The existing byte-span constructor model takes a checked reference and an int32 length. Scalar evidence permits that reference for the raw `void*` parameter only at the exact `System.Runtime` 10 `ReadOnlySpan<byte>(void*, int32)` constructor signature, with its exact declaring type, parameter/result metadata and emitted `spanCreate` operation. An opaque value or native integer cannot use this rule. Other pointer signatures retain their existing opaque classification.
+Primitive integer pointer parameters, locals and results carry checked allocation-relative references. Raw `void*` remains opaque except at the supported `System.Runtime` 10 primitive `Span<T>(void*, int32)` and `ReadOnlySpan<T>(void*, int32)` constructors. Their scalar evidence checks the exact declaring type, external signature, parameter/result metadata, element width and mutability against the emitted `spanFromReference` operation. The existing `ReadOnlySpan<byte>` constructor retains its exact `spanCreate` check. Each constructor requires a checked reference and an int32 length; an opaque value or native integer cannot fabricate a reference through this rule. Other pointer element types remain unsupported by extraction.
 
 A raw `stloc` into a validated int32 or narrow integer home with a known `word64` or `native` input is an explicit terminal `invalidState` case. The checked home store rejects every such `i64` input. The certificate therefore requires no successful successor from that store; it does not convert the value or treat later instructions as a successful execution. The rule requires the exact emitted local index. Unknown values, references and missing or different homes cannot use this exception. All covered arithmetic and conversion encodings still require their exact checks, including after the terminal store.
 
@@ -338,3 +370,17 @@ correspondence beyond the existing admitted layout model. Reference-only
 interfaces and caller proof caches gain no new authority. See
 [TYPED-IMPORTS.md](TYPED-IMPORTS.md) for the supported subset and rejection rules.
 
+### Reference observations
+
+`brtrue`, `brfalse`, `ceq`, `beq` and `bne.un` observe allocation-relative
+references, including readonly views, without reading bytes or granting authority.
+Non-null operands must pass formation and lifetime checks. Equality compares offsets
+within one allocation and distinguishes interiors of different allocations. A comparison
+between different allocations involving an end pointer is unsupported: allocation
+identities do not establish whether adjacent runtime addresses coincide.
+
+Bounded `ldnull` emits the existing null-reference value, while scalar evidence tracks
+its raw object-null kind separately from managed references. It can be truth-tested,
+compared with another object null, duplicated or discarded. It cannot justify object
+parameters, locals or results, or a comparison against a managed reference. The scalar
+certificate binds the raw null literal, comparison operation and branch target exactly.

@@ -22,8 +22,9 @@ internal static class LeanEmitter
     internal const string Decide = "by decide +kernel";
     internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar")
     {
-        // A span local is only touched by a receiver fold, so its slot is an inert root.
-        if (type is ByReferenceType || Spans.Width(type) is not null) return ".reference";
+        if (type is ByReferenceType or PointerType) return ".reference";
+        if (Spans.Width(type) is { } width)
+            return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (MetadataValidation.IsAggregate(type, module)) return $".aggregate {MetadataValidation.Layout(type, module, architecture)}";
         if (Narrow(type) is { } narrow) return $".narrow .{narrow}";
         return EnumTypes.Storage(type).FullName switch
@@ -47,6 +48,7 @@ internal static class LeanEmitter
     {
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
         string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
+        string kind when kind.StartsWith(".span ", StringComparison.Ordinal) => ".nullRef",
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module, architecture)} 0)"
     };
@@ -97,8 +99,7 @@ internal static class LeanEmitter
         {
             MethodDefinition m = methods[n];
             HashSet<Instruction> reachable = Reachability.Analyze(m, profile);
-            NativeOperands.Certificate scalarCertificate = NativeOperands.Certify(m, profile);
-            HashSet<Instruction> nativeOperands = scalarCertificate.Mixed;
+            var scalarCertificate = NativeOperands.Certify(m, profile);
             var parameterIndices = ParameterStorage.Analyze(m, profile);
             string parameters = string.Join(", ", parameterIndices.Select(index => $"({index}, {Kind(MethodArguments.Type(m, index), m.Module, profile.Architecture)})"));
             string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module, profile.Architecture) : ".unmodeled"));
@@ -107,7 +108,7 @@ internal static class LeanEmitter
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
             List<string> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, nativeOperands, parameterIndices, importResolution) : ".unsupported \"Unreachable under selected profile\"");
+                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, scalarCertificate, parameterIndices, importResolution) : ".unsupported \"Unreachable under selected profile\"");
             var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
             string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
@@ -119,10 +120,17 @@ internal static class LeanEmitter
                     if (s.i.OpCode.Code == Code.Ldsfld)
                     {
                         StaticValues.Value value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module, profile.Architecture);
-                        var initializer = Array.IndexOf(methods, value.Initializer);
-                        if (initializer < 0) throw new InvalidDataException($"Missing static initializer: {value.Initializer.FullName}");
+                        var initializer = value.Initializer is null ? 0 : Array.IndexOf(methods, value.Initializer);
+                        if (initializer < 0)
+                            throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
+                        var literal = value.Literal is null ? "" : $", literal := some ({value.Literal})";
                         StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
-                        return $"({s.pc}, {{ identity := {identity.Identity}, assemblyIdentity := {JsonSerializer.Serialize(identity.AssemblyIdentity)}, fieldName := {JsonSerializer.Serialize(value.Field.FullName)}, bytes := {StaticData.LeanBytes(value.Bytes)}, initializer := some {{ method := {initializer}, arguments := [{string.Join(", ", value.Arguments)}] }} }})";
+                        return $"({s.pc}, {{ identity := {identity.Identity}, " +
+                            $"assemblyIdentity := {JsonSerializer.Serialize(identity.AssemblyIdentity)}, " +
+                            $"fieldName := {JsonSerializer.Serialize(value.Field.FullName)}, " +
+                            $"bytes := {StaticData.LeanBytes(value.Bytes)}, scalar := {StaticValues.Scalar(value.Field)}, " +
+                            $"initializer := some {{ method := {initializer}, " +
+                            $"arguments := [{string.Join(", ", value.Arguments)}]{literal} }} }})";
                     }
                     FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
                     StaticIdentityRecord fieldIdentity = StaticIdentity.Of(f);
@@ -152,7 +160,7 @@ internal static class LeanEmitter
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
         for (int n = 0; n < methods.Length; n++)
-            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods imports method{n}Closed method{n}Reachable method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid specializedMethods imports (Extraction.lowerConstrainedRaw method{n}DispatchTypes method{n}Closed) method{n}Reachable method{n} := {Decide}");
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them.
         lean.AppendLine("def signatures : List String := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}Signature")) + "]");
@@ -160,17 +168,18 @@ internal static class LeanEmitter
         lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
-        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses }}")) + "]");
+        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, dispatchTypes := method{n}DispatchTypes }}")) + "]");
         for (int n = 0; n < methods.Length; n++)
         {
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
+            lean.AppendLine($"theorem method{n}_constrained_validated : Extraction.ConstrainedCallsValid method{n}DispatchTypes specializedMethods method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_unsafe_validated : Extraction.UnsafeCallsValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
             lean.AppendLine($"theorem method{n}_division_validated : Extraction.DivisionIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
-            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_division_validated, method{n}_opaque_validated, method{n}_vector_initializations_validated, method{n}_scalars_validated⟩");
+            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_division_validated, method{n}_opaque_validated, method{n}_vector_initializations_validated, method{n}_scalars_validated, method{n}_constrained_validated⟩");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");

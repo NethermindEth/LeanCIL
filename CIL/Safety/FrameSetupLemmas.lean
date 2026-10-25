@@ -1,5 +1,6 @@
 import CIL.Safety.FrameLemmas
 import CIL.Safety.MemoryBelow
+import CIL.Safety.SpanViewLemmas
 
 /-!
 # Frame setup effects
@@ -115,10 +116,12 @@ theorem allocateHome_preserves_caller_memory {alignment : Nat} (m result : Memor
     rw [(allocation_identity_fresh _ _ _ _ ha).1]
     exact Nat.le_refl _
 
-/-- A root must contain a checked reference; byte slots must name live storage. -/
+/-- Roots and spans retain checked references and extents; byte slots name live storage. -/
 def LocalSlot.ReferencesValid (m : Memory) : LocalSlot → Prop
   | .root none | .root (some .null) | .opaque128 _ => True
   | .root (some (.address r)) | .bytes _ r => form m r = .ok r
+  | .span _ _ none => True
+  | .span _ _ (some view) => view.validate m = .ok ()
 
 /-- Every slot in `slots` satisfies `LocalSlot.ReferencesValid`. -/
 def SlotsReferencesValid (m : Memory) (slots : List LocalSlot) : Prop :=
@@ -130,6 +133,10 @@ theorem LocalSlot.ReferencesValid.preserve {m result : Memory} {slot : LocalSlot
   cases slot with
   | bytes kind r => exact ext.preserves_reference hm r r valid
   | opaque128 _ => trivial
+  | span width writable value =>
+    cases value with
+    | none => trivial
+    | some view => exact view.validate_preserved valid hm ext
   | root value =>
     cases value with
     | none => exact True.intro
@@ -157,7 +164,7 @@ theorem allocateHome_reference_valid {alignment : Nat} (m result : Memory)
 
 /-- Byte homes are allocated after the entry watermark; roots do not own bytes. -/
 def LocalSlot.Above (watermark : Nat) : LocalSlot → Prop
-  | .root _ | .opaque128 _ => True
+  | .root _ | .opaque128 _ | .span .. => True
   | .bytes _ r => watermark ≤ r.allocation
 
 theorem write_staticBindings {m result : Memory} {r : Reference} {bytes : List (BitVec 8)}
@@ -240,6 +247,7 @@ theorem storeLocal_preserves_reference_validity (m result : Memory) (slot final 
   repeat' first
     | exact retained
     | solve | exact formValue_root_valid (by assumption)
+    | solve | exact checkedAt_ok (by assumption)
     | cases h
     | split at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
@@ -282,6 +290,7 @@ theorem FrameSetup.append {activation : Nat} {first middle last : Memory}
       cases slot with
       | root _ => trivial
       | opaque128 _ => trivial
+      | span _ _ _ => trivial
       | bytes _ _ => exact Nat.le_trans a.fresh.1.next bound
 
 theorem allocateHome_setup {alignment : Nat} (m result : Memory) (activation width : Nat)
@@ -343,6 +352,25 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
     FrameSetup activation m result [slot] owned := by
   unfold makeLocal at h
   split at h
+  · rename_i width writable
+    split at h
+    · cases h
+    · rename_i widthValid
+      split at h
+      · cases h
+        refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id, ?_, ?_⟩
+        · intro _ entry member
+          obtain rfl := List.mem_singleton.mp member
+          simp_all [LocalSlot.ReferencesValid, SpanView.validate, Bind.bind, Except.bind,
+            Pure.pure, Except.pure]
+        · intro entry member
+          obtain rfl := List.mem_singleton.mp member
+          trivial
+      · cases h
+        exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+          by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
+          by simp [LocalSlot.Above]⟩
+      · cases h
   · split at h
     · cases h; exact .root _ _ _ True.intro
     · cases h; exact .root _ _ _ True.intro

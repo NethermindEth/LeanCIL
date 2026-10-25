@@ -14,6 +14,9 @@ namespace CIL.Extraction
 /-- `(pops, pushes)` of each memory operation. -/
 private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .bigMul64 => (3, 1)
+  | .spanSlice explicitLength => (if explicitLength then 3 else 2, 1)
+  | .spanFromReference .. => (2, 1)
+  | .spanReadOnly => (1, 1)
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
   | .init256 | .skipInit => (1, 0)
@@ -27,6 +30,7 @@ change a local root. Control flow, returns, stores and addresses require exact
 raw-instruction matching instead. No unrecognized instruction is admitted. -/
 def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :=
   match op with
+  | .stackAlloc _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
   | .const32 _ | .const64 _ | .arg .. | .vectorArg _ | .local .. | .vectorLocal _ => some (0, 1)
