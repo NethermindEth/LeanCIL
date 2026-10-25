@@ -60,6 +60,7 @@ import CIL.Safety.Calling
 import CIL.Safety.CallingTransport
 import CIL.Safety.Certificate
 import CIL.Safety.CertifiedContract
+import CIL.Safety.CodeAt
 import CIL.Safety.ConfinedSnapshots
 import CIL.Safety.ConstructComposition
 import CIL.Safety.ConstructContract

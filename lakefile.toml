@@ -155,6 +155,9 @@ name = "Tests.ProfileContract"
 [[lean_lib]]
 name = "Tests.InstructionEquations"
 
+[[lean_lib]]
+name = "Tests.CodeAt"
+
 # Audits kernel-replayed oleans without elaborating proof or publisher source.
 [[lean_exe]]
 name = "leancil-audit"

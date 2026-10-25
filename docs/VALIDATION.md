@@ -137,6 +137,15 @@ state `a + b + c`, `a - b - c` and the flag words in source form, through both
 source memory leaves the run stuck at that store, with the exact unsolved goal
 asserted.
 
+`Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the
+lookups its `CodeAt` placement yields, with the error asserted when stepping has no
+placement, hands that segment theorem the middle of a larger placed region, closes a
+concrete placement by `rfl` and refutes a shifted one and one running past the code.
+It composes adjacent placements and splits them back with `cons_iff`, `take` and
+`drop`, including past the segment's end, and recovers the positional
+`leading ++ segment ++ tail` form from a nonempty placement alone, proving the bound
+`exists_eq_append` needs by placing the empty segment past the end of a body.
+
 `Tests.MethodEmbedding` checks transport of checked executions to actual method
 bodies with mapped program counters; `Tests.OutcomeEmbedding` checks transport of
 named exceptions and outcome contracts, the relocated fault pc, and that changed
@@ -202,7 +211,7 @@ naming `CIL.step.eq_def` elaborates.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
