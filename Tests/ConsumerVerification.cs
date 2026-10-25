@@ -5,6 +5,8 @@
 
 using System.Text.Json;
 
+Run(["dotnet", "run", "--file", At("Tests/ConsumerSourceResolution.cs")]);
+
 var cli = new[] { "dotnet", args.Length == 0 ? ExtractorPath : Path.GetFullPath(args[0]) };
 var root = Path.GetFullPath(At("artifacts/ConsumerPackage"));
 var output = At("artifacts/ConsumerExtraction");
