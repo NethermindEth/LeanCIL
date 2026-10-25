@@ -124,7 +124,10 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
         lean.AppendLine($"def method{number}Closed : Extraction.RawMethod := {Method(method, method)}");
         lean.AppendLine($"def method{number}DispatchTypes : List Extraction.DispatchType := {DispatchTypes(method)}");
-        lean.AppendLine($"theorem method{number}_specialization_validated : Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw method{number}Closed method{number}RawArguments := {LeanEmitter.Decide}");
+        // Direct equality proofs avoid a separate structural decision over the raw metadata.
+        lean.AppendLine($"theorem method{number}_specialization_validated :" +
+            $" Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw" +
+            $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
     }
 
     string DispatchTypes(MethodDefinition method)
