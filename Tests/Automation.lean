@@ -622,16 +622,30 @@ theorem feature_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safety.Frame
   simp only [cil_step, enabled, ite_true]
   rfl
 
-/-- Checked stepping keeps the same fact usable: the normaliser leaves it folded too. -/
+open Lean Elab Tactic in
+/-- Fails if normalising `facts` restates any of them as a new hypothesis. -/
+elab "expect_facts_already_normal " "[" facts:term,* "]" : tactic => do
+  let config ← `(Lean.Parser.Tactic.optConfig|)
+  let prepared ← CIL.Safety.normaliseStepFacts config facts.getElems
+  unless prepared.size == facts.getElems.size do
+    throwError "normalisation restated {prepared.size - facts.getElems.size} facts"
+
+/-- Checked stepping uses the fact as stated: the normaliser leaves a symbolic feature test
+    folded, as the step leaves it, rather than restating the fact as a match on `f`. -/
 theorem feature_checked_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (feature : CIL.Feature)
     (disabled : body.profile.evaluate feature = false) :
     CIL.Safety.step body (.feature feature) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 0)] frame memory) := by
+  expect_facts_already_normal [disabled]
   cil_checked_step [disabled]
 
-#print axioms feature_step_symbolic_fact
-#print axioms feature_checked_step_symbolic_fact
+/-- info: 'Tests.Automation.feature_step_symbolic_fact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms feature_step_symbolic_fact
+/--
+info: 'Tests.Automation.feature_checked_step_symbolic_fact' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in #print axioms feature_checked_step_symbolic_fact
 
 -- A global theorem stated through `evaluate` is normalized like a local fact.
 def wideProfile : CIL.FeatureProfile := { avx2 := true }
