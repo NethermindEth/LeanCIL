@@ -266,6 +266,10 @@ module for each input. Prove the template once and use the generated bindings fo
 selected profiles; see [generated profile templates](docs/PROOFS.md#generated-profile-templates)
 for the supported domain and checking workflow.
 
+Public and protected static methods can publish contracts for separately compiled callers,
+including a derived class calling a protected base method. Calls remain statically resolved;
+this does not add virtual dispatch support.
+
 Exported contracts can carry an explicit type-initialization premise for libraries
 with static constructors, including types containing `static readonly` struct fields.
 The sidecar binds each premise to an assembly, type and profile; importing callers

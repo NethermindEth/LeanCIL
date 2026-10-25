@@ -358,6 +358,10 @@ not exportable. Contract predicates and their reachable definitions determine th
 closure digest; the name alone does not determine it.
 
 Version 1 supports public or protected static, non-virtual, non-generic exports.
+A separately compiled derived class can import a protected base method's contract
+for a statically resolved call. The `exportsprotected` suite checks that SDK-built
+case and rejects rehashed metadata that disagrees with the deployed DLL's visibility.
+This boundary does not support virtual dispatch.
 An export that calls another library's contract is certified conditionally on
 that import (`HoldsGiven ... ImportsHold`). RVA static sites are supported. Each certification records the
 exact scoped static identities, and the producer checks their set against the
