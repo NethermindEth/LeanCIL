@@ -159,6 +159,19 @@ A null managed reference is a distinct value, not address zero. `Unsafe.NullRef<
 
 Static data is immutable, extraction-bound RVA storage with field identities retained separately from contents. Static initializers that could execute unmodelled code are rejected.
 
+Supplied one-dimensional primitive integer arrays retain an element type, length and checked
+allocation-relative data reference. The runtime correspondence premise must identify these with
+the actual array's element type, length and backing bytes; constructing a model view does not
+establish that correspondence. Array operations reuse existing allocation, lifetime,
+initialization and authority checks. A readonly permission set grants no write authority, while
+aliases over the same allocation observe the same bytes. A valid null array raises the named
+`System.NullReferenceException`; an out-of-range index on a valid non-null array raises
+`System.IndexOutOfRangeException`. Invalid extents, expired storage and missing authority remain
+model faults and cannot prove either expected exception. Array allocation, reference elements,
+multidimensional arrays and taking the address of an array root are outside this subset.
+The scalar certificate checks array opcode families, integer widths, load signedness, native
+integer distinctions and typed element tokens against the emitted operations.
+
 Generated static identities are unsigned natural numbers from SHA-256 of the
 full assembly identity and full field name. The assembly identity text is
 `Name, Version=a.b.c.d, Culture=<culture or neutral>, PublicKeyToken=<16 lowercase

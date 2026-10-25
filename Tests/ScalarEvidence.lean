@@ -164,7 +164,7 @@ example : ¬ TranslationValid [] #[] [floatEvidence 108] [] [floatMethod] := by 
 example : ¬ ScalarFlowValid (floatRaw 107) floatFeatures (floatStates.set 2 (some [.other])) floatMethod.code := by decide
 example : ¬ ScalarFlowValid (floatRaw 108) floatFeatures (floatStates.set 2 (some [.other])) floatMethod.code := by decide
 example : scalarTransfer addRaw (i 80) [.reference] = some [.other] := by decide
-example : scalarTransfer addRaw (i 150) [.word32, .reference] = some [.other] := by decide
+example : scalarTransfer addRaw (i 150) [.word32, .reference] = none := by decide
 example : scalarTransfer addRaw (i 154) [.word32, .reference] = some [.other] := by decide
 
 example : scalarTransfer { addRaw with locals := [intType] } (i 10) [.other] = none := by decide
@@ -411,7 +411,8 @@ private def holeStates : ScalarCertificate :=
   [some [], some [.word64], some [.word64, .word64], some [.other], some [], some [.word64]]
 private def holeCode (emitted : Op) : List Op := [.arg 0, .arg 1, emitted, .pop, .arg 0, .ret]
 example : ScalarFlowValid (holeRaw 88) holeFeatures (holeStates.set 3 (some [.word64])) (holeCode .add) := by decide
-example : ScalarFlowValid (holeRaw 149) holeFeatures holeStates (holeCode (.memory (.spanItem 4))) := by decide
+-- Array loads now require exact array evidence rather than accepting an equal stack effect.
+example : ¬ ScalarFlowValid (holeRaw 149) holeFeatures holeStates (holeCode (.memory (.spanItem 4))) := by decide
 example : ¬ ScalarFlowValid (holeRaw 149) holeFeatures holeStates (holeCode .add) := by decide
 example : ¬ ScalarFlowValid (holeRaw 143 (.type intType)) holeFeatures holeStates (holeCode (.divide true false)) := by decide
 example : ¬ ScalarFlowValid (holeRaw 149) holeFeatures holeStates (holeCode (.nativeBinary .add)) := by decide

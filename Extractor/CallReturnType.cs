@@ -23,6 +23,8 @@ internal static class CallReturnType
         }
         if (type is ByReferenceType byRef) return new ByReferenceType(Substitute(byRef.ElementType, method));
         if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType, method));
+        if (type is ArrayType { IsVector: true } array)
+            return new ArrayType(Substitute(array.ElementType, method));
         if (type is GenericInstanceType generic)
         {
             GenericInstanceType result = new(generic.ElementType);

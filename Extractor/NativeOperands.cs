@@ -7,12 +7,17 @@ namespace Nethermind.LeanCIL;
 // share 64-bit storage, but only metadata-proven native/int32 mixtures may widen.
 internal static class NativeOperands
 {
-    internal enum Kind { Other, Word32, Word64, Native, Reference, NullObject }
+    internal enum Kind
+    {
+        Other, Word32, Word64, Native, Reference, NullObject,
+        ArraySigned8, ArrayUnsigned8, ArraySigned16, ArrayUnsigned16, ArraySigned32, ArrayUnsigned32,
+        ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter
+    }
 
     internal sealed record Certificate(HashSet<Instruction> Mixed, Dictionary<Instruction, Kind[]> Incoming);
 
     static Kind Type(TypeReference type) => type is ByReferenceType or PointerType
-        ? Kind.Reference : EnumTypes.Storage(type).MetadataType switch
+        ? Kind.Reference : Arrays.Of(type)?.Kind ?? EnumTypes.Storage(type).MetadataType switch
     {
         MetadataType.IntPtr or MetadataType.UIntPtr => Kind.Native,
         MetadataType.Int64 or MetadataType.UInt64 => Kind.Word64,
@@ -155,12 +160,12 @@ internal static class NativeOperands
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
                             Type(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType),
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
-                        Code.Ldobj => Type((TypeReference)instruction.Operand),
+                        Code.Ldobj or Code.Ldelem_Any => Type((TypeReference)instruction.Operand),
                         Code.Ldloca or Code.Ldloca_S or Code.Ldarga or Code.Ldarga_S or
                             Code.Ldflda or Code.Ldsflda or Code.Localloc => Kind.Reference,
-                        Code.Ldind_I or Code.Conv_I or Code.Conv_U or Code.Conv_Ovf_I or Code.Conv_Ovf_I_Un or
+                        Code.Ldlen or Code.Ldelem_I or Code.Ldind_I or Code.Conv_I or Code.Conv_U or Code.Conv_Ovf_I or Code.Conv_Ovf_I_Un or
                             Code.Conv_Ovf_U or Code.Conv_Ovf_U_Un => Kind.Native,
-                        Code.Ldc_I8 or Code.Ldind_I8 or Code.Conv_I8 or Code.Conv_U8 or Code.Conv_Ovf_I8 or
+                        Code.Ldc_I8 or Code.Ldelem_I8 or Code.Ldind_I8 or Code.Conv_I8 or Code.Conv_U8 or Code.Conv_Ovf_I8 or
                             Code.Conv_Ovf_I8_Un or Code.Conv_Ovf_U8 or Code.Conv_Ovf_U8_Un => Kind.Word64,
                         Code.Ldtoken => Kind.Other,
                         Code.Ldnull => Kind.NullObject,

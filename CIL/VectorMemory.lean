@@ -1,3 +1,4 @@
+import CIL.ArrayTypes
 import CIL.Memory
 import CIL.WideMultiply
 
@@ -129,6 +130,8 @@ inductive MemoryOp where
   /-- Primitive spans over supplied storage; these operations never grant memory authority. -/
   | spanFromReference (width : Nat) (writable : Bool)
   | spanSlice (explicitLength : Bool) | spanReadOnly
+  /-- Integer operations over supplied array storage; allocation is not modelled. -/
+  | arrayLength | arrayLoad (width : Nat) (signed : Bool) | arrayStore (width : Nat)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
   deriving Repr
@@ -138,7 +141,9 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. => 2
-  | .spanReadOnly => 1
+  | .spanReadOnly | .arrayLength => 1
+  | .arrayLoad .. => 2
+  | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
   | .staticAddress _ | .staticValue _ | .nullRef => 0
   | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool

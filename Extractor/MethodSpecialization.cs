@@ -79,6 +79,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                     : throw new InvalidDataException("Malformed generic method type parameter");
             if (type is ByReferenceType byRef) return new ByReferenceType(Substitute(byRef.ElementType));
             if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType));
+            if (type is ArrayType { IsVector: true } array) return new ArrayType(Substitute(array.ElementType));
             if (type is GenericInstanceType generic)
             {
                 var result = new GenericInstanceType(generic.ElementType);

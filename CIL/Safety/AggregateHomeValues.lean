@@ -17,7 +17,7 @@ theorem load_local_aggregate_of_read {memory : Memory} {reference : Reference}
     (loaded : read memory reference size 1 = .ok bytes) :
     loadLocal memory (.bytes (.aggregate size) reference) =
       .ok (.scalar (.aggregate bytes)) := by
-  exact loadLocal_of_read loaded
+  exact loadLocal_of_read (kind := .aggregate size) loaded
 
 /-- Full-width checked aggregate stores need write access, not initialized bytes.
     The explicit write equation also exposes the exact footprint to callers. -/
