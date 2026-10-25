@@ -35,7 +35,8 @@ source bundle.
 Libraries may read immutable RVA static tables. The fresh extraction decides
 each export's reachable tables. Their scoped identities must equal the
 certification's, the caller binding's and the bundled extraction's records, and
-each must name a field of the library assembly. Table bytes come only from the
+each must name a field of the library assembly. The three published records are
+compared before any build; the fresh extraction is compared with them after it runs. Table bytes come only from the
 fresh extraction, so a re-certified DLL with changed bytes fails the author
 proof that ties them to the published `StaticWorldValid` descriptors. The
 composed theorem states `linkChecked` for the whole linked program: the

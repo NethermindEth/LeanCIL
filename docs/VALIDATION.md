@@ -288,8 +288,8 @@ Run one leaf with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationconsumer` | Executed consumer caller artifact mutation |
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
-| `exportsstatics` | Standalone modular static exports, then forced full verification of the RVA-table library with warm receipts; changed DLL, forged caller or bundle static records and tampered bundle rejection |
-| `exportsfullstatics` | The same fixture with `--full-composition`: app and library tables with one local index, one table shared by two imported slots, and rejection of a re-certified changed table |
+| `exportsstatics` | Standalone modular static exports with their own SDK setup and existing assertions |
+| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof |
 | `exportstransitive` | Standalone transitive contract imports with their own SDK setup and existing assertions |
 | `exportsfulltransitive` | The same fixture with `--full-composition`: forced full verification of App -> A -> B replays both bundles; a missing or tampered B bundle fails |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the unchanged six-argument discovery fixture |

@@ -1,6 +1,9 @@
 {
   "workflowRun": "https://github.com/NethermindEth/LeanCIL/actions/runs/40063600830",
   "measurement": "Completed job duration in seconds, including setup and verification",
+  "estimated": {
+    "exportsfullstatics": "Not yet measured in CI: 378 s locally with a certified library, times 3 as for exportsstatics and exportstransitive"
+  },
   "seconds": {
     "arguments": 261,
     "audit": 177,
@@ -30,15 +33,14 @@
     "exportsfullconsumer": 764,
     "exportsfullordinary": 851,
     "exportsfullpair": 1229,
-    "exportsfullstatics": 1080,
-    "exportsfulltransitive": 1200,
+    "exportsfullstatics": 1130,
     "exportsfulltheorems": 705,
     "exportsmutationconsumer": 896,
     "exportsmutationordinary": 604,
     "exportsmutationshadow": 473,
     "exportsmutationsource": 858,
     "exportsresolution": 70,
-    "exportsstatics": 1160,
+    "exportsstatics": 374,
     "exportstransitive": 842,
     "exportstyped": 1846,
     "failures": 125,

@@ -125,9 +125,33 @@ partial class Program
         ExtractionIdentity extraction = ExtractionIdentity.Read(output);
         if (extraction.Imports.Length == 0) throw new InvalidDataException(NoFullImports);
         HashSet<string> used = new(StringComparer.Ordinal);
-        foreach (JsonElement binding in extraction.Imports) SelectFullBundle(output, binding, overrides, used);
+        foreach (JsonElement binding in extraction.Imports)
+            RequireAgreedStaticRecords(binding, SelectFullBundle(output, binding, overrides, used));
         foreach (JsonElement node in ReachableGraph(extraction)) PreflightFullNode(output, node, overrides, used);
         RequireUsedOverrides(overrides, used);
+    }
+
+    // The caller binding, certification and bundled extraction must name one static set before any build;
+    // the fresh extraction is compared with all three after regeneration.
+    static void RequireAgreedStaticRecords(JsonElement binding, FullSelection selection)
+    {
+        string identity = binding.GetProperty("identity").GetString()!;
+        string profile = binding.GetProperty("profile").GetString()!;
+        ContractCertification[] certifications = selection.Contract.Certifications
+            .Where(item => item.Identity == identity && item.Profile == profile).ToArray();
+        int[] matches = selection.Inventory.Exports.EnumerateArray().Select((record, index) => (record, index))
+            .Where(item => item.record.GetProperty("identity").GetString() == identity &&
+                item.record.GetProperty("profile").GetString() == profile)
+            .Select(item => item.index).ToArray();
+        if (certifications.Length != 1 || matches.Length != 1)
+            throw new InvalidDataException("Full source bundle has no unique selected export/profile.");
+        JsonElement bundled = JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Within(selection.Bundle, "exports/" + matches[0] + "/identity.json")));
+        StaticIdentityRecord[] pinned = StaticIdentitySet(binding);
+        bool agreed = pinned.SequenceEqual(StaticIdentitySet(bundled)) && pinned.SequenceEqual(
+            certifications[0].StaticIdentities.OrderBy(item => item.Identity, StringComparer.Ordinal));
+        if (!agreed)
+            throw new InvalidDataException("Full-verification static identity records disagree: " + identity);
     }
 
     // Search roots without the toolchain, which a supported run keeps read-only instead of rehashing.
