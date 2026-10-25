@@ -210,3 +210,6 @@ name = "Tests.RetainedNumericLocals"
 
 [[lean_lib]]
 name = "Tests.ProfileEmbedding"
+
+[[lean_lib]]
+name = "Tests.FeatureGetter"

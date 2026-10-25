@@ -14,6 +14,12 @@ table exact without adding axioms. `DivisionIntrinsicsValid_iff_original` proves
 the original signature lookup, malformed-family rejection, arity, reachability, profile
 availability and length checks for arbitrary raw metadata, including non-ASCII identities.
 
+Feature getter validation likewise checks the common assembly/type prefix once, then compares
+literal UTF-8 suffixes. `featureGetter_eq_original` proves equality with the original lookup
+for every raw call site; a separate kernel-checked equality validates the generated suffix
+table. Prefix truncation, trailing bytes, non-ASCII names and call-shape mismatches remain
+rejected. This changes certificate checking cost, not the admitted feature getters.
+
 Use `CIL.Safety.invoke` for specifications that include checked memory execution.
 State the mathematical contract and its input/memory preconditions independently
 of the implementation. The [soundness boundary](SOUNDNESS.md) describes what a
