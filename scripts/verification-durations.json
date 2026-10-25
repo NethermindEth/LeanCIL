@@ -2,7 +2,9 @@
   "workflowRun": "https://github.com/NethermindEth/LeanCIL/actions/runs/40063600830",
   "measurement": "Completed job duration in seconds, including setup and verification",
   "estimated": {
-    "exportsfullstatics": "Not yet measured in CI: 378 s locally with a certified library, times 3 as for exportsstatics and exportstransitive"
+    "exportsfullstatics": "Not yet measured in CI: 378 s locally with a certified library, times 3 as for exportsstatics and exportstransitive",
+    "exportstransitive": "Provisional expanded-coverage estimate: chain, four-node diamond, warm receipts and staged mutation; update from CI",
+    "exportstransitiveoutcomes": "Provisional new-coverage estimate for three producer exports and deep outcome composition; update from CI"
   },
   "seconds": {
     "arguments": 261,
@@ -34,6 +36,7 @@
     "exportsfullordinary": 851,
     "exportsfullpair": 1229,
     "exportsfullstatics": 1130,
+    "exportsfulltransitive": 1200,
     "exportsfulltheorems": 705,
     "exportsmutationconsumer": 896,
     "exportsmutationordinary": 604,
@@ -41,7 +44,8 @@
     "exportsmutationsource": 858,
     "exportsresolution": 70,
     "exportsstatics": 374,
-    "exportstransitive": 842,
+    "exportstransitive": 2700,
+    "exportstransitiveoutcomes": 1800,
     "exportstyped": 1846,
     "failures": 125,
     "fsharp": 264,

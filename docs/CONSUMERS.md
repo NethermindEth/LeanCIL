@@ -357,8 +357,9 @@ must agree. Custom axioms, sorry and valueless opaque interface declarations are
 not exportable. Contract predicates and their reachable definitions determine the
 closure digest; the name alone does not determine it.
 
-Version 1 supports public or protected static, non-virtual, non-generic exports
-without imports. RVA static sites are supported. Each certification records the
+Version 1 supports public or protected static, non-virtual, non-generic exports.
+An export that calls another library's contract is certified conditionally on
+that import (`HoldsGiven ... ImportsHold`). RVA static sites are supported. Each certification records the
 exact scoped static identities, and the producer checks their set against the
 generated program in Lean. It rejects recorded static-value and
 initialization assumptions because this sidecar version does not transport them.

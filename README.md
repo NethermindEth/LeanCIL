@@ -252,8 +252,11 @@ selected profiles; see [generated profile templates](docs/PROOFS.md#generated-pr
 for the supported domain and checking workflow.
 
 `leancil verify --force-full-verify` independently checks supported imported
-libraries against their pinned implementation DLLs and source bundles. Closed
-libraries may read immutable RVA static tables: checked composition preserves
+libraries and their reachable contract dependencies against separately pinned
+implementation DLLs, interfaces and source bundles. Conditional exports and shared
+dependencies are checked in dependency order, including when ordinary verification
+receipts are warm. Composition preserves normal returns and named exceptional
+outcomes. Libraries may read immutable RVA static tables: checked composition preserves
 their assembly-scoped identities and shared-table descriptors. Static-world
 requirements remain explicit contract preconditions; static-constructor and
 static-value assumptions are not supported in this mode. See
