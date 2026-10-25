@@ -665,8 +665,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return new(StringComparer.Ordinal);
     }
 
-    // Collects certified modules except the extraction, its audit, proofs and their importers, with
-    // their sources and imports; extraction-dependent ones also bind the generated program text.
+    // Collects certified modules and their source/import closures. Generated certificates bind
+    // their exact source too; restoring them saves compilation but never their replay or audit.
     // Returns null when no module can be bound to its sources.
     string? CollectConsumerSupport(string session, Dictionary<string, string> modules, Dictionary<string, string[]> graph,
         HashSet<string> excluded, HashSet<string> extractionDependent, IReadOnlyDictionary<string, string> sources)
@@ -699,8 +699,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (new[] { ".c", ".c.hash", ".ir", ".ir.hash", ".setup.json" }
                     .Any(suffix => artifact.EndsWith("/" + modulePath + suffix, StringComparison.Ordinal)))
                     files.Add(artifact);
-            var candidates = sources.Where(pair => pair.Key != ExtractedSourceKey && (pair.Key[..^".lean".Length] == modulePath ||
-                pair.Key[..^".lean".Length].EndsWith("/" + modulePath, StringComparison.Ordinal))).ToDictionary();
+            var candidates = sources.Where(pair =>
+                (pair.Key != ExtractedSourceKey || name == "Extracted") &&
+                (pair.Key[..^".lean".Length] == modulePath ||
+                    pair.Key[..^".lean".Length].EndsWith("/" + modulePath, StringComparison.Ordinal))).ToDictionary();
             if (extractionDependent.Contains(name) && candidates.Count > 0) candidates[ExtractedSourceKey] = sources[ExtractedSourceKey];
             record[name] = new(new(candidates, StringComparer.Ordinal),
                 graph[name].Order(StringComparer.Ordinal).ToArray(), files.ToArray());
@@ -1172,6 +1174,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         void VerifyGroup(int[] members, string session, bool first, bool share)
         {
             Dictionary<string, string> bound = new(WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean"))), StringComparer.Ordinal);
+            bound["<generated>/ExtractionAudit.lean"] = ContentKey(ExtractionAuditSource);
             foreach ((string module, string source) in extractions[members[0]].Sources)
                 bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
             var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
@@ -1485,8 +1488,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 var dependent = DependentModules(graph, ["Extracted", "ExtractedSymbols", "ExtractionAudit", .. names]);
                 // Extraction-dependent modules are recorded too, bound to this Extracted; export uses only the others.
                 // Records bind no PDB names, so importers of ExtractedSymbols stay unbound and are never cached.
-                var excluded = DependentModules(graph, ["ExtractionAudit", .. names]);
-                excluded.Add("Extracted");
+                var excluded = DependentModules(graph, names);
                 excluded.Add("ExtractedSymbols");
                 var collected = UseSuccessCache || share || exporting
                     ? CollectConsumerSupport(session, currentArtifacts, graph, excluded, extractionDependent, bound) : null;
