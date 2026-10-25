@@ -267,13 +267,14 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
     finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
     string[] stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
         .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!).ToArray();
-    // One bundle gives one library build however many slots it fills; the caller has its own.
+    // One bundle gives one library build however many slots it fills; the caller has its own. The caller's
+    // proof is checked again, so no restored receipt stood in for it.
     if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != slots ||
         stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != slots ||
         stages.Count(stage => stage is "Building fresh Lean verification library" or
             "Copying certified Lean verification library") != 2 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
-        stages.Any(stage => stage.Contains("certified proof:", StringComparison.Ordinal)))
+        !stages.Any(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal)))
         throw new InvalidOperationException(
             "Full verification reused a receipt instead of replaying: " + string.Join(", ", stages));
     JsonElement verified =
