@@ -69,10 +69,27 @@ private def homeArgument : ArgumentOp × Bool → Option Nat
   | (.store index, true) | (.address index, true) => some index
   | _ => none
 
+/-- Enumerating bounded set members preserves ascending argument order without scanning gaps. -/
+private theorem boundedHomeSet (homes : Std.TreeSet Nat) (count : Nat) :
+    homes.toList.filter (· < count) = (List.range count).filter homes.contains := by
+  have ordered : homes.toList.Pairwise (· < ·) :=
+    homes.ordered_toList.imp fun relation => Nat.compare_eq_lt.mp relation
+  have leftOrder := ordered.filter (fun index => index < count)
+  have rightOrder := (List.pairwise_lt_range (n := count)).filter homes.contains
+  apply List.Perm.eq_of_pairwise (le := (· < ·)) (fun _ _ _ _ before after => by omega)
+    leftOrder rightOrder
+  apply (List.perm_ext_iff_of_nodup (leftOrder.imp Nat.ne_of_lt)
+    (rightOrder.imp Nat.ne_of_lt)).mpr
+  intro index
+  simp only [List.mem_filter, Std.TreeSet.mem_toList, Std.TreeSet.mem_iff_contains,
+    List.mem_range, decide_eq_true_eq, and_comm]
+
+#print axioms boundedHomeSet
+
 /-- Derive the sorted, duplicate-free home set from one scan of the raw body. -/
 def requiredHomeIndices (raw : RawArguments) (reachable : List Bool) : List Nat :=
   let homes := Std.TreeSet.ofList ((raw.code.zip reachable).filterMap homeArgument)
-  (List.range raw.arguments.length).filter homes.contains
+  homes.toList.filter (· < raw.arguments.length)
 
 /-- Indexed home discovery agrees with scanning the complete body for each argument,
     including truncated reachability masks and out-of-range argument references. -/
@@ -82,6 +99,7 @@ theorem requiredHomeIndices_eq_scan (raw : RawArguments) (reachable : List Bool)
         | .store argument | .address argument => argument == index
         | _ => false) := by
   dsimp only [requiredHomeIndices]
+  rw [boundedHomeSet]
   congr 1
   funext index
   rw [Std.TreeSet.contains_ofList, List.contains_filterMap]
