@@ -367,9 +367,8 @@ private def opaqueLocalType : Option TypeExpr → Bool
 def opaqueLocalIndices (closed : RawMethod) : List Nat :=
   let addressed := Std.TreeSet.ofList (closed.code.filterMap fun instruction =>
     if instruction.opcode == 18 || instruction.opcode == 65037 then localIndex instruction else none)
-  let locals := FlowIndex.ofList closed.locals
-  (List.range closed.locals.length).filter fun index =>
-    opaqueLocalType (locals.get? index) && !addressed.contains index
+  ((closed.locals.zipIdx).filter fun (type, index) =>
+    opaqueLocalType (some type) && !addressed.contains index).map Prod.snd
 
 /-- Indexed opaque-local discovery agrees with direct local lookup and address membership. -/
 theorem opaqueLocalIndices_eq_scan (closed : RawMethod) :
@@ -381,7 +380,13 @@ theorem opaqueLocalIndices_eq_scan (closed : RawMethod) :
       | _ => false) && !(closed.code.filterMap (fun instruction =>
         if instruction.opcode == 18 || instruction.opcode == 65037 then localIndex instruction
         else none)).contains index) := by
-  simp only [opaqueLocalIndices, FlowIndex.get?_ofList, Std.TreeSet.contains_ofList]
+  simp only [opaqueLocalIndices, Std.TreeSet.contains_ofList]
+  rw [List.range_eq_range', ← List.zipIdx_map_snd 0 closed.locals, List.filter_map]
+  congr 1
+  apply List.filter_congr
+  intro entry present
+  have found := List.mem_zipIdx_iff_getElem?.mp present
+  simp only [Function.comp_def, found]
   rfl
 
 #print axioms opaqueLocalIndices_eq_scan

@@ -130,4 +130,15 @@ theorem lowering_first_call_unchanged :
 theorem lowering_unresolved_call_retained :
     (lowerConstrainedRaw [] raw).code[2]? = raw.code[2]? := by decide +kernel
 #print axioms lowering_unresolved_call_retained
+/-- A trailing prefix cannot read a nonexistent next instruction from the streaming cursor. -/
+theorem trailing_prefix_rejected :
+    ¬ ConstrainedCallsValid types methods { raw with code := [⟨0, 65046, .type receiver⟩] }
+      [true] { emitted with code := [.nop] } := by decide +kernel
+#print axioms trailing_prefix_rejected
+
+/-- Streaming completion still rejects extra emitted instructions. -/
+theorem extra_emitted_rejected :
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      { emitted with code := emitted.code ++ [.nop] } := by decide +kernel
+#print axioms extra_emitted_rejected
 end Tests.ConstrainedEvidence
