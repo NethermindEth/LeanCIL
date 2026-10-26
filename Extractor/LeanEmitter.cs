@@ -21,13 +21,19 @@ internal static class LeanEmitter
 
     // The kernel rechecks every decide; elaborator whnf costs grow superlinearly with body size.
     internal const string Decide = "by decide +kernel";
-    internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar")
+    internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar",
+        MetadataValidation.LayoutContext? layouts = null)
     {
+        layouts?.Require(module, architecture);
         if (type is ByReferenceType or PointerType) return ".reference";
         if (Arrays.Of(type) is { } element) return $".array .{element.Lean}";
         if (Spans.Width(type) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
-        if (MetadataValidation.IsAggregate(type, module)) return $".aggregate {MetadataValidation.Layout(type, module, architecture)}";
+        if (MetadataValidation.IsAggregate(type, module))
+        {
+            var size = layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture);
+            return $".aggregate {size}";
+        }
         if (Narrow(type) is { } narrow) return $".narrow .{narrow}";
         return EnumTypes.Storage(type).FullName switch
         {
@@ -46,16 +52,18 @@ internal static class LeanEmitter
         methods.SelectMany(method => Reachability.Analyze(method, profile)).Where(StaticSite)
             .Select(instruction => StaticIdentity.Of(StaticField(instruction, methods[0].Module, profile.Architecture)))
             .Distinct().OrderBy(identity => identity.Identity, StringComparer.Ordinal).ToArray();
-    internal static string Initial(TypeReference type, ModuleDefinition module, string architecture = "scalar") => Kind(type, module, architecture) switch
+    internal static string Initial(TypeReference type, ModuleDefinition module, string architecture = "scalar",
+        MetadataValidation.LayoutContext? layouts = null) => Kind(type, module, architecture, layouts) switch
     {
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
         string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
         string kind when kind.StartsWith(".span ", StringComparison.Ordinal) ||
             kind.StartsWith(".array ", StringComparison.Ordinal) => ".nullRef",
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
-        _ => $".aggregate (List.replicate {MetadataValidation.Layout(type, module, architecture)} 0)"
+        _ => ".aggregate (List.replicate " +
+            (layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)) + " 0)"
     };
-    static TypeReference[] LayoutTypes(MethodDefinition[] methods)
+    static TypeReference[] LayoutTypes(MethodDefinition[] methods, MetadataValidation.LayoutContext metadata)
     {
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
             .Concat(m.HasThis ? [m.DeclaringType] : [])
@@ -72,7 +80,7 @@ internal static class LeanEmitter
         {
             if (!seenLayouts.Add(type.FullName)) return;
             layouts.Add(type);
-            foreach (MetadataValidation.InstanceField field in MetadataValidation.Fields(type))
+            foreach (MetadataValidation.InstanceField field in metadata.Fields(type))
                 if (MetadataValidation.IsAggregate(field.Type, methods[0].Module)) IncludeLayout(field.Type);
         }
         foreach (TypeReference type in types) IncludeLayout(type);
@@ -110,16 +118,23 @@ internal static class LeanEmitter
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
         StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
-        TypeReference[] types = LayoutTypes(methods);
+        var layoutContext = new MetadataValidation.LayoutContext(methods[0].Module, profile.Architecture);
+        TypeReference[] types = LayoutTypes(methods, layoutContext);
         for (int i = 0; i < types.Length; i++)
         {
-            int size = MetadataValidation.Layout(types[i], methods[0].Module, profile.Architecture);
-            string fields = string.Join(", ", MetadataValidation.Fields(types[i])
-                .Select(f => $"⟨{MetadataValidation.FieldOffset(types[i], f.Definition, methods[0].Module, profile.Architecture)}, {MetadataValidation.FieldSize(f.Type, methods[0].Module, profile.Architecture)}, {MetadataValidation.IsAggregate(f.Type, methods[0].Module).ToString().ToLowerInvariant()}⟩"));
+            int size = layoutContext.Size(types[i]);
+            string fields = string.Join(", ", layoutContext.Fields(types[i])
+                .Select(field =>
+                {
+                    var offset = layoutContext.FieldOffset(types[i], field.Definition);
+                    var width = layoutContext.FieldSize(field.Type);
+                    var aggregate = MetadataValidation.IsAggregate(field.Type, methods[0].Module);
+                    return $"⟨{offset}, {width}, {aggregate.ToString().ToLowerInvariant()}⟩";
+                }));
             lean.AppendLine($"def layout{i} : AggregateLayout := ⟨{size}, [{fields}]⟩");
             lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := {Decide}");
         }
-        LayoutEvidence layoutEvidence = new(types, profile.Architecture);
+        LayoutEvidence layoutEvidence = new(types, layoutContext);
         layoutEvidence.EmitLayouts(lean);
         GenericEvidence genericEvidence = new(originalModule, layoutEvidence, importResolution);
         for (int n = 0; n < methods.Length; n++)
@@ -130,8 +145,11 @@ internal static class LeanEmitter
             var reachable = featureCertificate.Keys.ToHashSet();
             var scalarCertificate = NativeOperands.Certify(m, reachable);
             var parameterIndices = ParameterStorage.Analyze(m, reachable);
-            string parameters = string.Join(", ", parameterIndices.Select(index => $"({index}, {Kind(MethodArguments.Type(m, index), m.Module, profile.Architecture)})"));
-            string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module, profile.Architecture) : ".unmodeled"));
+            string LocalKind(TypeReference type) => Kind(type, m.Module, profile.Architecture, layoutContext);
+            string parameters = string.Join(", ", parameterIndices.Select(index =>
+                $"({index}, {LocalKind(MethodArguments.Type(m, index))})"));
+            string locals = string.Join(", ", m.Body.Variables.Select(variable => m.Body.InitLocals
+                ? Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext) : ".unmodeled"));
             HashSet<int> addressedLocals = m.Body.Instructions
                 .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
@@ -139,13 +157,13 @@ internal static class LeanEmitter
             foreach (Instruction i in m.Body.Instructions)
                 ops.Add(reachable.Contains(i)
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterIndices, importResolution)
+                        scalarCertificate, parameterIndices, importResolution, layoutContext)
                     : ".unsupported \"Unreachable under selected profile\"");
             var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
             string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
                     !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index)) : "";
-            string kinds = string.Join(", ", m.Body.Variables.Select(v => Kind(v.VariableType, m.Module, profile.Architecture)));
+            string kinds = string.Join(", ", m.Body.Variables.Select(variable => LocalKind(variable.VariableType)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
                 {

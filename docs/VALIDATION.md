@@ -870,3 +870,22 @@ implementations, using the current linear FlowIndex builder. An Apple M4 / Lean 
 These include index construction and isolate positional work. They do not measure dispatch
 metadata resolution, full-method proof time or total CI savings. Existing constrained/opaque
 regressions pass, with additional trailing-prefix and extra-emitted-instruction rejection cases.
+
+Read-only translation validation and Lean emission now each own a `LayoutContext`, scoped to
+one module and architecture. It reuses fully validated root layouts and field/position snapshots
+through layout declarations, instruction translation and raw evidence emission. Every new root
+still runs the original recursive validator with a fresh active set and recursive cache: warming
+a child cannot bypass the 128-level nesting check. Contexts never cross metadata rewrites or
+extraction requests, and context-taking helpers reject module/architecture mismatches.
+
+`Tests.InstructionIndexes` checks nested-root reuse, field identity/order, fresh-call mutation
+visibility, distinct x64/arm64 vector layouts and nesting rejection after warming a child. A
+34-request matrix covering scalar, x64-v3, x64-v4 and arm64-advsimd, including nested vector
+layouts and tuple division, retained all 68 generated Lean file hashes.
+
+A Windows .NET 10 fixture compiled a method reading every UInt64 field of a wide struct and
+measured complete `LeanEmitter.Emit` calls, including constructing the context. After three
+warmups, median times over seven runs were 7.762→1.133 ms at 64 fields, 72.221→4.212 ms at
+256 fields, and 531.870→21.939 ms at 1,024 fields. All three emitted source hashes matched.
+The baseline already includes linear metadata-name counting. This isolates emission work;
+it does not include loading assemblies, the initial admission walk, proof checking or CI.

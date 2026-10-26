@@ -13,11 +13,12 @@ internal sealed class LayoutEvidence
     // Raw metadata is topological; emitted layout constants retain the caller supplied order.
     readonly Dictionary<string, int> emittedIndices = new(StringComparer.Ordinal);
     readonly Dictionary<string, int> typeIndices = new(StringComparer.Ordinal);
-    readonly string architecture;
+    readonly MetadataValidation.LayoutContext layouts;
+    string Architecture => layouts.Architecture;
 
-    internal LayoutEvidence(TypeReference[] types, string architecture = "scalar")
+    internal LayoutEvidence(TypeReference[] types, MetadataValidation.LayoutContext layouts)
     {
-        this.architecture = architecture;
+        this.layouts = layouts;
         for (var index = 0; index < types.Length; index++)
             emittedIndices.TryAdd(types[index].FullName, index);
         rawTypes = Topological(types);
@@ -25,14 +26,14 @@ internal sealed class LayoutEvidence
             typeIndices.TryAdd(rawTypes[index].FullName, index);
     }
 
-    static TypeReference[] Topological(TypeReference[] entries)
+    TypeReference[] Topological(TypeReference[] entries)
     {
         var ordered = new List<TypeReference>();
         var seen = new HashSet<string>();
         void Include(TypeReference type)
         {
             if (!seen.Add(type.FullName)) return;
-            foreach (var field in MetadataValidation.Fields(type))
+            foreach (var field in layouts.Fields(type))
                 if (MetadataValidation.IsAggregate(field.Type, type.Module)) Include(field.Type);
             ordered.Add(type);
         }
@@ -44,6 +45,8 @@ internal sealed class LayoutEvidence
         ? assembly.FullName : type.Module.Assembly.Name.FullName;
 
     internal static string Identity(TypeReference type) => Scope(type) + "::" + type.FullName;
+
+    internal MetadataValidation.LayoutContext Metadata => layouts;
 
     internal string[] Identities => rawTypes.Select(Identity).ToArray();
 
@@ -75,7 +78,7 @@ internal sealed class LayoutEvidence
         lean.AppendLine(string.Join(",\n", rawTypes.Select(type =>
         {
             var metadata = ValueTuples.Is(type) ? ((GenericInstanceType)type).ElementType.Resolve() : type.Resolve();
-            var fields = MetadataValidation.Fields(type).Select(field =>
+            var fields = layouts.Fields(type).Select(field =>
                 $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
             return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
                 (metadata.IsAutoLayout ? "auto := true, " : "") +
@@ -87,10 +90,11 @@ internal sealed class LayoutEvidence
             string.Join(", ", rawTypes.Select(type =>
             {
                 var index = emittedIndices.GetValueOrDefault(type.FullName, -1);
-                var alignment = MetadataValidation.AggregateLayout(type, type.Module, architecture).Alignment;
+                var alignment = layouts.AggregateLayout(type).Alignment;
                 return $"⟨layout{index}, {alignment}⟩";
             })) + "]");
-        lean.AppendLine($"theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts .{architecture} := " + LeanEmitter.Decide);
+        lean.AppendLine("theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts " +
+            $".{Architecture} := " + LeanEmitter.Decide);
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number, HashSet<Instruction> reachable,
@@ -106,7 +110,7 @@ internal sealed class LayoutEvidence
                 var reference = (FieldReference)instruction.Operand;
                 var field = reference.Resolve();
                 var owner = ValueTuples.Is(reference.DeclaringType) ? reference.DeclaringType : field.DeclaringType;
-                var fieldIndex = Array.FindIndex(MetadataValidation.Fields(owner), candidate => candidate.Definition == field);
+                var fieldIndex = layouts.FieldIndex(owner, field);
                 var access = instruction.OpCode.Code switch { Code.Ldfld => "load", Code.Stfld => "store", _ => "address" };
                 uses.Add($".field {pc} {Index(owner)} {fieldIndex} .{access}");
             }

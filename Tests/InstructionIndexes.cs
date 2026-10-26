@@ -63,7 +63,7 @@ var translate = extractor.GetType("Nethermind.LeanCIL.InstructionTranslation", t
     .GetMethod("Translate", BindingFlags.Static | BindingFlags.NonPublic)!;
 var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1 };
 string Translate(Instruction instruction) => (string)translate.Invoke(null,
-    [instruction, caller, methods, 0, Index(caller), null, null, null, null])!;
+    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null])!;
 if (Translate(call) != ".call 1 0") throw new Exception("Incorrect call index");
 methods.Remove(callee);
 try
@@ -96,9 +96,13 @@ var outer = new TypeDefinition("Fixture", "AOuter", Mono.Cecil.TypeAttributes.Pu
     valueType);
 outer.Fields.Add(new FieldDefinition("Inner", Mono.Cecil.FieldAttributes.Public, inner));
 module.Types.Add(outer);
+var contextType = extractor.GetType("Nethermind.LeanCIL.MetadataValidation+LayoutContext", true)!;
+object Context(ModuleDefinition owner, string architecture) => Activator.CreateInstance(contextType,
+    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [owner, architecture], null)!;
+var context = Context(module, "scalar");
 var layoutType = extractor.GetType("Nethermind.LeanCIL.LayoutEvidence", true)!;
 var layouts = Activator.CreateInstance(layoutType, BindingFlags.Instance | BindingFlags.NonPublic,
-    null, [new TypeReference[] { outer, inner }, "scalar"], null)!;
+    null, [new TypeReference[] { outer, inner }, context], null)!;
 var layoutIndex = layoutType.GetMethod("Index", BindingFlags.Instance | BindingFlags.NonPublic)!;
 if ((int)layoutIndex.Invoke(layouts, [inner])! != 0 || (int)layoutIndex.Invoke(layouts, [outer])! != 1 ||
     (int)layoutIndex.Invoke(layouts, [module.TypeSystem.String])! != -1)
@@ -136,3 +140,64 @@ var changedLayout = Layout(outer);
 if ((int)changedLayout.GetType().GetProperty("Size")!.GetValue(changedLayout)! != 16)
     throw new Exception("Aggregate indexes were reused after metadata changed");
 Console.WriteLine("PASS aggregate name indexes preserve duplicate rejection and fresh-call mutation visibility");
+
+var contextLayout = contextType.GetMethod("AggregateLayout", BindingFlags.Instance | BindingFlags.NonPublic)!;
+var contextFields = contextType.GetMethod("Fields", BindingFlags.Instance | BindingFlags.NonPublic)!;
+var contextFieldIndex = contextType.GetMethod("FieldIndex", BindingFlags.Instance | BindingFlags.NonPublic)!;
+var freshContext = Context(module, "scalar");
+var firstLayout = contextLayout.Invoke(freshContext, [outer])!;
+if (!ReferenceEquals(firstLayout, contextLayout.Invoke(freshContext, [outer])) ||
+    (int)firstLayout.GetType().GetProperty("Size")!.GetValue(firstLayout)! != 16)
+    throw new Exception("The fresh context did not reuse the current nested layout");
+if (!ReferenceEquals(contextFields.Invoke(freshContext, [inner]), contextFields.Invoke(freshContext, [inner])) ||
+    (int)contextFieldIndex.Invoke(freshContext, [inner, inner.Fields[1], false])! != 1 ||
+    (int)contextFieldIndex.Invoke(freshContext, [inner, duplicateField, false])! != -1)
+    throw new Exception("Field snapshots lost field identity or instance order");
+var intrinsicsScope = AssemblyNameReference.Parse(
+    "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
+var vector = new GenericInstanceType(new TypeReference("System.Runtime.Intrinsics", "Vector256`1",
+    module, intrinsicsScope, true));
+vector.GenericArguments.Add(module.TypeSystem.UInt64);
+var vectorOwner = new TypeDefinition("Fixture", "VectorOwner", outer.Attributes, valueType);
+module.Types.Add(vectorOwner);
+module.TypeSystem.Byte.Scope = runtimeScope;
+vectorOwner.Fields.Add(new FieldDefinition("Tag", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.Byte));
+vectorOwner.Fields.Add(new FieldDefinition("Vector", Mono.Cecil.FieldAttributes.Public, vector));
+int ContextSize(object selected, TypeReference type)
+{
+    var result = contextLayout.Invoke(selected, [type])!;
+    return (int)result.GetType().GetProperty("Size")!.GetValue(result)!;
+}
+if (ContextSize(Context(module, "x64"), vectorOwner) != 64 ||
+    ContextSize(Context(module, "arm64"), vectorOwner) != 48)
+    throw new Exception("Layout results leaked between architectures");
+var chain = new List<TypeDefinition>();
+for (var depth = 0; depth < 129; depth++)
+{
+    var nested = new TypeDefinition("Fixture", "Depth" + depth, outer.Attributes, valueType);
+    nested.Fields.Add(new FieldDefinition("Child", Mono.Cecil.FieldAttributes.Public,
+        depth == 0 ? module.TypeSystem.UInt64 : chain[^1]));
+    module.Types.Add(nested);
+    chain.Add(nested);
+}
+var deepContext = Context(module, "scalar");
+ContextSize(deepContext, chain[64]);
+try
+{
+    ContextSize(deepContext, chain[^1]);
+    throw new Exception("A cached child bypassed the aggregate nesting limit");
+}
+catch (TargetInvocationException error) when (error.InnerException is InvalidDataException invalid &&
+    invalid.Message.StartsWith("Recursive or excessively nested aggregate layout:", StringComparison.Ordinal)) { }
+Console.WriteLine("PASS layout contexts preserve architecture and nesting-validation boundaries");
+
+var kind = extractor.GetType("Nethermind.LeanCIL.LeanEmitter", true)!
+    .GetMethod("Kind", BindingFlags.Static | BindingFlags.NonPublic)!;
+try
+{
+    kind.Invoke(null, [vectorOwner, module, "x64", Context(module, "arm64")]);
+    throw new Exception("A mismatched layout context was accepted by emission");
+}
+catch (TargetInvocationException error) when (error.InnerException is InvalidDataException invalid &&
+    invalid.Message == "Layout context does not match module or architecture.") { }
+Console.WriteLine("PASS context-taking emission rejects mismatched architecture");

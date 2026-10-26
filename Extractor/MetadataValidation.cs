@@ -58,6 +58,71 @@ internal static class MetadataValidation
         [.. (owner.Resolve() ?? throw new InvalidDataException("Unresolved aggregate")).Fields
             .Where(field => !field.IsStatic).Select(field => new InstanceField(field.Name, field.FieldType, field))];
 
+    // A read-only validation/emission phase owns its context; metadata rewrites require a new one.
+    internal sealed class LayoutContext(ModuleDefinition module, string architecture)
+    {
+        readonly Dictionary<TypeReference, AggregateInfo> validated = new(ReferenceEqualityComparer.Instance);
+        readonly Dictionary<TypeReference, FieldSet> fields = new(ReferenceEqualityComparer.Instance);
+        Dictionary<string, int>? typeCounts;
+        internal string Architecture => architecture;
+
+        internal void Require(ModuleDefinition owner, string requestedArchitecture)
+        {
+            if (!ReferenceEquals(module, owner) || architecture != requestedArchitecture)
+                throw new InvalidDataException("Layout context does not match module or architecture.");
+        }
+
+        sealed class FieldSet(TypeReference owner)
+        {
+            internal readonly InstanceField[] Fields = MetadataValidation.Fields(owner);
+            internal readonly Dictionary<FieldDefinition, int> InstanceIndices =
+                new(ReferenceEqualityComparer.Instance);
+            internal readonly Dictionary<FieldDefinition, int> AllIndices = new(ReferenceEqualityComparer.Instance);
+
+            internal void Index(TypeReference owner)
+            {
+                for (var index = 0; index < Fields.Length; index++)
+                    InstanceIndices.TryAdd(Fields[index].Definition, index);
+                var all = owner.Resolve().Fields;
+                for (var index = 0; index < all.Count; index++) AllIndices.TryAdd(all[index], index);
+            }
+        }
+
+        FieldSet FieldSnapshot(TypeReference owner)
+        {
+            if (fields.TryGetValue(owner, out var cached)) return cached;
+            var snapshot = new FieldSet(owner);
+            snapshot.Index(owner);
+            fields.Add(owner, snapshot);
+            return snapshot;
+        }
+
+        internal InstanceField[] Fields(TypeReference owner) => FieldSnapshot(owner).Fields;
+
+        internal int FieldIndex(TypeReference owner, FieldDefinition field, bool includeStatic = false)
+        {
+            var snapshot = FieldSnapshot(owner);
+            return (includeStatic ? snapshot.AllIndices : snapshot.InstanceIndices).GetValueOrDefault(field, -1);
+        }
+
+        internal AggregateInfo AggregateLayout(TypeReference reference)
+        {
+            if (validated.TryGetValue(reference, out var cached)) return cached;
+            typeCounts ??= module.GetTypes().CountBy(type => type.FullName, StringComparer.Ordinal).ToDictionary();
+            // A new root keeps its own recursion-depth check, even if a child was validated earlier.
+            var layout = MetadataValidation.AggregateLayout(reference, module, architecture, [],
+                new Dictionary<string, AggregateInfo>(), typeCounts);
+            validated.Add(reference, layout);
+            return layout;
+        }
+
+        internal int Size(TypeReference reference) => AggregateLayout(reference).Size;
+        internal int FieldSize(TypeReference type) => IsAggregate(type, module)
+            ? Size(type) : VectorWidth(type) ?? PrimitiveWidth(type);
+        internal int FieldOffset(TypeReference owner, FieldDefinition field) =>
+            AggregateLayout(owner).Offsets[field.FullName];
+    }
+
     internal static int Layout(TypeReference reference, ModuleDefinition module, string architecture = "scalar") =>
         AggregateLayout(reference, module, architecture).Size;
 
@@ -400,6 +465,7 @@ internal static class MetadataValidation
         var methods = ordered.ToArray();
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
+        var layoutContext = new LayoutContext(module, profile.Architecture);
         for (int i = 0; i < methods.Length; i++)
         {
             var index = i;
@@ -419,7 +485,7 @@ internal static class MetadataValidation
                 if (!skipped.Contains(instruction))
                     Check(method, instruction, () =>
                         InstructionTranslation.Translate(instruction, method, methodIndices, index, instructions,
-                            profile, nativeOperands, parameterHomes, imports), named: true);
+                            profile, nativeOperands, parameterHomes, imports, layoutContext), named: true);
         }
         return methods;
     }
