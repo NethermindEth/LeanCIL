@@ -670,19 +670,17 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     const string GeneratedPackageName = "leancil_generated";
 
     /// <summary>
-    /// Resolves the session's leancil dependency to a framework package over the certified library,
-    /// which Lake then reads in place, and adds a generated-module package that the session root requires. Returns
+    /// Resolves the session's leancil dependency to the certified library directory, which Lake then
+    /// reads in place, and adds a generated-module package that the session root requires. Returns
     /// that package: it has its own layout, so the consumer's srcDir and buildDir cannot move it.
     /// </summary>
     static string UseCertifiedFramework(string session, string certified)
     {
         var generated = Within(session, ".lake/packages/" + GeneratedPackageName);
         Directory.CreateDirectory(generated);
-        // The root and the generated package must resolve leancil to the same framework package.
-        var framework = FrameworkPackage(session, certified);
         File.WriteAllText(Path.Combine(generated, "lakefile.toml"),
             $"name = \"{GeneratedPackageName}\"\n\n[[require]]\nname = \"leancil\"\npath = " +
-            JsonSerializer.Serialize(framework.Replace('\\', '/')) + "\n");
+            JsonSerializer.Serialize(Path.GetFullPath(certified).Replace('\\', '/')) + "\n");
         File.Copy(Path.Combine(certified, "lean-toolchain"), Path.Combine(generated, "lean-toolchain"));
         var relative = Path.GetRelativePath(session, generated).Replace('\\', '/');
         var toml = Path.Combine(session, "lakefile.toml");
@@ -701,7 +699,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             ["type"] = "path", ["scope"] = "", ["name"] = name, ["manifestFile"] = "lake-manifest.json",
             ["inherited"] = inherited, ["dir"] = directory, ["configFile"] = "lakefile.toml"
         };
-        packages[index] = PathPackage("leancil", framework,
+        packages[index] = PathPackage("leancil", Path.GetFullPath(certified),
             packages[index]!["inherited"]?.GetValue<bool>() ?? false);
         packages.Add(PathPackage(GeneratedPackageName, relative, false));
         File.WriteAllText(path, manifest.ToJsonString());

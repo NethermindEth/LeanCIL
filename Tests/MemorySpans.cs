@@ -75,7 +75,7 @@ foreach (var (method, proof) in new[]
 })
 {
     var contractOutput = Path.Combine(root, method);
-    Run(["lake", "env", "lean", "-o", Path.Combine(contractOutput, "Extracted.olean"),
+    Run(["lake", "env", "lean", "--root=" + contractOutput, "-o", Path.Combine(contractOutput, "Extracted.olean"),
         Path.Combine(contractOutput, "Extracted.lean")], cwd: FixturePackage());
     var contracts = Run(["lake", "env", "lean", At(proof)], cwd: FixturePackage(), leanPath: contractOutput);
     if (contracts.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted span contract");

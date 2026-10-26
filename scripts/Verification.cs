@@ -1022,9 +1022,10 @@ partial class Program : IDisposable
     }
 
     /// <summary>The lakefile requirement of a package below owner on the certified framework.</summary>
+    // Relative, so equal sessions have equal configurations wherever their directories are.
     static string FrameworkRequirement(string owner, string certified) =>
         "\n[[require]]\nname = \"leancil\"\npath = " +
-        JsonSerializer.Serialize(FrameworkPackage(owner, certified).Replace('\\', '/')) + "\n";
+        JsonSerializer.Serialize(Path.GetRelativePath(owner, FrameworkPackage(owner, certified)).Replace('\\', '/')) + "\n";
 
     /// <summary>Declarations of every library in a lakefile except the framework's own CIL.</summary>
     static string LibraryDeclarations(string lakefile) => string.Concat(
