@@ -81,4 +81,10 @@ theorem missing_static_rejects :
       (body [(0, descriptor)]) = false := by decide +kernel
 #print axioms missing_static_rejects
 
+/-- Sparse homes retain ascending order and discard out-of-range references. -/
+theorem sparse_homes : requiredHomeIndices
+    ⟨List.replicate 1024 (.field .unsigned64), [],
+      [.store 1000, .address 2, .store 1000, .store 1024, .store 0]⟩
+    [true, true, true, true, false] = [2, 1000] := by decide +kernel
+#print axioms sparse_homes
 end Tests.ExtractionHomeIndexes

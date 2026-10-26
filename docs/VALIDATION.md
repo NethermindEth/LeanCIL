@@ -902,3 +902,19 @@ construction, performs eight passes over reverse-ordered homes plus a missing ar
 one-second warmups, median seven samples of 25 runs measured 128/512/2,048 homes at
 0.0090/0.0306/0.4200 ms before and 0.0021/0.0088/0.0649 ms after. These isolate lookup costs,
 not full extraction or CI wall time.
+Parameter home discovery enumerates the collected ordered set and filters its members by the
+argument bound. It no longer allocates every argument index and performs a tree lookup for each.
+The proved list equality retains ascending order, duplicate elimination, out-of-range filtering
+and truncated reachability semantics. `Tests/HomeEnumerationScaling.lean` compares both algorithms.
+
+Apple M4 / Lean 4.35 paired `decide +kernel` declaration work, including set construction (kHB):
+
+| Arguments | Homes | Range membership | Set enumeration |
+| --- | ---: | ---: | ---: |
+| 128 | 128 | 4,674.52 | 4,331.61 |
+| 512 | 512 | 24,966.38 | 23,066.91 |
+| 512 | 8 | 2,152.66 | 360.60 |
+| 2,048 | 8 | 8,246.02 | 1,011.87 |
+
+The dense cases improve 7–8%; sparse cases improve 83–88%. Computing the argument bound still
+traverses the argument list. These are focused kernel-work measurements, not total CI savings.
