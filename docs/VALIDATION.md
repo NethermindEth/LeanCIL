@@ -773,3 +773,13 @@ end-to-end CI time. Parameter slot lookup and the rest of contract verification 
 Call and home/static/opaque measurements above were collected for each isolated change before
 stacking the linear FlowIndex builder. Combined-stack counts may differ. Managed-call numbers
 measure direct kernel decision, not the preserved structural "cil_managed_calls" shortcut.
+
+Region suffix membership makes fallthrough closure automatic: `lower ≤ pc` implies
+`lower ≤ pc + 1`. The checker therefore looks up only explicit branch targets and callees.
+Its equivalence theorem still covers every instruction, including a final fallthrough beyond
+the body; instruction availability remains a separate execution obligation.
+
+On Apple M4 / Lean 4.35, paired `decide +kernel` checks of 32, 128 and 512 methods, each
+containing 16 nops and a return and listed from pc zero, took 1,120.60→1,008.90,
+5,832.86→5,391.51 and 29,638.99→27,878.92 kHB respectively. These include region-index
+construction and show 6–10% less kernel work, not total verification wall-time savings.

@@ -146,4 +146,8 @@ theorem absentCallee : regionClosedCheck
 /-- No code is checked for an empty region. -/
 theorem emptyStarts : regionClosedCheck [caller, helper] [] = true := by decide +kernel
 #print axioms emptyStarts
+/-- Region membership extends past the body; execution checks instruction availability. -/
+theorem finalFallthrough : regionClosedCheck
+    [{ caller with code := [.nop] }] [(0, 0)] = true := by decide +kernel
+#print axioms finalFallthrough
 end Tests.RegionRun
