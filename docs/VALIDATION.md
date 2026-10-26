@@ -1181,3 +1181,9 @@ toolchain frontend, and rejected native replays retain the existing per-module f
 The same two-profile fresh workload took 43.56 seconds with these changes, versus 47.67
 seconds with interface restoration alone; certificate compilation fell from 8.71 to 5.64
 seconds and replay from 8.73 to 6.83 seconds. Full-suite timing remains a separate check.
+
+The component-reuse and support-union fixtures skip their framework-only warmup verification
+when `LEANCIL_CERTIFIED_LIBRARY` is supplied. Their actual batches still authenticate that
+library and verify every original request with success caching disabled. Without a supplied
+library, the original warmup remains. This removes two redundant complete consumer sessions
+from prepared CI runs without removing any component, replay or source-identity assertions.

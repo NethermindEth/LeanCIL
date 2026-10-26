@@ -57,8 +57,9 @@ try
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
     foreach (var name in saved.Keys.Where(name => name != "LEANCIL_DISABLE_SUCCESS_CACHE"))
         Environment.SetEnvironmentVariable(name, null);
-    // Warm the certified framework before timing the fixed consumer workload.
-    Run([.. cli, "verify", requests[0].output, "--proof", requests[0].proof, "--proof-root", package]);
+    // A supplied library is already prepared; the batches authenticate it and verify every request.
+    if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")))
+        Run([.. cli, "verify", requests[0].output, "--proof", requests[0].proof, "--proof-root", package]);
     foreach (var order in new[] { new[] { 0, 1, 2 }, new[] { 2, 0, 1 } })
     {
         var trace = ConsumerTraceDirectory.Create(root, "Trace");
