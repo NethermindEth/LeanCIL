@@ -11,6 +11,29 @@ theorem home_edges : requiredHomeIndices
     [true, true, true, true] = [1, 3] := by decide +kernel
 #print axioms home_edges
 
+/-- Duplicate home claims keep the first appended slot, and absent homes have no slot. -/
+theorem home_slots : (argumentHomeIndex [2, 0, 2] 5)[2]? = some 5 ∧
+    (argumentHomeIndex [2, 0, 2] 5)[0]? = some 6 ∧
+    (argumentHomeIndex [2, 0, 2] 5)[1]? = none := by decide +kernel
+#print axioms home_slots
+
+/-- Indexed argument validation rejects missing arguments, incorrect slots and short masks. -/
+theorem argument_bounds :
+    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 1]⟩ [1]
+      [true] [.setLocal 0] = false ∧
+    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
+      [true] [.setLocal 1] = false ∧
+    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
+      [] [.setLocal 0] = false := by decide +kernel
+#print axioms argument_bounds
+
+/-- Pruned instructions must remain unsupported, even when their indexes are invalid. -/
+theorem pruned_argument :
+    argumentInstructionsValid ⟨[], [], [.load 99]⟩ []
+      [false] [.unsupported "dead"] = true ∧
+    argumentInstructionsValid ⟨[], [], [.load 99]⟩ [] [false] [.arg 99] = false := by
+  decide +kernel
+#print axioms pruned_argument
 /-- A minimal raw body for metadata-only validation. -/
 def raw : RawMethod := {
   token := 1, owner := "Indexes", hasThis := false, explicitThis := false,

@@ -806,3 +806,19 @@ call per method. Median times over five measured runs after two warmups, includi
 construction, generated text and output writes, were 2.90→1.87 ms at 128 methods, 20.56→6.37 ms
 at 512, and 127.10→24.18 ms at 2,048. Combined output hashes matched at every size. These are
 isolated template-emission measurements, not end-to-end verification estimates.
+Argument instruction validation now shares indexes for argument types and appended home slots.
+The home-slot map preserves the first occurrence even for duplicate home lists; missing argument
+indexes, hidden home accesses and unsupported replacements remain rejected. Expected home kinds
+also use the argument-type index. Exact lookup/check equivalence theorems preserve the existing
+semantic consequence statements. Tests in `Tests.ExtractionHomeIndexes` cover these boundaries.
+
+`Tests/ArgumentSlotScaling.lean` isolates the per-instruction checks with one store per argument.
+On Apple M4 / Lean 4.35, `leanprof elab --heartbeats` reported:
+
+| Arguments/stores | List lookup (kHB) | Indexed lookup (kHB) |
+| --- | ---: | ---: |
+| 128 | 8,953.23 | 4,647.67 |
+| 512 | 136,907.69 | 24,508.59 |
+
+The indexed measurements include constructing both indexes with the current linear FlowIndex
+builder. They reduce measured work by 48–82%; they do not estimate total CI wall time.
