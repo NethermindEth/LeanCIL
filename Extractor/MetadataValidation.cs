@@ -70,10 +70,11 @@ internal static class MetadataValidation
     // Managed layout for primitive, reference-free fields on the admitted 64-bit
     // CoreCLR targets. This is not interop marshalling layout (notably for bool).
     internal static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture = "scalar")
-        => AggregateLayout(reference, module, architecture, [], new Dictionary<string, AggregateInfo>());
+        => AggregateLayout(reference, module, architecture, [], new Dictionary<string, AggregateInfo>(),
+            module.GetTypes().CountBy(type => type.FullName, StringComparer.Ordinal).ToDictionary());
 
     static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture,
-        HashSet<string> active, Dictionary<string, AggregateInfo> layouts)
+        HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
     {
         if (ValueTuples.Is(reference)) return TupleLayout(reference, module, architecture);
         var type = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate");
@@ -82,7 +83,7 @@ internal static class MetadataValidation
             !(type.IsExplicitLayout || type.IsSequentialLayout) || type.HasGenericParameters ||
             type.ClassSize is < -1 or > 65536 || (type.IsExplicitLayout && type.ClassSize <= 0) ||
             type.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.InlineArrayAttribute") ||
-            module.GetTypes().Count(t => t.FullName == type.FullName) != 1)
+            typeCounts.GetValueOrDefault(type.FullName) != 1)
             throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName}");
 
         if (layouts.TryGetValue(type.FullName, out var cached)) return cached;
@@ -93,6 +94,7 @@ internal static class MetadataValidation
         if (packing is not (-1 or 0 or 1 or 2 or 4 or 8 or 16 or 32 or 64 or 128))
             throw new InvalidDataException($"Invalid aggregate packing: {reference.FullName}");
         int pack = packing <= 0 ? 64 : packing;
+        var fieldCounts = type.Fields.CountBy(field => field.Name, StringComparer.Ordinal).ToDictionary();
         var offsets = new Dictionary<string, int>();
         var end = 0;
         var alignment = 1;
@@ -102,7 +104,7 @@ internal static class MetadataValidation
             if (field.FieldType is TypeSpecification && vectorWidth is null)
                 throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
             var nested = IsAggregate(field.FieldType, module)
-                ? AggregateLayout(field.FieldType, module, architecture, active, layouts) : null;
+                ? AggregateLayout(field.FieldType, module, architecture, active, layouts, typeCounts) : null;
             int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(field.FieldType);
             if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
                 throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
@@ -113,7 +115,7 @@ internal static class MetadataValidation
             var offset = type.IsExplicitLayout ? field.Offset : (end + fieldAlignment - 1) / fieldAlignment * fieldAlignment;
             if (offset < 0 || offset > 65536 - width ||
                 (type.IsExplicitLayout && offset + width > type.ClassSize) ||
-                (type.IsSequentialLayout && field.Offset >= 0) || type.Fields.Count(f => f.Name == field.Name) != 1)
+                (type.IsSequentialLayout && field.Offset >= 0) || fieldCounts[field.Name] != 1)
                 throw new InvalidDataException($"Invalid field layout: {field.FullName}");
             offsets.Add(field.FullName, offset);
             end = Math.Max(end, offset + width);
