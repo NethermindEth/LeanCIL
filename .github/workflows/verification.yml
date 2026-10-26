@@ -132,7 +132,8 @@ jobs:
       fail-fast: false
       # Longest measured suites start first; eight runners bound concurrent load.
       max-parallel: 8
-      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+      matrix:
+        suite: [core, evidence, exportstransitive, imports]
 
     env:
       DOTNET_NOLOGO: true
