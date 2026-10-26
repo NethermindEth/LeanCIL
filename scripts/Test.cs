@@ -164,14 +164,6 @@ foreach (string project in projects.Distinct(StringComparer.Ordinal))
 
 Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, ExtractorBuildIdentity());
 
-if (suite is "all" or "core" or "unsafe" or "scaling" or "excluded")
-{
-    // Direct semantic/evidence checks use the checkout's Lake build directory.
-    // Seed it from the same validated library instead of rebuilding CIL.
-    verification.Library(Inputs(At("CIL.lean")));
-    CopyTree(Path.Combine(verification.library!, ".lake/build"), At(".lake/build"));
-}
-
 if (suite is not ("all" or "core"))
 {
     RunSuite(suite);
@@ -217,7 +209,7 @@ Passed("external consumer proof package and transitive source identity");
 RunFixture("Tests/MethodSelectors.cs", [], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
-Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding",
+Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBinding", "Tests.MethodEmbedding",
     "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels",
     "Tests.DebugNames", "Tests.MethodContract", "Tests.ContractCalls", "Tests.ConstructContract", "Tests.OutcomeContract",
     "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints",
@@ -225,7 +217,7 @@ Run(["lake", "build", "CIL", "Tests.Semantics", "Tests.Automation", "Tests.Metho
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes"],
-    streamOutput: true, progress: "Building Lean library, semantics and automation tests");
+    verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
     + "local snapshot, contract consequence, invocation certificate, call transport, buffer contents, linking, "

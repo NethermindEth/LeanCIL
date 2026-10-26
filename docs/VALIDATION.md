@@ -118,7 +118,8 @@ both streamed artifacts and copied metadata retain their file modes.
 `Tests/LibraryCopyScaling.cs` compares separate validation/copying with hashing during
 copying, retaining independent destination validation in both paths. It alternates four
 pairs over the same framework/native build files and records file count, bytes and wall
-time. An optional argument selects the donor `.lake/build` directory; the synthetic
+time. An optional argument selects the donor `.lake/build` directory, by default the certified
+library's; the synthetic
 performance fixture is never supplied to a verifier as a certified library.
 
 `Tests/ConsumerFingerprintReuse.cs` checks authenticated canonical fingerprints across

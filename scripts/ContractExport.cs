@@ -445,8 +445,7 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         Directory.CreateDirectory(isolated);
         // Only the framework is visible, read in place; Lake writes only the interface modules here.
         File.WriteAllText(Path.Combine(isolated, "lakefile.toml"),
-            "name = \"leancil-interface\"\n\n[[require]]\nname = \"leancil\"\npath = " +
-            JsonSerializer.Serialize(certified.Replace('\\', '/')) + "\n");
+            "name = \"leancil-interface\"\n" + FrameworkRequirement(isolated, certified));
         File.Copy(Path.Combine(certified, "lean-toolchain"), Path.Combine(isolated, "lean-toolchain"));
         foreach (InterfaceModule source in interfaces)
         {

@@ -72,7 +72,7 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
         {
             var forgedSpan = Path.Combine(root, "forged-span.lean");
             File.WriteAllText(forgedSpan, source.Replace(span, replacement, StringComparison.Ordinal));
-            var rejectedSpan = Execute(["lake", "env", "lean", forgedSpan]);
+            var rejectedSpan = Execute(["lake", "env", "lean", forgedSpan], cwd: FixturePackage());
             if (rejectedSpan.Code == 0 || !rejectedSpan.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
                 throw new Exception("Forged span constructor was not rejected: " + rejectedSpan.Output);
             Console.WriteLine("PASS forged stack span rejected: " + replacement);
@@ -84,7 +84,7 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
     if (!source.Contains(operation, StringComparison.Ordinal)) throw new Exception("Missing uninitialized allocation");
     var forged = Path.Combine(root, "forged-initialization.lean");
     File.WriteAllText(forged, source.Replace(operation, ".stackAlloc true", StringComparison.Ordinal));
-    var rejected = Execute(["lake", "env", "lean", forged]);
+    var rejected = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejected.Code == 0 || !rejected.Output.Contains("FeatureFlowValid", StringComparison.Ordinal))
         throw new Exception("Forged localsinit was not rejected by the Lean certificate: " + rejected.Output);
     Console.WriteLine("PASS forged stack initialization rejected");

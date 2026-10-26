@@ -25,11 +25,14 @@ var measureOnly = baselineWorker is not null;
 var workerAssembly = baselineWorker ?? typeof(Program).Assembly.Location;
 var directory = At("artifacts/ConsumerFingerprintReuse-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(directory);
+// Resolve the certified library before the private cache below hides the shared one.
+using var certified = new Program();
+certified.Library(Inputs(At("CIL.lean")));
+var auditor = certified.auditExecutable!;
+var moduleDirectory = Path.Combine(certified.library!, ".lake/build/lib/lean");
 Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(directory, "Cache"));
 Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
 string? toolchain = null;
-var auditor = At(".lake/build/bin/leancil-audit" + (OperatingSystem.IsWindows() ? ".exe" : ""));
-var moduleDirectory = At(".lake/build/lib/lean");
 var paths = measure
     ? Directory.EnumerateFiles(Path.Combine(moduleDirectory, "CIL"), "*.olean", SearchOption.AllDirectories)
         .Append(Path.Combine(moduleDirectory, "CIL.olean")).ToArray()

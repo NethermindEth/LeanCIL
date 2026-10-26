@@ -49,7 +49,7 @@ foreach (var name in new[] { "Element", "Read", "Write" })
     if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing address mutation target");
     var forged = Path.Combine(root, "ForgedElement.lean");
     File.WriteAllText(forged, source.Replace(target, ".arrayAddress .unsigned32", StringComparison.Ordinal));
-    var rejection = Execute(["lake", "env", "lean", forged]);
+    var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
         throw new Exception("Forged element address was not rejected by scalar evidence: " + rejection.Output);
 }

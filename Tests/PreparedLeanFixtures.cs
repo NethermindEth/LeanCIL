@@ -18,7 +18,6 @@ partial class Program
         var inputs = CommonInputs();
         var session = Library(inputs);
         var compiled = Path.Combine(session, ".lake/build/lib/lean");
-        CopyTree(Path.Combine(library!, ".lake/build"), At(".lake/build"));
         var records = new ConcurrentDictionary<string, PreparedLeanModule>(StringComparer.Ordinal);
         foreach (var module in modules)
             if (!Regex.IsMatch(module, @"\ATests\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z"))
@@ -87,12 +86,13 @@ partial class Program
 
     static void RequireLeanFixtures(params string[] modules)
     {
-        if (!PreparedLeanFixturesMatch(modules)) Run(["lake", "build", .. modules]);
+        if (!PreparedLeanFixturesMatch(modules))
+            Run(["lake", "build", .. modules], FixturePackage());
     }
 
     static void CheckLeanFixture(string module)
     {
         if (!PreparedLeanFixturesMatch([module]))
-            Run(["lake", "env", "lean", At(module.Replace('.', '/') + ".lean")]);
+            Run(["lake", "env", "lean", At(module.Replace('.', '/') + ".lean")], FixturePackage());
     }
 }

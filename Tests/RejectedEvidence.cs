@@ -69,7 +69,7 @@ partial class Program
             Directory.CreateDirectory(directory);
             var path = Path.GetFullPath(Path.Combine(directory, "RejectedBatch.lean"));
             File.WriteAllText(path, source);
-            var result = Execute(["lake", "env", "lean", path], leanPath: leanPath);
+            var result = Execute(["lake", "env", "lean", path], cwd: FixturePackage(), leanPath: leanPath);
             var diagnostics = Regex.Matches(result.Output,
                 @"(?m)^" + Regex.Escape(path.Replace('\\', '/')) + @":(\d+):\d+: (error|warning|information):");
             if (diagnostics.Count == 0)

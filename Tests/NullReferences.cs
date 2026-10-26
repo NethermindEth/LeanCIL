@@ -16,7 +16,7 @@ var owner = runtime.GetType("Examples.NullReferences")!;
 var limbs = runtime.GetType("Examples.FourLimbs")!;
 using var source = ModuleDefinition.ReadModule(assembly);
 var methods = source.GetType("Examples.NullReferences").Methods;
-Run(["lake", "build", "Tests.UnsafeCallEvidence"]);
+Run(["lake", "build", "Tests.UnsafeCallEvidence"], verification.CheckoutPackage());
 
 // Every byte of the caller's 32-byte struct is 0x25, so each limb is 0x2525252525252525.
 const string memory = """
@@ -89,7 +89,7 @@ foreach (var (name, helper, forgery) in new[]
     if (!extracted.Contains(helper)) throw new InvalidOperationException($"{name} does not emit {helper}");
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, extracted.Replace(helper, forgery));
-    var result = Execute(["lake", "env", "lean", mutated]);
+    var result = Execute(["lake", "env", "lean", mutated], cwd: verification.CheckoutPackage());
     if (result.Code == 0 || !result.Output.Contains("Extraction.UnsafeCallsValid rawLayouts method0Closed") ||
         !result.Output.Contains("is false") || result.Output.Contains("FeatureFlowValid"))
         throw new InvalidOperationException($"Forged {helper} was accepted for {name}\n{result.Output}");

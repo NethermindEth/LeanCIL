@@ -11,7 +11,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var queue = new GeneratedQueue(verification, assembly);
 var root = At("artifacts/SkipInitialization");
 Directory.CreateDirectory(root);
-Run(["lake", "build", "Tests.UnsafeCallEvidence"]);
+Run(["lake", "build", "Tests.UnsafeCallEvidence"], verification.CheckoutPackage());
 
 verification.Verify(assembly, "Examples", "SkipInitialization::Skip(Examples.FourLimbs&)",
     At("Examples/Proofs/SkipInitialization.lean"), Path.Combine(root, "Skip"));

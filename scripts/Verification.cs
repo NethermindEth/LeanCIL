@@ -963,13 +963,8 @@ partial class Program : IDisposable
     {
         var directory = Path.Combine(Path.GetTempPath(), "leancil-session-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var libraries = Regex.Matches(File.ReadAllText(Path.Combine(certified, "lakefile.toml")),
-                @"^\[\[lean_lib\]\]\r?\nname = ""([^""]+)""", RegexOptions.Multiline)
-            .Select(match => match.Groups[1].Value).Where(name => name != "CIL");
-        var basePath = certified.Replace('\\', '/').Replace("\"", "\\\"");
-        File.WriteAllText(Path.Combine(directory, "lakefile.toml"),
-            $"name = \"leancil-session\"\n\n[[require]]\nname = \"leancil\"\npath = \"{basePath}\"\n" +
-            string.Concat(libraries.Select(name => $"\n[[lean_lib]]\nname = \"{name}\"\n")));
+        File.WriteAllText(Path.Combine(directory, "lakefile.toml"), "name = \"leancil-session\"\n" +
+            FrameworkRequirement(directory, certified) + LibraryDeclarations(Path.Combine(certified, "lakefile.toml")));
         File.Copy(Path.Combine(certified, "lean-toolchain"), Path.Combine(directory, "lean-toolchain"));
         foreach (var name in extraSources)
         {
@@ -1008,6 +1003,88 @@ partial class Program : IDisposable
     /// <summary>The Lean search path of a session: its own outputs before the certified base.</summary>
     string SessionLeanPath(string directory) =>
         Path.Combine(directory, ".lake/build/lib/lean") + Path.PathSeparator + Path.Combine(library!, ".lake/build/lib/lean");
+
+    /// <summary>
+    /// A package named leancil whose only library is CIL, read in place from the certified library.
+    /// The certified lakefile also declares the test libraries; only this view keeps them from
+    /// claiming a requiring package's own modules.
+    /// </summary>
+    static string FrameworkPackage(string owner, string certified)
+    {
+        var directory = Path.Combine(owner, ".lake", "leancil-framework");
+        Directory.CreateDirectory(directory);
+        var root = Path.GetFullPath(certified).Replace('\\', '/');
+        WriteIfChanged(Path.Combine(directory, "lakefile.toml"),
+            $"name = \"leancil\"\nsrcDir = {JsonSerializer.Serialize(root)}\nbuildDir = " +
+            $"{JsonSerializer.Serialize(root + "/.lake/build")}\n\n[[lean_lib]]\nname = \"CIL\"\n");
+        WriteIfChanged(Path.Combine(directory, "lean-toolchain"), File.ReadAllText(Path.Combine(certified, "lean-toolchain")));
+        return directory;
+    }
+
+    /// <summary>The lakefile requirement of a package below owner on the certified framework.</summary>
+    static string FrameworkRequirement(string owner, string certified) =>
+        "\n[[require]]\nname = \"leancil\"\npath = " +
+        JsonSerializer.Serialize(FrameworkPackage(owner, certified).Replace('\\', '/')) + "\n";
+
+    /// <summary>Declarations of every library in a lakefile except the framework's own CIL.</summary>
+    static string LibraryDeclarations(string lakefile) => string.Concat(
+        Regex.Matches(File.ReadAllText(lakefile), @"^\[\[lean_lib\]\]\r?\nname = ""([^""]+)""", RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value).Where(name => name != "CIL")
+            .Select(name => $"\n[[lean_lib]]\nname = \"{name}\"\n"));
+
+    // Rewriting an unchanged configuration would make Lake reconfigure packages that later builds reuse.
+    // Concurrent fixtures share the checkout package, so a reader sees the old or new file, never a partial one.
+    static void WriteIfChanged(string path, string contents)
+    {
+        if (File.Exists(path) && File.ReadAllText(path) == contents) return;
+        var staging = path + "." + Guid.NewGuid().ToString("N");
+        File.WriteAllText(staging, contents);
+        File.Move(staging, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// The package in which checkout tests build: its sources are the checkout's own and its CIL is
+    /// the certified library, read in place, so neither the library nor the checkout gets a CIL build.
+    /// </summary>
+    string CheckoutPackage()
+    {
+        Library(Inputs(At("CIL.lean")));
+        var directory = At(".lake/leancil-checkout");
+        Directory.CreateDirectory(directory);
+        WriteIfChanged(Path.Combine(directory, "lakefile.toml"), "name = \"leancil-checkout\"\nsrcDir = \"../..\"\n" +
+            FrameworkRequirement(directory, library!) + LibraryDeclarations(At("lakefile.toml")));
+        WriteIfChanged(Path.Combine(directory, "lean-toolchain"), File.ReadAllText(At("lean-toolchain")));
+        return directory;
+    }
+
+    /// <summary>The Lean search path of checkout tests: their own outputs, then the certified library.</summary>
+    string CheckoutLeanPath() => SessionLeanPath(CheckoutPackage());
+
+    static Program? fixtureVerification;
+
+    /// <summary>The checkout package for static test helpers, created once per process.</summary>
+    static string FixturePackage()
+    {
+        if (fixtureVerification is null)
+        {
+            var verification = fixtureVerification = new Program();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => ((IDisposable)verification).Dispose();
+        }
+        return fixtureVerification.CheckoutPackage();
+    }
+
+    /// <summary>The Lean search path for static test helpers: checkout outputs, then the certified library.</summary>
+    static string FixtureLeanPath()
+    {
+        var package = FixturePackage();
+        return fixtureVerification!.SessionLeanPath(package);
+    }
+
+    /// <summary>The compiled module on a Lean search path, as Lean resolves it: the first directory that has it.</summary>
+    static string ResolveOlean(string leanPath, string module) =>
+        leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(directory => Path.Combine(directory, module.Replace('.', '/') + ".olean"))
+            .FirstOrDefault(File.Exists) ?? throw new FileNotFoundException("Missing compiled module: " + module);
 
     string PrepareLibrary(string destination, string? trustedDigest = null)
     {

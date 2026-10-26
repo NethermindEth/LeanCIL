@@ -113,7 +113,7 @@ if (!source.Contains(one) || !source.Contains(".staticValue [(BitVec.ofNat 8 1),
     throw new InvalidOperationException("Missing One descriptor in the extraction");
 var forged = Path.Combine(root, "One-forged.lean");
 File.WriteAllText(forged, source.Replace("[(BitVec.ofNat 8 1), ", "[(BitVec.ofNat 8 2), "));
-var forgedResult = Execute(["lake", "env", "lean", forged]);
+var forgedResult = Execute(["lake", "env", "lean", forged], cwd: verification.CheckoutPackage());
 if (forgedResult.Code == 0 || !forgedResult.Output.Contains("Extraction.StaticValuesValid program"))
     throw new InvalidOperationException("Forged static value was accepted\n" + forgedResult.Output);
 Console.WriteLine("PASS forged static value rejected by the extraction certificate");

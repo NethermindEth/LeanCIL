@@ -9,14 +9,11 @@ using System.Text.Json;
 using var verification = new Program();
 var output = At("artifacts/AllocationImports");
 Directory.CreateDirectory(output);
-var build = Run(["lake", "build", "CIL", "leancil-audit",
-    "Tests.AllocationRenaming", "Tests.AllocationExecutionRenaming"]);
+var build = Run(["lake", "build", "Tests.AllocationRenaming", "Tests.AllocationExecutionRenaming"],
+    verification.CheckoutPackage());
 if (build.Contains("sorryAx", StringComparison.Ordinal))
     throw new InvalidOperationException("Allocation build contains sorryAx");
-verification.auditExecutable = At(".lake/build/bin/leancil-audit" +
-    (OperatingSystem.IsWindows() ? ".exe" : ""));
-verification.auditExecutableSha = Sha(verification.auditExecutable);
-var leanPath = At(".lake/build/lib/lean");
+var leanPath = verification.CheckoutLeanPath();
 
 HashSet<string> Imports(string name, string[] modules)
 {
@@ -41,7 +38,7 @@ if (baseline.Contains(entry) || !selected.Contains(entry))
     throw new InvalidOperationException("Allocation refinement must require its explicit import");
 var targets = selected.Except(baseline).Order(StringComparer.Ordinal).ToArray();
 var parts = targets.ToDictionary(module => module, module =>
-    ConsumerModuleParts(Path.Combine(leanPath, module.Replace('.', '/') + ".olean")));
+    ConsumerModuleParts(ResolveOlean(leanPath, module)));
 if (!verification.ReplayModulesJointly(At("."), targets, leanPath, "Kernel replay of allocation refinement"))
     throw new InvalidOperationException("Allocation refinement dependencies failed joint kernel replay");
 Console.WriteLine($"PASS root import excludes allocation refinement; explicit imports replay {targets.Length} modules");
@@ -53,7 +50,7 @@ if (audited.namespaces is not { error: null, count: > 0, rejected.Length: 0 } na
         JsonSerializer.Serialize(audited.namespaces));
 foreach (var module in targets)
 {
-    var path = Path.Combine(leanPath, module.Replace('.', '/') + ".olean");
+    var path = ResolveOlean(leanPath, module);
     RequireAuditedModule(audited, module, path);
     if (!Same(parts[module], ConsumerModuleParts(path)))
         throw new InvalidOperationException("Allocation module changed during replay or audit: " + module);

@@ -107,7 +107,7 @@ foreach (var (name, count, expected) in cases)
     if (!source.Contains(".eq", StringComparison.Ordinal)) throw new Exception("Missing equality mutation target");
     var forged = Path.Combine(root, "ForgedEquality.lean");
     File.WriteAllText(forged, source.Replace(".eq", ".lt", StringComparison.Ordinal));
-    var rejection = Execute(["lake", "env", "lean", forged]);
+    var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
         throw new Exception("Forged reference equality was not rejected by scalar evidence: " + rejection.Output);
     Console.WriteLine("PASS independent forged reference equality rejection");

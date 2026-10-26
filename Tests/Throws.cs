@@ -155,7 +155,7 @@ foreach (var (mutation, marker) in new[]
     if (mutation == "dead-non-exception")
     {
         if (result.Code != 0) throw new InvalidOperationException("Unreachable unsupported throw blocked extraction: " + result.Output);
-        Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")]);
+        Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")], cwd: verification.CheckoutPackage());
         Console.WriteLine("PASS unreachable unsupported throw stays excluded and its certificate checks");
         continue;
     }

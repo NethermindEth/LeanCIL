@@ -8,9 +8,7 @@
 using System.Text.Json;
 
 using var verification = new Program();
-Run(["lake", "build", "leancil-audit"]);
-verification.auditExecutable = At(".lake/build/bin/leancil-audit" + (OperatingSystem.IsWindows() ? ".exe" : ""));
-verification.auditExecutableSha = Sha(verification.auditExecutable);
+verification.Library(Inputs(At("CIL.lean")));
 var root = Path.Combine(Path.GetTempPath(), "leancil-inspection-test-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
