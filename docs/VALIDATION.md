@@ -833,3 +833,18 @@ certifications per export, measured median batches of 128/512/2,048 exports at
 0.369/1.814/22.929 ms with list searches versus 0.031/0.121/0.590 ms with dictionaries.
 Dictionary construction is included. This measures the lookup algorithm, not DLL validation,
 proof checking or end-to-end import time.
+
+Blocker collection retains ordered lists for sites, entries and call chains while using indexes
+for deduplication. Sites use record value equality; entries use exact (signature, profile)
+keys; chains use full ordinal element equality, including element boundaries and order.
+Findings and reaches have reference identity, so assigning a finding's output ID cannot change
+its hash. `Tests/Blockers.cs` checks distinct arrays with equal contents, distinct chain splits,
+profile case and first-seen output ordering. The full fixture report matches the former CLI
+except for its extractor hash.
+
+A Windows .NET 10 Release collection benchmark inserted each unique site and two-element chain
+twice into one finding. After a one-second warmup per implementation/size, median times over
+five measured batches at 128/512/2,048 unique sites and chains were 0.093/2.761/35.876 ms for
+list deduplication versus 0.021/0.130/0.540 ms for indexed accumulation. Collection construction
+is included; indexed measurements invoke the actual accumulator through reflection. These are
+collection costs, not admission or complete report-generation timings.
