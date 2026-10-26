@@ -16,7 +16,14 @@ internal sealed class ImportResolution : IDisposable
         StaticIdentityRecord[] StaticIdentities, InitializationAssumption[] InitializationAssumptions,
         string? DefinitionSignature, string[] TypeArguments, ContractMethodSignature? TypedSignature,
         ContractLayout[] PublishedLayouts, ContractLayout[] ActualLayouts, string ComputedLayouts);
-    sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module);
+    sealed record Library(Source Source, ContractInterface Interface, string SidecarSha256, ModuleDefinition Module)
+    {
+        // Read validates uniqueness before a library and its indexes can be published.
+        internal Dictionary<string, ContractExport> Exports { get; } =
+            Interface.Exports.ToDictionary(export => export.Identity, StringComparer.Ordinal);
+        internal Dictionary<(string Identity, string Profile), ContractCertification> Certifications { get; } =
+            Interface.Certifications.ToDictionary(record => (record.Identity, record.Profile));
+    }
     readonly record struct ValidatedMetadata(ContractLayout[] ActualLayouts, string ComputedLayouts);
     internal sealed record Node(string AssemblyIdentity, string ImplementationSha256, string InterfaceDigest,
         string SidecarPath, string ImplementationPath, string ExpectedInterfaceDigest, bool IsReferenceAssembly,
@@ -159,7 +166,7 @@ internal sealed class ImportResolution : IDisposable
             throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Next: supply --import {reference.DeclaringType.Scope.Name}.leancil.contracts and --import-sha256 {reference.DeclaringType.Scope.Name}=<hex> and --import-interface-sha256 {reference.DeclaringType.Scope.Name}=<hex>.");
         ContractMethodMetadata.Selection selection = ContractMethodMetadata.ResolveImported(reference, library.Module, profile.Architecture);
         string identity = selection.Identity;
-        ContractExport export = library.Interface.Exports.SingleOrDefault(candidate => candidate.Identity == identity)
+        ContractExport export = library.Exports.GetValueOrDefault(identity)
             ?? throw new InvalidDataException("Contract export not present: " + identity);
         MethodDefinition definition = selection.Definition;
         if (library.Interface.FormatVersion == 2)
@@ -186,7 +193,7 @@ internal sealed class ImportResolution : IDisposable
             throw new InvalidDataException("Contract import requires an exact named built-in profile.");
         if (!export.Profiles.Contains(profile.Name, StringComparer.Ordinal))
             throw new InvalidDataException("Contract import profile not listed: " + profile.Name);
-        ContractCertification certification = library.Interface.Certifications.SingleOrDefault(record => record.Identity == identity && record.Profile == profile.Name)
+        ContractCertification certification = library.Certifications.GetValueOrDefault((identity, profile.Name))
             ?? throw new InvalidDataException("Contract import certification not present for profile: " + profile.Name);
         if (certification.ImplementationSha256 != library.Interface.ImplementationSha256 ||
             certification.InterfaceDigest != library.Interface.InterfaceDigest || certification.ClosureDigest != export.ClosureDigest)
