@@ -1,4 +1,5 @@
 import CIL.Extraction.Features
+import Std.Data.TreeSet.Lemmas
 import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
@@ -355,20 +356,46 @@ instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Decidable (DivisionIntrinsicsValid closed reachable method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
-/-- A `Vector128<ulong>` local whose address is never taken. -/
-private def opaqueEligible (closed : RawMethod) (addressed : List Nat) (index : Nat) : Bool :=
-  (match closed.locals[index]? with
+/-- Whether a raw local is the whole-vector type eligible for opaque storage. -/
+private def opaqueLocalType : Option TypeExpr → Bool
   | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
       (.atom elementScope "System.UInt64")) =>
     scope == intrinsicsScope && elementScope == runtimeScope
-  | _ => false) && !addressed.contains index
+  | _ => false
 
 /-- Every eligible local, in index order; addresses are taken by `ldloca` (18 or 0xFE0D). -/
 def opaqueLocalIndices (closed : RawMethod) : List Nat :=
-  let addressed := closed.code.filterMap fun instruction =>
-    if instruction.opcode == 18 || instruction.opcode == 65037 then localIndex instruction else none
-  (List.range closed.locals.length).filter (opaqueEligible closed addressed)
+  let addressed := Std.TreeSet.ofList (closed.code.filterMap fun instruction =>
+    if instruction.opcode == 18 || instruction.opcode == 65037 then localIndex instruction else none)
+  let locals := FlowIndex.ofList closed.locals
+  (List.range closed.locals.length).filter fun index =>
+    opaqueLocalType (locals.get? index) && !addressed.contains index
 
+/-- Indexed opaque-local discovery agrees with direct local lookup and address membership. -/
+theorem opaqueLocalIndices_eq_scan (closed : RawMethod) :
+    opaqueLocalIndices closed = (List.range closed.locals.length).filter (fun index =>
+      (match (closed.locals[index]? : Option TypeExpr) with
+      | some (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
+          (.atom elementScope "System.UInt64")) =>
+        scope == intrinsicsScope && elementScope == runtimeScope
+      | _ => false) && !(closed.code.filterMap (fun instruction =>
+        if instruction.opcode == 18 || instruction.opcode == 65037 then localIndex instruction
+        else none)).contains index) := by
+  simp only [opaqueLocalIndices, FlowIndex.get?_ofList, Std.TreeSet.contains_ofList]
+  rfl
+
+#print axioms opaqueLocalIndices_eq_scan
+/-- Every claimed opaque local has the emitted whole-vector slot kind. -/
+private def opaqueKindsValid (method : Method) : Bool :=
+  let kinds := FlowIndex.ofList method.localKinds
+  method.opaqueVectorLocals.all fun index => kinds.get? index == some .vector128
+
+/-- No emitted address operation exposes an opaque local's unspecified bytes. -/
+private def opaqueAddressesValid (method : Method) : Bool :=
+  let slots := Std.TreeSet.ofList method.opaqueVectorLocals
+  method.code.all fun operation => match operation with
+    | .localAddr index => !slots.contains index
+    | _ => true
 /-- The opaque locals are exactly the eligible ones when the method uses
     `CreateScalarUnsafe` and none otherwise; each is a 128-bit vector slot whose address the
     emitted code never takes. -/
@@ -377,11 +404,23 @@ def OpaqueLocalsValid (closed : RawMethod) (method : Method) : Prop :=
     match op with
     | .intrinsic (.vector .createScalarUnsafe64) _ => true
     | _ => false) then opaqueLocalIndices closed else []) ∧
-  method.opaqueVectorLocals.all (fun index => method.localKinds[index]? == some .vector128) = true ∧
-  method.code.all (fun operation => match operation with
-    | .localAddr index => !(index ∈ method.opaqueVectorLocals)
-    | _ => true) = true
+  opaqueKindsValid method = true ∧ opaqueAddressesValid method = true
 
+/-- Indexed opaque-local checks preserve the original kind and no-address obligations. -/
+theorem OpaqueLocalsValid_iff_scan (closed : RawMethod) (method : Method) :
+    OpaqueLocalsValid closed method ↔
+      method.opaqueVectorLocals = (if method.code.any (fun op => match op with
+        | .intrinsic (.vector .createScalarUnsafe64) _ => true
+        | _ => false) then opaqueLocalIndices closed else []) ∧
+      method.opaqueVectorLocals.all (fun index => method.localKinds[index]? == some .vector128) =
+        true ∧
+      method.code.all (fun operation => match operation with
+        | .localAddr index => !(index ∈ method.opaqueVectorLocals)
+        | _ => true) = true := by
+  simp only [OpaqueLocalsValid, opaqueKindsValid, opaqueAddressesValid,
+    FlowIndex.get?_ofList, Std.TreeSet.contains_ofList, List.contains_eq_mem]
+
+#print axioms OpaqueLocalsValid_iff_scan
 instance (closed : RawMethod) (method : Method) : Decidable (OpaqueLocalsValid closed method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 

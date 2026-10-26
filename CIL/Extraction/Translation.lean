@@ -6,6 +6,7 @@ import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.Constrained
+import Std.Data.TreeMap.Lemmas
 
 /-!
 # Translation validity
@@ -74,10 +75,31 @@ private def staticScalarType : TypeExpr → Option (Nat × Bool)
     | _ => none
   | _ => none
 
+/-- Index static sites with the same first-match behavior as the metadata list. -/
+private def staticSiteIndex : List (Nat × StaticDescriptor) → Std.TreeMap Nat StaticDescriptor
+  | [] => ∅
+  | (pc, descriptor) :: sites => (staticSiteIndex sites).insert pc descriptor
+
+/-- Duplicate sites retain the first descriptor, including malformed evidence. -/
+private theorem staticSiteIndex_get (sites : List (Nat × StaticDescriptor)) (pc : Nat) :
+    (staticSiteIndex sites)[pc]? = (sites.find? (fun site => site.1 == pc)).map Prod.snd := by
+  induction sites with
+  | nil => simp [staticSiteIndex]
+  | cons site sites ih =>
+    rcases site with ⟨index, descriptor⟩
+    simp only [staticSiteIndex, Std.TreeMap.getElem?_insert, List.find?_cons]
+    by_cases same : index = pc
+    · subst index; simp
+    · have different : (index == pc) = false := beq_eq_false_iff_ne.mpr same
+      simp [same, ih, different]
+
+#print axioms staticSiteIndex_get
+
 /-- A readonly scalar load has exactly the width and extension of its raw field type. -/
-private def staticLoadMatches (closed : RawMethod) (method : Method) (pc : Nat) : Bool :=
-  match closed.code[pc]?, method.staticSites.find? (fun site => site.1 == pc) with
-  | some instruction, some (_, descriptor) =>
+private def staticLoadMatches (instruction : Option RawInstruction)
+    (descriptor : Option StaticDescriptor) : Bool :=
+  match instruction, descriptor with
+  | some instruction, some descriptor =>
     if instruction.opcode != 126 then false else
     match instruction.operand with
     | .field _ _ type _ =>
@@ -87,16 +109,35 @@ private def staticLoadMatches (closed : RawMethod) (method : Method) (pc : Nat) 
     | _ => false
   | _, _ => false
 
+/-- Check return conversions and static loads using precomputed instruction and site indexes. -/
+def methodShapeInstructions (layouts : List RawLayout) (closed : RawMethod)
+    (method : Method) : Bool :=
+  let raw := FlowIndex.ofList closed.code
+  let sites := staticSiteIndex method.staticSites
+  method.code.zipIdx.all fun (op, pc) => match op with
+    | .ret narrow => narrow == returnNarrow layouts closed.returnType
+    | .memory (.staticValue _) => staticLoadMatches (raw.get? pc) sites[pc]?
+    | _ => true
+
+/-- Indexed instruction-shape checks agree with direct list lookups at every emitted pc. -/
+theorem methodShapeInstructions_eq_scan (layouts : List RawLayout) (closed : RawMethod)
+    (method : Method) :
+    methodShapeInstructions layouts closed method = method.code.zipIdx.all (fun (op, pc) =>
+      match op with
+      | .ret narrow => narrow == returnNarrow layouts closed.returnType
+      | .memory (.staticValue _) => staticLoadMatches closed.code[pc]?
+          ((method.staticSites.find? (fun site => site.1 == pc)).map Prod.snd)
+      | _ => true) := by
+  simp only [methodShapeInstructions, FlowIndex.get?_ofList, staticSiteIndex_get]
+
+#print axioms methodShapeInstructions_eq_scan
 /-- Bind non-instruction method fields that affect frame setup and return behavior. -/
 def MethodShapeValid (layouts : List RawLayout) (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
   method.locals = method.localKinds.map (fun kind =>
     if closed.initLocals then initialLocal kind else .unmodeled) ∧
   method.vectorLocals = [] ∧ method.vectorArgs = [] ∧
-  method.code.zipIdx.all (fun (op, pc) => match op with
-    | .ret narrow => narrow == returnNarrow layouts closed.returnType
-    | .memory (.staticValue _) => staticLoadMatches closed method pc
-    | _ => true) = true
+  methodShapeInstructions layouts closed method = true
 
 instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) :
     Decidable (MethodShapeValid layouts closed method) :=
