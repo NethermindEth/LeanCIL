@@ -1202,8 +1202,10 @@ partial class Program : IDisposable
                 (replayTargets is not null && (audited.replayed is null || audited.fused is null ||
                     !audited.replayed.SequenceEqual(replayTargets))))
                 throw new InvalidDataException("Incomplete theorem audit result");
+#if !LEANCIL_TOOL
             if (replayTargets is not null)
                 Console.WriteLine(JsonSerializer.Serialize(new { auditFused = audited.fused, modules }));
+#endif
             return audited;
         }
         finally { File.Delete(request); File.Delete(result); }
