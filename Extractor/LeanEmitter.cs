@@ -171,7 +171,7 @@ internal static class LeanEmitter
                     if (s.i.OpCode.Code == Code.Ldsfld)
                     {
                         StaticValues.Value value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module, profile.Architecture);
-                        var initializer = value.Initializer is null ? 0 : Array.IndexOf(methods, value.Initializer);
+                        var initializer = value.Initializer is null ? 0 : methodIndices.GetValueOrDefault(value.Initializer, -1);
                         if (initializer < 0)
                             throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
                         var literal = value.Literal is null ? "" : $", literal := some ({value.Literal})";
