@@ -62,14 +62,14 @@ partial class Program
             return (source.ToString(), ranges);
         }
 
-        public void Check()
+        public void Check(string? leanPath = null)
         {
             if (cases.Count == 0) return;
             var (source, ranges) = BatchSource();
             Directory.CreateDirectory(directory);
             var path = Path.GetFullPath(Path.Combine(directory, "RejectedBatch.lean"));
             File.WriteAllText(path, source);
-            var result = Execute(["lake", "env", "lean", path]);
+            var result = Execute(["lake", "env", "lean", path], leanPath: leanPath);
             var diagnostics = Regex.Matches(result.Output,
                 @"(?m)^" + Regex.Escape(path.Replace('\\', '/')) + @":(\d+):\d+: (error|warning|information):");
             if (diagnostics.Count == 0)

@@ -1118,6 +1118,12 @@ original and mutated assemblies, and UTF-8 identity mutations use isolated rejec
 Generated verification batches use the authenticated native kernel replay command when it
 succeeds, retaining the toolchain checker as the failure fallback for the same module set.
 
+Translation-audit fixtures compile all six certificate variants against one checked prefix
+before testing wrapper rejection, then replay those declarations and audit their exact native
+statements. Missing certificates, unrelated statements, definitions and altered import tables
+must fail both their wrapper checks and direct certificate audits; the definitionally equal
+wrapped statement still passes elaboration but fails the exact emitted-statement check.
+
 Full-verification term transfer encodes each structurally distinct expression node once and
 writes a compact data table instead of elaborating a recursively expanded constructor term.
 Structural equality includes binder spelling and annotations; names retain numeric and string
