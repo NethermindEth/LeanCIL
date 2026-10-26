@@ -5,6 +5,7 @@ import CIL.Interface.Closure
 # Olean audit
 
 `leancil-audit REQUEST RESULT` audits compiled `.olean` files without elaborating any source.
+`--headers INPUT` parses source import headers without elaboration or executing source commands.
 `--imports INPUT OUTPUT` reads compiled import headers; `--fingerprints INPUT` writes portable
 module parts with only persisted linter diagnostics removed. Neither mode loads extensions.
 
@@ -330,12 +331,30 @@ unsafe def writeFingerprints (input : String) : IO Unit := do
     let regions ← fingerprintModule name sources destinations
     for region in regions.reverse do region.free
 
+/-- Parse source headers with Lean's parser, retaining module-system import forms and comments. -/
+def writeSourceHeaders (input : String) : IO Unit := do
+  let sources : Array String ←
+    IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
+  for source in sources do
+    let (header, _, messages) ← Parser.parseHeader (Parser.mkInputContext source input)
+    if messages.hasErrors then
+      throw (IO.userError "Invalid contract interface import header")
+    let `(Parser.Module.header| $[module]? $[prelude]? $imports*) := header
+      | throw (IO.userError "Invalid contract interface header")
+    let mut names : Array Json := #[]
+    for imported in imports do
+      let `(Parser.Module.import| $[public]? $[meta]? import $[all]? $name) := imported
+        | throw (IO.userError "Invalid contract interface import")
+      names := names.push (Json.str name.getId.toString)
+    IO.println (Json.arr names).compress
+
 end LeanCILAudit
 
 open Lean LeanCILAudit in
 /-- Reads REQUEST, imports `modules` without running any extension, and writes RESULT. -/
 unsafe def main (args : List String) : IO UInt32 := do
   match args with
+  | ["--headers", input] => writeSourceHeaders input; return 0
   | ["--imports", input, output] => writeImports input output; return 0
   | ["--fingerprints", input] => writeFingerprints input; return 0
   | _ => pure ()

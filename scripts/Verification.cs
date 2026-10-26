@@ -1299,39 +1299,20 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
 
     Dictionary<string, string[]> ContractModuleImports(string destination, SortedDictionary<string, string> sources)
     {
-        string probe = Path.Combine(destination, "LeanCILHeader" + Guid.NewGuid().ToString("N") + ".lean");
-        string input = probe + ".json";
+        string input = Path.Combine(destination, "LeanCILHeader" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
-            File.WriteAllText(probe, """
-import Lean
-open Lean Parser
-unsafe def main (args : List String) : IO Unit := do
-  let [input] := args | throw (IO.userError "Expected interface source manifest")
-  let sources : Array String <- IO.ofExcept <| (Lean.Json.parse (<- IO.FS.readFile input)).bind Lean.fromJson?
-  for source in sources do
-    let (header, _, messages) <- Parser.parseHeader (Parser.mkInputContext source input)
-    if messages.hasErrors then
-      throw (IO.userError "Invalid contract interface import header")
-    let `(Module.header| $[module]? $[prelude]? $imports*) := header
-      | throw (IO.userError "Invalid contract interface header")
-    let mut names : Array Lean.Json := #[]
-    for imported in imports do
-      let `(Module.import| $[public]? $[meta]? import $[all]? $name) := imported
-        | throw (IO.userError "Invalid contract interface import")
-      names := names.push (Lean.Json.str name.getId.toString)
-    IO.println (Lean.Json.arr names).compress
-""");
             File.WriteAllText(input, JsonSerializer.Serialize(sources.Values));
-            string result = Run([LeanExecutable, "--run", probe, input], destination, environment: LeanEnvironment);
+            var executable = CheckedAuditExecutable();
+            string result = Run([executable, "--headers", input], destination, environment: LeanEnvironment);
+            CheckedAuditExecutable();
             string[] lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length != sources.Count) throw new InvalidDataException("Incomplete contract interface import graph.");
             return sources.Keys.Zip(lines).ToDictionary(pair => pair.First,
                 pair => JsonSerializer.Deserialize<string[]>(pair.Second) ?? throw new InvalidDataException("Invalid contract import graph."), StringComparer.Ordinal);
         }
-        finally { File.Delete(probe); File.Delete(input); }
+        finally { File.Delete(input); }
     }
-
     string[] StageImportSources(ExtractionIdentity extraction, string destination)
     {
         SortedDictionary<string, string> sources = extraction.Sources;

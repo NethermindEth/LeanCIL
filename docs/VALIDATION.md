@@ -1058,3 +1058,8 @@ Its kernel check fell from 16,039.56 to 11,202.47 kHB (30% less). The generated 
 shrunk from 32,111,728 to 26,561,792 bytes. All four fixed-step family consumers and the full
 423-job library build passed without `sorryAx`. The profiling fixtures included the candidate
 macros inline; the figures above select the theorem's own elaboration and kernel entries.
+The same native auditor parses contract source import headers with Lean's parser. This replaces
+compiling a temporary Lean parser program for each verification. Parsing still rejects malformed
+headers, retains comments and module-system import syntax, and never elaborates source commands.
+The imports fixture checks those properties explicitly. A focused native parse takes roughly
+0.06 seconds locally; the original CI run spent 22.1 seconds across 25 interpreted parser calls.

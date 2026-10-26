@@ -59,6 +59,27 @@ void Save(bool bind = true, bool updatePin = true)
 
 using Program interfaceVerification = new();
 string interfaceLibrary = interfaceVerification.Library(Inputs(At("CIL.lean")));
+string headerMarker = Path.Combine(directory, "header-command-executed");
+File.Delete(headerMarker);
+var headerSources = new SortedDictionary<string, string>(StringComparer.Ordinal)
+{
+    ["Comments"] = "/- outer /- nested -/ -/ import Alpha\n-- comment\nimport Beta.Gamma\n",
+    ["Module"] = "module\npublic import Alpha\npublic meta import Beta.Gamma\nimport all Private\n",
+    ["Prelude"] = "prelude\nimport Alpha\n",
+    ["Source"] = "import Lean\nrun_cmd Lean.Elab.Command.liftIO <| IO.FS.writeFile " +
+        JsonSerializer.Serialize(headerMarker) + " \"executed\"\n"
+};
+var parsedHeaders = interfaceVerification.ContractModuleImports(directory, headerSources);
+if (!parsedHeaders["Comments"].SequenceEqual(["Alpha", "Beta.Gamma"]) ||
+    !parsedHeaders["Module"].SequenceEqual(["Alpha", "Beta.Gamma", "Private"]) ||
+    !parsedHeaders["Prelude"].SequenceEqual(["Alpha"]) ||
+    !parsedHeaders["Source"].SequenceEqual(["Lean"]) || File.Exists(headerMarker))
+    throw new InvalidOperationException("Contract header parsing changed imports or executed source commands.");
+Exception? malformedHeader = null;
+try { interfaceVerification.ContractModuleImports(directory, new() { ["Invalid"] = "import\n" }); }
+catch (InvalidOperationException error) { malformedHeader = error; }
+if (malformedHeader is null || !malformedHeader.Message.Contains("Invalid contract interface import header"))
+    throw new InvalidOperationException("Malformed contract header was not rejected by Lean's parser.");
 Run([interfaceVerification.LeanExecutable, At("Tests/ContractClosure.lean")],
     leanPath: Path.Combine(interfaceLibrary, ".lake/build/lib/lean"),
     streamOutput: true, progress: "Canonical contract closure tests");
