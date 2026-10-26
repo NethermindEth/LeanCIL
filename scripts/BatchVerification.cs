@@ -8,7 +8,8 @@ partial class Program
     // proofs keep their original module environment through Verify.
     // Assembly overrides the batch assembly for fixtures generated from a modified copy.
     sealed record GeneratedVerification(string Entry, string Proof, string Output,
-        string Theorem = "ExampleProof.correctness", string? Assembly = null, string? Profile = null);
+        string Theorem = "ExampleProof.correctness", string? Assembly = null, string? Profile = null,
+        string[]? InitializedTypes = null);
 
     // Per-fixture checks are dominated by Lean startup; passes are reported only after the whole batch is certified.
     sealed class GeneratedQueue(Program verification, string assembly, string identity = "Examples")
@@ -35,7 +36,7 @@ partial class Program
             File.WriteAllText(path, JsonSerializer.Serialize(requests.Select(request => new
             {
                 assembly = request.Assembly, identity, entry = request.Entry, output = request.Output,
-                profile = request.Profile ?? profile
+                profile = request.Profile ?? profile, initializedTypes = request.InitializedTypes
             })));
             Run(["dotnet", ExtractorPath, "generated-extraction-batch", mode, path]);
         }

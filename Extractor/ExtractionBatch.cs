@@ -5,7 +5,8 @@ namespace Nethermind.LeanCIL;
 
 internal static partial class Program
 {
-    sealed record ExtractionRequest(string Assembly, string? Identity, string Entry, string Output, string Profile);
+    sealed record ExtractionRequest(string Assembly, string? Identity, string Entry, string Output, string Profile,
+        string[]? InitializedTypes);
 
     // Only immutable assembly bytes cross requests. Validation rewrites Cecil instruction operands,
     // and symbols attach readers to modules, so every request owns fresh modules and symbol readers.
@@ -87,7 +88,8 @@ internal static partial class Program
         {
             if (request.Profile.StartsWith('@')) batch.Track(request.Profile[1..]);
             var result = Run([args[0], request.Assembly, request.Entry, request.Output, request.Profile,
-                .. request.Identity is null ? Array.Empty<string>() : ["--assembly", request.Identity]], batch);
+                .. request.Identity is null ? Array.Empty<string>() : ["--assembly", request.Identity],
+                .. (request.InitializedTypes ?? []).SelectMany(type => new[] { "--assume-initialized", type })], batch);
             if (result != 0) return result;
         }
         batch.RequireUnchanged();

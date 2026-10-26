@@ -27,18 +27,24 @@ var requests = new[]
     new Request(assembly, "Examples", "Arithmetic::Add(ulong,ulong)", Path.Combine(root, "Original"), "x64-sse2"),
     new Request(assembly, "Examples", "Capabilities::Flags()", Path.Combine(root, "ScalarFlags"), "scalar"),
     new Request(assembly, "Examples", "Capabilities::Flags()", Path.Combine(root, "X64Flags"), "x64-v3"),
-    new Request(assembly, "Examples", "Loops::Countdown(uint)", Path.Combine(root, "Loop"), "scalar")
+    new Request(assembly, "Examples", "Loops::Countdown(uint)", Path.Combine(root, "Loop"), "scalar"),
+    new Request(assembly, "Examples", "StaticValues::One()", Path.Combine(root, "Static"), "scalar",
+        ["Examples.Word256"])
 };
 var originals = new List<SortedDictionary<string, string>>();
 foreach (var request in requests)
 {
-    Run(Extract("extract", request.Assembly, request.Identity, request.Entry, request.Output, request.Profile));
+    Run([.. Extract("extract", request.Assembly, request.Identity, request.Entry, request.Output, request.Profile),
+        .. (request.InitializedTypes ?? []).SelectMany(type => new[] { "--assume-initialized", type })]);
     originals.Add(CacheFiles(request.Output));
 }
 Batch("extract", requests);
 for (var index = 0; index < requests.Length; index++)
     Require(Same(originals[index], CacheFiles(requests[index].Output)), "Batched extraction differs from direct output");
 Batch("check", requests);
+Reject("check", [requests[^1] with { InitializedTypes = ["Examples.InitializedTypes"] }], "assumptions differ");
+Reject("extract", [requests[^1] with { InitializedTypes = null }], "requires --assume-initialized");
+Batch("extract", [requests[^1]]);
 Require(File.Exists(Path.Combine(requests[0].Output, "Symbols.lean")), "Expected matching PDB symbols");
 Require(!File.Exists(Path.Combine(requests[1].Output, "Symbols.lean")), "Symbols leaked into another DLL");
 Console.WriteLine("PASS mixed DLLs, profiles, repeated generic specialization and symbol identities match direct extraction");
@@ -126,4 +132,5 @@ static void Require(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
-sealed record Request(string Assembly, string Identity, string Entry, string Output, string Profile);
+sealed record Request(string Assembly, string Identity, string Entry, string Output, string Profile,
+    string[]? InitializedTypes = null);
