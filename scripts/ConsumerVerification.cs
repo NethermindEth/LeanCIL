@@ -36,7 +36,7 @@ partial class Program
 
     // Normalization reads module parts directly, without importing toolchain oleans.
     // Bind the native implementation and runtime, including shared-library replacements.
-    string ConsumerFingerprintTools(string executableHash)
+    string CanonicalFingerprintTools(string executableHash)
     {
         var native = Directory.EnumerateFiles(Toolchain, "*", SearchOption.AllDirectories).Where(path =>
             path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
@@ -44,9 +44,76 @@ partial class Program
             path.EndsWith(".so", StringComparison.Ordinal) ||
             Path.GetFileName(path).Contains(".so.", StringComparison.Ordinal));
         var files = HashFiles(native.Select(path => (Path.GetRelativePath(Toolchain, path), path)));
-        return ContentKey("canonical-fingerprints-v1\n" + VerificationPolicy + "\n" +
+        return ContentKey("canonical-fingerprints-v2\n" +
             System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
             Sha(LeanExecutable) + "\n" + executableHash + "\n" + JsonSerializer.Serialize(files));
+    }
+
+    sealed record CertifiedFingerprintModule(SortedDictionary<string, string> Raw,
+        SortedDictionary<string, string> Canonical);
+    sealed record CertifiedFingerprintManifest(int Schema, string Tools,
+        SortedDictionary<string, CertifiedFingerprintModule> Modules);
+
+    // The outer certified-library manifest authenticates this transformation table alongside
+    // its sources, toolchain and compiled artifacts. It does not authorize consumer proofs.
+    void PrepareCertifiedFingerprints()
+    {
+        var session = Library(Inputs(At("CIL.lean")));
+        var executable = CheckedAuditExecutable();
+        var tools = CanonicalFingerprintTools(auditExecutableSha!);
+        var modules = certifiedModules!.Keys.Where(path => path.EndsWith(".olean", StringComparison.Ordinal))
+            .ToDictionary(ModuleName, path => Path.Combine(session, ".lake/build/lib/lean", path),
+                StringComparer.Ordinal);
+        var raw = modules.ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value),
+            StringComparer.Ordinal);
+        var normalized = NormalizeConsumerParts(session, executable, modules);
+        CheckedAuditExecutable();
+        if (tools != CanonicalFingerprintTools(auditExecutableSha!) || modules.Any(pair =>
+                !Same(raw[pair.Key], ConsumerModuleParts(pair.Value))))
+            throw new InvalidDataException("Certified library fingerprint inputs changed during normalization.");
+        var manifest = new CertifiedFingerprintManifest(1, tools,
+            new(modules.Keys.ToDictionary(name => name,
+                name => new CertifiedFingerprintModule(raw[name], normalized[name])), StringComparer.Ordinal));
+        var path = Path.Combine(session, CertifiedFingerprintsName);
+        var json = JsonSerializer.Serialize(manifest);
+        File.WriteAllText(path, json);
+        certifiedFingerprintsSha = ContentKey(json);
+        Console.WriteLine($"Prepared canonical fingerprints for {modules.Count} certified library modules.");
+    }
+
+    // A matching name is insufficient: every module part and the actual normalizer must
+    // match the authenticated producer's input before its canonical bytes can be reused.
+    Dictionary<string, CertifiedFingerprintModule> CertifiedFingerprintParts(
+        Dictionary<string, string> modules, string tools)
+    {
+        if (certifiedFingerprintsSha is null || library is null) return new(StringComparer.Ordinal);
+        var path = Path.Combine(library, CertifiedFingerprintsName);
+        var bytes = File.ReadAllBytes(path);
+        if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != certifiedFingerprintsSha)
+            throw new InvalidDataException("Certified library fingerprint metadata changed.");
+        var manifest = JsonSerializer.Deserialize<CertifiedFingerprintManifest>(bytes);
+        if (manifest is null || manifest.Schema != 1 || manifest.Tools != tools)
+            return new(StringComparer.Ordinal);
+        if (manifest.Modules is null || manifest.Modules.Values.Any(module => module is null ||
+                module.Raw is null || module.Canonical is null || !module.Raw.ContainsKey(".olean") ||
+                !module.Raw.Keys.SequenceEqual(module.Canonical.Keys) || module.Raw.Keys.Any(part =>
+                    part is not (".olean" or ".olean.server" or ".olean.private")) ||
+                module.Raw.Values.Concat(module.Canonical.Values).Any(hash => !Regex.IsMatch(hash, "^[0-9a-f]{64}$"))))
+            throw new InvalidDataException("Invalid certified library fingerprint metadata.");
+        return modules.Where(pair => manifest.Modules.TryGetValue(pair.Key, out var fingerprint) &&
+                Same(fingerprint.Raw, ConsumerModuleParts(pair.Value)))
+            .ToDictionary(pair => pair.Key, pair => manifest.Modules[pair.Key], StringComparer.Ordinal);
+    }
+
+    void RequireCertifiedFingerprints(Dictionary<string, CertifiedFingerprintModule> reused,
+        Dictionary<string, string> modules, string tools)
+    {
+        if (reused.Count == 0) return;
+        CheckedAuditExecutable();
+        if (tools != CanonicalFingerprintTools(auditExecutableSha!) ||
+            Sha(Path.Combine(library!, CertifiedFingerprintsName)) != certifiedFingerprintsSha ||
+            reused.Any(pair => !Same(pair.Value.Raw, ConsumerModuleParts(modules[pair.Key]))))
+            throw new InvalidDataException("Certified library fingerprint inputs changed during normalization.");
     }
 
     sealed record FingerprintInput(string Name, string Source, SortedDictionary<string, string> Parts, string Key);
@@ -124,14 +191,22 @@ partial class Program
         var started = DateTimeOffset.UtcNow;
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         var executable = CheckedAuditExecutable();
+        var canonicalTools = UseSuccessCache || certifiedFingerprintsSha is not null
+            ? CanonicalFingerprintTools(auditExecutableSha!) : "";
+        var certified = CertifiedFingerprintParts(modules, canonicalTools);
+        var pending = modules.Where(pair => !certified.ContainsKey(pair.Key)).ToDictionary(StringComparer.Ordinal);
         if (!UseSuccessCache || modules.Count == 0)
         {
-            var normalized = NormalizeConsumerParts(session, executable, modules);
-            TraceConsumerFingerprints(session, started, elapsed.Elapsed, 0, modules.Count);
+            var normalized = NormalizeConsumerParts(session, executable, pending);
+            RequireCertifiedFingerprints(certified, modules, canonicalTools);
+            foreach (var (name, fingerprint) in certified) normalized.Add(name, fingerprint.Canonical);
+            TraceConsumerFingerprints(session, started, elapsed.Elapsed, certified.Count, pending.Count);
             return normalized;
         }
-        var tools = ConsumerFingerprintTools(auditExecutableSha!);
-        var inputs = modules.Select(pair =>
+        // Local receipts also bind this verifier binary; the supplied base independently
+        // authenticates its transformation table through its trusted manifest digest.
+        var tools = ContentKey(VerificationPolicy + "\n" + canonicalTools);
+        var inputs = pending.Select(pair =>
         {
             var parts = ConsumerModuleParts(pair.Value);
             if (!parts.ContainsKey(".olean")) throw new InvalidDataException("Missing module: " + pair.Key);
@@ -142,7 +217,8 @@ partial class Program
         Directory.CreateDirectory(temporary);
         try
         {
-            var results = new Dictionary<string, SortedDictionary<string, string>>(StringComparer.Ordinal);
+            var results = certified.ToDictionary(pair => pair.Key, pair => pair.Value.Canonical,
+                StringComparer.Ordinal);
             var missing = new List<(FingerprintInput Input, string Source, string Receipt)>();
             foreach (var (item, index) in inputs.Select((item, index) => (item, index)))
             {
@@ -175,7 +251,7 @@ partial class Program
                 }
             }
             CheckedAuditExecutable();
-            if (tools != ConsumerFingerprintTools(auditExecutableSha!))
+            if (canonicalTools != CanonicalFingerprintTools(auditExecutableSha!))
                 throw new InvalidDataException("Fingerprint tools changed during normalization.");
             foreach (var item in inputs)
                 if (!Same(item.Parts, ConsumerModuleParts(item.Source)))
@@ -190,7 +266,9 @@ partial class Program
                 PublishSuccess(item.Input.Key, item.Receipt);
             }
             if (UseSuccessCache && Directory.Exists(SuccessCacheRoot)) EvictStaleSupport();
-            TraceConsumerFingerprints(session, started, elapsed.Elapsed, inputs.Length - missing.Count, missing.Count);
+            RequireCertifiedFingerprints(certified, modules, canonicalTools);
+            TraceConsumerFingerprints(session, started, elapsed.Elapsed,
+                certified.Count + inputs.Length - missing.Count, missing.Count);
             return results;
         }
         finally { Directory.Delete(temporary, true); }

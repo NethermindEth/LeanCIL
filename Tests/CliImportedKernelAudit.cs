@@ -53,7 +53,8 @@ if (!baseline)
     var scripts = Path.Combine(corpus, "scripts");
     Directory.CreateDirectory(scripts);
     Directory.CreateDirectory(Path.Combine(corpus, "Extractor"));
-    foreach (var name in new[] { "PrepareLibrary.cs", "Verification.cs" })
+    foreach (var name in new[]
+             { "PrepareLibrary.cs", "Verification.cs", "ConsumerVerification.cs", "LeanDiagnostics.cs" })
         File.Copy(At("scripts/" + name), Path.Combine(scripts, name));
     foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig" })
         File.Copy(At(name), Path.Combine(corpus, name));

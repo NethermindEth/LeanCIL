@@ -19,6 +19,8 @@ partial class Program : IDisposable
     static string Source([CallerFilePath] string path = "") => path;
 
     string? library;
+    const string CertifiedFingerprintsName = "canonical-fingerprints.json";
+    string? certifiedFingerprintsSha;
     string? resolvedToolchain;
     bool extractorBuilt;
 
@@ -872,6 +874,11 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                     throw new InvalidOperationException("Certified library identity or integrity mismatch");
                 if (!ValidCertifiedLibrary(library, suppliedDigest, libraryKey, sources))
                     throw new InvalidOperationException("Certified library changed while copying");
+                var manifestBytes = File.ReadAllBytes(Path.Combine(library, "cache-manifest.json"));
+                if (Convert.ToHexStringLower(SHA256.HashData(manifestBytes)) != suppliedDigest)
+                    throw new InvalidDataException("Certified library manifest changed before metadata binding.");
+                certifiedFingerprintsSha = JsonSerializer.Deserialize<SortedDictionary<string, string>>(manifestBytes)?
+                    .GetValueOrDefault(CertifiedFingerprintsName);
                 libraryBuild = "certified-artifact";
                 Trace("Copying certified Lean verification library", copyStarted, library, copyElapsed.Elapsed, 0, "", [supplied, library]);
             }
@@ -949,7 +956,11 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         {
             CopyTree(session, staging);
             File.WriteAllText(Path.Combine(staging, "library-key.txt"), libraryKey);
-            File.WriteAllText(Path.Combine(staging, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(staging), Json));
+            var files = CacheFiles(staging);
+            if (certifiedFingerprintsSha is not null &&
+                files.GetValueOrDefault(CertifiedFingerprintsName) != certifiedFingerprintsSha)
+                throw new InvalidDataException("Certified library fingerprint metadata changed while publishing.");
+            File.WriteAllText(Path.Combine(staging, "cache-manifest.json"), JsonSerializer.Serialize(files, Json));
             var digest = Sha(Path.Combine(staging, "cache-manifest.json"));
             if (!ValidCertifiedLibrary(staging, digest, libraryKey!, LibrarySources(libraryInputs!)))
                 throw new InvalidOperationException("Certified library changed while copying");

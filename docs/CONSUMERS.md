@@ -278,6 +278,16 @@ only for modules whose bytes match a manifest fingerprint.
 `--fresh` bypasses portable reuse too; `LEANCIL_DISABLE_SUCCESS_CACHE` disables
 local receipts without disabling an explicitly supplied portable manifest.
 
+`scripts/PrepareLibrary.cs` also records canonical framework fingerprints inside the
+certified library. Its independently trusted manifest digest covers this table along with
+the library sources and artifacts. A receiver reuses entries only for the same module
+name, exact compiled-part presence and hashes, and matching normalization version, Lean,
+native auditor and runtime bytes. Relocating unchanged artifacts does not invalidate them.
+Changed modules and tools fall back to normalization; changed authenticated table bytes
+fail verification. This pure byte-transformation reuse also applies when local receipts
+are disabled or `--fresh` uses an explicitly supplied certified library. It does not change
+portable support eligibility, source/import checks, theorem audits or kernel replay.
+
 ## Replay profiling
 
 Set `LEANCIL_PROFILE_CONSUMER_REPLAY=true` with `LEANCIL_TRACE_DIRECTORY` to

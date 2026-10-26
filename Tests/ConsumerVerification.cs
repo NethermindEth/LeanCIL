@@ -11,6 +11,7 @@ Run(["dotnet", "run", "--file", At("Tests/ConsumerSupportUnion.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/ConsumerCertificateReuse.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/ConsumerComponents.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/ConsumerFingerprintReuse.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/CertifiedFingerprints.cs")]);
 
 var cli = new[] { "dotnet", args.Length == 0 ? ExtractorPath : Path.GetFullPath(args[0]) };
 var root = Path.GetFullPath(At("artifacts/ConsumerPackage"));
