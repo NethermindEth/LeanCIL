@@ -43,6 +43,17 @@ private def itemOps : List Op :=
 example : foldRoles [words] itemCode = [none, some .head, some .interior, none, none, none, none] := by decide
 example : foldRoles [intType] itemCode = List.replicate 7 none := by decide
 example : foldRoles [words] [i 10, i 18 (.local 1)] = [none, none] := by decide
+
+/-- A third decoded local use disallows receiver folding anywhere in the body. -/
+theorem extra_local_use : foldRoles [words] (itemCode ++ [i 6]) =
+    List.replicate 8 none := by decide +kernel
+#print axioms extra_local_use
+
+/-- A malformed local-load operand does not count as a decoded use of local zero. -/
+theorem malformed_local_operand :
+    foldRoles [words] (itemCode ++ [i 65036 (.argument 0)]) =
+      [none, some .head, some .interior, none, none, none, none, none] := by decide +kernel
+#print axioms malformed_local_operand
 -- Only the store may be entered from elsewhere.
 example : foldEntry (foldRoles [words] itemCode)[1]? ∧
     ¬ foldEntry (foldRoles [words] itemCode)[2]? := by decide

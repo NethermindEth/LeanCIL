@@ -1187,3 +1187,28 @@ when `LEANCIL_CERTIFIED_LIBRARY` is supplied. Their actual batches still authent
 library and verify every original request with success caching disabled. Without a supplied
 library, the original warmup remains. This removes two redundant complete consumer sessions
 from prepared CI runs without removing any component, replay or source-identity assertions.
+
+Fold discovery counts decoded local references once with a balanced tree instead of filtering
+the entire instruction body per local. `foldRoles_eq_filter` proves exact equality to the
+former filter-based selection, including malformed operands and out-of-range local indexes.
+Methods without locals skip count construction. The separate positional lookup of local types
+remains linear; this change does not make all of fold discovery linear.
+
+Exception folds inspect at most three message loads, since admitted constructors accept at
+most two. `throwFold_eq_takeWhile` proves equality to the unrestricted prefix scan. Long
+rejected prefixes still permit an admitted fold starting later. Span and throw evidence tests
+cover extra uses, malformed local operands, oversized prefixes and valid suffix folds.
+
+On Apple M4, kernel-checked discovery for 256 span locals/768 instructions fell from 7.87s to
+2.40s (user CPU 7.45s to 2.05s), including index construction and checking every output role.
+A 4,096-instruction message-only body fell from 6.47s to 2.06s (user CPU 6.15s to 1.76s).
+Smaller counts showed 0.94s to 0.76s at 64 locals and 2.29s to 1.17s at 128 locals. Existing
+TypeTestEvidence and SpanEvidence were effectively unchanged: 5.22s to 5.15s and 0.77s to
+0.77s. Those fixtures contain few locals and short message prefixes, so these are scaling
+improvements rather than a demonstrated large CI saving.
+
+The standalone kernel benchmarks are `docs/performance/fold-roles/CountScaling.lean` and
+`ThrowScaling.lean`. After building each revision's library, run
+`lake env lean docs/performance/fold-roles/CountScaling.lean` (and the throw file) under an
+external timer. They construct their inputs inside the checked proposition and verify complete
+role lists with `decide +kernel`; neither benchmark is part of the default library build.

@@ -43,6 +43,8 @@ matching metadata, reducing repeated string comparisons during replay. Primitive
 shares the exact runtime assembly identity. Reachable external calls reuse their complete
 identities as checked UTF-8 byte constants, avoiding repeated decoding in the kernel. See
 [certificate validation](docs/PROOFS.md).
+Fold discovery indexes local-use counts once and bounds exception-message prefix scans;
+both changes have exact equivalence proofs to the original checks.
 
 Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.402**. The extractor uses Mono.Cecil; the F# examples also use FSharp.Core. Both packages are pinned in `Directory.Packages.props`. Lean uses Std and Lean, without Mathlib.
 

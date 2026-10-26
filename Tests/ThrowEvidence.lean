@@ -38,6 +38,19 @@ example : throwFold [i 115 argument, i 122] = none := by decide
 example : throwFold [i 115 (ctor owner "Fixture.Failure" 0), i 122] = none := by decide
 example : throwFold [i 115 divide, i 38, i 122] = none := by decide
 
+/-- Rejecting an oversized message prefix still discovers an admitted fold in its suffix. -/
+theorem long_prefix_suffix :
+    foldRoles [] ([i 20, i 20, i 20] ++
+      [i 115 (ctor runtime "System.ArgumentException" 2), i 122]) =
+      [none, some .head, some .interior, some .interior,
+        some (.raise "System.ArgumentException")] := by decide +kernel
+#print axioms long_prefix_suffix
+
+/-- A long message-only body never invents a constructor or throw. -/
+theorem message_only_body : foldRoles [] (List.replicate 128 (i 20)) =
+    List.replicate 128 none := by decide +kernel
+#print axioms message_only_body
+
 theorem rejects_non_exception : throwFold [i 115 (ctor runtime "System.Object" 0), i 122] = none := by decide
 #print axioms rejects_non_exception
 
