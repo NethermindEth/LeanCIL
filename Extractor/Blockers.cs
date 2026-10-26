@@ -167,7 +167,9 @@ internal static class Blockers
         var ordered = findings.Values.OrderByDescending(f => f.Entries.Count).ThenByDescending(f => f.Sites.Count)
             .ThenBy(f => f.Construct, StringComparer.Ordinal).ToArray();
         for (var i = 0; i < ordered.Length; i++) ordered[i].Id = $"B{i + 1}";
-        foreach (var outcome in outcomes) outcome.Findings.Sort((a, b) => Array.IndexOf(ordered, a).CompareTo(Array.IndexOf(ordered, b)));
+        var ranks = ordered.Select((finding, index) => (finding, index))
+            .ToDictionary(pair => pair.finding, pair => pair.index);
+        foreach (var outcome in outcomes) outcome.Findings.Sort((left, right) => ranks[left].CompareTo(ranks[right]));
 
         var report = JsonSerializer.Serialize(new
         {

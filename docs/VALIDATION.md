@@ -648,3 +648,25 @@ all remain mandatory checks while ordinary consumers avoid loading their 197 MiB
 The compiled namespace audit checks their theorem axiom closures even on warm builds and binds
 the audited paths and module bytes to those replayed. An isolated theorem depending on
 `sorryAx` passes kernel replay but must fail that audit; build output is also checked.
+
+Extraction bookkeeping indexes declaration names, imported assembly identities, imported call
+slots, batch proof modules and aggregate layout names. Component imports retain declaration
+order; raw layout positions and emitted layout constant positions have separate indexes.
+`Tests/ConsumerSupportCandidates.cs` checks dependency ordering and conservative references in
+literal text, while `Tests/InstructionIndexes.cs` checks nested layout ordering and absent types.
+The transitive import regression also checks identical imports before rejecting ambiguous versions.
+
+On the Apple M4 with .NET 10.0.401, splitting synthetic one-dependency method chains took these
+median times over seven warmed runs, including index construction and component hashing:
+
+| Methods | Declaration scans | Indexed dependencies |
+| --- | ---: | ---: |
+| 128 | 1.23 ms | 0.46 ms |
+| 512 | 13.79 ms | 1.94 ms |
+| 2,048 | 113.59 ms | 6.46 ms |
+
+Each input contains two declarations per method and refers to the previous method's value.
+Both implementations produced identical component sources and aggregate imports. A separate
+24-request extraction matrix (eight entries across scalar, x64-v3 and arm64-advsimd profiles)
+retained all 48 generated Lean file hashes. These measure component splitting and output
+stability, not end-to-end proof or CI speedups.

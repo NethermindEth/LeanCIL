@@ -126,6 +126,13 @@ internal static class ImportReviewRegressions
             AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", extractorDirectory + Path.DirectorySeparatorChar);
             if (Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory) != extractorDirectory)
                 throw new InvalidOperationException("The isolated ambiguity test did not select the actual CLI's framework directory.");
+            sources.SetValue(firstSource, 1);
+            using (IDisposable duplicate = (IDisposable)Construct(resolutionType, sources))
+            {
+                var nodes = (Array)resolutionType.GetProperty("Nodes", PrivateInstance)!.GetValue(duplicate)!;
+                if (nodes.Length != 1) throw new Exception("Identical imports were not deduplicated");
+            }
+            sources.SetValue(secondSource, 1);
             Reject(() =>
             {
                 using IDisposable resolution = (IDisposable)Construct(resolutionType, sources);

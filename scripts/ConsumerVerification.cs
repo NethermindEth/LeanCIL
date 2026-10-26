@@ -956,7 +956,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             return name;
         }
         var header = Component(source[..methods[0].Index] + "\nend Extracted\n");
-        var declarations = new Dictionary<string, string>(StringComparer.Ordinal);
+        var declarations = new Dictionary<string, int>(StringComparer.Ordinal);
         var modules = new List<string> { header };
         for (var index = 0; index < methods.Count; index++)
         {
@@ -966,14 +966,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // cannot authorize a certificate: compilation and kernel replay remain mandatory.
             var tokens = Regex.Matches(body, @"[A-Za-z_][A-Za-z0-9_]*")
                 .Select(match => match.Value).ToHashSet(StringComparer.Ordinal);
-            var imports = declarations.Where(pair => tokens.Contains(pair.Key)).Select(pair => pair.Value)
-                .Prepend(header).Distinct(StringComparer.Ordinal);
+            var imports = tokens.Select(token => declarations.GetValueOrDefault(token, -1))
+                .Where(declaration => declaration >= 0).Distinct().Order()
+                .Select(declaration => modules[declaration]).Prepend(header);
             var name = Component(string.Join("\n", imports.Select(module => "import " + module)) +
                 "\n\n" + ExtractionComponentContext + body + "\nend Extracted\n");
             modules.Add(name);
             foreach (Match declaration in Regex.Matches(body,
                 @"(?m)^(?:@\[[^\r\n]*\]\s+)?(?:def|theorem) ([A-Za-z_][A-Za-z0-9_]*)"))
-                declarations.Add(declaration.Groups[1].Value, name);
+                declarations.Add(declaration.Groups[1].Value, modules.Count - 1);
         }
         return new(ContentKey(source), string.Join("\n", modules.Select(module => "import " + module)) +
             "\n\n" + ExtractionComponentContext + tail, sources);
@@ -1534,17 +1535,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
                 }
             var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
+            var requestModules = members.Select((member, index) => (member, module: names[index]))
+                .ToDictionary(pair => pair.member, pair => pair.module);
             // Groups share one Symbols.lean hash or none.
             var symbolHash = symbols[members[0]];
             var prepared = PrepareConsumerSession(session, root, dependencies, snapshot, certifiedLibrary, extractions[members[0]],
                 members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash,
                 members.Where(i => requests[i].ExportAudit is not null).ToDictionary(
-                    i => names[Array.IndexOf(members, i)], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
+                    i => requestModules[i], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
                 generatedSources: generatedSources, components: components);
             var frameworkCopy = prepared.FrameworkCopy;
-            string[] interfaceModules = extractions[members[0]].Sources.Keys.Where(module => module != "ExtractedImports").ToArray();
+            var interfaceModules = extractions[members[0]].Sources.Keys
+                .Where(module => module != "ExtractedImports").ToArray();
+            var interfaceModuleNames = interfaceModules.ToHashSet(StringComparer.Ordinal);
             Dictionary<string, string> InterfaceArtifacts() => ModuleArtifacts(frameworkCopy)
-                .Where(pair => interfaceModules.Contains(ModuleName(pair.Key), StringComparer.Ordinal)).ToDictionary();
+                .Where(pair => interfaceModuleNames.Contains(ModuleName(pair.Key))).ToDictionary();
             Dictionary<string, string> acceptedInterfaceArtifacts = new(StringComparer.Ordinal);
             void RequireInterfaceArtifacts()
             {
@@ -1770,7 +1775,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         var relative = Path.GetRelativePath(session, Path.Combine(directory, pair.Key));
                         return restoredArtifacts.TryGetValue(relative.Replace('\\', '/'), out var hash) && hash == pair.Value;
                     });
-                    bool publishedInterface = directory.Equals(frameworkModules, comparison) && interfaceModules.Contains(module.Key, StringComparer.Ordinal);
+                    bool publishedInterface = directory.Equals(frameworkModules, comparison) && interfaceModuleNames.Contains(module.Key);
                     if (publishedInterface && (module.Count() != acceptedInterfaceArtifacts.Count(pair => ModuleName(pair.Key) == module.Key) ||
                         module.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value)))
                         throw new InvalidDataException("Published contract interface artifacts changed after their closure audit: " + module.Key);
@@ -1778,7 +1783,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 }
             }
             if (!moduleNames.Contains("Extracted") || !moduleNames.Contains("ExtractionAudit") ||
-                proceeding.Any(i => !moduleNames.Contains(names[Array.IndexOf(members, i)])))
+                proceeding.Any(i => !moduleNames.Contains(requestModules[i])))
                 throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
             var mainArtifacts = artifactSnapshots.SelectMany(snapshot =>
                 Directory.EnumerateFiles(snapshot.Directory, "*.olean", SearchOption.AllDirectories)
@@ -1802,7 +1807,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 // A request depends only on its own proof's import closure and the extraction certificate.
                 var closure = graph is null ? null
-                    : ImportClosure(graph, [names[Array.IndexOf(members, i)], "Extracted", "ExtractionAudit",
+                    : ImportClosure(graph, [requestModules[i], "Extracted", "ExtractionAudit",
                         .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()]);
                 var rejected = failures.Keys.Where(name => closure is null || closure.Contains(name)).Order(StringComparer.Ordinal).ToArray();
                 if (rejected.Length > 0)
@@ -1823,7 +1828,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 try
                 {
-                    var module = names[Array.IndexOf(members, i)];
+                    var module = requestModules[i];
                     string[] auditModules = [module, .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
                     var audited = AuditOleans(leanPath, auditModules,
                         requests[i].ExportAudit?.Theorems ?? [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
@@ -1849,11 +1854,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (checkedArtifacts != JsonSerializer.Serialize(finalArtifacts))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
             foreach (int i in proceeding)
-                requests[i].ExportAudit?.Checked(session, names[Array.IndexOf(members, i)], leanPath);
+                requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath);
             Dictionary<int, FullImportResult> fullResults = new();
             foreach (int i in proceeding)
                 if (fullImportAudit is not null)
-                    fullResults.Add(i, fullImportAudit(outputs[i], session, names[Array.IndexOf(members, i)], leanPath));
+                    fullResults.Add(i, fullImportAudit(outputs[i], session, requestModules[i], leanPath));
             Recheck(proceeding);
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
