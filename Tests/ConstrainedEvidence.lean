@@ -141,4 +141,33 @@ theorem extra_emitted_rejected :
     ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
       { emitted with code := emitted.code ++ [.nop] } := by decide +kernel
 #print axioms extra_emitted_rejected
+/-- Exact identities reject duplicates and distinguish aggregate indexes and assembly scopes. -/
+theorem indexed_type_identity :
+    (DispatchIndex.ofTypes [concrete, concrete, declared]).resolve receiver site = none ∧
+    (DispatchIndex.ofTypes [concrete, declared]).resolve
+      (.aggregate "Fixture::Counter" 1) site = none ∧
+    (DispatchIndex.ofTypes [concrete, declared]).resolve receiver
+      { site with declaringType := .atom "Other" "IValue" } = none := by decide +kernel
+#print axioms indexed_type_identity
+
+/-- Repeated override tokens do not duplicate one implementation; explicit still wins. -/
+theorem indexed_override_precedence :
+    ((DispatchIndex.ofTypes [{ concrete with methods := [implementation,
+      { implementation with
+        token := 22, name := "IValue.Read", isPublic := false, overrides := [5, 5] }] },
+      declared]).resolve receiver site).map (·.token) = some 22 := by
+  decide +kernel
+#print axioms indexed_override_precedence
+
+/-- Multiple matching methods remain ambiguous for token, explicit and implicit selection. -/
+theorem indexed_method_ambiguity :
+    (DispatchIndex.ofTypes [concrete, { declared with methods := [slot, slot] }]).resolve
+      receiver site = none ∧
+    (DispatchIndex.ofTypes [{ concrete with methods := [implementation, implementation] },
+      declared]).resolve receiver site = none ∧
+    (DispatchIndex.ofTypes [{ concrete with methods := [
+      { implementation with overrides := [5] },
+      { implementation with token := 22, overrides := [5] }] }, declared]).resolve
+      receiver site = none := by decide +kernel
+#print axioms indexed_method_ambiguity
 end Tests.ConstrainedEvidence

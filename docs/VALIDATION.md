@@ -973,3 +973,28 @@ Apple M4 / Lean 4.35 paired `decide +kernel` checks in the standalone
 comparing the entire computed layout, not total CI time. Local step lemmas keep the new full
 algorithm-equivalence proof inexpensive: its declaration takes 1,282.34 kHB rather than the
 177,255.76 kHB of the initial broad proof attempt.
+Constrained-call validation and lowering now build ordered dispatch candidate indexes once per
+invocation, then reuse them across call sites. Type identity, method token/name and explicit
+interface override lookup no longer rescan the full catalog for every call. Candidate buckets
+retain duplicates, exact type checks and explicit override precedence. Repeated override tokens
+within one method still contribute only one candidate. Arbitrary-input equivalence theorems
+cover indexed resolution, complete instruction validation and lowering, including malformed and
+ambiguous metadata. The list-based `resolveConstrained` remains the specification used by those
+theorems; production validation and lowering use `DispatchIndex.resolve`.
+
+`Tests/DispatchScaling.lean` is a standalone kernel-work comparison with one valid call per
+concrete type and a shared interface. Both sides construct the raw catalog; the indexed side
+also constructs all indexes. Apple M4 / Lean 4.35 `leanprof elab --heartbeats` declaration work:
+
+| Concrete types and calls | List search (kHB) | Indexed dispatch (kHB) |
+| --- | ---: | ---: |
+| 16 | 3,825.30 | 4,691.19 |
+| 32 | 11,182.25 | 9,893.97 |
+| 64 | 36,403.13 | 21,464.39 |
+
+Index construction costs 23% more in the small fixture, breaks even before 32 calls and reduces
+work by 41% at 64 calls. These are type-heavy dispatch measurements, not total proof or CI time.
+Validation and lowering each construct their own index; they do not share it across invocations.
+The helper APIs `constrainedSiteWindow`, `constrainedSites`, `lowerConstrainedInstruction`,
+`lowerConstrainedCode` and their streaming equivalence theorems now accept a resolver function.
+Public `ConstrainedCallsValid` and `lowerConstrainedRaw` argument types are unchanged.
