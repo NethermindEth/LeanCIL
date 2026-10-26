@@ -328,6 +328,8 @@ static-value assumptions are not supported in this mode. See
 required producer evidence.
 Full verification checks caller and imported proofs again even when ordinary
 verification has already cached successful results.
+Transferred proofs share repeated expression nodes in a compact data table; reconstruction
+still kernel-checks every declaration and independently replays the compiled result.
 An `export-contracts` manifest can list several profile artifacts for one method and one
 family theorem. Each extraction is checked independently, with kernel-checked flag agreement
 and exact equality to the reprofiled reference program. See the

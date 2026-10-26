@@ -313,9 +313,12 @@ partial class Program
             File.WriteAllText(Path.Combine(compositionDirectory, library.Module + ".lean"),
                 "import " + callerModule + "\n" + library.TransferSource);
             Compile(library.Module, RecheckProgress + library.Module, untrusted: true);
-            Run([checker, library.ExpectedModule, library.Module], callerSession, fullLeanPath,
-                progress: "Independent kernel replay of transferred library declarations");
         }
+        string[] transferredModules = libraries
+            .SelectMany(library => new[] { library.ExpectedModule, library.Module }).ToArray();
+        const string TransferReplayProgress = "Independent kernel replay of transferred library declarations";
+        if (!ReplayModulesJointly(callerSession, transferredModules, fullLeanPath, TransferReplayProgress))
+            Run([checker, .. transferredModules], callerSession, fullLeanPath, progress: TransferReplayProgress);
         string composition = FullCompositionModule;
         File.WriteAllText(Path.Combine(compositionDirectory, composition + ".lean"),
             FullCompositionSource(callerModule, callerTheorem, libraries, bindings.Length));

@@ -1109,3 +1109,18 @@ Focused Windows measurements on this change reduced the scalar regression file f
 that representation. The mixed-profile feature fixture's traced work took 37.5 seconds locally.
 These are local observations, not a claim that the evidence CI job is below four minutes;
 its completed Ubuntu run remains the end-to-end acceptance measurement.
+
+Full-verification term transfer encodes each structurally distinct expression node once and
+writes a compact data table instead of elaborating a recursively expanded constructor term.
+Structural equality includes binder spelling and annotations; names retain numeric and string
+components, and universe expressions retain their full structure. Metadata is stripped as
+before. The decoder rejects missing, cyclic and forward references, unknown binder annotations
+and malformed table data. Free variables and expression/universe metavariables remain unsupported.
+
+Decoding constructs expressions only. Each transferred declaration still passes `Lean.addDecl`
+with kernel checking explicitly enabled, followed by the existing independent replay and exact
+composition audit. The generated source imports the decoder from the certified
+`CIL.Interface.FullTransfer` module. `Tests.FullTransfer` checks exact reconstructed types and
+values across binders, universes, projections, local lets, string literals and proofs, plus
+malformed table rejection. The full transitive suite retains its forged dependency, staged
+mutation, changed implementation, cyclic dependency and missing-bundle regressions.
