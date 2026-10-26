@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 
 using System.Globalization;
 using System.Reflection;
@@ -11,6 +12,7 @@ using Mono.Cecil.Cil;
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/StaticScalarValues");
 Directory.CreateDirectory(root);
+var evidence = new GeneratedEvidence(root, args.Contains("--measure", StringComparer.Ordinal));
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.StaticScalars")!;
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution"]);
 
@@ -47,11 +49,10 @@ foreach (var method in runtime.GetMethods().Where(method => method.Name.StartsWi
               .ok [.scalar ({{Expected(method.Invoke(null, null)!)}})] := rfl
         #print axioms scalar_value
         """);
-    var result = Run(["lake", "env", "lean", proof]);
-    if (result.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted scalar proof");
-    Console.WriteLine("PASS runtime and certified scalar value: " + method.Name);
+    evidence.Add(proof, "PASS runtime and certified scalar value: " + method.Name);
 }
 
+evidence.Check();
 void Reject(string name, string dll, string method, string marker, bool assume = true)
 {
     var output = Path.Combine(root, "Reject-" + name);

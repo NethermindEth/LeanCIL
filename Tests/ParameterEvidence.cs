@@ -2,12 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 var output = At("artifacts/ParameterEvidence");
 Directory.CreateDirectory(output);
+var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 Run(["lake", "env", "lean", "Tests/ExtractionParameters.lean"]);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
@@ -21,7 +23,7 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
 {
     var folder = Path.Combine(output, index.ToString());
     Run(Extract("extract", assembly, "Examples", selector, folder));
-    Run(["lake", "env", "lean", Path.Combine(folder, "Extracted.lean")]);
+    evidence.Add(Path.Combine(folder, "Extracted.lean"), "PASS checked extraction: " + selector);
 }
 
 // C# uses short forms here; independently exercise long-form argument opcodes too.
@@ -46,10 +48,11 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     {
         var folder = Path.Combine(output, "Long" + Array.IndexOf(samples, selector));
         Run(Extract("extract", longAssembly, "Examples", selector, folder));
-        Run(["lake", "env", "lean", Path.Combine(folder, "Extracted.lean")]);
+        evidence.Add(Path.Combine(folder, "Extracted.lean"), "PASS checked extraction: " + selector);
     }
 }
 
+evidence.Check();
 var baseline = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
 void Reject(string name, string mutated)
 {

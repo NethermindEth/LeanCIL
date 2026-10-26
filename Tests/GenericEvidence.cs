@@ -1,18 +1,20 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
 
 using System.Text;
 using System.Text.Json;
 using Nethermind.LeanCIL;
 
-if (args is not ([] or ["--external-identities"]))
-    throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities]");
+if (args is not ([] or ["--external-identities"] or ["--measure"]))
+    throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities|--measure]");
 var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
+var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
 CheckExternalIdentities();
-if (args.Length != 0) return;
+if (args is ["--external-identities"]) return;
 Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var samples = new[]
@@ -27,10 +29,11 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
 {
     var folder = Path.Combine(output, index.ToString());
     Run(Extract("extract", assembly, "Examples", "GenericMethods::" + selector, folder));
-    Run(["lake", "env", "lean", Path.Combine(folder, "Extracted.lean")]);
-    Console.WriteLine("PASS structural specialization " + selector);
+    evidence.Add(Path.Combine(folder, "Extracted.lean"), "PASS structural specialization " + selector);
 }
 
+evidence.Check();
+CheckEvidenceBatchFailures();
 Run(["lake", "env", "lean", "Tests/ExtractionGenerics.lean"]);
 CheckExternalCallTargets();
 string ChangeDefinition(string source, string name, Func<string, string> change)
@@ -131,6 +134,50 @@ void CheckExternalIdentities()
             throw new InvalidOperationException("Identity encoding checks did not reject " + name + "\n" + result.Output);
     }
     Console.WriteLine("PASS exact external identities: deduplication, unreachable calls, Unicode and mutations");
+}
+
+void CheckEvidenceBatchFailures()
+{
+    var original = Path.Combine(output, "0", "Extracted.lean");
+    var source = File.ReadAllText(original);
+    foreach (var (name, suffix, marker) in new[]
+    {
+        ("invalid-proof", "\ntheorem invalid_evidence : False := by decide +kernel\n" +
+            "#print axioms invalid_evidence\n", "error:"),
+        ("unchecked-declaration", """
+
+            import Lean
+            set_option debug.skipKernelTC true
+            run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+              name := `forged_evidence
+              levelParams := []
+              type := Lean.mkConst ``False
+              value := Lean.mkConst ``True.intro
+            })
+            #print axioms forged_evidence
+            """, "declaration type mismatch")
+    })
+    {
+        var directory = Path.Combine(output, "BatchFailure-" + name);
+        Directory.CreateDirectory(directory);
+        var invalid = Path.Combine(directory, "Invalid.lean");
+        File.WriteAllText(invalid, source + suffix);
+        var rejected = new GeneratedEvidence(directory);
+        rejected.Add(original, "Unexpected success before rejected evidence");
+        rejected.Add(invalid, "Unexpected invalid evidence success");
+        var command = name == "unchecked-declaration" ? "leanchecker PositiveBatch" : "lake env lean";
+        try
+        {
+            rejected.Check();
+            throw new Exception("Invalid generated evidence batch was accepted: " + name);
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.Contains(marker, StringComparison.Ordinal) &&
+            exception.Message.Contains(command, StringComparison.Ordinal))
+        {
+            Console.WriteLine("PASS evidence batch rejects " + name);
+        }
+    }
 }
 
 void CheckExternalCallTargets()
