@@ -51,38 +51,54 @@ private def binderSource : BinderInfo -> String
   | .strictImplicit => "Lean.BinderInfo.strictImplicit"
   | .instImplicit => "Lean.BinderInfo.instImplicit"
 
-/-- Lean source that rebuilds the expression with constants renamed by `mapped`. Metadata
-    is dropped; free and meta variables are rejected. -/
+/-- Shared expression nodes and their source bindings within one transferred declaration. -/
+private structure ExpressionSource where
+  nodes : ExprStructMap String := {}
+  bindings : Array String := #[]
+
+/-- Rebuild the exact expression while naming repeated subterms once. Metadata is dropped;
+    free and meta variables are rejected, and constants retain the checked name mapping. -/
 private def exprSource (environment : Environment) (shared : Std.HashSet Name)
-    (targetNamespace : Name) : Expr -> Except String String
-  | .bvar index => pure ("(Lean.Expr.bvar " ++ toString index ++ ")")
-  | .fvar _ => throw "Full verification cannot transfer free variables"
-  | .mvar _ => throw "Full verification cannot transfer metavariables"
-  | .sort level => return "(Lean.Expr.sort " ++ (<- levelSource level) ++ ")"
-  | .const name levels =>
-    return ("(Lean.Expr.const " ++
-      nameSource (<- mapped environment shared targetNamespace name) ++ " " ++
-      listSource (<- levels.mapM levelSource) ++ ")")
-  | .app fn argument =>
-    return ("(Lean.Expr.app " ++ (<- exprSource environment shared targetNamespace fn) ++ " " ++
-      (<- exprSource environment shared targetNamespace argument) ++ ")")
-  | .lam name type body info => return ("(Lean.Expr.lam " ++ nameSource name ++ " " ++
-      (<- exprSource environment shared targetNamespace type) ++ " " ++
-      (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")")
-  | .forallE name type body info => return ("(Lean.Expr.forallE " ++ nameSource name ++ " " ++
-      (<- exprSource environment shared targetNamespace type) ++ " " ++
-      (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")")
-  | .letE name type value body nondep => return ("(Lean.Expr.letE " ++ nameSource name ++ " " ++
-      (<- exprSource environment shared targetNamespace type) ++ " " ++
-      (<- exprSource environment shared targetNamespace value) ++ " " ++
-      (<- exprSource environment shared targetNamespace body) ++ " " ++ toString nondep ++ ")")
-  | .lit (.natVal value) => pure ("(Lean.Expr.lit (Lean.Literal.natVal " ++ toString value ++ "))")
-  | .lit (.strVal value) => pure ("(Lean.Expr.lit (Lean.Literal.strVal " ++ quoted value ++ "))")
-  | .mdata _ value => exprSource environment shared targetNamespace value
-  | .proj type index value =>
-    return ("(Lean.Expr.proj " ++
-      nameSource (<- mapped environment shared targetNamespace type) ++ " " ++
-      toString index ++ " " ++ (<- exprSource environment shared targetNamespace value) ++ ")")
+    (targetNamespace : Name) (expression : Expr) :
+    StateT ExpressionSource (Except String) String := do
+  if let some source := (← get).nodes[ExprStructEq.mk expression]? then return source
+  let source ← do
+    match expression with
+    | .bvar index => pure ("(Lean.Expr.bvar " ++ toString index ++ ")")
+    | .fvar _ => throw "Full verification cannot transfer free variables"
+    | .mvar _ => throw "Full verification cannot transfer metavariables"
+    | .sort level => pure ("(Lean.Expr.sort " ++ (<- levelSource level) ++ ")")
+    | .const name levels =>
+      pure ("(Lean.Expr.const " ++
+        nameSource (<- mapped environment shared targetNamespace name) ++ " " ++
+        listSource (← liftM (levels.mapM levelSource)) ++ ")")
+    | .app fn argument =>
+      pure ("(Lean.Expr.app " ++ (<- exprSource environment shared targetNamespace fn) ++ " " ++
+        (<- exprSource environment shared targetNamespace argument) ++ ")")
+    | .lam name type body info => pure ("(Lean.Expr.lam " ++ nameSource name ++ " " ++
+        (<- exprSource environment shared targetNamespace type) ++ " " ++
+        (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")")
+    | .forallE name type body info => pure ("(Lean.Expr.forallE " ++ nameSource name ++ " " ++
+        (<- exprSource environment shared targetNamespace type) ++ " " ++
+        (<- exprSource environment shared targetNamespace body) ++ " " ++ binderSource info ++ ")")
+    | .letE name type value body nondep => pure ("(Lean.Expr.letE " ++ nameSource name ++ " " ++
+        (<- exprSource environment shared targetNamespace type) ++ " " ++
+        (<- exprSource environment shared targetNamespace value) ++ " " ++
+        (<- exprSource environment shared targetNamespace body) ++ " " ++ toString nondep ++ ")")
+    | .lit (.natVal value) =>
+      pure ("(Lean.Expr.lit (Lean.Literal.natVal " ++ toString value ++ "))")
+    | .lit (.strVal value) => pure ("(Lean.Expr.lit (Lean.Literal.strVal " ++ quoted value ++ "))")
+    | .mdata _ value => exprSource environment shared targetNamespace value
+    | .proj type index value =>
+      pure ("(Lean.Expr.proj " ++
+        nameSource (<- mapped environment shared targetNamespace type) ++ " " ++
+        toString index ++ " " ++ (<- exprSource environment shared targetNamespace value) ++ ")")
+  let state ← get
+  let name := "expression" ++ toString state.bindings.size
+  set { state with
+    nodes := state.nodes.insert ⟨expression⟩ name
+    bindings := state.bindings.push ("  let " ++ name ++ " : Lean.Expr := " ++ source ++ "\n") }
+  return name
 
 /-- The body of a definition, theorem or opaque; unsafe and partial declarations and other
     kinds are rejected. -/
@@ -100,8 +116,9 @@ private def value (info : ConstantInfo) : Except String Expr :=
 private def declarationSource (environment : Environment) (shared : Std.HashSet Name)
     (targetNamespace : Name) (info : ConstantInfo) : Except String String := do
   let target := nameSource (targetNamespace ++ info.name)
-  let type <- exprSource environment shared targetNamespace info.type
-  let body <- exprSource environment shared targetNamespace (<- value info)
+  let (type, expressions) ← (exprSource environment shared targetNamespace info.type).run {}
+  let (body, expressions) ←
+    (exprSource environment shared targetNamespace (← value info)).run expressions
   let common := "name := " ++ target ++ ", levelParams := " ++
     listSource (info.levelParams.map nameSource) ++ ", type := " ++ type ++ ", value := " ++ body
   let declaration <- match info with
@@ -117,6 +134,7 @@ private def declarationSource (environment : Environment) (shared : Std.HashSet 
     | .opaqueInfo _ => pure ("Lean.Declaration.opaqueDecl { " ++ common ++ ", isUnsafe := false }")
     | _ => throw "Unsupported full-verification declaration"
   return "run_cmd Lean.Elab.Command.liftCoreM do\n" ++
+    String.join expressions.bindings.toList ++
     "  if (<- Lean.getEnv).contains " ++ target ++
       " then throwError \"Full-verification destination already exists\"\n" ++
     "  Lean.withOptions (fun options => options.setBool `debug.skipKernelTC false) do\n" ++
@@ -161,6 +179,7 @@ def capture (environment : Environment) (sharedModules : Array Name) (targetName
   let imports := state.imports.toArray.toList.mergeSort
     (fun left right => left.toString <= right.toString)
   return String.intercalate "\n" (imports.map (fun name => "import " ++ name.toString)) ++
-    "\nimport Lean\n\n" ++ String.intercalate "\n" state.sources.toList
+    "\nimport Lean\n\nset_option maxRecDepth 65536\n\n" ++
+      String.intercalate "\n" state.sources.toList
 
 end CIL.Interface.FullTransfer
