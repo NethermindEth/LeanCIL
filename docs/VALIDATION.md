@@ -1142,6 +1142,25 @@ compile first, with repeated generic controls deduplicated. Byte-backed identity
 retain their UTF-8 witnesses. Evidence-list omission and reordering still check the complete
 certificate because they test agreement between records, not an independent validator.
 
+Feature-flow validation indexes addressed local slots and classifies exact local types once,
+then shares that index across state-shape checks, local transfers and emitted local operations.
+`FeatureLocalIndex.eligible_eq` proves equality with the original raw instruction/type scan for
+every index and fact, including malformed metadata and missing locals. Existing feature-flow
+equivalence and reachability proofs retain their statements. The focused feature regression
+also checks boolean bounds, both address-taking opcodes, wrong assembly scopes and malformed
+address operands.
+
+`Tests/FeatureLocalScaling.lean` isolates known facts at every instruction/local pair. A local
+kernel measurement reduced 128×128 checks from 1.52 to 0.844 seconds, 256×256 from 6.58 to
+3.99 seconds, and 512×512 from 29.3 to 16.4 seconds. Both measured sequences grow approximately
+quadratically; these data do not demonstrate a different asymptotic kernel cost. The eliminated
+work is repeated raw-body address scanning, local-list lookup and type classification. The
+existing feature regression module changed from 4.290 to 4.056 seconds, a smaller benefit
+because ordinary certificates often contain unknown facts, which already exit early.
+For full 128-instruction feature certificates, empty-local kernel checks measured 116 versus
+117 ms and 128 unknown locals measured 161 versus 152 ms; this sample showed no material
+regression on the early-exit paths.
+
 Full-verification term transfer encodes each structurally distinct expression node once and
 writes a compact data table instead of elaborating a recursively expanded constructor term.
 Structural equality includes binder spelling and annotations; names retain numeric and string

@@ -2,6 +2,7 @@ import CIL.Extraction.Generics
 import CIL.Extraction.FeatureEffects
 import CIL.Extraction.Folds
 import CIL.Extraction.FlowIndex
+import CIL.Extraction.FeatureLocals
 import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
@@ -143,25 +144,12 @@ theorem featureGetter_eq_original (site : CallSite) : featureGetter site = (do
     String.append_assoc]
 #print axioms featureGetter_eq_original
 
-/-- Whether the body takes local `index`'s address with `ldloca` (18 or 0xFE0D). -/
-private def addressed (raw : RawMethod) (index : Nat) : Bool := raw.code.any fun instruction =>
-  (instruction.opcode == 18 || instruction.opcode == 65037) && localIndex instruction == some index
-
-/-- A local may hold a known fact only if it is never addressed and is an `int`, `uint`,
-    or a `bool` holding 0 or 1. -/
-private def eligibleFact (raw : RawMethod) (index : Nat) (fact : Option W32) : Bool :=
-  if fact.isNone then true else if addressed raw index then false else
-  match raw.locals[index]? with
-  | some (.atom scope name) => scope == runtimeScope &&
-      (name == "System.Int32" || name == "System.UInt32" ||
-        name == "System.Boolean" && (fact == some 0 || fact == some 1))
-  | _ => false
-
 /-- A certificate state fits the method: one fact per local, at most `maxStack` stack
     entries, and only eligible locals known. -/
-private def wellShaped (raw : RawMethod) (state : FeatureState) : Bool :=
+private def wellShaped (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+    (state : FeatureState) : Bool :=
   state.locals.length == raw.locals.length && state.stack.length <= raw.maxStack &&
-  (state.locals.zipIdx).all fun (fact, index) => eligibleFact raw index fact
+  (state.locals.zipIdx).all fun (fact, index) => eligible index fact
 
 /-- The word an `ldc.i4` instruction pushes, in any of its forms. -/
 private def constant32 (instruction : RawInstruction) : Option W32 :=
@@ -202,7 +190,8 @@ private def forget (state : FeatureState) (pops pushes : Nat) : Option FeatureSt
 
 /-- Recompute a transfer from raw CLI encodings and metadata, independently of the
     extractor's worklist and its claimed incoming/outgoing facts. -/
-def featureTransfer (raw : RawMethod) (profile : FeatureProfile)
+private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+    (profile : FeatureProfile)
     (instruction : RawInstruction) (state : FeatureState) : Option FeatureState := do
   if let some word := constant32 instruction then
     return { state with stack := some word :: state.stack }
@@ -216,7 +205,7 @@ def featureTransfer (raw : RawMethod) (profile : FeatureProfile)
     let value :: stack := state.stack | none
     if index >= state.locals.length then none else
       return { stack, locals :=
-        state.locals.set index (if eligibleFact raw index value then value else none) }
+        state.locals.set index (if eligible index value then value else none) }
   -- `dup`, then `and`, `or`, `xor` and `ceq` over known words.
   if instruction.opcode == 37 then
     let value :: stack := state.stack | none
@@ -246,14 +235,21 @@ def featureTransfer (raw : RawMethod) (profile : FeatureProfile)
     let (pops, pushes) ← rawStackEffect instruction.opcode
     forget state pops pushes
 
+/-- Recompute the transfer using the raw local-eligibility rule. -/
+def featureTransfer (raw : RawMethod) := featureTransferWith raw (featureLocalEligible raw)
+
 /-- A decided type test replaces the raw comparison result by its exact word. -/
-def featureTransferAt (raw : RawMethod) (profile : FeatureProfile) (role : Option FoldRole)
+private def featureTransferAtWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+    (profile : FeatureProfile) (role : Option FoldRole)
     (instruction : RawInstruction) (state : FeatureState) : Option FeatureState :=
   match role with
   | some (.result value) => match state.stack with
     | _ :: _ :: stack => some { state with stack := some (if value then 1 else 0) :: stack }
     | _ => none
-  | _ => featureTransfer raw profile instruction state
+  | _ => featureTransferWith raw eligible profile instruction state
+
+/-- The folded transfer stated independently of any local-eligibility index. -/
+def featureTransferAt (raw : RawMethod) := featureTransferAtWith raw (featureLocalEligible raw)
 
 /-- Every switch destination is retained, even for a constant selector. Only
     true/false branches may prune an edge, and only for a known word. -/
@@ -305,7 +301,8 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) 
 /-- Bind every control-flow operation and every operation that propagates a known
     feature fact to the actual emitted instruction. Unknown operations may not
     emit an unsupported hole on a reachable path. -/
-def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted : Op) : Bool :=
+private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+    (instruction : RawInstruction) (emitted : Op) : Bool :=
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65050] then return false
@@ -328,10 +325,10 @@ def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted :
     return match emitted with
       | .local actual actualNarrow =>
         instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index &&
-          (!eligibleFact raw index (some 0) || actualNarrow == narrow)
+          (!eligible index (some 0) || actualNarrow == narrow)
       | .setLocal actual actualNarrow =>
         instruction.opcode ∈ [10, 11, 12, 13, 19, 65038] && actual == index &&
-          (!eligibleFact raw index (some 0) || actualNarrow == narrow)
+          (!eligible index (some 0) || actualNarrow == narrow)
       | _ => false
   if instruction.opcode ∈ [18, 65037] then
     return match localIndex instruction, emitted with
@@ -378,29 +375,37 @@ def featureOpMatches (raw : RawMethod) (instruction : RawInstruction) (emitted :
     | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 65025, 42] || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
 
+/-- Bind an emitted operation using the raw local-eligibility rule. -/
+def featureOpMatches (raw : RawMethod) := featureOpMatchesWith raw (featureLocalEligible raw)
+
 /-- Fold operands emit nothing, a type comparison emits its decided word and a folded
     `throw` raises its constructed type. Outside a decided test, type handles and
     `System.Type` calls have no admitted translation. -/
-def featureOpMatchesAt (raw : RawMethod) (role : Option FoldRole)
+private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+    (role : Option FoldRole)
     (instruction : RawInstruction) (emitted : Op) : Bool :=
   match role, emitted with
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .const32 word => word == if value then 1 else 0
   | some (.raise name), .throw exception => name == exception
   | some _, _ => false
-  | none, _ => !typeTestInstruction instruction && featureOpMatches raw instruction emitted
+  | none, _ => !typeTestInstruction instruction && featureOpMatchesWith raw eligible instruction emitted
+
+/-- Fold-aware instruction matching stated independently of any eligibility index. -/
+def featureOpMatchesAt (raw : RawMethod) := featureOpMatchesAtWith raw (featureLocalEligible raw)
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     be well shaped, match its emitted instruction, and flow into a weaker state at every
     recomputed successor. -/
-private def checkFeatureSite (raw : RawMethod) (profile : FeatureProfile)
+private def checkFeatureSiteWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+    (profile : FeatureProfile)
     (certificate : Nat → Option (Option FeatureState))
     (roles : Nat → Option (Option FoldRole)) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Op → Bool
   | _, none, .unsupported _ => true
   | ((instruction, role), pc), some state, emitted =>
-    wellShaped raw state && featureOpMatchesAt raw role instruction emitted &&
-      match featureTransferAt raw profile role instruction state,
+    wellShaped raw eligible state && featureOpMatchesAtWith raw eligible role instruction emitted &&
+      match featureTransferAtWith raw eligible profile role instruction state,
           featureSuccessors pc instruction state with
       | some after, some successors =>
         -- Roles are contiguous, so only a non-fallthrough edge can enter a fold's interior.
@@ -412,6 +417,10 @@ private def checkFeatureSite (raw : RawMethod) (profile : FeatureProfile)
       | _, _ => false
   | _, none, _ => false
 
+/-- The per-site specification uses the original raw-metadata eligibility rule. -/
+private def checkFeatureSite (raw : RawMethod) :=
+  checkFeatureSiteWith raw (featureLocalEligible raw)
+
 /-- No optional sites: entry, every raw PC, the entire parameter-reachability mask,
     every successor, and all unsupported holes are covered. -/
 def FeatureFlowValid (raw : RawMethod) (profile : FeatureProfile)
@@ -419,10 +428,11 @@ def FeatureFlowValid (raw : RawMethod) (profile : FeatureProfile)
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := List.replicate raw.locals.length none }) ∧
-  all3Flow (fun lookup => checkFeatureSite raw profile lookup
+  (let eligible := (FeatureLocalIndex.ofRaw raw).eligible
+   all3Flow (fun lookup => checkFeatureSiteWith raw eligible profile lookup
       (FlowIndex.ofList (foldRoles raw.locals raw.code)).get?)
     (.ofList certificate) 0
-    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true
+    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code) = true
 
 instance (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
     (reachable : List Bool) (code : List Op) :
@@ -442,12 +452,17 @@ theorem FeatureFlowValid_iff_list (raw : RawMethod) (profile : FeatureProfile)
           (fun target => (foldRoles raw.locals raw.code)[target]?))
         (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true := by
   unfold FeatureFlowValid
+  have eligible : (FeatureLocalIndex.ofRaw raw).eligible = featureLocalEligible raw := by
+    funext index fact
+    exact FeatureLocalIndex.eligible_eq raw index fact
+  rw [eligible]
   rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
   have roles : (FlowIndex.ofList (foldRoles raw.locals raw.code)).get? =
       (fun target => (foldRoles raw.locals raw.code)[target]?) := by
     funext target
     exact FlowIndex.get?_ofList _ _
   rw [roles]
+  rfl
 
 #print axioms FeatureFlowValid_iff_list
 
@@ -515,9 +530,16 @@ theorem FeatureFlowValid.edge_closed {raw : RawMethod} {profile : FeatureProfile
       some ((instruction, role), pc) := by
     simp [List.getElem?_zipIdx, rawAt]
   have sites := valid.2.2.2.2
+  have eligible : (FeatureLocalIndex.ofRaw raw).eligible = featureLocalEligible raw := by
+    funext index fact
+    exact FeatureLocalIndex.eligible_eq raw index fact
+  change all3Flow _ _ _ _ _ _ = true at sites
+  rw [eligible] at sites
   rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at sites
   have checked := all3_at sites indexed stateAt (List.getElem?_eq_getElem bound)
-  simp only [checkFeatureSite, transferred, successorsAt, Bool.and_eq_true] at checked
+  unfold featureTransferAt at transferred
+  simp only [checkFeatureSiteWith,
+    transferred, successorsAt, Bool.and_eq_true] at checked
   have successor := List.all_eq_true.mp checked.2.2 target member
   cases hnext : certificate[target]? with
   | none => simp [hnext] at successor

@@ -38,7 +38,9 @@ See [contract composition](docs/PROOFS.md) for explicit and automatic call proof
 
 Feature and division getter recognition use exact byte comparisons with kernel-checked
 equivalence to their original signature rules. This reduces certificate replay work while
-preserving metadata rejection. Managed-call certificates use structural equality proofs for
+preserving metadata rejection. Feature-flow checks share an indexed classification of local
+types and address exclusions, proved equivalent to the original metadata scans.
+Managed-call certificates use structural equality proofs for
 matching metadata, reducing repeated string comparisons during replay. Primitive metadata also
 shares the exact runtime assembly identity. Reachable external calls reuse their complete
 identities as checked UTF-8 byte constants, avoiding repeated decoding in the kernel. See
