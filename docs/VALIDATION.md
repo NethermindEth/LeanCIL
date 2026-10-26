@@ -124,7 +124,7 @@ performance fixture is never supplied to a verifier as a certified library.
 
 `Tests/ConsumerFingerprintReuse.cs` checks authenticated canonical fingerprints across
 independent verifier processes using two framework modules and a multipart fixture. It
-covers corrupt receipts, changed or missing parts, module names, auditor/runtime bytes,
+covers corrupt receipts, changed or missing parts, module names, auditor bytes,
 fresh and disabled caches, diagnostic normalization, source/import invalidation and
 kernel replay. `--measure` uses the fixed full framework plus fixture workload and records
 wall time, raw input bytes, serialization counts and native normalization time. Supply a
