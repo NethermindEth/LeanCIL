@@ -554,9 +554,8 @@ partial class Program
             string auditSource = ExportAuditSource(prepared[index], export.Kind);
             ConsumerExportAudit audit = new(auditSource, (session, proofModule, leanPath) =>
             {
-                ExportClosure actual =
-                    independent.CheckExportClosure(session, proofModule, export.ContractConstant, leanPath);
-                (string statementDigest, string _) = independent.CheckExportStatement(session, proofModule, leanPath);
+                (ExportClosure actual, string statementDigest, string _) =
+                    independent.CheckExportCertification(proofModule, export.ContractConstant, leanPath);
                 if (actual.Digest != export.ClosureDigest || actual.Kind != export.Kind ||
                     statementDigest != slot.Import.Certification.StatementDigest)
                     throw new InvalidDataException(

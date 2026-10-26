@@ -98,9 +98,7 @@ partial class Program
         {
             Dictionary<string, ExportClosure> publishedClosures =
                 CheckPublishedContractInterfaces(manifest, closureInterfaces, prepared, staging);
-            List<CheckedContractExport> verified = [];
-            foreach (PreparedContractExport export in prepared)
-                verified.Add(VerifyContractExport(manifest, export, publishedClosures[export.Request.Contract]));
+            CheckedContractExport[] verified = VerifyContractExports(manifest, prepared, publishedClosures);
             if (!Same(before, ExportInputs(manifestPath, manifest)))
                 throw new InvalidDataException("Contract export inputs changed during verification.");
             string implementationHash = ContractInterface.Hash(implementation);
@@ -146,36 +144,58 @@ partial class Program
         }
     }
 
-    // One export, one consumer run: the audit callback binds the checked statement to the published closure.
-    CheckedContractExport VerifyContractExport(ContractExportManifest manifest, PreparedContractExport export,
-        ExportClosure published)
+    // Compatible exports share an authenticated consumer snapshot, retaining their individual audits.
+    CheckedContractExport[] VerifyContractExports(ContractExportManifest manifest, PreparedContractExport[] exports,
+        IReadOnlyDictionary<string, ExportClosure> published)
+    {
+        CheckedContractExport?[] checkedExports = new CheckedContractExport?[exports.Length];
+        ConsumerRequest[] requests = exports.Select((export, index) => PrepareExportRequest(
+            manifest, export, published[export.Request.Contract], result => checkedExports[index] = result)).ToArray();
+        // An in-tree artifact needs its own exclusion from the source snapshot.
+        bool sharedSnapshot = exports.All(export => !Inside(manifest.ProofRoot, export.Request.Artifact));
+        int[][] groups = sharedSnapshot
+            ? [Enumerable.Range(0, exports.Length).ToArray()]
+            : Enumerable.Range(0, exports.Length).Select(index => new[] { index }).ToArray();
+        foreach (int[] group in groups)
+        {
+            ConsumerOutcome[] outcomes = VerifyConsumerRequests(manifest.ProofRoot,
+                group.Select(index => requests[index]).ToArray(), null, batch: group.Length > 1);
+            for (int position = 0; position < group.Length; position++)
+            {
+                ConsumerOutcome outcome = outcomes[position];
+                if (outcome.Error is not null)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
+                if (outcome.Report is null || checkedExports[group[position]] is null)
+                    throw new InvalidDataException("Contract export did not finish its exact theorem audit and replay.");
+            }
+        }
+        return checkedExports.Select(result => result!).ToArray();
+    }
+
+    // The callback binds one freshly checked statement to its independently published closure.
+    ConsumerRequest PrepareExportRequest(ContractExportManifest manifest, PreparedContractExport export,
+        ExportClosure published, Action<CheckedContractExport> completed)
     {
         string contract = export.Request.Contract;
         string audit = ExportAuditSource(export, published.Kind);
-        CheckedContractExport? checkedExport = null;
         ConsumerExportAudit specification = new(audit, (session, proofModule, leanPath) =>
         {
-            ExportClosure actual = CheckExportClosure(session, proofModule, contract, leanPath);
+            (ExportClosure actual, string digest, string statement) =
+                CheckExportCertification(proofModule, contract, leanPath);
             bool matchesPublished = actual.Digest == published.Digest && actual.Kind == published.Kind &&
                 actual.Canonical == published.Canonical;
             if (!matchesPublished)
                 throw new InvalidDataException(
                     "Export contract differs from its published interface closure: " + contract);
-            (string digest, string statement) = CheckExportStatement(session, proofModule, leanPath);
-            checkedExport = new(export, actual, digest, statement, audit, proofModule + "Author");
+            completed(new(export, actual, digest, statement, audit, proofModule + "Author"));
         }, [ExportTheoremRequest(contract, published.Kind, export.Conditional),
             export.Request.Program is null
                 ? ExportTheoremRequest(contract, published.Kind, export.Conditional) with { name = export.Request.Theorem }
                 : ProofTheorem(export.Request.Theorem),
             PublicLayoutsRequest(export.Profile), .. InitializationAuditRequests(export),
             .. ProfileFamilyAudits(export)], ProfileFamilySources(export));
-        ConsumerRequest request = new(manifest.Assembly, export.Request.Artifact, export.Proof, ExportTheorem, null,
+        return new(manifest.Assembly, export.Request.Artifact, export.Proof, ExportTheorem, null,
             ExportAudit: specification);
-        ConsumerOutcome outcome = VerifyConsumerRequests(manifest.ProofRoot, [request], null, batch: false)[0];
-        if (outcome.Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
-        if (outcome.Report is null || checkedExport is null)
-            throw new InvalidDataException("Contract export did not finish its exact theorem audit and replay.");
-        return checkedExport;
     }
 
     static AuditRequest PublicLayoutsRequest(string profile) =>
@@ -462,42 +482,37 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         if (failures.Count != 0)
             throw new InvalidDataException(
                 "Kernel replay rejected the published interface: " + string.Join(", ", failures.Keys));
-        CheckPublishedInterfaceDeclarations(isolated, interfaces.Select(source => source.Name).ToArray(), leanPath);
+        string[] contracts = exports.Select(export => export.Request.Contract).Distinct(StringComparer.Ordinal).ToArray();
+        string[] interfaceNames = interfaces.Select(source => source.Name).ToArray();
+        AuditedOleans audited = AuditOleans(leanPath, interfaceNames, [], interfaces: interfaceNames, closures: contracts);
+        if (audited.interfaces?.error is { } error) throw new InvalidDataException(error);
         Dictionary<string, ExportClosure> closures = new(StringComparer.Ordinal);
-        string imports = string.Join("\n", interfaces.Select(source => "import " + source.Name));
-        foreach (string contract in exports.Select(export => export.Request.Contract).Distinct(StringComparer.Ordinal))
-            closures[contract] = CheckExportClosure(isolated, imports, contract, leanPath, importsAreSource: true);
+        for (int index = 0; index < contracts.Length; index++)
+            closures[contracts[index]] = CheckedExportClosure(contracts[index], audited.closures![index]);
         return closures;
     }
 
-    void CheckPublishedInterfaceDeclarations(string session, string[] modules, string leanPath)
+    // The canonical closure is validated independently of the theorem that uses it.
+    static ExportClosure CheckedExportClosure(string contract, AuditedClosure closure)
     {
-        AuditedOleans audited = AuditOleans(leanPath, modules, [], interfaces: modules);
-        if (audited.interfaces?.error is { } error) throw new InvalidDataException(error);
-    }
-
-    ExportClosure CheckExportClosure(string session, string import, string contract, string leanPath,
-        bool importsAreSource = false)
-    {
-        string[] modules = importsAreSource
-            ? import.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(line => line["import ".Length..]).ToArray() : [import];
-        AuditedOleans audited = AuditOleans(leanPath, modules, [], closures: [contract]);
-        AuditedClosure closure = audited.closures!.Single();
         if (closure.error is { } error) throw new InvalidDataException(error);
         if (closure.kind is not ("method" or "outcome") || string.IsNullOrEmpty(closure.canonical))
             throw new InvalidDataException("Invalid canonical export contract closure.");
         return new(contract, closure.kind, ContentKey(closure.canonical), closure.canonical);
     }
 
-    (string Digest, string Statement) CheckExportStatement(string session, string proofModule, string leanPath)
+    // Closure and statement use one imported environment and retain their separate checks.
+    (ExportClosure Closure, string Digest, string Statement) CheckExportCertification(
+        string proofModule, string contract, string leanPath)
     {
         AuditedOleans audited =
-            AuditOleans(leanPath, [proofModule], [new(ExportTheorem, axioms: ApprovedAxioms, statement: true)]);
+            AuditOleans(leanPath, [proofModule], [new(ExportTheorem, axioms: ApprovedAxioms, statement: true)],
+                closures: [contract]);
+        ExportClosure closure = CheckedExportClosure(contract, audited.closures!.Single());
         AuditedAxioms(audited.theorems[0]);
         string statement = audited.theorems[0].statement
             ?? throw new InvalidDataException("Missing checked export statement.");
-        return (ContentKey(statement), statement);
+        return (closure, ContentKey(statement), statement);
     }
     static ContractInterface AddExportCertifications(ContractInterface sidecar,
         IReadOnlyList<CheckedContractExport> exports) =>

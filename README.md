@@ -334,6 +334,8 @@ An `export-contracts` manifest can list several profile artifacts for one method
 family theorem. Each extraction is checked independently, with kernel-checked flag agreement
 and exact equality to the reprofiled reference program. See the
 [profile-family manifest example](docs/PROOFS.md) for the same-flag transport requirements.
+Compatible exports share their source snapshot and reusable compilation work; each export
+retains its own theorem, contract closure, replay and publication checks.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter

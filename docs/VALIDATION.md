@@ -1124,3 +1124,15 @@ composition audit. The generated source imports the decoder from the certified
 values across binders, universes, projections, local lets, string literals and proofs, plus
 malformed table rejection. The full transitive suite retains its forged dependency, staged
 mutation, changed implementation, cyclic dependency and missing-bundle regressions.
+
+Contract publication audits interface declarations and their requested closures in one imported
+environment. Each final export likewise audits its closure and certified theorem statement
+together, including independently rebuilt full-verification exports. The closure digest,
+contract kind, theorem axioms and statement checks remain separate obligations.
+
+Exports whose artifacts lie outside the proof root share one consumer input snapshot and the
+existing extraction-group verification machinery. Each request retains its own exact export
+audit and checked result. Artifacts inside the proof root retain individual snapshots so their
+output exclusion does not hide another request's source. `exportsfullpair` checks two exported
+methods and their independently replayed caller composition; its focused Windows run passed
+in 179.7 seconds. That is a validation timing, not a before/after performance measurement.
