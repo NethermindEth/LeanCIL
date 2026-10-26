@@ -9,28 +9,25 @@ exceptions while accessing corresponding allocation identities.
 
 namespace CIL.Safety
 
-/-- Instruction families keep the checked simulation proofs independently small. -/
-private inductive InstructionFamily where
-  | storage | fields | other
-
-/-- Storage and field operations require distinct checked intermediate addresses. -/
-private def instructionFamily : CIL.Op → InstructionFamily
-  | .loadAggregate _ | .copyObject _ | .storeAggregate _ | .initAggregate _
-  | .loadScalar .. | .storeScalar _ => .storage
-  | .fieldAt .. | .fieldAddress _ | .setFieldAt .. | .aggregateFieldAt ..
-  | .setAggregateFieldAt .. => .fields
-  | _ => .other
-
-set_option hygiene false in
-/-- Composes checked primitive correspondences within one ordinary instruction family. -/
-local macro "instruction_renaming" : tactic => `(tactic| (
+set_option maxHeartbeats 600000 in
+/-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
+theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Op)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (instruction operation stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (instruction operation stack source)
+      (instruction operation (stack.map mapping.value) target) := by
   unfold CIL.Safety.instruction at observable ⊢
   rw [mapping.unspecifiedOperands]
   split at observable
   · cases observable
   · simp only [Bool.false_eq_true, ite_false, *]
     split at observable
-    all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value]
     all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
     all_goals try exact related.memoryInstructionResult _ formed _ bounds observable
@@ -98,74 +95,8 @@ local macro "instruction_renaming" : tactic => `(tactic| (
          exact .ok ⟨related, rfl⟩)
       | dsimp +instances only [AllocationRenaming.reference]
       | simp only [mapping.isNull, imageEquality]
-      | (split <;> try simp only [*, mapping.isNull, AllocationRenaming.managedReference,
+      | (split <;> try simp only [*, AllocationRenaming.managedReference,
           Bind.bind, Except.bind])
-))
-
-/-- storage instructions preserve mapped successful values and named exceptions. -/
-private theorem instruction_storage {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Op)
-    (family : instructionFamily operation = .storage)
-    (formed : source.WellFormed)
-    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
-    (observable : SuccessOrThrow (instruction operation stack source)) :
-    ResultRenamed mapping
-      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
-      (instruction operation stack source)
-      (instruction operation (stack.map mapping.value) target) := by
-  instruction_renaming
-#print axioms instruction_storage
-
-/-- fields instructions preserve mapped successful values and named exceptions. -/
-private theorem instruction_fields {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Op)
-    (family : instructionFamily operation = .fields)
-    (formed : source.WellFormed)
-    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
-    (observable : SuccessOrThrow (instruction operation stack source)) :
-    ResultRenamed mapping
-      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
-      (instruction operation stack source)
-      (instruction operation (stack.map mapping.value) target) := by
-  instruction_renaming
-#print axioms instruction_fields
-
-/-- other instructions preserve mapped successful values and named exceptions. -/
-private theorem instruction_other {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Op)
-    (family : instructionFamily operation = .other)
-    (formed : source.WellFormed)
-    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
-    (observable : SuccessOrThrow (instruction operation stack source)) :
-    ResultRenamed mapping
-      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
-      (instruction operation stack source)
-      (instruction operation (stack.map mapping.value) target) := by
-  instruction_renaming
-#print axioms instruction_other
-
-/-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
-theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Op)
-    (formed : source.WellFormed)
-    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
-    (observable : SuccessOrThrow (instruction operation stack source)) :
-    ResultRenamed mapping
-      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
-      (instruction operation stack source)
-      (instruction operation (stack.map mapping.value) target) := by
-  cases family : instructionFamily operation with
-  | storage => exact instruction_storage related operation family formed stack bounds observable
-  | fields => exact instruction_fields related operation family formed stack bounds observable
-  | other => exact instruction_other related operation family formed stack bounds observable
 #print axioms Memory.Renamed.instructionResult
 
 end CIL.Safety

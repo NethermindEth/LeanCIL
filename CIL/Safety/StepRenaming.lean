@@ -27,22 +27,10 @@ theorem stepTransport : StepTransport := by
     targetFrame source target metadata memories frames sourceFormed targetFormed staticBounds
     argumentBounds bounds observable
   cases family : fixedStepFamily operation with
-  | subtract =>
+  | reference =>
     rw [fixedOperation indices operation (by rw [family]; intro impossible; cases impossible)]
-    exact ⟨mapping, .refl mapping, memories.stepSubtract frames sourceFormed sourceBody targetBody
+    exact ⟨mapping, .refl mapping, memories.stepReference frames sourceFormed sourceBody targetBody
       metadata operation family pc arguments stack bounds observable⟩
-  | compare =>
-    rw [fixedOperation indices operation (by rw [family]; intro impossible; cases impossible)]
-    exact ⟨mapping, .refl mapping, memories.stepCompare frames sourceFormed sourceBody targetBody
-      metadata operation family pc arguments stack bounds observable⟩
-  | unsignedBranch =>
-    rw [fixedOperation indices operation (by rw [family]; intro impossible; cases impossible)]
-    exact ⟨mapping, .refl mapping, memories.stepUnsignedBranch frames sourceFormed
-      sourceBody targetBody metadata operation family pc arguments stack bounds observable⟩
-  | equalityBranch =>
-    rw [fixedOperation indices operation (by rw [family]; intro impossible; cases impossible)]
-    exact ⟨mapping, .refl mapping, memories.stepEqualityBranch frames sourceFormed
-      sourceBody targetBody metadata operation family pc arguments stack bounds observable⟩
   | numeric =>
     rw [fixedOperation indices operation (by rw [family]; intro impossible; cases impossible)]
     exact ⟨mapping, .refl mapping, memories.stepNumeric frames sourceFormed sourceBody targetBody
