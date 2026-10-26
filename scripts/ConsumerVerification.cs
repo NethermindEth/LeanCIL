@@ -860,6 +860,69 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     sealed record ConsumerSession(string FrameworkCopy, Dictionary<string, string> Copied);
 
+    sealed record ExtractionComponents(string InputHash, string Aggregate, Dictionary<string, string> Sources);
+    const string ExtractionComponentContext = "namespace Extracted\nopen CIL\nset_option maxRecDepth 4096\n\n";
+
+    // Split only the extractor's declaration boundaries. Lean still checks every imported
+    // declaration and the aggregate certificate against the complete program.
+    static ExtractionComponents SplitExtractionComponents(string source)
+    {
+        var methods = Regex.Matches(source, @"(?m)^def method[0-9]+Signature : String := ");
+        var aggregate = source.IndexOf("def specializedMethods :", StringComparison.Ordinal);
+        if (methods.Count < 2 || aggregate <= methods[^1].Index)
+            return new(ContentKey(source), source, new(StringComparer.Ordinal));
+        var localValidation = new Regex(@"(?m)^theorem method([0-9]+)_" +
+            @"(?:coverage|shape|unsafe|division|opaque|vector_initializations)_validated[^\r\n]*\r?\n");
+        var tail = source[aggregate..];
+        var validations = localValidation.Matches(tail).GroupBy(match => int.Parse(match.Groups[1].Value))
+            .ToDictionary(group => group.Key, group => string.Concat(group.Select(match => match.Value)));
+        tail = localValidation.Replace(tail, "");
+        var sources = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Component(string text)
+        {
+            var name = "LeanCILComponent_" + ContentKey(text);
+            sources.Add(name, text);
+            return name;
+        }
+        var header = Component(source[..methods[0].Index] + "\nend Extracted\n");
+        var declarations = new Dictionary<string, string>(StringComparer.Ordinal);
+        var modules = new List<string> { header };
+        for (var index = 0; index < methods.Count; index++)
+        {
+            var end = index + 1 < methods.Count ? methods[index + 1].Index : aggregate;
+            var body = source[methods[index].Index..end] + validations.GetValueOrDefault(index, "");
+            // Extra dependencies from literal text are conservative. Missing dependencies
+            // cannot authorize a certificate: compilation and kernel replay remain mandatory.
+            var tokens = Regex.Matches(body, @"[A-Za-z_][A-Za-z0-9_]*")
+                .Select(match => match.Value).ToHashSet(StringComparer.Ordinal);
+            var imports = declarations.Where(pair => tokens.Contains(pair.Key)).Select(pair => pair.Value)
+                .Prepend(header).Distinct(StringComparer.Ordinal);
+            var name = Component(string.Join("\n", imports.Select(module => "import " + module)) +
+                "\n\n" + ExtractionComponentContext + body + "\nend Extracted\n");
+            modules.Add(name);
+            foreach (Match declaration in Regex.Matches(body,
+                @"(?m)^(?:@\[[^\r\n]*\]\s+)?(?:def|theorem) ([A-Za-z_][A-Za-z0-9_]*)"))
+                declarations.Add(declaration.Groups[1].Value, name);
+        }
+        return new(ContentKey(source), string.Join("\n", modules.Select(module => "import " + module)) +
+            "\n\n" + ExtractionComponentContext + tail, sources);
+    }
+
+    // A unique wrapper stays in Extracted so its compilation shares the aggregate process.
+    static ExtractionComponents SharedExtractionComponents(ExtractionComponents plan, HashSet<string> repeated)
+    {
+        if (plan.Sources.Keys.Count(repeated.Contains) < 2)
+            return new(plan.InputHash, "", new(StringComparer.Ordinal));
+        var shared = plan.Sources.Where(pair => repeated.Contains(pair.Key)).ToDictionary(StringComparer.Ordinal);
+        var bodies = plan.Sources.Where(pair => !repeated.Contains(pair.Key)).Select(pair =>
+            pair.Value[(pair.Value.IndexOf(ExtractionComponentContext, StringComparison.Ordinal) +
+                ExtractionComponentContext.Length)..^"\nend Extracted\n".Length]);
+        var tail = plan.Aggregate[(plan.Aggregate.IndexOf(ExtractionComponentContext, StringComparison.Ordinal) +
+            ExtractionComponentContext.Length)..];
+        return new(plan.InputHash, string.Join("\n", shared.Keys.Select(module => "import " + module)) + "\n\n" +
+            ExtractionComponentContext + string.Concat(bodies) + tail, shared);
+    }
+
     // Resolve source roots through Lake so library and package srcDir settings agree with imports.
     static string[] ConsumerSourceDirectories(string session, IEnumerable<string> packageRoots)
     {
@@ -948,7 +1011,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
         IReadOnlyDictionary<string, string>? exportAudits = null,
         ConsumerSessionPurpose purpose = ConsumerSessionPurpose.Verification,
-        IReadOnlyDictionary<string, string>? generatedSources = null)
+        IReadOnlyDictionary<string, string>? generatedSources = null,
+        ExtractionComponents? components = null)
     {
         foreach (var dependency in dependencies)
         {
@@ -1003,6 +1067,24 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .GetProperty("generatedSha256").GetString())
                 throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
         AddConsumerLibrary(frameworkCopy, "Extracted");
+        var componentPaths = new List<string>();
+        if (components is { Sources.Count: > 0 })
+        {
+            if (generated != components.InputHash)
+                throw new InvalidDataException("Generated CIL changed before component preparation.");
+            var packageRoots = dependencies.Select(dependency =>
+                Within(session, Path.GetRelativePath(root, dependency.Source))).Prepend(session);
+            var directories = ConsumerSourceDirectories(session, packageRoots);
+            foreach (var (module, source) in components.Sources)
+            {
+                RejectContractSourceShadow(module, directories);
+                var path = Path.Combine(frameworkCopy, module + ".lean");
+                File.WriteAllText(path, source);
+                AddConsumerLibrary(frameworkCopy, module);
+                componentPaths.Add(path);
+            }
+            File.WriteAllText(Path.Combine(frameworkCopy, "Extracted.lean"), components.Aggregate);
+        }
         if (extraction.Sources.Count > 0)
         {
             var packageRoots = dependencies.Select(dependency =>
@@ -1032,6 +1114,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
             .Append(Path.Combine(frameworkCopy, "Extracted.lean"))
             .Append(extractionAuditPath).ToList();
+        copied.AddRange(componentPaths);
         copied.AddRange(importModules.Select(module => Path.Combine(frameworkCopy, module.Replace('.', Path.DirectorySeparatorChar) + ".lean")));
         if (symbols is not null) copied.Add(symbolsPath);
         if (generatedSources is not null)
@@ -1327,6 +1410,30 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (groups.Count == 0) return outcomes;
         var ordered = groups.Values.Select(group => group.ToArray())
             .OrderByDescending(group => group.Count(i => !requests[i].ExpectRejection)).ToArray();
+        var componentPlans = new Dictionary<int, ExtractionComponents>();
+        foreach (var group in ordered)
+            try
+            {
+                componentPlans[group[0]] = SplitExtractionComponents(
+                    File.ReadAllText(Path.Combine(outputs[group[0]], "Extracted.lean")));
+            }
+            catch (Exception error) { Fail(group, error); }
+        ordered = ordered.Where(group => componentPlans.ContainsKey(group[0])).ToArray();
+        if (ordered.Length == 0) return outcomes;
+        var repeatedComponents = componentPlans.Values.SelectMany(plan => plan.Sources.Keys)
+            .GroupBy(module => module, StringComparer.Ordinal).Where(group => group.Count() > 1)
+            .Select(group => group.Key).ToHashSet(StringComparer.Ordinal);
+        // Only the first workspace publishes in-session support before parallel work.
+        // Seed it with the largest common source body; other components stay monolithic.
+        ordered = ordered.OrderByDescending(group => componentPlans[group[0]].Sources
+            .Where(pair => repeatedComponents.Contains(pair.Key)).Sum(pair => (long)pair.Value.Length)).ToArray();
+        repeatedComponents.IntersectWith(componentPlans[ordered[0][0]].Sources.Keys);
+        foreach (var index in componentPlans.Keys.ToArray())
+        {
+            // A common header alone does not justify extra compiler processes. Split only
+            // when this batch can reuse method evidence as well as profile/layout metadata.
+            componentPlans[index] = SharedExtractionComponents(componentPlans[index], repeatedComponents);
+        }
         var sources = ConsumerSourceHashes(snapshot, root);
         bool exporting = !forceFullVerification && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
         var export = new ConsumerSupportExport();
@@ -1339,7 +1446,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
         void VerifyGroup(int[] members, string session, bool first, bool share)
         {
+            var components = componentPlans[members[0]];
             Dictionary<string, string> bound = new(WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean"))), StringComparer.Ordinal);
+            foreach (var (module, source) in components.Sources)
+                bound["<generated>/" + module + ".lean"] = ContentKey(source);
             bound["<generated>/ExtractionAudit.lean"] = ContentKey(ExtractionAuditSource);
             foreach ((string module, string source) in extractions[members[0]].Sources)
                 bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
@@ -1359,7 +1469,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash,
                 members.Where(i => requests[i].ExportAudit is not null).ToDictionary(
                     i => names[Array.IndexOf(members, i)], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
-                generatedSources: generatedSources);
+                generatedSources: generatedSources, components: components);
             var frameworkCopy = prepared.FrameworkCopy;
             string[] interfaceModules = extractions[members[0]].Sources.Keys.Where(module => module != "ExtractedImports").ToArray();
             Dictionary<string, string> InterfaceArtifacts() => ModuleArtifacts(frameworkCopy)
@@ -1411,7 +1521,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 supportArtifacts = RestoreConsumerSupport(supportKey, bound, support, dependent: false);
             }
             RestorePortableSupport(session, trusted);
-            var restoredArtifacts = new SortedDictionary<string, string>(supportArtifacts.Where(pair => pair.Key != ConsumerSupportRecordName)
+            var sharedRecord = ReadConsumerSupportRecord(Path.Combine(support, ConsumerSupportRecordName));
+            // Initial persistent restoration already selected and authenticated this bound
+            // closure; its copied artifacts do not include the support manifest.
+            var sharedFiles = sharedRecord is null ? (first ? supportArtifacts.Keys.ToHashSet(StringComparer.Ordinal)
+                    : new HashSet<string>(StringComparer.Ordinal))
+                : RestorableConsumerSupport(sharedRecord, bound).SelectMany(module => sharedRecord[module].Files)
+                    .ToHashSet(StringComparer.Ordinal);
+            var restoredArtifacts = new SortedDictionary<string, string>(supportArtifacts.Where(pair => sharedFiles.Contains(pair.Key))
                 .ToDictionary(), StringComparer.Ordinal);
             foreach (var file in restoredArtifacts.Keys)
             {
@@ -1688,7 +1805,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // audit, extraction recheck and source-stability checks succeeded.
             if (failures.Count == 0 && graph is not null)
             {
-                var dependent = DependentModules(graph, ["Extracted", "ExtractedSymbols", "ExtractionAudit", .. names]);
+                var dependent = DependentModules(graph,
+                    ["Extracted", "ExtractedSymbols", "ExtractionAudit", .. names, .. components.Sources.Keys]);
                 // Extraction-dependent modules are recorded too, bound to this Extracted; export uses only the others.
                 // Records bind no PDB names, so importers of ExtractedSymbols stay unbound and are never cached.
                 var excluded = DependentModules(graph, names);

@@ -8,6 +8,14 @@ correspondence between the serialized bytes and the assembly remains an extracto
 The former redundant `externalIdentityNBytes_eq` and `externalIdentityN_eq` literal equalities
 are replaced by `externalIdentityNBytes_valid` and shared `externalIdentityChunkN_valid` proofs.
 
+Consumer batches may factor regenerated extraction source into content-named header and method
+modules. This is a deterministic transformation in the trusted verifier implementation, not a
+proved Lean source-equivalence theorem. The exact input hash is checked again before staging;
+all staged sources and compiled artifacts participate in the existing stability checks. Lean
+still validates the full program and call connections, and the compiled certificate is audited.
+Only unchanged components with an authenticated source/import closure and unchanged artifact
+bytes can reuse an earlier kernel replay. A matching module name alone never authorizes reuse.
+
 `leancil resolve-imports` is untrusted location selection outside extraction.
 deps.json, NuGet assets, the RID graph and the LeanCilContracts attribute only
 choose the sidecar and DLL paths passed to `extract`, which never reads them.

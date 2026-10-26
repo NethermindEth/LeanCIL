@@ -166,6 +166,26 @@ resolved import paths are still compared with those resolved before the build.
 
 ## Batch verification
 
+Related multi-method extractions can reuse identical generated method evidence within a batch.
+The verifier selects a first workspace containing the largest common source body and factors its
+shared profile/layout header and method declarations into modules named by their content hashes.
+Unique wrappers remain in `Extracted`, avoiding extra compiler processes for unshared code.
+Single extractions and groups without shared method evidence retain the original source layout.
+
+The original regenerated source hash is checked before factoring. Component identities include
+their exact sources and imported component identities; the existing authenticated support cache
+also binds the framework, toolchain, verifier policy and source/import closure. Later workspaces
+copy only components whose complete source dependency closure still matches. Changed artifact
+bytes prevent replay reuse. Call connections, constrained calls, the complete translation
+certificate, compiled axiom audit and final input checks still run for every extraction.
+Generated components are not exported as portable consumer support.
+
+This first implementation shares components available in the initial checked workspace. It does
+not rename method indices to discover structurally equivalent methods, and unrelated groups can
+still repeat evidence that is absent from that workspace. `Tests/ConsumerComponents.cs` records
+build/replay counts, source size and wall time for four wrappers around one helper; `--measure`
+accepts a baseline extractor DLL without requiring component reuse.
+
 `leancil verify-batch requests.json` verifies many requests against one consumer
 snapshot in one session:
 

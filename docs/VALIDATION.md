@@ -47,6 +47,15 @@ compilation and replay times. Use the same fixed files and toolchain when compar
 For per-declaration kernel costs, run the paired Lean files with `--json --profile -j1
 -DElab.async=false -Dprofiler.threshold=0`; JSON source positions identify each declaration.
 
+`Tests/ConsumerComponents.cs` checks four independently certified wrappers around one helper.
+The common profile/layout and helper modules must compile and replay once, while all four
+complete extraction certificates must replay. Profile, helper and call-target changes invalidate
+their component identities; a consumer source shadowing a generated component must fail without
+a certificate. Source byte counts and compilation/replay/wall timings are recorded in `timings.json`.
+Pass a baseline extractor DLL and `--measure` to run the same workload without asserting reuse.
+The existing certificate-reuse fixture still checks authenticated cross-process restoration,
+self-rehashed corrupt artifacts, changed extraction sources and generated-source tampering.
+
 `Tests/VerificationCache.cs` checks certified-library copying against the pinned manifest,
 source snapshot and toolchain key, rejects changed/missing/extra files and rehashed
 manifests, and independently detects destination corruption. On Unix it also checks that
