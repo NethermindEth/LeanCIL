@@ -1110,6 +1110,14 @@ that representation. The mixed-profile feature fixture's traced work took 37.5 s
 These are local observations, not a claim that the evidence CI job is below four minutes;
 its completed Ubuntu run remains the end-to-end acceptance measurement.
 
+Constrained-call rejection fixtures retain the emitted definitions and the exact constrained
+validator obligations, while their full positive certificates still check every validator.
+Positive controls compile that same reduced fixture before changing its call target, so a
+missing prerequisite cannot masquerade as rejection. Static-span proofs share one batch across
+original and mutated assemblies, and UTF-8 identity mutations use isolated rejection scopes.
+Generated verification batches use the authenticated native kernel replay command when it
+succeeds, retaining the toolchain checker as the failure fallback for the same module set.
+
 Full-verification term transfer encodes each structurally distinct expression node once and
 writes a compact data table instead of elaborating a recursively expanded constructor term.
 Structural equality includes binder spelling and annotations; names retain numeric and string

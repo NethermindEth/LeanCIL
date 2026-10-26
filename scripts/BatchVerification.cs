@@ -106,7 +106,8 @@ partial class Program
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
             if (changed.Length > 0)
             {
-                Run([checker, .. changed], leanPath: leanPath, progress: "Kernel replay of generated batch dependencies");
+                if (!ReplayModulesJointly(session, changed, leanPath, "Kernel replay of generated batch dependencies"))
+                    Run([checker, .. changed], leanPath: leanPath, progress: "Kernel replay of generated batch dependencies");
                 certifiedModules = currentModules;
             }
             var batchSource = string.Join("\n", imports.Select(n => "import " + n)) + "\n" + bodies;
@@ -118,7 +119,10 @@ partial class Program
                 leanPath: leanPath, progress: $"Checking {requests.Count} generated fixtures");
             var built = OleanHashes(fresh, session);
             RequireOnlyAdded(bound, built, "Batch");
-            Run([checker, "Batch"], leanPath: leanPath, progress: $"Kernel replay of {requests.Count} generated fixtures");
+            if (!ReplayModulesJointly(session, ["Batch"], leanPath,
+                $"Kernel replay of {requests.Count} generated fixtures"))
+                Run([checker, "Batch"], leanPath: leanPath,
+                    progress: $"Kernel replay of {requests.Count} generated fixtures");
             var audited = AuditOleans(leanPath, ["Batch"], [.. Enumerable.Range(0, requests.Count).SelectMany(i => new[] {
                 ProofTheorem($"BatchCase{i}.{requests[i].Theorem}"),
                 ExtractionCertificate($"BatchCase{i}.Extracted.translation_valid", $"BatchCase{i}.") })]);

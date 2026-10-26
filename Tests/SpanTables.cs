@@ -82,9 +82,6 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 Prove(tampered, "SpanTables::Word(int)", "Tampered",
     [Claim(tampered, "Word", [0], ".ok [.scalar (.i32 1891)]")],
     () => Console.WriteLine("PASS tampered RVA blob changes the proved word"));
-queue.Flush();
-rejected.Check();
-
 // Reused locals and computed indexes retain storage; entering an erased receiver is invalid.
 foreach (var (mutation, marker) in new[]
 {

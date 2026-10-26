@@ -6,6 +6,7 @@
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 
+using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -41,12 +42,27 @@ foreach (var (name, type, expected) in new[]
               inputMemory).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
         #print axioms constrained_result
         """);
-    evidence.Add(proof, "PASS compiled constrained call and certificate: " + name);
 
     const string call = ".call 2 1";
     if (!source.Contains(call, StringComparison.Ordinal)) throw new Exception("Missing constrained call mutation target");
     var forged = Path.Combine(root, name + "-wrong-target.lean");
-    File.WriteAllText(forged, source.Replace(call, ".call 0 1", StringComparison.Ordinal));
+    // Keep the exact emitted definitions and constrained obligations; unrelated certificates
+    // are covered by the complete positive extraction above, not recomputed for each mutation.
+    var obligations = Regex.Matches(source,
+        @"(?m)^theorem method\d+_constrained_validated : [^\r\n]+\r?$");
+    var methodCount = Regex.Matches(source, @"(?m)^def method\d+ : Method :=").Count;
+    if (methodCount == 0 || obligations.Count != methodCount)
+        throw new Exception("Unexpected constrained obligation count");
+    var declarations = Regex.Replace(source,
+        @"(?m)^(?:@\[[^\r\n]*\] )?theorem [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", "");
+    declarations = Regex.Replace(declarations, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+    var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Select(match =>
+        match.Value + "\n#print axioms " + Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value)) +
+        "\nend Extracted", StringComparison.Ordinal);
+    var control = Regex.Replace(narrowed, @"(?m)^import [^\r\n]+\r?\n", "");
+    File.AppendAllText(proof, "\nnamespace ConstrainedControl\n" + control + "\nend ConstrainedControl\n");
+    evidence.Add(proof, "PASS compiled constrained call, certificate and obligation eligibility: " + name);
+    File.WriteAllText(forged, narrowed.Replace(call, ".call 0 1", StringComparison.Ordinal));
     rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
 }
 

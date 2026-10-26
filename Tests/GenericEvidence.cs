@@ -118,6 +118,7 @@ void CheckExternalIdentities()
     var path = Path.Combine(output, "ExactExternalIdentities.lean");
     File.WriteAllText(path, baseline);
     Run(["lake", "env", "lean", path]);
+    var rejectedIdentities = new RejectedEvidence(Path.Combine(output, "IdentityMutations"));
     foreach (var (name, source) in new[]
     {
         ("changed-byte", baseline.Replace("#[83,", "#[84,", StringComparison.Ordinal)),
@@ -127,13 +128,13 @@ void CheckExternalIdentities()
     {
         if (source == baseline) throw new InvalidOperationException("Identity mutation was not applied: " + name);
         var rejectedPath = Path.Combine(output, "Identity-" + name + ".lean");
-        File.WriteAllText(rejectedPath, source);
-        var result = Execute(["lake", "env", "lean", rejectedPath]);
-        if (result.Code == 0 || !result.Output.Contains("error:", StringComparison.Ordinal) ||
-            !(result.Output.Contains("rfl", StringComparison.Ordinal) ||
-                result.Output.Contains("Type mismatch", StringComparison.Ordinal)))
-            throw new InvalidOperationException("Identity encoding checks did not reject " + name + "\n" + result.Output);
+        File.WriteAllText(rejectedPath, "import Lean\nnamespace Extracted\n" +
+            source.Replace("import Lean\n", "", StringComparison.Ordinal) + "\nend Extracted\n");
+        rejectedIdentities.Add(rejectedPath, "PASS exact identity mutation: " + name,
+            diagnostic => diagnostic.Contains("rfl", StringComparison.Ordinal) ||
+                diagnostic.Contains("Type mismatch", StringComparison.Ordinal));
     }
+    rejectedIdentities.Check();
     Console.WriteLine("PASS exact external identities: deduplication, unreachable calls, Unicode and mutations");
 }
 
