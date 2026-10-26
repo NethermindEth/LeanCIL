@@ -783,3 +783,14 @@ On Apple M4 / Lean 4.35, paired `decide +kernel` checks of 32, 128 and 512 metho
 containing 16 nops and a return and listed from pc zero, took 1,120.60→1,008.90,
 5,832.86→5,391.51 and 29,638.99→27,878.92 kHB respectively. These include region-index
 construction and show 6–10% less kernel work, not total verification wall-time savings.
+Aggregate metadata validation counts module type names once per layout traversal and field names
+once per visited type. Duplicate instance/static field names and duplicate full type names still
+reject; the counts are rebuilt on each public layout request so later metadata mutations remain
+visible. `Tests.InstructionIndexes` includes those rejection and mutation cases.
+
+An isolated Windows .NET 10 scaling fixture used sequential structs with UInt64 fields, warmed
+three times, then took the median of seven batches of ten complete layout computations. Index
+construction is included: 256 fields improved 1.293→0.158 ms, 1,024 fields 3.753→0.479 ms, and
+4,096 fields 49.715→1.829 ms. The duplicate-field check is linear instead of quadratic. These
+are layout-validation measurements, not end-to-end extraction or CI estimates. The ordinary
+struct extraction retained its generated Lean bytes, and mixed batch-extraction regressions pass.

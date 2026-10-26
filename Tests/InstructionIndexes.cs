@@ -109,3 +109,30 @@ if (!emitted.ToString().Contains("computedLayouts : Array Extraction.ComputedLay
     StringComparison.Ordinal))
     throw new Exception("Raw layout order was confused with emitted layout order");
 Console.WriteLine("PASS layout indexes distinguish emitted and topological order and reject missing types");
+
+var metadataType = extractor.GetType("Nethermind.LeanCIL.MetadataValidation", true)!;
+var aggregateLayout = metadataType.GetMethod("AggregateLayout", BindingFlags.Static | BindingFlags.NonPublic,
+    null, [typeof(TypeReference), typeof(ModuleDefinition), typeof(string)], null)!;
+object Layout(TypeReference type) => aggregateLayout.Invoke(null, [type, module, "scalar"])!;
+void RejectLayout(TypeReference type, string diagnostic)
+{
+    try { Layout(type); }
+    catch (TargetInvocationException error) when (error.InnerException is InvalidDataException invalid &&
+        invalid.Message.StartsWith(diagnostic, StringComparison.Ordinal)) { return; }
+    throw new Exception("Invalid aggregate metadata was accepted: " + diagnostic);
+}
+var duplicateField = new FieldDefinition("Value", Mono.Cecil.FieldAttributes.Public |
+    Mono.Cecil.FieldAttributes.Static, module.TypeSystem.UInt64);
+inner.Fields.Add(duplicateField);
+RejectLayout(outer, "Invalid field layout: ");
+inner.Fields.Remove(duplicateField);
+Layout(outer);
+var duplicateType = new TypeDefinition(inner.Namespace, inner.Name, inner.Attributes, inner.BaseType);
+module.Types.Add(duplicateType);
+RejectLayout(outer, "Unsupported aggregate layout: ");
+module.Types.Remove(duplicateType);
+inner.Fields.Add(new FieldDefinition("Second", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
+var changedLayout = Layout(outer);
+if ((int)changedLayout.GetType().GetProperty("Size")!.GetValue(changedLayout)! != 16)
+    throw new Exception("Aggregate indexes were reused after metadata changed");
+Console.WriteLine("PASS aggregate name indexes preserve duplicate rejection and fresh-call mutation visibility");
