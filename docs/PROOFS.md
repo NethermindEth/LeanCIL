@@ -6,6 +6,8 @@ the checked dispatcher is analyzed once. The existing step, run and invocation s
 interpreter definitions and approved axioms are unchanged; no stepping attributes are added.
 The return proof uses an explicit simplification set: unrestricted `simp_all` repeatedly tries
 to discharge irrelevant dispatcher exclusions. Keep that set narrow when extending the proof.
+The callee proof reduces each fixed opcode before splitting the remaining dispatcher matches,
+avoiding repeated case analysis of branches already excluded by that opcode.
 
 Certificate validation streams fallthrough states and uses balanced indexes for branch
 destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original

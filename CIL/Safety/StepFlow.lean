@@ -31,6 +31,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Va
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body op pc args frame stack m = .ok action) : action.callee = op.callees.head? := by
   cases op <;> unfold step at h
+  all_goals dsimp only at h
   all_goals split at h
   all_goals
     (try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.mapError] at h)
