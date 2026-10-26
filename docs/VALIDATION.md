@@ -1089,7 +1089,11 @@ environment must not choose which body's axioms a subsequent audit sees. `JointR
 both duplicate orders, a forged body, source-location fallback and toolchain shadowing in both
 paths. A fixed `Tests.MethodContract` artifact took 2.59–2.63 seconds for separate native replay
 and audit versus 1.36–1.38 seconds combined, with identical statement and axiom output. These
-are focused Windows timings; consumer orchestration does not yet use this optional capability.
+are focused Windows timings. Single-request consumer groups use this path, except export callbacks,
+full-import audits and profiled replay. Existing byte snapshots, module-path checks and post-audit
+integrity checks still bind the result. A rejected joint set retains per-module failure attribution.
+The verifier records `auditFused` so measured runs distinguish shared environments from
+metadata or duplicate-declaration fallbacks.
 
 ### Evidence-suite reuse
 

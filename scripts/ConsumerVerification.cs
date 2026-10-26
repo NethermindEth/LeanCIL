@@ -1821,9 +1821,29 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // Cached support was checked against another Extracted or PDB, so its importers are always replayed.
             var extractionDependent = graph is null ? new HashSet<string>(StringComparer.Ordinal)
                 : DependentModules(graph, ["Extracted", "ExtractedSymbols"]);
-            var failures = ReplayConsumerModules(session, discovered.Where(module =>
+            var replayTargets = discovered.Where(module =>
                 !baseUnchanged || extractionDependent.Contains(module.Name) ||
-                (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name), leanPath);
+                (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name).ToArray();
+            AuditedOleans? combinedAudit = null;
+            if (proceeding.Length == 1 && replayTargets.Length > 0 &&
+                requests[proceeding[0]].ExportAudit is null && fullImportAudit is null &&
+                Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
+            {
+                int index = proceeding[0];
+                try
+                {
+                    combinedAudit = AuditOleans(leanPath,
+                        [requestModules[index], "Extracted",
+                            .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()],
+                        [ProofTheorem(requests[index].Theorem, extractions[index]),
+                            ExtractionCertificate("Extracted.translation_valid")],
+                        ImportPremise(extractions[index]), replayTargets: replayTargets);
+                }
+                // An ineligible or rejected joint set still needs individual failure attribution.
+                catch (InvalidOperationException) { }
+            }
+            var failures = combinedAudit is null ? ReplayConsumerModules(session, replayTargets, leanPath)
+                : new Dictionary<string, string>();
             foreach (var i in proceeding)
             {
                 // A request depends only on its own proof's import closure and the extraction certificate.
@@ -1851,7 +1871,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
                     AuditRequest[] proofAudits = requests[i].ExportAudit?.Theorems ??
                         [ProofTheorem(requests[i].Theorem, extractions[i])];
-                    var audited = AuditOleans(leanPath, auditModules,
+                    var audited = combinedAudit ?? AuditOleans(leanPath, auditModules,
                         [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")], ImportPremise(extractions[i]),
                         closures: requests[i].ExportAudit?.Closures);
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
