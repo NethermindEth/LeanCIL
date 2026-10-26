@@ -72,4 +72,24 @@ example : ManagedCallsValid methods [] caller [true, true, true, false, true] em
 example (raw : RawInstruction) (target count : Nat) (valid : validateManagedCall methods imports raw true (.call target count) = true) :
     target < 2 := validated_call_bound valid
 
+/-- Imported slot zero follows all extracted methods, even with a larger indexed table. -/
+theorem indexed_import_valid :
+    ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports
+      { callee with code := [call site] } [true]
+      { locals := [], returnsValue := false, code := [.call 64 3] } := by decide +kernel
+#print axioms indexed_import_valid
+
+/-- A target before the import table cannot borrow its slot zero by truncated subtraction. -/
+theorem indexed_import_underflow_rejected :
+    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports
+      { callee with code := [call site] } [true]
+      { locals := [], returnsValue := false, code := [.call 63 3] } := by decide +kernel
+#print axioms indexed_import_underflow_rejected
+
+/-- A missing imported slot is rejected rather than replaced with a default descriptor. -/
+theorem indexed_import_missing_rejected :
+    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports
+      { callee with code := [call site] } [true]
+      { locals := [], returnsValue := false, code := [.call 65 3] } := by decide +kernel
+#print axioms indexed_import_missing_rejected
 end Tests.ImportEvidence

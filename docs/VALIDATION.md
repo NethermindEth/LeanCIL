@@ -713,3 +713,29 @@ Measurements include index construction. They show the removal of quadratic inst
 lookup; they do not estimate total CI savings. The separate `all3_zip_states` proof cleanup
 reduces declaration work from 97,195.29 to 589.64 kHB on the same machine, without changing
 its statement. Its axiom set shrinks to `propext`.
+Constrained validation uses balanced instruction/reachability indexes and a set of all decoded
+branch destinations, including unreachable instructions and switch arms. The following constrained
+lowering pass also indexes predecessor instructions; `lowerConstrainedRaw_eq_original` proves
+identical output for arbitrary raw bodies, including malformed prefixes. Managed-call validation
+indexes both extracted methods and imported slots once per method check. The equivalence theorems
+`ConstrainedCallsValid_iff_original` and `ManagedCallsValid_iff_original` preserve the original
+list-based rules, including absent entries, import offsets and malformed lengths.
+`cil_managed_calls` still uses structural metadata equalities before its kernel-decision fallback.
+
+`lake env lean Tests/CallIndexScaling.lean` compares indexed and list-based checks and independently
+replays every theorem, including the auxiliary proof declarations created by `decide +kernel`.
+On Windows with Lean 4.35, the dominant auxiliary declarations used these raw kernel heartbeats:
+
+| Workload | Size | List lookup | Indexed lookup |
+| --- | ---: | ---: | ---: |
+| Constrained validation, reachable nops | 128 instructions | 4,984,847 | 2,045,014 |
+| Constrained validation, reachable nops | 512 instructions | 76,557,716 | 9,566,111 |
+| Managed calls, each target used once | 128 methods/calls | 2,767,034 | 1,368,097 |
+| Managed calls, each target used once | 512 methods/calls | 39,348,863 | 6,135,858 |
+
+The indexed measurements include index construction and length checks; the list baselines measure
+only the per-site checks. These isolate lookup costs rather than estimate total CI wall time.
+The constrained traversal is O(N log N), plus branch-target set construction and metadata checks;
+it no longer performs O(N²) optional list lookups. Imported signature comparisons retain their
+existing checks and costs. The registered constrained/import evidence suites also test unreachable
+switch-prefix bypass, duplicate switch targets, short reachability and both import-table bounds.
