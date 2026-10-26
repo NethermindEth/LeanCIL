@@ -73,7 +73,7 @@ Run([.. cli, "extract", assembly, method, output, "scalar", "--assume-initialize
 Run([.. cli, "verify", output, "--proof", proof, "--proof-root", package,
     "--theorem", "WorkspaceProof.selectedMethod", "--fresh"]);
 var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-if (!report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid", StringComparison.Ordinal) ||
+if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid", StringComparison.Ordinal) ||
     report.GetProperty("libraryBuild").GetString() == "consumer-proof-cache")
     throw new InvalidOperationException("Workspace proof did not pass ordinary fresh extraction audit and hermetic verification.");
 Console.WriteLine("PASS real pinned UInt256 workspace, transitive symbols import, editable proof and fresh certification");

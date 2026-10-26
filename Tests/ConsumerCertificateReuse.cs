@@ -68,11 +68,11 @@ void Verify(string label, bool expectedBuild)
         .ToArray();
     var replayed = replay.SelectMany(stage => Transcript(stage).Split('\n').Where(line => line.StartsWith('{')))
         .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("module").GetString()).ToArray();
-    if ((!measureOnly && (built != expectedBuild || auditBuilt != expectedBuild)) || !replayed.Contains("Extracted") ||
-        !replayed.Contains("ExtractionAudit") || !replayed.Contains("LeanCILProof"))
+    if ((!measureOnly && built != expectedBuild) || auditBuilt || !replayed.Contains("Extracted") ||
+        replayed.Contains("ExtractionAudit") || !replayed.Contains("LeanCILProof"))
         throw new InvalidOperationException("Certificate build/replay mismatch: " + label);
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-    if (!report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid") ||
+    if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid") ||
         report.GetProperty("libraryBuild").GetString() == "consumer-proof-cache")
         throw new InvalidOperationException("Missing fresh certificate audit: " + label);
     measurements.Add(new { label, seconds = timer.Elapsed.TotalSeconds, built, auditBuilt,
@@ -107,5 +107,22 @@ if (tampered.Code != 1 || !tampered.Output.Contains("differs from regenerated CI
     File.Exists(Path.Combine(output, "verified.json")))
     throw new InvalidOperationException("Cached certificate bypassed extraction regeneration: " + tampered.Output);
 Console.WriteLine("PASS cached certificate cannot bypass generated-source tampering rejection");
+Extract("scalar");
+File.AppendAllText(proof, """
+
+open Lean Elab Command in
+run_cmd do
+  let root := ((← getFileName) : System.FilePath).parent.get!
+  let artifact := root / ".lake/packages/leancil/.lake/build/lib/lean/Extracted.olean"
+  let bytes ← IO.FS.readBinFile artifact
+  IO.FS.rename artifact (artifact.addExtension "original")
+  IO.FS.writeBinFile artifact (bytes.push 0)
+
+""");
+var replaced = Execute([.. cli, "verify", output, "--proof", proof, "--proof-root", package, "--fresh"]);
+if (replaced.Code != 1 || !replaced.Output.Contains("Extraction certificate artifacts changed during proof checking") ||
+    File.Exists(Path.Combine(output, "verified.json")))
+    throw new InvalidOperationException("Consumer proof replaced the prechecked extraction artifact: " + replaced.Output);
+Console.WriteLine("PASS consumer proof cannot replace the directly audited extraction artifact");
 File.WriteAllText(Path.Combine(directory, "timings.json"), JsonSerializer.Serialize(measurements, Json));
 Console.WriteLine("Measurements: " + Path.Combine(directory, "timings.json"));

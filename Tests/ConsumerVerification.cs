@@ -82,7 +82,7 @@ Verify("--proof", proof, "--proof-root", root);
 var first = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 var inputs = first.GetProperty("inputs");
 if (first.GetProperty("schema").GetInt32() != 4 ||
-    !first.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid", StringComparison.Ordinal) ||
+    !first.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid", StringComparison.Ordinal) ||
     !first.GetProperty("libraryBuild").GetString()!.StartsWith("consumer-", StringComparison.Ordinal))
     throw new InvalidOperationException("Consumer verification omitted certified base or exact extraction certificate audit.");
 if (first.GetProperty("initializedTypes")[0].GetString() != "Examples.InitializedTypes")

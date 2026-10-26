@@ -270,7 +270,8 @@ partial class Program : IDisposable
     // Joint replay shares imported dependencies; rejected target sets retain the toolchain fallback.
     void ReplayCheckedModules(string[] targets, string leanPath, string progress)
     {
-        if (targets.Length > 1 && ReplayModulesJointly(Root, targets, leanPath, progress)) return;
+        if ((targets.Length > 1 || (targets.Length == 1 && auditExecutable is not null)) &&
+            ReplayModulesJointly(Root, targets, leanPath, progress)) return;
         Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"),
             .. targets], leanPath: leanPath, progress: progress);
     }

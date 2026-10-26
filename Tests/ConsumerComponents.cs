@@ -114,7 +114,7 @@ try
         @"\bBuilt (LeanCILComponent_[a-f0-9]+)(?:\s|$)").Select(match => match.Groups[1].Value)).ToArray();
     if (!measure && (reused.Any(module => builds.Count(name => name == module) != 1 ||
             replayed.Count(name => name == module) != 1) || replayed.Count(name => name == "Extracted") != 4 ||
-            replayed.Count(name => name == "ExtractionAudit") != 4))
+            replayed.Contains("ExtractionAudit")))
         throw new Exception("Components did not compile/replay once while all complete certificates were checked.");
     File.WriteAllText(Path.Combine(directory, "timings.json"), JsonSerializer.Serialize(new
     {

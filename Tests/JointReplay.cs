@@ -45,15 +45,28 @@ void CheckReplays(bool native)
 {
     if (native)
     {
-        Run(["lake", "build", "leancil-audit"]);
-        verification.auditExecutable = At(".lake/build/bin/leancil-audit" +
-            (OperatingSystem.IsWindows() ? ".exe" : ""));
-        verification.auditExecutableSha = Sha(verification.auditExecutable);
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")))
+            verification.Library(Inputs(At("CIL.lean")));
+        else
+        {
+            Run(["lake", "build", "leancil-audit"]);
+            verification.auditExecutable = At(".lake/build/bin/leancil-audit" +
+                (OperatingSystem.IsWindows() ? ".exe" : ""));
+            verification.auditExecutableSha = Sha(verification.auditExecutable);
+        }
     }
     Console.WriteLine(native ? "CHECK native joint replay" : "CHECK bootstrap joint replay");
     if (!verification.ReplayModulesJointly(root, ["JointA", "JointB", "JointC"], root, "Joint replay check"))
         throw new InvalidOperationException("Import-closed targets did not replay jointly");
     Console.WriteLine("PASS import-closed targets replay jointly");
+
+    if (verification.ReplayConsumerModules(root, ["JointC"], root).Count != 0)
+        throw new InvalidOperationException("Single target with external dependencies failed replay");
+    var singleFailure = verification.ReplayConsumerModules(root, ["JointForged"], root);
+    if (singleFailure.Keys.SingleOrDefault() != "JointForged" ||
+        !singleFailure["JointForged"].Contains("while replaying declaration"))
+        throw new InvalidOperationException("Single-target forgery was not rejected and attributed");
+    Console.WriteLine("PASS single target replays with external dependencies and rejects forged declarations");
 
     if (!verification.ReplayModulesJointly(root, ["JointD", "JointE1", "JointE2"], root, "Joint replay check"))
         throw new InvalidOperationException("Identical on-demand equation lemmas blocked joint replay");

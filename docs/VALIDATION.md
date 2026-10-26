@@ -1161,3 +1161,17 @@ closures against its own imports. Existing before/after artifact checks remain i
 interface compilation and independent replays. A focused Windows comparison reduced interface
 build stages from 5.28 to 2.95 seconds and the two-request verification from 50.54 to 47.67
 seconds. These are fixture timings, not complete-suite or CI measurements.
+
+Consumer verification audits `Extracted.translation_valid` directly after kernel replay instead
+of compiling a second theorem that merely restates it. The native auditor still requires a
+theorem declaration, the exact `TranslationValid` application over the emitted tables and
+program, and the approved axiom set. Consumer reports therefore name
+`Extracted.translation_valid` in `extractionAudit`; the single-file verifier still names
+`ExtractionAudit.valid`. Workspaces containing expected proof rejections retain the wrapper,
+since those requests can finish before the final native audit. Compiled extraction and component
+artifacts are hashed before consumer proof checking and checked again afterward.
+Authenticated native replay also handles single-module target sets; profiling retains the
+toolchain frontend, and rejected native replays retain the existing per-module fallback.
+The same two-profile fresh workload took 43.56 seconds with these changes, versus 47.67
+seconds with interface restoration alone; certificate compilation fell from 8.71 to 5.64
+seconds and replay from 8.73 to 6.83 seconds. Full-suite timing remains a separate check.
