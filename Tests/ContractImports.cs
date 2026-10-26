@@ -519,7 +519,7 @@ Run(Command());
 File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
 Run([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"]);
 RejectSubstitution(consumerProof,
-    "((System.FilePath.mk (← getFileName)).parent.getD \".\") / \".lake\" / \"packages\" / \"leancil\"",
+    "((System.FilePath.mk (← getFileName)).parent.getD \".\") / \".lake\" / \"packages\" / \"leancil_generated\"",
     ".lake/build/lib/lean/" + interfaceModule + ".olean", "--proof-root", package);
 File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
 Console.WriteLine("PASS consumer verification rejects post-audit interface artifact substitution with unchanged original sources");
