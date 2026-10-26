@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include BatchVerification.cs
+#:include CoreExamples.cs
 #:include ExportVerificationSuites.cs
 
 using System.Text.Json;
@@ -111,19 +113,7 @@ void Rejected(string[] command, string marker)
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 const string identity = "Examples";
 
-var signatures = new Dictionary<string, string>
-{
-    ["Add"] = "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
-    ["Choose"] = "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)",
-    ["Calls"] = "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)",
-    ["Alias"] = "System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)",
-    ["Struct"] = "System.UInt64 Examples.Arithmetic::Struct(System.UInt64)",
-    ["StructCopy"] = "System.UInt64 Examples.Arithmetic::StructCopy(System.UInt64)",
-    ["LargeStruct"] = "System.UInt64 Examples.Arithmetic::LargeStruct(System.UInt64)",
-    ["PastEnd"] = "System.UInt64 Examples.Arithmetic::PastEnd(System.UInt64&)",
-    ["WrongAdd"] = "System.UInt64 Examples.Arithmetic::WrongAdd(System.UInt64,System.UInt64)",
-    ["Escape"] = "System.UInt64& Examples.Arithmetic::Escape()"
-};
+var signatures = CoreExampleSignatures;
 
 // Each suite can run in its own checkout, with only the projects it needs.
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
@@ -241,16 +231,7 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "local snapshot, contract consequence, invocation certificate, call transport, buffer contents, linking, "
     + "store fact, profile contract, instruction equation, code placement and SIMD lane tests");
 
-// Verify each extracted method and immediately check its artifact identity.
-foreach (var (name, signature) in signatures)
-{
-    var proof = At($"Examples/Proofs/{name}.lean");
-    var output = At($"artifacts/{name}");
-
-    verification.Verify(assembly, identity, name == "Add" ? "Arithmetic::Add(ulong,ulong)" : signature, proof, output);
-    verification.Verify(assembly, identity, signature, proof, output, check: true);
-    Passed(name + " kernel proof and artifact identity");
-}
+verification.VerifyCoreExamples(At("artifacts"), Passed);
 
 // Both selectors bind the same full identity; explicit mismatches must still fail.
 const string fullIdentity = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";

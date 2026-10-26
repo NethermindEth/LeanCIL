@@ -1063,6 +1063,20 @@ compiling a temporary Lean parser program for each verification. Parsing still r
 headers, retains comments and module-system import syntax, and never elaborates source commands.
 The imports fixture checks those properties explicitly. A focused native parse takes roughly
 0.06 seconds locally; the original CI run spent 22.1 seconds across 25 interpreted parser calls.
+### Core example batches
+
+Core's ten immutable example proofs share one generated verification batch. Each keeps its
+own extraction, theorem audit, exact translation certificate and output identity check. The
+source, environment, receipt and assembly mutation scenarios remain separate. The focused
+`dotnet run --file Tests/CoreExamples.cs` fixture uses the same implementation; `--separate`
+reproduces the former verification loop, and `--check-existing <directory>` checks all reports
+and rejects changed proof identity or batch source. With success caching disabled and the same
+prepared library, the ten examples took 116.95 seconds separately and 28.65 seconds batched
+on Windows. They contain nine distinct proof texts and ten distinct extracted programs.
+Native audits fell from ten to one, replay processes from eleven to two, and Lake invocations
+from five to one; both runs built exactly one support module. This is a focused measurement,
+not a claim that the complete Core job has reached four minutes.
+
 ### Native joint kernel replay
 
 The authenticated `leancil-audit --replay INPUT` command accepts a JSON array of module names.
