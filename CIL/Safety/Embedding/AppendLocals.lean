@@ -77,15 +77,16 @@ theorem allocateStack_appendLocals (memory : Memory) (frame : Frame) (extra : Li
 
 #print axioms allocateStack_appendLocals
 
-/-- Closes `step` on a padded frame against the unpadded step mapped through the padding,
-    splitting both sides in lockstep; fails on a branch that reads a local the unpadded frame
-    lacks. -/
-local macro "frame_natural" : tactic => `(tactic| repeat' (first
+/-- Closes `step` on a padded frame against the unpadded step mapped through the padding.
+    Shared binds are normalized before splitting results; a missing unpadded local still fails. -/
+local macro "frame_natural" : tactic => `(tactic| (
+  simp only [map_bind, map_pure, FrameAction.appendLocals, Frame.appendLocals]
+  repeat' first
   | rfl
   | contradiction
   | (simp only [map_bind, map_pure, FrameAction.appendLocals, Frame.appendLocals]; done)
-  | split
   | (apply bind_congr; intro)
+  | split
   | simp only [map_bind]))
 
 /-- The shared dispatcher tail carries the frame unchanged through pure and memory operations. -/

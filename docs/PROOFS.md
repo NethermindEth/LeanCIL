@@ -8,6 +8,8 @@ The return proof uses an explicit simplification set: unrestricted `simp_all` re
 to discharge irrelevant dispatcher exclusions. Keep that set narrow when extending the proof.
 The callee proof reduces each fixed opcode before splitting the remaining dispatcher matches,
 avoiding repeated case analysis of branches already excluded by that opcode.
+Trailing-local proofs normalize maps over monadic binds before trying congruence, so shared
+computations need not be split into their possible results to prove the continuation unchanged.
 
 Certificate validation streams fallthrough states and uses balanced indexes for branch
 destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original
