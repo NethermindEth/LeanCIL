@@ -58,16 +58,19 @@ partial class Program
     // its sources, toolchain and compiled artifacts. It does not authorize consumer proofs.
     void PrepareCertifiedFingerprints()
     {
+        if (session is not null && !ownsLibrary)
+            throw new InvalidOperationException("Fingerprint metadata must be written before the library is opened in place.");
+        writesLibrary = true;
         Library(Inputs(At("CIL.lean")));
-        var session = library!;
+        var certified = library!;
         var executable = CheckedAuditExecutable();
         var tools = CanonicalFingerprintTools(auditExecutableSha!);
         var modules = certifiedModules!.Keys.Where(path => path.EndsWith(".olean", StringComparison.Ordinal))
-            .ToDictionary(ModuleName, path => Path.Combine(session, ".lake/build/lib/lean", path),
+            .ToDictionary(ModuleName, path => Path.Combine(certified, ".lake/build/lib/lean", path),
                 StringComparer.Ordinal);
         var raw = modules.ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value),
             StringComparer.Ordinal);
-        var normalized = NormalizeConsumerParts(session, executable, modules);
+        var normalized = NormalizeConsumerParts(certified, executable, modules);
         CheckedAuditExecutable();
         if (tools != CanonicalFingerprintTools(auditExecutableSha!) || modules.Any(pair =>
                 !Same(raw[pair.Key], ConsumerModuleParts(pair.Value))))
@@ -75,7 +78,7 @@ partial class Program
         var manifest = new CertifiedFingerprintManifest(1, tools,
             new(modules.Keys.ToDictionary(name => name,
                 name => new CertifiedFingerprintModule(raw[name], normalized[name])), StringComparer.Ordinal));
-        var path = Path.Combine(session, CertifiedFingerprintsName);
+        var path = Path.Combine(certified, CertifiedFingerprintsName);
         var json = JsonSerializer.Serialize(manifest);
         File.WriteAllText(path, json);
         certifiedFingerprintsSha = ContentKey(json);

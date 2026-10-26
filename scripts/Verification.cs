@@ -21,6 +21,8 @@ partial class Program : IDisposable
     /// <summary>The certified library, read in place; deleted on disposal only when this process built it.</summary>
     string? library;
     bool ownsLibrary;
+    /// <summary>Set before <see cref="Library"/> by producers that write into the library, which then get a private copy.</summary>
+    bool writesLibrary;
     /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
     string? session;
     /// <summary>The base library's compiled module artifacts, taken from its validated manifest.</summary>
@@ -889,9 +891,10 @@ partial class Program : IDisposable
         const string compiledPrefix = ".lake/build/lib/lean/";
         // Lake compiles a dependency's missing modules into its own build directory, so a library
         // extended with uncompiled sources is read from a private copy; a complete one is never written.
-        if (!ownsLibrary && manifest.Keys.Any(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
-                name.EndsWith(".lean", StringComparison.Ordinal) &&
-                !manifest.ContainsKey(compiledPrefix + name[..^".lean".Length] + ".olean")))
+        var incomplete = manifest.Keys.Any(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
+            name.EndsWith(".lean", StringComparison.Ordinal) &&
+            !manifest.ContainsKey(compiledPrefix + name[..^".lean".Length] + ".olean"));
+        if (!ownsLibrary && (incomplete || writesLibrary))
         {
             var started = DateTimeOffset.UtcNow;
             var elapsed = Stopwatch.StartNew();
@@ -899,7 +902,8 @@ partial class Program : IDisposable
             CopyTree(library, copy);
             library = copy;
             ownsLibrary = true;
-            Trace("Copying incomplete certified Lean verification library", started, copy, elapsed.Elapsed, 0, "", [copy]);
+            Trace(incomplete ? "Copying incomplete certified Lean verification library" : "Copying certified Lean verification library",
+                started, copy, elapsed.Elapsed, 0, "", [copy]);
         }
         baseModules = new(manifest.Where(pair => pair.Key.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal))
