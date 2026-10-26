@@ -50,10 +50,13 @@ internal static class ExceptionLint
             throw new InvalidDataException("Extraction changed during exception lint.");
         string member = DocumentationId(MethodSpecialization.Definition(methods[0]));
         Declaration[] declarations = ReadDocumentation(xml, module.Assembly.Name.Name, member);
+        var methodIndices = methods.Select((method, index) => (method, index))
+            .ToDictionary(pair => pair.method, pair => pair.index);
         List<Site> sites = [];
         for (int methodIndex = 0; methodIndex < methods.Length; methodIndex++)
         {
             MethodDefinition method = methods[methodIndex];
+            var instructions = new InstructionIndex(method);
             var reachable = Reachability.Analyze(method, profile);
             var nativeOperands = NativeOperands.Certify(method, reachable);
             int[] parameterHomes = ParameterStorage.Analyze(method, reachable);
@@ -62,7 +65,8 @@ internal static class ExceptionLint
             {
                 if (folded.Raises.TryGetValue(instruction, out string? exception))
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
-                string operation = InstructionTranslation.Translate(instruction, method, methods, methodIndex, profile, nativeOperands, parameterHomes);
+                string operation = InstructionTranslation.Translate(instruction, method, methodIndices,
+                    methodIndex, instructions, profile, nativeOperands, parameterHomes);
                 foreach (string named in RuntimeExceptions(operation))
                     sites.Add(new(method.FullName, instruction.Offset, named, "interpreter operation: " + operation));
             }

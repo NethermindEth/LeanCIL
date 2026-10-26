@@ -64,14 +64,16 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         return $"{{ declaringType := {Type(definition.DeclaringType)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Type))} }}";
     }
 
-    string Operand(MethodDefinition method, Instruction instruction, Instruction admittedInstruction,
-        IReadOnlySet<Instruction> reachable)
+    string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
+        Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)
     {
         switch (instruction.Operand)
         {
             case null: return ".none";
-            case Instruction target: return $".target {method.Body.Instructions.IndexOf(target)}";
-            case Instruction[] targets: return $".targets {List(targets.Select(target => method.Body.Instructions.IndexOf(target).ToString(CultureInfo.InvariantCulture)))}";
+            case Instruction target: return $".target {instructions.Position(target)}";
+            case Instruction[] targets:
+                return $".targets {List(targets.Select(target =>
+                    instructions.Position(target).ToString(CultureInfo.InvariantCulture)))}";
             case ParameterDefinition parameter:
                 var argument = parameter.Index < 0 && method.HasThis ? 0 : parameter.Index + (method.HasThis ? 1 : 0);
                 if (argument < 0) throw new InvalidDataException("Invalid raw argument index");
@@ -113,6 +115,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
 
     string Method(MethodDefinition method, MethodDefinition admitted, IReadOnlySet<Instruction> reachable)
     {
+        var instructions = new InstructionIndex(method);
         var constraints = method.GenericParameters.Select(parameter =>
             $"{{ flags := {(uint)parameter.Attributes}, types := {List(parameter.Constraints.Select(constraint => Quote(ConstraintType(constraint.ConstraintType))))} }}");
         if (method.MetadataToken.ToUInt32() != admitted.MetadataToken.ToUInt32() ||
@@ -123,7 +126,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             var selected = admitted.Body.Instructions[index];
             if (instruction.Offset != selected.Offset || instruction.OpCode.Value != selected.OpCode.Value)
                 throw new InvalidDataException("Specialization instruction mapping changed an offset or opcode.");
-            var operand = Operand(method, instruction, selected, reachable);
+            var operand = Operand(method, instructions, instruction, selected, reachable);
             return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
                 $"operand := {operand} }}";
         });

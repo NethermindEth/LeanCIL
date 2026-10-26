@@ -1,5 +1,14 @@
 # Validation coverage
 
+Branch positions and prefix-bypass checks use indexes scoped to each body traversal, and call
+translation uses a method index scoped to the current ordered call graph. Original and specialized
+bodies have separate instruction indexes. Dependency invalidation traverses reverse import edges
+once with a queue, including missing roots and cycles. Support reuse retains the existing external
+module and extraction-source binding exceptions.
+`Tests/InstructionIndexes.cs`, `Tests/ConstrainedResolution.cs` and
+`Tests/ConsumerSupportCandidates.cs` cover identity, fresh traversal, branch/switch prefix bypasses,
+reverse-ordered chains, cycles, missing imports and support source bindings.
+
 Extraction reuses each method's reachability result within validation, emission and exception
 linting. Feature evidence uses the same incoming states as instruction selection. Each phase
 computes a fresh result, so no analysis is cached across method mutation or profile changes.

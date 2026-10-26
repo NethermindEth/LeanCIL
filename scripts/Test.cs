@@ -128,7 +128,10 @@ var signatures = new Dictionary<string, string>
 // Each suite can run in its own checkout, with only the projects it needs.
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
 if (suite is "all" or "core")
-    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs", "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs", "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs"]);
+    projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs",
+        "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
+        "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs",
+        "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs"]);
@@ -194,6 +197,9 @@ Passed("certified artifact receipts and cache tampering rejection");
 
 RunFixture("Tests/VerificationReuse.cs", [], streamOutput: true, progress: "Certified verification reuse checks");
 Passed("cold and warm verification, proof-edit invalidation and unchecked helper rejection");
+
+RunFixture("Tests/InstructionIndexes.cs", [], streamOutput: true, progress: "Instruction index checks");
+Passed("instruction indexes and prefix target rejection");
 
 RunFixture("Tests/ExtractionBatch.cs", [], streamOutput: true, progress: "Extraction batch checks");
 Passed("batched extraction identities, input freshness and failure isolation");

@@ -55,12 +55,11 @@ internal static class Arrays
         _ => null
     };
 
-    internal static void ValidateReadOnly(MethodDefinition method, Instruction prefix)
+    internal static void ValidateReadOnly(InstructionIndex instructions, Instruction prefix)
     {
         if (prefix.Next is not { OpCode.Code: Code.Ldelema } address || prefix.Operand is not null)
             throw new InvalidDataException("Readonly prefix requires an immediate array element address");
-        if (method.Body.Instructions.Any(instruction => instruction.Operand == address ||
-            instruction.Operand is Instruction[] targets && targets.Contains(address)))
+        if (instructions.IsTarget(address))
             throw new InvalidDataException("Branch enters an array address after its readonly prefix");
     }
 

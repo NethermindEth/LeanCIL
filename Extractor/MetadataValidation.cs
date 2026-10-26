@@ -284,6 +284,7 @@ internal static class MetadataValidation
             if (!Check(method, null, () => reachable = Reachability.Analyze(method, profile), named: true) ||
                 !Check(method, null, () => (typeTests, throws) = (TypeTests.Analyze(method), Throws.Analyze(method))))
                 return;
+            var instructions = new InstructionIndex(method);
             state[method] = 1;
             void Enter(MethodDefinition callee, MethodReference reference, Instruction instruction)
             {
@@ -296,7 +297,7 @@ internal static class MetadataValidation
             {
                 if (instruction.OpCode.Code == Code.Callvirt)
                 {
-                    var resolved = ConstrainedCalls.Resolve(method, instruction, profile.Architecture);
+                    var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
                     Enter(resolved.Target, reference, instruction);
                     return;
                 }
@@ -395,10 +396,13 @@ internal static class MetadataValidation
         ordered.Reverse();
         // Validate translation before producing any artifact.
         var methods = ordered.ToArray();
+        var methodIndices = methods.Select((method, index) => (method, index))
+            .ToDictionary(pair => pair.method, pair => pair.index);
         for (int i = 0; i < methods.Length; i++)
         {
             var index = i;
             var method = methods[index];
+            var instructions = new InstructionIndex(method);
             NativeOperands.Certificate? nativeOperands = null;
             int[]? parameterHomes = null;
             HashSet<Instruction>? reachable = null;
@@ -412,7 +416,8 @@ internal static class MetadataValidation
             foreach (Instruction instruction in reachable!)
                 if (!skipped.Contains(instruction))
                     Check(method, instruction, () =>
-                        InstructionTranslation.Translate(instruction, method, methods, index, profile, nativeOperands, parameterHomes, imports), named: true);
+                        InstructionTranslation.Translate(instruction, method, methodIndices, index, instructions,
+                            profile, nativeOperands, parameterHomes, imports), named: true);
         }
         return methods;
     }

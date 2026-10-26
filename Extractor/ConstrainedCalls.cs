@@ -8,7 +8,8 @@ internal static class ConstrainedCalls
 {
     internal sealed record Resolution(TypeDefinition Receiver, MethodDefinition Slot, MethodDefinition Target);
 
-    internal static Resolution Resolve(MethodDefinition caller, Instruction call, string architecture)
+    internal static Resolution Resolve(MethodDefinition caller, Instruction call,
+        InstructionIndex instructions, string architecture)
     {
         if (call.OpCode.Code != Code.Callvirt || call.Operand is not MethodReference reference ||
             call.Previous is not { OpCode.Code: Code.Constrained, Operand: TypeReference receiver })
@@ -18,8 +19,7 @@ internal static class ConstrainedCalls
             receiver.FullName != concrete.FullName || LayoutEvidence.Scope(receiver) != LayoutEvidence.Scope(concrete))
             throw new InvalidDataException("Constrained receiver must be a concrete same-assembly struct");
         MetadataValidation.Layout(concrete, caller.Module, architecture);
-        if (caller.Body.Instructions.Any(instruction => instruction.Operand == call ||
-                instruction.Operand is Instruction[] targets && targets.Contains(call)))
+        if (instructions.IsTarget(call))
             throw new InvalidDataException("Branch bypasses constrained receiver prefix");
         if (reference is GenericInstanceMethod || reference.Resolve() is not { } slot ||
             slot.Module != caller.Module || reference.FullName != slot.FullName ||

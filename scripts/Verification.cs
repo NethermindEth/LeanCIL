@@ -1343,10 +1343,11 @@ unsafe def main (args : List String) : IO Unit := do
                     if ((!sources.ContainsKey(dependency) || dependency == "ExtractedImports") && !TrustedContractModule(dependency))
                         throw new InvalidDataException("Undeclared contract interface dependency: " + dependency);
         List<string> ordered = [];
+        HashSet<string> complete = new(StringComparer.Ordinal);
         HashSet<string> active = new(StringComparer.Ordinal);
         void Stage(string module)
         {
-            if (ordered.Contains(module, StringComparer.Ordinal)) return;
+            if (complete.Contains(module)) return;
             if (!active.Add(module)) throw new InvalidDataException("Cyclic contract interface module imports: " + module);
             foreach (string dependency in dependencies[module])
                 if (sources.ContainsKey(dependency)) Stage(dependency);
@@ -1356,6 +1357,7 @@ unsafe def main (args : List String) : IO Unit := do
             File.WriteAllText(path, sources[module], new UTF8Encoding(false));
             active.Remove(module);
             ordered.Add(module);
+            complete.Add(module);
         }
         foreach (string module in sources.Keys) Stage(module);
         return ordered.ToArray();

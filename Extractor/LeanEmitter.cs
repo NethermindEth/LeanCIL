@@ -102,6 +102,8 @@ internal static class LeanEmitter
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, ModuleDefinition originalModule, ImportResolution? importResolution = null,
         StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false)
     {
+        var methodIndices = methods.Select((method, index) => (method, index))
+            .ToDictionary(pair => pair.method, pair => pair.index);
         var templates = new List<TemplateEmitter.Method>();
         var callDefinitions = new string?[methods.Length];
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
@@ -123,6 +125,7 @@ internal static class LeanEmitter
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
+            var instructions = new InstructionIndex(m);
             var featureCertificate = Reachability.Certify(m, profile);
             var reachable = featureCertificate.Keys.ToHashSet();
             var scalarCertificate = NativeOperands.Certify(m, reachable);
@@ -134,7 +137,10 @@ internal static class LeanEmitter
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
             List<string> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i) ? InstructionTranslation.Translate(i, m, methods, n, profile, scalarCertificate, parameterIndices, importResolution) : ".unsupported \"Unreachable under selected profile\"");
+                ops.Add(reachable.Contains(i)
+                    ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
+                        scalarCertificate, parameterIndices, importResolution)
+                    : ".unsupported \"Unreachable under selected profile\"");
             var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
             string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
