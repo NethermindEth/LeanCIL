@@ -119,32 +119,57 @@ theorem argumentUnspecified_map (mapping : AllocationRenaming)
     Function.comp_def, mapping.hasUnspecified]
 #print axioms argumentUnspecified_map
 
+/-- The finite reference-operation family exposes only the cases that can observe references. -/
+inductive ReferenceStepOperation : CIL.Op → Prop where
+  | sub : ReferenceStepOperation .sub
+  | ltu : ReferenceStepOperation .ltu
+  | gtu : ReferenceStepOperation .gtu
+  | eq : ReferenceStepOperation .eq
+  | bltu (destination : Nat) : ReferenceStepOperation (.bltu destination)
+  | bgeu (destination : Nat) : ReferenceStepOperation (.bgeu destination)
+  | bgtu (destination : Nat) : ReferenceStepOperation (.bgtu destination)
+  | bleu (destination : Nat) : ReferenceStepOperation (.bleu destination)
+  | brzero (destination : Nat) : ReferenceStepOperation (.brzero destination)
+  | brnonzero (destination : Nat) : ReferenceStepOperation (.brnonzero destination)
+  | beq (destination : Nat) : ReferenceStepOperation (.beq destination)
+  | bne (destination : Nat) : ReferenceStepOperation (.bne destination)
+
+/-- Reference-family classification supplies its finite case analysis independently of step goals. -/
+theorem referenceStepOperation (operation : CIL.Op)
+    (family : fixedStepFamily operation = .reference) : ReferenceStepOperation operation := by
+  cases operation <;> try cases family
+  all_goals constructor
+#print axioms referenceStepOperation
+
 set_option hygiene false in
 /-- Resolve dispatcher fallback patterns without unfolding the checked fallback computation. -/
 macro "fixed_fallback" : tactic => `(tactic| (
   let originalStack := stack
   have fallback := related.stepFallback frames formed operation pc sourceBody.profile
     stack bounds observable
-  cases operation <;> try cases family
+  try rw [metadata.profile]
+  first
+  | (have referenceCases := referenceStepOperation operation family
+     cases referenceCases)
+  | (cases operation <;> try cases family)
   all_goals try exact fallback
   all_goals cases stack with
   | nil =>
-    simp only [List.map_nil, metadata.profile]
+    try dsimp only [List.map_nil]
     exact fallback
   | cons first rest =>
     cases first
-    all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile]
+    all_goals try dsimp only [List.map_cons, AllocationRenaming.value]
     all_goals try exact fallback
     all_goals cases rest with
     | nil =>
-      try simp only [List.map_nil, List.map_cons, AllocationRenaming.value, metadata.profile]
+      try dsimp only [List.map_nil, List.map_cons, AllocationRenaming.value]
       first
       | contradiction
       | exact fallback
     | cons second rest =>
       cases second
-      all_goals try simp only [List.map_nil, List.map_cons, AllocationRenaming.value,
-        metadata.profile]
+      all_goals try dsimp only [List.map_nil, List.map_cons, AllocationRenaming.value]
       all_goals first
       | contradiction
       | exact fallback

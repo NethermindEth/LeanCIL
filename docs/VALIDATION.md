@@ -1045,3 +1045,16 @@ audits before this change and four afterward. Local Windows traces measured 11.0
 5.95 seconds in those audits. Other concurrent builds affected whole-fixture timings, so this is
 not an end-to-end CI estimate. Corrupted receipts, changed extraction and generated-source
 modification controls still reject as before.
+### Allocation reference-step proof search
+
+`fixed_fallback` normalizes mapped stack constructors definitionally and rewrites the target
+profile once. It avoids repeatedly asking the simplifier to discharge the large dispatcher's
+negative match conditions. Reference operations use a proved finite classification before stack
+case analysis; this changes proof construction, not execution or the simulation statement.
+
+On Apple M4 with Lean 4.35 and `leanprof --heartbeats`, elaborating
+`Memory.Renamed.stepReference` fell from 416,618.32 to 204,647.51 kHB (51% less).
+Its kernel check fell from 16,039.56 to 11,202.47 kHB (30% less). The generated Windows olean
+shrunk from 32,111,728 to 26,561,792 bytes. All four fixed-step family consumers and the full
+423-job library build passed without `sorryAx`. The profiling fixtures included the candidate
+macros inline; the figures above select the theorem's own elaboration and kernel entries.
