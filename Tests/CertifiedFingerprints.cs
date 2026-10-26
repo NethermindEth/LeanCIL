@@ -16,7 +16,7 @@ if (args is ["--worker", var specification, var output])
     var session = worker.Library(Inputs(At("CIL.lean")));
     if (job.WithoutMetadata) worker.certifiedFingerprintsSha = null;
     if (job.Toolchain is not null) worker.resolvedToolchain = job.Toolchain;
-    if (job.ChangeMetadata) File.AppendAllText(Path.Combine(session, CertifiedFingerprintsName), "\n");
+    if (job.ChangeMetadata) File.AppendAllText(Path.Combine(worker.library!, CertifiedFingerprintsName), "\n");
     // The producer can be a file-based app while the receiver is the packaged CLI.
     worker.verificationPolicy = "different-receiver-policy";
     var result = worker.PortableConsumerModuleParts(session, job.Modules);

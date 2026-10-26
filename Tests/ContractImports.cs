@@ -81,7 +81,7 @@ catch (InvalidOperationException error) { malformedHeader = error; }
 if (malformedHeader is null || !malformedHeader.Message.Contains("Invalid contract interface import header"))
     throw new InvalidOperationException("Malformed contract header was not rejected by Lean's parser.");
 Run([interfaceVerification.LeanExecutable, At("Tests/ContractClosure.lean")],
-    leanPath: Path.Combine(interfaceLibrary, ".lake/build/lib/lean"),
+    leanPath: interfaceVerification.SessionLeanPath(interfaceLibrary),
     streamOutput: true, progress: "Canonical contract closure tests");
 string interfaceProbe = Path.Combine(directory, "interface-probe");
 Directory.CreateDirectory(interfaceProbe);

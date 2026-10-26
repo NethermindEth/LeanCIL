@@ -293,7 +293,8 @@ if (!ReusableCertified(importGraph, Packaged("m"), certifiedParts).SetEquals(["C
     ReusableCertified(importGraph, Packaged("changed"), certifiedParts).Count != 0)
     throw new InvalidOperationException("A certified module skipped replay against changed imports");
 // The certified library's own oleans, in the shape ModuleArtifacts records them, are all reusable.
-var sessionOleans = Path.Combine(verification.Library(Inputs(At("CIL.lean"))), ".lake/build/lib/lean");
+verification.Library(Inputs(At("CIL.lean")));
+var sessionOleans = Path.Combine(verification.library!, ".lake/build/lib/lean");
 var sessionParts = new SortedDictionary<string, SortedDictionary<string, string>>(
     Directory.EnumerateFiles(sessionOleans, "*.olean", SearchOption.AllDirectories).ToDictionary(
         path => ModuleName(Path.GetRelativePath(sessionOleans, path).Replace('\\', '/')), ConsumerModuleParts), StringComparer.Ordinal);
