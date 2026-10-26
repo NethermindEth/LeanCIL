@@ -92,9 +92,100 @@ private def autoSequential (previous : Array ComputedLayout) (raw : RawLayout) :
   | some (width :: widths) => widths.all (· == width)
   | _ => false
 
+/-- Compute one field's placement without extending the field list. -/
+private def placeField (previous : Array ComputedLayout) (raw : RawLayout)
+    (architecture : Architecture) (pack size alignment : Nat) (field : RawField) :
+    Option (Nat × Nat × FieldLayout) := do
+  if field.type == .vector256 && pack > 16 && architecture == .scalar then none else do
+    let (width, natural, aggregate) ← fieldStorage previous architecture field.type
+    let aligned := min pack natural
+    if aligned = 0 then none else do
+      let offset ← if raw.explicit then field.offset else
+        if field.offset.isSome then none else some (alignUp size aligned)
+      if offset + width > 65536 ||
+          (raw.explicit && offset + width > raw.declaredSize.toNat) then none else
+        return (max size (offset + width), max alignment aligned, ⟨offset, width, aggregate⟩)
+
+/-- Accumulate checked placements in reverse order and restore declaration order once. -/
+private def layoutFields (step : Nat → Nat → RawField → Option (Nat × Nat × FieldLayout)) :
+    List RawField → Nat → Nat → List FieldLayout → Option (Nat × Nat × List FieldLayout)
+  | [], size, alignment, fields => some (size, alignment, fields.reverse)
+  | field :: rest, size, alignment, fields => do
+    let (size, alignment, placed) ← step size alignment field
+    layoutFields step rest size alignment (placed :: fields)
+
+/-- Reverse accumulation preserves ordered placements and every field-computation failure. -/
+private theorem layoutFields_eq_fold
+    (step : Nat → Nat → RawField → Option (Nat × Nat × FieldLayout))
+    (raw : List RawField) (size alignment : Nat) (fields : List FieldLayout) :
+    layoutFields step raw size alignment fields =
+      raw.foldlM (init := (size, alignment, fields.reverse))
+        (fun (size, alignment, fields) field => do
+          let (size, alignment, placed) ← step size alignment field
+          return (size, alignment, fields ++ [placed])) := by
+  induction raw generalizing size alignment fields with
+  | nil => rfl
+  | cons field rest ih =>
+    simp only [layoutFields, List.foldlM_cons]
+    cases found : step size alignment field with
+    | none => rfl
+    | some result =>
+      rcases result with ⟨size, alignment, placed⟩
+      simpa only [Bind.bind, Option.bind, Pure.pure, List.reverse_cons] using
+        ih size alignment (placed :: fields)
+
+#print axioms layoutFields_eq_fold
+
 /-- Recompute CoreCLR reference-free 64-bit layout from ordered metadata fields. -/
 def computeLayout (previous : Array ComputedLayout) (raw : RawLayout)
     (architecture : Architecture := .scalar) : Option ComputedLayout := do
+  if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
+  else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
+  else if raw.explicit && raw.declaredSize ≤ 0 then none
+  else if raw.auto && !autoSequential previous raw then none
+  else
+    let pack := if raw.packing ≤ 0 then 64 else raw.packing.toNat
+    let (size, alignment, fields) ← layoutFields (placeField previous raw architecture pack)
+      raw.fields 0 1 []
+    let finalSize := max 1
+      (if raw.declaredSize > 0 then max size raw.declaredSize.toNat else alignUp size alignment)
+    if finalSize > 65536 then none else
+      return ⟨⟨finalSize, fields⟩, alignment⟩
+/-- Distribute optional sequencing over a field-validation branch. -/
+private theorem bind_if (condition : Prop) [Decidable condition] (left right : Option α)
+    (next : α → Option β) :
+    (if condition then left else right).bind next =
+      if condition then left.bind next else right.bind next := by
+  split <;> rfl
+
+#print axioms bind_if
+
+/-- Extending an ordered accumulator after placement is the original field step. -/
+private theorem placeField_append (previous : Array ComputedLayout) (raw : RawLayout)
+    (architecture : Architecture) (pack size alignment : Nat) (fields : List FieldLayout)
+    (field : RawField) :
+    (do
+      let (size, alignment, placed) ← placeField previous raw architecture pack size alignment field
+      return (size, alignment, fields ++ [placed])) = (do
+      if field.type == .vector256 && pack > 16 && architecture == .scalar then none else do
+        let (width, natural, aggregate) ← fieldStorage previous architecture field.type
+        let aligned := min pack natural
+        if aligned = 0 then none else do
+          let offset ← if raw.explicit then field.offset else
+            if field.offset.isSome then none else some (alignUp size aligned)
+          if offset + width > 65536 ||
+              (raw.explicit && offset + width > raw.declaredSize.toNat) then none else
+            return (max size (offset + width), max alignment aligned,
+              fields ++ [⟨offset, width, aggregate⟩])) := by
+  unfold placeField
+  simp only [Option.bind_eq_bind, Option.pure_def, bind_if, Option.bind_assoc,
+    Option.bind_none, Option.bind_some]
+
+#print axioms placeField_append
+
+/-- Linear field construction is exactly the former append-based layout computation. -/
+theorem computeLayout_eq_append (previous : Array ComputedLayout) (raw : RawLayout)
+    (architecture : Architecture) : computeLayout previous raw architecture = do
   if raw.packing ∉ [-1, 0, 1, 2, 4, 8, 16, 32, 64, 128] then none
   else if raw.declaredSize < -1 || raw.declaredSize > 65536 then none
   else if raw.explicit && raw.declaredSize ≤ 0 then none
@@ -116,7 +207,10 @@ def computeLayout (previous : Array ComputedLayout) (raw : RawLayout)
     let finalSize := max 1
       (if raw.declaredSize > 0 then max size raw.declaredSize.toNat else alignUp size alignment)
     if finalSize > 65536 then none else
-      return ⟨⟨finalSize, fields⟩, alignment⟩
+      return ⟨⟨finalSize, fields⟩, alignment⟩ := by
+  simp only [computeLayout, layoutFields_eq_fold, List.reverse_nil, placeField_append]
+
+#print axioms computeLayout_eq_append
 
 /-- Reject forward references and cycles by computing strictly in metadata-table order. -/
 def computeLayouts (raw : List RawLayout) (architecture : Architecture := .scalar) :
