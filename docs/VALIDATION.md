@@ -693,3 +693,23 @@ continue to use the same proved optional-lookup interface.
 
 The shared state-pairing proof also uses explicit list-shape cases instead of broad simplifier
 search. Its statement is unchanged, and its checked axiom set is reduced to `propext`.
+
+Region closure now builds an ordered map of each method's minimum starting pc, visits program
+methods sequentially, and checks each included body once. It skips absent region entries and
+preserves region membership for absent callees: execution validity is a separate obligation.
+The equivalence theorem covers the former checker exactly, including duplicate starts and
+out-of-range pcs. `Tests.RegionRun` exercises those cases; `Tests/RegionScaling.lean` is a
+standalone before/after workload for `leanprof elab --heartbeats`.
+
+On Apple M4 with Lean 4.35, kernel-decision declaration work for a single full-method region:
+
+| Nops before return | Former checker (kHB) | Indexed checker (kHB) |
+| --- | ---: | ---: |
+| 128 | 2,674.46 | 214.01 |
+| 512 | 38,908.36 | 742.40 |
+| 2,048 | 608,701.24 | 2,855.94 |
+
+Measurements include index construction. They show the removal of quadratic instruction
+lookup; they do not estimate total CI savings. The separate `all3_zip_states` proof cleanup
+reduces declaration work from 97,195.29 to 589.64 kHB on the same machine, without changing
+its statement. Its axiom set shrinks to `propext`.

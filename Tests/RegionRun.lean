@@ -120,4 +120,30 @@ theorem longSuffix_moves (profile : CIL.FeatureProfile) (callee fuel : Nat) (arg
 #print axioms AgreesOn.set
 #print axioms suffix_moves
 
+/-- Repeated and overlapping starts describe one union, independent of input order. -/
+theorem duplicateStarts :
+    regionClosedCheck [caller, helper] [(0, 4), (1, 0), (0, 2), (0, 2)] = true := by
+  decide +kernel
+#print axioms duplicateStarts
+
+/-- A later duplicate cannot hide the earlier suffix's escaping branch. -/
+theorem earlierStartRejects : regionClosedCheck
+    [{ caller with code := [.ret, .branch 0, .ret] }] [(0, 2), (0, 1)] = false := by
+  decide +kernel
+#print axioms earlierStartRejects
+
+/-- Region closure concerns existing instructions, even when starts name absent methods. -/
+theorem absentAndEmpty : regionClosedCheck [caller, helper] [(99, 0), (0, 999)] = true := by
+  decide +kernel
+#print axioms absentAndEmpty
+
+/-- A listed absent callee still belongs to the region; execution separately rejects it. -/
+theorem absentCallee : regionClosedCheck
+    [{ caller with code := [.call 99 0, .ret] }] [(0, 0), (99, 0)] = true := by
+  decide +kernel
+#print axioms absentCallee
+
+/-- No code is checked for an empty region. -/
+theorem emptyStarts : regionClosedCheck [caller, helper] [] = true := by decide +kernel
+#print axioms emptyStarts
 end Tests.RegionRun
