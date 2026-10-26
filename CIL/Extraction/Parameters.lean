@@ -1,5 +1,7 @@
 import CIL.Extraction.LayoutUses
 import CIL.Extraction.Lockstep
+import CIL.Extraction.FlowIndex
+import Std.Data.TreeMap.Lemmas
 import Std.Data.TreeSet.Lemmas
 
 /-!
@@ -91,10 +93,20 @@ theorem requiredHomeIndices_eq_scan (raw : RawArguments) (reachable : List Bool)
 /-- Each homed argument index with the slot kind of its home, in argument order. -/
 def expectedHomes (layouts : Array ComputedLayout) (raw : RawArguments)
     (reachable : List Bool) : Option (List (Nat × LocalKind)) :=
+  let arguments := FlowIndex.ofList raw.arguments
   (requiredHomeIndices raw reachable).mapM fun index => do
-    let type ← raw.arguments[index]?
+    let type ← arguments.get? index
     return (index, ← storageKind layouts type)
 
+/-- Indexing argument types preserves the expected home kinds and all missing-type failures. -/
+theorem expectedHomes_eq_scan (layouts : Array ComputedLayout) (raw : RawArguments)
+    (reachable : List Bool) : expectedHomes layouts raw reachable =
+      (requiredHomeIndices raw reachable).mapM (fun index => do
+        let type ← raw.arguments[index]?
+        return (index, ← storageKind layouts type)) := by
+  simp only [expectedHomes, FlowIndex.get?_ofList]
+
+#print axioms expectedHomes_eq_scan
 /-- The narrowing a load of a small-integer argument applies. -/
 private def argumentNarrow : StorageType → Option NarrowKind
   | .field .signed8 => some .signed8
@@ -108,28 +120,48 @@ private def argumentNarrow : StorageType → Option NarrowKind
 private def homeSlot (raw : RawArguments) (homes : List Nat) (index : Nat) : Option Nat :=
   if index ∈ homes then some (raw.locals.length + homes.idxOf index) else none
 
+/-- Map each argument to its first home position; earlier duplicate homes win. -/
+def argumentHomeIndex : List Nat → Nat → Std.TreeMap Nat Nat
+  | [], _ => ∅
+  | home :: rest, offset => (argumentHomeIndex rest (offset + 1)).insert home offset
+
+/-- The index preserves first-occurrence lookup even for malformed duplicate home lists. -/
+theorem argumentHomeIndex_get (homes : List Nat) (offset index : Nat) :
+    (argumentHomeIndex homes offset)[index]? =
+      if index ∈ homes then some (offset + homes.idxOf index) else none := by
+  induction homes generalizing offset with
+  | nil => simp [argumentHomeIndex]
+  | cons home homes ih =>
+    simp only [argumentHomeIndex, Std.TreeMap.getElem?_insert, Nat.compare_eq_eq]
+    by_cases same : home = index
+    · subst home; simp
+    · simp [same, Ne.symm same, ih, List.idxOf_cons, Nat.add_comm, Nat.add_left_comm]
+
+#print axioms argumentHomeIndex_get
+
 /-- Check one argument instruction against a precomputed home set; hidden accesses
     to appended home slots are rejected. -/
-def validateArgumentOpIn (raw : RawArguments) (homes : List Nat)
+def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option StorageType)
+    (homeAt : Nat → Option Nat)
     (operation : ArgumentOp) (live : Bool) (emitted : Op) : Bool :=
   if !live then match emitted with | .unsupported _ => true | _ => false
   else match operation with
   | .load index => (do
-      let type ← raw.arguments[index]?
-      match homeSlot raw homes index, emitted with
+      let type ← argumentAt index
+      match homeAt index, emitted with
       | some slot, .local actual narrow => return actual == slot && narrow.isNone
       | none, .arg actual narrow => return actual == index && narrow == argumentNarrow type
       | _, _ => return false).getD false
   | .store index => (do
-      let _ ← raw.arguments[index]?
-      let slot ← homeSlot raw homes index
+      let _ ← argumentAt index
+      let slot ← homeAt index
       match emitted with
       | .setLocal actual narrow => return actual == slot && narrow.isNone
       | _ => return false).getD false
   | .address index => (do
-      let type ← raw.arguments[index]?
+      let type ← argumentAt index
       if type == StorageType.reference || (match type with | .array _ => true | _ => false) then return false
-      let slot ← homeSlot raw homes index
+      let slot ← homeAt index
       match emitted with
       | .localAddr actual => return actual == slot
       | .local actual none => return actual == slot && match type with
@@ -139,8 +171,36 @@ def validateArgumentOpIn (raw : RawArguments) (homes : List Nat)
       | .arg .. | .vectorArg .. | .vectorArgAddr .. => false
       | .local index _ | .setLocal index _ | .localAddr index
       | .vectorLocal index | .vectorLocalAddr index | .setVectorLocal index =>
-        index < raw.locals.length
+        index < localCount
       | _ => true
+
+/-- The per-instruction rule against the original argument and home lists. -/
+def validateArgumentOpIn (raw : RawArguments) (homes : List Nat) :
+    ArgumentOp → Bool → Op → Bool :=
+  validateArgumentOpAt raw.locals.length (raw.arguments[·]?) (homeSlot raw homes)
+
+/-- Check the complete instruction stream with shared argument-type and home-slot indexes. -/
+def argumentInstructionsValid (raw : RawArguments) (homes : List Nat)
+    (reachable : List Bool) (code : List Op) : Bool :=
+  let arguments := FlowIndex.ofList raw.arguments
+  let slots := argumentHomeIndex homes raw.locals.length
+  all3 (validateArgumentOpAt raw.locals.length arguments.get? (slots[·]?))
+    raw.code reachable code
+
+/-- Indexed access validation preserves every original instruction check and length failure. -/
+theorem argumentInstructionsValid_eq_scan (raw : RawArguments) (homes : List Nat)
+    (reachable : List Bool) (code : List Op) :
+    argumentInstructionsValid raw homes reachable code =
+      all3 (validateArgumentOpIn raw homes) raw.code reachable code := by
+  have arguments : (FlowIndex.ofList raw.arguments).get? = (raw.arguments[·]?) := by
+    funext index
+    exact FlowIndex.get?_ofList _ _
+  have slots : ((argumentHomeIndex homes raw.locals.length)[·]?) = homeSlot raw homes := by
+    funext index
+    exact argumentHomeIndex_get _ _ _
+  simp only [argumentInstructionsValid, arguments, slots, validateArgumentOpIn]
+
+#print axioms argumentInstructionsValid_eq_scan
 
 /-- `validateArgumentOpIn` with the home set derived from the body. -/
 def validateArgumentOp (raw : RawArguments) (reachable : List Bool) :
@@ -155,8 +215,7 @@ def ParameterHomesValid (layouts : Array ComputedLayout) (raw : RawArguments)
   raw.locals.mapM (storageKind layouts) = some method.localKinds ∧
   method.locals.length = raw.locals.length ∧
   expectedHomes layouts raw reachable = some method.parameterHomes ∧
-  all3 (validateArgumentOpIn raw (requiredHomeIndices raw reachable)) raw.code reachable
-    method.code = true
+  argumentInstructionsValid raw (requiredHomeIndices raw reachable) reachable method.code = true
 
 instance (layouts : Array ComputedLayout) (raw : RawArguments)
     (reachable : List Bool) (method : Method) :
@@ -186,7 +245,9 @@ theorem validated_argument_access {layouts : Array ComputedLayout} {raw : RawArg
     (rawAt : raw.code[pc.val]? = some operation) (reachableAt : reachable[pc.val]? = some live)
     (emittedAt : method.code[pc.val]? = some emitted) :
     validateArgumentOp raw reachable operation live emitted = true := by
-  exact all3_at valid.2.2.2.2.2 rawAt reachableAt emittedAt
+  have checked := valid.2.2.2.2.2
+  rw [argumentInstructionsValid_eq_scan] at checked
+  exact all3_at checked rawAt reachableAt emittedAt
 
 /-- Once a parameter has a home, loading its original argument slot is rejected. -/
 theorem home_load_rejects_original_arg (raw : RawArguments) (reachable : List Bool)
@@ -194,6 +255,6 @@ theorem home_load_rejects_original_arg (raw : RawArguments) (reachable : List Bo
     (home : index ∈ requiredHomeIndices raw reachable) :
     validateArgumentOp raw reachable (.load index) true (.arg actual narrow) = false := by
   cases found : raw.arguments[index]? <;>
-    simp [validateArgumentOp, validateArgumentOpIn, homeSlot, home, found]
+    simp [validateArgumentOp, validateArgumentOpIn, validateArgumentOpAt, homeSlot, home, found]
 
 end CIL.Extraction
