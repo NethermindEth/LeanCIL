@@ -998,3 +998,25 @@ Validation and lowering each construct their own index; they do not share it acr
 The helper APIs `constrainedSiteWindow`, `constrainedSites`, `lowerConstrainedInstruction`,
 `lowerConstrainedCode` and their streaming equivalence theorems now accept a resolver function.
 Public `ConstrainedCallsValid` and `lowerConstrainedRaw` argument types are unchanged.
+
+Public layout projection validation now constructs balanced indexes for artifact selection and
+nested public-index expansion. Ordered sets replace the three quadratic list-uniqueness checks.
+`LayoutProjectionValid_iff_list` proves exact equivalence to all former conditions for arbitrary
+inputs, including malformed indices and catalogs. `Tests.LayoutProjectionIndexes` checks
+reordering, empty catalogs, duplicate identities/indices, case-sensitive identity, missing
+indices and nested expansion; the existing imported-layout certificate tests also pass.
+
+The proposition's unfolded conjunction now exposes `projectionDistinct ... = true` instead of
+`List.Nodup`, and `projectionMetadataMatches` instead of the list-based metadata equality.
+Consumers that destructure these clauses can recover the former statements through
+`LayoutProjectionValid_iff_list`; the validator's accepted inputs and computed-layout checks
+are unchanged. No stepping equations or execution tactics change.
+
+Apple M4 / Lean 4.35 `leanprof` measurements of the standalone
+`Tests/LayoutProjectionScaling.lean` paired `decide +kernel` fixture include complete validators,
+both computed-layout checks, and construction of all indexes/sets. At 128 distinct empty layouts,
+the workload fell from 42,941.43 to 29,594.10 kHB (31% less). At 32 layouts it increased from
+3,288.47 to 3,667.68 kHB (12% more): index construction has a small-catalog cost. These are
+synthetic validator measurements, not total CI timings. The eliminated work is quadratic
+identity/index comparison and repeated linear metadata lookup; computed-layout validation and
+structural equality remain, so this is not a claim that the entire validator is linear.

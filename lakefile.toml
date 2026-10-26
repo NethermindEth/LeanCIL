@@ -234,3 +234,6 @@ name = "Tests.ExtractionHomeIndexes"
 
 [[lean_lib]]
 name = "Tests.LayoutAccumulation"
+
+[[lean_lib]]
+name = "Tests.LayoutProjectionIndexes"
