@@ -794,3 +794,15 @@ construction is included: 256 fields improved 1.293→0.158 ms, 1,024 fields 3.7
 4,096 fields 49.715→1.829 ms. The duplicate-field check is linear instead of quadratic. These
 are layout-validation measurements, not end-to-end extraction or CI estimates. The ordinary
 struct extraction retained its generated Lean bytes, and mixed batch-extraction regressions pass.
+Template emission groups methods by identity once, indexes template positions and each
+variant's method positions, and indexes template callee parameters. Sorted template/callee
+order and profile input order remain unchanged; duplicate identities are still rejected before
+emission. An absent callee in an excluded profile retains the existing zero placeholder.
+`Tests/TemplateIndexes.cs` checks reordered methods, conditional absent callees, deterministic
+output and duplicate rejection without compiling Lean.
+
+A Windows .NET 10 Release benchmark emitted two profiles with reverse method ordering and one
+call per method. Median times over five measured runs after two warmups, including index
+construction, generated text and output writes, were 2.90→1.87 ms at 128 methods, 20.56→6.37 ms
+at 512, and 127.10→24.18 ms at 2,048. Combined output hashes matched at every size. These are
+isolated template-emission measurements, not end-to-end verification estimates.
