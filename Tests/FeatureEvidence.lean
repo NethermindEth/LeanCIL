@@ -134,4 +134,22 @@ example : featureOpMatches branchRaw (i 88) (.add) = true := by decide
 example : featureOpMatches branchRaw (i 88) (.nop) = false := by decide
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
+/-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/
+theorem indexed_local_eligibility :
+    let types := [intType, .atom runtimeScope "System.Boolean",
+      .atom "Wrong.Runtime" "System.Int32", .byref intType]
+    let locals := FeatureLocalIndex.ofRaw (raw [i 18 (.local 0), i 65037 (.local 3)] types)
+    locals.eligible 0 (some 1) = false ∧ locals.eligible 0 none = true ∧
+    locals.eligible 1 (some 0) = true ∧ locals.eligible 1 (some 1) = true ∧
+    locals.eligible 1 (some 2) = false ∧ locals.eligible 2 (some 0) = false ∧
+    locals.eligible 3 (some 0) = false ∧ locals.eligible 99 (some 0) = false ∧
+    locals.eligible 99 none = true := by decide +kernel
+#print axioms indexed_local_eligibility
+
+/-- A malformed address operand neither invents an index nor excludes an unrelated local. -/
+theorem indexed_malformed_address :
+    let locals := FeatureLocalIndex.ofRaw (raw [i 18 (.integer 0), i 65037 (.local 99)] [intType])
+    locals.eligible 0 (some 42) = true ∧ locals.eligible 99 (some 42) = false := by decide +kernel
+#print axioms indexed_malformed_address
+
 end Tests.FeatureEvidence

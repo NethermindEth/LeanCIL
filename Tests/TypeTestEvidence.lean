@@ -2,10 +2,13 @@ import CIL.Extraction.Features
 
 set_option maxRecDepth 4096
 
+/-! Certificate regression fixtures, evaluated against the checked CIL extraction model. -/
+
 namespace Tests.TypeTestEvidence
 open CIL CIL.Extraction
 
-private def runtime := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+/-- The primitive assembly identity with its checked byte representation. -/
+private def runtime := runtimeScope
 private def owner := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 private def intType : TypeExpr := .atom runtime "System.Int32"
 private def word : TypeExpr := .atom runtime "System.UInt64"

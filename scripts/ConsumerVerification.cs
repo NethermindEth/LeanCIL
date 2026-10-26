@@ -479,7 +479,7 @@ partial class Program
         var targets = modules.ToArray();
         var profile = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") == "true";
         // A rejected or ineligible joint replay falls through to per-module replay, which attributes failures.
-        if (!profile && targets.Length > 1 &&
+        if (!profile && (targets.Length > 1 || (targets.Length == 1 && auditExecutable is not null)) &&
             ReplayModulesJointly(session, targets, leanPath, "Joint kernel replay of consumer proof and dependencies")) return [];
         return ReplayConsumerModulesSeparately(session, targets, leanPath, profile);
     }
@@ -1084,7 +1084,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         IReadOnlyDictionary<string, string>? exportAudits = null,
         ConsumerSessionPurpose purpose = ConsumerSessionPurpose.Verification,
         IReadOnlyDictionary<string, string>? generatedSources = null,
-        ExtractionComponents? components = null)
+        ExtractionComponents? components = null, bool checkRejectedProofs = false)
     {
         foreach (var dependency in dependencies)
         {
@@ -1178,14 +1178,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (Sha(symbolsPath) != symbols) throw new InvalidDataException("PDB names changed during consumer snapshot.");
             AddConsumerLibrary(frameworkCopy, "ExtractedSymbols");
         }
-        var extractionAuditPath = Path.Combine(frameworkCopy, "ExtractionAudit.lean");
-        if (File.Exists(extractionAuditPath)) throw new InvalidDataException("ExtractionAudit is reserved for the certificate audit.");
-        File.WriteAllText(extractionAuditPath, ExtractionAuditSource);
-        AddConsumerLibrary(frameworkCopy, "ExtractionAudit");
         var copied = snapshot.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal))
             .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
-            .Append(Path.Combine(frameworkCopy, "Extracted.lean"))
-            .Append(extractionAuditPath).ToList();
+            .Append(Path.Combine(frameworkCopy, "Extracted.lean")).ToList();
+        if (checkRejectedProofs)
+        {
+            // Rejected proofs stop before the final native audit, so check the certificate first.
+            var extractionAuditPath = Path.Combine(frameworkCopy, "ExtractionAudit.lean");
+            if (File.Exists(extractionAuditPath))
+                throw new InvalidDataException("ExtractionAudit is reserved for the certificate audit.");
+            File.WriteAllText(extractionAuditPath, ExtractionAuditSource);
+            AddConsumerLibrary(frameworkCopy, "ExtractionAudit");
+            copied.Add(extractionAuditPath);
+        }
         copied.AddRange(componentPaths);
         copied.AddRange(importModules.Select(module => Path.Combine(frameworkCopy, module.Replace('.', Path.DirectorySeparatorChar) + ".lean")));
         if (symbols is not null) copied.Add(symbolsPath);
@@ -1225,8 +1230,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return new(frameworkCopy, copied.ToDictionary(path => path, Sha));
     }
 
-    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked,
-        AuditRequest[]? Theorems = null, Dictionary<string, string>? GeneratedSources = null);
+    sealed record ConsumerExportAudit(string Source, Action<string, string, string, AuditedOleans> Checked,
+        AuditRequest[]? Theorems = null, Dictionary<string, string>? GeneratedSources = null,
+        string[]? Closures = null);
 
     sealed record ConsumerRequest(string Assembly, string Output, string Proof, string Theorem, string? Settings,
         bool ExpectRejection = false, ConsumerExportAudit? ExportAudit = null);
@@ -1519,10 +1525,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         void VerifyGroup(int[] members, string session, bool first, bool share)
         {
             var components = componentPlans[members[0]];
+            bool checkRejectedProofs = members.Any(index => requests[index].ExpectRejection);
             Dictionary<string, string> bound = new(WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean"))), StringComparer.Ordinal);
             foreach (var (module, source) in components.Sources)
                 bound["<generated>/" + module + ".lean"] = ContentKey(source);
-            bound["<generated>/ExtractionAudit.lean"] = ContentKey(ExtractionAuditSource);
+            if (checkRejectedProofs)
+                bound["<generated>/ExtractionAudit.lean"] = ContentKey(ExtractionAuditSource);
             foreach ((string module, string source) in extractions[members[0]].Sources)
                 bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
             var generatedSources = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1543,7 +1551,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 members.Select((i, k) => (names[k], proofs[i], outputs[i])).ToArray(), symbolHash,
                 members.Where(i => requests[i].ExportAudit is not null).ToDictionary(
                     i => requestModules[i], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
-                generatedSources: generatedSources, components: components);
+                generatedSources: generatedSources, components: components, checkRejectedProofs: checkRejectedProofs);
             var frameworkCopy = prepared.FrameworkCopy;
             var interfaceModules = extractions[members[0]].Sources.Keys
                 .Where(module => module != "ExtractedImports").ToArray();
@@ -1557,25 +1565,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (current.Count != acceptedInterfaceArtifacts.Count ||
                     current.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value))
                     throw new InvalidDataException("Published contract interface artifacts changed after their closure audit.");
-            }
-            if (interfaceModules.Length > 0)
-            {
-                Stage(members, "contract interface validation");
-                Run(["lake", "build", .. interfaceModules.Select(module => "+" + module + ":olean")], frameworkCopy,
-                    progress: "Compiling published contract interfaces");
-                // The audit, the replay and the proof must all read the bytes compiled here.
-                acceptedInterfaceArtifacts = InterfaceArtifacts();
-                string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
-                Stage(members, "kernel replay");
-                Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
-                if (interfaceFailures.Count > 0)
-                    throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
-                        string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
-                RequireInterfaceArtifacts();
-                // The checker reads only the bytes just replayed.
-                CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
-                    module => Path.Combine(frameworkCopy, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
-                RequireInterfaceArtifacts();
             }
             string[] initialImportDirectories;
             if (!first && relativeImportDirectories.Length > 0)
@@ -1631,11 +1620,42 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 }
                 finally { Directory.Delete(own, true); }
             }
+            if (interfaceModules.Length > 0)
+            {
+                Stage(members, "contract interface validation");
+                Run(["lake", "build", .. interfaceModules.Select(module => "+" + module + ":olean")], frameworkCopy,
+                    progress: "Compiling published contract interfaces");
+                // The audit, the replay and the proof must all read the bytes compiled here.
+                acceptedInterfaceArtifacts = InterfaceArtifacts();
+                string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
+                Stage(members, "kernel replay");
+                Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
+                if (interfaceFailures.Count > 0)
+                    throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
+                        string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
+                RequireInterfaceArtifacts();
+                // The checker reads only the bytes just replayed.
+                CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
+                    module => Path.Combine(frameworkCopy, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
+                RequireInterfaceArtifacts();
+            }
             // Snapshot before invoking Lake: configuration elaboration and imported
             // metaprograms must not redefine the source bytes accepted by this run.
             Stage(members, "extraction certificate audit");
-            var extractionAudit = Run(["lake", "build", "+ExtractionAudit:olean"], frameworkCopy,
+            var certificateTarget = checkRejectedProofs ? "+ExtractionAudit:olean" : "+Extracted:olean";
+            var extractionAudit = Run(["lake", "build", certificateTarget], frameworkCopy,
                 progress: "Checking consumer extraction certificate");
+            string[] certificateModules = ["Extracted", .. components.Sources.Keys,
+                .. checkRejectedProofs ? new[] { "ExtractionAudit" } : []];
+            Dictionary<string, SortedDictionary<string, string>> ExtractionArtifacts() => certificateModules.ToDictionary(
+                module => module, module => ConsumerModuleParts(Path.Combine(frameworkCopy,
+                    ".lake/build/lib/lean", module.Replace('.', '/') + ".olean")), StringComparer.Ordinal);
+            string checkedExtractionArtifacts = JsonSerializer.Serialize(ExtractionArtifacts());
+            void RequireExtractionArtifacts()
+            {
+                if (JsonSerializer.Serialize(ExtractionArtifacts()) != checkedExtractionArtifacts)
+                    throw new InvalidDataException("Extraction certificate artifacts changed during proof checking.");
+            }
             // Generated reference modules must be fixed before consumer configuration or proof code can run.
             SortedDictionary<string, string> GeneratedArtifacts()
             {
@@ -1686,6 +1706,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     progress: "Checking consumer contract interfaces and import assumptions");
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
             var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies");
+            RequireExtractionArtifacts();
             RequireGeneratedArtifacts();
             var buildFailure = build.Code == 0 ? null
                 : new InvalidOperationException($"Command failed ({build.Code}): {string.Join(' ', command)}\n{build.Output}");
@@ -1782,7 +1803,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     discovered.Add((module.Key, unchanged || certifiedSupport || publishedInterface));
                 }
             }
-            if (!moduleNames.Contains("Extracted") || !moduleNames.Contains("ExtractionAudit") ||
+            if (!moduleNames.Contains("Extracted") || (checkRejectedProofs && !moduleNames.Contains("ExtractionAudit")) ||
                 proceeding.Any(i => !moduleNames.Contains(requestModules[i])))
                 throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
             var mainArtifacts = artifactSnapshots.SelectMany(snapshot =>
@@ -1800,15 +1821,77 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // Cached support was checked against another Extracted or PDB, so its importers are always replayed.
             var extractionDependent = graph is null ? new HashSet<string>(StringComparer.Ordinal)
                 : DependentModules(graph, ["Extracted", "ExtractedSymbols"]);
-            var failures = ReplayConsumerModules(session, discovered.Where(module =>
+            var replayTargets = discovered.Where(module =>
                 !baseUnchanged || extractionDependent.Contains(module.Name) ||
-                (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name), leanPath);
+                (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name).ToArray();
+            Dictionary<int, AuditedOleans>? combinedAudits = null;
+            var premise = ImportPremise(extractions[proceeding[0]]);
+            var premiseIdentity = JsonSerializer.Serialize(premise);
+            var replayedNames = replayTargets.ToHashSet(StringComparer.Ordinal);
+            // Duplicate declarations in skipped support must not select another request's proof body.
+            bool completeConsumerReplay = discovered.All(module => module.Name == "CIL" ||
+                module.Name.StartsWith("CIL.", StringComparison.Ordinal) || replayedNames.Contains(module.Name));
+            if (replayTargets.Length > 0 && fullImportAudit is null &&
+                (members.Length == 1 || completeConsumerReplay) &&
+                proceeding.All(index => requests[index].ExportAudit is null &&
+                    JsonSerializer.Serialize(ImportPremise(extractions[index])) == premiseIdentity) &&
+                Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
+            {
+                try
+                {
+                    string[] Modules(int index) => [requestModules[index], "Extracted",
+                        .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                    var proofAudits = proceeding.Select(index =>
+                    {
+                        var audit = ProofTheorem(requests[index].Theorem, extractions[index]);
+                        // Another proof's declarations must not satisfy this request's missing theorem.
+                        return members.Length == 1 ? audit : audit with
+                        {
+                            allowedModules = ImportClosure(graph!, Modules(index))
+                                .Order(StringComparer.Ordinal).ToArray()
+                        };
+                    }).ToArray();
+                    var audited = AuditOleans(leanPath,
+                        proceeding.SelectMany(Modules).Distinct(StringComparer.Ordinal).ToArray(),
+                        [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")],
+                        premise, replayTargets: replayTargets);
+                    combinedAudits = proceeding.Select((index, position) => (index, position))
+                        // A conservative owner scope may omit a transitive toolchain import.
+                        // Hidden target dependencies are definitive failures, never audit-only fallbacks.
+                        .Where(item => audited.theorems[item.position].error is null ||
+                            audited.theorems[item.position].error!.StartsWith(
+                                "Theorem dependency is outside its request's import closure:",
+                                StringComparison.Ordinal))
+                        .ToDictionary(item => item.index, item => audited with
+                        {
+                            theorems = [audited.theorems[item.position], audited.theorems[^1]]
+                        });
+                }
+                // An ineligible or rejected joint set still needs individual failure attribution.
+                catch (InvalidOperationException) { }
+            }
+            HashSet<string>? RequestClosure(int index) => graph is null ? null
+                : ImportClosure(graph, [requestModules[index], "Extracted",
+                    .. checkRejectedProofs ? new[] { "ExtractionAudit" } : [],
+                    .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()]);
+            var failures = new Dictionary<string, string>();
+            if (combinedAudits is null)
+            {
+                if (members.Length == 1) failures = ReplayConsumerModules(session, replayTargets, leanPath);
+                else
+                    foreach (int index in proceeding)
+                    {
+                        // A sibling's undeclared constants must not make another proof replay successfully.
+                        var closure = RequestClosure(index)!;
+                        var own = ReplayConsumerModules(session,
+                            replayTargets.Where(closure.Contains).ToArray(), leanPath);
+                        foreach (var (module, error) in own) failures.TryAdd(module, error);
+                    }
+            }
             foreach (var i in proceeding)
             {
                 // A request depends only on its own proof's import closure and the extraction certificate.
-                var closure = graph is null ? null
-                    : ImportClosure(graph, [requestModules[i], "Extracted", "ExtractionAudit",
-                        .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()]);
+                var closure = RequestClosure(i);
                 var rejected = failures.Keys.Where(name => closure is null || closure.Contains(name)).Order(StringComparer.Ordinal).ToArray();
                 if (rejected.Length > 0)
                     Fail([i], new InvalidOperationException("Kernel replay rejected " + string.Join(", ", rejected) + ":\n" +
@@ -1816,29 +1899,33 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
-            // Audits read the replayed oleans only; Lake and the consumer's metaprograms never see them.
-            Stage(proceeding, "extraction certificate audit");
-            var certificate = AuditOleans(leanPath, ["ExtractionAudit"], [ExtractionCertificate("ExtractionAudit.valid")]);
-            RequireAuditedModule(certificate, "ExtractionAudit", currentArtifacts["ExtractionAudit"]);
-            AuditedAxioms(certificate.theorems[0]);
-            extractionAudit += AuditText(certificate.theorems[0]);
-            Stage(proceeding, "theorem audit");
-            var audits = new Dictionary<int, (string Audit, string[] Axioms)>();
+            // Audit the certificate and proof in one import environment containing only replayed oleans.
+            var audits = new Dictionary<int, (string Audit, string[] Axioms, AuditedOleans Result)>();
+            string certificateText = "";
             foreach (var i in proceeding)
             {
                 try
                 {
+                    Stage([i], "extraction certificate audit");
                     var module = requestModules[i];
-                    string[] auditModules = [module, .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
-                    var audited = AuditOleans(leanPath, auditModules,
-                        requests[i].ExportAudit?.Theorems ?? [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
+                    string[] auditModules = [module, "Extracted",
+                        .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                    AuditRequest[] proofAudits = requests[i].ExportAudit?.Theorems ??
+                        [ProofTheorem(requests[i].Theorem, extractions[i])];
+                    var audited = combinedAudits?.GetValueOrDefault(i) ?? AuditOleans(leanPath, auditModules,
+                        [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")], ImportPremise(extractions[i]),
+                        closures: requests[i].ExportAudit?.Closures);
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
+                    AuditedAxioms(audited.theorems[^1]);
+                    certificateText = AuditText(audited.theorems[^1]);
+                    Stage([i], "theorem audit");
                     RequireAuditedConstants(audited);
                     foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
-                    audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]));
+                    audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]), audited);
                 }
                 catch (Exception error) { Fail([i], error); }
             }
+            extractionAudit += certificateText;
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
             Recheck(proceeding);
@@ -1854,7 +1941,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (checkedArtifacts != JsonSerializer.Serialize(finalArtifacts))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
             foreach (int i in proceeding)
-                requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath);
+                requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath, audits[i].Result);
             Dictionary<int, FullImportResult> fullResults = new();
             foreach (int i in proceeding)
                 if (fullImportAudit is not null)

@@ -1,6 +1,8 @@
 import CIL.Interface.Closure
 import CIL.Safety.MethodContract
 
+/-! Canonical contract serialization and complete interface dependency discovery. -/
+
 open Lean CIL.Interface
 
 namespace Tests.ContractClosure
@@ -53,3 +55,23 @@ run_cmd do
     throwError "Computational recursor metadata omitted from the closure"
 
 end Tests.ContractClosure
+
+open Lean Elab Command in
+run_cmd do
+  let environment ← getEnv
+  let declared := environment.constants.toList.map fun (name, _) =>
+    (name, definingModule environment name)
+  for modules in #[#[], #[`CIL.Interface.Closure], #[environment.mainModule],
+      #[`CIL.Interface.Closure, `CIL.Safety.MethodContract, environment.mainModule],
+      #[`MissingInterfaceModule], #[`CIL.Interface.Closure, `CIL.Interface.Closure]] do
+    let expected := declared.filterMap fun (name, moduleName) =>
+      if modules.contains moduleName then some name else none
+    let indexed := interfaceDeclarations environment modules
+    let expectedSet := expected.foldl (fun set name => set.insert name) ({} : NameSet)
+    let indexedSet := indexed.foldl (fun set name => set.insert name) ({} : NameSet)
+    unless expectedSet.toArray.qsort Name.lt == indexedSet.toArray.qsort Name.lt do
+      throwError "Indexed interface declarations differ from full environment traversal"
+  let shared := Expr.app (.const `first []) (.const `second [])
+  let expression := Expr.proj `Container 0 (.app shared shared)
+  unless expressionDependencies expression == [`Container, `first, `second] do
+    throwError "Shared expression traversal lost a dependency or changed first-occurrence order"

@@ -1020,3 +1020,280 @@ the workload fell from 42,941.43 to 29,594.10 kHB (31% less). At 32 layouts it i
 synthetic validator measurements, not total CI timings. The eliminated work is quadratic
 identity/index comparison and repeated linear metadata lookup; computed-layout validation and
 structural equality remain, so this is not a claim that the entire validator is linear.
+
+Imported-interface auditing selects declarations from the imported module catalogs rather than
+materializing and filtering every declaration in the Lean environment. Current-file declarations
+still use the environment scan. Private and auxiliary declarations are included and their actual
+module ownership is checked. Dependency traversal visits shared expression nodes only once;
+canonical contract serialization is unchanged. `Tests.ContractClosure` compares selected
+membership with the former scan, including current, imported, missing and duplicate modules.
+The imports suite compiles that test against its already certified library instead of rebuilding
+the library's dependencies in the repository checkout.
+
+A preliminary Windows paired native audit of `ImportFixture.addOne` measured median
+3.50 seconds before and 1.22 seconds after (three runs each), with byte-identical audit output.
+These focused timings are not complete-suite or CI measurements.
+### Consumer certificate and theorem audit imports
+
+Fresh consumer verification audits the extraction certificate and requested proof in one native
+import environment. Both artifacts must match their kernel-replayed module paths, and their
+individual theorem types, premises and allowed axioms are still checked. This removes a repeated
+closure import; it does not reuse a previous proof result or skip fresh verification.
+
+The four positive verification requests in `Tests/ConsumerCertificateReuse.cs` used eight native
+audits before this change and four afterward. Local Windows traces measured 11.03 seconds versus
+5.95 seconds in those audits. Other concurrent builds affected whole-fixture timings, so this is
+not an end-to-end CI estimate. Corrupted receipts, changed extraction and generated-source
+modification controls still reject as before.
+### Allocation reference-step proof search
+
+`fixed_fallback` normalizes mapped stack constructors definitionally and rewrites the target
+profile once. It avoids repeatedly asking the simplifier to discharge the large dispatcher's
+negative match conditions. Reference operations use a proved finite classification before stack
+case analysis; this changes proof construction, not execution or the simulation statement.
+
+On Apple M4 with Lean 4.35 and `leanprof --heartbeats`, elaborating
+`Memory.Renamed.stepReference` fell from 416,618.32 to 204,647.51 kHB (51% less).
+Its kernel check fell from 16,039.56 to 11,202.47 kHB (30% less). The generated Windows olean
+shrunk from 32,111,728 to 26,561,792 bytes. All four fixed-step family consumers and the full
+423-job library build passed without `sorryAx`. The profiling fixtures included the candidate
+macros inline; the figures above select the theorem's own elaboration and kernel entries.
+The same native auditor parses contract source import headers with Lean's parser. This replaces
+compiling a temporary Lean parser program for each verification. Parsing still rejects malformed
+headers, retains comments and module-system import syntax, and never elaborates source commands.
+The imports fixture checks those properties explicitly. A focused native parse takes roughly
+0.06 seconds locally; the original CI run spent 22.1 seconds across 25 interpreted parser calls.
+### Core example batches
+
+Core's ten immutable example proofs share one generated verification batch. Each keeps its
+own extraction, theorem audit, exact translation certificate and output identity check. The
+source, environment, receipt and assembly mutation scenarios remain separate. The focused
+`dotnet run --file Tests/CoreExamples.cs` fixture uses the same implementation; `--separate`
+reproduces the former verification loop, and `--check-existing <directory>` checks all reports
+and rejects changed proof identity or batch source. With success caching disabled and the same
+prepared library, the ten examples took 116.95 seconds separately and 28.65 seconds batched
+on Windows. They contain nine distinct proof texts and ten distinct extracted programs.
+Native audits fell from ten to one, replay processes from eleven to two, and Lake invocations
+from five to one; both runs built exactly one support module. This is a focused measurement,
+not a claim that the complete Core job has reached four minutes.
+
+The generic-method, F# and universal-contract fixtures also batch their immutable positive
+proofs. The generic instance and other fixed-memory contracts retain their exact statements;
+batching does not turn them into arbitrary-memory specifications. Mutated assemblies and
+expected failures retain their isolated checks. These changes remove eleven separate positive
+verification sessions across the three fixtures.
+
+Standalone proofs and generated batches combine their final replay and theorem audit when
+eligible. Dependency certification, artifact identity checks and failure diagnostics remain;
+audits needing source-location metadata still import the checked artifacts.
+Paired Windows runs of the ten-example batch with the same certified library took 29.98 seconds
+with separate replay/audit and 28.10 seconds combined. An earlier combined run took 40.17 seconds
+with slower compilation and setup too; these short fixture timings remain sensitive to host load.
+
+Compatible consumer requests can share that final replay and audit too. Each selected theorem
+and its reachable replay-target declarations must belong to the request's own import closure.
+Duplicate declarations and skipped consumer support conservatively retain separate checking.
+The fallback replays each request's import-closed target set independently, preventing a forged
+proof from borrowing an undeclared sibling dependency before an isolated axiom audit.
+`Tests/JointReplay.cs` covers target and external owners, duplicate bodies and hidden dependencies.
+The existing consumer batch checks also reject a theorem available only in another request.
+
+`Tests/ConsumerCombinedAudit.cs` is a focused manual benchmark and adversarial fixture. Its
+`--without-hidden` comparison keeps eight successful requests and two expected failures fixed.
+On Windows, that workload took 30.87 seconds with separate audits and 19.48 seconds with shared
+replay/audit, using the same certified library. Its default additionally checks an undeclared
+reference to an unapproved sibling axiom; both shared and isolated fallback paths must reject it.
+These measurements exclude fixture setup and do not establish a complete-suite CI timing.
+
+### Native joint kernel replay
+
+The authenticated `leancil-audit --replay INPUT` command accepts a JSON array of module names.
+It uses the same `CIL/Replay.lean` algorithm as fresh-library bootstrap certification: import
+non-target dependencies without extensions, reject conflicting declarations and replay target
+constants in the kernel. Identical on-demand theorem duplicates retain the toolchain rule.
+The native executable is checked before and after replay. Before it is authenticated, bootstrap
+uses the source captured when the verifier starts and rejects changes before executing it.
+
+`Tests/JointReplay.cs` exercises both modes against import-closed targets, repeated equation
+lemmas, conflicting declarations, targets hidden behind untargeted imports and forged theorems.
+Rejected joint sets still fall back to per-module replay with individual failure attribution.
+The test also rejects a changed bootstrap source snapshot. In one Windows trace, the two
+positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
+through the native auditor. Single-file verification now also shares replay imports for its
+multi-module interface and proof target sets. Fresh checking and failure isolation are unchanged.
+
+The native auditor also accepts `replayTargets` in an audit request. It retains the kernel's
+checked environment for structural theorem and constant checks, avoiding a second dependency
+import. Any duplicate declaration, interface/closure/namespace request, or contract refutation
+requiring source locations retains the ordinary audit import. This does not change the standalone
+replay duplicate rule: equal theorem types can have different proof bodies, so a merged replay
+environment must not choose which body's axioms a subsequent audit sees. `JointReplay` checks
+both duplicate orders, a forged body, source-location fallback and toolchain shadowing in both
+paths. A fixed `Tests.MethodContract` artifact took 2.59–2.63 seconds for separate native replay
+and audit versus 1.36–1.38 seconds combined, with identical statement and axiom output. These
+are focused Windows timings. Single-request consumer groups use this path, except export callbacks,
+full-import audits and profiled replay. Existing byte snapshots, module-path checks and post-audit
+integrity checks still bind the result. A rejected joint set retains per-module failure attribution.
+The verifier records `auditFused` so measured runs distinguish shared environments from
+metadata or duplicate-declaration fallbacks.
+
+### Evidence-suite reuse
+
+The evidence runner compiles its test modules once against the authenticated CIL library,
+without asking Lake to rebuild that library from copied build traces. Test dependencies are
+ordered before their importers, with at most two independent compilations running together.
+Child fixtures validate the parent's source/output hashes before reusing a completed test;
+standalone fixture invocations retain their original build path. Reproduce this preparation
+with `dotnet run --file Tests/ExtractionEvidence.cs -- --prepare-only`.
+
+Generated rejection batches retain each mutation's original expected diagnostic markers. A
+Lean command saves and restores the complete command state around each case, including its
+declarations, attributes, scopes and options. Messages are collected with Lean's `guard_msgs`
+helper, then associated with the original case's line range. A rejected neighbor, missing
+marker, successful mutation or leaked failed simp theorem cannot satisfy another case's check;
+`Tests/RejectedEvidenceTests.cs` exercises these failures. No rejection result is published
+until every case passes. Existing audited positive batches still replay with `leanchecker`;
+direct semantic fixtures retain their original frontend kernel checks while sharing imports.
+
+The four capability profiles now share one generated verification batch. Every profile keeps
+its own extraction identity, execution theorem, certificate audit and final regeneration check.
+A regression rejects reuse of the scalar report under the x64-v3 profile. The runtime-scope
+constants in the scalar, type-test, throw, span and imported-layout fixtures use the existing
+byte representation, whose equality to the full assembly-name literal is already proved by
+`runtimeScope_eq`; their regression statements are unchanged.
+
+Focused Windows measurements on this change reduced the scalar regression file from about
+26 seconds to 14.4 seconds and the type-test file from 12.2 seconds to 9.0 seconds by reusing
+that representation. The mixed-profile feature fixture's traced work took 37.5 seconds locally.
+These are local observations, not a claim that the evidence CI job is below four minutes;
+its completed Ubuntu run remains the end-to-end acceptance measurement.
+
+Constrained-call rejection fixtures retain the emitted definitions and the exact constrained
+validator obligations, while their full positive certificates still check every validator.
+Positive controls compile that same reduced fixture before changing its call target, so a
+missing prerequisite cannot masquerade as rejection. Static-span proofs share one batch across
+original and mutated assemblies, and UTF-8 identity mutations use isolated rejection scopes.
+Generated verification batches use the authenticated native kernel replay command when it
+succeeds, retaining the toolchain checker as the failure fallback for the same module set.
+
+Translation-audit fixtures compile all six certificate variants against one checked prefix
+before testing wrapper rejection, then replay those declarations and audit their exact native
+statements. Missing certificates, unrelated statements, definitions and altered import tables
+must fail both their wrapper checks and direct certificate audits; the definitionally equal
+wrapped statement still passes elaboration but fails the exact emitted-statement check.
+
+Generic substitution, managed-call and method-shape mutations select their corresponding
+emitted validator; type-test mutations select feature-flow validation. Unchanged controls
+compile first, with repeated generic controls deduplicated. Byte-backed identity definitions
+retain their UTF-8 witnesses. Evidence-list omission and reordering still check the complete
+certificate because they test agreement between records, not an independent validator.
+
+Feature-flow validation indexes addressed local slots and classifies exact local types once,
+then shares that index across state-shape checks, local transfers and emitted local operations.
+`FeatureLocalIndex.eligible_eq` proves equality with the original raw instruction/type scan for
+every index and fact, including malformed metadata and missing locals. Existing feature-flow
+equivalence and reachability proofs retain their statements. The focused feature regression
+also checks boolean bounds, both address-taking opcodes, wrong assembly scopes and malformed
+address operands.
+
+`Tests/FeatureLocalScaling.lean` isolates known facts at every instruction/local pair. A local
+kernel measurement reduced 128×128 checks from 1.52 to 0.844 seconds, 256×256 from 6.58 to
+3.99 seconds, and 512×512 from 29.3 to 16.4 seconds. Both measured sequences grow approximately
+quadratically; these data do not demonstrate a different asymptotic kernel cost. The eliminated
+work is repeated raw-body address scanning, local-list lookup and type classification. The
+existing feature regression module changed from 4.290 to 4.056 seconds, a smaller benefit
+because ordinary certificates often contain unknown facts, which already exit early.
+For full 128-instruction feature certificates, empty-local kernel checks measured 116 versus
+117 ms and 128 unknown locals measured 161 versus 152 ms; this sample showed no material
+regression on the early-exit paths.
+
+Full-verification term transfer encodes each structurally distinct expression node once and
+writes a compact data table instead of elaborating a recursively expanded constructor term.
+Structural equality includes binder spelling and annotations; names retain numeric and string
+components, and universe expressions retain their full structure. Metadata is stripped as
+before. The decoder rejects missing, cyclic and forward references, unknown binder annotations
+and malformed table data. Free variables and expression/universe metavariables remain unsupported.
+
+Decoding constructs expressions only. Each transferred declaration still passes `Lean.addDecl`
+with kernel checking explicitly enabled, followed by the existing independent replay and exact
+composition audit. The generated source imports the decoder from the certified
+`CIL.Interface.FullTransfer` module. `Tests.FullTransfer` checks exact reconstructed types and
+values across binders, universes, projections, local lets, string literals and proofs, plus
+malformed table rejection. The full transitive suite retains its forged dependency, staged
+mutation, changed implementation, cyclic dependency and missing-bundle regressions.
+
+Contract publication audits interface declarations and their requested closures in one imported
+environment. The fresh consumer theorem audit also requests each export's closure and certified
+statement, including independently rebuilt full-verification exports. Export callbacks consume
+that authenticated response after the existing artifact and source guards; they do not import
+the environment again. The closure digest, contract kind, theorem axioms and statement checks
+remain separate obligations. `exportsaudit` exercises source and compiled-artifact mutation
+after those callbacks and requires the original integrity failures.
+
+Exports whose artifacts lie outside the proof root share one consumer input snapshot and the
+existing extraction-group verification machinery. Each request retains its own exact export
+audit and checked result. Artifacts inside the proof root retain individual snapshots so their
+output exclusion does not hide another request's source. `exportsfullpair` checks two exported
+methods and their independently replayed caller composition; its focused Windows run passed
+in 179.7 seconds. That is a validation timing, not a before/after performance measurement.
+Consumer workspaces restore authenticated, source-bound support before compiling published
+interfaces. Identical interfaces can therefore reuse their compiled artifacts across extraction
+groups, while each workspace still kernel-replays them and checks their canonical contract
+closures against its own imports. Existing before/after artifact checks remain in place.
+`Tests/ContractImports.cs --interface-reuse-only` checks two fresh profile groups with one
+interface compilation and independent replays. A focused Windows comparison reduced interface
+build stages from 5.28 to 2.95 seconds and the two-request verification from 50.54 to 47.67
+seconds. These are fixture timings, not complete-suite or CI measurements.
+
+Consumer verification audits `Extracted.translation_valid` directly after kernel replay instead
+of compiling a second theorem that merely restates it. The native auditor still requires a
+theorem declaration, the exact `TranslationValid` application over the emitted tables and
+program, and the approved axiom set. Consumer reports therefore name
+`Extracted.translation_valid` in `extractionAudit`; the single-file verifier still names
+`ExtractionAudit.valid`. Workspaces containing expected proof rejections retain the wrapper,
+since those requests can finish before the final native audit. Compiled extraction and component
+artifacts are hashed before consumer proof checking and checked again afterward.
+Authenticated native replay also handles single-module target sets; profiling retains the
+toolchain frontend, and rejected native replays retain the existing per-module fallback.
+The same two-profile fresh workload took 43.56 seconds with these changes, versus 47.67
+seconds with interface restoration alone; certificate compilation fell from 8.71 to 5.64
+seconds and replay from 8.73 to 6.83 seconds. Full-suite timing remains a separate check.
+
+The component-reuse and support-union fixtures skip their framework-only warmup verification
+when `LEANCIL_CERTIFIED_LIBRARY` is supplied. Their actual batches still authenticate that
+library and verify every original request with success caching disabled. Without a supplied
+library, the original warmup remains. This removes two redundant complete consumer sessions
+from prepared CI runs without removing any component, replay or source-identity assertions.
+
+Fold discovery counts decoded local references once with a balanced tree instead of filtering
+the entire instruction body per local. `foldRoles_eq_filter` proves exact equality to the
+former filter-based selection, including malformed operands and out-of-range local indexes.
+Methods without locals skip count construction. The separate positional lookup of local types
+remains linear; this change does not make all of fold discovery linear.
+
+Exception folds inspect at most three message loads, since admitted constructors accept at
+most two. `throwFold_eq_takeWhile` proves equality to the unrestricted prefix scan. Long
+rejected prefixes still permit an admitted fold starting later. Span and throw evidence tests
+cover extra uses, malformed local operands, oversized prefixes and valid suffix folds.
+
+On Apple M4, kernel-checked discovery for 256 span locals/768 instructions fell from 7.87s to
+2.40s (user CPU 7.45s to 2.05s), including index construction and checking every output role.
+A 4,096-instruction message-only body fell from 6.47s to 2.06s (user CPU 6.15s to 1.76s).
+Smaller counts showed 0.94s to 0.76s at 64 locals and 2.29s to 1.17s at 128 locals. Existing
+TypeTestEvidence and SpanEvidence were effectively unchanged: 5.22s to 5.15s and 0.77s to
+0.77s. Those fixtures contain few locals and short message prefixes, so these are scaling
+improvements rather than a demonstrated large CI saving.
+
+The standalone kernel benchmarks are `docs/performance/fold-roles/CountScaling.lean` and
+`ThrowScaling.lean`. After building each revision's library, run
+`lake env lean docs/performance/fold-roles/CountScaling.lean` (and the throw file) under an
+external timer. They construct their inputs inside the checked proposition and verify complete
+role lists with `decide +kernel`; neither benchmark is part of the default library build.
+
+With the indexed validators and combined replay/audit built into a newly certified library,
+the Windows two-profile interface-reuse workload passed in 39.14 seconds, compared with
+43.56 seconds before these changes. Both consumer groups used the fused audit; the interface
+still compiled once and was independently replayed in each group. The entire fixture,
+including setup, took 56.86 seconds. These timings do not establish a whole-suite CI gain.
+The certificate-reuse fixture passed all six checks: its four positive sessions used the
+fused audit, and generated-source tampering and compiled-extraction substitution were rejected.

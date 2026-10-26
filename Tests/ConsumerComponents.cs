@@ -90,8 +90,9 @@ var saved = new[] { "LEANCIL_DISABLE_SUCCESS_CACHE", "LEANCIL_TRACE_DIRECTORY" }
 try
 {
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
-    // Prepare the framework before timing the identical four-extraction workload.
-    Run([.. cli, "verify", requests[0].output, "--proof", proof, "--proof-root", package]);
+    // A supplied library is already prepared; the batch authenticates it and verifies every request.
+    if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")))
+        Run([.. cli, "verify", requests[0].output, "--proof", proof, "--proof-root", package]);
     var trace = ConsumerTraceDirectory.Create(directory, "Trace");
     Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
     var manifest = Path.Combine(directory, "batch.json");
@@ -114,7 +115,7 @@ try
         @"\bBuilt (LeanCILComponent_[a-f0-9]+)(?:\s|$)").Select(match => match.Groups[1].Value)).ToArray();
     if (!measure && (reused.Any(module => builds.Count(name => name == module) != 1 ||
             replayed.Count(name => name == module) != 1) || replayed.Count(name => name == "Extracted") != 4 ||
-            replayed.Count(name => name == "ExtractionAudit") != 4))
+            replayed.Contains("ExtractionAudit")))
         throw new Exception("Components did not compile/replay once while all complete certificates were checked.");
     File.WriteAllText(Path.Combine(directory, "timings.json"), JsonSerializer.Serialize(new
     {

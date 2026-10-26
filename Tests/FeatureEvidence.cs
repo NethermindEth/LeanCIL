@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include ../scripts/BatchVerification.cs
+#:include RejectedEvidence.cs
 #:include ../scripts/RuntimeProfileValidation.cs
 
 using System.Text.RegularExpressions;
@@ -11,6 +14,7 @@ using System.Text.Json.Nodes;
 using var verification = new Program();
 var output = At("artifacts/FeatureEvidence");
 Directory.CreateDirectory(output);
+var rejected = new RejectedEvidence(output);
 // Exercise the production validator and both old-name and custom-profile migration paths.
 var profileType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
 var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -50,11 +54,11 @@ foreach (var (name, flag, value, accepted) in new[]
     catch (TargetInvocationException exception) when (!accepted && exception.InnerException is InvalidDataException) { }
 }
 Console.WriteLine("PASS runtime profile groups, retired profiles and reduced vector width");
-Run(["lake", "build", "CIL.Extraction.Features", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Features", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var sharedEvidence = Path.Combine(output, "RuntimeProfiles.lean");
 RuntimeProfileValidation.Check(sharedCases, ExtractorPath, sharedEvidence);
 Run(["lake", "env", "lean", sharedEvidence]);
-Run(["lake", "env", "lean", "Tests/FeatureEvidence.lean"]);
+RequireLeanFixtures("Tests.FeatureEvidence");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var folder = Path.Combine(output, "CompiledLoop");
 Run(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)", folder, "scalar"));
@@ -67,10 +71,7 @@ void Reject(string name, string mutated)
     if (mutated == baseline) throw new InvalidOperationException("Feature mutation did not change source: " + name);
     var target = Path.Combine(output, name + ".lean");
     File.WriteAllText(target, mutated);
-    var result = Execute(["lake", "env", "lean", target]);
-    if (result.Code == 0 || !result.Output.Contains("decide"))
-        throw new InvalidOperationException("Feature certificate mutation was not rejected: " + name + "\n" + result.Output);
-    Console.WriteLine("PASS feature certificate rejects " + name);
+    rejected.Add(target, "PASS feature certificate rejects " + name, "decide");
 }
 
 string MutateState(string source, string update) => Regex.Replace(source,
@@ -85,11 +86,13 @@ Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))
 Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [none], locals := [none] })"));
 Reject("false-pruned-successor", MutateState(baseline, "set 10 none"));
 Reject("omitted-states", MutateState(baseline, "take 17"));
+rejected.Check();
 var unsupported = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)",
     Path.Combine(output, "EnabledUnsupported"), "x64-v3"));
 if (unsupported.Code == 0 || !unsupported.Output.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Enabled feature failed to expose unsupported array code: " + unsupported.Output);
 // X86Base.X64 and Vector128 getters decide their branches from the profile alone.
+var capabilitiesQueue = new GeneratedQueue(verification, assembly);
 foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-advsimd", 2), ("x64-sse42", 3) })
 {
     var capabilities = Path.Combine(output, "Capabilities-" + profile);
@@ -97,9 +100,26 @@ foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-a
     var proof = Path.Combine(capabilities, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
         $"  (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.i32 {flags})] := rfl\nend ExampleProof\n");
-    verification.Verify(assembly, "Examples", "Capabilities::Flags()", proof, Path.Combine(capabilities, "Verified"), profile);
-    Console.WriteLine($"PASS Capabilities::Flags under {profile} returns {flags}");
+    capabilitiesQueue.Add(new("Capabilities::Flags()", proof, Path.Combine(capabilities, "Verified"), Profile: profile),
+        () => Console.WriteLine($"PASS Capabilities::Flags under {profile} returns {flags}"));
 }
+capabilitiesQueue.Flush();
+var scalarCapabilities = Path.Combine(output, "Capabilities-scalar");
+verification.Verify(assembly, "Examples", "Capabilities::Flags()", Path.Combine(scalarCapabilities, "Proof.lean"),
+    Path.Combine(scalarCapabilities, "Verified"), check: true);
+var wrongProfileRejected = false;
+try
+{
+    verification.Verify(assembly, "Examples", "Capabilities::Flags()", Path.Combine(scalarCapabilities, "Proof.lean"),
+        Path.Combine(scalarCapabilities, "Verified"), "x64-v3", check: true);
+}
+catch (InvalidOperationException error) when (
+    error.Message.Contains("differs from regenerated CIL", StringComparison.Ordinal))
+{
+    wrongProfileRejected = true;
+}
+if (!wrongProfileRejected) throw new InvalidOperationException("A mixed-profile report accepted the wrong profile");
+Console.WriteLine("PASS mixed-profile batch report preserves its extraction profile");
 // A custom profile names the rule it breaks.
 var noBase = Path.Combine(output, "bmi2-without-x86base.json");
 File.WriteAllText(noBase, """

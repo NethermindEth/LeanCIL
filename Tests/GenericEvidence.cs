@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
 
@@ -12,10 +14,13 @@ if (args is not ([] or ["--external-identities"] or ["--measure"]))
     throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities|--measure]");
 var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
+var rejected = new RejectedEvidence(output);
 var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
+var controls = new GeneratedEvidence(Path.Combine(output, "Controls"));
+var controlSources = new HashSet<string>(StringComparer.Ordinal);
 CheckExternalIdentities();
 if (args is ["--external-identities"]) return;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var samples = new[]
 {
@@ -34,7 +39,7 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
 
 evidence.Check();
 CheckEvidenceBatchFailures();
-Run(["lake", "env", "lean", "Tests/ExtractionGenerics.lean"]);
+CheckLeanFixture("Tests.ExtractionGenerics");
 CheckExternalCallTargets();
 string ChangeDefinition(string source, string name, Func<string, string> change)
 {
@@ -43,17 +48,26 @@ string ChangeDefinition(string source, string name, Func<string, string> change)
     var end = source.IndexOf('\n', start);
     return source[..start] + change(source[start..end]) + source[end..];
 }
-void Reject(int sample, string name, Func<string, string> mutate)
+void Reject(int sample, string name, Func<string, string> mutate,
+    string? theorem = "method1_specialization_validated")
 {
     var baseline = File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean"));
     var source = mutate(baseline);
     if (source == baseline) throw new InvalidOperationException("Mutation did not change source: " + name);
+    if (theorem is not null)
+    {
+        var control = NarrowEvidence(baseline, theorem);
+        if (controlSources.Add(control))
+        {
+            var controlPath = Path.Combine(output, "Control-" + controlSources.Count + ".lean");
+            File.WriteAllText(controlPath, control);
+            controls.Add(controlPath, "PASS unchanged generic obligation: " + theorem, theorem);
+        }
+        source = NarrowEvidence(source, theorem);
+    }
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, source);
-    var result = Execute(["lake", "env", "lean", path]);
-    if (result.Code == 0 || !result.Output.Contains("error:", StringComparison.Ordinal))
-        throw new InvalidOperationException("Invalid specialization was not rejected: " + name + "\n" + result.Output);
-    Console.WriteLine("PASS generic evidence rejects " + name);
+    rejected.Add(path, "PASS generic evidence rejects " + name, "error:");
 }
 foreach (var (name, scope) in new[]
 {
@@ -62,22 +76,35 @@ foreach (var (name, scope) in new[]
 })
     Reject(0, name, source => ChangeDefinition(source, "method1Closed", line =>
         line.Replace("Extraction.runtimeScope", System.Text.Json.JsonSerializer.Serialize(scope))));
-Reject(0, "wrong-type-argument", source => ChangeDefinition(source, "method1TypeArgumentsRaw", line => line.Replace("System.UInt64", "System.UInt32")));
-Reject(0, "wrong-closed-signature", source => ChangeDefinition(source, "method1Closed", line => line.Replace("System.UInt64", "System.UInt32")));
-Reject(7, "wrong-closed-local", source => ChangeDefinition(source, "method1Closed", line => line.Replace("locals := [.atom", "locals := [.byref (.atom").Replace("], initLocals", ")], initLocals")));
-Reject(12, "wrong-type-operand", source => ChangeDefinition(source, "method1Closed", line => line.Replace("operand := .type (.aggregate", "operand := .type (.byref (.aggregate").Replace(" 0) }", " 0)) }")));
-Reject(0, "altered-opcode", source => ChangeDefinition(source, "method1Closed", line => line.Replace("opcode := 2,", "opcode := 3,")));
-Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed", line => line.Replace("operand := .target 4", "operand := .target 3")));
-Reject(0, "wrong-managed-target", source => source.Replace(".call 1 1", ".call 0 1"));
+Reject(0, "wrong-type-argument", source => ChangeDefinition(source, "method1TypeArgumentsRaw",
+    line => line.Replace("System.UInt64", "System.UInt32")));
+Reject(0, "wrong-closed-signature", source => ChangeDefinition(source, "method1Closed",
+    line => line.Replace("System.UInt64", "System.UInt32")));
+Reject(7, "wrong-closed-local", source => ChangeDefinition(source, "method1Closed", line =>
+    line.Replace("locals := [.atom", "locals := [.byref (.atom").Replace("], initLocals", ")], initLocals")));
+Reject(12, "wrong-type-operand", source => ChangeDefinition(source, "method1Closed", line =>
+    line.Replace("operand := .type (.aggregate", "operand := .type (.byref (.aggregate").Replace(" 0) }", " 0)) }")));
+Reject(0, "altered-opcode", source => ChangeDefinition(source, "method1Closed",
+    line => line.Replace("opcode := 2,", "opcode := 3,")));
+Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed",
+    line => line.Replace("operand := .target 4", "operand := .target 3")));
+Reject(0, "wrong-managed-target", source => source.Replace(".call 1 1", ".call 0 1"), "method0_calls_validated");
 Console.WriteLine("PASS original-metadata generic substitution, complete managed-call binding and malformed evidence rejection");
-Reject(0, "omitted-method-evidence", source => ChangeDefinition(source, "methodEvidence", _ => "def methodEvidence : List Extraction.MethodEvidence := []"));
-Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "methodEvidence", line => line.Replace("method0", "swapped").Replace("method1", "method0").Replace("swapped", "method1")));
-Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1", line => line.Replace("returnsValue := true", "returnsValue := false")).Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"));
-Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32 1]"));
-Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"));
-Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"));
-Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"));
+Reject(0, "omitted-method-evidence", source => ChangeDefinition(source, "methodEvidence",
+    _ => "def methodEvidence : List Extraction.MethodEvidence := []"), null);
+Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "methodEvidence",
+    line => line.Replace("method0", "swapped").Replace("method1", "method0").Replace("swapped", "method1")), null);
+Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1",
+    line => line.Replace("returnsValue := true", "returnsValue := false"))
+        .Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"), "method1_shape_validated");
+Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32 1]"), "method1_shape_validated");
+Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"), "method1_shape_validated");
+Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"), "method1_shape_validated");
+Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"),
+    "method1_shape_validated");
 
+controls.Check(replay: false);
+rejected.Check();
 void CheckExternalIdentities()
 {
     var evidence = new ExternalIdentityEvidence();
@@ -117,6 +144,7 @@ void CheckExternalIdentities()
     var path = Path.Combine(output, "ExactExternalIdentities.lean");
     File.WriteAllText(path, baseline);
     Run(["lake", "env", "lean", path]);
+    var rejectedIdentities = new RejectedEvidence(Path.Combine(output, "IdentityMutations"));
     foreach (var (name, source) in new[]
     {
         ("changed-byte", baseline.Replace("#[83,", "#[84,", StringComparison.Ordinal)),
@@ -126,13 +154,13 @@ void CheckExternalIdentities()
     {
         if (source == baseline) throw new InvalidOperationException("Identity mutation was not applied: " + name);
         var rejectedPath = Path.Combine(output, "Identity-" + name + ".lean");
-        File.WriteAllText(rejectedPath, source);
-        var result = Execute(["lake", "env", "lean", rejectedPath]);
-        if (result.Code == 0 || !result.Output.Contains("error:", StringComparison.Ordinal) ||
-            !(result.Output.Contains("rfl", StringComparison.Ordinal) ||
-                result.Output.Contains("Type mismatch", StringComparison.Ordinal)))
-            throw new InvalidOperationException("Identity encoding checks did not reject " + name + "\n" + result.Output);
+        File.WriteAllText(rejectedPath, "import Lean\nnamespace Extracted\n" +
+            source.Replace("import Lean\n", "", StringComparison.Ordinal) + "\nend Extracted\n");
+        rejectedIdentities.Add(rejectedPath, "PASS exact identity mutation: " + name,
+            diagnostic => diagnostic.Contains("rfl", StringComparison.Ordinal) ||
+                diagnostic.Contains("Type mismatch", StringComparison.Ordinal));
     }
+    rejectedIdentities.Check();
     Console.WriteLine("PASS exact external identities: deduplication, unreachable calls, Unicode and mutations");
 }
 
@@ -198,11 +226,7 @@ void CheckExternalCallTargets()
         if (source == baseline) throw new InvalidOperationException("Call mutation was not applied: " + name);
         var rejectedPath = Path.Combine(folder, name + ".lean");
         File.WriteAllText(rejectedPath, source);
-        var result = Execute(["lake", "env", "lean", rejectedPath]);
-        if (result.Code == 0 ||
-            !result.Output.Contains("Extraction.DivisionIntrinsicsValid", StringComparison.Ordinal) ||
-            !result.Output.Contains("is false", StringComparison.Ordinal))
-            throw new InvalidOperationException("Division certificate did not reject " + name + "\n" + result.Output);
-        Console.WriteLine("PASS materialized external call rejects " + name);
+        rejected.Add(rejectedPath, "PASS materialized external call rejects " + name,
+            "Extraction.DivisionIntrinsicsValid", "is false");
     }
 }

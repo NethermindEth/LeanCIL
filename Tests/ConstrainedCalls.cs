@@ -2,14 +2,20 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
 
+using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/ConstrainedCalls");
 Directory.CreateDirectory(root);
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.ConstrainedEvidence"]);
+var evidence = new GeneratedEvidence(root);
+var rejected = new RejectedEvidence(root);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.ConstrainedEvidence");
 
 foreach (var (name, type, expected) in new[]
 {
@@ -36,19 +42,32 @@ foreach (var (name, type, expected) in new[]
               inputMemory).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
         #print axioms constrained_result
         """);
-    var result = Run(["lake", "env", "lean", proof]);
-    if (result.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted constrained proof");
-    Console.WriteLine("PASS compiled constrained call and certificate: " + name);
 
     const string call = ".call 2 1";
     if (!source.Contains(call, StringComparison.Ordinal)) throw new Exception("Missing constrained call mutation target");
     var forged = Path.Combine(root, name + "-wrong-target.lean");
-    File.WriteAllText(forged, source.Replace(call, ".call 0 1", StringComparison.Ordinal));
-    var rejected = Execute(["lake", "env", "lean", forged]);
-    if (rejected.Code == 0 || !rejected.Output.Contains("ConstrainedCallsValid", StringComparison.Ordinal))
-        throw new Exception("Forged constrained target was not rejected by its certificate: " + rejected.Output);
-    Console.WriteLine("PASS forged constrained target: " + name);
+    // Keep the exact emitted definitions and constrained obligations; unrelated certificates
+    // are covered by the complete positive extraction above, not recomputed for each mutation.
+    var obligations = Regex.Matches(source,
+        @"(?m)^theorem method\d+_constrained_validated : [^\r\n]+\r?$");
+    var methodCount = Regex.Matches(source, @"(?m)^def method\d+ : Method :=").Count;
+    if (methodCount == 0 || obligations.Count != methodCount)
+        throw new Exception("Unexpected constrained obligation count");
+    var declarations = Regex.Replace(source,
+        @"(?m)^(?:@\[[^\r\n]*\] )?theorem [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", "");
+    declarations = Regex.Replace(declarations, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+    var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Select(match =>
+        match.Value + "\n#print axioms " + Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value)) +
+        "\nend Extracted", StringComparison.Ordinal);
+    var control = Regex.Replace(narrowed, @"(?m)^import [^\r\n]+\r?\n", "");
+    File.AppendAllText(proof, "\nnamespace ConstrainedControl\n" + control + "\nend ConstrainedControl\n");
+    evidence.Add(proof, "PASS compiled constrained call, certificate and obligation eligibility: " + name);
+    File.WriteAllText(forged, narrowed.Replace(call, ".call 0 1", StringComparison.Ordinal));
+    rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
 }
+
+evidence.Check(replay: false);
+rejected.Check();
 
 foreach (var (mutation, marker) in new[]
 {
@@ -68,9 +87,9 @@ foreach (var (mutation, marker) in new[]
         else module.GetType("Examples.CounterValue").Interfaces.Clear();
         module.Write(dll);
     }
-    var rejected = Execute(["dotnet", ExtractorPath, "extract", dll,
+    var extractionRejection = Execute(["dotnet", ExtractorPath, "extract", dll,
         "ConstrainedCalls::Implicit(Examples.CounterValue&)", Path.Combine(root, "Reject-" + mutation)]);
-    if (rejected.Code == 0 || !rejected.Output.Contains(marker, StringComparison.Ordinal))
-        throw new Exception("Incorrect constrained rejection: " + mutation + "\n" + rejected.Output);
+    if (extractionRejection.Code == 0 || !extractionRejection.Output.Contains(marker, StringComparison.Ordinal))
+        throw new Exception("Incorrect constrained rejection: " + mutation + "\n" + extractionRejection.Output);
     Console.WriteLine("PASS constrained extraction rejection: " + mutation);
 }

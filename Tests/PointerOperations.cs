@@ -2,14 +2,17 @@
 #:property PublishAot=false
 #:property AllowUnsafeBlocks=true
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include GeneratedEvidence.cs
 
 using System.Reflection;
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/PointerOperations");
 Directory.CreateDirectory(root);
+var evidence = new GeneratedEvidence(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.PointerOperations")!;
-Run(["lake", "build", "CIL.Extraction.Translation", "Tests.PointerOperations"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "Tests.PointerOperations");
 var storageBytes = new byte[16];
 foreach (var name in new[]
     { "Subtract", "SubtractNative", "Difference", "Less", "Greater", "LessEqual", "GreaterEqual" })
@@ -51,9 +54,7 @@ foreach (var name in new[]
               .ok (inputMemory, [{{resultValue}}]) := rfl
         #print axioms pointer_result
         """);
-    var checkedProof = Run(["lake", "env", "lean", proof]);
-    if (checkedProof.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted pointer proof");
-    Console.WriteLine("PASS runtime, certificate and checked pointer execution: " + name);
+    evidence.Add(proof, "PASS runtime, certificate and checked pointer execution: " + name);
     if (name != "Difference") continue;
     if (!source.Contains(".sub", StringComparison.Ordinal)) throw new Exception("Missing difference mutation target");
     var forged = Path.Combine(root, "ForgedDifference.lean");
@@ -63,3 +64,5 @@ foreach (var name in new[]
         throw new Exception("Forged difference was not rejected by scalar evidence: " + rejection.Output);
     Console.WriteLine("PASS independent forged pointer difference rejection");
 }
+
+evidence.Check(replay: false);

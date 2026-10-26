@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import Std.Data.TreeMap.Lemmas
 
 /-!
 # Folded instruction sequences
@@ -189,12 +190,48 @@ private def raisedType (count : Nat) : RawInstruction → Option String
     | _, _ => none
   | _ => none
 
+/-- One beyond the largest admitted message arity; reaching it rules out a throw fold. -/
+private def throwMessageLimit : Nat := 3
+
 /-- `throw new E(...)` with only string or null arguments: the argument count and raised type. -/
 def throwFold (code : List RawInstruction) : Option (Nat × String) :=
-  let count := (code.takeWhile messageLoad).length
+  let count := ((code.take throwMessageLimit).takeWhile messageLoad).length
+  if count == throwMessageLimit then none else
   match code.drop count with
   | constructor :: ⟨_, 122, .none⟩ :: _ => (count, ·) <$> raisedType count constructor
   | _ => none
+
+/-- Admitted exception constructors never consume more than two message arguments. -/
+private theorem raisedType_large (count : Nat) (instruction : RawInstruction)
+    (large : 2 < count) : raisedType count instruction = none := by
+  have notOne : ¬ count ≤ 1 := by omega
+  have notTwo : count ≠ 2 := by omega
+  unfold raisedType
+  split <;> try rfl
+  split <;> simp_all [exceptionConstructor] <;> omega
+
+#print axioms raisedType_large
+
+/-- Bounding message-prefix inspection preserves the original unrestricted fold test. -/
+theorem throwFold_eq_takeWhile (code : List RawInstruction) :
+    throwFold code =
+      let count := (code.takeWhile messageLoad).length
+      match code.drop count with
+      | constructor :: ⟨_, 122, .none⟩ :: _ => (count, ·) <$> raisedType count constructor
+      | _ => none := by
+  unfold throwFold throwMessageLimit
+  rw [← List.take_takeWhile, List.length_take]
+  by_cases short : (code.takeWhile messageLoad).length ≤ 2
+  · have bound : min 3 (code.takeWhile messageLoad).length =
+        (code.takeWhile messageLoad).length := by omega
+    have notThree : (code.takeWhile messageLoad).length ≠ 3 := by omega
+    simp only [bound, beq_iff_eq, notThree, ↓reduceIte]
+  · have bound : min 3 (code.takeWhile messageLoad).length = 3 := by omega
+    have large : 2 < (code.takeWhile messageLoad).length := by omega
+    simp only [bound, beq_self_eq_true, ↓reduceIte]
+    split <;> simp [raisedType_large _ _ large]
+
+#print axioms throwFold_eq_takeWhile
 
 /-- An instruction's part in a folded sequence. -/
 inductive FoldRole where
@@ -231,12 +268,50 @@ def foldRolesFrom (locals : List TypeExpr) :
     | some (role :: pending) => role :: foldRolesFrom locals pending tail
     | _ => none :: foldRolesFrom locals [] tail
 
+/-- Exact counts of decoded local operands, including indexes outside the declared locals. -/
+private def localUseCounts : List RawInstruction → Std.TreeMap Nat Nat
+  | [] => ∅
+  | instruction :: rest =>
+    let counts := localUseCounts rest
+    match localIndex instruction with
+    | none => counts
+    | some index => counts.insert index (counts.getD index 0 + 1)
+
+/-- Each indexed count equals the original raw-instruction filter, even for malformed operands. -/
+private theorem localUseCounts_get (code : List RawInstruction) (index : Nat) :
+    (localUseCounts code).getD index 0 =
+      (code.filter fun instruction => localIndex instruction == some index).length := by
+  induction code with
+  | nil => simp [localUseCounts]
+  | cons instruction rest ih =>
+    cases decoded : localIndex instruction with
+    | none => simp [localUseCounts, decoded, ih]
+    | some decodedIndex =>
+      simp only [localUseCounts, decoded, Std.TreeMap.getD_insert, Nat.compare_eq_eq]
+      by_cases same : decodedIndex = index
+      · simp [same, decoded, ih]
+      · simp [same, decoded, ih]
+
+#print axioms localUseCounts_get
+
 /-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
+  if locals.isEmpty then foldRolesFrom [] [] code else
+  let counts := localUseCounts code
   let singleUse := locals.zipIdx.map fun (type, index) =>
-    if (code.filter fun instruction => localIndex instruction == some index).length == 2
-      then type else .void
+    if counts.getD index 0 == 2 then type else .void
   foldRolesFrom singleUse [] code
+
+/-- Indexed role discovery agrees with filtering the whole body separately for each local. -/
+theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction) :
+    foldRoles locals code = foldRolesFrom
+      (locals.zipIdx.map fun (type, index) =>
+        if (code.filter fun instruction => localIndex instruction == some index).length == 2
+          then type else .void) [] code := by
+  cases locals <;> simp only [foldRoles, List.isEmpty_nil, List.isEmpty_cons,
+    Bool.false_eq_true, ↓reduceIte, List.zipIdx_nil, List.map_nil, localUseCounts_get]
+
+#print axioms foldRoles_eq_filter
 
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
 def foldEntry (role : Option (Option FoldRole)) : Bool :=

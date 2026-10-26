@@ -1,11 +1,14 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include GeneratedEvidence.cs
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/MemorySpans");
 Directory.CreateDirectory(root);
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution"]);
+var evidence = new GeneratedEvidence(root);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution");
 
 foreach (var (name, signature, arguments, expected) in new[]
 {
@@ -37,9 +40,7 @@ foreach (var (name, signature, arguments, expected) in new[]
               .ok [.scalar (.i32 {{expected}})] := rfl
         #print axioms compiled_span_result
         """);
-    var result = Run(["lake", "env", "lean", proof]);
-    if (result.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted span proof");
-    Console.WriteLine("PASS compiled span certificate and execution: " + name);
+    evidence.Add(proof, "PASS compiled span certificate and execution: " + name);
 }
 
 var original = File.ReadAllText(Path.Combine(root, "SliceRead", "Extracted.lean"));
@@ -66,7 +67,7 @@ foreach (var (name, before, after) in new[]
     Console.WriteLine("PASS independent span evidence rejection: " + name);
 }
 
-Run(["lake", "build", "CIL.Safety.MethodContract", "CIL.Safety.BufferContents"]);
+RequireLeanFixtures("CIL.Safety.MethodContract", "CIL.Safety.BufferContents");
 foreach (var (method, proof) in new[]
 {
     ("SliceRead", "Tests/MemorySpanContracts.lean"),
@@ -93,3 +94,5 @@ foreach (var (signature, marker) in new[]
         throw new Exception("Incorrect unsupported span signature rejection: " + signature + "\n" + result.Output);
     Console.WriteLine("PASS unsupported span signature: " + signature);
 }
+
+evidence.Check(replay: false);

@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
+#:include PreparedLeanFixtures.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -11,10 +13,11 @@ using Mono.Cecil.Cil;
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/StaticValues");
+var pending = new GeneratedQueue(verification, assembly);
 Directory.CreateDirectory(root);
 const string word = "Examples.Word256";
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType(word)!;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
 string[] Extract(string dll, string selector, string output, bool assume = true) =>
     ["dotnet", ExtractorPath, "extract", dll, selector, output, .. assume ? new[] { "--assume-initialized", word } : []];
@@ -27,31 +30,44 @@ ulong[] Limbs(string field)
 string Claim(string method, ulong[] limbs) =>
     $"∃ bytes, (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.aggregate bytes)] ∧\n" +
     $"  (List.range 4).map (fun i => CIL.Safety.byteNumber ((bytes.drop (8 * i)).take 8)) = [{string.Join(", ", limbs)}]";
-JsonElement Prove(string dll, string selector, string folder, string claim)
+void Prove(string dll, string selector, string folder, string claim, Action<JsonElement> passed)
 {
     var output = Path.Combine(root, folder);
-    Run(Extract(dll, selector, output));
     var proof = Path.Combine(root, folder + ".lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
         claim + " :=\n  ⟨_, rfl, by decide⟩\nend ExampleProof\n");
-    var verified = Run(["dotnet", ExtractorPath, "verify", output, "--proof", proof]);
-    if (!verified.Contains($"Caller assumption: {word} initialization completed successfully before invocation."))
-        throw new InvalidOperationException("Verification omitted the initialization assumption:\n" + verified);
-    return JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+    void Report()
+    {
+        var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+        if (!report.GetProperty("initializedTypes").EnumerateArray().Select(item => item.GetString())
+            .SequenceEqual(new[] { word }))
+            throw new InvalidOperationException("Verification omitted the initialization assumption");
+        passed(report);
+    }
+    if (folder == "One")
+    {
+        Run(Extract(dll, selector, output));
+        var verified = Run(["dotnet", ExtractorPath, "verify", output, "--proof", proof]);
+        if (!verified.Contains($"Caller assumption: {word} initialization completed successfully before invocation."))
+            throw new InvalidOperationException("Verification omitted the initialization assumption:\n" + verified);
+        Report();
+    }
+    else pending.Add(new(selector, proof, output, Assembly: dll, InitializedTypes: [word]), Report);
 }
 
 // Limbs agree with the values .NET's static constructor stored.
 foreach (var (method, field) in new[] { ("One", "One"), ("Zero", "Zero"), ("Min", "MinValue") })
 {
-    var report = Prove(assembly, $"StaticValues::{method}()", method, Claim(method, Limbs(field)));
-    if (report.GetProperty("staticValues").EnumerateArray().Single().GetString() != $"{word} {word}::{field}")
-        throw new InvalidOperationException("Verification report omitted the static value assumption for " + field);
-    Console.WriteLine($"PASS {field}: limbs {string.Join(", ", Limbs(field))} from the static constructor");
+    Prove(assembly, $"StaticValues::{method}()", method, Claim(method, Limbs(field)), report =>
+    {
+        if (report.GetProperty("staticValues").EnumerateArray().Single().GetString() != $"{word} {word}::{field}")
+            throw new InvalidOperationException("Verification report omitted the static value assumption for " + field);
+        Console.WriteLine($"PASS {field}: limbs {string.Join(", ", Limbs(field))} from the static constructor");
+    });
 }
 
 // ExpMod's shape: a loaded value stored through an out parameter.
 var select = Path.Combine(root, "Select");
-Run(Extract(assembly, "StaticValues::Select(bool,Examples.Word256&)", select));
 var selectProof = Path.Combine(root, "Select.lean");
 File.WriteAllText(selectProof, """
     import Extracted
@@ -71,8 +87,8 @@ File.WriteAllText(selectProof, """
       decide +kernel
     end ExampleProof
     """);
-Run(["dotnet", ExtractorPath, "verify", select, "--proof", selectProof]);
-Console.WriteLine("PASS loaded One and Zero stored through an out parameter");
+pending.Add(new("StaticValues::Select(bool,Examples.Word256&)", selectProof, select, InitializedTypes: [word]),
+    () => Console.WriteLine("PASS loaded One and Zero stored through an out parameter"));
 
 // The proved value comes from the static constructor's IL: changing its argument changes the theorem.
 var changed = Path.Combine(root, "Changed", "Examples.dll");
@@ -86,8 +102,9 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     constant.OpCode = OpCodes.Ldc_I4_7;
     module.Write(changed);
 }
-Prove(changed, "StaticValues::One()", "Changed", Claim("One", [7, 0, 0, 0]));
-Console.WriteLine("PASS changed static constructor argument changes the proved limbs");
+Prove(changed, "StaticValues::One()", "Changed", Claim("One", [7, 0, 0, 0]),
+    _ => Console.WriteLine("PASS changed static constructor argument changes the proved limbs"));
+pending.Flush();
 
 // The certificate recomputes the initializer: forged bytes in the extracted program fail translation_valid.
 var source = File.ReadAllText(Path.Combine(root, "One", "Extracted.lean"));

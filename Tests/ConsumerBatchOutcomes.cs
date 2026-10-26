@@ -12,6 +12,8 @@ partial class Program
         var forgedProof = Path.Combine(root, "ProofForged.lean");
         var axiomatic = Path.Combine(root, "Client", "Axiomatic.lean");
         var axiomProof = Path.Combine(root, "ProofAxiom.lean");
+        var missingProof = Path.Combine(root, "ProofMissingSibling.lean");
+        var hiddenProof = Path.Combine(root, "ProofHiddenSibling.lean");
         var directory = Path.Combine(Path.GetDirectoryName(batchB)!, "OutcomeChecks-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var trace = ConsumerTraceDirectory.Create(directory, "Trace");
@@ -34,6 +36,7 @@ partial class Program
                 import Extracted
                 import CIL.Semantics
                 namespace Client.Axiomatic
+                axiom hidden : False
                 axiom execution (x y : CIL.W64) (memory : CIL.Memory) :
                     CIL.invoke Extracted.program 4 0 [.i64 x, .i64 y] memory =
                       some (memory, [.i64 (x + y)])
@@ -42,11 +45,28 @@ partial class Program
             File.WriteAllText(axiomProof, File.ReadAllText(proof)
                 .Replace("import Client.Shared", "import Client.Axiomatic")
                 .Replace("Client.execution", "Client.Axiomatic.execution"));
+            File.WriteAllText(missingProof,
+                "import Extracted\ntheorem MissingSibling.other : True := True.intro\n");
+            File.WriteAllText(hiddenProof, """
+                import Lean
+                import Extracted
+                set_option debug.skipKernelTC true
+                run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+                  name := `HiddenSibling.false
+                  levelParams := []
+                  type := Lean.mkConst ``False
+                  value := Lean.mkConst `Client.Axiomatic.hidden
+                })
+                """);
             var axiomOutput = Path.Combine(Path.GetDirectoryName(batchB)!, "Axiom-" + Guid.NewGuid().ToString("N"));
             var forgedOutput = Path.Combine(Path.GetDirectoryName(batchB)!, "Forged-" + Guid.NewGuid().ToString("N"));
-            CopyTree(batchB, axiomOutput);
-            CopyTree(batchB, forgedOutput);
-            foreach (var output in new[] { axiomOutput, forgedOutput, batchC })
+            var missingOutput = Path.Combine(Path.GetDirectoryName(batchB)!,
+                "MissingSibling-" + Guid.NewGuid().ToString("N"));
+            var hiddenOutput = Path.Combine(Path.GetDirectoryName(batchB)!,
+                "HiddenSibling-" + Guid.NewGuid().ToString("N"));
+            foreach (var output in new[] { axiomOutput, forgedOutput, missingOutput, hiddenOutput })
+                CopyTree(batchB, output);
+            foreach (var output in new[] { axiomOutput, forgedOutput, missingOutput, hiddenOutput, batchC })
                 File.WriteAllText(Path.Combine(output, "verified.json"), "{}");
             object Request(string output, string selectedProof, string theorem = "ExampleProof.correctness",
                 string expect = "verified") => new { output, proof = selectedProof, theorem, expect };
@@ -56,14 +76,16 @@ partial class Program
                 Request(batchA, proof, expect: "rejected"), Request(batchA, proof),
                 Request(batchB, forgedProof), Request(batchB, proof),
                 Request(batchB, alternate, "AlternateProof.correctness"), Request(batchC, proof),
-                Request(batchC, proof, expect: "rejected")
+                Request(batchC, proof, expect: "rejected"),
+                Request(missingOutput, missingProof, "AlternateProof.correctness"),
+                Request(hiddenOutput, hiddenProof, "HiddenSibling.false")
             ];
             Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
             Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
             var timer = Stopwatch.StartNew();
             var statuses = new List<string>();
             var diagnostics = new List<string>();
-            // Baseline reproduces the two standalone checks and the original seven-request batch.
+            // The comparison isolates the first two checks while preserving all batch outcomes.
             var groups = separate ? new[] { requests[..1], requests[1..2], requests[2..] } : [requests];
             foreach (var group in groups)
             {
@@ -82,13 +104,15 @@ partial class Program
             timer.Stop();
             string[] expected = ["failed/theorem audit", "failed/kernel replay", "failed/proof checking",
                 "verified/extraction integrity", "failed/kernel replay", "verified/extraction integrity",
-                "verified/extraction integrity", "failed/proof checking", "rejected/proof checking"];
+                "verified/extraction integrity", "failed/proof checking", "rejected/proof checking",
+                "failed/theorem audit", "failed/kernel replay"];
             var text = string.Join('\n', diagnostics);
             if (!statuses.SequenceEqual(expected) || !text.Contains("Unapproved proof axioms") ||
                 !text.Contains("Client.Axiomatic.execution") || !text.Contains("Client.Batch.forged") ||
-                !text.Contains("while replaying declaration") ||
-                !text.Contains(separate ? "Batch: 4 passed, 3 failed of 7 requests." :
-                    "Batch: 4 passed, 5 failed of 9 requests."))
+                !text.Contains("while replaying declaration") || !text.Contains("Expected a theorem") ||
+                !text.Contains("HiddenSibling.false") || !text.Contains("Client.Axiomatic.hidden") ||
+                !text.Contains(separate ? "Batch: 4 passed, 5 failed of 9 requests." :
+                    "Batch: 4 passed, 7 failed of 11 requests."))
                 throw new InvalidOperationException(
                     "Unexpected batch outcomes: " + string.Join(", ", statuses) + "\n" + text);
             CheckConsumerLeanSummary(text, "Client/Shared.lean:", "(building Client.Shared)");
@@ -99,7 +123,7 @@ partial class Program
             if (certificateA.GetProperty("initializedTypes")[0].GetString() != "Examples.InitializedTypes" ||
                 certificateB.GetProperty("theorem").GetString() != "AlternateProof.correctness" ||
                 !certificateB.GetProperty("inputs").TryGetProperty("proof:" + alternate, out _) ||
-                new[] { axiomOutput, forgedOutput, batchC }.Any(output =>
+                new[] { axiomOutput, forgedOutput, missingOutput, hiddenOutput, batchC }.Any(output =>
                     File.Exists(Path.Combine(output, "verified.json"))))
                 throw new InvalidOperationException(
                     "Batch certificates were not bound per request or a stale certificate survived.");
@@ -125,13 +149,15 @@ partial class Program
                 JsonSerializer.Serialize(measurements, Json));
             Console.WriteLine(JsonSerializer.Serialize(measurements));
             Console.WriteLine("PASS imported axiom and unchecked declarations rejected without certificates");
+            Console.WriteLine("PASS missing sibling theorem and hidden sibling axiom retain independent failures");
             Console.WriteLine("PASS batch requests keep independent outcomes, certificates and expected rejections");
         }
         finally
         {
             Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", savedTrace);
             Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedCache);
-            foreach (var path in new[] { forged, forgedProof, axiomatic, axiomProof }) File.Delete(path);
+            foreach (var path in new[] { forged, forgedProof, axiomatic, axiomProof, missingProof, hiddenProof })
+                File.Delete(path);
         }
     }
 

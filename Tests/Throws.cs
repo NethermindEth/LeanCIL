@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include RejectedEvidence.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -13,9 +15,10 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Throws");
 Directory.CreateDirectory(root);
+var rejected = new RejectedEvidence(root);
 var queue = new GeneratedQueue(verification, assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Throws")!;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
 // Every fault is located at the folded `throw` and names the type .NET raises.
 foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
@@ -50,13 +53,12 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var forged = source.Replace($".throw \"{label}\"", ".throw \"System.InvalidOperationException\"");
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, forged);
-    var result = Execute(["lake", "env", "lean", mutated]);
-    if (result.Code == 0 || !result.Output.Contains($"Extraction.FeatureFlowValid method{method}Closed") || !result.Output.Contains("is false"))
-        throw new InvalidOperationException($"Forged raised type was accepted for {name}\n{result.Output}");
-    Console.WriteLine($"PASS {name}: forged raised type rejected by the feature certificate");
+    rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
+        $"Extraction.FeatureFlowValid method{method}Closed", "is false");
 }
 
 queue.Flush();
+rejected.Check();
 
 // Anything other than the exact encoding without handlers stays unsupported.
 foreach (var (mutation, marker) in new[]

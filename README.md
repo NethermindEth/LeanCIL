@@ -38,11 +38,15 @@ See [contract composition](docs/PROOFS.md) for explicit and automatic call proof
 
 Feature and division getter recognition use exact byte comparisons with kernel-checked
 equivalence to their original signature rules. This reduces certificate replay work while
-preserving metadata rejection. Managed-call certificates use structural equality proofs for
+preserving metadata rejection. Feature-flow checks share an indexed classification of local
+types and address exclusions, proved equivalent to the original metadata scans.
+Managed-call certificates use structural equality proofs for
 matching metadata, reducing repeated string comparisons during replay. Primitive metadata also
 shares the exact runtime assembly identity. Reachable external calls reuse their complete
 identities as checked UTF-8 byte constants, avoiding repeated decoding in the kernel. See
 [certificate validation](docs/PROOFS.md).
+Fold discovery indexes local-use counts once and bounds exception-message prefix scans;
+both changes have exact equivalence proofs to the original checks.
 
 Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.402**. The extractor uses Mono.Cecil; the F# examples also use FSharp.Core. Both packages are pinned in `Directory.Packages.props`. Lean uses Std and Lean, without Mathlib.
 
@@ -54,7 +58,9 @@ dotnet run --file scripts/Test.cs
 The scripts are [.NET file-based apps](https://learn.microsoft.com/en-us/dotnet/core/sdk/file-based-apps), with shared C# logic included directly. No scripting runtime is needed beyond .NET.
 
 Positive array, layout, parameter, generic and static-value evidence shares Lean imports in
-generated batches, with independent kernel replay. Rejection fixtures retain separate checks.
+generated batches, with independent kernel replay. Rejection batches restore Lean's environment
+after each case and require that case's own expected diagnostics. The evidence suite compiles its
+regression modules directly against the certified library, avoiding another CIL build.
 See [validation coverage](docs/VALIDATION.md) for reproducible measurements.
 
 Core consumer tests batch fixed rejection cases to reuse certified-library setup while keeping
@@ -115,6 +121,11 @@ Verified: ExampleProof.correctness
 ```
 
 Every invocation validates the request's identity and required proof evidence. Authenticated caches can reuse unchanged certified builds; source/hash checks, audits and required kernel replay still apply. Use `--fresh` to disable local verification reuse. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
+
+Eligible standalone proofs, generated batches and consumer groups audit the environment returned
+by kernel replay, avoiding a second import. Consumer groups retain each request's theorem and
+dependency scope. Duplicate declarations and audits requiring source locations or module metadata
+retain the separate audit path; theorem and artifact checks still apply.
 
 List the methods of an assembly with `leancil list`, and check that generated files still match
 the assembly and extraction settings without running Lean with `leancil check`:
@@ -326,10 +337,14 @@ static-value assumptions are not supported in this mode. See
 required producer evidence.
 Full verification checks caller and imported proofs again even when ordinary
 verification has already cached successful results.
+Transferred proofs share repeated expression nodes in a compact data table; reconstruction
+still kernel-checks every declaration and independently replays the compiled result.
 An `export-contracts` manifest can list several profile artifacts for one method and one
 family theorem. Each extraction is checked independently, with kernel-checked flag agreement
 and exact equality to the reprofiled reference program. See the
 [profile-family manifest example](docs/PROOFS.md) for the same-flag transport requirements.
+Compatible exports share their source snapshot and reusable compilation work; each export
+retains its own theorem, contract closure, replay and publication checks.
 
 The [proof-writing guide](docs/PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter

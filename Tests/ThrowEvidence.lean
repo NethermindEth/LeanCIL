@@ -2,10 +2,13 @@ import CIL.Extraction.Features
 
 set_option maxRecDepth 4096
 
+/-! Certificate regression fixtures, evaluated against the checked CIL extraction model. -/
+
 namespace Tests.ThrowEvidence
 open CIL CIL.Extraction
 
-private def runtime := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+/-- The primitive assembly identity with its checked byte representation. -/
+private def runtime := runtimeScope
 private def owner := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 private def intType : TypeExpr := .atom runtime "System.Int32"
 
@@ -34,6 +37,19 @@ example : foldRoles [] [i 20, i 114 (.text "zero"), i 115 argument, i 122] =
 example : throwFold [i 115 argument, i 122] = none := by decide
 example : throwFold [i 115 (ctor owner "Fixture.Failure" 0), i 122] = none := by decide
 example : throwFold [i 115 divide, i 38, i 122] = none := by decide
+
+/-- Rejecting an oversized message prefix still discovers an admitted fold in its suffix. -/
+theorem long_prefix_suffix :
+    foldRoles [] ([i 20, i 20, i 20] ++
+      [i 115 (ctor runtime "System.ArgumentException" 2), i 122]) =
+      [none, some .head, some .interior, some .interior,
+        some (.raise "System.ArgumentException")] := by decide +kernel
+#print axioms long_prefix_suffix
+
+/-- A long message-only body never invents a constructor or throw. -/
+theorem message_only_body : foldRoles [] (List.replicate 128 (i 20)) =
+    List.replicate 128 none := by decide +kernel
+#print axioms message_only_body
 
 theorem rejects_non_exception : throwFold [i 115 (ctor runtime "System.Object" 0), i 122] = none := by decide
 #print axioms rejects_non_exception

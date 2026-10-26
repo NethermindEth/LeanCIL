@@ -67,8 +67,6 @@ foreach (var name in new[] { "Add", "Minimum", "Calls", "Mutate", "Store" })
     });
 }
 
-queue.Flush();
-
 // The same language-independent contracts apply to C# and F# assemblies.
 foreach (var (selector, contract, name) in new[]
 {
@@ -76,7 +74,10 @@ foreach (var (selector, contract, name) in new[]
     ("Arithmetic::Store(ulong&,ulong)", "InstanceWriteRead", "UniversalStore"),
     ("Arithmetic::Construct(ulong)", "ConstructorValue", "UniversalConstructor")
 })
-    verification.Verify(assembly, "Examples.FSharp", selector, At($"Examples/Proofs/{contract}.lean"), Path.Combine(root, name));
+    queue.Add(new(selector, At($"Examples/Proofs/{contract}.lean"), Path.Combine(root, name)),
+        () => Console.WriteLine($"PASS F# {name}: unchanged contract"));
+
+queue.Flush();
 
 var wrongOutput = Path.Combine(root, "WrongAddition");
 var failed = false;

@@ -59,7 +59,30 @@ void Save(bool bind = true, bool updatePin = true)
 
 using Program interfaceVerification = new();
 string interfaceLibrary = interfaceVerification.Library(Inputs(At("CIL.lean")));
-Run(["lake", "build", "Tests.ContractClosure"], streamOutput: true, progress: "Canonical contract closure tests");
+string headerMarker = Path.Combine(directory, "header-command-executed");
+File.Delete(headerMarker);
+var headerSources = new SortedDictionary<string, string>(StringComparer.Ordinal)
+{
+    ["Comments"] = "/- outer /- nested -/ -/ import Alpha\n-- comment\nimport Beta.Gamma\n",
+    ["Module"] = "module\npublic import Alpha\npublic meta import Beta.Gamma\nimport all Private\n",
+    ["Prelude"] = "prelude\nimport Alpha\n",
+    ["Source"] = "import Lean\nrun_cmd Lean.Elab.Command.liftIO <| IO.FS.writeFile " +
+        JsonSerializer.Serialize(headerMarker) + " \"executed\"\n"
+};
+var parsedHeaders = interfaceVerification.ContractModuleImports(directory, headerSources);
+if (!parsedHeaders["Comments"].SequenceEqual(["Alpha", "Beta.Gamma"]) ||
+    !parsedHeaders["Module"].SequenceEqual(["Alpha", "Beta.Gamma", "Private"]) ||
+    !parsedHeaders["Prelude"].SequenceEqual(["Alpha"]) ||
+    !parsedHeaders["Source"].SequenceEqual(["Lean"]) || File.Exists(headerMarker))
+    throw new InvalidOperationException("Contract header parsing changed imports or executed source commands.");
+Exception? malformedHeader = null;
+try { interfaceVerification.ContractModuleImports(directory, new() { ["Invalid"] = "import\n" }); }
+catch (InvalidOperationException error) { malformedHeader = error; }
+if (malformedHeader is null || !malformedHeader.Message.Contains("Invalid contract interface import header"))
+    throw new InvalidOperationException("Malformed contract header was not rejected by Lean's parser.");
+Run([interfaceVerification.LeanExecutable, At("Tests/ContractClosure.lean")],
+    leanPath: Path.Combine(interfaceLibrary, ".lake/build/lib/lean"),
+    streamOutput: true, progress: "Canonical contract closure tests");
 string interfaceProbe = Path.Combine(directory, "interface-probe");
 Directory.CreateDirectory(interfaceProbe);
 string interfaceSource = File.ReadAllText(Path.Combine(fixture, "ImportFixture.lean"));
@@ -110,6 +133,68 @@ void MutateLibrary(Action<ModuleDefinition> mutation)
     contract["implementationSha256"] = expectedHash;
     contract["certifications"]![0]!["implementationSha256"] = expectedHash;
     Save();
+}
+
+void CheckInterfaceReuse()
+{
+    Reset();
+    contract["exports"]![0]!["profiles"]!.AsArray().Add("x64-v3");
+    JsonObject certification = contract["certifications"]![0]!.DeepClone().AsObject();
+    certification["profile"] = "x64-v3";
+    contract["certifications"]!.AsArray().Add(certification);
+    Save();
+    string reuseRoot = Path.Combine(directory, "interface-reuse-" + Guid.NewGuid().ToString("N"));
+    string reusePackage = Path.Combine(reuseRoot, "Package");
+    Directory.CreateDirectory(reusePackage);
+    File.Copy(At("lean-toolchain"), Path.Combine(reusePackage, "lean-toolchain"));
+    string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
+    File.WriteAllText(Path.Combine(reusePackage, "lakefile.toml"),
+        "name = \"interface_reuse\"\n[[require]]\nname = \"leancil\"\ngit = " +
+        JsonSerializer.Serialize(Root.Replace('\\', '/')) + "\nrev = " + JsonSerializer.Serialize(revision) + "\n");
+    Run(["lake", "update"], reusePackage);
+    string proof = Path.Combine(reusePackage, "Proof.lean");
+    File.Copy(Path.Combine(fixture, "Caller.lean"), proof);
+    var requests = new[] { "scalar", "x64-v3" }.Select(profile =>
+    {
+        string extraction = Path.Combine(reuseRoot, profile);
+        string[] command = Command(extra: [profile]);
+        command[5] = extraction;
+        Run(command);
+        return new { output = extraction, proof, theorem = "ExampleProof.correctness" };
+    }).ToArray();
+    string manifest = Path.Combine(reuseRoot, "batch.json");
+    File.WriteAllText(manifest, JsonSerializer.Serialize(new { schema = 1, proofRoot = reusePackage, requests }));
+    string trace = Path.Combine(reuseRoot, "trace");
+    string? priorTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+        Run([.. cli, "verify-batch", manifest, "--fresh"]);
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", priorTrace); }
+    JsonElement[] records = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+    string Transcript(JsonElement record) => File.ReadAllText(Path.Combine(trace,
+        record.GetProperty("transcript").GetString()!));
+    JsonElement[] builds = records.Where(record => record.GetProperty("stage").GetString() ==
+        "Compiling published contract interfaces").ToArray();
+    int compiled = builds.Sum(record => System.Text.RegularExpressions.Regex.Matches(Transcript(record),
+        @"\bBuilt " + interfaceModule + @"(?:\s|$)").Count);
+    int replayed = records.Where(record => record.GetProperty("exitCode").GetInt32() == 0 &&
+            record.GetProperty("stage").GetString()!.Contains("kernel replay", StringComparison.OrdinalIgnoreCase))
+        .SelectMany(record => Transcript(record).Split('\n').Where(line => line.StartsWith('{')))
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+        .Count(record => record.TryGetProperty("module", out JsonElement module) && module.GetString() == interfaceModule);
+    if (builds.Length != 2 || compiled != 1 || replayed < 2)
+        throw new InvalidOperationException($"Interface reuse mismatch: {builds.Length} checks, {compiled} builds, {replayed} replays.");
+    Console.WriteLine("PASS identical published interfaces compile once across fresh extraction groups and replay independently");
+    Reset();
+}
+
+if (args.Contains("--interface-reuse-only", StringComparer.Ordinal))
+{
+    CheckInterfaceReuse();
+    return;
 }
 
 Reset();
@@ -178,8 +263,13 @@ if (stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argume
         argument.GetString()!.StartsWith(deletedProofs, StringComparison.Ordinal))) ||
     stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "extract")))
     throw new InvalidOperationException("Fresh caller verification obtained library implementation proofs or extracted Lib.");
-if (!stages.Any(stage => stage.GetProperty("stage").GetString()!.Contains("Kernel replay", StringComparison.Ordinal) &&
-    stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == interfaceModule)))
+if (!stages.Where(stage => stage.GetProperty("exitCode").GetInt32() == 0 &&
+        stage.GetProperty("stage").GetString()!.Contains("Kernel replay", StringComparison.Ordinal))
+    .SelectMany(stage => File.ReadLines(Path.Combine(trace, stage.GetProperty("transcript").GetString()!)))
+    .Where(line => line.StartsWith('{'))
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+    .Any(record => record.TryGetProperty("module", out JsonElement module) &&
+        module.GetString() == interfaceModule))
     throw new InvalidOperationException("Fresh caller verification did not independently replay the published interface declarations.");
 if (!verified.Contains("Conditional verification: assumes _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
@@ -827,3 +917,4 @@ try
 }
 finally { Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedReferenceCache); }
 Console.WriteLine("PASS reference-only authoring disables success receipts only for its own request");
+CheckInterfaceReuse();

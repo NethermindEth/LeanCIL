@@ -1,12 +1,18 @@
 import Lean
 import CIL.Interface.Closure
+import CIL.Replay
+import CIL.Interface.Headers
 
 /-!
 # Olean audit
 
 `leancil-audit REQUEST RESULT` audits compiled `.olean` files without elaborating any source.
+`--headers INPUT` parses source import headers without elaboration or executing source commands.
 `--imports INPUT OUTPUT` reads compiled import headers; `--fingerprints INPUT` writes portable
 module parts with only persisted linter diagnostics removed. Neither mode loads extensions.
+`--replay INPUT` kernel-checks an exact JSON array of target modules against shared imports.
+An audit request with `replayTargets` checks those modules first and reuses their checked kernel
+environment when declaration names are unique and the audit needs no target module metadata.
 
 It imports `modules` with `loadExts := false`, so no imported environment extension, attribute,
 elaborator, notation or `initialize` runs; only constant declarations are read. The toolchain's
@@ -15,12 +21,15 @@ library precedes `LEAN_PATH`, so a user module cannot shadow `Init`, `Std` or `L
 REQUEST (JSON):
   { "modules":   ["Proof", ...],
     "theorems":  [{ "name": N, "type": E?, "levelParams": [u, ...]?, "axioms": [N, ...],
-                    "statement": bool?, "refutation": bool? }],
+                    "statement": bool?, "refutation": bool?, "allowedModules": [M, ...]? }],
     "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
-    "interfaces": [M, ...]?, "closures": [{ "name": N }]?,
+    "interfaces": [M, ...]?, "closures": [{ "name": N }]?, "replayTargets": [M, ...]?,
     "namespaces": { "prefixes": [P, ...], "axioms": [N, ...] }? }
 A theorem must be a `theorem` whose type matches `E` (when given) and whose axiom closure is
-in `axioms`. A constant must be a definition whose value (and type) match. Every declaration
+in `axioms`. An `allowedModules` scope requires its declaring module and every reachable
+replay-target declaration's module to belong to that set;
+scoped replay rejects duplicate declarations instead of selecting another proof's body.
+A constant must be a definition whose value (and type) match. Every declaration
 of the `interfaces` modules must pass `CIL.Interface.validateInterfaceDeclarations`, and each
 `closures` entry reports `CIL.Interface.contractClosure`: its contract kind and canonical
 closure. `namespaces` audits every `theorem` that one of `modules` declares under a namespace
@@ -116,26 +125,30 @@ def parts : ConstantInfo → Array Expr
   | .inductInfo v => #[v.type] ++ v.ctors.toArray.map (Expr.const · [])
   | .quotInfo v => #[v.type]
 
-/-- Axioms reachable from any of `roots`, in one walk that shares visited declarations; olean
-    axiom summaries are ignored. -/
-def axiomClosureOf (env : Kernel.Environment) (roots : Array Name) : Array Name := Id.run do
+/-- Reachable axioms and the first declaration outside `visible`, sharing one dependency walk.
+Persisted olean axiom summaries are ignored. -/
+def axiomClosureOf (env : Kernel.Environment) (roots : Array Name)
+    (visible : Name → Bool := fun _ => true) : Array Name × Option Name := Id.run do
   let mut seen : Std.HashSet Name := {}
   let mut pending := roots
   let mut axioms : NameSet := {}
+  let mut invisible := none
   while h : pending.size > 0 do
     let c := pending[pending.size - 1]
     pending := pending.pop
     if seen.contains c then continue
     seen := seen.insert c
+    if invisible.isNone && !visible c then invisible := some c
     let some info := env.find? c | continue
     if info matches .axiomInfo _ then axioms := axioms.insert c
     for e in parts info do
       for d in e.getUsedConstants do
         unless seen.contains d do pending := pending.push d
-  return axioms.toArray.qsort Name.lt
+  return (axioms.toArray.qsort Name.lt, invisible)
 
 /-- Axioms reachable from `root`, walking kernel declarations only. -/
-def axiomClosure (env : Kernel.Environment) (root : Name) : Array Name := axiomClosureOf env #[root]
+def axiomClosure (env : Kernel.Environment) (root : Name) : Array Name :=
+  (axiomClosureOf env #[root]).1
 
 /-- `e` with every metadata node removed, so comparison sees only kernel structure. -/
 partial def stripMData (e : Expr) : Expr := e.replace fun
@@ -183,16 +196,26 @@ def checkAxioms (allowed : Array Name) (found : Array Name) : Option String :=
   if bad.isEmpty then none
   else some s!"Unapproved proof axioms: {", ".intercalate (bad.toList.map toString)}"
 
-/-- Audits one `theorems` entry: kind, level parameters and type, and axiom closure. -/
-def theorem? (env : Environment) (req : Json) : IO Json := do
+/-- Audits one theorem's kind, owner scope, level parameters, type and axiom closure. -/
+def theorem? (env : Environment) (req : Json)
+    (ownerOf : Name → Option Name) (replayed : NameSet) : IO Json := do
   let thm := name (← IO.ofExcept (req.getObjValAs? String "name"))
   let kernel := env.toKernelEnv
   let result (fields : List (String × Json)) :=
     Json.mkObj ([("name", toJson thm.toString)] ++ fields)
   let some (.thmInfo info) := kernel.find? thm
     | return result [("error", toJson "Expected a theorem")]
+  let allowed := (names req "allowedModules").foldl (·.insert ·) ({} : NameSet)
+  if (req.getObjVal? "allowedModules").isOk then
+    unless (ownerOf thm).any allowed.contains do
+      return result [("error", toJson s!"Theorem is outside its request's import closure: {thm}")]
   let type := stripMData info.type
-  let found := axiomClosure kernel thm
+  let visible := fun constant => !(req.getObjVal? "allowedModules").isOk ||
+    (ownerOf constant).all (fun owner => !replayed.contains owner || allowed.contains owner)
+  let (found, invisible) := axiomClosureOf kernel #[thm] visible
+  if let some constant := invisible then
+    return result [("error", toJson
+      s!"Theorem dependency is outside its request's import closure: {constant}")]
   let mut fields := [("axioms", toJson (found.map toString))]
   if req.getObjValAs? Bool "statement" matches .ok true then
     fields := fields ++ [("statement", toJson (← statement env thm info.type))]
@@ -276,7 +299,7 @@ def namespaces (env : Environment) (modules : Array Name) (req : Json) : IO Json
       -- Nested prefixes each count the theorem, so neither reports zero.
       for p in matching do perPrefix := perPrefix.insert p (perPrefix.getD p 0 + 1)
     perModule := perModule.push (m.toString, toJson count)
-  let found := axiomClosureOf kernel roots
+  let found := (axiomClosureOf kernel roots).1
   -- Attribution walks each theorem again, so it runs only when the shared closure is rejected.
   let rejected := if (checkAxioms allowed found).isNone then #[] else
     roots.filterMap fun c =>
@@ -330,12 +353,52 @@ unsafe def writeFingerprints (input : String) : IO Unit := do
     let regions ← fingerprintModule name sources destinations
     for region in regions.reverse do region.free
 
+/-- Whether an audit needs target metadata absent from a freshly replayed kernel environment. -/
+def needsTargetMetadata (env : Kernel.Environment) (req : Json) : Bool := Id.run do
+  if !(names req "interfaces").isEmpty ||
+      !((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).isEmpty ||
+      (req.getObjVal? "namespaces").isOk then return true
+  for entry in (req.getObjValAs? (Array Json) "theorems").toOption.getD #[] do
+    if entry.getObjValAs? Bool "refutation" matches .ok true then
+      let some thm := (entry.getObjValAs? String "name").toOption | return true
+      if let some (.thmInfo info) := env.find? (name thm) then
+        if let .app (.const `Not _) claim := stripMData info.type then
+          if let .const contract _ := claim.getAppFn then
+            if contracts.contains contract then return true
+  return false
+
+/-- Audits a supplied immutable environment and records the exact resolved module paths. -/
+unsafe def writeAudit (req : Json) (output : String) (env : Environment)
+    (extra : List (String × Json) := [])
+    (ownerOf : Name → Option Name := fun name =>
+      (env.getModuleIdxFor? name).bind (env.allImportedModuleNames[·.toNat]?)) : IO Unit := do
+  let modules := names req "modules"
+  let replayed := (names req "replayTargets").foldl (·.insert ·) ({} : NameSet)
+  let mut paths : List (String × Json) := []
+  for m in modules do paths := paths ++ [(m.toString, toJson (← findOLean m).toString)]
+  let theorems ← ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).mapM
+    (fun entry => theorem? env entry ownerOf replayed)
+  let constants ←
+    ((req.getObjValAs? (Array Json) "constants").toOption.getD #[]).mapM (constant? env)
+  let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM (closure? env)
+  let audited ← match req.getObjVal? "namespaces" with
+    | .ok spec => pure [("namespaces", ← namespaces env modules spec)]
+    | .error _ => pure []
+  IO.FS.writeFile output (Json.mkObj ([("modules", Json.mkObj paths),
+    ("theorems", toJson theorems), ("constants", toJson constants),
+    ("interfaces", interfaces env req), ("closures", toJson closures)] ++ audited ++ extra)).compress
+
 end LeanCILAudit
 
 open Lean LeanCILAudit in
 /-- Reads REQUEST, imports `modules` without running any extension, and writes RESULT. -/
 unsafe def main (args : List String) : IO UInt32 := do
   match args with
+  | ["--replay", input] =>
+    let targets ← IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
+    CIL.Replay.replayModulesJointly targets
+    return 0
+  | ["--headers", input] => CIL.Interface.writeSourceHeaders input; return 0
   | ["--imports", input, output] => writeImports input output; return 0
   | ["--fingerprints", input] => writeFingerprints input; return 0
   | _ => pure ()
@@ -346,17 +409,20 @@ unsafe def main (args : List String) : IO UInt32 := do
   searchPathRef.set ((← getBuiltinSearchPath sysroot) ++ (← addSearchPathFromEnv {}))
   let modules := names req "modules"
   if modules.isEmpty then throw (IO.userError "No modules to audit")
-  let mut paths : List (String × Json) := []
-  for m in modules do paths := paths ++ [(m.toString, toJson (← findOLean m).toString)]
+  if let .ok targets := req.getObjValAs? (List String) "replayTargets" then
+    if targets.isEmpty then throw (IO.userError "No modules to replay")
+    CIL.Replay.withReplayedModules targets fun kernel unique ownerOf => do
+      let hasOwnerScopes := ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).any
+        (fun entry => (entry.getObjVal? "allowedModules").isOk)
+      if hasOwnerScopes && !unique then
+        throw (IO.userError "Scoped theorem audit requires unique replay declarations")
+      let fused := unique && modules.all (fun m => targets.contains m.toString) &&
+        !needsTargetMetadata kernel req
+      let env ← if fused then pure (Environment.ofKernelEnv kernel)
+        else importModules (modules.map ({ module := · })) {} (loadExts := false)
+      try writeAudit req output env [("replayed", toJson targets), ("fused", toJson fused)] ownerOf
+      finally unless fused do env.freeRegions
+    return 0
   let env ← importModules (modules.map ({ module := · })) {} (loadExts := false)
-  let theorems ← ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).mapM (theorem? env)
-  let constants ←
-    ((req.getObjValAs? (Array Json) "constants").toOption.getD #[]).mapM (constant? env)
-  let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM (closure? env)
-  let audited ← match req.getObjVal? "namespaces" with
-    | .ok spec => pure [("namespaces", ← namespaces env modules spec)]
-    | .error _ => pure []
-  IO.FS.writeFile output (Json.mkObj ([("modules", Json.mkObj paths),
-    ("theorems", toJson theorems), ("constants", toJson constants),
-    ("interfaces", interfaces env req), ("closures", toJson closures)] ++ audited)).compress
+  writeAudit req output env
   return 0

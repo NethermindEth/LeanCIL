@@ -2,6 +2,9 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include RejectedEvidence.cs
+#:include GeneratedEvidence.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -13,9 +16,11 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/TypeTests");
 Directory.CreateDirectory(root);
+var rejected = new RejectedEvidence(root);
+var controls = new GeneratedEvidence(Path.Combine(root, "Controls"));
 var queue = new GeneratedQueue(verification, assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.TypeTests")!;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 
 string[] Ops(string source, int method) => Regex.Matches(source,
     $@"(?m)^@\[cil_code ↓\] theorem method{method}_instruction\d+ : method{method}\.code\[\d+\]\? = some \((.*) : Op\) := rfl\r?$")
@@ -32,7 +37,6 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
     var folder = Path.Combine(root, name);
     Run(Extract("extract", assembly, "Examples", $"TypeTests::{name}(int)", folder));
     var source = File.ReadAllText(Path.Combine(folder, "Extracted.lean"));
-    Run(["lake", "env", "lean", Path.Combine(folder, "Extracted.lean")]);
     var ops = Ops(source, 1);
     var folds = Folds(ops);
     if (!folds.Select(fold => fold.Word).SequenceEqual(expected) ||
@@ -63,14 +67,18 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
     var lemma = Array.FindIndex(lines, line => line.StartsWith($"@[cil_code ↓] theorem method1_instruction{pc} :", StringComparison.Ordinal));
     lines[lemma] = lines[lemma].Replace($"(.const32 {expected[0]} : Op)", $"({forged} : Op)");
     var mutated = Path.Combine(root, name + "-forged.lean");
-    File.WriteAllText(mutated, string.Join('\n', lines));
-    var result = Execute(["lake", "env", "lean", mutated]);
-    if (result.Code == 0 || !result.Output.Contains("Extraction.FeatureFlowValid method1Closed") || !result.Output.Contains("is false"))
-        throw new InvalidOperationException("Forged type-test word was accepted for " + name + "\n" + result.Output);
-    Console.WriteLine($"PASS {name}: forged type-test word rejected by the feature certificate");
+    const string obligation = "method1_features_validated";
+    var control = Path.Combine(root, name + "-control.lean");
+    File.WriteAllText(control, NarrowEvidence(source, obligation));
+    controls.Add(control, "PASS unchanged type-test feature obligation: " + name, obligation);
+    File.WriteAllText(mutated, NarrowEvidence(string.Join('\n', lines), obligation));
+    rejected.Add(mutated, $"PASS {name}: forged type-test word rejected by the feature certificate",
+        "Extraction.FeatureFlowValid method1Closed", "is false");
 }
 
 queue.Flush();
+controls.Check(replay: false);
+rejected.Check();
 
 // A fold never hides reachable unsupported code.
 var live = Execute(Extract("extract", assembly, "Examples", "TypeTests::Word(int)", Path.Combine(root, "Word")));

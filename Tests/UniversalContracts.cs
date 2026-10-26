@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -11,16 +12,21 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/UniversalContracts");
 
-foreach (var (owner, name, selector, proofName) in new[]
+var contracts = new[]
 {
     ("Arithmetic", "Choose", "Arithmetic::Choose(bool,ulong,ulong)", "Choose"),
     ("GenericMethods", "Identity64", "GenericMethods::Identity64(ulong)", "GenericIdentity"),
     ("Arithmetic", "Struct", "Arithmetic::Struct(ulong)", "Struct")
-})
+};
+var positives = new GeneratedQueue(verification, assembly);
+foreach (var (_, name, selector, proofName) in contracts)
+    positives.Add(new(selector, At($"Examples/Proofs/{proofName}.lean"), Path.Combine(root, name)),
+        () => Console.WriteLine($"PASS universal {name}: arbitrary inputs and caller memory with preservation"));
+positives.Flush();
+
+foreach (var (owner, name, selector, proofName) in contracts)
 {
     var proof = At($"Examples/Proofs/{proofName}.lean");
-    verification.Verify(assembly, "Examples", selector, proof, Path.Combine(root, name));
-    Console.WriteLine($"PASS universal {name}: arbitrary inputs and caller memory with preservation");
 
     var wrong = Path.Combine(root, "Wrong" + name);
     Directory.CreateDirectory(wrong);

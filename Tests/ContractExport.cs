@@ -516,7 +516,7 @@ theorem LeanCILExportAudit.noStaticSites :
         {
             using Program verification = new() { freshLibrary = true };
             bool callbackRan = false;
-            ConsumerExportAudit audit = new(auditSource, (session, module, leanPath) =>
+            ConsumerExportAudit audit = new(auditSource, (session, module, leanPath, audited) =>
             {
                 string target;
                 if (compiled)

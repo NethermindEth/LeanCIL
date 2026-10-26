@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include BatchVerification.cs
+#:include CoreExamples.cs
 #:include ExportVerificationSuites.cs
 
 using System.Text.Json;
@@ -111,19 +113,7 @@ void Rejected(string[] command, string marker)
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 const string identity = "Examples";
 
-var signatures = new Dictionary<string, string>
-{
-    ["Add"] = "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
-    ["Choose"] = "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)",
-    ["Calls"] = "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)",
-    ["Alias"] = "System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)",
-    ["Struct"] = "System.UInt64 Examples.Arithmetic::Struct(System.UInt64)",
-    ["StructCopy"] = "System.UInt64 Examples.Arithmetic::StructCopy(System.UInt64)",
-    ["LargeStruct"] = "System.UInt64 Examples.Arithmetic::LargeStruct(System.UInt64)",
-    ["PastEnd"] = "System.UInt64 Examples.Arithmetic::PastEnd(System.UInt64&)",
-    ["WrongAdd"] = "System.UInt64 Examples.Arithmetic::WrongAdd(System.UInt64,System.UInt64)",
-    ["Escape"] = "System.UInt64& Examples.Arithmetic::Escape()"
-};
+var signatures = CoreExampleSignatures;
 
 // Each suite can run in its own checkout, with only the projects it needs.
 var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
@@ -138,7 +128,11 @@ if (suite is "all" or "evidence")
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/StackAllocation.cs"]);
 if (suite is "all" or "evidence")
-    projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
+    projects.AddRange([
+        "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
+        "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
+        "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
+        "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "unsafe") projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
 foreach (var (name, entry) in independentSuites)
@@ -170,7 +164,7 @@ foreach (string project in projects.Distinct(StringComparer.Ordinal))
 
 Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, ExtractorBuildIdentity());
 
-if (suite is "all" or "core" or "unsafe" or "evidence" or "scaling" or "excluded")
+if (suite is "all" or "core" or "unsafe" or "scaling" or "excluded")
 {
     // Direct semantic/evidence checks use the checkout's Lake build directory.
     // Seed it from the same validated private library instead of rebuilding CIL.
@@ -237,16 +231,7 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "local snapshot, contract consequence, invocation certificate, call transport, buffer contents, linking, "
     + "store fact, profile contract, instruction equation, code placement and SIMD lane tests");
 
-// Verify each extracted method and immediately check its artifact identity.
-foreach (var (name, signature) in signatures)
-{
-    var proof = At($"Examples/Proofs/{name}.lean");
-    var output = At($"artifacts/{name}");
-
-    verification.Verify(assembly, identity, name == "Add" ? "Arithmetic::Add(ulong,ulong)" : signature, proof, output);
-    verification.Verify(assembly, identity, signature, proof, output, check: true);
-    Passed(name + " kernel proof and artifact identity");
-}
+verification.VerifyCoreExamples(At("artifacts"), Passed);
 
 // Both selectors bind the same full identity; explicit mismatches must still fail.
 const string fullIdentity = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";

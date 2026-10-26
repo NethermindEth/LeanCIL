@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 
 using System.Reflection;
@@ -10,7 +11,7 @@ var root = At("artifacts/PrimitiveArrays");
 Directory.CreateDirectory(root);
 var evidence = new GeneratedEvidence(root, args.Contains("--measure", StringComparer.Ordinal));
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.PrimitiveArrays")!;
-Run(["lake", "build", "CIL.Extraction.Translation", "Tests.PrimitiveArrays"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "Tests.PrimitiveArrays");
 var elements = new (Type Type, string Lean, int Width)[]
 {
     (typeof(sbyte), "signed8", 1), (typeof(byte), "unsigned8", 1),

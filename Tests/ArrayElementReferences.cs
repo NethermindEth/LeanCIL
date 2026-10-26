@@ -1,14 +1,17 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include GeneratedEvidence.cs
 
 using System.Reflection;
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/ArrayElementReferences");
 Directory.CreateDirectory(root);
+var evidence = new GeneratedEvidence(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.ArrayElementReferences")!;
-Run(["lake", "build", "CIL.Extraction.Translation", "Tests.ArrayElementReferences"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "Tests.ArrayElementReferences");
 foreach (var name in new[] { "Element", "Read", "Write" })
 {
     var values = new[] { 3, 5 };
@@ -40,9 +43,7 @@ foreach (var name in new[] { "Element", "Read", "Write" })
              | .error _ => false) = true := by decide +kernel
         #print axioms checked_element_reference
         """);
-    var checkedProof = Run(["lake", "env", "lean", proof]);
-    if (checkedProof.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted reference proof");
-    Console.WriteLine("PASS runtime and certified array reference: " + name);
+    evidence.Add(proof, "PASS runtime and certified array reference: " + name);
     if (name != "Element") continue;
     const string target = ".arrayAddress .signed32";
     if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing address mutation target");
@@ -52,3 +53,5 @@ foreach (var name in new[] { "Element", "Read", "Write" })
     if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
         throw new Exception("Forged element address was not rejected by scalar evidence: " + rejection.Output);
 }
+
+evidence.Check(replay: false);

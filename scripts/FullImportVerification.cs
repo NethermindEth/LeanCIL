@@ -313,9 +313,12 @@ partial class Program
             File.WriteAllText(Path.Combine(compositionDirectory, library.Module + ".lean"),
                 "import " + callerModule + "\n" + library.TransferSource);
             Compile(library.Module, RecheckProgress + library.Module, untrusted: true);
-            Run([checker, library.ExpectedModule, library.Module], callerSession, fullLeanPath,
-                progress: "Independent kernel replay of transferred library declarations");
         }
+        string[] transferredModules = libraries
+            .SelectMany(library => new[] { library.ExpectedModule, library.Module }).ToArray();
+        const string TransferReplayProgress = "Independent kernel replay of transferred library declarations";
+        if (!ReplayModulesJointly(callerSession, transferredModules, fullLeanPath, TransferReplayProgress))
+            Run([checker, .. transferredModules], callerSession, fullLeanPath, progress: TransferReplayProgress);
         string composition = FullCompositionModule;
         File.WriteAllText(Path.Combine(compositionDirectory, composition + ".lean"),
             FullCompositionSource(callerModule, callerTheorem, libraries, bindings.Length));
@@ -549,11 +552,10 @@ partial class Program
         {
             ContractExport export = slot.Import.Export;
             string auditSource = ExportAuditSource(prepared[index], export.Kind);
-            ConsumerExportAudit audit = new(auditSource, (session, proofModule, leanPath) =>
+            ConsumerExportAudit audit = new(auditSource, (session, proofModule, leanPath, audited) =>
             {
-                ExportClosure actual =
-                    independent.CheckExportClosure(session, proofModule, export.ContractConstant, leanPath);
-                (string statementDigest, string _) = independent.CheckExportStatement(session, proofModule, leanPath);
+                (ExportClosure actual, string statementDigest, string _) =
+                    CheckedExportCertification(export.ContractConstant, audited);
                 if (actual.Digest != export.ClosureDigest || actual.Kind != export.Kind ||
                     statementDigest != slot.Import.Certification.StatementDigest)
                     throw new InvalidDataException(
@@ -565,7 +567,7 @@ partial class Program
                     ? ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional)
                         with { name = slot.Author }
                     : ProofTheorem(slot.Author), .. ProfileFamilyAudits(prepared[index])],
-                ProfileFamilySources(prepared[index]));
+                ProfileFamilySources(prepared[index]), Closures: [export.ContractConstant]);
             return new ConsumerRequest(implementation, slot.Artifact, prepared[index].Proof, ExportTheorem, null,
                 ExportAudit: audit);
         }).ToArray();

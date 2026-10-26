@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include GeneratedEvidence.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -9,6 +11,7 @@ using Mono.Cecil.Cil;
 
 var root = At("artifacts/ReadOnlyArrayReferences");
 Directory.CreateDirectory(root);
+var evidence = new GeneratedEvidence(root);
 var assembly = Path.Combine(root, "Examples.dll");
 using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll")))
 {
@@ -39,8 +42,8 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
     il.Emit(OpCodes.Ret);
     module.Write(assembly);
 }
-Run(["lake", "build", "CIL.Extraction.Translation"]);
-Run(["lake", "env", "lean", At("Tests/ReadOnlyArrayReferences.lean")]);
+RequireLeanFixtures("CIL.Extraction.Translation");
+CheckLeanFixture("Tests.ReadOnlyArrayReferences");
 var runtime = Assembly.LoadFile(assembly).GetType("Examples.ArrayElementReferences")!;
 foreach (var name in new[] { "Element", "Read", "Write" })
 {
@@ -73,9 +76,7 @@ foreach (var name in new[] { "Element", "Read", "Write" })
               = true := by decide +kernel
         #print axioms readonly_composition
         """);
-    var checkedProof = Run(["lake", "env", "lean", proof]);
-    if (checkedProof.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted readonly proof");
-    Console.WriteLine("PASS certified readonly reference composition: " + name);
+    evidence.Add(proof, "PASS certified readonly reference composition: " + name);
     if (name != "Element") continue;
     const string target = ".arrayAddress .signed32 false";
     if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing readonly mutation target");
@@ -103,3 +104,5 @@ foreach (var branch in new[] { false, true })
         throw new Exception("Wrong readonly-prefix rejection: " + rejection.Output);
     Console.WriteLine("PASS malformed readonly prefix: " + expected);
 }
+
+evidence.Check(replay: false);

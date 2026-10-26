@@ -101,7 +101,7 @@ end ExampleProof
 Run(["lake", "update"], consumer);
 Run(["dotnet", ExtractorPath, "verify", output, "--proof", proof, "--proof-root", consumer]);
 var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-if (!report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid") ||
+if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid") ||
     !report.GetProperty("theoremAudit").GetString()!.Contains("ExampleProof.correctness"))
     throw new InvalidOperationException("Missing independent certificate/theorem audits.");
 Console.WriteLine("PASS fresh consumer proof-root verifies the scalar path past the excluded branch");

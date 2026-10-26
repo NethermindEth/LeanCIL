@@ -217,67 +217,11 @@ partial class Program : IDisposable
     // Pin the sysroot that `lake env` would supply, so direct Lean runs use the trusted toolchain.
     IReadOnlyDictionary<string, string> LeanEnvironment => new Dictionary<string, string> { ["LEAN_SYSROOT"] = Toolchain };
 
+    readonly byte[] bootstrapReplaySource = File.ReadAllBytes(At("CIL/Replay.lean"));
+
     // Per-module replay re-imports each module's dependencies; one shared import of
     // everything outside the targets makes large sets several times cheaper.
-    // No target constant may preexist, since Replay skips matching theorems unchecked.
-    const string JointReplaySource = """
-import LeanChecker
-unsafe def readReplayParts (module : Lean.Name) : IO (Lean.ModuleData × Lean.ModuleData) := do
-  let mFile ← Lean.findOLean module
-  unless (← mFile.pathExists) do
-    throw <| IO.userError s!"object file '{mFile}' of module {module} does not exist"
-  let mut fnames := #[mFile]
-  let sFile := Lean.OLeanLevel.server.adjustFileName mFile
-  if (← sFile.pathExists) then
-    fnames := fnames.push sFile
-    let pFile := Lean.OLeanLevel.private.adjustFileName mFile
-    if (← pFile.pathExists) then
-      fnames := fnames.push pFile
-  let parts ← Lean.readModuleDataParts fnames
-  if h : parts.size = 0 then throw <| IO.userError "failed to read module data" else
-  return (parts[0].1, parts[parts.size-1].1)
--- The duplicate rule of `finalizeImport` and `Replay`: on-demand equation lemmas recur across modules.
-def sameReplayTheorem : Lean.ConstantInfo → Lean.ConstantInfo → Bool
-  | .thmInfo a, .thmInfo b => a.name == b.name && a.type == b.type && a.levelParams == b.levelParams && a.all == b.all
-  | _, _ => false
-unsafe def replayModulesJointly (args : List String) : IO Unit := do
-  Lean.initSearchPath (← Lean.findSysroot)
-  let started ← IO.monoMsNow
-  let names := args.map String.toName
-  let targets : Lean.NameSet := names.foldl (·.insert ·) {}
-  let mut imports : Std.HashMap Lean.Name Lean.Import := {}
-  let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
-  for module in names do
-    let (exported, complete) ← readReplayParts module
-    for i in exported.imports do
-      unless targets.contains i.module do
-        imports := imports.insert i.module <| match imports[i.module]? with
-          | some j => { j with importAll := j.importAll || i.importAll, isExported := j.isExported || i.isExported, isMeta := j.isMeta || i.isMeta }
-          | none => i
-    -- The most private part subsumes the others.
-    for name in complete.constNames, ci in complete.constants do
-      match constants[name]? with
-      | some prior =>
-        unless sameReplayTheorem prior ci do
-          throw <| IO.userError s!"Constant {name} is declared by more than one replay target"
-      | none => constants := constants.insert name ci
-  let external := imports.toArray.map (·.2) |>.qsort (·.module.toString < ·.module.toString)
-  let (_, s) ← Lean.importModulesCore external |>.run
-  let env ← Lean.finalizeImport s external {} 0 false false (isModule := true)
-  let imported := env.allImportedModuleNames
-  for (name, ci) in constants do
-    if let some prior := env.find? name then
-      -- Only an identical theorem from an untargeted module may be skipped, as per-module replay would.
-      let owner := (env.getModuleIdxFor? name).bind (imported[·.toNat]?)
-      unless owner.any (!targets.contains ·) && sameReplayTheorem prior ci do
-        throw <| IO.userError s!"Replay target constant {name} is already imported"
-  discard <| env.toKernelEnv.replay constants
-  env.freeRegions
-  let elapsed := (← IO.monoMsNow) - started
-  for name in args do
-    IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("joint", Lean.toJson true), ("milliseconds", Lean.toJson elapsed)]).compress
-""";
-
+    // Imported target declarations cannot be skipped as already-checked duplicate theorems.
     // False when the set is ineligible or any declaration is rejected; callers then replay per module.
     bool ReplayModulesJointly(string cwd, string[] targets, string leanPath, string progress)
     {
@@ -286,10 +230,23 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         try
         {
             File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
-            File.WriteAllText(runner, JointReplaySource + "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
-                string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
-                "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayModulesJointly args\n");
-            var result = Execute([LeanExecutable, runner], cwd, leanPath, progress: progress, environment: LeanEnvironment);
+            string[] command;
+            if (auditExecutable is not null)
+                command = [CheckedAuditExecutable(), "--replay", targetsPath];
+            else
+            {
+                // Bootstrap certification cannot trust the native auditor before authenticating it.
+                if (Convert.ToHexStringLower(SHA256.HashData(bootstrapReplaySource)) != Sha(At("CIL/Replay.lean")))
+                    throw new InvalidDataException("Kernel replay source changed before certification.");
+                File.WriteAllText(runner, Encoding.UTF8.GetString(bootstrapReplaySource) +
+                    "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
+                    string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
+                    "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n" +
+                    "  CIL.Replay.replayModulesJointly args\n");
+                command = [LeanExecutable, runner];
+            }
+            var result = Execute(command, cwd, leanPath, progress: progress, environment: LeanEnvironment);
+            if (auditExecutable is not null) CheckedAuditExecutable();
             if (result.Code != 0) return false;
             var replayed = new HashSet<string>(StringComparer.Ordinal);
             foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
@@ -308,6 +265,15 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             return replayed.SetEquals(targets);
         }
         finally { File.Delete(runner); File.Delete(targetsPath); }
+    }
+
+    // Joint replay shares imported dependencies; rejected target sets retain the toolchain fallback.
+    void ReplayCheckedModules(string[] targets, string leanPath, string progress)
+    {
+        if ((targets.Length > 1 || (targets.Length == 1 && auditExecutable is not null)) &&
+            ReplayModulesJointly(Root, targets, leanPath, progress)) return;
+        Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"),
+            .. targets], leanPath: leanPath, progress: progress);
     }
 
     static SortedDictionary<string, string> ModuleArtifacts(string session) =>
@@ -1171,7 +1137,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
 
     static readonly string[] ApprovedAxioms = ["propext", "Quot.sound", "Classical.choice"];
 
-    sealed record AuditRequest(string name, object? type = null, string[]? axioms = null, bool statement = false, bool refutation = false);
+    sealed record AuditRequest(string name, object? type = null, string[]? axioms = null,
+        bool statement = false, bool refutation = false, string[]? allowedModules = null);
     sealed record AuditRefutation(string contract, int line, int column);
     sealed record AuditedTheorem(string name, string? error, string[]? axioms, string? statement, AuditRefutation? refutes);
     sealed record AuditConstantRequest(string name, object value, object? type = null, string[]? axioms = null);
@@ -1181,7 +1148,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     sealed record AuditedNamespaces(int count, Dictionary<string, int> prefixes, Dictionary<string, int> modules, string[] axioms,
         AuditedTheorem[] rejected, string? error);
     sealed record AuditedOleans(Dictionary<string, string> modules, AuditedTheorem[] theorems, AuditedTheorem[] constants,
-        AuditedInterfaces? interfaces = null, AuditedClosure[]? closures = null, AuditedNamespaces? namespaces = null);
+        AuditedInterfaces? interfaces = null, AuditedClosure[]? closures = null, AuditedNamespaces? namespaces = null,
+        string[]? replayed = null, bool? fused = null);
 
     static readonly JsonSerializerOptions AuditJson = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
@@ -1207,7 +1175,8 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
 
     // Reads the kernel-replayed oleans only: no imported elaborator, notation, extension or initializer runs.
     AuditedOleans AuditOleans(string leanPath, string[] modules, AuditRequest[] theorems, AuditConstantRequest[]? constants = null,
-        string[]? interfaces = null, string[]? closures = null, AuditNamespaces? namespaces = null)
+        string[]? interfaces = null, string[]? closures = null, AuditNamespaces? namespaces = null,
+        string[]? replayTargets = null)
     {
         var executable = CheckedAuditExecutable();
         var request = Path.Combine(Path.GetTempPath(), "leancil-audit-" + Guid.NewGuid().ToString("N") + ".json");
@@ -1218,8 +1187,10 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
             interfaces ??= [];
             closures ??= [];
             File.WriteAllText(request, JsonSerializer.Serialize(new { modules, theorems, constants, interfaces,
-                closures = closures.Select(name => new { name }), namespaces }, AuditJson));
-            Run([executable, request, result], leanPath: leanPath, environment: LeanEnvironment);
+                closures = closures.Select(name => new { name }), namespaces, replayTargets }, AuditJson));
+            Run([executable, request, result], leanPath: leanPath, environment: LeanEnvironment,
+                progress: replayTargets is null ? null : "Joint kernel replay of consumer proof and dependencies");
+            CheckedAuditExecutable();
             var audited = JsonSerializer.Deserialize<AuditedOleans>(File.ReadAllText(result))
                 ?? throw new InvalidDataException("Missing theorem audit result");
             if (audited.theorems.Length != theorems.Length || audited.theorems.Zip(theorems).Any(pair => pair.First.name != pair.Second.name) ||
@@ -1227,8 +1198,14 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
                 modules.Any(module => !audited.modules.ContainsKey(module)) || audited.interfaces is null || audited.closures is null ||
                 audited.closures.Length != closures.Length || audited.closures.Zip(closures).Any(pair => pair.First.name != pair.Second) ||
                 (namespaces is not null && (audited.namespaces?.prefixes is null || audited.namespaces.modules is null ||
-                    audited.namespaces.axioms is null || audited.namespaces.rejected is null)))
+                    audited.namespaces.axioms is null || audited.namespaces.rejected is null)) ||
+                (replayTargets is not null && (audited.replayed is null || audited.fused is null ||
+                    !audited.replayed.SequenceEqual(replayTargets))))
                 throw new InvalidDataException("Incomplete theorem audit result");
+#if !LEANCIL_TOOL
+            if (replayTargets is not null)
+                Console.WriteLine(JsonSerializer.Serialize(new { auditFused = audited.fused, modules }));
+#endif
             return audited;
         }
         finally { File.Delete(request); File.Delete(result); }
@@ -1299,39 +1276,34 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
 
     Dictionary<string, string[]> ContractModuleImports(string destination, SortedDictionary<string, string> sources)
     {
-        string probe = Path.Combine(destination, "LeanCILHeader" + Guid.NewGuid().ToString("N") + ".lean");
-        string input = probe + ".json";
+        string input = Path.Combine(destination, "LeanCILHeader" + Guid.NewGuid().ToString("N") + ".json");
+        string runner = Path.ChangeExtension(input, ".lean");
         try
         {
-            File.WriteAllText(probe, """
-import Lean
-open Lean Parser
-unsafe def main (args : List String) : IO Unit := do
-  let [input] := args | throw (IO.userError "Expected interface source manifest")
-  let sources : Array String <- IO.ofExcept <| (Lean.Json.parse (<- IO.FS.readFile input)).bind Lean.fromJson?
-  for source in sources do
-    let (header, _, messages) <- Parser.parseHeader (Parser.mkInputContext source input)
-    if messages.hasErrors then
-      throw (IO.userError "Invalid contract interface import header")
-    let `(Module.header| $[module]? $[prelude]? $imports*) := header
-      | throw (IO.userError "Invalid contract interface header")
-    let mut names : Array Lean.Json := #[]
-    for imported in imports do
-      let `(Module.import| $[public]? $[meta]? import $[all]? $name) := imported
-        | throw (IO.userError "Invalid contract interface import")
-      names := names.push (Lean.Json.str name.getId.toString)
-    IO.println (Lean.Json.arr names).compress
-""");
             File.WriteAllText(input, JsonSerializer.Serialize(sources.Values));
-            string result = Run([LeanExecutable, "--run", probe, input], destination, environment: LeanEnvironment);
+            string result;
+            if (auditExecutable is null)
+            {
+                // Editor workspaces parse headers before a certified library exists.
+                File.WriteAllText(runner, File.ReadAllText(At("CIL/Interface/Headers.lean")) +
+                    "\ndef main (args : List String) : IO Unit := do\n" +
+                    "  let [input] := args | throw (IO.userError \"Expected source manifest\")\n" +
+                    "  CIL.Interface.writeSourceHeaders input\n");
+                result = Run([LeanExecutable, "--run", runner, input], destination, environment: LeanEnvironment);
+            }
+            else
+            {
+                var executable = CheckedAuditExecutable();
+                result = Run([executable, "--headers", input], destination, environment: LeanEnvironment);
+                CheckedAuditExecutable();
+            }
             string[] lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length != sources.Count) throw new InvalidDataException("Incomplete contract interface import graph.");
             return sources.Keys.Zip(lines).ToDictionary(pair => pair.First,
                 pair => JsonSerializer.Deserialize<string[]>(pair.Second) ?? throw new InvalidDataException("Invalid contract import graph."), StringComparer.Ordinal);
         }
-        finally { File.Delete(probe); File.Delete(input); }
+        finally { File.Delete(input); File.Delete(runner); }
     }
-
     string[] StageImportSources(ExtractionIdentity extraction, string destination)
     {
         SortedDictionary<string, string> sources = extraction.Sources;
@@ -1706,7 +1678,6 @@ unsafe def main (args : List String) : IO Unit := do
             File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
 
-            var checker = Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
             var currentModules = ModuleArtifacts(session);
             var alteredExisting = certifiedModules!.Any(pair => !currentModules.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
             var changedModules = (alteredExisting ? currentModules.Keys : currentModules.Keys.Where(name => !certifiedModules!.ContainsKey(name)))
@@ -1714,7 +1685,7 @@ unsafe def main (args : List String) : IO Unit := do
             if (changedModules.Length > 0)
             {
                 stage?.Invoke("kernel replay");
-                Run([checker, .. changedModules], leanPath: leanPath, progress: "Kernel replay of proof dependencies: " + entry);
+                ReplayCheckedModules(changedModules, leanPath, "Kernel replay of proof dependencies: " + entry);
                 certifiedModules = currentModules;
             }
             // Full artifact identities include transitive support dependencies and every
@@ -1771,7 +1742,8 @@ unsafe def main (args : List String) : IO Unit := do
             if (importModules.Length > 0)
             {
                 stage?.Invoke("kernel replay");
-                Run([checker, .. importModules], leanPath: leanPath, progress: "Kernel replay of published contract interfaces and App import assumptions");
+                ReplayCheckedModules(importModules, leanPath,
+                    "Kernel replay of published contract interfaces and App import assumptions");
                 CheckContractInterfaces(extraction, importModules, leanPath, module => Path.Combine(fresh, module.Replace('.', '/') + ".olean"));
                 if (!Same(bound, OleanHashes(fresh, session)))
                     throw new InvalidOperationException("Compiled artifacts changed during verification");
@@ -1819,16 +1791,33 @@ unsafe def main (args : List String) : IO Unit := do
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
             string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"],
                 .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(), .. proofRestored ? Array.Empty<string>() : ["Proof"]];
+            string[] auditModules = ["Proof", "ExtractionAudit",
+                .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
+            AuditRequest[] proofAudits =
+                [ProofTheorem(theorem, extraction), ExtractionCertificate("ExtractionAudit.valid")];
+            AuditedOleans? audited = null;
             if (replay.Length > 0)
             {
                 stage?.Invoke("kernel replay");
-                Run([checker, .. replay], leanPath: leanPath, progress: (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                RequireStagedProofSources();
+                if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
+                {
+                    try
+                    {
+                        audited = AuditOleans(leanPath, auditModules, proofAudits,
+                            ImportPremise(extraction), replayTargets: replay);
+                    }
+                    catch (InvalidOperationException) { }
+                }
+                // A rejected combined replay retains the original checker diagnostics.
+                if (audited is null)
+                    ReplayCheckedModules(replay, leanPath,
+                        (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
             }
-            // The audit reads the bytes leanchecker replayed: nothing may change until it finishes.
+            // The audit reads the replayed bytes; all source and artifact guards still follow it.
             stage?.Invoke("theorem audit");
-            string[] auditModules = ["Proof", "ExtractionAudit", .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
             RequireStagedProofSources();
-            var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(theorem, extraction), ExtractionCertificate("ExtractionAudit.valid")], ImportPremise(extraction));
+            audited ??= AuditOleans(leanPath, auditModules, proofAudits, ImportPremise(extraction));
             RequireStagedProofSources();
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
