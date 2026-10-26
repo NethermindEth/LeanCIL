@@ -42,9 +42,8 @@ internal static class NativeOperands
         Code.Bgt or Code.Bgt_S or Code.Bgt_Un or Code.Bgt_Un_S or Code.Bge or Code.Bge_S or Code.Bge_Un or Code.Bge_Un_S or
         Code.Blt or Code.Blt_S or Code.Blt_Un or Code.Blt_Un_S or Code.Ble or Code.Ble_S or Code.Ble_Un or Code.Ble_Un_S;
 
-    internal static Certificate Certify(MethodDefinition method, FeatureProfile profile)
+    internal static Certificate Certify(MethodDefinition method, IReadOnlySet<Instruction> reachable)
     {
-        HashSet<Instruction> reachable = Reachability.Analyze(method, profile);
         var incoming = new Dictionary<Instruction, Kind[]> { [method.Body.Instructions[0]] = [] };
         var mixed = new HashSet<Instruction>();
         var pending = new Queue<Instruction>();

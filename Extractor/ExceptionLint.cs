@@ -54,10 +54,11 @@ internal static class ExceptionLint
         for (int methodIndex = 0; methodIndex < methods.Length; methodIndex++)
         {
             MethodDefinition method = methods[methodIndex];
-            var nativeOperands = NativeOperands.Certify(method, profile);
-            int[] parameterHomes = ParameterStorage.Analyze(method, profile);
+            var reachable = Reachability.Analyze(method, profile);
+            var nativeOperands = NativeOperands.Certify(method, reachable);
+            int[] parameterHomes = ParameterStorage.Analyze(method, reachable);
             Throws.Analysis folded = Throws.Analyze(method);
-            foreach (Instruction instruction in Reachability.Analyze(method, profile).OrderBy(value => value.Offset))
+            foreach (Instruction instruction in reachable.OrderBy(value => value.Offset))
             {
                 if (folded.Raises.TryGetValue(instruction, out string? exception))
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
