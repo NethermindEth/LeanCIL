@@ -739,3 +739,37 @@ The constrained traversal is O(N log N), plus branch-target set construction and
 it no longer performs O(N²) optional list lookups. Imported signature comparisons retain their
 existing checks and costs. The registered constrained/import evidence suites also test unreachable
 switch-prefix bypass, duplicate switch targets, short reachability and both import-table bounds.
+Home discovery and static/opaque-local validation use balanced indexes instead of repeated
+linked-list scans. Home discovery collects live stores and addresses once, then retains argument
+order while filtering the argument range. Static sites keep the first descriptor at a duplicate
+pc. Opaque-local discovery still considers addresses in the complete raw body, including dead
+instructions. Equivalence theorems cover arbitrary input lists, including malformed indexes,
+duplicate sites and truncated masks; no new assumptions are required.
+
+`Tests.ExtractionHomeIndexes` exercises those boundary cases. The indexed implementations use
+`Std.TreeSet`/`Std.TreeMap` for keyed membership and `FlowIndex` for positional lookup. This adds
+standard-library tree dependencies to the validators. The public validity propositions retain
+their obligations, with explicit equivalence theorems for the indexed checks.
+
+An Apple M4 run of `leanprof elab --heartbeats` measured the following total declaration work
+for paired `decide +kernel` proofs (kHB, thousands of raw heartbeats). More than 99% of total
+profiled work was in the kernel. Each pair includes constructing its index. The home fixture
+has one store per argument; the static fixture has one descriptor per load; the opaque fixture
+has equally many vector locals and out-of-range address references, leaving all locals eligible.
+
+| Check | Entries | List scans | Indexed |
+| --- | ---: | ---: | ---: |
+| Parameter home discovery | 128 | 3,568.83 | 4,674.26 |
+| Parameter home discovery | 512 | 53,145.52 | 24,966.14 |
+| Static-load shape validation | 128 | 5,402.08 | 5,152.10 |
+| Static-load shape validation | 512 | 81,005.04 | 26,628.89 |
+| Opaque-local discovery | 128 | 9,601.26 | 7,323.65 |
+| Opaque-local discovery | 512 | 124,343.11 | 31,897.40 |
+
+The tree overhead increases work for the smaller home fixture; at 512 entries, measured work
+falls by 53%, 67% and 74%, respectively. These isolate the changed checks and do not estimate
+end-to-end CI time. Parameter slot lookup and the rest of contract verification are unchanged.
+
+Call and home/static/opaque measurements above were collected for each isolated change before
+stacking the linear FlowIndex builder. Combined-stack counts may differ. Managed-call numbers
+measure direct kernel decision, not the preserved structural "cil_managed_calls" shortcut.

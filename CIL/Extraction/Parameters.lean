@@ -1,5 +1,6 @@
 import CIL.Extraction.LayoutUses
 import CIL.Extraction.Lockstep
+import Std.Data.TreeSet.Lemmas
 
 /-!
 # Parameter homes
@@ -61,13 +62,32 @@ def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalK
       return .aggregate ⟨layout.layout.size, bounded⟩
     else none
 
-/-- Derive the sorted, duplicate-free home set from the complete raw body. -/
-def requiredHomeIndices (raw : RawArguments) (reachable : List Bool) : List Nat :=
-  (List.range raw.arguments.length).filter fun index =>
-    (raw.code.zip reachable).any fun (operation, live) => live && match operation with
-      | .store argument | .address argument => argument == index
-      | _ => false
+/-- A live store or address operation requires a home for its argument. -/
+private def homeArgument : ArgumentOp × Bool → Option Nat
+  | (.store index, true) | (.address index, true) => some index
+  | _ => none
 
+/-- Derive the sorted, duplicate-free home set from one scan of the raw body. -/
+def requiredHomeIndices (raw : RawArguments) (reachable : List Bool) : List Nat :=
+  let homes := Std.TreeSet.ofList ((raw.code.zip reachable).filterMap homeArgument)
+  (List.range raw.arguments.length).filter homes.contains
+
+/-- Indexed home discovery agrees with scanning the complete body for each argument,
+    including truncated reachability masks and out-of-range argument references. -/
+theorem requiredHomeIndices_eq_scan (raw : RawArguments) (reachable : List Bool) :
+    requiredHomeIndices raw reachable = (List.range raw.arguments.length).filter (fun index =>
+      (raw.code.zip reachable).any fun (operation, live) => live && match operation with
+        | .store argument | .address argument => argument == index
+        | _ => false) := by
+  dsimp only [requiredHomeIndices]
+  congr 1
+  funext index
+  rw [Std.TreeSet.contains_ofList, List.contains_filterMap]
+  congr 1
+  funext (operation, live)
+  cases operation <;> cases live <;> simp [homeArgument, BEq.comm]
+
+#print axioms requiredHomeIndices_eq_scan
 /-- Each homed argument index with the slot kind of its home, in argument order. -/
 def expectedHomes (layouts : Array ComputedLayout) (raw : RawArguments)
     (reachable : List Bool) : Option (List (Nat × LocalKind)) :=

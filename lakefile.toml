@@ -228,3 +228,6 @@ name = "Tests.AllocationExecutionRenaming"
 
 [[lean_lib]]
 name = "Tests.FlowIndex"
+
+[[lean_lib]]
+name = "Tests.ExtractionHomeIndexes"
