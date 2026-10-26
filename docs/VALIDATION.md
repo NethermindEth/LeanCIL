@@ -1247,3 +1247,11 @@ The standalone kernel benchmarks are `docs/performance/fold-roles/CountScaling.l
 `lake env lean docs/performance/fold-roles/CountScaling.lean` (and the throw file) under an
 external timer. They construct their inputs inside the checked proposition and verify complete
 role lists with `decide +kernel`; neither benchmark is part of the default library build.
+
+With the indexed validators and combined replay/audit built into a newly certified library,
+the Windows two-profile interface-reuse workload passed in 39.14 seconds, compared with
+43.56 seconds before these changes. Both consumer groups used the fused audit; the interface
+still compiled once and was independently replayed in each group. The entire fixture,
+including setup, took 56.86 seconds. These timings do not establish a whole-suite CI gain.
+The certificate-reuse fixture passed all six checks: its four positive sessions used the
+fused audit, and generated-source tampering and compiled-extraction substitution were rejected.
