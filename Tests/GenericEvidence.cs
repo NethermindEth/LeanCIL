@@ -16,6 +16,8 @@ var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
 var rejected = new RejectedEvidence(output);
 var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
+var controls = new GeneratedEvidence(Path.Combine(output, "Controls"));
+var controlSources = new HashSet<string>(StringComparer.Ordinal);
 CheckExternalIdentities();
 if (args is ["--external-identities"]) return;
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
@@ -46,11 +48,23 @@ string ChangeDefinition(string source, string name, Func<string, string> change)
     var end = source.IndexOf('\n', start);
     return source[..start] + change(source[start..end]) + source[end..];
 }
-void Reject(int sample, string name, Func<string, string> mutate)
+void Reject(int sample, string name, Func<string, string> mutate,
+    string? theorem = "method1_specialization_validated")
 {
     var baseline = File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean"));
     var source = mutate(baseline);
     if (source == baseline) throw new InvalidOperationException("Mutation did not change source: " + name);
+    if (theorem is not null)
+    {
+        var control = NarrowEvidence(baseline, theorem);
+        if (controlSources.Add(control))
+        {
+            var controlPath = Path.Combine(output, "Control-" + controlSources.Count + ".lean");
+            File.WriteAllText(controlPath, control);
+            controls.Add(controlPath, "PASS unchanged generic obligation: " + theorem, theorem);
+        }
+        source = NarrowEvidence(source, theorem);
+    }
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, source);
     rejected.Add(path, "PASS generic evidence rejects " + name, "error:");
@@ -62,22 +76,34 @@ foreach (var (name, scope) in new[]
 })
     Reject(0, name, source => ChangeDefinition(source, "method1Closed", line =>
         line.Replace("Extraction.runtimeScope", System.Text.Json.JsonSerializer.Serialize(scope))));
-Reject(0, "wrong-type-argument", source => ChangeDefinition(source, "method1TypeArgumentsRaw", line => line.Replace("System.UInt64", "System.UInt32")));
-Reject(0, "wrong-closed-signature", source => ChangeDefinition(source, "method1Closed", line => line.Replace("System.UInt64", "System.UInt32")));
-Reject(7, "wrong-closed-local", source => ChangeDefinition(source, "method1Closed", line => line.Replace("locals := [.atom", "locals := [.byref (.atom").Replace("], initLocals", ")], initLocals")));
-Reject(12, "wrong-type-operand", source => ChangeDefinition(source, "method1Closed", line => line.Replace("operand := .type (.aggregate", "operand := .type (.byref (.aggregate").Replace(" 0) }", " 0)) }")));
-Reject(0, "altered-opcode", source => ChangeDefinition(source, "method1Closed", line => line.Replace("opcode := 2,", "opcode := 3,")));
-Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed", line => line.Replace("operand := .target 4", "operand := .target 3")));
-Reject(0, "wrong-managed-target", source => source.Replace(".call 1 1", ".call 0 1"));
+Reject(0, "wrong-type-argument", source => ChangeDefinition(source, "method1TypeArgumentsRaw",
+    line => line.Replace("System.UInt64", "System.UInt32")));
+Reject(0, "wrong-closed-signature", source => ChangeDefinition(source, "method1Closed",
+    line => line.Replace("System.UInt64", "System.UInt32")));
+Reject(7, "wrong-closed-local", source => ChangeDefinition(source, "method1Closed", line =>
+    line.Replace("locals := [.atom", "locals := [.byref (.atom").Replace("], initLocals", ")], initLocals")));
+Reject(12, "wrong-type-operand", source => ChangeDefinition(source, "method1Closed", line =>
+    line.Replace("operand := .type (.aggregate", "operand := .type (.byref (.aggregate").Replace(" 0) }", " 0)) }")));
+Reject(0, "altered-opcode", source => ChangeDefinition(source, "method1Closed",
+    line => line.Replace("opcode := 2,", "opcode := 3,")));
+Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed",
+    line => line.Replace("operand := .target 4", "operand := .target 3")));
+Reject(0, "wrong-managed-target", source => source.Replace(".call 1 1", ".call 0 1"), "method0_calls_validated");
 Console.WriteLine("PASS original-metadata generic substitution, complete managed-call binding and malformed evidence rejection");
-Reject(0, "omitted-method-evidence", source => ChangeDefinition(source, "methodEvidence", _ => "def methodEvidence : List Extraction.MethodEvidence := []"));
-Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "methodEvidence", line => line.Replace("method0", "swapped").Replace("method1", "method0").Replace("swapped", "method1")));
-Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1", line => line.Replace("returnsValue := true", "returnsValue := false")).Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"));
-Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32 1]"));
-Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"));
-Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"));
-Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"));
+Reject(0, "omitted-method-evidence", source => ChangeDefinition(source, "methodEvidence",
+    _ => "def methodEvidence : List Extraction.MethodEvidence := []"), null);
+Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "methodEvidence",
+    line => line.Replace("method0", "swapped").Replace("method1", "method0").Replace("swapped", "method1")), null);
+Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1",
+    line => line.Replace("returnsValue := true", "returnsValue := false"))
+        .Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"), "method1_shape_validated");
+Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32 1]"), "method1_shape_validated");
+Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"), "method1_shape_validated");
+Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"), "method1_shape_validated");
+Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"),
+    "method1_shape_validated");
 
+controls.Check(replay: false);
 rejected.Check();
 void CheckExternalIdentities()
 {

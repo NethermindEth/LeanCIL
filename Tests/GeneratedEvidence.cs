@@ -5,14 +5,33 @@ using System.Text.RegularExpressions;
 
 partial class Program
 {
+    // Keep emitted definitions intact and select one independent validator obligation.
+    // Its unchanged form must also be compiled as a positive control by the caller.
+    static string NarrowEvidence(string source, string theorem)
+    {
+        var found = 0;
+        var result = Regex.Replace(source,
+            @"(?m)^(?:@\[[^\r\n]*\] )?theorem (\w+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", match =>
+            {
+                // Byte-backed identity definitions carry these checked UTF-8 witnesses.
+                if (Regex.IsMatch(match.Groups[1].Value, @"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z"))
+                    return match.Value;
+                if (match.Groups[1].Value != theorem) return "";
+                found++;
+                return match.Value;
+            });
+        if (found != 1) throw new InvalidOperationException("Missing unique evidence obligation: " + theorem);
+        return Regex.Replace(result, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+    }
+
     // Only generated, namespace-relative evidence belongs here. Rejection fixtures use
     // their isolated environments and diagnostics; arbitrary consumer proofs use the verifier.
     sealed class GeneratedEvidence(string directory, bool measure = false)
     {
-        readonly List<(string Path, string Source, string Passed)> cases = [];
+        readonly List<(string Path, string Source, string Passed, string Theorem)> cases = [];
 
-        public void Add(string path, string passed) =>
-            cases.Add((Path.GetFullPath(path), File.ReadAllText(path), passed));
+        public void Add(string path, string passed, string theorem = "translation_valid") =>
+            cases.Add((Path.GetFullPath(path), File.ReadAllText(path), passed, theorem));
 
         string BatchSource()
         {
@@ -22,7 +41,7 @@ partial class Program
             {
                 var source = cases[index].Source;
                 if (!source.Contains("namespace Extracted\n", StringComparison.Ordinal) ||
-                    !source.Contains("theorem translation_valid :", StringComparison.Ordinal))
+                    !source.Contains("theorem " + cases[index].Theorem + " :", StringComparison.Ordinal))
                     throw new InvalidOperationException("Expected generated extraction evidence: " + cases[index].Path);
                 var body = Regex.Replace(source, @"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", match =>
                 {
@@ -31,7 +50,7 @@ partial class Program
                 }, RegexOptions.Multiline);
                 bodies.AppendLine($"namespace EvidenceCase{index}");
                 bodies.AppendLine(body);
-                bodies.AppendLine("#print axioms Extracted.translation_valid");
+                bodies.AppendLine("#print axioms Extracted." + cases[index].Theorem);
                 bodies.AppendLine($"end EvidenceCase{index}");
             }
             return string.Join('\n', imports.Select(module => "import " + module)) + "\n" + bodies;

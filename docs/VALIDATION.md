@@ -1124,6 +1124,12 @@ statements. Missing certificates, unrelated statements, definitions and altered 
 must fail both their wrapper checks and direct certificate audits; the definitionally equal
 wrapped statement still passes elaboration but fails the exact emitted-statement check.
 
+Generic substitution, managed-call and method-shape mutations select their corresponding
+emitted validator; type-test mutations select feature-flow validation. Unchanged controls
+compile first, with repeated generic controls deduplicated. Byte-backed identity definitions
+retain their UTF-8 witnesses. Evidence-list omission and reordering still check the complete
+certificate because they test agreement between records, not an independent validator.
+
 Full-verification term transfer encodes each structurally distinct expression node once and
 writes a compact data table instead of elaborating a recursively expanded constructor term.
 Structural equality includes binder spelling and annotations; names retain numeric and string
