@@ -935,3 +935,29 @@ searching the method array at each static load. Null initializers still use zero
 initializers still produce the existing `-1` sentinel. Three compiled Word256 static-load
 entries retain all six generated Lean hashes; an unsupported initializer retains its exact
 rejection diagnostic. This removes O(static sites × methods) search work without another index.
+Static initializer validation shares a read-only `StaticValues.Context` within one metadata
+validation walk. Constructor indexes retain store positions, the first control transfer and
+an ordered branch-reentry envelope; module indexes retain the first stores outside a field's
+constructor. Constructor closure address checks and initializer static-access checks are also
+shared. Specialization creates detached clones, so the compiled module remains unchanged.
+A later validation receives a fresh context; there is no module-wide persistent index cache.
+The existing field/architecture value cache remains unchanged.
+
+`Tests.StaticValueIndexes.cs` checks scalar copies, duplicate stores, prefix control flow,
+branch/switch and foreign targets, first outside writer, closure address-taking, fresh contexts
+and resolution-error ordering. Index construction records resolution failures so a later
+failure cannot replace the original earlier writer diagnostic. Twenty-four extraction requests
+(eight scalar loads across three profiles) retain all 48 generated Lean file hashes.
+
+Windows .NET 10 medians over seven runs after three warmups measured resolution of every field
+in a fresh synthetic module, including context/index construction, literal evaluation and
+value checks but excluding fixture construction. The module has one constructor assigning
+all fields and one reader accessing them all:
+
+| Readonly fields | Repeated scans | Shared indexes |
+| --- | ---: | ---: |
+| 128 | 5.638 ms | 0.350 ms |
+| 512 | 28.794 ms | 1.470 ms |
+| 2,048 | 172.527 ms | 6.254 ms |
+
+These isolate static-field resolution and do not estimate full extraction or CI savings.

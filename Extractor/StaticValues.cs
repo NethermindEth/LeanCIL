@@ -8,7 +8,7 @@ namespace Nethermind.LeanCIL;
 
 // Readonly fields have one unconditional store, from a literal or M(constants).
 // Lean rechecks stored bytes; recognizing the constructor store remains trusted.
-internal static class StaticValues
+internal static partial class StaticValues
 {
     internal sealed record Value(FieldDefinition Field, MethodDefinition? Initializer, string[] Arguments,
         byte[] Bytes, string? Literal = null);
@@ -70,44 +70,34 @@ internal static class StaticValues
         return field;
     }
 
-    internal static Value Resolve(FieldReference reference, ModuleDefinition module, string architecture = "scalar")
-    {
-        FieldDefinition field = Field(reference, module, architecture);
-        ConcurrentDictionary<string, Value> values = cache.GetValue(field, _ => new());
-        return values.GetOrAdd(architecture, static (selected, context) => Compute(context.Field, context.Module, selected),
-            (Field: field, Module: module));
-    }
-
-    static Value Compute(FieldDefinition field, ModuleDefinition module, string architecture)
+    internal static Value Resolve(FieldReference reference, ModuleDefinition module, string architecture = "scalar") =>
+        new Context(module).Resolve(reference, architecture);
+    static Value Compute(FieldDefinition field, ModuleDefinition module, string architecture, Context context)
     {
         var constructor = field.DeclaringType.Methods.SingleOrDefault(m => m.IsConstructor && m.IsStatic && m.HasBody) ??
             throw Unsupported(field, "No static constructor stores its value.");
         if (constructor.Body.ExceptionHandlers.Count != 0)
             throw Unsupported(field, "The static constructor has exception handlers.");
         var code = constructor.Body.Instructions;
-        var stores = code.Select((i, index) => (i, index)).Where(s => Stored(s.i, Code.Stsfld) == field).Select(s => s.index).ToArray();
-        if (stores.Length != 1)
-            throw Unsupported(field, $"The static constructor stores it {stores.Length} times; exactly one store is admitted.");
+        var constructorIndex = context.Constructor(constructor);
+        var stores = constructorIndex.Stores(field);
+        if (stores.Count != 1)
+            throw Unsupported(field, $"The static constructor stores it {stores.Count} times; exactly one store is admitted.");
         var store = stores[0];
-        // `jmp` has call flow but never returns, so only returning calls may precede the store.
-        if (code.Take(store).Any(i => i.OpCode.FlowControl is not (FlowControl.Next or FlowControl.Call or FlowControl.Meta) || i.OpCode.Code == Code.Jmp))
+        if (constructorIndex.FirstControlTransfer < store)
             throw Unsupported(field, "Control flow precedes its store, so the store is not unconditional.");
-        foreach (var branch in code.Where(i => i.Operand is Instruction or Instruction[]))
-            if ((branch.Operand is Instruction target ? new[] { target } : (Instruction[])branch.Operand).Any(t => code.IndexOf(t) <= store))
-                throw Unsupported(field, $"A branch re-enters the code before its store: {branch}");
-        foreach (var method in module.GetTypes().SelectMany(t => t.Methods).Where(m => m.HasBody && m != constructor))
-            if (method.Body.Instructions.Any(i => Stored(i, Code.Stsfld) == field))
-                throw Unsupported(field, $"It is also stored outside its static constructor, in {method.FullName}.");
-        foreach (var method in Closure(constructor, module))
-            if (method.Body.Instructions.Any(i => Stored(i, Code.Ldsflda) == field))
-                throw Unsupported(field, $"Its address is taken during initialization, in {method.FullName}.");
-
+        if (constructorIndex.Reentry(store) is { } branch)
+            throw Unsupported(field, $"A branch re-enters the code before its store: {branch}");
+        if (context.OutsideStore(field, constructor) is { } writer)
+            throw Unsupported(field, $"It is also stored outside its static constructor, in {writer.FullName}.");
+        if (context.AddressTaken(field, constructor) is { } addressMethod)
+            throw Unsupported(field, $"Its address is taken during initialization, in {addressMethod.FullName}.");
         if (store > 0 && Stored(code[store - 1], Code.Ldsfld) is { } source && source != field)
         {
             if (source.DeclaringType != field.DeclaringType || source.FieldType.FullName != field.FieldType.FullName ||
-                !code.Take(store - 1).Any(i => Stored(i, Code.Stsfld) == source))
+                !constructorIndex.Stores(source).Any(index => index < store - 1))
                 throw Unsupported(field, $"It copies {source.FullName}, which is not stored earlier in the same static constructor.");
-            return Resolve(source, module, architecture) with { Field = field };
+            return context.Resolve(source, architecture) with { Field = field };
         }
         if (store > 0 && !MetadataValidation.IsAggregate(field.FieldType, module) &&
             (Constant(code[store - 1]) || Conversion(code[store - 1])))
@@ -139,9 +129,8 @@ internal static class StaticValues
         for (var p = 0; p < arguments.Length; p++)
             if (((Word)arguments[p]).Width != MetadataValidation.PrimitiveWidth(initializer.Parameters[p].ParameterType))
                 throw Unsupported(field, $"Argument {p} of {initializer.FullName} has the wrong width.");
-        foreach (var method in Closure(initializer, module))
-            if (method.Body.Instructions.Any(i => i.OpCode.Code is Code.Ldsfld or Code.Ldsflda or Code.Stsfld))
-                throw Unsupported(field, $"Its initializer accesses static fields, in {method.FullName}.");
+        if (context.InitializerStaticAccess(initializer) is { } staticAccess)
+            throw Unsupported(field, $"Its initializer accesses static fields, in {staticAccess.FullName}.");
         var bytes = Bytes(Run(initializer, arguments, field, module, 0, architecture), field, architecture);
         return new Value(field, initializer, arguments.Select(a => LeanWord((Word)a)).ToArray(), bytes);
     }
