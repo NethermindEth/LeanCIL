@@ -176,7 +176,7 @@ set_option maxRecDepth 4096 in
 private theorem divisionSignatureBytes_eq : divisionSignatureBytes =
     divisionSignatures.map (fun (owner, name, signature, _, _) =>
       (owner, name, identityBytes signature)) := by
-  rfl
+  decide +kernel
 #print axioms divisionSignatureBytes_eq
 
 /-- Remove an exact byte prefix, rejecting mismatches and truncated identities. -/

@@ -20,6 +20,9 @@ The ordinary instruction proof normalizes mapped stack constructors with a singl
 pass, avoiding repeated traversal of the dispatcher. Later normalization retains full simplification.
 The execution-invariant dispatcher applies contract lemmas before searching for their success
 hypotheses, and uses an explicit simp set to establish scalar-stack validity.
+The precomputed intrinsic signature-byte table is checked against its original strings with
+`decide +kernel`, avoiding expensive whole-table definitional equality while retaining an
+axiom-free equality theorem.
 
 Certificate validation streams fallthrough states and uses balanced indexes for branch
 destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original
