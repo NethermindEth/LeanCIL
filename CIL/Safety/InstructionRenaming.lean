@@ -28,7 +28,8 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
   · cases observable
   · simp only [Bool.false_eq_true, ite_false, *]
     split at observable
-    all_goals try simp only [List.map_cons, AllocationRenaming.value]
+    all_goals try simp (config := { singlePass := true }) only
+      [List.map_cons, AllocationRenaming.value]
     all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
     all_goals try exact related.memoryInstructionResult _ formed _ bounds observable
     all_goals try solve | repeat first | contradiction | cases observable | split at observable

@@ -16,6 +16,8 @@ Reference-aware subtraction, comparisons and branches share `Memory.Renamed.step
 `FixedStepFamily.reference`. These replace `stepSubtract`, `stepCompare`, `stepUnsignedBranch`
 and `stepEqualityBranch`, and their four separate family constructors. `stepTransport` and its
 successful/exceptional execution guarantees retain their statements.
+The ordinary instruction proof normalizes mapped stack constructors with a single simplifier
+pass, avoiding repeated traversal of the dispatcher. Later normalization retains full simplification.
 
 Certificate validation streams fallthrough states and uses balanced indexes for branch
 destinations. `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original
