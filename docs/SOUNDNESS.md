@@ -1,5 +1,13 @@
 # Soundness boundary
 
+External-call metadata identities are serialized as their UTF-8 bytes. Generated proofs check
+the validity of bounded chunks and compose them with `ByteArray.IsValidUTF8.append`; the kernel
+also checks that the concatenation is exactly the emitted byte array. Every existing signature
+and instruction validator consumes that unchanged identity. As with other raw metadata fields,
+correspondence between the serialized bytes and the assembly remains an extractor assumption.
+The former redundant `externalIdentityNBytes_eq` and `externalIdentityN_eq` literal equalities
+are replaced by `externalIdentityNBytes_valid` and shared `externalIdentityChunkN_valid` proofs.
+
 `leancil resolve-imports` is untrusted location selection outside extraction.
 deps.json, NuGet assets, the RID graph and the LeanCilContracts attribute only
 choose the sidecar and DLL paths passed to `extract`, which never reads them.

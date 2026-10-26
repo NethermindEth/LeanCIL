@@ -24,6 +24,11 @@ flowchart TD
 
 Dashed boxes are trusted rather than proved; see the [trusted computing base](docs/SOUNDNESS.md#trusted-computing-base). They are the extractor's metadata decoding and instruction translation, the CIL semantics as a model of .NET 10, and the Lean kernel with the verifier's hashing and process execution. Lean independently checks the extractor's layout, generic-specialization and feature evidence, but not the general translation. The compiler is not trusted: extraction reads its actual output. The kernel checks your proof but not your statement, so the guarantee is exactly what the theorem says, including its preconditions.
 
+Generated external-call identities use shared, kernel-checked UTF-8 chunks. This avoids
+re-encoding long assembly-qualified signatures while retaining exact byte identities and
+all translation validators. See [validation coverage](docs/VALIDATION.md) for the fixed-input
+compilation and replay benchmark.
+
 ## Build and test
 
 Caller proofs can register proved interfaces with `@[cil_contract]` and use

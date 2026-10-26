@@ -32,6 +32,21 @@ One local comparison of these nine requests, against the same certified base, to
 consumer builds from five to three, and replay invocations from six to three. This is a
 measurement of the selected cases, not the whole core suite or a CI wall-time guarantee.
 
+`Tests/ExternalIdentityEncoding.cs` kernel-checks generated identity strings against their
+literal values, including empty strings, embedded NULs, escaping and Unicode characters
+crossing chunk boundaries. Malformed UTF-16 is rejected before serialization, and invalid
+UTF-8 fails its validity proof. A compiled `Math.Abs`
+extraction passes, while a changed, still-valid UTF-8 call identity fails `ScalarFlowValid`.
+
+`scripts/BenchmarkExternalIdentities.cs` accepts fixed baseline `Extracted.lean` files with
+`externalIdentityNBytes_eq` declarations. It replaces only their identity encoding with the
+current emitter, compiles both complete modules with one Lean worker, then independently
+kernel-replays each. All chunk declarations are included. `artifacts/ExternalIdentityBenchmark`
+contains the paired sources and `timings.json`, including input SHA-256, source/artifact sizes,
+compilation and replay times. Use the same fixed files and toolchain when comparing results.
+For per-declaration kernel costs, run the paired Lean files with `--json --profile -j1
+-DElab.async=false -Dprofiler.threshold=0`; JSON source positions identify each declaration.
+
 `Tests/VerificationCache.cs` checks certified-library copying against the pinned manifest,
 source snapshot and toolchain key, rejects changed/missing/extra files and rehashed
 manifests, and independently detects destination corruption. On Unix it also checks that
