@@ -670,3 +670,26 @@ Both implementations produced identical component sources and aggregate imports.
 24-request extraction matrix (eight entries across scalar, x64-v3 and arm64-advsimd profiles)
 retained all 48 generated Lean file hashes. These measure component splitting and output
 stability, not end-to-end proof or CI speedups.
+
+The certificate successor index consumes the source list once to build its balanced tree,
+replacing repeated length/take/drop traversals. `Tests.FlowIndex` covers empty and singleton
+inputs, odd/even partitions, missing certificate states, out-of-bounds lookups and untouched
+suffixes. `FlowIndex.build_spec` proves prefix consumption and exact list lookup equivalence.
+
+`Tests/FlowIndexScaling.lean` retains the former builder as a benchmark reference. It constructs
+indexes and checks every target in reverse order, including the first out-of-bounds position,
+using `decide +kernel`. On Apple M4 with Lean 4.35.0, leanprof measured these theorem-checking
+heartbeat counts (kHB); they include elaboration and kernel checking, not whole-suite timings:
+
+| Entries | Repeated list splitting | Consuming builder |
+| --- | ---: | ---: |
+| 128 | 1,019.05 | 654.46 |
+| 512 | 4,749.06 | 2,907.29 |
+| 2,048 | 21,825.45 | 12,951.03 |
+
+These fixed workloads reduce checking work by 36–41%. Tree construction is linear in list
+cells; arbitrary target lookup remains logarithmic. The existing feature and scalar validators
+continue to use the same proved optional-lookup interface.
+
+The shared state-pairing proof also uses explicit list-shape cases instead of broad simplifier
+search. Its statement is unchanged, and its checked axiom set is reduced to `propext`.
