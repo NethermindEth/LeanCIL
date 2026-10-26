@@ -672,24 +672,44 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return false;
     }
 
+    /// <summary>Package name of the session package that holds the generated certificate modules.</summary>
+    const string GeneratedPackageName = "leancil_generated";
+
     /// <summary>
     /// Resolves the session's leancil dependency to the certified library directory, which Lake then
-    /// reads in place: its CIL traces are current, so builds write only below the session.
+    /// reads in place, and adds a generated-module package that the session root requires. Returns
+    /// that package: it has its own layout, so the consumer's srcDir and buildDir cannot move it.
     /// </summary>
-    static void UseCertifiedFramework(string session, string certified)
+    static string UseCertifiedFramework(string session, string certified)
     {
+        var generated = Within(session, ".lake/packages/" + GeneratedPackageName);
+        Directory.CreateDirectory(generated);
+        File.WriteAllText(Path.Combine(generated, "lakefile.toml"),
+            $"name = \"{GeneratedPackageName}\"\n\n[[require]]\nname = \"leancil\"\npath = " +
+            JsonSerializer.Serialize(Path.GetFullPath(certified).Replace('\\', '/')) + "\n");
+        File.Copy(Path.Combine(certified, "lean-toolchain"), Path.Combine(generated, "lean-toolchain"));
+        var relative = Path.GetRelativePath(session, generated).Replace('\\', '/');
+        var toml = Path.Combine(session, "lakefile.toml");
+        if (File.Exists(toml))
+            File.AppendAllText(toml, $"\n[[require]]\nname = \"{GeneratedPackageName}\"\npath = \"{relative}\"\n");
+        else
+            File.AppendAllText(Path.Combine(session, "lakefile.lean"), $"\nrequire {GeneratedPackageName} from \"{relative}\"\n");
+
         var path = Path.Combine(session, "lake-manifest.json");
         var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
         var packages = manifest["packages"]!.AsArray();
         var index = packages.Select((package, position) => (package, position))
             .Single(entry => entry.package!["name"]!.GetValue<string>() == "leancil").position;
-        packages[index] = new System.Text.Json.Nodes.JsonObject
+        System.Text.Json.Nodes.JsonObject PathPackage(string name, string directory, bool inherited) => new()
         {
-            ["type"] = "path", ["scope"] = "", ["name"] = "leancil", ["manifestFile"] = "lake-manifest.json",
-            ["inherited"] = packages[index]!["inherited"]?.GetValue<bool>() ?? false,
-            ["dir"] = Path.GetFullPath(certified), ["configFile"] = "lakefile.toml"
+            ["type"] = "path", ["scope"] = "", ["name"] = name, ["manifestFile"] = "lake-manifest.json",
+            ["inherited"] = inherited, ["dir"] = directory, ["configFile"] = "lakefile.toml"
         };
+        packages[index] = PathPackage("leancil", Path.GetFullPath(certified),
+            packages[index]!["inherited"]?.GetValue<bool>() ?? false);
+        packages.Add(PathPackage(GeneratedPackageName, relative, false));
         File.WriteAllText(path, manifest.ToJsonString());
+        return generated;
     }
 
     static void AddConsumerLibrary(string directory, string name)
@@ -1147,8 +1167,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (purpose == ConsumerSessionPurpose.Verification)
         {
             // Lake reads the certified library in place and writes only below this session.
-            UseCertifiedFramework(session, certifiedLibrary!);
-            generatedPackage = session;
+            generatedPackage = UseCertifiedFramework(session, certifiedLibrary!);
         }
         else
         {
