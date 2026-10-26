@@ -848,3 +848,25 @@ five measured batches at 128/512/2,048 unique sites and chains were 0.093/2.761/
 list deduplication versus 0.021/0.130/0.540 ms for indexed accumulation. Collection construction
 is included; indexed measurements invoke the actual accumulator through reflection. These are
 collection costs, not admission or complete report-generation timings.
+Constrained instruction validation now consumes the raw, reachability and emitted lists together,
+retaining the previous instruction and reading the next one from the tail. Lowering likewise
+retains the raw predecessor before rewriting it. This removes per-position tree lookup and
+construction for sequential instruction evidence while preserving malformed-neighbor and length
+rejection. Method-target lookup, branch membership and dispatch metadata resolution keep their
+existing checks. Opaque-local enumeration reads each type directly from `zipIdx`; address-set
+membership remains indexed. The earlier equivalence theorems retain their statements.
+
+`Tests/StreamingValidationScaling.lean` compares these traversals to the preceding indexed
+implementations, using the current linear FlowIndex builder. An Apple M4 / Lean 4.35 run of
+`leanprof elab --heartbeats` measured total theorem-declaration work:
+
+| Check | Entries | Indexed positions (kHB) | Streaming positions (kHB) |
+| --- | ---: | ---: | ---: |
+| Constrained reachable nops | 128 | 1,256.40 | 330.73 |
+| Constrained reachable nops | 512 | 5,596.06 | 1,257.34 |
+| Eligible opaque locals, no addresses | 128 | 2,248.81 | 1,781.24 |
+| Eligible opaque locals, no addresses | 512 | 4,807.78 | 2,599.93 |
+
+These include index construction and isolate positional work. They do not measure dispatch
+metadata resolution, full-method proof time or total CI savings. Existing constrained/opaque
+regressions pass, with additional trailing-prefix and extra-emitted-instruction rejection cases.
