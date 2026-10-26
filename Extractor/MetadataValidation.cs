@@ -472,13 +472,13 @@ internal static class MetadataValidation
             var method = methods[index];
             var instructions = new InstructionIndex(method);
             NativeOperands.Certificate? nativeOperands = null;
-            int[]? parameterHomes = null;
+            Dictionary<int, int>? parameterHomes = null;
             HashSet<Instruction>? reachable = null;
             if (!Check(method, null, () =>
                 {
                     reachable = Reachability.Analyze(method, profile);
                     nativeOperands = NativeOperands.Certify(method, reachable);
-                    parameterHomes = ParameterStorage.Analyze(method, reachable);
+                    parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable));
                 }, named: true))
                 continue;
             foreach (Instruction instruction in reachable!)
