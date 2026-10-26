@@ -1,5 +1,11 @@
 # Validation coverage
 
+Extraction reuses each method's reachability result within validation, emission and exception
+linting. Feature evidence uses the same incoming states as instruction selection. Each phase
+computes a fresh result, so no analysis is cached across method mutation or profile changes.
+`Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
+profiles, feature queries and a loop backedge, and retains source/assembly tampering checks.
+
 Generated positive evidence in `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`,
 `GenericEvidence` and `StaticScalarValues` shares imports within each fixture. Each extraction
 and its proof remain in their own namespace, following the generated verification batch

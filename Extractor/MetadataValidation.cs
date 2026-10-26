@@ -401,10 +401,15 @@ internal static class MetadataValidation
             var method = methods[index];
             NativeOperands.Certificate? nativeOperands = null;
             int[]? parameterHomes = null;
-            if (!Check(method, null, () => (nativeOperands, parameterHomes) =
-                (NativeOperands.Certify(method, profile), ParameterStorage.Analyze(method, profile)), named: true))
+            HashSet<Instruction>? reachable = null;
+            if (!Check(method, null, () =>
+                {
+                    reachable = Reachability.Analyze(method, profile);
+                    nativeOperands = NativeOperands.Certify(method, reachable);
+                    parameterHomes = ParameterStorage.Analyze(method, reachable);
+                }, named: true))
                 continue;
-            foreach (Instruction instruction in Reachability.Analyze(method, profile))
+            foreach (Instruction instruction in reachable!)
                 if (!skipped.Contains(instruction))
                     Check(method, instruction, () =>
                         InstructionTranslation.Translate(instruction, method, methods, index, profile, nativeOperands, parameterHomes, imports), named: true);

@@ -123,9 +123,10 @@ internal static class LeanEmitter
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
-            HashSet<Instruction> reachable = Reachability.Analyze(m, profile);
-            var scalarCertificate = NativeOperands.Certify(m, profile);
-            var parameterIndices = ParameterStorage.Analyze(m, profile);
+            var featureCertificate = Reachability.Certify(m, profile);
+            var reachable = featureCertificate.Keys.ToHashSet();
+            var scalarCertificate = NativeOperands.Certify(m, reachable);
+            var parameterIndices = ParameterStorage.Analyze(m, reachable);
             string parameters = string.Join(", ", parameterIndices.Select(index => $"({index}, {Kind(MethodArguments.Type(m, index), m.Module, profile.Architecture)})"));
             string locals = string.Join(", ", m.Body.Variables.Select(v => m.Body.InitLocals ? Initial(v.VariableType, m.Module, profile.Architecture) : ".unmodeled"));
             HashSet<int> addressedLocals = m.Body.Instructions
@@ -178,7 +179,7 @@ internal static class LeanEmitter
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
-            FeatureEvidence.Emit(lean, m, n, profile);
+            FeatureEvidence.Emit(lean, m, n, featureCertificate);
             lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : method{n}.opaqueVectorLocals = [{opaqueLocals}] := rfl");
             ScalarEvidence.Emit(lean, m, n, scalarCertificate);
             lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : method{n}.parameterHomes = [{parameters}] := rfl");

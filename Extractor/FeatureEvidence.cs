@@ -1,5 +1,6 @@
 using System.Text;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -9,9 +10,9 @@ internal static class FeatureEvidence
 {
     static string Fact(int? value) => value is int word ? $"some (BitVec.ofInt 32 ({word}))" : "none";
 
-    internal static void Emit(StringBuilder lean, MethodDefinition method, int number, FeatureProfile profile)
+    internal static void Emit(StringBuilder lean, MethodDefinition method, int number,
+        IReadOnlyDictionary<Instruction, FeatureConstants> incoming)
     {
-        var incoming = Reachability.Certify(method, profile);
         var states = method.Body.Instructions.Select(instruction =>
         {
             if (!incoming.TryGetValue(instruction, out FeatureConstants? state)) return "none";

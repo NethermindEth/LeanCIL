@@ -17,7 +17,9 @@ internal static class InstructionTranslation
     {
         if (imports is not null && imports.TryTranslate(i, methods.Length, out string imported)) return imported;
         profile ??= FeatureProfile.Scalar;
-        nativeOperands ??= NativeOperands.Certify(m, profile);
+        var reachable = nativeOperands is null || parameterHomes is null
+            ? Reachability.Analyze(m, profile) : null;
+        nativeOperands ??= NativeOperands.Certify(m, reachable!);
         if (i.OpCode.Code == Code.Add && nativeOperands.Incoming.TryGetValue(i, out var incoming) &&
             incoming.Length >= 2 && incoming[^2] == NativeOperands.Kind.Reference &&
             incoming[^1] is NativeOperands.Kind.Word32 or NativeOperands.Kind.Native)
@@ -29,7 +31,8 @@ internal static class InstructionTranslation
         }
         if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(m, i.Previous);
         if (Arrays.Translate(i) is { } arrayOperation) return arrayOperation;
-        var translated = TranslateCore(i, m, methods, methodIndex, profile, parameterHomes ?? ParameterStorage.Analyze(m, profile));
+        parameterHomes ??= ParameterStorage.Analyze(m, reachable!);
+        var translated = TranslateCore(i, m, methods, methodIndex, profile, parameterHomes);
         return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;
     }
 

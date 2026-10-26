@@ -5,10 +5,10 @@ namespace Nethermind.LeanCIL;
 
 internal static class ParameterStorage
 {
-    internal static int[] Analyze(MethodDefinition method, FeatureProfile profile)
+    internal static int[] Analyze(MethodDefinition method, IEnumerable<Instruction> reachable)
     {
         var indices = new SortedSet<int>();
-        foreach (var instruction in Reachability.Analyze(method, profile))
+        foreach (var instruction in reachable)
         {
             if (instruction.OpCode.Code is not (Code.Starg or Code.Starg_S or Code.Ldarga or Code.Ldarga_S)) continue;
             if (instruction.Operand is not ParameterDefinition parameter)
