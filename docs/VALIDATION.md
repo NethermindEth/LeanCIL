@@ -1033,3 +1033,15 @@ the library's dependencies in the repository checkout.
 A preliminary Windows paired native audit of `ImportFixture.addOne` measured median
 3.50 seconds before and 1.22 seconds after (three runs each), with byte-identical audit output.
 These focused timings are not complete-suite or CI measurements.
+### Consumer certificate and theorem audit imports
+
+Fresh consumer verification audits the extraction certificate and requested proof in one native
+import environment. Both artifacts must match their kernel-replayed module paths, and their
+individual theorem types, premises and allowed axioms are still checked. This removes a repeated
+closure import; it does not reuse a previous proof result or skip fresh verification.
+
+The four positive verification requests in `Tests/ConsumerCertificateReuse.cs` used eight native
+audits before this change and four afterward. Local Windows traces measured 11.03 seconds versus
+5.95 seconds in those audits. Other concurrent builds affected whole-fixture timings, so this is
+not an end-to-end CI estimate. Corrupted receipts, changed extraction and generated-source
+modification controls still reject as before.

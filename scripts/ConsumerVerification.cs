@@ -1816,29 +1816,32 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
-            // Audits read the replayed oleans only; Lake and the consumer's metaprograms never see them.
-            Stage(proceeding, "extraction certificate audit");
-            var certificate = AuditOleans(leanPath, ["ExtractionAudit"], [ExtractionCertificate("ExtractionAudit.valid")]);
-            RequireAuditedModule(certificate, "ExtractionAudit", currentArtifacts["ExtractionAudit"]);
-            AuditedAxioms(certificate.theorems[0]);
-            extractionAudit += AuditText(certificate.theorems[0]);
-            Stage(proceeding, "theorem audit");
+            // Audit the certificate and proof in one import environment containing only replayed oleans.
             var audits = new Dictionary<int, (string Audit, string[] Axioms)>();
+            string certificateText = "";
             foreach (var i in proceeding)
             {
                 try
                 {
+                    Stage([i], "extraction certificate audit");
                     var module = requestModules[i];
-                    string[] auditModules = [module, .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                    string[] auditModules = [module, "ExtractionAudit",
+                        .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                    AuditRequest[] proofAudits = requests[i].ExportAudit?.Theorems ??
+                        [ProofTheorem(requests[i].Theorem, extractions[i])];
                     var audited = AuditOleans(leanPath, auditModules,
-                        requests[i].ExportAudit?.Theorems ?? [ProofTheorem(requests[i].Theorem, extractions[i])], ImportPremise(extractions[i]));
+                        [.. proofAudits, ExtractionCertificate("ExtractionAudit.valid")], ImportPremise(extractions[i]));
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
+                    AuditedAxioms(audited.theorems[^1]);
+                    certificateText = AuditText(audited.theorems[^1]);
+                    Stage([i], "theorem audit");
                     RequireAuditedConstants(audited);
                     foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
                     audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]));
                 }
                 catch (Exception error) { Fail([i], error); }
             }
+            extractionAudit += certificateText;
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
             Recheck(proceeding);
