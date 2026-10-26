@@ -11,11 +11,12 @@ internal static class InstructionTranslation
             return ".feature " + FeatureProfile.LeanFeature(feature);
         return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);
     }
-    internal static string Translate(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
+    internal static string Translate(Instruction i, MethodDefinition m,
+        IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
         FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
         int[]? parameterHomes = null, ImportResolution? imports = null)
     {
-        if (imports is not null && imports.TryTranslate(i, methods.Length, out string imported)) return imported;
+        if (imports is not null && imports.TryTranslate(i, methods.Count, out string imported)) return imported;
         profile ??= FeatureProfile.Scalar;
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
@@ -26,17 +27,18 @@ internal static class InstructionTranslation
             return ".memory (.add 1 true)";
         if (i.OpCode.Code == Code.Readonly)
         {
-            Arrays.ValidateReadOnly(m, i);
+            Arrays.ValidateReadOnly(instructions, i);
             return ".nop";
         }
-        if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(m, i.Previous);
+        if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
         if (Arrays.Translate(i) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.Analyze(m, reachable!);
-        var translated = TranslateCore(i, m, methods, methodIndex, profile, parameterHomes);
+        var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes);
         return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;
     }
 
-    static string TranslateCore(Instruction i, MethodDefinition m, MethodDefinition[] methods, int methodIndex,
+    static string TranslateCore(Instruction i, MethodDefinition m, IReadOnlyDictionary<MethodDefinition, int> methods,
+        int methodIndex, InstructionIndex instructions,
         FeatureProfile profile, int[] parameterHomes)
     {
         profile ??= FeatureProfile.Scalar;
@@ -47,19 +49,19 @@ internal static class InstructionTranslation
         if (i.OpCode.Code == Code.Constrained)
         {
             if (i.Next is null) throw new InvalidDataException("Constrained prefix has no call");
-            ConstrainedCalls.Resolve(m, i.Next, profile.Architecture);
+            ConstrainedCalls.Resolve(m, i.Next, instructions, profile.Architecture);
             return ".nop";
         }
         if (i.OpCode.Code == Code.Callvirt)
         {
-            var resolved = ConstrainedCalls.Resolve(m, i, profile.Architecture).Target;
-            var index = Array.IndexOf(methods, resolved);
+            var resolved = ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture).Target;
+            var index = methods.GetValueOrDefault(resolved, -1);
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
             return $".call {index} {resolved.Parameters.Count + 1}";
         }
         if (throws.Raises.TryGetValue(i, out string? raised)) return $".throw \"{raised}\"";
         if (throws.Operands.Contains(i) || Spans.Analyze(m).Operands.Contains(i)) return ".nop";
-        int Target() => m.Body.Instructions.IndexOf((Instruction)i.Operand);
+        int Target() => instructions.Position((Instruction)i.Operand);
         int Local() => ((VariableDefinition)i.Operand).Index;
         string Narrow(TypeReference type) => LeanEmitter.Narrow(type) is { } kind ? $" (some .{kind})" : "";
         string LocalOp(string op, int index) => $".{op} {index}" +
@@ -105,7 +107,7 @@ internal static class InstructionTranslation
             var r = (MethodReference)i.Operand;
             if (RuntimeModel(r, profile) is string modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
-            int index = Array.IndexOf(methods, resolved);
+            int index = methods.GetValueOrDefault(resolved, -1);
             if (index > methodIndex)
             {
                 if (i.OpCode.Code == Code.Newobj)
@@ -143,7 +145,8 @@ internal static class InstructionTranslation
             Code.Mul_Ovf => ".checkedArithmetic .mul true", Code.Mul_Ovf_Un => ".checkedArithmetic .mul false",
             Code.Div => ".divide true false", Code.Div_Un => ".divide false false",
             Code.Rem => ".divide true true", Code.Rem_Un => ".divide false true",
-            Code.Switch => ".switch [" + string.Join(", ", ((Instruction[])i.Operand).Select(m.Body.Instructions.IndexOf)) + "]",
+            Code.Switch => ".switch [" +
+                string.Join(", ", ((Instruction[])i.Operand).Select(instructions.Position)) + "]",
             Code.Sizeof => $".const32 {TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture)}",
             Code.Cpobj => $".copyObject {CopyWidth((TypeReference)i.Operand, m.Module, profile.Architecture)}",
             Code.Ldind_I1 => ".loadScalar 1 true", Code.Ldind_U1 => ".loadScalar 1",

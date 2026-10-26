@@ -11,6 +11,10 @@ var extractor = Assembly.LoadFrom(ExtractorPath);
 var resolve = extractor.GetType("Nethermind.LeanCIL.ConstrainedCalls", throwOnError: true)!
     .GetMethod("Resolve", BindingFlags.Static | BindingFlags.NonPublic)!;
 
+object Index(MethodDefinition method) => Activator.CreateInstance(
+    extractor.GetType("Nethermind.LeanCIL.InstructionIndex", true)!,
+    BindingFlags.Instance | BindingFlags.NonPublic, null, [method], null)!;
+
 foreach (var (receiverName, methodName) in new[]
 {
     ("CounterValue", "Read"),
@@ -22,7 +26,7 @@ foreach (var (receiverName, methodName) in new[]
     var receiver = module.GetType("Examples." + receiverName);
     var prefix = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Constrained);
     prefix.Operand = receiver;
-    var resolution = resolve.Invoke(null, [method, prefix.Next, "scalar"])!;
+    var resolution = resolve.Invoke(null, [method, prefix.Next, Index(method), "scalar"])!;
     var target = (MethodDefinition)resolution.GetType().GetProperty("Target")!.GetValue(resolution)!;
     if (target.DeclaringType != receiver || target.Name != methodName)
         throw new Exception("Incorrect concrete constrained implementation: " + target.FullName);
@@ -32,6 +36,7 @@ foreach (var (receiverName, methodName) in new[]
 foreach (var (mutation, marker) in new[]
 {
     ("branch", "Branch bypasses constrained receiver prefix"),
+    ("switch", "Branch bypasses constrained receiver prefix"),
     ("reference", "concrete same-assembly struct"),
     ("missing", "no unique struct implementation"),
     ("ordinary", "adjacent concrete constrained receiver")
@@ -48,13 +53,16 @@ foreach (var (mutation, marker) in new[]
         case "branch":
             method.Body.GetILProcessor().InsertBefore(prefix, Instruction.Create(OpCodes.Br, call));
             break;
+        case "switch":
+            method.Body.GetILProcessor().InsertBefore(prefix, Instruction.Create(OpCodes.Switch, [call, call]));
+            break;
         case "reference": prefix.Operand = module.GetType("Examples.ConstrainedCalls"); break;
         case "missing": receiver.Methods.Remove(receiver.Methods.Single(method => method.Name == "Read")); break;
         case "ordinary": prefix.OpCode = OpCodes.Nop; prefix.Operand = null; break;
     }
     try
     {
-        resolve.Invoke(null, [method, call, "scalar"]);
+        resolve.Invoke(null, [method, call, Index(method), "scalar"]);
         throw new Exception("Constrained resolver accepted " + mutation);
     }
     catch (TargetInvocationException error) when

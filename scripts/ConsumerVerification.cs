@@ -332,14 +332,7 @@ partial class Program
         var destination = Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT");
         if (string.IsNullOrWhiteSpace(destination) || export.Sources is null || export.Modules.Count == 0) return;
         // A conflicting module invalidates its importers, as on receivers.
-        var dropped = new HashSet<string>(export.Conflicts, StringComparer.Ordinal);
-        bool changed;
-        do
-        {
-            changed = false;
-            foreach (var (name, imports) in export.Imports)
-                if (!dropped.Contains(name) && imports.Any(dropped.Contains)) changed |= dropped.Add(name);
-        } while (changed);
+        var dropped = DependentModules(export.Imports, export.Conflicts);
         var modules = new SortedDictionary<string, SortedDictionary<string, string>>(
             export.Modules.Where(pair => !dropped.Contains(pair.Key)).ToDictionary(), StringComparer.Ordinal);
         if (modules.Count == 0) return;
@@ -465,16 +458,13 @@ partial class Program
             // Unused producer modules need not be built by a different method gate.
             var invalid = manifest.Modules.Where(pair => !fingerprints.TryGetValue(pair.Key, out var parts) ||
                 !Same(pair.Value, parts)).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
-            bool changed;
-            do
-            {
-                changed = false;
-                foreach (var name in manifest.Modules.Keys)
-                    if (manifest.Imports[name].Any(import => invalid.Contains(import) ||
-                        (!manifest.Modules.ContainsKey(import) &&
-                         !File.Exists(Path.Combine(Toolchain, "lib/lean", import.Replace('.', '/') + ".olean")))))
-                        changed |= invalid.Add(name);
-            } while (changed);
+            var graph = manifest.Modules.Keys.ToDictionary(name => name, name => manifest.Imports[name],
+                StringComparer.Ordinal);
+            foreach (var import in graph.Values.SelectMany(imports => imports).Distinct(StringComparer.Ordinal))
+                if (!manifest.Modules.ContainsKey(import) &&
+                    !File.Exists(Path.Combine(Toolchain, "lib/lean", import.Replace('.', '/') + ".olean")))
+                    invalid.Add(import);
+            invalid = DependentModules(graph, invalid);
             result.UnionWith(manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" &&
                 !name.StartsWith("CIL.", StringComparison.Ordinal) && name is not ("Extracted" or "ExtractedSymbols" or "ExtractionAudit") &&
                 !name.StartsWith("LeanCILProof", StringComparison.Ordinal)));
@@ -767,16 +757,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return closure;
     }
 
-    static HashSet<string> DependentModules(Dictionary<string, string[]> graph, IEnumerable<string> roots)
+    static HashSet<string> DependentModules(IReadOnlyDictionary<string, string[]> graph, IEnumerable<string> roots)
     {
+        var importers = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var (name, imports) in graph)
+            foreach (var import in imports)
+            {
+                if (!importers.TryGetValue(import, out var users)) importers.Add(import, users = []);
+                users.Add(name);
+            }
         var dependent = new HashSet<string>(roots, StringComparer.Ordinal);
-        bool changed;
-        do
-        {
-            changed = false;
-            foreach (var (name, imports) in graph)
-                if (imports.Any(dependent.Contains)) changed |= dependent.Add(name);
-        } while (changed);
+        var pending = new Queue<string>(dependent);
+        while (pending.TryDequeue(out var name))
+            if (importers.TryGetValue(name, out var users))
+                foreach (var user in users)
+                    if (dependent.Add(user)) pending.Enqueue(user);
         return dependent;
     }
 
@@ -802,15 +797,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var result = record.Where(pair => pair.Value.Sources.Count > 0 &&
                 pair.Value.Sources.All(source => sources.TryGetValue(source.Key, out var hash) && hash == source.Value))
             .Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
-        bool changed;
-        do
-        {
-            changed = false;
-            foreach (var name in result.ToArray())
-                if (record[name].Imports.Any(import => !result.Contains(import) && !ExternalConsumerModule(import) &&
-                    !(import == "Extracted" && record[name].Sources.ContainsKey(ExtractedSourceKey))))
-                    changed |= result.Remove(name);
-        } while (changed);
+        var graph = record.ToDictionary(pair => pair.Key,
+            pair => pair.Value.Imports.Where(import => !ExternalConsumerModule(import) &&
+                !(import == "Extracted" && pair.Value.Sources.ContainsKey(ExtractedSourceKey))).ToArray(),
+            StringComparer.Ordinal);
+        var invalid = record.Keys.Where(name => !result.Contains(name))
+            .Concat(graph.Values.SelectMany(imports => imports).Where(import => !record.ContainsKey(import)));
+        result.ExceptWith(DependentModules(graph, invalid));
         return result;
     }
 
