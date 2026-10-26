@@ -130,7 +130,7 @@ var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Tes
 if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs",
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
-        "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs",
+        "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/ImportIndexes.cs",
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
@@ -200,6 +200,7 @@ Passed("cold and warm verification, proof-edit invalidation and unchecked helper
 
 RunFixture("Tests/InstructionIndexes.cs", [], streamOutput: true, progress: "Instruction index checks");
 RunFixture("Tests/TemplateIndexes.cs", [], streamOutput: true, progress: "Template index checks");
+RunFixture("Tests/ImportIndexes.cs", [], streamOutput: true, progress: "Import index checks");
 Passed("instruction indexes and prefix target rejection");
 
 RunFixture("Tests/ExtractionBatch.cs", [], streamOutput: true, progress: "Extraction batch checks");

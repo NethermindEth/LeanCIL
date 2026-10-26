@@ -822,3 +822,14 @@ On Apple M4 / Lean 4.35, `leanprof elab --heartbeats` reported:
 
 The indexed measurements include constructing both indexes with the current linear FlowIndex
 builder. They reduce measured work by 48–82%; they do not estimate total CI wall time.
+
+Loaded contract libraries index exports by exact identity and certifications by exact
+(identity, profile). The production reader still rejects duplicates before constructing either
+index. `Tests/ImportIndexes.cs` checks case-sensitive lookup, multiple profiles and the reader's
+exact duplicate diagnostics using an otherwise accepted interface.
+
+A Windows .NET 10 Release synthetic lookup benchmark, with one lookup per export and two
+certifications per export, measured median batches of 128/512/2,048 exports at
+0.369/1.814/22.929 ms with list searches versus 0.031/0.121/0.590 ms with dictionaries.
+Dictionary construction is included. This measures the lookup algorithm, not DLL validation,
+proof checking or end-to-end import time.
