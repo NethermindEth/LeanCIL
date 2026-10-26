@@ -201,8 +201,13 @@ if (stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argume
         argument.GetString()!.StartsWith(deletedProofs, StringComparison.Ordinal))) ||
     stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "extract")))
     throw new InvalidOperationException("Fresh caller verification obtained library implementation proofs or extracted Lib.");
-if (!stages.Any(stage => stage.GetProperty("stage").GetString()!.Contains("Kernel replay", StringComparison.Ordinal) &&
-    stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == interfaceModule)))
+if (!stages.Where(stage => stage.GetProperty("exitCode").GetInt32() == 0 &&
+        stage.GetProperty("stage").GetString()!.Contains("Kernel replay", StringComparison.Ordinal))
+    .SelectMany(stage => File.ReadLines(Path.Combine(trace, stage.GetProperty("transcript").GetString()!)))
+    .Where(line => line.StartsWith('{'))
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+    .Any(record => record.TryGetProperty("module", out JsonElement module) &&
+        module.GetString() == interfaceModule))
     throw new InvalidOperationException("Fresh caller verification did not independently replay the published interface declarations.");
 if (!verified.Contains("Conditional verification: assumes _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
