@@ -918,3 +918,14 @@ Apple M4 / Lean 4.35 paired `decide +kernel` declaration work, including set con
 
 The dense cases improve 7–8%; sparse cases improve 83–88%. Computing the argument bound still
 traverses the argument list. These are focused kernel-work measurements, not total CI savings.
+
+Interface-module merging uses an ordinal-ignore-case spelling index to detect collisions while
+retaining ordinal sorted output. Exact duplicate names with identical source remain accepted;
+changed source or different casing remains rejected, including Unicode ordinal case pairs.
+`Tests.ImportIndexes` exercises this merge rule independently of interface admission.
+
+A Windows .NET 10 collection benchmark with reverse-ordered unique module names, including
+both indexes and sorted output construction, measured 128/512/2,048 modules at
+0.092/1.304/20.984 ms before and 0.011/0.060/0.458 ms after (one-second warmups, median seven
+samples). This isolates module merging, not full import verification. Collision detection
+becomes expected linear work; sorted output construction still takes O(M log M).
