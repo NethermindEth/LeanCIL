@@ -1079,6 +1079,18 @@ The test also rejects a changed bootstrap source snapshot. In one Windows trace,
 positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
 through the native auditor. Single-file verification now also shares replay imports for its
 multi-module interface and proof target sets. Fresh checking and failure isolation are unchanged.
+
+The native auditor also accepts `replayTargets` in an audit request. It retains the kernel's
+checked environment for structural theorem and constant checks, avoiding a second dependency
+import. Any duplicate declaration, interface/closure/namespace request, or contract refutation
+requiring source locations retains the ordinary audit import. This does not change the standalone
+replay duplicate rule: equal theorem types can have different proof bodies, so a merged replay
+environment must not choose which body's axioms a subsequent audit sees. `JointReplay` checks
+both duplicate orders, a forged body, source-location fallback and toolchain shadowing in both
+paths. A fixed `Tests.MethodContract` artifact took 2.59–2.63 seconds for separate native replay
+and audit versus 1.36–1.38 seconds combined, with identical statement and axiom output. These
+are focused Windows timings; consumer orchestration does not yet use this optional capability.
+
 ### Evidence-suite reuse
 
 The evidence runner compiles its test modules once against the authenticated CIL library,

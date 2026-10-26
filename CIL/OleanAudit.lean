@@ -11,6 +11,8 @@ import CIL.Interface.Headers
 `--imports INPUT OUTPUT` reads compiled import headers; `--fingerprints INPUT` writes portable
 module parts with only persisted linter diagnostics removed. Neither mode loads extensions.
 `--replay INPUT` kernel-checks an exact JSON array of target modules against shared imports.
+An audit request with `replayTargets` checks those modules first and reuses their checked kernel
+environment when declaration names are unique and the audit needs no target module metadata.
 
 It imports `modules` with `loadExts := false`, so no imported environment extension, attribute,
 elaborator, notation or `initialize` runs; only constant declarations are read. The toolchain's
@@ -21,7 +23,7 @@ REQUEST (JSON):
     "theorems":  [{ "name": N, "type": E?, "levelParams": [u, ...]?, "axioms": [N, ...],
                     "statement": bool?, "refutation": bool? }],
     "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
-    "interfaces": [M, ...]?, "closures": [{ "name": N }]?,
+    "interfaces": [M, ...]?, "closures": [{ "name": N }]?, "replayTargets": [M, ...]?,
     "namespaces": { "prefixes": [P, ...], "axioms": [N, ...] }? }
 A theorem must be a `theorem` whose type matches `E` (when given) and whose axiom closure is
 in `axioms`. A constant must be a definition whose value (and type) match. Every declaration
@@ -334,6 +336,37 @@ unsafe def writeFingerprints (input : String) : IO Unit := do
     let regions ← fingerprintModule name sources destinations
     for region in regions.reverse do region.free
 
+/-- Whether an audit needs target metadata absent from a freshly replayed kernel environment. -/
+def needsTargetMetadata (env : Kernel.Environment) (req : Json) : Bool := Id.run do
+  if !(names req "interfaces").isEmpty ||
+      !((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).isEmpty ||
+      (req.getObjVal? "namespaces").isOk then return true
+  for entry in (req.getObjValAs? (Array Json) "theorems").toOption.getD #[] do
+    if entry.getObjValAs? Bool "refutation" matches .ok true then
+      let some thm := (entry.getObjValAs? String "name").toOption | return true
+      if let some (.thmInfo info) := env.find? (name thm) then
+        if let .app (.const `Not _) claim := stripMData info.type then
+          if let .const contract _ := claim.getAppFn then
+            if contracts.contains contract then return true
+  return false
+
+/-- Audits a supplied immutable environment and records the exact resolved module paths. -/
+unsafe def writeAudit (req : Json) (output : String) (env : Environment)
+    (extra : List (String × Json) := []) : IO Unit := do
+  let modules := names req "modules"
+  let mut paths : List (String × Json) := []
+  for m in modules do paths := paths ++ [(m.toString, toJson (← findOLean m).toString)]
+  let theorems ← ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).mapM (theorem? env)
+  let constants ←
+    ((req.getObjValAs? (Array Json) "constants").toOption.getD #[]).mapM (constant? env)
+  let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM (closure? env)
+  let audited ← match req.getObjVal? "namespaces" with
+    | .ok spec => pure [("namespaces", ← namespaces env modules spec)]
+    | .error _ => pure []
+  IO.FS.writeFile output (Json.mkObj ([("modules", Json.mkObj paths),
+    ("theorems", toJson theorems), ("constants", toJson constants),
+    ("interfaces", interfaces env req), ("closures", toJson closures)] ++ audited ++ extra)).compress
+
 end LeanCILAudit
 
 open Lean LeanCILAudit in
@@ -355,17 +388,16 @@ unsafe def main (args : List String) : IO UInt32 := do
   searchPathRef.set ((← getBuiltinSearchPath sysroot) ++ (← addSearchPathFromEnv {}))
   let modules := names req "modules"
   if modules.isEmpty then throw (IO.userError "No modules to audit")
-  let mut paths : List (String × Json) := []
-  for m in modules do paths := paths ++ [(m.toString, toJson (← findOLean m).toString)]
+  if let .ok targets := req.getObjValAs? (List String) "replayTargets" then
+    if targets.isEmpty then throw (IO.userError "No modules to replay")
+    CIL.Replay.withReplayedModules targets fun kernel unique => do
+      let fused := unique && modules.all (fun m => targets.contains m.toString) &&
+        !needsTargetMetadata kernel req
+      let env ← if fused then pure (Environment.ofKernelEnv kernel)
+        else importModules (modules.map ({ module := · })) {} (loadExts := false)
+      try writeAudit req output env [("replayed", toJson targets), ("fused", toJson fused)]
+      finally unless fused do env.freeRegions
+    return 0
   let env ← importModules (modules.map ({ module := · })) {} (loadExts := false)
-  let theorems ← ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).mapM (theorem? env)
-  let constants ←
-    ((req.getObjValAs? (Array Json) "constants").toOption.getD #[]).mapM (constant? env)
-  let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM (closure? env)
-  let audited ← match req.getObjVal? "namespaces" with
-    | .ok spec => pure [("namespaces", ← namespaces env modules spec)]
-    | .error _ => pure []
-  IO.FS.writeFile output (Json.mkObj ([("modules", Json.mkObj paths),
-    ("theorems", toJson theorems), ("constants", toJson constants),
-    ("interfaces", interfaces env req), ("closures", toJson closures)] ++ audited)).compress
+  writeAudit req output env
   return 0

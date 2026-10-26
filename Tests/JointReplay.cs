@@ -40,6 +40,66 @@ Compile("JointE2", "import JointD\ntheorem JointE2.use (n : Nat) : JointD.f (n +
 // Unrelated modules declaring one name with different statements.
 Compile("JointClash1", "theorem JointClash.same : True := trivial\n");
 Compile("JointClash2", "theorem JointClash.same : 1 = 1 := rfl\n");
+Compile("JointClean", "theorem JointDuplicate.same : True := True.intro\n");
+Compile("JointUnapproved", "axiom JointUnapproved.oracle : True\n" +
+    "theorem JointDuplicate.same : True := JointUnapproved.oracle\n");
+Compile("JointRefutation", "def CIL.Safety.MethodContract.Holds : Prop := False\n" +
+    "theorem JointRefutation.test : ¬ CIL.Safety.MethodContract.Holds := fun h => h\n");
+
+void CheckFusedReplay()
+{
+    var shadow = Path.Combine(root, "Shadow");
+    Directory.CreateDirectory(shadow);
+    File.WriteAllText(Path.Combine(shadow, "Init.olean"), "Not an olean");
+    var leanPath = shadow + Path.PathSeparator + root;
+
+    System.Text.Json.JsonElement Audit(string[] targets, string module, string theorem, bool fused,
+        bool rejected = false, bool metadata = false)
+    {
+        var request = Path.Combine(root, "fused-request.json");
+        var result = Path.Combine(root, "fused-result.json");
+        File.WriteAllText(request, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            modules = new[] { module }, replayTargets = targets,
+            theorems = new[] { new { name = theorem, axioms = Array.Empty<string>(), statement = true, refutation = true } },
+            interfaces = metadata ? new[] { module } : Array.Empty<string>()
+        }));
+        Run([verification.CheckedAuditExecutable(), request, result], root, leanPath, environment: environment);
+        var audited = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(File.ReadAllText(result));
+        if (audited.GetProperty("fused").GetBoolean() != fused ||
+            !audited.GetProperty("replayed").EnumerateArray().Select(value => value.GetString()).SequenceEqual(targets))
+            throw new InvalidOperationException("Fused audit selected the wrong environment or replay targets");
+        var checkedTheorem = audited.GetProperty("theorems")[0];
+        if (checkedTheorem.TryGetProperty("error", out var error) != rejected ||
+            (rejected && !error.GetString()!.Contains("JointUnapproved.oracle")))
+            throw new InvalidOperationException("Fused audit did not preserve the theorem's own axiom closure");
+        return audited;
+    }
+
+    Audit(["JointA"], "JointA", "JointA.base", fused: true);
+    Audit(["JointA"], "JointA", "JointA.base", fused: false, metadata: true);
+    Console.WriteLine("PASS fused and metadata fallback audit cannot shadow toolchain modules");
+    Audit(["JointClean", "JointUnapproved"], "JointUnapproved", "JointDuplicate.same",
+        fused: false, rejected: true);
+    Audit(["JointUnapproved", "JointClean"], "JointUnapproved", "JointDuplicate.same",
+        fused: false, rejected: true);
+    Console.WriteLine("PASS duplicate theorem bodies retain their own rejected axiom closure in both orders");
+    var refutation = Audit(["JointRefutation"], "JointRefutation", "JointRefutation.test", fused: false);
+    if (refutation.GetProperty("theorems")[0].GetProperty("refutes").GetProperty("line").GetInt32() != 2)
+        throw new InvalidOperationException("Fused fallback lost the refutation's source location");
+    Console.WriteLine("PASS refutation audit retains original source locations");
+
+    var forgedRequest = Path.Combine(root, "forged-fused.json");
+    File.WriteAllText(forgedRequest, """
+        {"modules":["JointForged"],"replayTargets":["JointForged"],
+         "theorems":[{"name":"JointForged.false","axioms":[]}]}
+        """);
+    var forged = Execute([verification.CheckedAuditExecutable(), forgedRequest,
+        Path.Combine(root, "forged-fused-result.json")], root, leanPath, environment: environment);
+    if (forged.Code == 0 || !(forged.Stdout + forged.Stderr).Contains("while replaying declaration"))
+        throw new InvalidOperationException("Fused replay accepted a forged theorem body");
+    Console.WriteLine("PASS fused replay rejects forged theorem bodies before auditing");
+}
 
 void CheckReplays(bool native)
 {
@@ -111,3 +171,4 @@ Console.WriteLine("PASS bootstrap replay source must match its initial snapshot"
 
 CheckReplays(native: false);
 CheckReplays(native: true);
+CheckFusedReplay();

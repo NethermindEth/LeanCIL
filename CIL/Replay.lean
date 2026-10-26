@@ -26,14 +26,16 @@ def sameReplayTheorem : Lean.ConstantInfo → Lean.ConstantInfo → Bool
       first.levelParams == second.levelParams && first.all == second.all
   | _, _ => false
 
-/-- Replays every target declaration against shared dependencies without loading extensions. -/
-unsafe def replayModulesJointly (args : List String) : IO Unit := do
-  Lean.initSearchPath (← Lean.findSysroot)
+/-- Replays every target and exposes the checked environment while its imported regions live.
+The callback flag excludes duplicate declarations whose selected proof body may differ. -/
+unsafe def withReplayedModules (args : List String)
+    (checked : Lean.Kernel.Environment → Bool → IO Unit) : IO Unit := do
   let started ← IO.monoMsNow
   let names := args.map String.toName
   let targets : Lean.NameSet := names.foldl (·.insert ·) {}
   let mut imports : Std.HashMap Lean.Name Lean.Import := {}
   let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
+  let mut unique := true
   for module in names do
     let (exported, complete) ← readReplayParts module
     for dependency in exported.imports do
@@ -48,25 +50,33 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
     for name in complete.constNames, ci in complete.constants do
       match constants[name]? with
       | some prior =>
+        unique := false
         unless sameReplayTheorem prior ci do
           throw <| IO.userError s!"Constant {name} is declared by more than one replay target"
       | none => constants := constants.insert name ci
   let external := imports.toArray.map (·.2) |>.qsort (·.module.toString < ·.module.toString)
   let (_, s) ← Lean.importModulesCore external |>.run
   let env ← Lean.finalizeImport s external {} 0 false false (isModule := true)
-  let imported := env.allImportedModuleNames
-  for (name, ci) in constants do
-    if let some prior := env.find? name then
-      -- Only identical theorems from untargeted modules may be skipped, as in per-module replay.
-      let owner := (env.getModuleIdxFor? name).bind (imported[·.toNat]?)
-      unless owner.any (!targets.contains ·) && sameReplayTheorem prior ci do
-        throw <| IO.userError s!"Replay target constant {name} is already imported"
-  discard <| env.toKernelEnv.replay constants
-  env.freeRegions
+  try
+    let imported := env.allImportedModuleNames
+    for (name, ci) in constants do
+      if let some prior := env.find? name then
+        unique := false
+        -- Only identical theorems from untargeted modules may be skipped, as in per-module replay.
+        let owner := (env.getModuleIdxFor? name).bind (imported[·.toNat]?)
+        unless owner.any (!targets.contains ·) && sameReplayTheorem prior ci do
+          throw <| IO.userError s!"Replay target constant {name} is already imported"
+    let replayed ← env.toKernelEnv.replay constants
+    checked replayed unique
+  finally env.freeRegions
   let elapsed := (← IO.monoMsNow) - started
   for name in args do
     IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("joint", Lean.toJson true),
       ("milliseconds", Lean.toJson elapsed)]).compress
 
-end CIL.Replay
+/-- Replays every target declaration against shared dependencies without loading extensions. -/
+unsafe def replayModulesJointly (args : List String) : IO Unit := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  withReplayedModules args fun _ _ => pure ()
 
+end CIL.Replay
