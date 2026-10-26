@@ -276,6 +276,7 @@ internal static class MetadataValidation
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
         MethodDefinition entry = ContractMethodMetadata.Select(module, entrySignature, typeArguments ?? [], profile.Architecture).Closed;
         MethodSpecialization specializations = new(module, profile.Architecture);
+        var staticValues = new StaticValues.Context(module);
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
         List<MethodDefinition> ordered = [];
@@ -427,7 +428,7 @@ internal static class MetadataValidation
                     FieldDefinition field = StaticValues.Field(loaded, module, profile.Architecture);
                     if (!initializedTypes.Contains(field.DeclaringType.FullName, StringComparer.Ordinal))
                         throw new InvalidDataException($"Unsupported static field load: {loaded.FullName}\n  Loading it requires --assume-initialized {field.DeclaringType.FullName}.");
-                    value = StaticValues.Resolve(loaded, module, profile.Architecture);
+                    value = staticValues.Resolve(loaded, profile.Architecture);
                 }
                 catch (InvalidDataException error) when (Rejections.Of(error) is null)
                 {
