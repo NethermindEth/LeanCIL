@@ -88,14 +88,13 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
                 if (field.DeclaringType.Scope is ModuleDefinition)
                 {
                     var resolved = field.Resolve();
-                    var fields = resolved.DeclaringType.Fields.Where(candidate => isStatic || !candidate.IsStatic).ToList();
-                    index = fields.IndexOf(resolved);
+                    index = layouts.Metadata.FieldIndex(resolved.DeclaringType, resolved, isStatic);
                 }
                 else if (!isStatic && ValueTuples.Is(field.DeclaringType))
                 {
                     // Tuple fields are typed by the instance's arguments, not the definition's T1/T2.
-                    var fields = MetadataValidation.Fields(field.DeclaringType);
-                    index = Array.FindIndex(fields, candidate => candidate.Definition == field.Resolve());
+                    var fields = layouts.Metadata.Fields(field.DeclaringType);
+                    index = layouts.Metadata.FieldIndex(field.DeclaringType, field.Resolve());
                     if (index < 0) throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
                     fieldType = fields[index].Type;
                 }
