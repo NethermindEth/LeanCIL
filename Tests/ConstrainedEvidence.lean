@@ -94,4 +94,40 @@ theorem reference_receiver_rejected :
   decide +kernel
 #print axioms reference_receiver_rejected
 
+/-- Even an unreachable switch arm cannot bypass the constrained prefix. -/
+theorem unreachable_switch_bypass_rejected :
+    ¬ ConstrainedCallsValid types methods
+      { raw with code := raw.code.set 0 ⟨0, 69, .targets [3, 2, 2]⟩ }
+      [false, true, true, true] emitted := by decide +kernel
+#print axioms unreachable_switch_bypass_rejected
+
+/-- A missing reachability entry is not an unreachable instruction exemption. -/
+theorem short_reachability_rejected :
+    ¬ ConstrainedCallsValid types methods raw [true, true, true] emitted := by decide +kernel
+#print axioms short_reachability_rejected
+
+/-- A branch to the prefix is allowed; only entering after it bypasses the receiver check. -/
+theorem prefix_target_valid :
+    ConstrainedCallsValid types methods
+      { raw with code := raw.code.set 0 ⟨0, 43, .target 1⟩ }
+      [true, true, true, true] emitted := by decide +kernel
+#print axioms prefix_target_valid
+/-- Lowering retains byte offsets while replacing the prefix and resolved call target. -/
+theorem lowered_call_exact :
+    (lowerConstrainedRaw types raw).code =
+      [⟨0, 2, .none⟩, ⟨1, 0, .none⟩,
+        ⟨7, 40, .call { site with target := .managed 21, declaringType := receiver }⟩,
+        ⟨12, 42, .none⟩] := by decide +kernel
+#print axioms lowered_call_exact
+
+/-- Index zero has no prefix; lowering must not invent one through truncated subtraction. -/
+theorem lowering_first_call_unchanged :
+    lowerConstrainedRaw types { raw with code := [⟨0, 111, .call site⟩] } =
+      { raw with code := [⟨0, 111, .call site⟩] } := by decide +kernel
+#print axioms lowering_first_call_unchanged
+
+/-- Failure to resolve metadata retains the original call for the later validator to reject. -/
+theorem lowering_unresolved_call_retained :
+    (lowerConstrainedRaw [] raw).code[2]? = raw.code[2]? := by decide +kernel
+#print axioms lowering_unresolved_call_retained
 end Tests.ConstrainedEvidence

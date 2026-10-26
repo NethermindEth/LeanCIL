@@ -1,4 +1,6 @@
 import CIL.Extraction.Folds
+import CIL.Extraction.FlowIndex
+import Std.Data.TreeSet.Lemmas
 
 /-! # Concrete constrained-call resolution from decoded type and method metadata -/
 
@@ -80,10 +82,10 @@ private def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
   | _ => false
 
 /-- The selected program entry must be precisely the resolved struct implementation. -/
-private def selectedImplementation (methods : List SpecializedMethod) (receiver : TypeExpr)
+private def selectedImplementation (methods : Nat → Option SpecializedMethod) (receiver : TypeExpr)
     (resolved : DispatchMethod) (emitted : Op) : Bool :=
   match emitted, namedType receiver with
-  | .call index count, some (scope, name) => match methods[index]? with
+  | .call index count, some (scope, name) => match methods index with
     | none => false
     | some method =>
       method.arguments.isEmpty && method.closed.token == resolved.token &&
@@ -97,16 +99,17 @@ private def selectedImplementation (methods : List SpecializedMethod) (receiver 
   | _, _ => false
 
 /-- Check prefix adjacency, branch integrity, metadata resolution and the emitted target. -/
-def constrainedSiteValid (types : List DispatchType) (methods : List SpecializedMethod)
-    (raw : RawMethod) (reachable : List Bool) (code : List Op) (pc : Nat) : Bool :=
-  if reachable[pc]? != some true then true else
-  match raw.code[pc]? with
+def constrainedSiteCheck (types : List DispatchType) (methods : Nat → Option SpecializedMethod)
+    (rawAt : Nat → Option RawInstruction) (liveAt : Nat → Option Bool)
+    (codeAt : Nat → Option Op) (targeted : Nat → Bool) (pc : Nat) : Bool :=
+  if liveAt pc != some true then true else
+  match rawAt pc with
   | some ⟨_, 65046, .type _⟩ =>
-    (match code[pc]? with | some .nop => true | _ => false) &&
-      (raw.code[pc + 1]?.map (·.opcode)) == some 111 && reachable[pc + 1]? == some true
+    (match codeAt pc with | some .nop => true | _ => false) &&
+      ((rawAt (pc + 1)).map (·.opcode)) == some 111 && liveAt (pc + 1) == some true
   | some ⟨_, 111, .call site⟩ =>
-    if pc == 0 || raw.code.any (branchesTo pc) then false else
-    match raw.code[pc - 1]?, code[pc]? with
+    if pc == 0 || targeted pc then false else
+    match rawAt (pc - 1), codeAt pc with
     | some ⟨_, 65046, .type receiver⟩, some emitted =>
       match resolveConstrained types receiver site with
       | some resolved => selectedImplementation methods receiver resolved emitted
@@ -115,12 +118,66 @@ def constrainedSiteValid (types : List DispatchType) (methods : List Specialized
   | some ⟨_, 65046, _⟩ | some ⟨_, 111, _⟩ => false
   | _ => true
 
+/-- The per-site rule stated with optional list lookups, including missing-neighbor rejection. -/
+def constrainedSiteValid (types : List DispatchType) (methods : List SpecializedMethod)
+    (raw : RawMethod) (reachable : List Bool) (code : List Op) (pc : Nat) : Bool :=
+  constrainedSiteCheck types (methods[·]?) (raw.code[·]?) (reachable[·]?) (code[·]?)
+    (fun target => raw.code.any (branchesTo target)) pc
+
+/-- All decoded branch destinations, including switch arms and unreachable instructions. -/
+def constrainedBranchTargets (raw : List RawInstruction) : List Nat :=
+  raw.flatMap fun instruction => match instruction.operand with
+    | .target target => [target]
+    | .targets targets => targets
+    | _ => []
+
+/-- Collecting branch destinations preserves the rejection rule at every possible pc. -/
+theorem constrainedBranchTargets_contains (raw : List RawInstruction) (pc : Nat) :
+    (constrainedBranchTargets raw).contains pc = raw.any (branchesTo pc) := by
+  induction raw with
+  | nil => rfl
+  | cons instruction rest ih =>
+    cases instruction with
+    | mk offset opcode operand =>
+      change _ = (branchesTo pc ⟨offset, opcode, operand⟩ || rest.any (branchesTo pc))
+      simp only [constrainedBranchTargets, List.flatMap_cons, List.contains_append]
+      change (_ || (constrainedBranchTargets rest).contains pc) = _
+      rw [ih]
+      cases operand <;> simp [branchesTo, BEq.beq, eq_comm]
+
+#print axioms constrainedBranchTargets_contains
+
 /-- Every reachable virtual call is statically resolved; no standalone prefix is admitted. -/
 def ConstrainedCallsValid (types : List DispatchType) (methods : List SpecializedMethod)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-    (List.range raw.code.length).all
-      (constrainedSiteValid types methods raw reachable emitted.code) = true
+    (List.range raw.code.length).all (constrainedSiteCheck types (FlowIndex.ofList methods).get?
+      (FlowIndex.ofList raw.code).get? (FlowIndex.ofList reachable).get?
+      (FlowIndex.ofList emitted.code).get?
+      (Std.TreeSet.ofList (constrainedBranchTargets raw.code)).contains) = true
+
+/-- Indexed validation is exactly the original per-pc rule, including malformed evidence. -/
+theorem ConstrainedCallsValid_iff_original (types : List DispatchType)
+    (methods : List SpecializedMethod) (raw : RawMethod) (reachable : List Bool)
+    (emitted : Method) :
+    ConstrainedCallsValid types methods raw reachable emitted ↔
+      raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
+        (List.range raw.code.length).all
+          (constrainedSiteValid types methods raw reachable emitted.code) = true := by
+  unfold ConstrainedCallsValid
+  have index {α : Type} (values : List α) :
+      (FlowIndex.ofList values).get? = (values[·]?) := by
+    funext pc
+    exact FlowIndex.get?_ofList values pc
+  simp only [index]
+  have targets : (Std.TreeSet.ofList (constrainedBranchTargets raw.code)).contains =
+      (fun target => raw.code.any (branchesTo target)) := by
+    funext pc
+    rw [Std.TreeSet.contains_ofList, constrainedBranchTargets_contains]
+  rw [targets]
+  rfl
+
+#print axioms ConstrainedCallsValid_iff_original
 
 instance (types : List DispatchType) (methods : List SpecializedMethod) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) :
@@ -132,16 +189,37 @@ instance (types : List DispatchType) (methods : List SpecializedMethod) (raw : R
 def lowerConstrainedRaw (types : List DispatchType) (raw : RawMethod) : RawMethod :=
   if !(raw.code.any fun instruction => instruction.opcode == 111 || instruction.opcode == 65046)
     then raw else
+  let instructions := FlowIndex.ofList raw.code
   { raw with code := raw.code.zipIdx.map fun (instruction, pc) =>
     match instruction with
     | ⟨offset, 65046, _⟩ => ⟨offset, 0, .none⟩
     | ⟨offset, 111, .call site⟩ =>
-      match raw.code[pc - 1]? with
+      match instructions.get? (pc - 1) with
       | some ⟨_, 65046, .type receiver⟩ => match resolveConstrained types receiver site with
         | some target => ⟨offset, 40, .call { site with
             target := .managed target.token, declaringType := receiver }⟩
         | none => instruction
       | _ => instruction
     | _ => instruction }
+
+/-- Indexed predecessor lookup preserves lowering even for malformed prefix sequences. -/
+theorem lowerConstrainedRaw_eq_original (types : List DispatchType) (raw : RawMethod) :
+    lowerConstrainedRaw types raw =
+    if !(raw.code.any fun instruction => instruction.opcode == 111 || instruction.opcode == 65046)
+      then raw else
+    { raw with code := raw.code.zipIdx.map fun (instruction, pc) =>
+      match instruction with
+      | ⟨offset, 65046, _⟩ => ⟨offset, 0, .none⟩
+      | ⟨offset, 111, .call site⟩ =>
+        match raw.code[pc - 1]? with
+        | some ⟨_, 65046, .type receiver⟩ => match resolveConstrained types receiver site with
+          | some target => ⟨offset, 40, .call { site with
+              target := .managed target.token, declaringType := receiver }⟩
+          | none => instruction
+        | _ => instruction
+      | _ => instruction } := by
+  simp only [lowerConstrainedRaw, FlowIndex.get?_ofList]
+
+#print axioms lowerConstrainedRaw_eq_original
 
 end CIL.Extraction

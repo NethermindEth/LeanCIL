@@ -1,4 +1,5 @@
 import CIL.Extraction.Parameters
+import CIL.Extraction.FlowIndex
 import CIL.Imports
 
 /-!
@@ -291,9 +292,9 @@ def importSignatureMatches (slot : ImportSlot) (site : CallSite) : Bool :=
     signature.parameters == site.parameterTypes && signature.supported slot.layouts.actual
 
 /-- An external call must bind exact instance metadata as well as identity and arity. -/
-def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
+def validateImportCallWith (methodCount : Nat) (imports : Nat → Option ImportSlot)
     (opcode : Nat) (site : CallSite) (identity : String) (target count : Nat) : Bool :=
-  opcode == 40 && methods.length ≤ target && match imports[target - methods.length]? with
+  opcode == 40 && methodCount ≤ target && match imports (target - methodCount) with
   | none => false
   | some slot =>
     slot.identity == identity && slot.parameterCount == site.parameterCount &&
@@ -303,14 +304,15 @@ def validateImportCall (methods : List SpecializedMethod) (imports : List Import
 
 /-- Every live managed call must select the independently instantiated definition
 with the exact substituted type arguments and signature; an external one, a matching import slot. -/
-def validateManagedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
+def validateManagedCallWith (methodCount : Nat)
+    (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
     (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
   if !live then true else
   match raw.operand with
   | .call site => match site.target with
     | .managed token => match managedCallTarget raw.opcode emitted with
       | none => false
-      | some (target, count) => match methods[target]? with
+      | some (target, count) => match methods target with
         | none => false
         | some callee =>
           callee.closed.token == token && callee.arguments == site.typeArguments &&
@@ -322,12 +324,22 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
           count == site.parameterCount + (if raw.opcode == 40 && site.hasThis then 1 else 0)
     | .external identity => match emitted with
       | .call target count =>
-        validateImportCall methods imports raw.opcode site identity target count
+        validateImportCallWith methodCount imports raw.opcode site identity target count
       | .newAggregate .. | .newVector256 .. => false
       | _ => true
   | _ => match emitted with
     | .call .. | .newAggregate .. | .newVector256 .. => false
     | _ => true
+
+/-- The external-call rule stated against the original lists, including bounds and offset. -/
+def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
+    (opcode : Nat) (site : CallSite) (identity : String) (target count : Nat) : Bool :=
+  validateImportCallWith methods.length (imports[·]?) opcode site identity target count
+
+/-- The call rule stated against the original lists for use in semantic consequences. -/
+def validateManagedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
+    (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
+  validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
 
 /-- Every call emitted at a live call site of `raw` binds to the method table or an import
     slot, and no other instruction emits a call. An external site may instead emit a
@@ -335,7 +347,24 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-  all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true
+  all3 (validateManagedCallWith methods.length (FlowIndex.ofList methods).get?
+    (FlowIndex.ofList imports).get?) raw.code reachable emitted.code = true
+
+/-- Indexed call lookup preserves every metadata check and rejects the same invalid targets. -/
+theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
+    (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
+    ManagedCallsValid methods imports raw reachable emitted ↔
+      raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
+        all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true := by
+  have index {α : Type} (values : List α) :
+      (FlowIndex.ofList values).get? = (values[·]?) := by
+    funext target
+    exact FlowIndex.get?_ofList values target
+  unfold ManagedCallsValid
+  rw [index, index]
+  rfl
+
+#print axioms ManagedCallsValid_iff_original
 
 instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) :
@@ -346,10 +375,12 @@ instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : R
     Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
 macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
   `(tactic| first
-    | (refine ⟨?_, ?_, ?_⟩
+    | (apply (ManagedCallsValid_iff_original _ _ _ _ _).mpr
+       refine ⟨?_, ?_, ?_⟩
        · rfl
        · rfl
-       · simp [all3, validateManagedCall, managedCallTarget, $[$facts:term],*] <;>
+       · simp [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
+           $[$facts:term],*] <;>
            decide +kernel)
     | decide +kernel)
 
@@ -358,6 +389,7 @@ theorem validated_managed_call {methods : List SpecializedMethod} {imports : Lis
     (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
     validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
       (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
+  have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
   have live : pc.val < reachable.length := valid.1 ▸ pc.isLt
   have present : pc.val < emitted.code.length := valid.2.1 ▸ pc.isLt
   rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
@@ -384,11 +416,13 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
     cases method with
     | managed token =>
       have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside
-      simp only [validateManagedCall, managedCallTarget, Bool.not_true, Bool.false_eq_true,
+      simp only [validateManagedCall, validateManagedCallWith, managedCallTarget,
+        Bool.not_true, Bool.false_eq_true,
         ite_false] at valid
       by_cases call : opcode = 40 <;> simp [call, missing] at valid
     | external identity =>
-      simp only [validateManagedCall, validateImportCall, Bool.not_true, Bool.false_eq_true,
+      simp only [validateManagedCall, validateManagedCallWith, validateImportCallWith,
+        Bool.not_true, Bool.false_eq_true,
         ite_false] at valid
       cases found : imports[target - methods.length]? with
       | none => simp [found] at valid
@@ -397,7 +431,7 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
         obtain ⟨⟨opcode40, _⟩, ⟨⟨⟨⟨⟨same, arity⟩, receiver⟩, result⟩, argc⟩, typed⟩⟩ := valid
         exact ⟨_, identity, slot, rfl, rfl, opcode40, typed, rfl, same, arity, receiver, result,
           argc⟩
-  | _ => simp [validateManagedCall] at valid
+  | _ => simp [validateManagedCall, validateManagedCallWith] at valid
 
 /-- Every accepted live `call` targets an extracted method or an existing import slot. -/
 theorem validated_call_bound {methods : List SpecializedMethod} {imports : List ImportSlot}
