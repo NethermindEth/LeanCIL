@@ -144,7 +144,7 @@ private partial def visit (environment : Environment) (shared : Std.HashSet Name
     throw ("Cyclic full-verification declaration: " ++ name.toString)
   let body <- value info
   let mut state := { state with active := state.active.insert name }
-  for dependency in expressionConstants info.type ++ expressionConstants body do
+  for dependency in expressionDependencies info.type ++ expressionDependencies body do
     state <- visit environment shared targetNamespace dependency state
   let source <- declarationSource environment shared targetNamespace info
   return { state with

@@ -96,17 +96,8 @@ private def trustedModule (name : Name) : Bool :=
   name == `CIL || (`CIL).isPrefixOf name || name == `Init || (`Init).isPrefixOf name ||
   name == `Std || (`Std).isPrefixOf name || name == `Lean || (`Lean).isPrefixOf name
 
-/-- Every constant an expression mentions, with repetitions. -/
-def expressionConstants : Expr -> List Name
-  | .const name _ => [name]
-  | .app fn argument => expressionConstants fn ++ expressionConstants argument
-  | .lam _ type body _ | .forallE _ type body _ =>
-    expressionConstants type ++ expressionConstants body
-  | .letE _ type value body _ =>
-    expressionConstants type ++ expressionConstants value ++ expressionConstants body
-  | .mdata _ value => expressionConstants value
-  | .proj type _ value => type :: expressionConstants value
-  | _ => []
+/-- Constants in first-occurrence order, visiting shared expression nodes only once. -/
+def expressionDependencies (value : Expr) : List Name := value.getUsedConstants.toList
 
 /-- The parts of a declaration that determine its meaning: its type, a definition's or
     opaque's value, and a recursor's computation rules. Proofs are excluded. -/
@@ -174,11 +165,11 @@ private def declaration (info : ConstantInfo) : Except String Json := do
 
 /-- The constants a theorem's proof mentions. -/
 private def proofDependencies : ConstantInfo -> List Name
-  | .thmInfo value => expressionConstants value.value
+  | .thmInfo value => expressionDependencies value.value
   | _ => []
 
 private def semanticDependencies (info : ConstantInfo) : List Name :=
-  related info ++ (semanticExpressions info).flatMap expressionConstants
+  related info ++ (semanticExpressions info).flatMap expressionDependencies
 
 /-- One walk over everything `roots` reach, visiting each declaration once. Untrusted
 declarations, and the trusted ones they name, must be `permitted`; every reachable axiom,
@@ -231,14 +222,29 @@ private def walk (environment : Environment) (roots : List Name) (serialize : Bo
     else break
   return entries
 
+/-- Declarations owned by the selected modules, including private and auxiliary declarations.
+    Current-file declarations are found in the environment rather than imported catalogs. -/
+def interfaceDeclarations (environment : Environment) (interfaceModules : Array Name) :
+    List Name := Id.run do
+  let mut declarations : List Name := []
+  for moduleName in environment.header.moduleNames, data in environment.header.moduleData do
+    unless interfaceModules.contains moduleName do continue
+    for name in data.constNames ++ data.extraConstNames do
+      if environment.find? name |>.isSome then
+        if interfaceModules.contains (definingModule environment name) then
+          declarations := name :: declarations
+  if interfaceModules.contains environment.mainModule then
+    for (name, _) in environment.constants.toList do
+      if definingModule environment name == environment.mainModule then
+        declarations := name :: declarations
+  return declarations
+
 /-- Every declaration of `interfaceModules`, and everything it reaches including proofs,
     passes the interface checks. -/
 def validateInterfaceDeclarations (environment : Environment) (interfaceModules : Array Name) :
     Except String Unit := do
   if interfaceModules.isEmpty then return
-  let declarations := environment.constants.toList.filterMap fun (name, _) =>
-    if interfaceModules.contains (definingModule environment name) then some name else none
-  discard <| walk environment declarations false
+  discard <| walk environment (interfaceDeclarations environment interfaceModules) false
 
 /-- The kind (`method` or `outcome`) and canonical closure of an exported contract constant,
     whose type must be `MethodContract` or `OutcomeContract`. Entries are sorted by name. -/

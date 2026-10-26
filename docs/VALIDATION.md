@@ -1020,3 +1020,16 @@ the workload fell from 42,941.43 to 29,594.10 kHB (31% less). At 32 layouts it i
 synthetic validator measurements, not total CI timings. The eliminated work is quadratic
 identity/index comparison and repeated linear metadata lookup; computed-layout validation and
 structural equality remain, so this is not a claim that the entire validator is linear.
+
+Imported-interface auditing selects declarations from the imported module catalogs rather than
+materializing and filtering every declaration in the Lean environment. Current-file declarations
+still use the environment scan. Private and auxiliary declarations are included and their actual
+module ownership is checked. Dependency traversal visits shared expression nodes only once;
+canonical contract serialization is unchanged. `Tests.ContractClosure` compares selected
+membership with the former scan, including current, imported, missing and duplicate modules.
+The imports suite compiles that test against its already certified library instead of rebuilding
+the library's dependencies in the repository checkout.
+
+A preliminary Windows paired native audit of `ImportFixture.addOne` measured median
+3.50 seconds before and 1.22 seconds after (three runs each), with byte-identical audit output.
+These focused timings are not complete-suite or CI measurements.

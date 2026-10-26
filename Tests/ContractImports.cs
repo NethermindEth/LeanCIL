@@ -59,7 +59,9 @@ void Save(bool bind = true, bool updatePin = true)
 
 using Program interfaceVerification = new();
 string interfaceLibrary = interfaceVerification.Library(Inputs(At("CIL.lean")));
-Run(["lake", "build", "Tests.ContractClosure"], streamOutput: true, progress: "Canonical contract closure tests");
+Run([interfaceVerification.LeanExecutable, At("Tests/ContractClosure.lean")],
+    leanPath: Path.Combine(interfaceLibrary, ".lake/build/lib/lean"),
+    streamOutput: true, progress: "Canonical contract closure tests");
 string interfaceProbe = Path.Combine(directory, "interface-probe");
 Directory.CreateDirectory(interfaceProbe);
 string interfaceSource = File.ReadAllText(Path.Combine(fixture, "ImportFixture.lean"));
