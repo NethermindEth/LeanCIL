@@ -1063,3 +1063,19 @@ compiling a temporary Lean parser program for each verification. Parsing still r
 headers, retains comments and module-system import syntax, and never elaborates source commands.
 The imports fixture checks those properties explicitly. A focused native parse takes roughly
 0.06 seconds locally; the original CI run spent 22.1 seconds across 25 interpreted parser calls.
+### Native joint kernel replay
+
+The authenticated `leancil-audit --replay INPUT` command accepts a JSON array of module names.
+It uses the same `CIL/Replay.lean` algorithm as fresh-library bootstrap certification: import
+non-target dependencies without extensions, reject conflicting declarations and replay target
+constants in the kernel. Identical on-demand theorem duplicates retain the toolchain rule.
+The native executable is checked before and after replay. Before it is authenticated, bootstrap
+uses the source captured when the verifier starts and rejects changes before executing it.
+
+`Tests/JointReplay.cs` exercises both modes against import-closed targets, repeated equation
+lemmas, conflicting declarations, targets hidden behind untargeted imports and forged theorems.
+Rejected joint sets still fall back to per-module replay with individual failure attribution.
+The test also rejects a changed bootstrap source snapshot. In one Windows trace, the two
+positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
+through the native auditor. Single-file verification now also shares replay imports for its
+multi-module interface and proof target sets. Fresh checking and failure isolation are unchanged.

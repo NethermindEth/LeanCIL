@@ -14,7 +14,8 @@ void Compile(string module, string source)
 {
     var path = Path.Combine(root, module + ".lean");
     File.WriteAllText(path, source);
-    Run([verification.LeanExecutable, "--root=" + root, "-o", Path.Combine(root, module + ".olean"), path], root, root, environment: environment);
+    Run([verification.LeanExecutable, "--root=" + root, "-o", Path.Combine(root, module + ".olean"), path],
+        root, root, environment: environment);
 }
 
 // A <- B <- C, plus a forged module whose theorem skipped kernel checking.
@@ -40,30 +41,60 @@ Compile("JointE2", "import JointD\ntheorem JointE2.use (n : Nat) : JointD.f (n +
 Compile("JointClash1", "theorem JointClash.same : True := trivial\n");
 Compile("JointClash2", "theorem JointClash.same : 1 = 1 := rfl\n");
 
-if (!verification.ReplayModulesJointly(root, ["JointA", "JointB", "JointC"], root, "Joint replay check"))
-    throw new InvalidOperationException("Import-closed targets did not replay jointly");
-Console.WriteLine("PASS import-closed targets replay jointly");
+void CheckReplays(bool native)
+{
+    if (native)
+    {
+        Run(["lake", "build", "leancil-audit"]);
+        verification.auditExecutable = At(".lake/build/bin/leancil-audit" +
+            (OperatingSystem.IsWindows() ? ".exe" : ""));
+        verification.auditExecutableSha = Sha(verification.auditExecutable);
+    }
+    Console.WriteLine(native ? "CHECK native joint replay" : "CHECK bootstrap joint replay");
+    if (!verification.ReplayModulesJointly(root, ["JointA", "JointB", "JointC"], root, "Joint replay check"))
+        throw new InvalidOperationException("Import-closed targets did not replay jointly");
+    Console.WriteLine("PASS import-closed targets replay jointly");
 
-if (!verification.ReplayModulesJointly(root, ["JointD", "JointE1", "JointE2"], root, "Joint replay check"))
-    throw new InvalidOperationException("Identical on-demand equation lemmas blocked joint replay");
-Console.WriteLine("PASS identical on-demand equation lemmas in several targets replay jointly");
+    if (!verification.ReplayModulesJointly(root, ["JointD", "JointE1", "JointE2"], root, "Joint replay check"))
+        throw new InvalidOperationException("Identical on-demand equation lemmas blocked joint replay");
+    Console.WriteLine("PASS identical on-demand equation lemmas in several targets replay jointly");
 
-if (verification.ReplayModulesJointly(root, ["JointClash1", "JointClash2"], root, "Joint replay check"))
-    throw new InvalidOperationException("Joint replay merged one name with different statements");
-if (verification.ReplayConsumerModules(root, ["JointClash1", "JointClash2"], root).Count != 0)
-    throw new InvalidOperationException("Per-module fallback rejected valid modules");
-Console.WriteLine("PASS one name with different statements falls back to per-module replay");
+    if (verification.ReplayModulesJointly(root, ["JointClash1", "JointClash2"], root, "Joint replay check"))
+        throw new InvalidOperationException("Joint replay merged one name with different statements");
+    if (verification.ReplayConsumerModules(root, ["JointClash1", "JointClash2"], root).Count != 0)
+        throw new InvalidOperationException("Per-module fallback rejected valid modules");
+    Console.WriteLine("PASS one name with different statements falls back to per-module replay");
 
-// JointA arrives through the untargeted JointB, so its theorems would be skipped as duplicates.
-if (verification.ReplayModulesJointly(root, ["JointA", "JointC"], root, "Joint replay check"))
-    throw new InvalidOperationException("Joint replay accepted a target loaded through an untargeted import");
-if (verification.ReplayConsumerModules(root, ["JointA", "JointC"], root).Count != 0)
-    throw new InvalidOperationException("Per-module fallback rejected valid modules");
-Console.WriteLine("PASS target loaded through an untargeted import falls back to per-module replay");
+    // JointA arrives through the untargeted JointB, so its theorems would be skipped as duplicates.
+    if (verification.ReplayModulesJointly(root, ["JointA", "JointC"], root, "Joint replay check"))
+        throw new InvalidOperationException("Joint replay accepted a target loaded through an untargeted import");
+    if (verification.ReplayConsumerModules(root, ["JointA", "JointC"], root).Count != 0)
+        throw new InvalidOperationException("Per-module fallback rejected valid modules");
+    Console.WriteLine("PASS target loaded through an untargeted import falls back to per-module replay");
 
-if (verification.ReplayModulesJointly(root, ["JointA", "JointForged"], root, "Joint replay check"))
-    throw new InvalidOperationException("Joint replay accepted a forged declaration");
-var failures = verification.ReplayConsumerModules(root, ["JointA", "JointForged"], root);
-if (failures.Keys.SingleOrDefault() != "JointForged" || !failures["JointForged"].Contains("while replaying declaration"))
-    throw new InvalidOperationException("Forged declaration was not attributed to its module: " + string.Join(", ", failures.Keys));
-Console.WriteLine("PASS forged declaration rejected and attributed to its module");
+    if (verification.ReplayModulesJointly(root, ["JointA", "JointForged"], root, "Joint replay check"))
+        throw new InvalidOperationException("Joint replay accepted a forged declaration");
+    var failures = verification.ReplayConsumerModules(root, ["JointA", "JointForged"], root);
+    if (failures.Keys.SingleOrDefault() != "JointForged" ||
+        !failures["JointForged"].Contains("while replaying declaration"))
+        throw new InvalidOperationException("Forged declaration was not attributed to its module: " +
+            string.Join(", ", failures.Keys));
+    Console.WriteLine("PASS forged declaration rejected and attributed to its module");
+}
+
+var originalReplayByte = verification.bootstrapReplaySource[0];
+try
+{
+    verification.bootstrapReplaySource[0] ^= 1;
+    try
+    {
+        verification.ReplayModulesJointly(root, ["JointA"], root, "Changed replay source check");
+        throw new InvalidOperationException("Changed bootstrap replay source was accepted");
+    }
+    catch (InvalidDataException error) when (error.Message.Contains("Kernel replay source changed")) { }
+}
+finally { verification.bootstrapReplaySource[0] = originalReplayByte; }
+Console.WriteLine("PASS bootstrap replay source must match its initial snapshot");
+
+CheckReplays(native: false);
+CheckReplays(native: true);

@@ -1,5 +1,6 @@
 import Lean
 import CIL.Interface.Closure
+import CIL.Replay
 
 /-!
 # Olean audit
@@ -8,6 +9,7 @@ import CIL.Interface.Closure
 `--headers INPUT` parses source import headers without elaboration or executing source commands.
 `--imports INPUT OUTPUT` reads compiled import headers; `--fingerprints INPUT` writes portable
 module parts with only persisted linter diagnostics removed. Neither mode loads extensions.
+`--replay INPUT` kernel-checks an exact JSON array of target modules against shared imports.
 
 It imports `modules` with `loadExts := false`, so no imported environment extension, attribute,
 elaborator, notation or `initialize` runs; only constant declarations are read. The toolchain's
@@ -355,6 +357,10 @@ open Lean LeanCILAudit in
 unsafe def main (args : List String) : IO UInt32 := do
   match args with
   | ["--headers", input] => writeSourceHeaders input; return 0
+  | ["--replay", input] =>
+    let targets ← IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
+    CIL.Replay.replayModulesJointly targets
+    return 0
   | ["--imports", input, output] => writeImports input output; return 0
   | ["--fingerprints", input] => writeFingerprints input; return 0
   | _ => pure ()
