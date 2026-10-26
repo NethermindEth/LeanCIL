@@ -972,6 +972,80 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
 
+    // Extend only the source set, never the certified compiled closure. Added helpers
+    // remain uncertified until the normal proof verifier compiles, replays and audits them.
+    string ExtendPreparedLibrary(string destination, string certifiedBase, string trustedDigest)
+    {
+        destination = Path.GetFullPath(destination);
+        certifiedBase = Path.GetFullPath(certifiedBase);
+        if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
+            throw new InvalidOperationException("Certified library destination must be empty");
+        var manifestBytes = File.ReadAllBytes(Path.Combine(certifiedBase, "cache-manifest.json"));
+        if (Convert.ToHexStringLower(SHA256.HashData(manifestBytes)) != trustedDigest)
+            throw new InvalidOperationException("Certified base manifest digest mismatch");
+        var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(manifestBytes)
+            ?? throw new InvalidDataException("Missing certified base manifest");
+        var oldSources = LibrarySources(manifest);
+        var (oldKey, _) = LibraryIdentity(oldSources);
+        var snapshot = Inputs(At("CIL.lean"));
+        var (newKey, newSources) = LibraryIdentity(snapshot);
+        if (oldSources.Any(pair => !newSources.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
+            throw new InvalidDataException("Source extension changed or removed an existing certified source");
+        var additions = newSources.Where(pair => !oldSources.ContainsKey(pair.Key)).ToArray();
+        if (additions.Any(pair => !Regex.IsMatch(pair.Key,
+                @"\ACIL/(?:[A-Za-z_][A-Za-z0-9_]*/)*[A-Za-z_][A-Za-z0-9_]*\.lean\z")))
+            throw new InvalidDataException("Source extension accepts only new CIL modules");
+        var staging = destination.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+            "." + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(staging);
+        var started = DateTimeOffset.UtcNow;
+        var elapsed = Stopwatch.StartNew();
+        try
+        {
+            if (!CopyCertifiedLibrary(certifiedBase, staging, trustedDigest, oldKey, oldSources) ||
+                !ValidCertifiedLibrary(staging, trustedDigest, oldKey, oldSources))
+                throw new InvalidDataException("Certified base identity or integrity mismatch");
+            foreach (var (name, hash) in additions)
+            {
+                var module = name[..^".lean".Length];
+                // Reject an added source for any previously compiled module, even when
+                // its source was absent from the authenticated producer's source set.
+                if (manifest.Keys.Any(path => path.StartsWith(".lake/build/lib/lean/" + module + ".",
+                        StringComparison.Ordinal) || path.StartsWith(".lake/build/ir/" + module + ".",
+                        StringComparison.Ordinal)) ||
+                    new[] { ".olean", ".olean.private", ".olean.server", ".ilean", ".trace" }.Any(suffix =>
+                        File.Exists(Path.Combine(staging, ".lake/build/lib/lean", module + suffix))) ||
+                    new[] { ".c", ".ir", ".setup.json" }.Any(suffix =>
+                        File.Exists(Path.Combine(staging, ".lake/build/ir", module + suffix))))
+                    throw new InvalidDataException("Source extension shadows a compiled module: " + name);
+                var target = Path.Combine(staging, name);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(At(name), target);
+                if (Sha(target) != hash)
+                    throw new InvalidDataException("Added source changed while copying: " + name);
+            }
+            if (!Same(newSources, LibrarySources(Inputs(At("CIL.lean")))))
+                throw new InvalidDataException("Source extension changed during preparation");
+            // Carry the producer's authenticated hashes forward; rehashing here could
+            // otherwise authorize an old artifact that changed after its private copy.
+            var extendedManifest = new SortedDictionary<string, string>(manifest, StringComparer.Ordinal);
+            foreach (var (name, hash) in additions) extendedManifest.Add(name, hash);
+            extendedManifest["library-key.txt"] = ContentKey(newKey);
+            File.WriteAllText(Path.Combine(staging, "library-key.txt"), newKey);
+            File.WriteAllText(Path.Combine(staging, "cache-manifest.json"),
+                JsonSerializer.Serialize(extendedManifest, Json));
+            var digest = Sha(Path.Combine(staging, "cache-manifest.json"));
+            if (!ValidCertifiedLibrary(staging, digest, newKey, newSources))
+                throw new InvalidDataException("Source extension changed while certifying");
+            if (Directory.Exists(destination)) Directory.Delete(destination);
+            Directory.Move(staging, destination);
+            Trace("Extending certified library sources", started, destination, elapsed.Elapsed, 0, "",
+                ["added-sources", additions.Length.ToString(), "compiled-modules-added", "0"]);
+            return digest;
+        }
+        finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+    }
+
     // A manifest authenticates contents only when its digest comes independently from a trusted producer.
     // Kernel replay cannot authenticate the native auditor or establish compiled-to-source correspondence.
     string? ReusePreparedLibrary(string directory, string? trustedDigest)

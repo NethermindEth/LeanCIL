@@ -1,5 +1,18 @@
 # Soundness boundary
 
+`scripts/PrepareLibrary.cs <output> --extend <base> <trusted-manifest-sha256>` can add CIL
+source modules to an authenticated base without changing its certified compiled declarations.
+Every existing source and configuration file must match, and the base identity must match the
+current platform and Lean tools. Added sources must not shadow any compiled module. The producer
+copies and authenticates the old artifacts, binds all added source bytes in a new manifest, and
+checks source stability before publication. The digest must come independently from a trusted
+producer; self-rehashing corrupted artifacts cannot renew it.
+
+The extension certifies no new declarations. When a proof imports an added helper, ordinary
+compilation, kernel replay and theorem auditing still apply. Changes or removals of existing
+sources require normal fresh preparation. This is not a general incremental build or an assertion
+that arbitrary elaborator dependencies can be inferred from module imports.
+
 External-call metadata identities are serialized as their UTF-8 bytes. Generated proofs check
 the validity of bounded chunks and compose them with `ByteArray.IsValidUTF8.append`; the kernel
 also checks that the concatenation is exactly the emitted byte array. Every existing signature
