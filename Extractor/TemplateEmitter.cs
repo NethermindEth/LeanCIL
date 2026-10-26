@@ -27,11 +27,14 @@ internal static class TemplateEmitter
             throw new InvalidDataException("Template inputs contain ambiguous managed method identities.");
         if (variants.Any(variant => string.Equals(output, variant.Directory, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Template output must be separate from its extraction inputs.");
-        var identities = variants.SelectMany(variant => variant.Methods).Select(method => method.Identity)
-            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        var templates = identities.Select(identity => Prepare(identity, variants)).ToArray();
+        var methods = variants.SelectMany(variant => variant.Methods.Select(method =>
+            (Variant: variant, Method: method))).ToLookup(row => row.Method.Identity, StringComparer.Ordinal);
+        var templates = methods.OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => Prepare(group.Key, group.ToArray())).ToArray();
+        var templateIndices = templates.Select((template, index) => (template.Identity, index))
+            .ToDictionary(pair => pair.Identity, pair => pair.index, StringComparer.Ordinal);
         var source = EmitTemplates(templates);
-        var bindings = variants.Select(variant => EmitBindings(templates, variant)).ToArray();
+        var bindings = variants.Select(variant => EmitBindings(templates, templateIndices, variant)).ToArray();
         Directory.CreateDirectory(output);
         File.WriteAllText(Path.Combine(output, "Templates.lean"), source, new UTF8Encoding(false));
         for (var index = 0; index < variants.Length; index++)
@@ -74,11 +77,8 @@ internal static class TemplateEmitter
         return (variant.Methods[index].Identity, prefix, op[end..]);
     }
 
-    static Template Prepare(string identity, Variant[] variants)
+    static Template Prepare(string identity, (Variant Variant, Method Method)[] selected)
     {
-        var selected = variants.SelectMany(variant => variant.Methods
-            .Where(method => method.Identity == identity).Select(method => (Variant: variant, Method: method)))
-            .ToArray();
         var first = selected[0].Method;
         if (selected.Any(row => row.Method.HasStaticSites))
             throw new InvalidDataException("Templates do not yet support static-site metadata: " + identity);
@@ -92,11 +92,13 @@ internal static class TemplateEmitter
         var callees = selected.SelectMany(row => row.Method.Ops.Select(op => Callee(row.Variant, op)))
             .Where(callee => callee is not null).Select(callee => callee!.Value.Identity)
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        var calleeIndices = callees.Select((callee, index) => (callee, index))
+            .ToDictionary(pair => pair.callee, pair => pair.index, StringComparer.Ordinal);
         var rows = selected.Select(row => new Row(row.Variant, row.Method, row.Method.Ops.Select(op =>
         {
             var callee = Callee(row.Variant, op);
             return callee is null ? op : callee.Value.Prefix +
-                "callee" + Array.IndexOf(callees, callee.Value.Identity) + callee.Value.Tail;
+                "callee" + calleeIndices[callee.Value.Identity] + callee.Value.Tail;
         }).ToArray())).ToArray();
         return new(identity, first.Metadata, features, callees, rows);
     }
@@ -148,21 +150,22 @@ internal static class TemplateEmitter
         return lean.ToString();
     }
 
-    static string EmitBindings(Template[] templates, Variant variant)
+    static string EmitBindings(Template[] templates, Dictionary<string, int> templateIndices, Variant variant)
     {
         var lean = new StringBuilder("import Extracted\nimport Templates\n\n" +
             "/-! Exact bindings for one checked profile extraction; recheck with that extraction. -/\n\n" +
             "namespace TemplateBindings\nopen CIL\n\n");
+        var methodIndices = variant.Methods.Select((method, index) => (method.Identity, index))
+            .ToDictionary(pair => pair.Identity, pair => pair.index, StringComparer.Ordinal);
         for (var index = 0; index < variant.Methods.Length; index++)
         {
-            var templateIndex = Array.FindIndex(templates,
-                template => template.Identity == variant.Methods[index].Identity);
+            var templateIndex = templateIndices[variant.Methods[index].Identity];
             var template = templates[templateIndex];
             var arguments = new List<string> { "Extracted.profile" };
             arguments.AddRange(template.Features.Select(feature => variant.Profile.Get(feature) ? "true" : "false"));
             foreach (var callee in template.Callees)
             {
-                var target = Array.FindIndex(variant.Methods, method => method.Identity == callee);
+                var target = methodIndices.GetValueOrDefault(callee, -1);
                 // A callee absent from this extraction can occur only under an excluded branch.
                 arguments.Add(Math.Max(0, target).ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
