@@ -142,7 +142,6 @@ else
     Directory.CreateDirectory(Path.Combine(tools, "bin"));
     using (var context = new Program())
         File.Copy(context.LeanExecutable, Path.Combine(tools, "bin", Path.GetFileName(context.LeanExecutable)));
-    File.WriteAllText(Path.Combine(tools, "bin", "changed-runtime.dll"), "different native runtime identity");
     Equal(initial, Invoke("changed-tools", modules.Count, toolchain: tools));
     Invoke("changed-private-metadata", 0, changeMetadata: true);
     var metadata = Path.Combine(prepared, CertifiedFingerprintsName);

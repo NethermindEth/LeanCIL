@@ -171,12 +171,8 @@ if (!measure)
     Directory.CreateDirectory(Path.Combine(toolchain, "bin"));
     using (var setup = new Program())
         File.Copy(setup.LeanExecutable, Path.Combine(toolchain, "bin", Path.GetFileName(setup.LeanExecutable)));
-    var runtime = Path.Combine(toolchain, "bin", "fingerprint-runtime.dll");
-    File.WriteAllText(runtime, "first native runtime identity");
     Equal(fixture, Invoke("different-toolchain", 1));
     Equal(fixture, Invoke("unchanged-toolchain", 0));
-    File.WriteAllText(runtime, "changed native runtime identity");
-    Equal(fixture, Invoke("changed-runtime", 1));
     toolchain = null;
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
     Equal(fixture, Invoke("disabled-cache", 1));

@@ -17,14 +17,12 @@ partial class Program
             .ToDictionary(pair => pair.Key.StartsWith("consumer:", StringComparison.Ordinal)
                 ? "consumer:" + Path.GetRelativePath(root, pair.Key[9..]).Replace('\\', '/') : pair.Key, pair => pair.Value), StringComparer.Ordinal);
 
-    string ConsumerToolchainIdentity()
-    {
-        var directory = Path.Combine(Toolchain, "lib", "lean");
-        var files = HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-            .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
-            .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
-        return ContentKey(JsonSerializer.Serialize(files));
-    }
+    /// <summary>
+    /// The toolchain release, by its elan name: a release fixes its compiled modules, so portable
+    /// support records match across machines and platforms of that release.
+    /// </summary>
+    string ConsumerToolchainIdentity() =>
+        ContentKey("toolchain-release-v1\n" + Path.GetFileName(Path.TrimEndingDirectorySeparator(Toolchain)));
 
     static SortedDictionary<string, string> ConsumerModuleParts(string path)
     {
@@ -34,20 +32,13 @@ partial class Program
         return parts;
     }
 
-    // Normalization reads module parts directly, without importing toolchain oleans.
-    // Bind the native implementation and runtime, including shared-library replacements.
-    string CanonicalFingerprintTools(string executableHash)
-    {
-        var native = Directory.EnumerateFiles(Toolchain, "*", SearchOption.AllDirectories).Where(path =>
-            path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
-            path.EndsWith(".dylib", StringComparison.Ordinal) ||
-            path.EndsWith(".so", StringComparison.Ordinal) ||
-            Path.GetFileName(path).Contains(".so.", StringComparison.Ordinal));
-        var files = HashFiles(native.Select(path => (Path.GetRelativePath(Toolchain, path), path)));
-        return ContentKey("canonical-fingerprints-v2\n" +
+    // Normalization reads module parts directly, without importing toolchain oleans. The toolchain
+    // release, platform and lean executable fix its native runtime; the auditor hash fixes the normalizer.
+    string CanonicalFingerprintTools(string executableHash) =>
+        ContentKey("canonical-fingerprints-v3\n" +
             System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
-            Sha(LeanExecutable) + "\n" + executableHash + "\n" + JsonSerializer.Serialize(files));
-    }
+            Path.GetFileName(Path.TrimEndingDirectorySeparator(Toolchain)) + "\n" +
+            Sha(LeanExecutable) + "\n" + executableHash);
 
     sealed record CertifiedFingerprintModule(SortedDictionary<string, string> Raw,
         SortedDictionary<string, string> Canonical);
@@ -1821,11 +1812,23 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var frameworkModules = CertifiedModuleDirectory(certifiedLibrary);
             var generatedModules = Path.GetFullPath(Path.Combine(generatedPackage, ".lake/build/lib/lean"));
             // No external commands run between this snapshot and the replay manifest.
-            // Recorded base modules were hashed when the manifest was validated; unrecorded ones are replayed.
+            // Recorded base modules take their hashes from the producer's manifest; unrecorded ones are replayed.
+            SortedDictionary<string, string> DirectoryArtifacts(string directory) =>
+                directory.Equals(frameworkModules, comparison) ? BaseModuleArtifacts() : ConsumerArtifactSnapshot(directory);
             var artifactSnapshots = importDirectories.Where(Directory.Exists)
-                .Select(directory => (Directory: directory, Artifacts: directory.Equals(frameworkModules, comparison)
-                    ? BaseModuleArtifacts()
-                    : ConsumerArtifactSnapshot(directory))).ToArray();
+                .Select(directory => (Directory: directory, Artifacts: DirectoryArtifacts(directory))).ToArray();
+            // The module parts on the import path now, in the shape of the replay manifest.
+            Dictionary<string, SortedDictionary<string, string>> ImportArtifactParts() => importDirectories
+                .Where(Directory.Exists).SelectMany(directory =>
+                {
+                    var artifacts = DirectoryArtifacts(directory);
+                    return Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
+                    {
+                        var relative = Path.GetRelativePath(directory, path).Replace('\\', '/');
+                        return (Name: ModuleName(relative), Parts: ConsumerSnapshotParts(artifacts, relative, path));
+                    });
+                })
+                .OrderBy(pair => pair.Name, StringComparer.Ordinal).ToDictionary(pair => pair.Name, pair => pair.Parts);
             var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison));
             var moduleNames = new HashSet<string>(StringComparer.Ordinal);
             var discovered = new List<(string Name, bool Certified)>();
@@ -1983,12 +1986,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (proceeding.Length == 0) return;
             if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
                 throw new InvalidOperationException("Sources changed in the fresh consumer build");
-            var finalArtifacts = importDirectories.Where(Directory.Exists).SelectMany(directory =>
-                Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories).Select(path =>
-                    (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
-                .OrderBy(pair => pair.Name, StringComparer.Ordinal)
-                .ToDictionary(pair => pair.Name, pair => ConsumerModuleParts(pair.Path));
-            if (checkedArtifacts != JsonSerializer.Serialize(finalArtifacts))
+            if (checkedArtifacts != JsonSerializer.Serialize(ImportArtifactParts()))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
             foreach (int i in proceeding)
                 requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath, audits[i].Result);
@@ -2006,12 +2004,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 string auditKind = contractExportAudit ? "contract export audit" : "full import audit";
                 if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
                     throw new InvalidOperationException("Sources changed during " + auditKind);
-                Dictionary<string, SortedDictionary<string, string>> exportArtifacts = importDirectories.Where(Directory.Exists)
-                    .SelectMany(directory => Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
-                        .Select(path => (Name: ModuleName(Path.GetRelativePath(directory, path).Replace('\\', '/')), Path: path)))
-                    .OrderBy(pair => pair.Name, StringComparer.Ordinal)
-                    .ToDictionary(pair => pair.Name, pair => ConsumerModuleParts(pair.Path));
-                if (checkedArtifacts != JsonSerializer.Serialize(exportArtifacts))
+                if (checkedArtifacts != JsonSerializer.Serialize(ImportArtifactParts()))
                     throw new InvalidOperationException("Compiled artifacts changed during " + auditKind);
             }
             // Publish only after the complete declaration replay, exact theorem

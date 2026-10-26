@@ -164,10 +164,6 @@ foreach (string project in projects.Distinct(StringComparer.Ordinal))
 
 Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, ExtractorBuildIdentity());
 
-// Validate a supplied certified library once; every fixture and CLI child inherits the result.
-if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")))
-    verification.Library(Inputs(At("CIL.lean")));
-
 if (suite is "all" or "core" or "unsafe" or "scaling" or "excluded")
 {
     // Direct semantic/evidence checks use the checkout's Lake build directory.

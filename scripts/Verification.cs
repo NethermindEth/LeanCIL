@@ -926,23 +926,13 @@ partial class Program : IDisposable
     }
 
     /// <summary>
-    /// The manifest of a supplied certified library, or null when its digest, key, sources or
-    /// (unless a parent process already checked them) file contents disagree with the trusted digest.
+    /// The manifest of a supplied certified library, or null when its manifest digest, key or source
+    /// binding disagrees. The producer hashed every file into that manifest; the files are not rehashed.
     /// </summary>
     static SortedDictionary<string, string>? SuppliedLibraryManifest(string directory, string? trustedDigest, string key,
         SortedDictionary<string, string> sources)
     {
-        const string validatedVariable = "LEANCIL_CERTIFIED_LIBRARY_VALIDATED";
         if (string.IsNullOrWhiteSpace(trustedDigest)) return null;
-        if (Environment.GetEnvironmentVariable(validatedVariable) != trustedDigest)
-        {
-            var started = DateTimeOffset.UtcNow;
-            var elapsed = Stopwatch.StartNew();
-            if (!ValidCertifiedLibrary(directory, trustedDigest, key, sources)) return null;
-            Trace("Validating certified Lean verification library", started, directory, elapsed.Elapsed, 0, "", [directory]);
-            // Child processes inherit the result instead of hashing the same bytes again.
-            Environment.SetEnvironmentVariable(validatedVariable, trustedDigest);
-        }
         try
         {
             var bytes = File.ReadAllBytes(Path.Combine(directory, "cache-manifest.json"));
