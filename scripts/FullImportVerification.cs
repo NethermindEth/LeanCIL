@@ -552,10 +552,10 @@ partial class Program
         {
             ContractExport export = slot.Import.Export;
             string auditSource = ExportAuditSource(prepared[index], export.Kind);
-            ConsumerExportAudit audit = new(auditSource, (session, proofModule, leanPath) =>
+            ConsumerExportAudit audit = new(auditSource, (session, proofModule, leanPath, audited) =>
             {
                 (ExportClosure actual, string statementDigest, string _) =
-                    independent.CheckExportCertification(proofModule, export.ContractConstant, leanPath);
+                    CheckedExportCertification(export.ContractConstant, audited);
                 if (actual.Digest != export.ClosureDigest || actual.Kind != export.Kind ||
                     statementDigest != slot.Import.Certification.StatementDigest)
                     throw new InvalidDataException(
@@ -567,7 +567,7 @@ partial class Program
                     ? ExportTheoremRequest(export.ContractConstant, export.Kind, prepared[index].Conditional)
                         with { name = slot.Author }
                     : ProofTheorem(slot.Author), .. ProfileFamilyAudits(prepared[index])],
-                ProfileFamilySources(prepared[index]));
+                ProfileFamilySources(prepared[index]), Closures: [export.ContractConstant]);
             return new ConsumerRequest(implementation, slot.Artifact, prepared[index].Proof, ExportTheorem, null,
                 ExportAudit: audit);
         }).ToArray();

@@ -178,10 +178,10 @@ partial class Program
     {
         string contract = export.Request.Contract;
         string audit = ExportAuditSource(export, published.Kind);
-        ConsumerExportAudit specification = new(audit, (session, proofModule, leanPath) =>
+        ConsumerExportAudit specification = new(audit, (session, proofModule, leanPath, audited) =>
         {
             (ExportClosure actual, string digest, string statement) =
-                CheckExportCertification(proofModule, contract, leanPath);
+                CheckedExportCertification(contract, audited);
             bool matchesPublished = actual.Digest == published.Digest && actual.Kind == published.Kind &&
                 actual.Canonical == published.Canonical;
             if (!matchesPublished)
@@ -193,7 +193,7 @@ partial class Program
                 ? ExportTheoremRequest(contract, published.Kind, export.Conditional) with { name = export.Request.Theorem }
                 : ProofTheorem(export.Request.Theorem),
             PublicLayoutsRequest(export.Profile), .. InitializationAuditRequests(export),
-            .. ProfileFamilyAudits(export)], ProfileFamilySources(export));
+            .. ProfileFamilyAudits(export)], ProfileFamilySources(export), Closures: [contract]);
         return new(manifest.Assembly, export.Request.Artifact, export.Proof, ExportTheorem, null,
             ExportAudit: specification);
     }
@@ -501,16 +501,16 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
         return new(contract, closure.kind, ContentKey(closure.canonical), closure.canonical);
     }
 
-    // Closure and statement use one imported environment and retain their separate checks.
-    (ExportClosure Closure, string Digest, string Statement) CheckExportCertification(
-        string proofModule, string contract, string leanPath)
+    // Closure and statement come from the same authenticated theorem audit.
+    static (ExportClosure Closure, string Digest, string Statement) CheckedExportCertification(
+        string contract, AuditedOleans audited)
     {
-        AuditedOleans audited =
-            AuditOleans(leanPath, [proofModule], [new(ExportTheorem, axioms: ApprovedAxioms, statement: true)],
-                closures: [contract]);
         ExportClosure closure = CheckedExportClosure(contract, audited.closures!.Single());
-        AuditedAxioms(audited.theorems[0]);
-        string statement = audited.theorems[0].statement
+        AuditedTheorem theorem = audited.theorems[0];
+        if (theorem.name != ExportTheorem)
+            throw new InvalidDataException("Missing checked export certification theorem.");
+        AuditedAxioms(theorem);
+        string statement = theorem.statement
             ?? throw new InvalidDataException("Missing checked export statement.");
         return (closure, ContentKey(statement), statement);
     }

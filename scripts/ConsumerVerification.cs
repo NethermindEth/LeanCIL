@@ -1225,8 +1225,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return new(frameworkCopy, copied.ToDictionary(path => path, Sha));
     }
 
-    sealed record ConsumerExportAudit(string Source, Action<string, string, string> Checked,
-        AuditRequest[]? Theorems = null, Dictionary<string, string>? GeneratedSources = null);
+    sealed record ConsumerExportAudit(string Source, Action<string, string, string, AuditedOleans> Checked,
+        AuditRequest[]? Theorems = null, Dictionary<string, string>? GeneratedSources = null,
+        string[]? Closures = null);
 
     sealed record ConsumerRequest(string Assembly, string Output, string Proof, string Theorem, string? Settings,
         bool ExpectRejection = false, ConsumerExportAudit? ExportAudit = null);
@@ -1817,7 +1818,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
             // Audit the certificate and proof in one import environment containing only replayed oleans.
-            var audits = new Dictionary<int, (string Audit, string[] Axioms)>();
+            var audits = new Dictionary<int, (string Audit, string[] Axioms, AuditedOleans Result)>();
             string certificateText = "";
             foreach (var i in proceeding)
             {
@@ -1830,14 +1831,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     AuditRequest[] proofAudits = requests[i].ExportAudit?.Theorems ??
                         [ProofTheorem(requests[i].Theorem, extractions[i])];
                     var audited = AuditOleans(leanPath, auditModules,
-                        [.. proofAudits, ExtractionCertificate("ExtractionAudit.valid")], ImportPremise(extractions[i]));
+                        [.. proofAudits, ExtractionCertificate("ExtractionAudit.valid")], ImportPremise(extractions[i]),
+                        closures: requests[i].ExportAudit?.Closures);
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
                     AuditedAxioms(audited.theorems[^1]);
                     certificateText = AuditText(audited.theorems[^1]);
                     Stage([i], "theorem audit");
                     RequireAuditedConstants(audited);
                     foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
-                    audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]));
+                    audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]), audited);
                 }
                 catch (Exception error) { Fail([i], error); }
             }
@@ -1857,7 +1859,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (checkedArtifacts != JsonSerializer.Serialize(finalArtifacts))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
             foreach (int i in proceeding)
-                requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath);
+                requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath, audits[i].Result);
             Dictionary<int, FullImportResult> fullResults = new();
             foreach (int i in proceeding)
                 if (fullImportAudit is not null)

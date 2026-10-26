@@ -1134,9 +1134,12 @@ malformed table rejection. The full transitive suite retains its forged dependen
 mutation, changed implementation, cyclic dependency and missing-bundle regressions.
 
 Contract publication audits interface declarations and their requested closures in one imported
-environment. Each final export likewise audits its closure and certified theorem statement
-together, including independently rebuilt full-verification exports. The closure digest,
-contract kind, theorem axioms and statement checks remain separate obligations.
+environment. The fresh consumer theorem audit also requests each export's closure and certified
+statement, including independently rebuilt full-verification exports. Export callbacks consume
+that authenticated response after the existing artifact and source guards; they do not import
+the environment again. The closure digest, contract kind, theorem axioms and statement checks
+remain separate obligations. `exportsaudit` exercises source and compiled-artifact mutation
+after those callbacks and requires the original integrity failures.
 
 Exports whose artifacts lie outside the proof root share one consumer input snapshot and the
 existing extraction-group verification machinery. Each request retains its own exact export
