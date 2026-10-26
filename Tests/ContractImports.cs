@@ -87,7 +87,7 @@ string interfaceProbe = Path.Combine(directory, "interface-probe");
 Directory.CreateDirectory(interfaceProbe);
 string interfaceSource = File.ReadAllText(Path.Combine(fixture, "ImportFixture.lean"));
 File.WriteAllText(Path.Combine(interfaceProbe, interfaceModule + ".lean"), interfaceSource);
-string interfaceLeanPath = interfaceProbe + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean");
+string interfaceLeanPath = interfaceProbe + Path.PathSeparator + interfaceVerification.SessionLeanPath(interfaceLibrary);
 Run([interfaceVerification.LeanExecutable, "--root=" + interfaceProbe, "-o", Path.Combine(interfaceProbe, interfaceModule + ".olean"),
     Path.Combine(interfaceProbe, interfaceModule + ".lean")], leanPath: interfaceLeanPath);
 string closureProbe = Path.Combine(interfaceProbe, "Closure.lean");
@@ -847,7 +847,7 @@ string hashWindow = Path.Combine(directory, "hash-window");
 Directory.CreateDirectory(hashWindow);
 File.WriteAllText(Path.Combine(hashWindow, interfaceModule + ".lean"), interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
 Run([interfaceVerification.LeanExecutable, "--root=" + hashWindow, "-o", Path.Combine(hashWindow, interfaceModule + ".olean"),
-    Path.Combine(hashWindow, interfaceModule + ".lean")], leanPath: hashWindow + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean"));
+    Path.Combine(hashWindow, interfaceModule + ".lean")], leanPath: hashWindow + Path.PathSeparator + interfaceVerification.SessionLeanPath(interfaceLibrary));
 byte[] unauditedArtifact = File.ReadAllBytes(Path.Combine(hashWindow, interfaceModule + ".olean"));
 void RejectReplayWindowSwap(string expectedDiagnostic, Func<string?> locate, Action<Action<string>> verify)
 {
