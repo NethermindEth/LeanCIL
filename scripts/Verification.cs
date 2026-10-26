@@ -1265,18 +1265,32 @@ partial class Program : IDisposable
     Dictionary<string, string[]> ContractModuleImports(string destination, SortedDictionary<string, string> sources)
     {
         string input = Path.Combine(destination, "LeanCILHeader" + Guid.NewGuid().ToString("N") + ".json");
+        string runner = Path.ChangeExtension(input, ".lean");
         try
         {
             File.WriteAllText(input, JsonSerializer.Serialize(sources.Values));
-            var executable = CheckedAuditExecutable();
-            string result = Run([executable, "--headers", input], destination, environment: LeanEnvironment);
-            CheckedAuditExecutable();
+            string result;
+            if (auditExecutable is null)
+            {
+                // Editor workspaces parse headers before a certified library exists.
+                File.WriteAllText(runner, File.ReadAllText(At("CIL/Interface/Headers.lean")) +
+                    "\ndef main (args : List String) : IO Unit := do\n" +
+                    "  let [input] := args | throw (IO.userError \"Expected source manifest\")\n" +
+                    "  CIL.Interface.writeSourceHeaders input\n");
+                result = Run([LeanExecutable, "--run", runner, input], destination, environment: LeanEnvironment);
+            }
+            else
+            {
+                var executable = CheckedAuditExecutable();
+                result = Run([executable, "--headers", input], destination, environment: LeanEnvironment);
+                CheckedAuditExecutable();
+            }
             string[] lines = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length != sources.Count) throw new InvalidDataException("Incomplete contract interface import graph.");
             return sources.Keys.Zip(lines).ToDictionary(pair => pair.First,
                 pair => JsonSerializer.Deserialize<string[]>(pair.Second) ?? throw new InvalidDataException("Invalid contract import graph."), StringComparer.Ordinal);
         }
-        finally { File.Delete(input); }
+        finally { File.Delete(input); File.Delete(runner); }
     }
     string[] StageImportSources(ExtractionIdentity extraction, string destination)
     {
