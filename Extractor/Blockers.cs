@@ -15,19 +15,53 @@ internal static class Blockers
 
     sealed record Site(string Method, int? IlOffset, string? Instruction, string? Source, string Message);
 
-    sealed record Reach(string Signature, string Profile)
+    sealed class ChainComparer : IEqualityComparer<string[]>
     {
-        internal List<string[]> Chains { get; } = [];
+        internal static readonly ChainComparer Instance = new();
+        public bool Equals(string[]? left, string[]? right) => ReferenceEquals(left, right) ||
+            left is not null && right is not null && left.SequenceEqual(right, StringComparer.Ordinal);
+        public int GetHashCode(string[] chain)
+        {
+            var hash = new HashCode();
+            foreach (var method in chain) hash.Add(method, StringComparer.Ordinal);
+            return hash.ToHashCode();
+        }
     }
 
-    // One unsupported construct, wherever it occurs and whichever entries reach it.
-    sealed record Finding(string Construct)
+    sealed class Reach(string signature, string profile)
     {
+        readonly HashSet<string[]> knownChains = new(ChainComparer.Instance);
+        internal string Signature { get; } = signature;
+        internal string Profile { get; } = profile;
+        internal List<string[]> Chains { get; } = [];
+        internal void AddChain(string[] chain)
+        {
+            if (knownChains.Add(chain)) Chains.Add(chain);
+        }
+    }
+
+    // Lists retain discovery order; indexes only decide whether an occurrence is new.
+    sealed class Finding(string construct)
+    {
+        readonly HashSet<Site> knownSites = [];
+        readonly Dictionary<(string Signature, string Profile), Reach> knownEntries = [];
+        internal string Construct { get; } = construct;
         internal List<Site> Sites { get; } = [];
         internal List<Reach> Entries { get; } = [];
         internal string Id { get; set; } = "";
-    }
 
+        internal void Add(Site site, string signature, string profile, string[] chain)
+        {
+            if (knownSites.Add(site)) Sites.Add(site);
+            if (!knownEntries.TryGetValue((signature, profile), out var reach))
+            {
+                reach = new(signature, profile);
+                knownEntries.Add((signature, profile), reach);
+                Entries.Add(reach);
+            }
+            reach.AddChain(chain);
+        }
+    }
     sealed record Outcome(string? Signature, string? Profile, string Status, string? Method, string? Reason, int? ReachableMethods, List<Finding> Findings);
 
     static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
@@ -142,6 +176,7 @@ internal static class Blockers
                 continue;
             }
             var entryFindings = new List<Finding>();
+            var knownFindings = new HashSet<Finding>();
             foreach (var failure in blocked)
             {
                 var message = failure.Error.Message;
@@ -152,13 +187,9 @@ internal static class Blockers
                 if (!findings.TryGetValue(construct, out var finding)) findings[construct] = finding = new(construct);
                 var site = new Site(failure.Method.FullName, offset, failure.At?.ToString(),
                     offset is int at ? Symbols.Location(failure.Method, at, Path.GetFileName) : null, message);
-                if (!finding.Sites.Contains(site)) finding.Sites.Add(site);
-                var entryPoint = failure.Chain[0].FullName;
-                var reach = finding.Entries.FirstOrDefault(r => r.Signature == entryPoint && r.Profile == profileName);
-                if (reach is null) finding.Entries.Add(reach = new(entryPoint, profileName));
-                var chain = failure.Chain.Select(m => m.FullName).ToArray();
-                if (!reach.Chains.Any(c => c.SequenceEqual(chain))) reach.Chains.Add(chain);
-                if (!entryFindings.Contains(finding)) entryFindings.Add(finding);
+                var chain = failure.Chain.Select(method => method.FullName).ToArray();
+                finding.Add(site, chain[0], profileName, chain);
+                if (knownFindings.Add(finding)) entryFindings.Add(finding);
             }
             outcomes.Add(new(signature, profileName, "blocked", blocked[0].Chain[0].FullName, null, null, entryFindings));
         }

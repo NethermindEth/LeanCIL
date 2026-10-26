@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 
+using System.Reflection;
 using System.Text.Json;
 
 // Admission report: shared blockers are deduplicated with every chain, excluded branches stay silent.
@@ -139,4 +140,28 @@ Require(entries[5].GetProperty("reason").GetString()!.Contains("No method matche
 Require(entries[6].GetProperty("reason").GetString()!.Contains("Unknown execution profile"), "Bad profile lacks its reason");
 Require(summary.Contains("2 admitted, 4 blocked, 2 not checked") && summary.Contains("nothing here is proved") &&
     !summary.Contains("verified", StringComparison.OrdinalIgnoreCase), "Summary overstates or misses counts");
+// Distinct arrays and sites are compared by content, while output keeps first discovery order.
+var blockersType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.Blockers", true)!;
+var findingType = blockersType.GetNestedType("Finding", BindingFlags.NonPublic)!;
+var siteType = blockersType.GetNestedType("Site", BindingFlags.NonPublic)!;
+const BindingFlags instanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+object Construct(Type type, params object?[] values) => Activator.CreateInstance(type, instanceMembers,
+    null, values, null)!;
+var finding = Construct(findingType, "construct");
+var add = findingType.GetMethod("Add", instanceMembers)!;
+void Add(int offset, string profile, string[] chain) => add.Invoke(finding,
+    [Construct(siteType, "Method", offset, "op", "source", "message"), "Entry", profile, chain]);
+Add(1, "scalar", ["Entry", "ab", "c"]);
+Add(1, "scalar", ["Entry", "ab", "c"]);
+Add(1, "scalar", ["Entry", "a", "bc"]);
+Add(2, "scalar", ["Entry", "ab", "c"]);
+Add(1, "Scalar", ["Entry", "ab", "c"]);
+var sites = (System.Collections.IList)findingType.GetProperty("Sites", instanceMembers)!.GetValue(finding)!;
+var reaches = (System.Collections.IList)findingType.GetProperty("Entries", instanceMembers)!.GetValue(finding)!;
+var reach = reaches[0]!;
+var chains = (List<string[]>)reach.GetType().GetProperty("Chains", instanceMembers)!.GetValue(reach)!;
+Require(sites.Count == 2 && reaches.Count == 2 && chains.Count == 2 &&
+    chains[0].SequenceEqual(new[] { "Entry", "ab", "c" }) &&
+    chains[1].SequenceEqual(new[] { "Entry", "a", "bc" }),
+    "Blocker indexes lost content equality, profile case or chain order");
 Console.WriteLine($"PASS {checks} admission report checks");
