@@ -929,3 +929,9 @@ both indexes and sorted output construction, measured 128/512/2,048 modules at
 0.092/1.304/20.984 ms before and 0.011/0.060/0.458 ms after (one-second warmups, median seven
 samples). This isolates module merging, not full import verification. Collision detection
 becomes expected linear work; sorted output construction still takes O(M log M).
+
+Static initializer bindings reuse the emitter's existing method-identity index instead of
+searching the method array at each static load. Null initializers still use zero and missing
+initializers still produce the existing `-1` sentinel. Three compiled Word256 static-load
+entries retain all six generated Lean hashes; an unsupported initializer retains its exact
+rejection diagnostic. This removes O(static sites × methods) search work without another index.
