@@ -119,13 +119,23 @@ partial class Program
                 leanPath: leanPath, progress: $"Checking {requests.Count} generated fixtures");
             var built = OleanHashes(fresh, session);
             RequireOnlyAdded(bound, built, "Batch");
-            if (!ReplayModulesJointly(session, ["Batch"], leanPath,
-                $"Kernel replay of {requests.Count} generated fixtures"))
-                Run([checker, "Batch"], leanPath: leanPath,
-                    progress: $"Kernel replay of {requests.Count} generated fixtures");
-            var audited = AuditOleans(leanPath, ["Batch"], [.. Enumerable.Range(0, requests.Count).SelectMany(i => new[] {
+            AuditRequest[] proofAudits = [.. Enumerable.Range(0, requests.Count).SelectMany(i => new[] {
                 ProofTheorem($"BatchCase{i}.{requests[i].Theorem}"),
-                ExtractionCertificate($"BatchCase{i}.Extracted.translation_valid", $"BatchCase{i}.") })]);
+                ExtractionCertificate($"BatchCase{i}.Extracted.translation_valid", $"BatchCase{i}.") })];
+            AuditedOleans? audited = null;
+            if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
+            {
+                try { audited = AuditOleans(leanPath, ["Batch"], proofAudits, replayTargets: ["Batch"]); }
+                catch (InvalidOperationException) { }
+            }
+            if (audited is null)
+            {
+                if (!ReplayModulesJointly(session, ["Batch"], leanPath,
+                    $"Kernel replay of {requests.Count} generated fixtures"))
+                    Run([checker, "Batch"], leanPath: leanPath,
+                        progress: $"Kernel replay of {requests.Count} generated fixtures");
+                audited = AuditOleans(leanPath, ["Batch"], proofAudits);
+            }
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
             RequireAuditedModule(audited, "Batch", Path.Combine(fresh, "Batch.olean"));

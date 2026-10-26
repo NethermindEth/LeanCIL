@@ -45,6 +45,17 @@ Compile("JointUnapproved", "axiom JointUnapproved.oracle : True\n" +
     "theorem JointDuplicate.same : True := JointUnapproved.oracle\n");
 Compile("JointRefutation", "def CIL.Safety.MethodContract.Holds : Prop := False\n" +
     "theorem JointRefutation.test : ¬ CIL.Safety.MethodContract.Holds := fun h => h\n");
+Compile("JointVisible", "theorem JointVisible.correctness : True := True.intro\n");
+Compile("JointHidden", """
+    import Lean
+    set_option debug.skipKernelTC true
+    run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+      name := `JointHidden.correctness
+      levelParams := []
+      type := Lean.mkConst ``True
+      value := Lean.mkConst `JointVisible.correctness
+    })
+    """);
 
 void CheckFusedReplay()
 {
@@ -65,7 +76,8 @@ void CheckFusedReplay()
             interfaces = metadata ? new[] { module } : Array.Empty<string>()
         }));
         Run([verification.CheckedAuditExecutable(), request, result], root, leanPath, environment: environment);
-        var audited = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(File.ReadAllText(result));
+        var audited = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            File.ReadAllText(result));
         if (audited.GetProperty("fused").GetBoolean() != fused ||
             !audited.GetProperty("replayed").EnumerateArray().Select(value => value.GetString()).SequenceEqual(targets))
             throw new InvalidOperationException("Fused audit selected the wrong environment or replay targets");
@@ -99,6 +111,43 @@ void CheckFusedReplay()
     if (forged.Code == 0 || !(forged.Stdout + forged.Stderr).Contains("while replaying declaration"))
         throw new InvalidOperationException("Fused replay accepted a forged theorem body");
     Console.WriteLine("PASS fused replay rejects forged theorem bodies before auditing");
+
+    void Scoped(string[] targets, string[] modules, object[] requests, bool duplicate = false)
+    {
+        var request = Path.Combine(root, "scoped-request.json");
+        var result = Path.Combine(root, "scoped-result.json");
+        File.WriteAllText(request, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            modules, replayTargets = targets, theorems = requests
+        }));
+        var run = Execute([verification.CheckedAuditExecutable(), request, result], root, leanPath,
+            environment: environment);
+        if (duplicate)
+        {
+            if (run.Code == 0 || !run.Output.Contains("requires unique replay declarations"))
+                throw new InvalidOperationException("Scoped replay accepted ambiguous theorem ownership");
+            return;
+        }
+        if (run.Code != 0) throw new InvalidOperationException(run.Output);
+        var audited = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            File.ReadAllText(result));
+        var theorems = audited.GetProperty("theorems").EnumerateArray().ToArray();
+        if (!audited.GetProperty("fused").GetBoolean() || theorems[0].TryGetProperty("error", out _) ||
+            (theorems.Length > 1 && !theorems[1].GetProperty("error").GetString()!.Contains("import closure")))
+            throw new InvalidOperationException("Scoped fused audit lost request-local visibility");
+    }
+
+    object Scope(string theorem, params string[] modules) =>
+        new { name = theorem, axioms = Array.Empty<string>(), allowedModules = modules };
+    Scoped(["JointA", "JointB", "JointC"], ["JointB", "JointC"],
+        [Scope("JointB.step", "JointA", "JointB"), Scope("JointC.top", "JointA", "JointB")]);
+    Scoped(["JointC"], ["JointC"], [Scope("JointA.base", "JointA")]);
+    Scoped(["JointVisible", "JointHidden"], ["JointVisible", "JointHidden"],
+        [Scope("JointVisible.correctness", "JointVisible"), Scope("JointHidden.correctness", "JointHidden")]);
+    foreach (var targets in new[] { new[] { "JointClean", "JointUnapproved" },
+        new[] { "JointUnapproved", "JointClean" } })
+        Scoped(targets, targets, [Scope("JointDuplicate.same", "JointClean")], duplicate: true);
+    Console.WriteLine("PASS fused scopes preserve target/external owners and reject duplicate proof bodies");
 }
 
 void CheckReplays(bool native)

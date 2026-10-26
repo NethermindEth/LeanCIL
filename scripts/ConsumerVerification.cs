@@ -1824,33 +1824,74 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var replayTargets = discovered.Where(module =>
                 !baseUnchanged || extractionDependent.Contains(module.Name) ||
                 (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name).ToArray();
-            AuditedOleans? combinedAudit = null;
-            if (proceeding.Length == 1 && replayTargets.Length > 0 &&
-                requests[proceeding[0]].ExportAudit is null && fullImportAudit is null &&
+            Dictionary<int, AuditedOleans>? combinedAudits = null;
+            var premise = ImportPremise(extractions[proceeding[0]]);
+            var premiseIdentity = JsonSerializer.Serialize(premise);
+            var replayedNames = replayTargets.ToHashSet(StringComparer.Ordinal);
+            // Duplicate declarations in skipped support must not select another request's proof body.
+            bool completeConsumerReplay = discovered.All(module => module.Name == "CIL" ||
+                module.Name.StartsWith("CIL.", StringComparison.Ordinal) || replayedNames.Contains(module.Name));
+            if (replayTargets.Length > 0 && fullImportAudit is null &&
+                (members.Length == 1 || completeConsumerReplay) &&
+                proceeding.All(index => requests[index].ExportAudit is null &&
+                    JsonSerializer.Serialize(ImportPremise(extractions[index])) == premiseIdentity) &&
                 Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
             {
-                int index = proceeding[0];
                 try
                 {
-                    combinedAudit = AuditOleans(leanPath,
-                        [requestModules[index], "Extracted",
-                            .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()],
-                        [ProofTheorem(requests[index].Theorem, extractions[index]),
-                            ExtractionCertificate("Extracted.translation_valid")],
-                        ImportPremise(extractions[index]), replayTargets: replayTargets);
+                    string[] Modules(int index) => [requestModules[index], "Extracted",
+                        .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                    var proofAudits = proceeding.Select(index =>
+                    {
+                        var audit = ProofTheorem(requests[index].Theorem, extractions[index]);
+                        // Another proof's declarations must not satisfy this request's missing theorem.
+                        return members.Length == 1 ? audit : audit with
+                        {
+                            allowedModules = ImportClosure(graph!, Modules(index))
+                                .Order(StringComparer.Ordinal).ToArray()
+                        };
+                    }).ToArray();
+                    var audited = AuditOleans(leanPath,
+                        proceeding.SelectMany(Modules).Distinct(StringComparer.Ordinal).ToArray(),
+                        [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")],
+                        premise, replayTargets: replayTargets);
+                    combinedAudits = proceeding.Select((index, position) => (index, position))
+                        // A conservative owner scope may omit a transitive toolchain import.
+                        // Hidden target dependencies are definitive failures, never audit-only fallbacks.
+                        .Where(item => audited.theorems[item.position].error is null ||
+                            audited.theorems[item.position].error!.StartsWith(
+                                "Theorem dependency is outside its request's import closure:",
+                                StringComparison.Ordinal))
+                        .ToDictionary(item => item.index, item => audited with
+                        {
+                            theorems = [audited.theorems[item.position], audited.theorems[^1]]
+                        });
                 }
                 // An ineligible or rejected joint set still needs individual failure attribution.
                 catch (InvalidOperationException) { }
             }
-            var failures = combinedAudit is null ? ReplayConsumerModules(session, replayTargets, leanPath)
-                : new Dictionary<string, string>();
+            HashSet<string>? RequestClosure(int index) => graph is null ? null
+                : ImportClosure(graph, [requestModules[index], "Extracted",
+                    .. checkRejectedProofs ? new[] { "ExtractionAudit" } : [],
+                    .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()]);
+            var failures = new Dictionary<string, string>();
+            if (combinedAudits is null)
+            {
+                if (members.Length == 1) failures = ReplayConsumerModules(session, replayTargets, leanPath);
+                else
+                    foreach (int index in proceeding)
+                    {
+                        // A sibling's undeclared constants must not make another proof replay successfully.
+                        var closure = RequestClosure(index)!;
+                        var own = ReplayConsumerModules(session,
+                            replayTargets.Where(closure.Contains).ToArray(), leanPath);
+                        foreach (var (module, error) in own) failures.TryAdd(module, error);
+                    }
+            }
             foreach (var i in proceeding)
             {
                 // A request depends only on its own proof's import closure and the extraction certificate.
-                var closure = graph is null ? null
-                    : ImportClosure(graph, [requestModules[i], "Extracted",
-                        .. checkRejectedProofs ? new[] { "ExtractionAudit" } : [],
-                        .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()]);
+                var closure = RequestClosure(i);
                 var rejected = failures.Keys.Where(name => closure is null || closure.Contains(name)).Order(StringComparer.Ordinal).ToArray();
                 if (rejected.Length > 0)
                     Fail([i], new InvalidOperationException("Kernel replay rejected " + string.Join(", ", rejected) + ":\n" +
@@ -1871,7 +1912,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
                     AuditRequest[] proofAudits = requests[i].ExportAudit?.Theorems ??
                         [ProofTheorem(requests[i].Theorem, extractions[i])];
-                    var audited = combinedAudit ?? AuditOleans(leanPath, auditModules,
+                    var audited = combinedAudits?.GetValueOrDefault(i) ?? AuditOleans(leanPath, auditModules,
                         [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")], ImportPremise(extractions[i]),
                         closures: requests[i].ExportAudit?.Closures);
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);

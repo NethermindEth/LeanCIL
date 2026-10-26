@@ -122,9 +122,10 @@ Verified: ExampleProof.correctness
 
 Every invocation validates the request's identity and required proof evidence. Authenticated caches can reuse unchanged certified builds; source/hash checks, audits and required kernel replay still apply. Use `--fresh` to disable local verification reuse. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
-Eligible single-request consumer proofs audit the environment returned by kernel replay,
-avoiding a second import. Duplicate declarations and audits requiring source locations or
-module metadata retain the separate audit path; theorem and artifact checks still apply.
+Eligible standalone proofs, generated batches and consumer groups audit the environment returned
+by kernel replay, avoiding a second import. Consumer groups retain each request's theorem and
+dependency scope. Duplicate declarations and audits requiring source locations or module metadata
+retain the separate audit path; theorem and artifact checks still apply.
 
 List the methods of an assembly with `leancil list`, and check that generated files still match
 the assembly and extraction settings without running Lean with `leancil check`:

@@ -27,14 +27,17 @@ def sameReplayTheorem : Lean.ConstantInfo → Lean.ConstantInfo → Bool
   | _, _ => false
 
 /-- Replays every target and exposes the checked environment while its imported regions live.
-The callback flag excludes duplicate declarations whose selected proof body may differ. -/
+The callback flag excludes duplicate declarations whose selected proof body may differ.
+The owner resolver identifies target and external declarations for request-local audit scopes. -/
 unsafe def withReplayedModules (args : List String)
-    (checked : Lean.Kernel.Environment → Bool → IO Unit) : IO Unit := do
+    (checked : Lean.Kernel.Environment → Bool → (Lean.Name → Option Lean.Name) → IO Unit) :
+    IO Unit := do
   let started ← IO.monoMsNow
   let names := args.map String.toName
   let targets : Lean.NameSet := names.foldl (·.insert ·) {}
   let mut imports : Std.HashMap Lean.Name Lean.Import := {}
   let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
+  let mut owners : Std.HashMap Lean.Name Lean.Name := {}
   let mut unique := true
   for module in names do
     let (exported, complete) ← readReplayParts module
@@ -53,7 +56,9 @@ unsafe def withReplayedModules (args : List String)
         unique := false
         unless sameReplayTheorem prior ci do
           throw <| IO.userError s!"Constant {name} is declared by more than one replay target"
-      | none => constants := constants.insert name ci
+      | none =>
+        constants := constants.insert name ci
+        owners := owners.insert name module
   let external := imports.toArray.map (·.2) |>.qsort (·.module.toString < ·.module.toString)
   let (_, s) ← Lean.importModulesCore external |>.run
   let env ← Lean.finalizeImport s external {} 0 false false (isModule := true)
@@ -67,7 +72,9 @@ unsafe def withReplayedModules (args : List String)
         unless owner.any (!targets.contains ·) && sameReplayTheorem prior ci do
           throw <| IO.userError s!"Replay target constant {name} is already imported"
     let replayed ← env.toKernelEnv.replay constants
-    checked replayed unique
+    let ownerOf := fun name => owners[name]? <|>
+      ((env.getModuleIdxFor? name).bind (imported[·.toNat]?))
+    checked replayed unique ownerOf
   finally env.freeRegions
   let elapsed := (← IO.monoMsNow) - started
   for name in args do
@@ -77,6 +84,6 @@ unsafe def withReplayedModules (args : List String)
 /-- Replays every target declaration against shared dependencies without loading extensions. -/
 unsafe def replayModulesJointly (args : List String) : IO Unit := do
   Lean.initSearchPath (← Lean.findSysroot)
-  withReplayedModules args fun _ _ => pure ()
+  withReplayedModules args fun _ _ _ => pure ()
 
 end CIL.Replay

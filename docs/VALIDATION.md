@@ -1077,6 +1077,34 @@ Native audits fell from ten to one, replay processes from eleven to two, and Lak
 from five to one; both runs built exactly one support module. This is a focused measurement,
 not a claim that the complete Core job has reached four minutes.
 
+The generic-method, F# and universal-contract fixtures also batch their immutable positive
+proofs. The generic instance and other fixed-memory contracts retain their exact statements;
+batching does not turn them into arbitrary-memory specifications. Mutated assemblies and
+expected failures retain their isolated checks. These changes remove eleven separate positive
+verification sessions across the three fixtures.
+
+Standalone proofs and generated batches combine their final replay and theorem audit when
+eligible. Dependency certification, artifact identity checks and failure diagnostics remain;
+audits needing source-location metadata still import the checked artifacts.
+Paired Windows runs of the ten-example batch with the same certified library took 29.98 seconds
+with separate replay/audit and 28.10 seconds combined. An earlier combined run took 40.17 seconds
+with slower compilation and setup too; these short fixture timings remain sensitive to host load.
+
+Compatible consumer requests can share that final replay and audit too. Each selected theorem
+and its reachable replay-target declarations must belong to the request's own import closure.
+Duplicate declarations and skipped consumer support conservatively retain separate checking.
+The fallback replays each request's import-closed target set independently, preventing a forged
+proof from borrowing an undeclared sibling dependency before an isolated axiom audit.
+`Tests/JointReplay.cs` covers target and external owners, duplicate bodies and hidden dependencies.
+The existing consumer batch checks also reject a theorem available only in another request.
+
+`Tests/ConsumerCombinedAudit.cs` is a focused manual benchmark and adversarial fixture. Its
+`--without-hidden` comparison keeps eight successful requests and two expected failures fixed.
+On Windows, that workload took 30.87 seconds with separate audits and 19.48 seconds with shared
+replay/audit, using the same certified library. Its default additionally checks an undeclared
+reference to an unapproved sibling axiom; both shared and isolated fallback paths must reject it.
+These measurements exclude fixture setup and do not establish a complete-suite CI timing.
+
 ### Native joint kernel replay
 
 The authenticated `leancil-audit --replay INPUT` command accepts a JSON array of module names.

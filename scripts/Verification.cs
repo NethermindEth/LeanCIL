@@ -1137,7 +1137,8 @@ partial class Program : IDisposable
 
     static readonly string[] ApprovedAxioms = ["propext", "Quot.sound", "Classical.choice"];
 
-    sealed record AuditRequest(string name, object? type = null, string[]? axioms = null, bool statement = false, bool refutation = false);
+    sealed record AuditRequest(string name, object? type = null, string[]? axioms = null,
+        bool statement = false, bool refutation = false, string[]? allowedModules = null);
     sealed record AuditRefutation(string contract, int line, int column);
     sealed record AuditedTheorem(string name, string? error, string[]? axioms, string? statement, AuditRefutation? refutes);
     sealed record AuditConstantRequest(string name, object value, object? type = null, string[]? axioms = null);
@@ -1788,17 +1789,33 @@ partial class Program : IDisposable
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
             string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"],
                 .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(), .. proofRestored ? Array.Empty<string>() : ["Proof"]];
+            string[] auditModules = ["Proof", "ExtractionAudit",
+                .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
+            AuditRequest[] proofAudits =
+                [ProofTheorem(theorem, extraction), ExtractionCertificate("ExtractionAudit.valid")];
+            AuditedOleans? audited = null;
             if (replay.Length > 0)
             {
                 stage?.Invoke("kernel replay");
-                ReplayCheckedModules(replay, leanPath,
-                    (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                RequireStagedProofSources();
+                if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
+                {
+                    try
+                    {
+                        audited = AuditOleans(leanPath, auditModules, proofAudits,
+                            ImportPremise(extraction), replayTargets: replay);
+                    }
+                    catch (InvalidOperationException) { }
+                }
+                // A rejected combined replay retains the original checker diagnostics.
+                if (audited is null)
+                    ReplayCheckedModules(replay, leanPath,
+                        (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
             }
-            // The audit reads the bytes leanchecker replayed: nothing may change until it finishes.
+            // The audit reads the replayed bytes; all source and artifact guards still follow it.
             stage?.Invoke("theorem audit");
-            string[] auditModules = ["Proof", "ExtractionAudit", .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
             RequireStagedProofSources();
-            var audited = AuditOleans(leanPath, auditModules, [ProofTheorem(theorem, extraction), ExtractionCertificate("ExtractionAudit.valid")], ImportPremise(extraction));
+            audited ??= AuditOleans(leanPath, auditModules, proofAudits, ImportPremise(extraction));
             RequireStagedProofSources();
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");

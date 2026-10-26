@@ -40,17 +40,21 @@ object[] Values(Type type) => type == typeof(bool) ? [false, true] :
     type.IsEnum ? new object[] { Enum.ToObject(type, 0), Enum.ToObject(type, -1), Enum.ToObject(type, 127), Enum.ToObject(type, -128) } :
     throw new InvalidOperationException("Unexpected parameter type");
 
-// Universal contracts cover direct, repeated, nested and instance generic calls.
+// Universal identity contracts cover direct, repeated and nested generic calls.
 foreach (var method in new[] { "Identity64", "Repeated", "Nested" })
-    verification.Verify(assembly, "Examples", $"GenericMethods::{method}(ulong)",
-        At("Examples/Proofs/GenericIdentity.lean"), Path.Combine(root, method));
-// The instance wrapper allocates a receiver; retain its separate fixed-memory check.
-verification.Verify(assembly, "Examples", "GenericMethods::Instance(ulong)",
-    At("Examples/Proofs/GenericInstance.lean"), Path.Combine(root, "Instance"));
-verification.Verify(assembly, "Examples", "GenericMethods::Identity32(int)",
-    At("Examples/Proofs/GenericIdentity32.lean"), Path.Combine(root, "Identity32"));
-verification.Verify(fsharp, "Examples.FSharp", "GenericMethods::Identity64(ulong)",
-    At("Examples/Proofs/GenericIdentity.lean"), Path.Combine(root, "FSharpIdentity"));
+    examples.Add(new($"GenericMethods::{method}(ulong)",
+        At("Examples/Proofs/GenericIdentity.lean"), Path.Combine(root, method)),
+        () => Console.WriteLine($"PASS {method}: universal identity and caller memory preservation"));
+// The allocating instance retains its distinct fixed-memory theorem within the batch.
+examples.Add(new("GenericMethods::Instance(ulong)",
+    At("Examples/Proofs/GenericInstance.lean"), Path.Combine(root, "Instance")),
+    () => Console.WriteLine("PASS generic instance: fixed-memory execution"));
+examples.Add(new("GenericMethods::Identity32(int)",
+    At("Examples/Proofs/GenericIdentity32.lean"), Path.Combine(root, "Identity32")),
+    () => Console.WriteLine("PASS generic Identity32: all scalar inputs in fixed memory"));
+fsharpExamples.Add(new("GenericMethods::Identity64(ulong)",
+    At("Examples/Proofs/GenericIdentity.lean"), Path.Combine(root, "FSharpIdentity")),
+    () => Console.WriteLine("PASS F# generic identity and caller memory preservation"));
 
 // Independent runtime results cover branches, several instantiations and aggregate storage.
 foreach (var (dll, identity, owner, names) in new[]
