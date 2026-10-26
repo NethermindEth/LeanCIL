@@ -68,5 +68,35 @@ try
                 "Invalid or duplicate contract certification.")) { }
     }
     Console.WriteLine("PASS exact import identity/profile indexing and production duplicate rejection");
+    SortedDictionary<string, string> MergeModules(params (string Name, string Source)[] entries)
+    {
+        var libraries = Array.CreateInstance(libraryType, entries.Length);
+        for (var index = 0; index < entries.Length; index++)
+        {
+            var fixture = value.DeepClone().AsObject();
+            fixture["interfaceModules"] = new JsonArray(new JsonObject
+                { ["name"] = entries[index].Name, ["source"] = entries[index].Source });
+            var description = JsonSerializer.Deserialize(fixture.ToJsonString(), contractType, json)!;
+            libraries.SetValue(Activator.CreateInstance(libraryType, BindingFlags.Instance | BindingFlags.Public |
+                BindingFlags.NonPublic, null, [null, description, "", null], null), index);
+        }
+        return (SortedDictionary<string, string>)resolutionType.GetMethod("Modules", hiddenStatic)!
+            .Invoke(null, [libraries])!;
+    }
+    var merged = MergeModules(("Z", "last"), ("A", "first"), ("A", "first"));
+    if (!merged.Keys.SequenceEqual(new[] { "A", "Z" }) || merged["A"] != "first")
+        throw new Exception("Module merging lost sorted output or identical-content deduplication");
+    foreach (var pair in new[] { ("A", "one", "A", "two"), ("A", "one", "a", "one"),
+        ("Σ", "one", "σ", "one") })
+    {
+        try
+        {
+            MergeModules((pair.Item1, pair.Item2), (pair.Item3, pair.Item4));
+            throw new Exception("Conflicting module names or contents accepted");
+        }
+        catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
+            rejected.Message == "Conflicting contract interface module: " + pair.Item3) { }
+    }
+    Console.WriteLine("PASS module ordering, exact deduplication, conflicting contents and ordinal case collisions");
 }
 finally { AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", savedBaseDirectory); }

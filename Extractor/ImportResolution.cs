@@ -344,12 +344,14 @@ internal sealed class ImportResolution : IDisposable
     static SortedDictionary<string, string> Modules(IEnumerable<Library> selected)
     {
         SortedDictionary<string, string> modules = new(StringComparer.Ordinal);
+        Dictionary<string, string> spellings = new(StringComparer.OrdinalIgnoreCase);
         foreach (InterfaceModule module in selected.SelectMany(library => library.Interface.InterfaceModules))
         {
             if ((modules.TryGetValue(module.Name, out string? prior) && prior != module.Source) ||
-                modules.Keys.Any(name => name != module.Name && string.Equals(name, module.Name, StringComparison.OrdinalIgnoreCase)))
+                (spellings.TryGetValue(module.Name, out var spelling) && spelling != module.Name))
                 throw new InvalidDataException("Conflicting contract interface module: " + module.Name);
             modules[module.Name] = module.Source;
+            spellings.TryAdd(module.Name, module.Name);
         }
         return modules;
     }
