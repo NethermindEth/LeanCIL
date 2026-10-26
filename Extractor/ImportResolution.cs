@@ -22,6 +22,8 @@ internal sealed class ImportResolution : IDisposable
         string SidecarPath, string ImplementationPath, string ExpectedInterfaceDigest, bool IsReferenceAssembly,
         ContractDependency[] Dependencies);
     readonly List<Library> libraries = [];
+    readonly Dictionary<string, Library> librariesByIdentity = new(StringComparer.Ordinal);
+    readonly HashSet<string> simpleNames = new(StringComparer.Ordinal);
     readonly Dictionary<(string Identity, string Profile), int> implementationState = [];
     readonly Dictionary<(string Identity, string Profile), ValidatedMetadata> validatedMetadata = [];
     readonly HashSet<string>? allowedDependencies;
@@ -30,6 +32,7 @@ internal sealed class ImportResolution : IDisposable
     readonly HashSet<Library> used = [];
     readonly Dictionary<string, Source> discovered = new(StringComparer.Ordinal);
     readonly List<Binding> bindings = [];
+    readonly Dictionary<string, int> bindingSlots = new(StringComparer.Ordinal);
     readonly Dictionary<Instruction, int> sites = [];
     internal IReadOnlyList<Binding> Bindings => bindings;
     internal Node[] Nodes => libraries.OrderBy(library => library.Interface.AssemblyIdentity, StringComparer.Ordinal)
@@ -83,7 +86,7 @@ internal sealed class ImportResolution : IDisposable
                         attribute.AttributeType.FullName == "System.Runtime.Versioning.TargetFrameworkAttribute")?.ConstructorArguments.Single().Value as string;
                     if (framework != contract.TargetFramework || framework != ".NETCoreApp,Version=v10.0")
                         throw new InvalidDataException("Import target framework mismatch.");
-                    Library? existing = libraries.SingleOrDefault(library => library.Interface.AssemblyIdentity == contract.AssemblyIdentity);
+                    Library? existing = librariesByIdentity.GetValueOrDefault(contract.AssemblyIdentity);
                     if (existing is not null)
                     {
                         if (existing.Interface.ImplementationSha256 != contract.ImplementationSha256)
@@ -93,9 +96,12 @@ internal sealed class ImportResolution : IDisposable
                         module.Dispose();
                         return;
                     }
-                    if (libraries.Any(library => library.Module.Assembly.Name.Name == module.Assembly.Name.Name))
+                    if (simpleNames.Contains(module.Assembly.Name.Name))
                         throw new InvalidDataException("Ambiguous import assembly simple name: " + module.Assembly.Name.Name);
-                    libraries.Add(new(source, contract, ContractInterface.Hash(sidecar), module));
+                    var library = new Library(source, contract, ContractInterface.Hash(sidecar), module);
+                    libraries.Add(library);
+                    librariesByIdentity.Add(contract.AssemblyIdentity, library);
+                    simpleNames.Add(module.Assembly.Name.Name);
                 }
                 catch { module.Dispose(); throw; }
     }
@@ -105,7 +111,7 @@ internal sealed class ImportResolution : IDisposable
         for (int index = 0; index < libraries.Count; index++)
             foreach (ContractDependency dependency in libraries[index].Interface.Dependencies)
             {
-                if (libraries.Any(library => library.Interface.AssemblyIdentity == dependency.AssemblyIdentity)) continue;
+                if (librariesByIdentity.ContainsKey(dependency.AssemblyIdentity)) continue;
                 string name = AssemblyNameReference.Parse(dependency.AssemblyIdentity).Name;
                 if (discovered.Remove(name, out Source? pending)) Load(pending);
             }
@@ -113,12 +119,13 @@ internal sealed class ImportResolution : IDisposable
         Modules(libraries);
     }
 
-    ImportResolution(List<Library> libraries, Dictionary<(string Identity, string Profile), int> implementationState,
-        Dictionary<(string Identity, string Profile), ValidatedMetadata> validatedMetadata, ContractInterface contract)
+    ImportResolution(ImportResolution parent, ContractInterface contract)
     {
-        this.libraries = libraries;
-        this.implementationState = implementationState;
-        this.validatedMetadata = validatedMetadata;
+        libraries = parent.libraries;
+        librariesByIdentity = parent.librariesByIdentity;
+        simpleNames = parent.simpleNames;
+        implementationState = parent.implementationState;
+        validatedMetadata = parent.validatedMetadata;
         allowedDependencies = contract.Dependencies.Select(dependency => dependency.AssemblyIdentity).ToHashSet(StringComparer.Ordinal);
         validatingAssembly = contract.AssemblyIdentity;
         ownsLibraries = false;
@@ -141,13 +148,13 @@ internal sealed class ImportResolution : IDisposable
         string assembly = reference.DeclaringType.Scope is AssemblyNameReference scope ? scope.FullName : reference.DeclaringType.Scope.Name;
         if (allowedDependencies is not null && !allowedDependencies.Contains(assembly))
             throw new InvalidDataException("Undeclared contract dependency: " + assembly + " required by " + validatingAssembly);
-        if (!libraries.Any(candidate => candidate.Interface.AssemblyIdentity == assembly) &&
+        if (!librariesByIdentity.ContainsKey(assembly) &&
             discovered.Remove(reference.DeclaringType.Scope.Name, out Source? pending))
         {
             Load(pending);
             ValidateGraph();
         }
-        Library? library = libraries.SingleOrDefault(candidate => candidate.Interface.AssemblyIdentity == assembly);
+        Library? library = librariesByIdentity.GetValueOrDefault(assembly);
         if (library is null)
             throw new InvalidDataException($"External managed dependency: {reference.FullName}\n  Next: supply --import {reference.DeclaringType.Scope.Name}.leancil.contracts and --import-sha256 {reference.DeclaringType.Scope.Name}=<hex> and --import-interface-sha256 {reference.DeclaringType.Scope.Name}=<hex>.");
         ContractMethodMetadata.Selection selection = ContractMethodMetadata.ResolveImported(reference, library.Module, profile.Architecture);
@@ -203,7 +210,7 @@ internal sealed class ImportResolution : IDisposable
         if (!library.Interface.IsReferenceAssembly)
             ValidateImplementation(library, export, certification, profile);
         MarkUsed(library);
-        int slot = bindings.FindIndex(binding => binding.Identity == identity);
+        int slot = bindingSlots.GetValueOrDefault(identity, -1);
         if (slot < 0)
         {
             slot = bindings.Count;
@@ -215,6 +222,7 @@ internal sealed class ImportResolution : IDisposable
                 export.DefinitionSignature,
                 export.TypeArguments ?? [], export.TypedSignature, export.Layouts ?? [], metadata.ActualLayouts,
                 metadata.ComputedLayouts));
+            bindingSlots.Add(identity, slot);
         }
         sites[instruction] = slot;
         validatedMetadata.TryAdd(key, metadata);
@@ -228,7 +236,7 @@ internal sealed class ImportResolution : IDisposable
         {
             if (!used.Add(selected)) continue;
             foreach (ContractDependency dependency in selected.Interface.Dependencies)
-                pending.Push(libraries.Single(candidate => candidate.Interface.AssemblyIdentity == dependency.AssemblyIdentity));
+                pending.Push(librariesByIdentity[dependency.AssemblyIdentity]);
         }
     }
 
@@ -241,7 +249,7 @@ internal sealed class ImportResolution : IDisposable
         implementationState[key] = 1;
         try
         {
-            using ImportResolution imports = new(libraries, implementationState, validatedMetadata, library.Interface);
+            using ImportResolution imports = new(this, library.Interface);
             var assumptions = InitializationAssumption.ForProfile(export, profile.Name);
             var ownTypes = assumptions.Where(item => item.AssemblyIdentity == library.Interface.AssemblyIdentity)
                 .Select(item => item.TypeName).ToArray();
@@ -285,13 +293,13 @@ internal sealed class ImportResolution : IDisposable
         ContractMethodMetadata.RejectModifiers(reference);
         if (allowedDependencies is not null && !allowedDependencies.Contains(scope.FullName))
             throw new InvalidDataException("Undeclared imported layout dependency: " + scope.FullName);
-        if (!libraries.Any(candidate => candidate.Interface.AssemblyIdentity == scope.FullName) &&
+        if (!librariesByIdentity.ContainsKey(scope.FullName) &&
             discovered.Remove(scope.Name, out Source? pending))
         {
             Load(pending);
             ValidateGraph();
         }
-        Library? library = libraries.SingleOrDefault(candidate => candidate.Interface.AssemblyIdentity == scope.FullName);
+        Library? library = librariesByIdentity.GetValueOrDefault(scope.FullName);
         if (library is null || library.Interface.FormatVersion != 2)
             throw new InvalidDataException("Imported byref layout requires a pinned typed interface: " + reference.FullName);
         ContractLayout[] actual = ImportedLayoutMetadata.ForType(reference.ElementType, library.Module, profile.Architecture);
@@ -358,6 +366,9 @@ internal sealed class ImportResolution : IDisposable
         if (!ownsLibraries) return;
         foreach (Library library in libraries) library.Module.Dispose();
         libraries.Clear();
+        librariesByIdentity.Clear();
+        simpleNames.Clear();
+        bindingSlots.Clear();
         validatedMetadata.Clear();
         used.Clear();
     }

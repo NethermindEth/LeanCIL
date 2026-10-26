@@ -78,3 +78,22 @@ if (!verification.RestorableConsumerSupport(record, sources).SetEquals(
     ["Bound", "Certified", "Independent", "CycleA", "CycleB"]))
     throw new Exception("Support closure changed source bindings or external-module exemptions");
 Console.WriteLine("PASS support invalidation preserves certified imports and extraction source bindings");
+var componentSource = "import CIL\nnamespace Extracted\n" +
+    "def method0Signature : String := \"zero\"\ndef zero := 0\ndef aliasZero := zero\n" +
+    "def method1Signature : String := \"one\"\ndef one := 1\n" +
+    "def method2Signature : String := \"one zero aliasZero one Unknown\"\n" +
+    "-- one zero method3Signature\ndef two := zero\n" +
+    "def method3Signature : String := \"three\"\ndef three := 3\n" +
+    "def specializedMethods : List Nat := []\nend Extracted\n";
+var components = SplitExtractionComponents(componentSource);
+var componentNames = components.Sources.Keys.ToArray();
+var expectedImports = new[] { new[] { 0 }, new[] { 0 }, new[] { 0, 1, 2 }, new[] { 0 } };
+for (var methodIndex = 0; methodIndex < expectedImports.Length; methodIndex++)
+{
+    var actual = components.Sources[componentNames[methodIndex + 1]].Split('\n')
+        .Where(line => line.StartsWith("import ", StringComparison.Ordinal));
+    var expected = expectedImports[methodIndex].Select(index => "import " + componentNames[index]);
+    if (!actual.SequenceEqual(expected))
+        throw new Exception("Component imports lost declaration order, deduplication or conservative text dependencies");
+}
+Console.WriteLine("PASS component imports preserve order, literal dependencies and prior declarations only");

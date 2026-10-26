@@ -7,9 +7,23 @@ namespace Nethermind.LeanCIL;
 
 // Raw metadata is serialized separately from computed sizes/offsets. Lean recomputes
 // those values and checks their uses in the emitted method rather than trusting them.
-internal sealed class LayoutEvidence(TypeReference[] types, string architecture = "scalar")
+internal sealed class LayoutEvidence
 {
-    readonly TypeReference[] rawTypes = Topological(types);
+    readonly TypeReference[] rawTypes;
+    // Raw metadata is topological; emitted layout constants retain the caller supplied order.
+    readonly Dictionary<string, int> emittedIndices = new(StringComparer.Ordinal);
+    readonly Dictionary<string, int> typeIndices = new(StringComparer.Ordinal);
+    readonly string architecture;
+
+    internal LayoutEvidence(TypeReference[] types, string architecture = "scalar")
+    {
+        this.architecture = architecture;
+        for (var index = 0; index < types.Length; index++)
+            emittedIndices.TryAdd(types[index].FullName, index);
+        rawTypes = Topological(types);
+        for (var index = 0; index < rawTypes.Length; index++)
+            typeIndices.TryAdd(rawTypes[index].FullName, index);
+    }
 
     static TypeReference[] Topological(TypeReference[] entries)
     {
@@ -33,7 +47,7 @@ internal sealed class LayoutEvidence(TypeReference[] types, string architecture 
 
     internal string[] Identities => rawTypes.Select(Identity).ToArray();
 
-    internal int Index(TypeReference type) => Array.FindIndex(rawTypes, entry => entry.FullName == type.FullName);
+    internal int Index(TypeReference type) => typeIndices.GetValueOrDefault(type.FullName, -1);
 
     internal string RawFieldType(TypeReference type, ModuleDefinition module)
     {
@@ -70,7 +84,12 @@ internal sealed class LayoutEvidence(TypeReference[] types, string architecture 
         })));
         lean.AppendLine("]");
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +
-            string.Join(", ", rawTypes.Select(type => $"⟨layout{Array.FindIndex(types, entry => entry.FullName == type.FullName)}, {MetadataValidation.AggregateLayout(type, type.Module, architecture).Alignment}⟩")) + "]");
+            string.Join(", ", rawTypes.Select(type =>
+            {
+                var index = emittedIndices.GetValueOrDefault(type.FullName, -1);
+                var alignment = MetadataValidation.AggregateLayout(type, type.Module, architecture).Alignment;
+                return $"⟨layout{index}, {alignment}⟩";
+            })) + "]");
         lean.AppendLine($"theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts .{architecture} := " + LeanEmitter.Decide);
     }
 

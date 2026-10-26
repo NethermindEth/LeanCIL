@@ -82,3 +82,30 @@ caller.Body.Instructions.Add(choose);
 caller.Body.Instructions.Add(destination);
 if (Translate(choose) != ".switch [2, 2]") throw new Exception("Switch target order or duplicates changed");
 Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
+var runtimeScope = AssemblyNameReference.Parse(
+    "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
+module.TypeSystem.UInt64.Scope = runtimeScope;
+var valueType = new TypeReference("System", "ValueType", module, runtimeScope);
+var inner = new TypeDefinition("Fixture", "ZInner", Mono.Cecil.TypeAttributes.Public |
+    Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout,
+    valueType);
+inner.Fields.Add(new FieldDefinition("Value", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
+module.Types.Add(inner);
+var outer = new TypeDefinition("Fixture", "AOuter", Mono.Cecil.TypeAttributes.Public |
+    Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout,
+    valueType);
+outer.Fields.Add(new FieldDefinition("Inner", Mono.Cecil.FieldAttributes.Public, inner));
+module.Types.Add(outer);
+var layoutType = extractor.GetType("Nethermind.LeanCIL.LayoutEvidence", true)!;
+var layouts = Activator.CreateInstance(layoutType, BindingFlags.Instance | BindingFlags.NonPublic,
+    null, [new TypeReference[] { outer, inner }, "scalar"], null)!;
+var layoutIndex = layoutType.GetMethod("Index", BindingFlags.Instance | BindingFlags.NonPublic)!;
+if ((int)layoutIndex.Invoke(layouts, [inner])! != 0 || (int)layoutIndex.Invoke(layouts, [outer])! != 1 ||
+    (int)layoutIndex.Invoke(layouts, [module.TypeSystem.String])! != -1)
+    throw new Exception("Layout index lost topological order or admitted an absent type");
+var emitted = new System.Text.StringBuilder();
+layoutType.GetMethod("EmitLayouts", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(layouts, [emitted]);
+if (!emitted.ToString().Contains("computedLayouts : Array Extraction.ComputedLayout := #[⟨layout1, 8⟩, ⟨layout0, 8⟩]",
+    StringComparison.Ordinal))
+    throw new Exception("Raw layout order was confused with emitted layout order");
+Console.WriteLine("PASS layout indexes distinguish emitted and topological order and reject missing types");
