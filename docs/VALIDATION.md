@@ -961,3 +961,15 @@ all fields and one reader accessing them all:
 | 2,048 | 172.527 ms | 6.254 ms |
 
 These isolate static-field resolution and do not estimate full extraction or CI savings.
+Layout computation accumulates field placements in reverse and restores declaration order once,
+removing quadratic `fields ++ [field]` work. `computeLayout_eq_append` proves equality to the
+complete former computation for arbitrary layouts, architectures and nested-layout tables.
+`Tests.LayoutAccumulation` covers order, explicit overlaps, empty layouts, missing children,
+packing/offset failures and vector architecture restrictions.
+
+Apple M4 / Lean 4.35 paired `decide +kernel` checks in the standalone
+`Tests/LayoutAccumulationScaling.lean` fixture measured 2,556.71→546.05 kHB for 128 fields and
+34,404.26→2,080.50 kHB for 512 fields (79–94% less kernel work). These include constructing and
+comparing the entire computed layout, not total CI time. Local step lemmas keep the new full
+algorithm-equivalence proof inexpensive: its declaration takes 1,282.34 kHB rather than the
+177,255.76 kHB of the initial broad proof attempt.
