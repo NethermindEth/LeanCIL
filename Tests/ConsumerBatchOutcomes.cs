@@ -129,18 +129,18 @@ partial class Program
                     "Batch certificates were not bound per request or a stale certificate survived.");
             var stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
                 .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
-            var copies = stages.Where(stage => stage.GetProperty("stage").GetString() ==
-                "Copying certified Lean verification library").ToArray();
+            var opens = stages.Where(stage => stage.GetProperty("stage").GetString() ==
+                "Opening certified Lean verification library").ToArray();
             if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")) &&
-                copies.Length != groups.Length)
-                throw new InvalidOperationException("Unexpected certified-base copy count: " + copies.Length);
+                opens.Length != groups.Length)
+                throw new InvalidOperationException("Unexpected certified-base open count: " + opens.Length);
             var measurements = new
             {
-                separate, processes = groups.Length, seconds = timer.Elapsed.TotalSeconds, copies = copies.Length,
+                separate, processes = groups.Length, seconds = timer.Elapsed.TotalSeconds, opens = opens.Length,
                 stages = stages.Where(stage => stage.GetProperty("stage").GetString() is { } name &&
                     (name.StartsWith("Building ", StringComparison.Ordinal) ||
                      name.Contains("kernel replay", StringComparison.OrdinalIgnoreCase) ||
-                     name == "Copying certified Lean verification library"))
+                     name == "Opening certified Lean verification library"))
                     .GroupBy(stage => stage.GetProperty("stage").GetString()!).ToDictionary(group => group.Key,
                     group => new { count = group.Count(),
                         seconds = group.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()) })

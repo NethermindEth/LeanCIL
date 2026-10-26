@@ -439,7 +439,8 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
     Dictionary<string, ExportClosure> CheckPublishedContractInterfaces(ContractExportManifest manifest,
         InterfaceModule[] interfaces, PreparedContractExport[] exports, string staging)
     {
-        string certified = Library(Inputs(exports[0].Proof));
+        Library(Inputs(exports[0].Proof));
+        string certified = library!;
         string isolated = Path.Combine(staging, "interface");
         Directory.CreateDirectory(isolated);
         CopyTree(Path.Combine(certified, "CIL"), Path.Combine(isolated, "CIL"));

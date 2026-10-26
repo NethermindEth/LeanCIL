@@ -58,7 +58,8 @@ partial class Program
     // its sources, toolchain and compiled artifacts. It does not authorize consumer proofs.
     void PrepareCertifiedFingerprints()
     {
-        var session = Library(Inputs(At("CIL.lean")));
+        Library(Inputs(At("CIL.lean")));
+        var session = library!;
         var executable = CheckedAuditExecutable();
         var tools = CanonicalFingerprintTools(auditExecutableSha!);
         var modules = certifiedModules!.Keys.Where(path => path.EndsWith(".olean", StringComparison.Ordinal))
@@ -1414,8 +1415,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         TrustedSupport[] trusted;
         try
         {
-            certifiedLibrary = Library(Inputs(proofs[live[0]], requests[live[0]].Settings));
-            certifiedBase = ModuleArtifacts(certifiedLibrary).Where(pair =>
+            Library(Inputs(proofs[live[0]], requests[live[0]].Settings));
+            certifiedLibrary = library!;
+            certifiedBase = baseModules!.Where(pair =>
                 ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
             dependencies = fullBundleDependencies ?? ConsumerDependencies(root);
             trusted = TrustedConsumerSupport(root, before[live[0]]);

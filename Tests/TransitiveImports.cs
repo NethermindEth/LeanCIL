@@ -278,7 +278,7 @@ void FullDiamond()
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
         stages.Count(stage => stage == "Building fresh consumer proof and dependencies") != 4 ||
         stages.Count(stage => stage is "Building fresh Lean verification library" or
-            "Copying certified Lean verification library") != 4)
+            "Opening certified Lean verification library") != 4)
         throw new InvalidOperationException("The diamond skipped or duplicated independent checking: " +
             string.Join(", ", stages));
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
@@ -307,7 +307,7 @@ void FullDiamond()
             var records = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
                 .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!);
             if (records.Any(stage => stage is "Building fresh Lean verification library" or
-                "Copying certified Lean verification library"))
+                "Opening certified Lean verification library"))
                 throw new InvalidOperationException("Changed graph evidence reached a proof build.");
         }
         finally
@@ -444,7 +444,7 @@ void FullTransitive()
     string[] stages = traced.Select(record => record.Stage).ToArray();
     int Last(string stage) => Array.FindLastIndex(stages, item => item == stage);
     int[] libraries = Enumerable.Range(0, stages.Length).Where(index => stages[index] is
-        "Building fresh Lean verification library" or "Copying certified Lean verification library").ToArray();
+        "Building fresh Lean verification library" or "Opening certified Lean verification library").ToArray();
     int Capture(int id) => Array.FindIndex(traced, record =>
         record.Command.Contains("LeanCILCaptureLeanCILFullLibrary" + id + ".lean", StringComparison.Ordinal));
     // A and B each get a fresh extraction and library build; the caller has its own build. Both extractions

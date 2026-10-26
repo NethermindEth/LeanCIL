@@ -93,7 +93,7 @@ partial class Program
         var support = imports.Where(n => n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
         if (support.Length > 0)
             Run(["lake", "build", .. support], session, progress: "Building generated batch dependencies");
-        var currentModules = ModuleArtifacts(session);
+        var currentModules = SessionModules(session);
         var certified = certifiedModules!;
         var altered = certified.Any(pair => !currentModules.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
         var changed = (altered ? currentModules.Keys : currentModules.Keys.Where(name => !certified.ContainsKey(name)))
@@ -103,7 +103,7 @@ partial class Program
         Directory.CreateDirectory(fresh);
         try
         {
-            var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
+            var leanPath = fresh + Path.PathSeparator + SessionLeanPath(session);
             if (changed.Length > 0)
             {
                 if (!ReplayModulesJointly(session, changed, leanPath, "Kernel replay of generated batch dependencies"))
@@ -113,7 +113,7 @@ partial class Program
             var batchSource = string.Join("\n", imports.Select(n => "import " + n)) + "\n" + bodies;
             var source = Path.Combine(fresh, "Batch.lean");
             File.WriteAllText(source, batchSource);
-            // Building the batch runs its proofs' code; the library must survive it unchanged.
+            // Building the batch runs its proofs' code; this session's compiled modules must survive it unchanged.
             var bound = OleanHashes(fresh, session);
             Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "Batch.olean"), source],
                 leanPath: leanPath, progress: $"Checking {requests.Count} generated fixtures");

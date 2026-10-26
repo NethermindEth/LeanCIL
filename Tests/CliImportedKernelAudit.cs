@@ -116,18 +116,18 @@ double Seconds(string name) => stages.Where(stage => stage.GetProperty("stage").
     .Sum(stage => stage.GetProperty("durationSeconds").GetDouble());
 const string buildStage = "Building fresh Lean verification library";
 const string replayStage = "Joint kernel replay of fresh Lean verification library";
-const string copyStage = "Copying certified Lean verification library";
+const string openStage = "Opening certified Lean verification library";
 var expectedPreparations = baseline ? 2 : freshPreparation ? 1 : 0;
 if (Count(buildStage) != expectedPreparations || Count(replayStage) != expectedPreparations ||
     Count("Extending certified library sources") != (baseline || freshPreparation ? 0 : 1) ||
-    Count(copyStage) != (baseline ? 0 : 2))
+    Count(openStage) != (baseline ? 0 : 2))
     throw new InvalidOperationException("Imported helper checks repeated or skipped their certified base preparation.");
 var measurements = new
 {
     baseline, freshPreparation, wallSeconds = timer.Elapsed.TotalSeconds,
     freshBuilds = Count(buildStage), freshBuildSeconds = Seconds(buildStage),
     baseReplays = Count(replayStage), baseReplaySeconds = Seconds(replayStage),
-    privateCopies = Count(copyStage), privateCopySeconds = Seconds(copyStage)
+    certifiedOpens = Count(openStage), certifiedOpenSeconds = Seconds(openStage)
 };
 File.WriteAllText(Path.Combine(importedRoot, "timings.json"), JsonSerializer.Serialize(measurements, Json));
 Console.WriteLine("PASS CLI imported helper preparation counts: " + JsonSerializer.Serialize(measurements));
