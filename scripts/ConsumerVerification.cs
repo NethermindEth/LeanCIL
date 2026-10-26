@@ -1818,10 +1818,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var frameworkModules = CertifiedModuleDirectory(certifiedLibrary);
             var generatedModules = Path.GetFullPath(Path.Combine(generatedPackage, ".lake/build/lib/lean"));
             // No external commands run between this snapshot and the replay manifest.
-            // The certified base was hashed when its manifest was validated and is never written.
+            // Recorded base modules were hashed when the manifest was validated; unrecorded ones are replayed.
             var artifactSnapshots = importDirectories.Where(Directory.Exists)
                 .Select(directory => (Directory: directory, Artifacts: directory.Equals(frameworkModules, comparison)
-                    ? new SortedDictionary<string, string>(baseModules!, StringComparer.Ordinal)
+                    ? BaseModuleArtifacts()
                     : ConsumerArtifactSnapshot(directory))).ToArray();
             var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison));
             var moduleNames = new HashSet<string>(StringComparer.Ordinal);

@@ -887,6 +887,20 @@ partial class Program : IDisposable
         }
         finally { cacheLock?.Dispose(); }
         const string compiledPrefix = ".lake/build/lib/lean/";
+        // Lake compiles a dependency's missing modules into its own build directory, so a library
+        // extended with uncompiled sources is read from a private copy; a complete one is never written.
+        if (!ownsLibrary && manifest.Keys.Any(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
+                name.EndsWith(".lean", StringComparison.Ordinal) &&
+                !manifest.ContainsKey(compiledPrefix + name[..^".lean".Length] + ".olean")))
+        {
+            var started = DateTimeOffset.UtcNow;
+            var elapsed = Stopwatch.StartNew();
+            var copy = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
+            CopyTree(library, copy);
+            library = copy;
+            ownsLibrary = true;
+            Trace("Copying incomplete certified Lean verification library", started, copy, elapsed.Elapsed, 0, "", [copy]);
+        }
         baseModules = new(manifest.Where(pair => pair.Key.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal))
             .ToDictionary(pair => pair.Key[compiledPrefix.Length..], pair => pair.Value), StringComparer.Ordinal);
@@ -968,10 +982,27 @@ partial class Program : IDisposable
         return directory;
     }
 
-    /// <summary>The certified modules: the base's from its manifest and this session's own outputs.</summary>
-    SortedDictionary<string, string> SessionModules(string directory)
+    /// <summary>
+    /// The base library's module artifacts: recorded ones from the validated manifest, plus any
+    /// unrecorded output, which Lake builds into the base from an unrecorded source and must be replayed.
+    /// </summary>
+    SortedDictionary<string, string> BaseModuleArtifacts()
     {
         var result = new SortedDictionary<string, string>(baseModules!, StringComparer.Ordinal);
+        var compiled = Path.Combine(library!, ".lake/build/lib/lean");
+        foreach (var path in Directory.EnumerateFiles(compiled, "*", SearchOption.AllDirectories))
+        {
+            var name = Path.GetRelativePath(compiled, path).Replace('\\', '/');
+            if (Path.GetFileName(name).Contains(".olean", StringComparison.Ordinal) && !result.ContainsKey(name))
+                result[name] = Sha(path);
+        }
+        return result;
+    }
+
+    /// <summary>The module artifacts of a session: the base's and this session's own outputs.</summary>
+    SortedDictionary<string, string> SessionModules(string directory)
+    {
+        var result = BaseModuleArtifacts();
         foreach (var (name, hash) in ModuleArtifacts(directory)) result[name] = hash;
         return result;
     }
