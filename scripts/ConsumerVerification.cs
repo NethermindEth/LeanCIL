@@ -672,6 +672,26 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return false;
     }
 
+    /// <summary>
+    /// Resolves the session's leancil dependency to the certified library directory, which Lake then
+    /// reads in place: its CIL traces are current, so builds write only below the session.
+    /// </summary>
+    static void UseCertifiedFramework(string session, string certified)
+    {
+        var path = Path.Combine(session, "lake-manifest.json");
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        var packages = manifest["packages"]!.AsArray();
+        var index = packages.Select((package, position) => (package, position))
+            .Single(entry => entry.package!["name"]!.GetValue<string>() == "leancil").position;
+        packages[index] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = "path", ["scope"] = "", ["name"] = "leancil", ["manifestFile"] = "lake-manifest.json",
+            ["inherited"] = packages[index]!["inherited"]?.GetValue<bool>() ?? false,
+            ["dir"] = Path.GetFullPath(certified), ["configFile"] = "lakefile.toml"
+        };
+        File.WriteAllText(path, manifest.ToJsonString());
+    }
+
     static void AddConsumerLibrary(string directory, string name)
     {
         var toml = Path.Combine(directory, "lakefile.toml");
@@ -680,6 +700,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         else
             File.AppendAllText(Path.Combine(directory, "lakefile.lean"), $"\nlean_lib {name}\n");
     }
+
+    /// <summary>The compiled module directory of a certified library.</summary>
+    static string CertifiedModuleDirectory(string certified) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(certified, ".lake/build/lib/lean")));
 
     (string[] Directories, string LeanPath) ConsumerImportDirectories(string session)
     {
@@ -691,10 +715,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var leanPath = lines[0]["LEAN_PATH=".Length..];
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var trusted = Path.GetFullPath(Path.Combine(Toolchain, "lib/lean"));
+        var certified = library is null ? null : CertifiedModuleDirectory(library);
         return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, session)))
             .Where(path => !path.Equals(trusted, comparison))
-            .Select(path => Within(session, Path.GetRelativePath(session, path)))
+            // The certified base is the one import directory outside the session.
+            .Select(path => path.Equals(certified, comparison) ? path : Within(session, Path.GetRelativePath(session, path)))
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray(), leanPath);
     }
 
@@ -930,7 +956,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return publication;
     }
 
-    sealed record ConsumerSession(string FrameworkCopy, Dictionary<string, string> Copied);
+    /// <summary>
+    /// A prepared consumer workspace. <paramref name="Generated"/> is the package holding the generated
+    /// modules: the session root for verification, whose leancil resolves to the certified library in
+    /// place, or the framework source copy for an editor workspace.
+    /// </summary>
+    sealed record ConsumerSession(string Generated, Dictionary<string, string> Copied);
 
     sealed record ExtractionComponents(string InputHash, string Aggregate, Dictionary<string, string> Sources);
     const string ExtractionComponentContext = "namespace Extracted\nopen CIL\nset_option maxRecDepth 4096\n\n";
@@ -1108,38 +1139,35 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
         var framework = dependencies.Single(d => d.Name == "leancil");
         var frameworkCopy = Within(session, Path.GetRelativePath(root, framework.Source));
-        // The snapshot already checked normalized source equality. Use the
-        // certified bytes (including line endings) so Lake can reuse its traces.
-        foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories).Append(At("CIL.lean")))
-            File.Copy(path, Path.Combine(frameworkCopy, Path.GetRelativePath(Root, path)), true);
         if (purpose == ConsumerSessionPurpose.Verification && certifiedLibrary is null)
             throw new InvalidDataException("Verification requires a certified framework library.");
         if (purpose == ConsumerSessionPurpose.Editor && certifiedLibrary is not null)
             throw new InvalidDataException("Editor workspaces cannot receive certified framework artifacts.");
+        string generatedPackage;
         if (purpose == ConsumerSessionPurpose.Verification)
         {
-            var baseBuild = Path.Combine(certifiedLibrary!, ".lake/build");
-            var frameworkBuild = Path.Combine(frameworkCopy, ".lake/build");
-            foreach (var path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(baseBuild, path).Replace('\\', '/');
-                if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
-                    .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
-                var destination = Path.Combine(frameworkBuild, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(path, destination, true);
-            }
+            // Lake reads the certified library in place and writes only below this session.
+            UseCertifiedFramework(session, certifiedLibrary!);
+            generatedPackage = session;
+        }
+        else
+        {
+            // The snapshot already checked normalized source equality. Use the
+            // certified bytes (including line endings) so Lake can reuse its traces.
+            foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories).Append(At("CIL.lean")))
+                File.Copy(path, Path.Combine(frameworkCopy, Path.GetRelativePath(Root, path)), true);
+            generatedPackage = frameworkCopy;
         }
         // Give Lake a real generated-module target before building consumer imports.
         if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
             throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");
-        File.Copy(Path.Combine(extraction.Output, "Extracted.lean"), Path.Combine(frameworkCopy, "Extracted.lean"));
-        var generated = Sha(Path.Combine(frameworkCopy, "Extracted.lean"));
+        File.Copy(Path.Combine(extraction.Output, "Extracted.lean"), Path.Combine(generatedPackage, "Extracted.lean"));
+        var generated = Sha(Path.Combine(generatedPackage, "Extracted.lean"));
         foreach (var output in proofs.Select(proof => proof.Output).Distinct())
             if (generated != JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")))
                 .GetProperty("generatedSha256").GetString())
                 throw new InvalidDataException("Generated CIL changed during consumer snapshot.");
-        AddConsumerLibrary(frameworkCopy, "Extracted");
+        AddConsumerLibrary(generatedPackage, "Extracted");
         var componentPaths = new List<string>();
         if (components is { Sources.Count: > 0 })
         {
@@ -1151,12 +1179,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             foreach (var (module, source) in components.Sources)
             {
                 RejectContractSourceShadow(module, directories);
-                var path = Path.Combine(frameworkCopy, module + ".lean");
+                var path = Path.Combine(generatedPackage, module + ".lean");
                 File.WriteAllText(path, source);
-                AddConsumerLibrary(frameworkCopy, module);
+                AddConsumerLibrary(generatedPackage, module);
                 componentPaths.Add(path);
             }
-            File.WriteAllText(Path.Combine(frameworkCopy, "Extracted.lean"), components.Aggregate);
+            File.WriteAllText(Path.Combine(generatedPackage, "Extracted.lean"), components.Aggregate);
         }
         if (extraction.Sources.Count > 0)
         {
@@ -1166,9 +1194,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             foreach (var module in extraction.Sources.Keys)
                 RejectContractSourceShadow(module, sourceDirectories);
         }
-        string[] importModules = StageImportSources(extraction, frameworkCopy);
-        foreach (string module in importModules) AddConsumerLibrary(frameworkCopy, module);
-        var symbolsPath = Path.Combine(frameworkCopy, "ExtractedSymbols.lean");
+        string[] importModules = StageImportSources(extraction, generatedPackage);
+        foreach (string module in importModules) AddConsumerLibrary(generatedPackage, module);
+        var symbolsPath = Path.Combine(generatedPackage, "ExtractedSymbols.lean");
         // Declared only when a proof imports it: symbol-free workspaces, and so their support keys, stay unchanged.
         if (symbols is not null)
         {
@@ -1177,23 +1205,23 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidDataException("ExtractedSymbols is reserved for the PDB names of the selected extraction.");
             File.Copy(Path.Combine(extraction.Output, "Symbols.lean"), symbolsPath);
             if (Sha(symbolsPath) != symbols) throw new InvalidDataException("PDB names changed during consumer snapshot.");
-            AddConsumerLibrary(frameworkCopy, "ExtractedSymbols");
+            AddConsumerLibrary(generatedPackage, "ExtractedSymbols");
         }
         var copied = snapshot.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal))
             .Select(k => Within(session, Path.GetRelativePath(root, k["consumer:".Length..])))
-            .Append(Path.Combine(frameworkCopy, "Extracted.lean")).ToList();
+            .Append(Path.Combine(generatedPackage, "Extracted.lean")).ToList();
         if (checkRejectedProofs)
         {
             // Rejected proofs stop before the final native audit, so check the certificate first.
-            var extractionAuditPath = Path.Combine(frameworkCopy, "ExtractionAudit.lean");
+            var extractionAuditPath = Path.Combine(generatedPackage, "ExtractionAudit.lean");
             if (File.Exists(extractionAuditPath))
                 throw new InvalidDataException("ExtractionAudit is reserved for the certificate audit.");
             File.WriteAllText(extractionAuditPath, ExtractionAuditSource);
-            AddConsumerLibrary(frameworkCopy, "ExtractionAudit");
+            AddConsumerLibrary(generatedPackage, "ExtractionAudit");
             copied.Add(extractionAuditPath);
         }
         copied.AddRange(componentPaths);
-        copied.AddRange(importModules.Select(module => Path.Combine(frameworkCopy, module.Replace('.', Path.DirectorySeparatorChar) + ".lean")));
+        copied.AddRange(importModules.Select(module => Path.Combine(generatedPackage, module.Replace('.', Path.DirectorySeparatorChar) + ".lean")));
         if (symbols is not null) copied.Add(symbolsPath);
         if (generatedSources is not null)
         {
@@ -1203,10 +1231,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             foreach (var (module, source) in generatedSources)
             {
                 RejectContractSourceShadow(module, directories);
-                var path = Within(frameworkCopy, module.Replace('.', '/') + ".lean");
+                var path = Within(generatedPackage, module.Replace('.', '/') + ".lean");
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 File.WriteAllText(path, source);
-                AddConsumerLibrary(frameworkCopy, module);
+                AddConsumerLibrary(generatedPackage, module);
                 copied.Add(path);
             }
         }
@@ -1228,7 +1256,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             AddConsumerLibrary(session, module);
             copied.Add(target);
         }
-        return new(frameworkCopy, copied.ToDictionary(path => path, Sha));
+        return new(generatedPackage, copied.ToDictionary(path => path, Sha));
     }
 
     sealed record ConsumerExportAudit(string Source, Action<string, string, string, AuditedOleans> Checked,
@@ -1554,11 +1582,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 members.Where(i => requests[i].ExportAudit is not null).ToDictionary(
                     i => requestModules[i], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
                 generatedSources: generatedSources, components: components, checkRejectedProofs: checkRejectedProofs);
-            var frameworkCopy = prepared.FrameworkCopy;
+            var generatedPackage = prepared.Generated;
             var interfaceModules = extractions[members[0]].Sources.Keys
                 .Where(module => module != "ExtractedImports").ToArray();
             var interfaceModuleNames = interfaceModules.ToHashSet(StringComparer.Ordinal);
-            Dictionary<string, string> InterfaceArtifacts() => ModuleArtifacts(frameworkCopy)
+            Dictionary<string, string> InterfaceArtifacts() => ModuleArtifacts(generatedPackage)
                 .Where(pair => interfaceModuleNames.Contains(ModuleName(pair.Key))).ToDictionary();
             Dictionary<string, string> acceptedInterfaceArtifacts = new(StringComparer.Ordinal);
             void RequireInterfaceArtifacts()
@@ -1625,7 +1653,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (interfaceModules.Length > 0)
             {
                 Stage(members, "contract interface validation");
-                Run(["lake", "build", .. interfaceModules.Select(module => "+" + module + ":olean")], frameworkCopy,
+                Run(["lake", "build", .. interfaceModules.Select(module => "+" + module + ":olean")], generatedPackage,
                     progress: "Compiling published contract interfaces");
                 // The audit, the replay and the proof must all read the bytes compiled here.
                 acceptedInterfaceArtifacts = InterfaceArtifacts();
@@ -1638,19 +1666,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 RequireInterfaceArtifacts();
                 // The checker reads only the bytes just replayed.
                 CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
-                    module => Path.Combine(frameworkCopy, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
+                    module => Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
                 RequireInterfaceArtifacts();
             }
             // Snapshot before invoking Lake: configuration elaboration and imported
             // metaprograms must not redefine the source bytes accepted by this run.
             Stage(members, "extraction certificate audit");
             var certificateTarget = checkRejectedProofs ? "+ExtractionAudit:olean" : "+Extracted:olean";
-            var extractionAudit = Run(["lake", "build", certificateTarget], frameworkCopy,
+            var extractionAudit = Run(["lake", "build", certificateTarget], generatedPackage,
                 progress: "Checking consumer extraction certificate");
             string[] certificateModules = ["Extracted", .. components.Sources.Keys,
                 .. checkRejectedProofs ? new[] { "ExtractionAudit" } : []];
             Dictionary<string, SortedDictionary<string, string>> ExtractionArtifacts() => certificateModules.ToDictionary(
-                module => module, module => ConsumerModuleParts(Path.Combine(frameworkCopy,
+                module => module, module => ConsumerModuleParts(Path.Combine(generatedPackage,
                     ".lake/build/lib/lean", module.Replace('.', '/') + ".olean")), StringComparer.Ordinal);
             string checkedExtractionArtifacts = JsonSerializer.Serialize(ExtractionArtifacts());
             void RequireExtractionArtifacts()
@@ -1661,7 +1689,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // Generated reference modules must be fixed before consumer configuration or proof code can run.
             SortedDictionary<string, string> GeneratedArtifacts()
             {
-                var directory = Path.Combine(frameworkCopy, ".lake/build/lib/lean");
+                var directory = Path.Combine(generatedPackage, ".lake/build/lib/lean");
                 return HashFiles(generatedSources.Keys.SelectMany(module =>
                 {
                     var path = Within(directory, module.Replace('.', '/') + ".olean");
@@ -1671,7 +1699,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             if (generatedSources.Count > 0)
                 Run(["lake", "build", .. generatedSources.Keys.Select(module => "+" + module + ":olean")],
-                    frameworkCopy, progress: "Checking fixed export reference modules");
+                    generatedPackage, progress: "Checking fixed export reference modules");
             var fixedGeneratedArtifacts = GeneratedArtifacts();
             if (generatedSources.Keys.Any(module => !fixedGeneratedArtifacts.ContainsKey(
                 (module.Replace('.', '/') + ".olean").Replace('/', Path.DirectorySeparatorChar))))
@@ -1704,7 +1732,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Stage(members, "proof checking");
             string[] importModules = extractions[members[0]].Sources.Keys.ToArray();
             if (importModules.Length > 0)
-                Run(["lake", "build", .. importModules.Select(module => "+" + module + ":olean")], frameworkCopy,
+                Run(["lake", "build", .. importModules.Select(module => "+" + module + ":olean")], generatedPackage,
                     progress: "Checking consumer contract interfaces and import assumptions");
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
             var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies");
@@ -1768,17 +1796,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal)).All(pair =>
                 File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            var frameworkModules = Path.GetFullPath(Path.Combine(frameworkCopy, ".lake/build/lib/lean"));
+            var frameworkModules = CertifiedModuleDirectory(certifiedLibrary);
+            var generatedModules = Path.GetFullPath(Path.Combine(generatedPackage, ".lake/build/lib/lean"));
             // No external commands run between this snapshot and the replay manifest.
+            // The certified base was hashed when its manifest was validated and is never written.
             var artifactSnapshots = importDirectories.Where(Directory.Exists)
-                .Select(directory => (Directory: directory, Artifacts: ConsumerArtifactSnapshot(directory))).ToArray();
-            var frameworkArtifacts = artifactSnapshots.FirstOrDefault(snapshot =>
-                snapshot.Directory.Equals(frameworkModules, comparison)).Artifacts;
-            var currentBase = (frameworkArtifacts ?? ConsumerArtifactSnapshot(frameworkModules)).Where(pair =>
-                ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
-            var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison)) &&
-                certifiedBase.Count == currentBase.Count &&
-                certifiedBase.All(pair => currentBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
+                .Select(directory => (Directory: directory, Artifacts: directory.Equals(frameworkModules, comparison)
+                    ? new SortedDictionary<string, string>(baseModules!, StringComparer.Ordinal)
+                    : ConsumerArtifactSnapshot(directory))).ToArray();
+            var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison));
             var moduleNames = new HashSet<string>(StringComparer.Ordinal);
             var discovered = new List<(string Name, bool Certified)>();
             foreach (var (directory, artifacts) in artifactSnapshots)
@@ -1798,7 +1824,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         var relative = Path.GetRelativePath(session, Path.Combine(directory, pair.Key));
                         return restoredArtifacts.TryGetValue(relative.Replace('\\', '/'), out var hash) && hash == pair.Value;
                     });
-                    bool publishedInterface = directory.Equals(frameworkModules, comparison) && interfaceModuleNames.Contains(module.Key);
+                    bool publishedInterface = directory.Equals(generatedModules, comparison) && interfaceModuleNames.Contains(module.Key);
                     if (publishedInterface && (module.Count() != acceptedInterfaceArtifacts.Count(pair => ModuleName(pair.Key) == module.Key) ||
                         module.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value)))
                         throw new InvalidDataException("Published contract interface artifacts changed after their closure audit: " + module.Key);

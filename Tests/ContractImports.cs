@@ -884,7 +884,7 @@ try
     RejectReplayWindowSwap("changed after their closure audit", () => new DirectoryInfo(Path.GetTempPath()).EnumerateDirectories("leancil-consumer-*")
             .Where(session => session.CreationTimeUtc >= started && session.Name.Length == "leancil-consumer-".Length + 32 &&
                 session.EnumerateFiles("*.lean").Any(file => File.ReadAllText(file.FullName).Contains(token, StringComparison.Ordinal)))
-            .Select(session => Path.Combine(session.FullName, ".lake/packages/leancil/.lake/build/lib/lean", interfaceModule + ".olean"))
+            .Select(session => Path.Combine(session.FullName, ".lake/build/lib/lean", interfaceModule + ".olean"))
             .SingleOrDefault(File.Exists),
         stage => { using Program consumer = new(); consumer.VerifyConsumer(app, consumerProof, output, "ExampleProof.correctness", package, null, stage); });
     File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
