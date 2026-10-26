@@ -190,8 +190,7 @@ def regionBodyCheck (index : Std.TreeMap Nat Nat) (method : Nat) (code : List CI
   match index[method]? with
   | none => true
   | some lower => code.zipIdx.all fun (op, pc) =>
-    !(lower ≤ pc) || ((!op.continues || indexedInStarts index method (pc + 1)) &&
-      op.targets.all (indexedInStarts index method) &&
+    !(lower ≤ pc) || (op.targets.all (indexedInStarts index method) &&
       op.callees.all (indexedInStarts index · 0))
 
 /-- Skipping absent methods agrees with testing membership at each instruction. -/
@@ -201,7 +200,16 @@ theorem regionBodyCheck_eq (index : Std.TreeMap Nat Nat) (method : Nat) (code : 
         ((!op.continues || indexedInStarts index method (pc + 1)) &&
           op.targets.all (indexedInStarts index method) &&
           op.callees.all (indexedInStarts index · 0))) := by
-  cases found : index[method]? <;> simp [regionBodyCheck, indexedInStarts, found]
+  cases found : index[method]? with
+  | none => simp [regionBodyCheck, indexedInStarts, found]
+  | some lower =>
+    simp only [regionBodyCheck, found]
+    congr 1
+    funext (op, pc)
+    by_cases inside : lower ≤ pc
+    · have next : lower ≤ pc + 1 := by omega
+      simp [indexedInStarts, found, inside, next]
+    · simp [indexedInStarts, found, inside]
 
 #print axioms regionBodyCheck_eq
 
