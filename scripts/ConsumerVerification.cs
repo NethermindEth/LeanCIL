@@ -1558,25 +1558,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     current.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value))
                     throw new InvalidDataException("Published contract interface artifacts changed after their closure audit.");
             }
-            if (interfaceModules.Length > 0)
-            {
-                Stage(members, "contract interface validation");
-                Run(["lake", "build", .. interfaceModules.Select(module => "+" + module + ":olean")], frameworkCopy,
-                    progress: "Compiling published contract interfaces");
-                // The audit, the replay and the proof must all read the bytes compiled here.
-                acceptedInterfaceArtifacts = InterfaceArtifacts();
-                string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
-                Stage(members, "kernel replay");
-                Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
-                if (interfaceFailures.Count > 0)
-                    throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
-                        string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
-                RequireInterfaceArtifacts();
-                // The checker reads only the bytes just replayed.
-                CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
-                    module => Path.Combine(frameworkCopy, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
-                RequireInterfaceArtifacts();
-            }
             string[] initialImportDirectories;
             if (!first && relativeImportDirectories.Length > 0)
                 initialImportDirectories = relativeImportDirectories.Select(path => Path.GetFullPath(path, session)).ToArray();
@@ -1630,6 +1611,25 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     if (dependentFiles.Count > 0) CacheProgress("certified extraction-dependent consumer modules");
                 }
                 finally { Directory.Delete(own, true); }
+            }
+            if (interfaceModules.Length > 0)
+            {
+                Stage(members, "contract interface validation");
+                Run(["lake", "build", .. interfaceModules.Select(module => "+" + module + ":olean")], frameworkCopy,
+                    progress: "Compiling published contract interfaces");
+                // The audit, the replay and the proof must all read the bytes compiled here.
+                acceptedInterfaceArtifacts = InterfaceArtifacts();
+                string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
+                Stage(members, "kernel replay");
+                Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
+                if (interfaceFailures.Count > 0)
+                    throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
+                        string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
+                RequireInterfaceArtifacts();
+                // The checker reads only the bytes just replayed.
+                CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
+                    module => Path.Combine(frameworkCopy, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
+                RequireInterfaceArtifacts();
             }
             // Snapshot before invoking Lake: configuration elaboration and imported
             // metaprograms must not redefine the source bytes accepted by this run.

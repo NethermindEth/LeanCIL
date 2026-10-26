@@ -1136,3 +1136,11 @@ audit and checked result. Artifacts inside the proof root retain individual snap
 output exclusion does not hide another request's source. `exportsfullpair` checks two exported
 methods and their independently replayed caller composition; its focused Windows run passed
 in 179.7 seconds. That is a validation timing, not a before/after performance measurement.
+Consumer workspaces restore authenticated, source-bound support before compiling published
+interfaces. Identical interfaces can therefore reuse their compiled artifacts across extraction
+groups, while each workspace still kernel-replays them and checks their canonical contract
+closures against its own imports. Existing before/after artifact checks remain in place.
+`Tests/ContractImports.cs --interface-reuse-only` checks two fresh profile groups with one
+interface compilation and independent replays. A focused Windows comparison reduced interface
+build stages from 5.28 to 2.95 seconds and the two-request verification from 50.54 to 47.67
+seconds. These are fixture timings, not complete-suite or CI measurements.

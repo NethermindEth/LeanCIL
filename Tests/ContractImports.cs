@@ -135,6 +135,68 @@ void MutateLibrary(Action<ModuleDefinition> mutation)
     Save();
 }
 
+void CheckInterfaceReuse()
+{
+    Reset();
+    contract["exports"]![0]!["profiles"]!.AsArray().Add("x64-v3");
+    JsonObject certification = contract["certifications"]![0]!.DeepClone().AsObject();
+    certification["profile"] = "x64-v3";
+    contract["certifications"]!.AsArray().Add(certification);
+    Save();
+    string reuseRoot = Path.Combine(directory, "interface-reuse-" + Guid.NewGuid().ToString("N"));
+    string reusePackage = Path.Combine(reuseRoot, "Package");
+    Directory.CreateDirectory(reusePackage);
+    File.Copy(At("lean-toolchain"), Path.Combine(reusePackage, "lean-toolchain"));
+    string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
+    File.WriteAllText(Path.Combine(reusePackage, "lakefile.toml"),
+        "name = \"interface_reuse\"\n[[require]]\nname = \"leancil\"\ngit = " +
+        JsonSerializer.Serialize(Root.Replace('\\', '/')) + "\nrev = " + JsonSerializer.Serialize(revision) + "\n");
+    Run(["lake", "update"], reusePackage);
+    string proof = Path.Combine(reusePackage, "Proof.lean");
+    File.Copy(Path.Combine(fixture, "Caller.lean"), proof);
+    var requests = new[] { "scalar", "x64-v3" }.Select(profile =>
+    {
+        string extraction = Path.Combine(reuseRoot, profile);
+        string[] command = Command(extra: [profile]);
+        command[5] = extraction;
+        Run(command);
+        return new { output = extraction, proof, theorem = "ExampleProof.correctness" };
+    }).ToArray();
+    string manifest = Path.Combine(reuseRoot, "batch.json");
+    File.WriteAllText(manifest, JsonSerializer.Serialize(new { schema = 1, proofRoot = reusePackage, requests }));
+    string trace = Path.Combine(reuseRoot, "trace");
+    string? priorTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+        Run([.. cli, "verify-batch", manifest, "--fresh"]);
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", priorTrace); }
+    JsonElement[] records = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+    string Transcript(JsonElement record) => File.ReadAllText(Path.Combine(trace,
+        record.GetProperty("transcript").GetString()!));
+    JsonElement[] builds = records.Where(record => record.GetProperty("stage").GetString() ==
+        "Compiling published contract interfaces").ToArray();
+    int compiled = builds.Sum(record => System.Text.RegularExpressions.Regex.Matches(Transcript(record),
+        @"\bBuilt " + interfaceModule + @"(?:\s|$)").Count);
+    int replayed = records.Where(record => record.GetProperty("exitCode").GetInt32() == 0 &&
+            record.GetProperty("stage").GetString()!.Contains("kernel replay", StringComparison.OrdinalIgnoreCase))
+        .SelectMany(record => Transcript(record).Split('\n').Where(line => line.StartsWith('{')))
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+        .Count(record => record.TryGetProperty("module", out JsonElement module) && module.GetString() == interfaceModule);
+    if (builds.Length != 2 || compiled != 1 || replayed < 2)
+        throw new InvalidOperationException($"Interface reuse mismatch: {builds.Length} checks, {compiled} builds, {replayed} replays.");
+    Console.WriteLine("PASS identical published interfaces compile once across fresh extraction groups and replay independently");
+    Reset();
+}
+
+if (args.Contains("--interface-reuse-only", StringComparer.Ordinal))
+{
+    CheckInterfaceReuse();
+    return;
+}
+
 Reset();
 File.Delete(sidecar);
 Reject(Command(includeImport: false), "Next: supply --import");
@@ -855,3 +917,4 @@ try
 }
 finally { Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedReferenceCache); }
 Console.WriteLine("PASS reference-only authoring disables success receipts only for its own request");
+CheckInterfaceReuse();
