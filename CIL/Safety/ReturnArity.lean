@@ -4,8 +4,9 @@ import CIL.Safety.Certificate
 # Return arity and fully specified results
 
 A successful return yields exactly as many values as the method declares (one or none), and
-neither returned values nor ordinary call arguments contain unspecified SIMD lanes. Proved
-for a single step, then lifted to runs and invocations through the return trace.
+neither returned values nor ordinary call arguments contain unspecified SIMD lanes. The two
+return properties share one dispatcher proof, then lift to runs and invocations through the
+return trace.
 -/
 
 namespace CIL.Safety
@@ -17,12 +18,13 @@ private theorem bind_success {source : Except ε α} {continuation : α → Exce
   cases source <;> simp [Except.bind]
 
 set_option maxHeartbeats 400000 in
-/-- A checked return has the arity declared by its actual method body. -/
-theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+/-- A successful return has its declared arity and exposes no unspecified SIMD lanes. -/
+theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
-    values.length = if body.returnsValue then 1 else 0 := by
+    values.length = (if body.returnsValue then 1 else 0) ∧
+      values.any Value.hasUnspecified = false := by
   unfold step at executed
   dsimp only at executed
   repeat' first
@@ -33,11 +35,22 @@ theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     | solve |
       have same : values = stack := (checkedValues_valid _ _ _ (by assumption)).1
       rw [same]
-      simp_all
-    | solve | simp_all
+      simp_all [observerCount, unspecifiedOperands, List.take_of_length_le,
+        Value.hasUnspecified, CIL.Value.hasUnspecified]
+    | solve | simp_all [Value.hasUnspecified, CIL.Value.hasUnspecified]
     | cases executed
     | obtain ⟨_, _, executed⟩ := bind_success.mp executed
     | simp only [Bind.bind, Pure.pure, Except.pure] at executed
+
+#print axioms step_return_properties
+
+/-- A checked return has the arity declared by its actual method body. -/
+theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+    (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
+    (values : List Value)
+    (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
+    values.length = if body.returnsValue then 1 else 0 :=
+  (step_return_properties body operation pc args frame stack memory final values executed).1
 
 /-- A successful run of `method` returns the arity its body declares. -/
 theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body : CIL.Method)
@@ -58,29 +71,13 @@ theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body :
 #print axioms step_return_length
 #print axioms run_return_length
 
-set_option maxHeartbeats 400000 in
 /-- Successful returns never expose unspecified SIMD lanes. -/
 theorem step_return_known (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
-    values.any Value.hasUnspecified = false := by
-  unfold step at executed
-  dsimp only at executed
-  repeat' first
-    | solve |
-        simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
-          reduceCtorEq, and_false, exists_false] at executed
-    | split at executed
-    | solve |
-      have same : values = stack := (checkedValues_valid _ _ _ (by assumption)).1
-      rw [same]
-      simp_all [observerCount, unspecifiedOperands, List.take_of_length_le,
-        Value.hasUnspecified, CIL.Value.hasUnspecified]
-    | solve | simp_all [Value.hasUnspecified, CIL.Value.hasUnspecified]
-    | cases executed
-    | obtain ⟨_, _, executed⟩ := bind_success.mp executed
-    | simp only [Bind.bind, Pure.pure, Except.pure] at executed
+    values.any Value.hasUnspecified = false :=
+  (step_return_properties body operation pc args frame stack memory final values executed).2
 
 #print axioms step_return_known
 
