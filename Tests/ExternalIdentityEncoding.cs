@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
 
 using System.Text;
@@ -17,7 +18,7 @@ try
     throw new InvalidOperationException("Malformed UTF-16 identity was silently replaced.");
 }
 catch (EncoderFallbackException) { }
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var leanPath = directory + Path.PathSeparator + At(".lake/build/lib/lean");
 var checker = Path.Combine(Run(["lean", "--print-prefix"]).Trim(), "bin",
     OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");

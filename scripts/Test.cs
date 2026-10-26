@@ -138,7 +138,11 @@ if (suite is "all" or "evidence")
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/StackAllocation.cs"]);
 if (suite is "all" or "evidence")
-    projects.AddRange(["Tests/LayoutEvidence.cs", "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs", "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs", "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
+    projects.AddRange([
+        "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
+        "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
+        "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
+        "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "unsafe") projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
 foreach (var (name, entry) in independentSuites)
@@ -170,7 +174,7 @@ foreach (string project in projects.Distinct(StringComparer.Ordinal))
 
 Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, ExtractorBuildIdentity());
 
-if (suite is "all" or "core" or "unsafe" or "evidence" or "scaling" or "excluded")
+if (suite is "all" or "core" or "unsafe" or "scaling" or "excluded")
 {
     // Direct semantic/evidence checks use the checkout's Lake build directory.
     // Seed it from the same validated private library instead of rebuilding CIL.

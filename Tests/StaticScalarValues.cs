@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 
 using System.Globalization;
@@ -12,9 +14,10 @@ using Mono.Cecil.Cil;
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/StaticScalarValues");
 Directory.CreateDirectory(root);
+var rejected = new RejectedEvidence(root);
 var evidence = new GeneratedEvidence(root, args.Contains("--measure", StringComparer.Ordinal));
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.StaticScalars")!;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution");
 
 string[] ExtractScalar(string dll, string method, string output, bool assume = true) =>
     ["dotnet", ExtractorPath, "extract", dll, "StaticScalars::" + method + "()", output,
@@ -109,8 +112,7 @@ foreach (var (name, before, after, marker) in new[]
     if (!original.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing tamper target: " + name);
     var proof = Path.Combine(root, "Forged-" + name + ".lean");
     File.WriteAllText(proof, original.Replace(before, after, StringComparison.Ordinal));
-    var result = Execute(["lake", "env", "lean", proof]);
-    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal))
-        throw new Exception("Forged scalar accepted: " + name + "\n" + result.Output);
-    Console.WriteLine("PASS Lean scalar evidence rejects " + name);
+    rejected.Add(proof, "PASS Lean scalar evidence rejects " + name, marker);
 }
+
+rejected.Check();

@@ -1,14 +1,23 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
 
-Run(["lake", "build", "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.ScalarEvidence", "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence", "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.StaticValueEvidence"],
-    streamOutput: true, progress: "Extraction validator regressions");
-Run(["lake", "build", "Tests.SpanViews", "Tests.MemorySpanExecution"]);
-Run(["lake", "build", "Tests.ConstrainedEvidence"]);
+if (args is not ([] or ["--prepare-only"]))
+    throw new ArgumentException("Usage: ExtractionEvidence.cs [--prepare-only]");
+using var fixtures = new Program();
+fixtures.PrepareLeanFixtures(
+    "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.ScalarEvidence",
+    "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
+    "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.StaticValueEvidence", "Tests.SpanViews",
+    "Tests.MemorySpanExecution", "Tests.ConstrainedEvidence", "Tests.StackAllocationEvidence",
+    "Tests.StackAllocation", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences", "Tests.ReadOnlyArrayReferences",
+    "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations");
+if (args is ["--prepare-only"]) return;
+Run(["dotnet", "run", "--file", "Tests/PreparedLeanFixturesTests.cs"]);
+Run(["dotnet", "run", "--file", "Tests/RejectedEvidenceTests.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ConstrainedResolution.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ConstrainedCalls.cs"]);
-Run(["lake", "build", "Tests.StackAllocationEvidence"]);
 Run(["dotnet", "run", "--file", "Tests/StackAllocation.cs"]);
 Run(["dotnet", "run", "--file", "Tests/PrimitiveArrays.cs"], streamOutput: true,
     progress: "Supplied primitive arrays");

@@ -54,7 +54,9 @@ dotnet run --file scripts/Test.cs
 The scripts are [.NET file-based apps](https://learn.microsoft.com/en-us/dotnet/core/sdk/file-based-apps), with shared C# logic included directly. No scripting runtime is needed beyond .NET.
 
 Positive array, layout, parameter, generic and static-value evidence shares Lean imports in
-generated batches, with independent kernel replay. Rejection fixtures retain separate checks.
+generated batches, with independent kernel replay. Rejection batches restore Lean's environment
+after each case and require that case's own expected diagnostics. The evidence suite compiles its
+regression modules directly against the certified library, avoiding another CIL build.
 See [validation coverage](docs/VALIDATION.md) for reproducible measurements.
 
 Core consumer tests batch fixed rejection cases to reuse certified-library setup while keeping

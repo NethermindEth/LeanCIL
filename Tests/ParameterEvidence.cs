@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 
 using Mono.Cecil;
@@ -9,9 +11,10 @@ using Mono.Cecil.Cil;
 
 var output = At("artifacts/ParameterEvidence");
 Directory.CreateDirectory(output);
+var rejected = new RejectedEvidence(output);
 var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
-Run(["lake", "env", "lean", "Tests/ExtractionParameters.lean"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
+RequireLeanFixtures("Tests.ExtractionParameters");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var samples = new[]
 {
@@ -59,10 +62,7 @@ void Reject(string name, string mutated)
     if (mutated == baseline) throw new InvalidOperationException("Mutation did not change generated source: " + name);
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, mutated);
-    var result = Execute(["lake", "env", "lean", path]);
-    if (result.Code == 0 || !result.Output.Contains("decide"))
-        throw new InvalidOperationException("Invalid home mapping was not rejected: " + name + "\n" + result.Output);
-    Console.WriteLine("PASS parameter evidence rejects " + name);
+    rejected.Add(path, "PASS parameter evidence rejects " + name, "decide");
 }
 
 // Mutate lookup lemmas along with code so their rfl proofs cannot cause the rejection.
@@ -71,4 +71,5 @@ Reject("wrong-slot", baseline.Replace(".setLocal 0", ".setLocal 1").Replace(".lo
 Reject("omitted-redirection", baseline.Replace(".local 0", ".arg 0"));
 Reject("wrong-home-type", baseline.Replace("[(0, .word32)]", "[(0, .word64)]"));
 Reject("omitted-raw-site", baseline.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"));
+rejected.Check();
 Console.WriteLine("PASS complete parameter-home mapping, argument types, instance indices and long/short encodings");

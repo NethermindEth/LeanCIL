@@ -2,6 +2,9 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -9,7 +12,9 @@ using Mono.Cecil.Cil;
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/ConstrainedCalls");
 Directory.CreateDirectory(root);
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.ConstrainedEvidence"]);
+var evidence = new GeneratedEvidence(root);
+var rejected = new RejectedEvidence(root);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.ConstrainedEvidence");
 
 foreach (var (name, type, expected) in new[]
 {
@@ -36,19 +41,17 @@ foreach (var (name, type, expected) in new[]
               inputMemory).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
         #print axioms constrained_result
         """);
-    var result = Run(["lake", "env", "lean", proof]);
-    if (result.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted constrained proof");
-    Console.WriteLine("PASS compiled constrained call and certificate: " + name);
+    evidence.Add(proof, "PASS compiled constrained call and certificate: " + name);
 
     const string call = ".call 2 1";
     if (!source.Contains(call, StringComparison.Ordinal)) throw new Exception("Missing constrained call mutation target");
     var forged = Path.Combine(root, name + "-wrong-target.lean");
     File.WriteAllText(forged, source.Replace(call, ".call 0 1", StringComparison.Ordinal));
-    var rejected = Execute(["lake", "env", "lean", forged]);
-    if (rejected.Code == 0 || !rejected.Output.Contains("ConstrainedCallsValid", StringComparison.Ordinal))
-        throw new Exception("Forged constrained target was not rejected by its certificate: " + rejected.Output);
-    Console.WriteLine("PASS forged constrained target: " + name);
+    rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
 }
+
+evidence.Check(replay: false);
+rejected.Check();
 
 foreach (var (mutation, marker) in new[]
 {
@@ -68,9 +71,9 @@ foreach (var (mutation, marker) in new[]
         else module.GetType("Examples.CounterValue").Interfaces.Clear();
         module.Write(dll);
     }
-    var rejected = Execute(["dotnet", ExtractorPath, "extract", dll,
+    var extractionRejection = Execute(["dotnet", ExtractorPath, "extract", dll,
         "ConstrainedCalls::Implicit(Examples.CounterValue&)", Path.Combine(root, "Reject-" + mutation)]);
-    if (rejected.Code == 0 || !rejected.Output.Contains(marker, StringComparison.Ordinal))
-        throw new Exception("Incorrect constrained rejection: " + mutation + "\n" + rejected.Output);
+    if (extractionRejection.Code == 0 || !extractionRejection.Output.Contains(marker, StringComparison.Ordinal))
+        throw new Exception("Incorrect constrained rejection: " + mutation + "\n" + extractionRejection.Output);
     Console.WriteLine("PASS constrained extraction rejection: " + mutation);
 }

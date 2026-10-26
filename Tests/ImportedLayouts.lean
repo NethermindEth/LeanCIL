@@ -2,10 +2,13 @@ import CIL.Extraction.Translation
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.LayoutProjection
 
+/-! Certificate regression fixtures, evaluated against the checked CIL extraction model. -/
+
 namespace Tests.ImportedLayouts
 open CIL CIL.Extraction
 
-def runtime : String := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+/-- The primitive assembly identity with its checked byte representation. -/
+def runtime : String := runtimeScope
 def library : String := "Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 def word : TypeExpr := .atom runtime "System.UInt64"
 def owner : TypeExpr := .atom library "Library.Methods"

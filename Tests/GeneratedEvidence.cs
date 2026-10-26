@@ -5,8 +5,8 @@ using System.Text.RegularExpressions;
 
 partial class Program
 {
-    // Only generated, namespace-relative evidence belongs here. Rejection fixtures keep
-    // their own processes and diagnostics; arbitrary consumer proofs use the verifier.
+    // Only generated, namespace-relative evidence belongs here. Rejection fixtures use
+    // their isolated environments and diagnostics; arbitrary consumer proofs use the verifier.
     sealed class GeneratedEvidence(string directory, bool measure = false)
     {
         readonly List<(string Path, string Source, string Passed)> cases = [];
@@ -51,7 +51,9 @@ partial class Program
             return timer.Elapsed.TotalSeconds;
         }
 
-        public void Check()
+        // Direct semantic fixtures already kernel-check during elaboration. Certificate audit
+        // fixtures additionally replay their serialized declarations in leanchecker.
+        public void Check(bool replay = true)
         {
             if (cases.Count == 0) return;
             Directory.CreateDirectory(directory);
@@ -62,12 +64,13 @@ partial class Program
             var compiled = Path.ChangeExtension(batch, ".olean");
             File.Delete(compiled);
             var checkedBatch = Run(["lake", "env", "lean", "--root=" + Path.GetDirectoryName(batch),
-                "-o", compiled, batch]);
+                .. replay ? new[] { "-o", compiled } : [], batch]);
             if (checkedBatch.Contains("sorryAx", StringComparison.Ordinal))
                 throw new InvalidOperationException("Untrusted generated evidence batch");
             var buildSeconds = timer.Elapsed.TotalSeconds;
-            Run(["leanchecker", "PositiveBatch"], leanPath: Path.GetDirectoryName(batch) + Path.PathSeparator +
-                At(".lake/build/lib/lean"));
+            if (replay)
+                Run(["leanchecker", "PositiveBatch"], leanPath: Path.GetDirectoryName(batch) + Path.PathSeparator +
+                    At(".lake/build/lib/lean"));
             timer.Stop();
             foreach (var item in cases)
             {

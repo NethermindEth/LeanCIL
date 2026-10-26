@@ -1079,3 +1079,33 @@ The test also rejects a changed bootstrap source snapshot. In one Windows trace,
 positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
 through the native auditor. Single-file verification now also shares replay imports for its
 multi-module interface and proof target sets. Fresh checking and failure isolation are unchanged.
+### Evidence-suite reuse
+
+The evidence runner compiles its test modules once against the authenticated CIL library,
+without asking Lake to rebuild that library from copied build traces. Test dependencies are
+ordered before their importers, with at most two independent compilations running together.
+Child fixtures validate the parent's source/output hashes before reusing a completed test;
+standalone fixture invocations retain their original build path. Reproduce this preparation
+with `dotnet run --file Tests/ExtractionEvidence.cs -- --prepare-only`.
+
+Generated rejection batches retain each mutation's original expected diagnostic markers. A
+Lean command saves and restores the complete command state around each case, including its
+declarations, attributes, scopes and options. Messages are collected with Lean's `guard_msgs`
+helper, then associated with the original case's line range. A rejected neighbor, missing
+marker, successful mutation or leaked failed simp theorem cannot satisfy another case's check;
+`Tests/RejectedEvidenceTests.cs` exercises these failures. No rejection result is published
+until every case passes. Existing audited positive batches still replay with `leanchecker`;
+direct semantic fixtures retain their original frontend kernel checks while sharing imports.
+
+The four capability profiles now share one generated verification batch. Every profile keeps
+its own extraction identity, execution theorem, certificate audit and final regeneration check.
+A regression rejects reuse of the scalar report under the x64-v3 profile. The runtime-scope
+constants in the scalar, type-test, throw, span and imported-layout fixtures use the existing
+byte representation, whose equality to the full assembly-name literal is already proved by
+`runtimeScope_eq`; their regression statements are unchanged.
+
+Focused Windows measurements on this change reduced the scalar regression file from about
+26 seconds to 14.4 seconds and the type-test file from 12.2 seconds to 9.0 seconds by reusing
+that representation. The mixed-profile feature fixture's traced work took 37.5 seconds locally.
+These are local observations, not a claim that the evidence CI job is below four minutes;
+its completed Ubuntu run remains the end-to-end acceptance measurement.

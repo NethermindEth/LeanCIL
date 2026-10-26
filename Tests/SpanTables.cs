@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include RejectedEvidence.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -13,9 +15,10 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/SpanTables");
 Directory.CreateDirectory(root);
+var rejected = new RejectedEvidence(root);
 var queue = new GeneratedQueue(verification, assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.SpanTables")!;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
 string Scalar(object value) => value switch
 {
@@ -60,10 +63,8 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     if (!source.Contains("(.nop : Op)")) continue;
     var forged = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(forged, source.Replace(".nop", ".localAddr 0"));
-    var result = Execute(["lake", "env", "lean", forged]);
-    if (result.Code == 0 || !Regex.IsMatch(result.Output, @"Extraction\.FeatureFlowValid method\d+Closed") || !result.Output.Contains("is false"))
-        throw new InvalidOperationException($"Forged span receiver was accepted for {name}\n{result.Output}");
-    Console.WriteLine($"PASS {name}: forged span receiver rejected by the feature certificate");
+    rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
+        diagnostic => Regex.IsMatch(diagnostic, @"Extraction\.FeatureFlowValid method\d+Closed"), "is false");
 }
 
 // The proved value comes from the assembly's RVA blob through ldtoken.
@@ -82,6 +83,7 @@ Prove(tampered, "SpanTables::Word(int)", "Tampered",
     [Claim(tampered, "Word", [0], ".ok [.scalar (.i32 1891)]")],
     () => Console.WriteLine("PASS tampered RVA blob changes the proved word"));
 queue.Flush();
+rejected.Check();
 
 // Reused locals and computed indexes retain storage; entering an erased receiver is invalid.
 foreach (var (mutation, marker) in new[]
@@ -132,4 +134,5 @@ foreach (var (mutation, marker) in new[]
     Console.WriteLine("PASS rejection: " + mutation);
 }
 queue.Flush();
+rejected.Check();
 Console.WriteLine("PASS typed static spans, bounds faults, reused locals, computed indexes and forged receivers");

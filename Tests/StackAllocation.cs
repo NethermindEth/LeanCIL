@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include GeneratedEvidence.cs
 
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -21,8 +23,9 @@ Console.WriteLine($"PASS runtime stack allocation: .NET {Environment.Version}, "
 
 var root = At("artifacts/StackAllocation");
 Directory.CreateDirectory(root);
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.Safety.Execution"]);
-Run(["lake", "env", "lean", At("Tests/StackAllocation.lean")]);
+var evidence = new GeneratedEvidence(root);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
+CheckLeanFixture("Tests.StackAllocation");
 
 foreach (var (name, signature, arguments, budget, predicate) in new[]
 {
@@ -59,9 +62,7 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
         theorem allocation_result : ({{predicate}}) := by first | rfl | exact True.intro
         #print axioms allocation_result
         """);
-    var log = Run(["lake", "env", "lean", proof]);
-    if (log.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted allocation proof");
-    Console.WriteLine("PASS compiled stack allocation: " + name);
+    evidence.Add(proof, "PASS compiled stack allocation: " + name);
 
     if (name == "fill")
     {
@@ -88,3 +89,5 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
         throw new Exception("Forged localsinit was not rejected by the Lean certificate: " + rejected.Output);
     Console.WriteLine("PASS forged stack initialization rejected");
 }
+
+evidence.Check(replay: false);

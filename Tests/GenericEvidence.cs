@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
 
@@ -12,10 +14,11 @@ if (args is not ([] or ["--external-identities"] or ["--measure"]))
     throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities|--measure]");
 var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
+var rejected = new RejectedEvidence(output);
 var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
 CheckExternalIdentities();
 if (args is ["--external-identities"]) return;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var samples = new[]
 {
@@ -34,7 +37,7 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
 
 evidence.Check();
 CheckEvidenceBatchFailures();
-Run(["lake", "env", "lean", "Tests/ExtractionGenerics.lean"]);
+CheckLeanFixture("Tests.ExtractionGenerics");
 CheckExternalCallTargets();
 string ChangeDefinition(string source, string name, Func<string, string> change)
 {
@@ -50,10 +53,7 @@ void Reject(int sample, string name, Func<string, string> mutate)
     if (source == baseline) throw new InvalidOperationException("Mutation did not change source: " + name);
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, source);
-    var result = Execute(["lake", "env", "lean", path]);
-    if (result.Code == 0 || !result.Output.Contains("error:", StringComparison.Ordinal))
-        throw new InvalidOperationException("Invalid specialization was not rejected: " + name + "\n" + result.Output);
-    Console.WriteLine("PASS generic evidence rejects " + name);
+    rejected.Add(path, "PASS generic evidence rejects " + name, "error:");
 }
 foreach (var (name, scope) in new[]
 {
@@ -78,6 +78,7 @@ Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true"
 Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"));
 Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"));
 
+rejected.Check();
 void CheckExternalIdentities()
 {
     var evidence = new ExternalIdentityEvidence();
@@ -198,11 +199,7 @@ void CheckExternalCallTargets()
         if (source == baseline) throw new InvalidOperationException("Call mutation was not applied: " + name);
         var rejectedPath = Path.Combine(folder, name + ".lean");
         File.WriteAllText(rejectedPath, source);
-        var result = Execute(["lake", "env", "lean", rejectedPath]);
-        if (result.Code == 0 ||
-            !result.Output.Contains("Extraction.DivisionIntrinsicsValid", StringComparison.Ordinal) ||
-            !result.Output.Contains("is false", StringComparison.Ordinal))
-            throw new InvalidOperationException("Division certificate did not reject " + name + "\n" + result.Output);
-        Console.WriteLine("PASS materialized external call rejects " + name);
+        rejected.Add(rejectedPath, "PASS materialized external call rejects " + name,
+            "Extraction.DivisionIntrinsicsValid", "is false");
     }
 }

@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include GeneratedEvidence.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -9,6 +11,7 @@ using Mono.Cecil.Cil;
 
 var root = At("artifacts/ReferenceInstructions");
 Directory.CreateDirectory(root);
+var evidence = new GeneratedEvidence(root);
 var assembly = Path.Combine(root, "Examples.dll");
 var cases = new[]
 {
@@ -73,7 +76,7 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
 }
 
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.ReferenceInstructions")!;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.Safety.Execution", "Tests.ReferenceTests"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution", "Tests.ReferenceTests");
 foreach (var (name, count, expected) in cases)
 {
     var inputs = Enumerable.Range(0, count).Select(index => (object)(index + 1)).ToArray();
@@ -99,9 +102,7 @@ foreach (var (name, count, expected) in cases)
               .ok (inputMemory, [.scalar (.i32 {{expected}})]) := rfl
         #print axioms reference_result
         """);
-    var result = Run(["lake", "env", "lean", proof]);
-    if (result.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted reference proof");
-    Console.WriteLine("PASS runtime, certificate and reference execution: " + name);
+    evidence.Add(proof, "PASS runtime, certificate and reference execution: " + name);
     if (name != "ReferenceEqual") continue;
     if (!source.Contains(".eq", StringComparison.Ordinal)) throw new Exception("Missing equality mutation target");
     var forged = Path.Combine(root, "ForgedEquality.lean");
@@ -129,7 +130,7 @@ File.WriteAllText(throwProof, throwSource + """
           .error ⟨0, 2, .thrown "System.DivideByZeroException"⟩ := rfl
     #print axioms null_message_raises
     """);
-var throwResult = Run(["lake", "env", "lean", throwProof]);
-if (throwResult.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted throw proof");
-Console.WriteLine("PASS existing null-message throw folding, runtime and certificate");
+evidence.Add(throwProof, "PASS existing null-message throw folding, runtime and certificate");
 
+
+evidence.Check(replay: false);

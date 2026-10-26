@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -14,7 +15,7 @@ var root = At("artifacts/StaticValues");
 Directory.CreateDirectory(root);
 const string word = "Examples.Word256";
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType(word)!;
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
 string[] Extract(string dll, string selector, string output, bool assume = true) =>
     ["dotnet", ExtractorPath, "extract", dll, selector, output, .. assume ? new[] { "--assume-initialized", word } : []];

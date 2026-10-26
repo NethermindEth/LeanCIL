@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
 #:include CheckedExtractionPrefix.cs
 
 using System.Text.RegularExpressions;
@@ -9,7 +10,7 @@ using var verification = new Program();
 verification.Library(Inputs(At("CIL.lean")));
 var output = At("artifacts/TranslationAudit");
 Directory.CreateDirectory(output);
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples", "Arithmetic::Add(ulong,ulong)", output));
 var baseline = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 var declaration = new Regex(@"theorem translation_valid\s*:[\s\S]*?(?=@\[cil_code\] theorem lookup0)");
