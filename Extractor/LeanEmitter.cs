@@ -145,6 +145,7 @@ internal static class LeanEmitter
             var reachable = featureCertificate.Keys.ToHashSet();
             var scalarCertificate = NativeOperands.Certify(m, reachable);
             var parameterIndices = ParameterStorage.Analyze(m, reachable);
+            var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
             string LocalKind(TypeReference type) => Kind(type, m.Module, profile.Architecture, layoutContext);
             string parameters = string.Join(", ", parameterIndices.Select(index =>
                 $"({index}, {LocalKind(MethodArguments.Type(m, index))})"));
@@ -157,7 +158,7 @@ internal static class LeanEmitter
             foreach (Instruction i in m.Body.Instructions)
                 ops.Add(reachable.Contains(i)
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterIndices, importResolution, layoutContext)
+                        scalarCertificate, parameterHomes, importResolution, layoutContext)
                     : ".unsupported \"Unreachable under selected profile\"");
             var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
             string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables

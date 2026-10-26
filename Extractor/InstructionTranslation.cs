@@ -14,7 +14,7 @@ internal static class InstructionTranslation
     internal static string Translate(Instruction i, MethodDefinition m,
         IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
         FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
-        int[]? parameterHomes = null, ImportResolution? imports = null,
+        IReadOnlyDictionary<int, int>? parameterHomes = null, ImportResolution? imports = null,
         MetadataValidation.LayoutContext? layouts = null)
     {
         if (imports is not null && imports.TryTranslate(i, methods.Count, out string imported)) return imported;
@@ -34,14 +34,14 @@ internal static class InstructionTranslation
         }
         if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
         if (Arrays.Translate(i) is { } arrayOperation) return arrayOperation;
-        parameterHomes ??= ParameterStorage.Analyze(m, reachable!);
+        parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
         var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes, layouts);
         return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;
     }
 
     static string TranslateCore(Instruction i, MethodDefinition m, IReadOnlyDictionary<MethodDefinition, int> methods,
         int methodIndex, InstructionIndex instructions,
-        FeatureProfile profile, int[] parameterHomes, MetadataValidation.LayoutContext? layouts)
+        FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext? layouts)
     {
         profile ??= FeatureProfile.Scalar;
         var typeTests = TypeTests.Analyze(m);
@@ -70,13 +70,13 @@ internal static class InstructionTranslation
             (op is "local" or "setLocal" ? Narrow(m.Body.Variables[index].VariableType) : "");
         string Arg(int index)
         {
-            var home = Array.IndexOf(parameterHomes, index);
+            var home = parameterHomes.GetValueOrDefault(index, -1);
             return home < 0 ? $".arg {index}" + Narrow(MethodArguments.Type(m, index)) :
                 $".local {m.Body.Variables.Count + home}";
         }
         string Parameter(string op)
         {
-            var home = Array.IndexOf(parameterHomes, MethodArguments.Index(m, (ParameterDefinition)i.Operand));
+            var home = parameterHomes.GetValueOrDefault(MethodArguments.Index(m, (ParameterDefinition)i.Operand), -1);
             if (home < 0) throw new InvalidDataException("Missing parameter storage");
             return $".{op} {m.Body.Variables.Count + home}";
         }

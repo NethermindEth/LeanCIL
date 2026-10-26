@@ -889,3 +889,16 @@ warmups, median times over seven runs were 7.762→1.133 ms at 64 fields, 72.221
 256 fields, and 531.870→21.939 ms at 1,024 fields. All three emitted source hashes matched.
 The baseline already includes linear metadata-name counting. This isolates emission work;
 it does not include loading assemblies, the initial admission walk, proof checking or CI.
+
+C# argument translation now builds argument-to-home-position indexes once per method in
+validation, emission and exception lint. The original ordered home array still drives evidence
+emission. Duplicate inputs retain their first position, missing homes remain absent, and raw
+locals are still added to the home position when emitting local-slot instructions.
+
+`Tests.InstructionIndexes` exercises loads, stores, addresses, duplicate homes and missing-store
+rejection. Eight argument-processing methods across scalar, x64-v3 and arm64-advsimd produced
+48 byte-identical Lean files before/after. A Windows .NET 10 lookup fixture, including index
+construction, performs eight passes over reverse-ordered homes plus a missing argument. After
+one-second warmups, median seven samples of 25 runs measured 128/512/2,048 homes at
+0.0090/0.0306/0.4200 ms before and 0.0021/0.0088/0.0649 ms after. These isolate lookup costs,
+not full extraction or CI wall time.

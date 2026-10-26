@@ -201,3 +201,40 @@ try
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException invalid &&
     invalid.Message == "Layout context does not match module or architecture.") { }
 Console.WriteLine("PASS context-taking emission rejects mismatched architecture");
+
+var indexHomes = extractor.GetType("Nethermind.LeanCIL.ParameterStorage", true)!
+    .GetMethod("IndexHomes", BindingFlags.Static | BindingFlags.NonPublic)!
+    .CreateDelegate<Func<IEnumerable<int>, Dictionary<int, int>>>();
+var homePositions = indexHomes([2, 1, 2]);
+if (homePositions[2] != 0 || homePositions[1] != 1 || homePositions.ContainsKey(0))
+    throw new Exception("Home positions lost first-match or missing-argument behavior");
+var argumentMethod = new MethodDefinition("Arguments", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+owner.Methods.Add(argumentMethod);
+for (var argument = 0; argument < 3; argument++)
+    argumentMethod.Parameters.Add(new ParameterDefinition("p" + argument,
+        Mono.Cecil.ParameterAttributes.None, module.TypeSystem.Int32));
+argumentMethod.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+argumentMethod.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+var storeArgument = Instruction.Create(OpCodes.Starg, argumentMethod.Parameters[1]);
+var loadArgument = Instruction.Create(OpCodes.Ldarg, argumentMethod.Parameters[1]);
+var addressArgument = Instruction.Create(OpCodes.Ldarga, argumentMethod.Parameters[1]);
+foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeArgument, loadArgument,
+    Instruction.Create(OpCodes.Pop), addressArgument, Instruction.Create(OpCodes.Pop), Instruction.Create(OpCodes.Ret) })
+    argumentMethod.Body.Instructions.Add(instruction);
+string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => (string)translate.Invoke(null,
+    [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
+        0, Index(argumentMethod), null, null, positions, null, null])!;
+if (TranslateArgument(storeArgument, homePositions) != ".setLocal 3" ||
+    TranslateArgument(loadArgument, homePositions) != ".local 3" ||
+    TranslateArgument(addressArgument, homePositions) != ".localAddr 3")
+    throw new Exception("Home translation lost the raw-local offset or slot index");
+if (TranslateArgument(loadArgument, []) != ".arg 1")
+    throw new Exception("Unhomed loads no longer use the original argument");
+try
+{
+    TranslateArgument(storeArgument, []);
+    throw new Exception("A store without a home was admitted");
+}
+catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
+    rejected.Message == "Missing parameter storage") { }
+Console.WriteLine("PASS home lookup preserves first positions, local offsets and missing-store rejection");
