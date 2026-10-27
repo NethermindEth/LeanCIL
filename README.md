@@ -47,6 +47,8 @@ identities as checked UTF-8 byte constants, avoiding repeated decoding in the ke
 [certificate validation](docs/PROOFS.md).
 Fold discovery indexes local-use counts once and bounds exception-message prefix scans;
 both changes have exact equivalence proofs to the original checks.
+Constrained dispatch compares linked UTF-8 byte keys and decodes ASCII metadata without repeated
+indexed reads. Checked equivalence preserves Unicode handling and the original dispatch rules.
 
 Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.403**. The extractor uses Mono.Cecil; the F# examples also use FSharp.Core. Both packages are pinned in `Directory.Packages.props`. Lean uses Std and Lean, without Mathlib.
 
