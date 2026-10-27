@@ -7,15 +7,16 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-// Donors are runs of this exact commit, then main pushes of the commit this checkout merges onto.
+// Prefer this commit or an identical merged PR tree before older main pushes.
 // Their own code built the library and printed its digest; PrepareLibrary --reuse rechecks both.
 const int RunsPerCommit = 10;
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 for (var i = 0; i < args.Length; i++)
 {
-    if (args[i] is not ("--repository" or "--workflow" or "--head" or "--base" or "--output") || i + 1 == args.Length)
+    if (args[i] is not ("--repository" or "--workflow" or "--head" or "--base" or "--output" or "--event") ||
+        i + 1 == args.Length)
         throw new ArgumentException("Usage: FindCertifiedLibrary.cs --repository <owner/name> --workflow <file> " +
-            "--head <commit> --base <commit> --output <file>");
+            "--head <commit> --base <commit> --output <file> [--event <event>]");
     options[args[i]] = args[++i];
 }
 string repository = options["--repository"], workflow = options["--workflow"], output = options["--output"];
@@ -23,9 +24,7 @@ string runs = $"repos/{repository}/actions/workflows/{workflow}/runs?per_page={R
 string RunPath(long run) => $"repos/{repository}/actions/runs/{run}";
 try
 {
-    IEnumerable<long> candidates = Runs(options["--head"], "").Concat(Runs(options["--base"], "&event=push&branch=main"))
-        .Distinct();
-    foreach (long run in candidates)
+    foreach (long run in Candidates().Distinct())
     foreach ((int attempt, long job) in
         CertifiedLibraryDonor.PreparedAttempts(Api(RunPath(run) + "/jobs?filter=all&per_page=100")))
     {
@@ -56,6 +55,29 @@ IEnumerable<long> Runs(string commit, string filter) => Regex.IsMatch(commit, "^
     : [];
 
 JsonElement Api(string path) => JsonSerializer.Deserialize<JsonElement>(Gh(path));
+
+IEnumerable<long> Candidates()
+{
+    foreach (var run in Runs(options["--head"], "")) yield return run;
+    foreach (var run in MergedPullRuns()) yield return run;
+    foreach (var run in Runs(options["--base"], "&event=push&branch=main")) yield return run;
+}
+
+IEnumerable<long> MergedPullRuns()
+{
+    if (options.GetValueOrDefault("--event") != "push") return [];
+    try
+    {
+        return CertifiedLibraryDonor.MergedHeads(repository, options["--head"], Api)
+            .SelectMany(head => Runs(head, "&event=pull_request&status=success")).ToArray();
+    }
+    catch (Exception error) when (error is InvalidOperationException or JsonException or Win32Exception or
+                                  KeyNotFoundException)
+    {
+        Console.WriteLine("::warning::Merged PR library lookup unavailable; trying main donors. " + error.Message);
+        return [];
+    }
+}
 
 string Gh(string path, params string[] flags)
 {

@@ -47,6 +47,8 @@ identities as checked UTF-8 byte constants, avoiding repeated decoding in the ke
 [certificate validation](docs/PROOFS.md).
 Fold discovery indexes local-use counts once and bounds exception-message prefix scans;
 both changes have exact equivalence proofs to the original checks.
+Constrained dispatch compares linked UTF-8 byte keys and decodes ASCII metadata without repeated
+indexed reads. Checked equivalence preserves Unicode handling and the original dispatch rules.
 
 Install the toolchain selected by `lean-toolchain` (Lean **4.35.0**, through elan) and .NET SDK **10.0.403**. The extractor uses Mono.Cecil; the F# examples also use FSharp.Core. Both packages are pinned in `Directory.Packages.props`. Lean uses Std and Lean, without Mathlib.
 
@@ -70,6 +72,8 @@ source, environment and cache-invalidation checks isolated. See the reproducible
 Edited consumer proofs reuse authenticated extraction preparation without starting a redundant
 certificate build. Rechecked proofs still independently replay and audit the generated certificate
 and check that proof elaboration leaves its compiled bytes unchanged.
+Generated certificate preparation also survives unrelated consumer package configuration changes;
+its own generated sources, configuration, framework artifacts and toolchain remain bound.
 
 Prepared certified libraries include canonical fingerprints of their compiled modules.
 Consumer verification reuses them only while module bytes and the normalizer match,
@@ -130,6 +134,9 @@ Eligible standalone proofs, generated batches and consumer groups audit the envi
 by kernel replay, avoiding a second import. Consumer groups retain each request's theorem and
 dependency scope. Duplicate declarations and audits requiring source locations or module metadata
 retain the separate audit path; theorem and artifact checks still apply.
+After a merge, CI can reuse the same-repository PR head's certified library when its complete Git
+tree matches the push commit. Source binding, artifact authentication and kernel replay still apply.
+
 Standalone verification directly audits the generated translation theorem, as consumer verification
 does, avoiding a separate wrapper compilation while retaining exact-type checks and kernel replay.
 

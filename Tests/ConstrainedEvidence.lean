@@ -4,6 +4,18 @@ import CIL.Extraction.Constrained
 namespace Tests.ConstrainedEvidence
 open CIL CIL.Extraction
 
+/-- ASCII acceleration retains Unicode metadata and malformed-name rejection. -/
+theorem named_metadata_decoding :
+    namedType (.aggregate "Fixture::Counter" 0) =
+      some ("Fixture".toList, "Counter".toList) ∧
+    namedType (.aggregate "Σcope::Counter" 0) = some ("Σcope".toList, "Counter".toList) ∧
+    namedType (.atom "Fixturé" "Counter") = some ("Fixturé".toList, "Counter".toList) ∧
+    namedType (.atom "Fixture" "Countér") = none ∧
+    namedType (.aggregate "Fixture:Counter" 0) = none ∧
+    namedType (.aggregate "Fixture::Counter[]" 0) = none ∧
+    namedType (.atom "" "Counter") = none := by decide +kernel
+#print axioms named_metadata_decoding
+
 private def integer : TypeExpr := .atom runtimeScope "System.Int32"
 private def receiver : TypeExpr := .aggregate "Fixture::Counter" 0
 private def interface : TypeExpr := .atom "Fixture" "IValue"

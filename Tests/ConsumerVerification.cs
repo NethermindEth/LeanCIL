@@ -248,6 +248,8 @@ try
     Verify();
     if (!NewReplayCommands(previous).Any(command => command.Contains("Client.Independent")))
         throw new InvalidOperationException("A Lake environment variable change reused certified support.");
+    if (!BuiltModule(NewStageOutput(previous, "Checking consumer extraction certificate"), "Extracted"))
+        throw new InvalidOperationException("A Lake environment variable change reused certificate preparation.");
     Environment.SetEnvironmentVariable(relevantVariable, null);
     File.AppendAllText(independent, "\n-- support source edit\n");
     previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
@@ -503,7 +505,12 @@ try
         .Replace("name = \"consumer\"\n", "name = \"consumer\"\nbuildDir = \".lake/custom-build\"\n"));
     File.WriteAllText(poison, "namespace Client.Poison\ntheorem valid : True := True.intro\nend Client.Poison\n");
     File.WriteAllText(sharedPath, "import Client.Poison\n" + shared);
+    var previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
     Verify();
+    if (NewStageOutput(previous, "Checking consumer extraction certificate").Length != 0 ||
+        !NewReplayCommands(previous).Any(command => command.Contains("Extracted") && command.Contains("Client.Poison")))
+        throw new InvalidOperationException(
+            "Consumer configuration change did not reuse preparation with independent replay.");
     Console.WriteLine("PASS custom Lake build directory with additional consumer module verified");
     File.WriteAllText(poison, """
         import Lean

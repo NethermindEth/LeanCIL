@@ -61,7 +61,8 @@ elapsed time of the complete Math CI job.
 
 ## Evidence investigation (#424)
 
-No Evidence optimization is retained from this investigation; #424 remains unresolved.
+The initial investigation retained no Evidence optimization; the dispatch follow-up below
+addresses one measured hotspot. Full-suite acceptance for #424 remains separate.
 The complete generated Generic positive batch took 15.29s with existing compiled imports.
 Three isolated changes to generic-constraint identity comparison did not materially improve it:
 
@@ -84,3 +85,50 @@ fixture times showed no material improvement: Generic 61.447→60.554s, TypeTest
 24.808→25.139s, and ConstrainedCalls 25.589→25.736s. That change was also discarded.
 Those fixture timings include more work than the positive-batch-only measurements above and
 should not be compared directly with them.
+
+### Constrained dispatch follow-up
+
+On an Apple M4 ARM64 machine with Lean 4.35.0, the complete ConstrainedCalls positive batch
+falls from 10.69/10.86s to 5.60/5.64s in repeated measurements (about 48%). Both revisions
+start from main `0361ca9`, rebuild the affected dependency closure with Lake, and compile the
+same generated source, SHA256 `ff40f05c551f2afe4c961073deaa0cbb27bd6dc1394a09a642292fc9a9fdb55b`.
+The batch retains all four execution results, complete translation certificates and narrowed
+positive controls. These are direct compilation timings, not complete Evidence suite timings.
+
+The retained changes decode ASCII metadata by traversing its linked byte representation and
+compare dispatch type keys as linked UTF-8 byte lists. A checked equality theorem establishes
+that decoding produces exactly `String.toList` for every string; non-ASCII strings retain the
+original decoder. The existing indexed-dispatch correspondence proofs remain unchanged.
+The public `DispatchIndex` representation changes from keys of `List String` to
+`List (List UInt8)`; lookup and resolution results are unchanged.
+
+The two changes must be measured together: individual exploratory runs were 11.11s for the
+decoder and 10.70s for byte keys against an 11.19s baseline, whereas their combination was
+5.49s. These nonadditive timings motivated the clean repeated pair above; they do not establish
+an additive cost model. Generic's positive batch remains approximately unchanged at 9.87s.
+
+Independent kernel replay of the complete constrained batch passes. All four independently
+forged constrained targets still fail their intended `ConstrainedCallsValid` obligation;
+the constrained metadata regression module also passes, including Unicode scopes and rejected
+decorated or malformed names.
+
+### Integrated Evidence suite
+
+The complete Windows Evidence suite, including checked control reuse, passes in 400.03s against
+440.27s on main `0361ca9` (9.1% faster). Including C# builds, the command takes 431.33s against
+475.72s. Both runs use `dotnet run --file scripts/Test.cs -- --suite evidence`, with each revision's
+authenticated library prepared beforehand, no concurrent benchmarks, and no supplied fixture
+manifest. Library production is excluded from both suite measurements.
+
+| Work | Before | After |
+| --- | ---: | ---: |
+| Complete constrained-call fixture | 28.08s | 14.15s |
+| Complete generic evidence fixture | 65.77s | 59.59s |
+| Lean frontend calls | 52 / 210.80s | 51 / 184.46s |
+| Positive-batch independent replay calls | 6 / 34.69s | 6 / 33.26s |
+| Extractor CLI calls | 182 | 182 |
+
+The original positive claims and independent mutations pass, together with two added rejection
+checks for missing or changed control declarations. Both runs contain 74 expected nonzero child
+commands. Frontend, replay and fixture durations overlap the suite duration; they are not additive
+savings. These are local measurements, not predicted hosted-runner job times.

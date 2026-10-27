@@ -24,6 +24,35 @@ partial class Program
         return Regex.Replace(result, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
     }
 
+    // Keep narrowed declarations and exact obligation types checked, but reuse the original
+    // proof instead of reducing the same validator twice. Mutations never use these witnesses.
+    static string CheckedEvidenceControl(string original, string narrowed, IEnumerable<string> theorems, int index)
+    {
+        var witnesses = new StringBuilder();
+        var audits = new StringBuilder();
+        foreach (var theorem in theorems)
+        {
+            var witness = $"evidenceControl{index}_{theorem}";
+            var pattern = @"(?m)^(theorem " + Regex.Escape(theorem) + @" : [^\r\n]*?) := [^\r\n]*";
+            var originalMatches = Regex.Matches(original, pattern);
+            var narrowedMatches = Regex.Matches(narrowed, pattern);
+            if (narrowedMatches.Count != 1 || originalMatches.Count != 1 ||
+                narrowedMatches[0].Groups[1].Value != originalMatches[0].Groups[1].Value)
+                throw new InvalidOperationException("Missing unique control obligation: " + theorem);
+            var header = originalMatches[0].Groups[1].Value;
+            var type = header[(header.IndexOf(" : ", StringComparison.Ordinal) + 3)..];
+            witnesses.AppendLine($"open CIL Extracted in\nprivate theorem {witness} : {type} := Extracted.{theorem}");
+            witnesses.AppendLine($"#print axioms {witness}");
+            var obligation = narrowedMatches[0];
+            narrowed = narrowed[..obligation.Index] + header + " := by exact " + witness +
+                narrowed[(obligation.Index + obligation.Length)..];
+            audits.AppendLine($"#print axioms EvidenceControl{index}.Extracted.{theorem}");
+        }
+        narrowed = Regex.Replace(narrowed, @"(?m)^import [^\r\n]+\r?\n", "");
+        return witnesses + $"\nnamespace EvidenceControl{index}\n" + narrowed +
+            $"\nend EvidenceControl{index}\n" + audits;
+    }
+
     // Only generated, namespace-relative evidence belongs here. Rejection fixtures use
     // their isolated environments and diagnostics; arbitrary consumer proofs use the verifier.
     sealed class GeneratedEvidence(string directory, bool measure = false)

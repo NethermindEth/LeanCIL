@@ -59,8 +59,9 @@ foreach (var (name, type, expected) in new[]
     var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Select(match =>
         match.Value + "\n#print axioms " + Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value)) +
         "\nend Extracted", StringComparison.Ordinal);
-    var control = Regex.Replace(narrowed, @"(?m)^import [^\r\n]+\r?\n", "");
-    File.AppendAllText(proof, "\nnamespace ConstrainedControl\n" + control + "\nend ConstrainedControl\n");
+    var control = CheckedEvidenceControl(source, narrowed, obligations.Select(match =>
+        Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value), 0);
+    File.AppendAllText(proof, "\n" + control);
     evidence.Add(proof, "PASS compiled constrained call, certificate and obligation eligibility: " + name);
     File.WriteAllText(forged, narrowed.Replace(call, ".call 0 1", StringComparison.Ordinal));
     rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");

@@ -135,20 +135,26 @@ private theorem multiGroup_get (keys : α → List Nat) (values : List α) (quer
 
 #print axioms multiGroup_get
 
+/-- Linked UTF-8 bytes avoid indexed string decoding while comparing dispatch keys. -/
+private def keyBytes (text : String) : List UInt8 := text.toByteArray.data.toList
+
 /-- Constructor-delimited type buckets retain scopes and aggregate positions. Exact identity
     checks below remain mandatory even if two encodings were to share a bucket. -/
-private def typeKeyInto : TypeExpr → List String → List String
-  | .void, rest => "void" :: rest
-  | .atom scope name, rest => "atom" :: scope :: name :: rest
-  | .aggregate identity index, rest => "aggregate" :: identity :: toString index :: rest
-  | .enum identity underlying, rest => "enum" :: identity :: typeKeyInto underlying rest
-  | .parameter index, rest => "parameter" :: toString index :: rest
-  | .byref element, rest => "byref" :: typeKeyInto element rest
-  | .pointer element, rest => "pointer" :: typeKeyInto element rest
-  | .array element, rest => "array" :: typeKeyInto element rest
-  | .constructor scope name, rest => "constructor" :: scope :: name :: rest
+private def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
+  | .void, rest => keyBytes "void" :: rest
+  | .atom scope name, rest => keyBytes "atom" :: keyBytes scope :: keyBytes name :: rest
+  | .aggregate identity index, rest =>
+    keyBytes "aggregate" :: keyBytes identity :: keyBytes (toString index) :: rest
+  | .enum identity underlying, rest =>
+    keyBytes "enum" :: keyBytes identity :: typeKeyInto underlying rest
+  | .parameter index, rest => keyBytes "parameter" :: keyBytes (toString index) :: rest
+  | .byref element, rest => keyBytes "byref" :: typeKeyInto element rest
+  | .pointer element, rest => keyBytes "pointer" :: typeKeyInto element rest
+  | .array element, rest => keyBytes "array" :: typeKeyInto element rest
+  | .constructor scope name, rest =>
+    keyBytes "constructor" :: keyBytes scope :: keyBytes name :: rest
   | .apply constructor argument, rest =>
-    "apply" :: typeKeyInto constructor (typeKeyInto argument rest)
+    keyBytes "apply" :: typeKeyInto constructor (typeKeyInto argument rest)
 
 /-- Raw metadata and its order-preserving method candidate indexes. -/
 structure DispatchTypeIndex where
@@ -163,7 +169,7 @@ def DispatchTypeIndex.ofType (type : DispatchType) : DispatchTypeIndex :=
     multiGroup (·.overrides) type.methods⟩
 
 /-- Dispatch type buckets; exact identity filtering preserves duplicate ambiguity. -/
-def DispatchIndex := Std.TreeMap (List String) (List DispatchTypeIndex)
+def DispatchIndex := Std.TreeMap (List (List UInt8)) (List DispatchTypeIndex)
 
 /-- Construct all type and method indexes once for a metadata catalog. -/
 def DispatchIndex.ofTypes (types : List DispatchType) : DispatchIndex :=
@@ -235,4 +241,3 @@ theorem DispatchIndex.resolve_ofTypes (types : List DispatchType) (receiver : Ty
 #print axioms DispatchIndex.resolve_ofTypes
 
 end CIL.Extraction
-

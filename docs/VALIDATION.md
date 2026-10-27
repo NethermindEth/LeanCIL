@@ -42,6 +42,17 @@ passes are printed only after both checks and source-stability checks succeed. R
 fixtures still run separately with their original diagnostic assertions. The array read,
 null and bounds checks share one final file instead of checking the read twice.
 
+Generic and constrained-call positive controls retain their narrowed declarations and exact
+obligation types, but reuse the original checked theorem instead of reducing its validator again.
+Generic controls compile and replay in the original positive batch. Missing or changed control
+declarations must still fail type checking; isolated mutation cases retain their original validator
+proofs and diagnostic checks, without access to the positive-control witnesses.
+On Apple M4 with the indexed constrained-dispatch library already built, the constrained positive
+batch fell from 5.67s to 5.26s. Generic positive compilation, independent replay and controls took
+18.79s before reuse and 16.84s afterward, including replay of the controls in the combined batch.
+These fixture measurements exclude extraction, dependency setup and unchanged rejection checks;
+they are incremental gains on top of the dispatch improvement, not whole-suite CI timings.
+
 Each of these five scripts accepts `--measure`, which first checks the same final source files
 separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and
 batch compilation/replay time. One local run measured:
@@ -171,6 +182,28 @@ both rejection paths remove a stale report. Pass a
 baseline extractor DLL and `--measure` to collect the same workload without requiring
 preparation reuse; process counts and elapsed times are written to `timings.json`.
 
+Generated certificates have their own authenticated support records containing only the
+closed generated module set. Their preparation key binds all generated sources and their
+Lake configuration, framework artifacts, tools and declared environment inputs. Consumer
+package configuration changes can reuse this preparation without reusing consumer modules
+or exempting the certificate from replay. The default consumer workload checks this with its
+existing custom-build-directory request and checks invalidation with its existing Lake
+environment mutation; these assertions add no verification requests.
+
+Run `Tests/ConsumerCertificateReuse.cs --configuration-reuse` for focused configuration reuse,
+fresh verification, self-rehashed corruption and post-restoration artifact mutation checks.
+Run `Tests/ConsumerComponents.cs --configuration-reuse` to check that split certificates retain
+their complete generated dependency set across a consumer configuration change. These extra
+requests are opt-in and are excluded from the unchanged full-workload timing comparison.
+
+The complete Windows consumer workload took 615.93s before this configuration reuse and
+605.23s after it, with the same 29 top-level assertions and helper fixtures. Certificate
+builds fell from 37 to 35 (89.31s to 84.88s); fresh consumer builds remained 48, joint
+replays 52 and fallback replays 4. The focused configuration-only request took 5.30s
+versus 7.19s with `--fresh`, avoiding a 2.06s certificate build. Both full runs used
+isolated success caches and the same authenticated framework donor. This removes
+specific redundant work; the 1.7% total improvement is not a substantial suite speedup.
+
 On Windows, the unchanged-extraction request removed one 0.186s certificate process; total
 request time was 4.976s before and 4.952s after, so this run establishes the eliminated work
 but not a significant overall latency gain. Both measurements used an already certified
@@ -288,7 +321,7 @@ The regression runner covers **54 check groups** across twenty-three test partit
 
 The runner builds the independent assemblies and the CIL library, then prepares a source-keyed, kernel-replayed library for verification. CI rebuilds from sources; local runs may reuse a cache entry whose receipt binds its key and manifest. The library is checked by its trusted manifest digest and read in place: every proof still compiles and undergoes kernel replay in a new private session package that requires the library as a path dependency, so Lake writes only below that session. File-based C# apps provide the test runner, verifier and metadata fixture generator. Metadata tooling uses the same pinned Mono.Cecil version as the extractor; the F# example assembly also uses pinned FSharp.Core.
 
-CI prepares the certified library once per workflow attempt and passes its immutable artifact ID, the run that uploaded it and its manifest digest from the producer job to the suite jobs. The producer first looks for a library already certified by a run of the same commit or by the main push of the checkout's first parent. Their own trusted code built that library and printed its digest, so the digest is read from the donor job's log, never from the artifact. `PrepareLibrary.cs --reuse` then rechecks the library key and source binding and kernel-replays the library; any mismatch, or no donor, builds from source. It does not restore compiled libraries from the GitHub Actions cache: a cache's source key and self-described file hashes cannot authenticate the native auditor or establish that compiled modules came from those sources.
+CI prepares the certified library once per workflow attempt and passes its immutable artifact ID, the run that uploaded it and its manifest digest from the producer job to the suite jobs. The producer first looks for a library already certified by a run of the same commit. On push events it next checks at most ten associated merged PRs from the same repository, requiring their merge commit to be this push and their complete Git tree to match exactly. Successful runs of those heads precede the main push of the checkout's first parent. API failures or absent eligible artifacts retain the older-main/source-build fallback. Their own trusted code built that library and printed its digest, so the digest is read from the donor job's log, never from the artifact. `PrepareLibrary.cs --reuse` then rechecks the library key and source binding and kernel-replays the library; any mismatch, or no donor, builds from source. It does not restore compiled libraries from the GitHub Actions cache: a cache's source key and self-described file hashes cannot authenticate the native auditor or establish that compiled modules came from those sources.
 
 `dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` requires an empty or absent destination and publishes a freshly built library through a staging directory. Explicit reuse uses `--reuse <trusted-manifest-sha256>`; obtain this digest independently from a trusted producer, never by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing the destination. Rebuilding an existing library requires a separate output directory. `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests, missing producer digests, and preservation of unrelated destination files.
 
