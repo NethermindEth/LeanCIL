@@ -172,7 +172,7 @@ partial class Program : IDisposable
     Func<string, string, string, string, FullImportResult>? fullImportAudit { get; set; }
     readonly AsyncLocal<bool> referenceOnlyContext = new();
     bool referenceOnlyAuthoring { get => referenceOnlyContext.Value; set => referenceOnlyContext.Value = value; }
-    bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
+    bool UseSuccessCache => !referenceOnlyAuthoring && !freshProofs && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
     static string SuccessCacheRoot => Path.Combine(Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
@@ -514,7 +514,8 @@ partial class Program : IDisposable
     {
         var traceStage = progress;
 #if LEANCIL_TOOL
-        // CLI output is a stable interface; progress belongs to the repository runner.
+        // Keep stdout stable and redirected stderr quiet, but explain long interactive builds.
+        if (!Console.IsErrorRedirected && progress is not null) Console.Error.WriteLine("START " + progress);
         progress = null;
         streamOutput = false;
 #endif
@@ -568,7 +569,16 @@ partial class Program : IDisposable
             TextWriter.Synchronized(new StreamWriter(Path.Combine(traceDirectory, transcript), false, Encoding.UTF8));
         var stdout = CaptureOutput(process.StandardOutput, streamOutput ? Console.Out : TextWriter.Null, summary, traceWriter);
         var stderr = CaptureOutput(process.StandardError, streamOutput ? Console.Error : TextWriter.Null, summary, traceWriter);
-        if (summary is null) process.WaitForExit();
+        if (summary is null)
+        {
+#if LEANCIL_TOOL
+            if (!Console.IsErrorRedirected && traceStage is not null)
+                while (!process.WaitForExit(10_000))
+                    Console.Error.WriteLine($"PROGRESS {traceStage} ({elapsed.Elapsed.TotalSeconds:F0}s)");
+            else
+#endif
+                process.WaitForExit();
+        }
         else
             while (!process.WaitForExit(10_000)) summary.Report();
 
@@ -576,6 +586,10 @@ partial class Program : IDisposable
         var error = stderr.GetAwaiter().GetResult();
         if (progress is not null)
             Console.WriteLine($"END {progress} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
+#if LEANCIL_TOOL
+        if (!Console.IsErrorRedirected && traceStage is not null)
+            Console.Error.WriteLine($"END {traceStage} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
+#endif
         Trace(traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, start.WorkingDirectory, elapsed.Elapsed, process.ExitCode, transcript, args);
         return (process.ExitCode, output + error, output, error);
     }
@@ -649,6 +663,7 @@ partial class Program : IDisposable
         left.Count == right.Count && left.All(p => right.TryGetValue(p.Key, out var value) && value == p.Value);
 
     bool freshLibrary { get; init; }
+    bool freshProofs { get; init; }
     string? incrementalLibrary { get; init; }
     string? incrementalDigest { get; init; }
     string? libraryKey;

@@ -378,7 +378,7 @@ partial class Program
     // Each manifest is authenticated by its own independently trusted digest.
     TrustedSupport[] TrustedConsumerSupport(string root, SortedDictionary<string, string> inputs)
     {
-        if (freshLibrary) return [];
+        if (freshProofs || freshLibrary) return [];
         var paths = (Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT") ?? "")
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var digests = (Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") ?? "")
@@ -1325,7 +1325,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         Action<int, string>? stage, bool batch, int parallelism = 1, Action<int, ConsumerOutcome>? finished = null)
     {
         root = Path.GetFullPath(root);
-        if (requests.Any(request => request.ExportAudit is not null) && !freshLibrary)
+        if (requests.Any(request => request.ExportAudit is not null) && !freshProofs && !freshLibrary)
             throw new InvalidDataException("Contract exports require fresh independent verification.");
         var outcomes = requests.Select(_ => new ConsumerOutcome()).ToArray();
         bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected && outcomes[i].Report is null;
