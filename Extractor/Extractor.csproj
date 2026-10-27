@@ -36,6 +36,17 @@
     </Content>
   </ItemGroup>
 
+  <!-- Release descriptors are generated from authenticated, replayed artifacts by the publisher. -->
+  <ItemGroup Condition="'$(CertifiedLibraryReleaseDirectory)' != ''">
+    <Content Include="$(CertifiedLibraryReleaseDirectory)/certified-library-release.*.json">
+      <Link>verification/%(Filename)%(Extension)</Link>
+      <TargetPath>verification/%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Pack>false</Pack>
+    </Content>
+  </ItemGroup>
+
   <!-- Keep the managed assembly identity while giving the CLI a short executable name. -->
   <Target Name="NameCliExecutable" AfterTargets="_ComputeNETCoreBuildOutputFiles">
     <ItemGroup>

@@ -669,6 +669,97 @@ partial class Program : IDisposable
     string? libraryKey;
     string? libraryBuild;
 
+    // This descriptor is distributed inside the installed CLI, not read from the downloaded archive.
+    sealed record CertifiedReleaseAsset(int Schema, string Tag, string Runtime, string LibraryKey,
+        string Archive, long ArchiveBytes, string ArchiveSha256, string ManifestSha256);
+
+    static string ReleaseAssetName(string runtime, string key) => $"leancil-library-{runtime}-{key}.zip";
+
+    static bool ValidReleaseAsset(CertifiedReleaseAsset asset, string key) => asset.Schema == 1 &&
+        asset.Runtime == RuntimeInformation.RuntimeIdentifier && asset.LibraryKey == key &&
+        asset.Tag is not null && Regex.IsMatch(asset.Tag, @"\A[A-Za-z0-9][A-Za-z0-9._-]*\z") &&
+        asset.Archive == ReleaseAssetName(asset.Runtime, key) &&
+        asset.ArchiveBytes is > 0 and <= 4L * 1024 * 1024 * 1024 &&
+        asset.ArchiveSha256 is not null && Regex.IsMatch(asset.ArchiveSha256, @"\A[0-9a-f]{64}\z") &&
+        asset.ManifestSha256 is not null && Regex.IsMatch(asset.ManifestSha256, @"\A[0-9a-f]{64}\z");
+
+    // A failed download never becomes a cache entry. The package-pinned archive digest is checked
+    // before extraction, then the producer manifest and full kernel replay authorize local reuse.
+    bool DownloadReleasedLibrary(string cached, string key)
+    {
+#if LEANCIL_TOOL
+        var descriptor = Path.Combine(Root, $"certified-library-release.{RuntimeInformation.RuntimeIdentifier}.json");
+        if (!File.Exists(descriptor)) return false;
+        var staging = cached + ".download-" + Guid.NewGuid().ToString("N");
+        var archive = staging + ".zip";
+        try
+        {
+            var asset = JsonSerializer.Deserialize<CertifiedReleaseAsset>(File.ReadAllBytes(descriptor));
+            if (asset is null || !ValidReleaseAsset(asset, key)) return false;
+            if (!Console.IsErrorRedirected) Console.Error.WriteLine("Downloading certified Lean verification library");
+            using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            var uri = new Uri("https://github.com/NethermindEth/LeanCIL/releases/download/" +
+                Uri.EscapeDataString(asset.Tag) + "/" + Uri.EscapeDataString(asset.Archive));
+            using var response = client.GetAsync(uri, System.Net.Http.HttpCompletionOption.ResponseHeadersRead,
+                    timeout.Token)
+                .GetAwaiter().GetResult();
+            response.EnsureSuccessStatusCode();
+            using (var input = response.Content.ReadAsStream(timeout.Token))
+            using (var output = File.Create(archive))
+            {
+                var buffer = new byte[1024 * 1024];
+                int count;
+                while ((count = input.ReadAsync(buffer, timeout.Token).AsTask().GetAwaiter().GetResult()) != 0)
+                {
+                    if (output.Length + count > asset.ArchiveBytes)
+                        throw new InvalidDataException("Released archive exceeds its package-pinned size");
+                    output.Write(buffer, 0, count);
+                }
+            }
+            InstallReleasedLibrary(archive, staging, cached, asset);
+            return true;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or
+            JsonException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException)
+        {
+            if (!Console.IsErrorRedirected)
+                Console.Error.WriteLine("Certified library download unavailable; building from sources. " +
+                    error.Message);
+            return false;
+        }
+        finally
+        {
+            try { File.Delete(archive); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            try { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+#else
+        return false;
+#endif
+    }
+
+    void InstallReleasedLibrary(string archive, string staging, string cached, CertifiedReleaseAsset asset)
+    {
+        var (key, _) = LibraryIdentity(CommonInputs());
+        if (!ValidReleaseAsset(asset, key) || new FileInfo(archive).Length != asset.ArchiveBytes ||
+            Sha(archive) != asset.ArchiveSha256)
+            throw new InvalidDataException("Release archive identity or integrity mismatch");
+        using (var zip = System.IO.Compression.ZipFile.OpenRead(archive))
+            if (zip.Entries.Count > 100_000 || zip.Entries.Sum(entry => entry.Length) > 8L * 1024 * 1024 * 1024)
+                throw new InvalidDataException("Released library exceeds extraction limits");
+        // ZipFile rejects entries escaping the destination; the entire extracted tree must match the manifest.
+        System.IO.Compression.ZipFile.ExtractToDirectory(archive, staging);
+        if (ReusePreparedLibrary(staging, asset.ManifestSha256) is null)
+            throw new InvalidDataException("Released library identity or integrity mismatch");
+        var manifestBytes = File.ReadAllBytes(Path.Combine(staging, "cache-manifest.json"));
+        File.WriteAllBytes(Path.Combine(staging, "cache-receipt.hmac"),
+            HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifestBytes).ToArray()));
+        if (Directory.Exists(cached)) Directory.Delete(cached, true);
+        Directory.Move(staging, cached);
+    }
+
     static SortedDictionary<string, string> LibrarySources(SortedDictionary<string, string> snapshot) =>
         new(snapshot.Where(p => p.Key.StartsWith("CIL/", StringComparison.Ordinal) ||
             p.Key is "CIL.lean" or "lakefile.toml" or "lake-manifest.json" or "lean-toolchain").ToDictionary(), StringComparer.Ordinal);
@@ -951,6 +1042,12 @@ partial class Program : IDisposable
                 library = cached;
                 manifest = cachedManifest;
                 libraryBuild = "cache";
+            }
+            else if (!fresh && DownloadReleasedLibrary(cached, libraryKey))
+            {
+                library = cached;
+                manifest = ReadManifest(cached) ?? throw new InvalidDataException("Missing downloaded library manifest");
+                libraryBuild = "release";
             }
             else
             {

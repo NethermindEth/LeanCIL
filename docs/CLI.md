@@ -151,6 +151,39 @@ leancil verify artifacts/Add
 
 Every invocation checks the proof afresh. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
+Release packages can include a certified-library descriptor for the current runtime. On the first
+cache miss, the CLI downloads that exact release asset from the official LeanCIL GitHub repository.
+The installed package pins its archive hash, producer manifest hash, runtime and source/toolchain
+key. The download is validated and independently kernel-replayed before receiving a local cache
+receipt. A missing descriptor, incompatible library or unavailable download falls back to building
+the packaged sources. `--rebuild-library` bypasses this download and the local library cache;
+an explicitly supplied certified library remains usable.
+
+### Publishing certified library assets
+
+For each supported runtime, from the exact sources that will be packaged, prepare and replay a
+library, then create its archive and package descriptor. The digest comes from the preparation
+command's output, independently of the directory being archived:
+
+```sh
+dotnet run --file scripts/PrepareLibrary.cs -- artifacts/release-library
+dotnet run --file scripts/PackageCertifiedLibrary.cs -- artifacts/release-library PRODUCER_SHA256 vVERSION artifacts/release-assets
+```
+
+The packaging command checks the entire producer artifact, replays its modules, and validates the
+bytes actually written to the archive. Collect the generated `certified-library-release.*.json`
+files from supported runtimes into one directory and pass that directory when packing the CLI:
+
+```sh
+dotnet pack Extractor -c Release -p:CertifiedLibraryReleaseDirectory=/absolute/path/to/release-assets
+```
+
+Publish the generated ZIP files as assets of the named release in `NethermindEth/LeanCIL` and
+distribute the CLI package through the normal trusted package channel. The descriptor is part of
+that installed package, so neither a mutable release asset nor a manifest inside its ZIP can
+authorize replacement bytes. These commands prepare files; they do not publish a release or upload
+a package. Without descriptors, development builds retain the normal local build behavior.
+
 ## Diagnostics
 
 Method and call validation failures name the rejected item and the method containing it. A rejected call reports the callee, the calling method and the IL offset of the call. For example, `typeof(ulong) == typeof(uint)` compiles to calls into the runtime library that LeanCIL does not model:
