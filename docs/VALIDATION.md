@@ -7,8 +7,12 @@ build configuration and the complete output file set. The workflow checks execut
 before starting the runner. Nested fixture invocations check the same identity and use the
 compiled assembly; absent or incompatible preparation falls back to an ordinary local build.
 Modified example assemblies are still rebuilt by their mutation tests.
+Configuration identity includes props, targets and configuration files along the entry script's
+directory chain through the checkout root. Fixtures with `#:project` references use an ordinary
+build because their external MSBuild source graph is not described by file-app includes.
 
-`Tests/PreparedFixtures.cs` covers arguments, included-source changes, SDK/runtime mismatches,
+`Tests/PreparedFixtures.cs` covers arguments, included-source changes, nested configuration changes,
+unsupported project references, SDK/runtime mismatches,
 manifest tampering and added or modified output files. This targets the 66 runner builds,
 14 contract-export builds and ten full-import builds observed in run 40486409764. CI timing
 must confirm the net saving, including the shared producer and artifact transfer.

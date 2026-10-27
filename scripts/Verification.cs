@@ -44,9 +44,10 @@ partial class Program : IDisposable
     sealed record PreparedFixtures(string Sdk, string Runtime, Dictionary<string, PreparedFixture> Fixtures);
     static string? fixtureSdk;
 
-    static SortedDictionary<string, string> FixtureInputs(string script)
+    static SortedDictionary<string, string>? FixtureInputs(string script)
     {
         var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var supported = true;
         void Add(string path)
         {
             path = Path.GetFullPath(path);
@@ -55,15 +56,25 @@ partial class Program : IDisposable
                 throw new InvalidOperationException("Fixture input is outside the checkout: " + path);
             if (!inputs.TryAdd(relative, Sha(path))) return;
             if (Path.GetExtension(path) != ".cs") return;
-            foreach (Match include in Regex.Matches(File.ReadAllText(path), @"(?m)^#:include\s+([^\r\n]+)"))
+            var source = File.ReadAllText(path);
+            // Project references bring in an MSBuild graph not described by file-app includes.
+            if (Regex.IsMatch(source, @"(?m)^[\t ]*#:project\b")) supported = false;
+            foreach (Match include in Regex.Matches(source, @"(?m)^#:include\s+([^\r\n]+)"))
                 Add(Path.Combine(Path.GetDirectoryName(path)!, include.Groups[1].Value.Trim()));
         }
         Add(At(script));
-        foreach (var path in Directory.EnumerateFiles(Root))
-            if (Path.GetExtension(path) is ".props" or ".targets" ||
-                Path.GetFileName(path) is "global.json" or "NuGet.Config" or "nuget.config" or ".editorconfig")
-                Add(path);
-        return inputs;
+        var root = Path.TrimEndingDirectorySeparator(Root);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        for (var directory = Path.GetDirectoryName(Path.GetFullPath(script, Root)); directory is not null;
+             directory = Path.GetDirectoryName(directory))
+        {
+            foreach (var path in Directory.EnumerateFiles(directory))
+                  if (Path.GetExtension(path).ToLowerInvariant() is ".props" or ".targets" ||
+                      Path.GetFileName(path).ToLowerInvariant() is "global.json" or "nuget.config" or ".editorconfig")
+                    Add(path);
+            if (directory.Equals(root, comparison)) break;
+        }
+        return supported ? inputs : null;
     }
 
     // The workflow pins this manifest's digest separately from its downloadable artifact.
@@ -78,7 +89,7 @@ partial class Program : IDisposable
         if (!prepared.Fixtures.TryGetValue(relative, out var fixture)) return null;
         fixtureSdk ??= Run(["dotnet", "--version"]).Trim();
         if (prepared.Runtime != RuntimeInformation.RuntimeIdentifier || prepared.Sdk != fixtureSdk ||
-            !Same(fixture.Inputs, FixtureInputs(relative))) return null;
+            FixtureInputs(relative) is not { } inputs || !Same(fixture.Inputs, inputs)) return null;
         var directory = Path.GetDirectoryName(manifest)!;
         directory = Path.GetFullPath(directory);
         var assemblyDirectory = Path.GetDirectoryName(Path.GetFullPath(fixture.Assembly, directory))!;

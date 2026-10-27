@@ -19,13 +19,16 @@ foreach (var script in new[] { "scripts/Test.cs", "Tests/ContractExport.cs", "Te
     var log = Run(["dotnet", "build", script, "-c", "Release", "--output", directory,
         "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"],
         progress: "Building shared fixture " + script);
-    if (log.Contains("IDE0005", StringComparison.Ordinal) || !Same(inputs, FixtureInputs(script)))
+    var current = FixtureInputs(script);
+    if (log.Contains("IDE0005", StringComparison.Ordinal) ||
+        inputs is not null && (current is null || !Same(inputs, current)))
         throw new InvalidOperationException("Fixture inputs changed or have unused imports: " + script);
     var files = HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
         .Select(path => (Path.GetRelativePath(output, path).Replace('\\', '/'), path)));
     var assembly = name + "/" + name + ".dll";
     if (!files.ContainsKey(assembly)) throw new InvalidOperationException("Missing fixture assembly: " + assembly);
-    fixtures.Add(script, new(assembly, inputs, files));
+    // Unsupported project graphs still build, but consumers run them from source.
+    if (inputs is not null) fixtures.Add(script, new(assembly, inputs, files));
 }
 var manifest = Path.Combine(output, "manifest.json");
 File.WriteAllText(manifest, JsonSerializer.Serialize(new PreparedFixtures(
