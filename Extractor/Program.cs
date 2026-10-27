@@ -12,11 +12,20 @@ internal static partial class Program
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
+    /// <summary>Runs <c>extract</c> or <c>check</c> in this process without printing its report;
+    /// a rejection throws instead of returning an exit code.</summary>
+    internal static void RunQuietly(string[] args)
+    {
+        if (args is not ["extract" or "check", ..]) throw new ArgumentException(Usage);
+        Run(args, report: TextWriter.Null, rethrow: true);
+    }
+
     static int Main(string[] args) => Run(args);
 
     static int Run(string[] args, ExtractionBatch? batch = null,
-        Action<TemplateEmitter.Variant>? checkedTemplate = null)
+        Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false)
     {
+        report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
         {
             Console.WriteLine(Usage + "\n       " + ImportResolver.Usage["Usage: ".Length..]);
@@ -338,17 +347,17 @@ internal static partial class Program
                     throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(identityPath)} differs from regenerated assembly, extractor or configuration metadata.");
                 if (symbolSource is not null && File.Exists(symbolPath) && File.ReadAllText(symbolPath) != symbolSource)
                     throw new InvalidDataException($"Stale or mismatched verification artifact: {CliPaths.Display(symbolPath)} differs from the regenerated PDB names and locations.\n  Assembly: {CliPaths.Display(assemblyPath)}\n  Method: {methods[0].FullName}");
-                Console.WriteLine("Valid: extraction artifacts match the assembly and recorded settings.");
-                Console.WriteLine($"  Assembly: {assemblyIdentity}");
-                Console.WriteLine($"  DLL: {CliPaths.Display(assemblyPath)}");
-                Console.WriteLine($"  Entry: {methods[0].FullName}");
-                Console.WriteLine($"  Profile: {profile.Name} ({profile.Architecture}, {profile.NativeWidth}-bit, {(profile.LittleEndian ? "little" : "big")}-endian)");
-                Console.WriteLine($"  Reachable methods: {methods.Length}");
-                Console.WriteLine($"  CIL: {CliPaths.Display(leanPath)}");
-                Console.WriteLine($"  Manifest: {CliPaths.Display(identityPath)}");
-                Console.WriteLine("  Matched: assembly identity and SHA-256, extractor SHA-256, configuration, metadata and regenerated CIL.");
+                report.WriteLine("Valid: extraction artifacts match the assembly and recorded settings.");
+                report.WriteLine($"  Assembly: {assemblyIdentity}");
+                report.WriteLine($"  DLL: {CliPaths.Display(assemblyPath)}");
+                report.WriteLine($"  Entry: {methods[0].FullName}");
+                report.WriteLine($"  Profile: {profile.Name} ({profile.Architecture}, {profile.NativeWidth}-bit, {(profile.LittleEndian ? "little" : "big")}-endian)");
+                report.WriteLine($"  Reachable methods: {methods.Length}");
+                report.WriteLine($"  CIL: {CliPaths.Display(leanPath)}");
+                report.WriteLine($"  Manifest: {CliPaths.Display(identityPath)}");
+                report.WriteLine("  Matched: assembly identity and SHA-256, extractor SHA-256, configuration, metadata and regenerated CIL.");
                 if (File.Exists(symbolPath))
-                    Console.WriteLine(symbolSource is null ? "  Symbols: not checked (no matching PDB)" : "  Symbols: matched the PDB");
+                    report.WriteLine(symbolSource is null ? "  Symbols: not checked (no matching PDB)" : "  Symbols: matched the PDB");
             }
             else
             {
@@ -364,20 +373,21 @@ internal static partial class Program
                 // Symbols from an earlier build must not outlive its PDB.
                 if (symbolSource is null) File.Delete(symbolPath);
                 else File.WriteAllText(symbolPath, symbolSource, new UTF8Encoding(false));
-                Console.WriteLine($"Extracted {methods.Length} reachable method{(methods.Length == 1 ? "" : "s")} into {CliPaths.Display(leanPath)}");
+                report.WriteLine($"Extracted {methods.Length} reachable method{(methods.Length == 1 ? "" : "s")} into {CliPaths.Display(leanPath)}");
             }
-            if (symbolNotice is not null) Console.WriteLine("  " + symbolNotice);
+            if (symbolNotice is not null) report.WriteLine("  " + symbolNotice);
             foreach (var name in initializedTypes)
-                Console.WriteLine($"  Caller assumption: {name} initialization completed successfully before invocation.");
+                report.WriteLine($"  Caller assumption: {name} initialization completed successfully before invocation.");
             foreach (var assumption in initializationAssumptions.Where(item => item.AssemblyIdentity != assemblyIdentity))
-                Console.WriteLine($"  Imported caller assumption: {assumption.AssemblyIdentity}::{assumption.TypeName} " +
+                report.WriteLine($"  Imported caller assumption: {assumption.AssemblyIdentity}::{assumption.TypeName} " +
                     "initialization completed successfully before invocation.");
             foreach (var name in staticValues)
-                Console.WriteLine($"  Caller assumption: {name} keeps the value its static constructor stored.");
+                report.WriteLine($"  Caller assumption: {name} keeps the value its static constructor stored.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
         }
         catch (Exception exception)
         {
+            if (rethrow) throw;
             CliDiagnostics.Write(exception, stage, args[0] is "check" or "verify" or "audit-library");
             return 1;
         }

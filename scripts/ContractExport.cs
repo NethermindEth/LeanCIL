@@ -301,7 +301,7 @@ partial class Program
     static PreparedContractExport PrepareContractExport(ContractExportManifest manifest, ModuleDefinition module,
         ContractExportRequest request)
     {
-        Run(["dotnet", ExtractorPath, "check", request.Artifact, "--assembly-path", manifest.Assembly]);
+        RunExtractor(["dotnet", ExtractorPath, "check", request.Artifact, "--assembly-path", manifest.Assembly]);
         ExtractionIdentity extraction = ExtractionIdentity.Read(request.Artifact);
         JsonElement identity = extraction.Root;
         FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>()
