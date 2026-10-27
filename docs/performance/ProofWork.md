@@ -63,8 +63,8 @@ elapsed time of the complete Math CI job.
 
 On main `c59b64e`, a further change replaces the 1,690 conjunction-group theorems with
 40 tables containing the same 21,804 input/outcome pairs, in the same order. Each table's
-Boolean checker has a proved implication to exact scalar-result equality. The kernel checks
-every row; one generic execution theorem then covers every member of the table, including
+Boolean checker has a proved implication to equality of the execution result with the observed
+runtime outcome. The kernel checks every row; one generic theorem covers every member, including
 narrowing and located arithmetic faults. No comparison is sampled or removed.
 
 The generated `correctness` statement is now universally quantified over that finite table,
@@ -73,8 +73,10 @@ its coverage. The compiled minimum contract, incorrect maximum rejection, seven 
 signature/identity checks and BigMul checks remain unchanged.
 
 At four shards on the same Windows machine, the slowest elaboration falls from 29.29s to
-21.32s (27.2%). Independent replay is more expensive with tables, so the elaboration saving
-must not be treated as a whole-job prediction. All positive proofs and independent replay pass.
+21.43s (26.8%). Independent replay rises from 6.35s to 8.08s, giving a combined reduction from
+35.64s to 29.51s (17.2%) for these sequential stages. The complete warm local Math suite moves
+from 58.08s to 56.49s; other stages and cache behavior dilute the proof-stage saving. These
+measurements do not predict hosted CI wall time. All positive proofs and independent replay pass.
 Larger conjunction groups, direct reflexivity terms, disabling unused-variable linting and
 single-threaded elaboration did not improve this workload and are not retained.
 

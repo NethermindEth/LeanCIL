@@ -152,14 +152,25 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         "/-- The scalar evaluator produces exactly the observed result or fault. -/\n" +
         "def boundaryMatches (test : BoundaryCase) : Bool :=\n" +
         $"  match {ForCase(evaluation)}, test.expected with\n" +
-        $"  | .ok (.i{resultWidth} actual), .ok expected => actual == expected\n" +
+        $"  | .ok (.i{resultWidth} actual), .ok expected => {Narrow(method.ReturnType, "actual")} == expected\n" +
         "  | .error actual, .error expected => actual == expected\n" +
         "  | _, _ => false\n" +
-        "/-- A successful table check establishes equality of the complete scalar outcome. -/\n" +
+        "/-- A checked scalar outcome gives exactly the observed result or located fault. -/\n" +
         "theorem boundaryMatches_correct (test : BoundaryCase) (checked : boundaryMatches test = true) :\n" +
-        $"  {ForCase(evaluation)} = test.expected.map CIL.Value.i{resultWidth} := by\n" +
+        $"  ({ForCase(invocation)}).map Prod.snd =\n" +
+        $"    (test.expected.map (fun r => [.scalar (.i{resultWidth} r)])).mapError\n" +
+        $"      (fun fault => ⟨0, {argc}, .arithmetic fault⟩) := by\n" +
         "  unfold boundaryMatches at checked\n" +
-        "  split at checked <;> simp_all [Except.map]\n" +
+        "  split at checked\n" +
+        "  · rename_i actual expected evaluated outcome\n" +
+        "    have same := beq_iff_eq.mp checked\n" +
+        "    simpa only [outcome, Except.map, Except.mapError, same] using\n" +
+        $"      (wrapper_success {caseArguments} actual evaluated)\n" +
+        "  · rename_i actual expected evaluated outcome\n" +
+        "    have same := beq_iff_eq.mp checked\n" +
+        "    simpa only [outcome, Except.map, Except.mapError, same] using\n" +
+        $"      (wrapper_fault {caseArguments} actual evaluated)\n" +
+        "  · simp at checked\n" +
         "#print axioms boundaryMatches_correct\n" +
         "/-- The kernel checks all recorded runtime comparisons. -/\n" +
         "theorem boundaryEvaluations : boundaryCases.all boundaryMatches = true := by decide +kernel\n" +
@@ -167,17 +178,10 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         "/-- Every recorded input executes with its observed result, narrowing and located fault. -/\n" +
         "theorem correctness : ∀ test ∈ boundaryCases,\n" +
         $"  ({ForCase(invocation)}).map Prod.snd =\n" +
-        $"    (test.expected.map (fun r => [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})])).mapError\n" +
+        $"    (test.expected.map (fun r => [.scalar (.i{resultWidth} r)])).mapError\n" +
         $"      (fun fault => ⟨0, {argc}, .arithmetic fault⟩) := by\n" +
         "  intro test member\n" +
-        "  have evaluated := boundaryMatches_correct test (List.all_eq_true.mp boundaryEvaluations test member)\n" +
-        "  cases outcome : test.expected with\n" +
-        "  | ok result =>\n" +
-        "    rw [outcome] at evaluated\n" +
-        $"    exact wrapper_success {caseArguments} result evaluated\n" +
-        "  | error fault =>\n" +
-        "    rw [outcome] at evaluated\n" +
-        $"    exact wrapper_fault {caseArguments} fault evaluated\n" +
+        "  exact boundaryMatches_correct test (List.all_eq_true.mp boundaryEvaluations test member)\n" +
         "#print axioms correctness\nend ExampleProof\n");
     var selector = $"IntegerMath::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     pending.Add((new GeneratedVerification(selector, proof, output), method.Name, boundaryCases.Count));
