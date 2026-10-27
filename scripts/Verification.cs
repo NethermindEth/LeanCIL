@@ -2136,7 +2136,6 @@ partial class Program : IDisposable
             if (Sha(Path.Combine(fresh, "Extracted.lean")) != extraction.Root.GetProperty("generatedSha256").GetString())
                 throw new InvalidOperationException("Inputs changed during verification");
             string[] importModules = StageImportSources(extraction, fresh);
-            File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + SessionLeanPath(session);
 
             var currentModules = SessionModules(session);
@@ -2152,29 +2151,24 @@ partial class Program : IDisposable
             // Full artifact identities include transitive support dependencies and every
             // olean part. Cached success is never inferred from an unsigned manifest.
             var environmentKey = ContentKey("certified-modules-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" + JsonSerializer.Serialize(currentModules));
-            var extractedKey = ContentKey("extraction-audit-v2\n" + environmentKey + "\n" +
-                Sha(Path.Combine(fresh, "Extracted.lean")) + "\n" + ExtractionAuditSource);
+            var extractedKey = ContentKey("extraction-audit-v3-direct-certificate\n" + environmentKey + "\n" +
+                Sha(Path.Combine(fresh, "Extracted.lean")));
             string? extractionPublication = null;
             if (RestoreSuccess(extractedKey, fresh))
             {
-                extractionAudit = File.ReadAllText(Path.Combine(fresh, "extraction-audit.txt"));
                 extractionCacheHits++;
                 CacheProgress("certified extraction: " + entry);
             }
             else
             {
-                foreach (var name in new[] { "Extracted", "ExtractionAudit" })
-                {
-                    stage?.Invoke(name == "ExtractionAudit" ? "extraction certificate audit" : "proof checking");
-                    var checkedOutput = Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
-                        leanPath: leanPath, progress: $"Checking {name}: {entry}");
-                    if (name == "ExtractionAudit") extractionAudit = checkedOutput;
-                }
+                // The native audit checks this theorem's exact type after independent kernel replay.
+                stage?.Invoke("proof checking");
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "Extracted.olean"),
+                    Path.Combine(fresh, "Extracted.lean")], leanPath: leanPath, progress: "Checking Extracted: " + entry);
                 var publication = Path.Combine(fresh, "extraction-cache");
                 Directory.CreateDirectory(publication);
                 foreach (var path in Directory.EnumerateFiles(fresh).Where(path =>
-                    Path.GetFileName(path).StartsWith("Extracted.olean", StringComparison.Ordinal) ||
-                    Path.GetFileName(path).StartsWith("ExtractionAudit.olean", StringComparison.Ordinal)))
+                    Path.GetFileName(path).StartsWith("Extracted.olean", StringComparison.Ordinal)))
                     File.Copy(path, Path.Combine(publication, Path.GetFileName(path)));
                 extractionPublication = publication;
             }
@@ -2250,12 +2244,12 @@ partial class Program : IDisposable
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
-            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"],
+            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted"],
                 .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(), .. proofRestored ? Array.Empty<string>() : ["Proof"]];
-            string[] auditModules = ["Proof", "ExtractionAudit",
+            string[] auditModules = ["Proof", "Extracted",
                 .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
             AuditRequest[] proofAudits =
-                [ProofTheorem(theorem, extraction), ExtractionCertificate("ExtractionAudit.valid")];
+                [ProofTheorem(theorem, extraction), ExtractionCertificate("Extracted.translation_valid")];
             AuditedOleans? audited = null;
             if (replay.Length > 0)
             {
@@ -2283,12 +2277,13 @@ partial class Program : IDisposable
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
             RequireAuditedModule(audited, "Proof", Path.Combine(fresh, "Proof.olean"));
-            RequireAuditedModule(audited, "ExtractionAudit", Path.Combine(fresh, "ExtractionAudit.olean"));
+            RequireAuditedModule(audited, "Extracted", Path.Combine(fresh, "Extracted.olean"));
             if (HasContractImports(extraction))
                 RequireAuditedModule(audited, "ExtractedImports", Path.Combine(fresh, "ExtractedImports.olean"));
             RequireAuditedConstants(audited);
             stage?.Invoke("extraction certificate audit");
             AuditedAxioms(audited.theorems[1]);
+            extractionAudit = AuditText(audited.theorems[1]);
             stage?.Invoke("theorem audit");
             axioms = AuditedAxioms(audited.theorems[0]);
             audit = AuditText(audited.theorems[0]);
@@ -2309,8 +2304,6 @@ partial class Program : IDisposable
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             if (extractionPublication is not null)
             {
-                extractionAudit += AuditText(audited.theorems[1]);
-                File.WriteAllText(Path.Combine(extractionPublication, "extraction-audit.txt"), extractionAudit);
                 PublishSuccess(extractedKey, extractionPublication);
             }
             fullResult = fullImportAudit?.Invoke(output, fresh, "Proof", leanPath);

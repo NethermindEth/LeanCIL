@@ -181,6 +181,28 @@ from eight rechecks (0.675s) to four (0.341s) on Windows. Total request times we
 measures eliminated work rather than an established overall latency improvement. The export
 and full-import mutation cohorts continue to check the post-callback integrity guards.
 
+`Tests/StandaloneCertificateReuse.cs` measures complete CLI requests against an already
+certified library, including source guards, native theorem audits and independent kernel
+replay. Standalone verification audits `Extracted.translation_valid` directly, eliminating
+the separate `ExtractionAudit` elaboration. The fixture checks frontend process counts for
+initial, unchanged, proof-edited, changed-extraction and `--fresh` requests. Pass a baseline
+extractor DLL and `--measure` to compare the previous wrapper-based implementation.
+
+| Windows request | Before | After | Frontend processes before → after |
+| --- | ---: | ---: | ---: |
+| Initial verification | 7.613s | 5.729s | 3 → 2 |
+| Unchanged verification | 1.784s | 1.783s | 0 → 0 |
+| Proof-only edit | 5.611s | 5.611s | 1 → 1 |
+| Changed extraction | 7.603s | 5.740s | 3 → 2 |
+| Fresh proof verification | 7.462s | 5.714s | 3 → 2 |
+
+The existing `Tests/TranslationAudit.cs` independently checks the direct certificate's exact
+type and rejects missing, unrelated, non-theorem and wrong-import-table declarations, as
+well as a definitionally equal but structurally different statement. CLI regressions retain
+unchecked-theorem and transitive-helper rejection, stale-report removal and changed-code
+proof failure. The remaining generated and proof modules still elaborate independently;
+this improvement does not introduce shared frontend environments or native snapshots.
+
 `Tests/TranslationScaling.cs` checks the unchanged extraction prefix once, then imports it
 into the compositional certificate and deliberately failing monolithic certificate. Its
 `--measure` option also checks both original complete files and records command timings

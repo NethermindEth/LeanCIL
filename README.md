@@ -130,6 +130,8 @@ Eligible standalone proofs, generated batches and consumer groups audit the envi
 by kernel replay, avoiding a second import. Consumer groups retain each request's theorem and
 dependency scope. Duplicate declarations and audits requiring source locations or module metadata
 retain the separate audit path; theorem and artifact checks still apply.
+Standalone verification directly audits the generated translation theorem, as consumer verification
+does, avoiding a separate wrapper compilation while retaining exact-type checks and kernel replay.
 
 List the methods of an assembly with `leancil list`, and check that generated files still match
 the assembly and extraction settings without running Lean with `leancil check`:

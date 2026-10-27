@@ -23,7 +23,7 @@ void Verified(params string[] options)
 
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
     if (report.GetProperty("schema").GetInt32() != 4 ||
-        !report.GetProperty("extractionAudit").GetString()!.Contains("ExtractionAudit.valid"))
+        !report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid"))
         throw new InvalidOperationException("Missing mandatory extraction certificate audit in report.");
 
     if (report.GetProperty("theorem").GetString() != "ExampleProof.correctness")
