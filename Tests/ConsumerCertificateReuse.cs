@@ -77,9 +77,15 @@ void Verify(string label, bool expectedBuild)
     if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid") ||
         report.GetProperty("libraryBuild").GetString() == "consumer-proof-cache")
         throw new InvalidOperationException("Missing fresh certificate audit: " + label);
+    var rechecks = stages.Where(stage => stage.GetProperty("stage").GetString() ==
+        "Rechecking consumer inputs").ToArray();
+    if (!measureOnly && rechecks.Length != 1)
+        throw new InvalidOperationException("Ordinary consumer verification must recheck inputs once: " + label);
     measurements.Add(new { label, seconds = timer.Elapsed.TotalSeconds, built, auditBuilt,
         certificateProcesses = certificates.Length,
         certificateSeconds = certificates.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()),
+        inputRechecks = rechecks.Length,
+        inputRecheckSeconds = rechecks.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()),
         replaySeconds = replay.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()), replayed });
     Console.WriteLine((measureOnly ? "MEASURE" : "PASS") + " consumer certificate " + label);
 }

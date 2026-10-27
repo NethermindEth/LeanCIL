@@ -170,6 +170,13 @@ request time was 4.976s before and 4.952s after, so this run establishes the eli
 but not a significant overall latency gain. Both measurements used an already certified
 library and retained independent replay of `Extracted` and `LeanCILProof`.
 
+Ordinary consumer requests regenerate the extraction and recheck their original inputs once
+after proof execution. Export and full-import callbacks retain another recheck after the
+callback executes. The fixture records these recheck counts and times: four requests dropped
+from eight rechecks (0.675s) to four (0.341s) on Windows. Total request times were noisy, so this
+measures eliminated work rather than an established overall latency improvement. The export
+and full-import mutation cohorts continue to check the post-callback integrity guards.
+
 `Tests/TranslationScaling.cs` checks the unchanged extraction prefix once, then imports it
 into the compositional certificate and deliberately failing monolithic certificate. Its
 `--measure` option also checks both original complete files and records command timings

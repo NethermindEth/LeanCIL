@@ -1431,6 +1431,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
         void Recheck(int[] members)
         {
+            var started = DateTimeOffset.UtcNow;
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
             CheckExtractions(members);
             members = Pending(members);
             if (members.Length == 0) return;
@@ -1445,6 +1447,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         Fail([i], new InvalidOperationException("Inputs changed during consumer verification"));
             }
             catch (Exception error) { Fail(members, error); }
+            Trace("Rechecking consumer inputs", started, root, elapsed.Elapsed,
+                members.Any(index => outcomes[index].Error is not null) ? 1 : 0, "", []);
         }
 
         live = Pending(all);
@@ -2009,18 +2013,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidOperationException("Sources changed in the fresh consumer build");
             if (checkedArtifacts != JsonSerializer.Serialize(ImportArtifactParts()))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
+            bool contractExportAudit = proceeding.Any(i => requests[i].ExportAudit is not null);
             foreach (int i in proceeding)
                 requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath, audits[i].Result);
             Dictionary<int, FullImportResult> fullResults = new();
             foreach (int i in proceeding)
                 if (fullImportAudit is not null)
                     fullResults.Add(i, fullImportAudit(outputs[i], session, requestModules[i], leanPath));
-            Recheck(proceeding);
-            proceeding = Pending(proceeding);
-            if (proceeding.Length == 0) return;
-            bool contractExportAudit = proceeding.Any(i => requests[i].ExportAudit is not null);
             if (contractExportAudit || fullImportAudit is not null)
             {
+                // Only callbacks can run further verification code after the first recheck.
+                Recheck(proceeding);
+                proceeding = Pending(proceeding);
+                if (proceeding.Length == 0) return;
                 RequireGeneratedArtifacts();
                 string auditKind = contractExportAudit ? "contract export audit" : "full import audit";
                 if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
