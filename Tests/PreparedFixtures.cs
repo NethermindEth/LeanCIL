@@ -10,7 +10,7 @@ var sourceDirectory = Path.Combine(directory, "sources");
 Directory.CreateDirectory(sourceDirectory);
 var source = Path.Combine(sourceDirectory, "Example.cs");
 var include = Path.Combine(sourceDirectory, "Included.cs");
-File.WriteAllText(source, "#!/usr/bin/env dotnet\n#:property PublishAot=false\n#:include Included.cs\n" +
+File.WriteAllText(source, "#!/usr/bin/env dotnet\n#:property PublishAot=false\n \t#:include Included.cs\n" +
     "Console.WriteLine(Example.Message + string.Join(\",\", args));\n");
 File.WriteAllText(include, "static class Example { public const string Message = \"prepared:\"; }\n");
 File.WriteAllText(Path.Combine(directory, ".editorconfig"), "# fixture analyzer configuration\n");

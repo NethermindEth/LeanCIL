@@ -59,7 +59,7 @@ partial class Program : IDisposable
             var source = File.ReadAllText(path);
             // Project references bring in an MSBuild graph not described by file-app includes.
             if (Regex.IsMatch(source, @"(?m)^[\t ]*#:project\b")) supported = false;
-            foreach (Match include in Regex.Matches(source, @"(?m)^#:include\s+([^\r\n]+)"))
+            foreach (Match include in Regex.Matches(source, @"(?m)^[\t ]*#:include\s+([^\r\n]+)"))
                 Add(Path.Combine(Path.GetDirectoryName(path)!, include.Groups[1].Value.Trim()));
         }
         Add(At(script));
