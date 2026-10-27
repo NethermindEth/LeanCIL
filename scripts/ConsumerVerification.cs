@@ -378,7 +378,7 @@ partial class Program
     // Each manifest is authenticated by its own independently trusted digest.
     TrustedSupport[] TrustedConsumerSupport(string root, SortedDictionary<string, string> inputs)
     {
-        if (freshLibrary) return [];
+        if (freshProofs || freshLibrary) return [];
         var paths = (Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT") ?? "")
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var digests = (Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") ?? "")
@@ -1325,7 +1325,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         Action<int, string>? stage, bool batch, int parallelism = 1, Action<int, ConsumerOutcome>? finished = null)
     {
         root = Path.GetFullPath(root);
-        if (requests.Any(request => request.ExportAudit is not null) && !freshLibrary)
+        if (requests.Any(request => request.ExportAudit is not null) && !freshProofs && !freshLibrary)
             throw new InvalidDataException("Contract exports require fresh independent verification.");
         var outcomes = requests.Select(_ => new ConsumerOutcome()).ToArray();
         bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected && outcomes[i].Report is null;
@@ -1431,6 +1431,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
         void Recheck(int[] members)
         {
+            var started = DateTimeOffset.UtcNow;
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
             CheckExtractions(members);
             members = Pending(members);
             if (members.Length == 0) return;
@@ -1445,6 +1447,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         Fail([i], new InvalidOperationException("Inputs changed during consumer verification"));
             }
             catch (Exception error) { Fail(members, error); }
+            Trace("Rechecking consumer inputs", started, root, elapsed.Elapsed,
+                members.Any(index => outcomes[index].Error is not null) ? 1 : 0, "", []);
         }
 
         live = Pending(all);
@@ -1645,6 +1649,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 File.Copy(Within(support, file), target, true);
             }
             if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
+            var certificateRestoration = new SortedDictionary<string, string>(restoredArtifacts, StringComparer.Ordinal);
             // Not part of restoredArtifacts: these are rebuilt only if stale and always replayed.
             if (supportKey.Length > 0)
             {
@@ -1658,6 +1663,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         var target = Within(session, file);
                         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                         File.Copy(Within(own, file), target, true);
+                        certificateRestoration[file] = dependentFiles[file];
                     }
                     if (dependentFiles.Count > 0) CacheProgress("certified extraction-dependent consumer modules");
                 }
@@ -1686,10 +1692,29 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // metaprograms must not redefine the source bytes accepted by this run.
             Stage(members, "extraction certificate audit");
             var certificateTarget = checkRejectedProofs ? "+ExtractionAudit:olean" : "+Extracted:olean";
-            var extractionAudit = Run(["lake", "build", certificateTarget], generatedPackage,
-                progress: "Checking consumer extraction certificate");
             string[] certificateModules = ["Extracted", .. components.Sources.Keys,
                 .. checkRejectedProofs ? new[] { "ExtractionAudit" } : []];
+            // Authenticated source-closed artifacts need no no-op Lake invocation. Their
+            // bytes are still fixed before proof code, then independently replayed and audited.
+            var restoredCertificate = certificateModules.All(module =>
+            {
+                var path = Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
+                var relative = Path.GetRelativePath(session, path).Replace('\\', '/');
+                var parts = ConsumerModuleParts(path);
+                return parts.ContainsKey(".olean") && certificateRestoration.ContainsKey(relative) &&
+                    certificateRestoration.ContainsKey(relative[..^".olean".Length] + ".trace") &&
+                    parts.All(part => certificateRestoration.TryGetValue(
+                        relative[..^".olean".Length] + part.Key, out var hash) && hash == part.Value);
+            }) && certificateRestoration.All(pair =>
+                File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
+            string extractionAudit;
+            if (restoredCertificate)
+            {
+                CacheProgress("certified consumer extraction preparation");
+                extractionAudit = "";
+            }
+            else extractionAudit = Run(["lake", "build", certificateTarget], generatedPackage,
+                progress: "Checking consumer extraction certificate");
             Dictionary<string, SortedDictionary<string, string>> ExtractionArtifacts() => certificateModules.ToDictionary(
                 module => module, module => ConsumerModuleParts(Path.Combine(generatedPackage,
                     ".lake/build/lib/lean", module.Replace('.', '/') + ".olean")), StringComparer.Ordinal);
@@ -1988,18 +2013,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidOperationException("Sources changed in the fresh consumer build");
             if (checkedArtifacts != JsonSerializer.Serialize(ImportArtifactParts()))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
+            bool contractExportAudit = proceeding.Any(i => requests[i].ExportAudit is not null);
             foreach (int i in proceeding)
                 requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath, audits[i].Result);
             Dictionary<int, FullImportResult> fullResults = new();
             foreach (int i in proceeding)
                 if (fullImportAudit is not null)
                     fullResults.Add(i, fullImportAudit(outputs[i], session, requestModules[i], leanPath));
-            Recheck(proceeding);
-            proceeding = Pending(proceeding);
-            if (proceeding.Length == 0) return;
-            bool contractExportAudit = proceeding.Any(i => requests[i].ExportAudit is not null);
             if (contractExportAudit || fullImportAudit is not null)
             {
+                // Only callbacks can run further verification code after the first recheck.
+                Recheck(proceeding);
+                proceeding = Pending(proceeding);
+                if (proceeding.Length == 0) return;
                 RequireGeneratedArtifacts();
                 string auditKind = contractExportAudit ? "contract export audit" : "full import audit";
                 if (prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))

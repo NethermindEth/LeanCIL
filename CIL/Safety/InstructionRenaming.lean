@@ -5,6 +5,7 @@ import CIL.Safety.MemoryInstructionRenaming
 
 Typed fields, aggregates, lanes and stack operations preserve successful values and named
 exceptions while accessing corresponding allocation identities.
+Primitive matching tries writes before reads to avoid reducing a write while rejecting a read lemma.
 -/
 
 namespace CIL.Safety
@@ -26,7 +27,8 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
   rw [mapping.unspecifiedOperands]
   split at observable
   · cases observable
-  · simp only [Bool.false_eq_true, ite_false, *]
+  · rename_i guard
+    rw [ite_eq_right guard, ite_eq_right guard]
     split at observable
     all_goals try simp (config := { singlePass := true }) only
       [List.map_cons, AllocationRenaming.value]
@@ -70,15 +72,15 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
            rw [related.sourceLimit]
            exact formed.form_below (checked_add_result_valid _ _ _ _ _ _ _ sourceStep)
          subst second)
+      | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+         intro first second sourceStep memoryRelated
+         exact .ok ⟨memoryRelated, rfl⟩)
       | (apply (related.checkedRead _ (by assumption) _ _ _ _).bindWithSuccess
          intro first second sourceStep same
          subst second)
       | (apply (related.checkedAccess _ (by assumption) _ _ _ _ _).bindWithSuccess
          intro first second sourceStep same
          subst second)
-      | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
-         intro first second sourceStep memoryRelated
-         exact .ok ⟨memoryRelated, rfl⟩)
       | (apply (related.loadSnapshot _ (by assumption) _).bindWithSuccess
          intro first second sourceStep same
          subst second

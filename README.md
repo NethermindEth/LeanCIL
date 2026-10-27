@@ -67,6 +67,10 @@ Core consumer tests batch fixed rejection cases to reuse certified-library setup
 source, environment and cache-invalidation checks isolated. See the reproducible comparison in
 [validation coverage](docs/VALIDATION.md).
 
+Edited consumer proofs reuse authenticated extraction preparation without starting a redundant
+certificate build. Rechecked proofs still independently replay and audit the generated certificate
+and check that proof elaboration leaves its compiled bytes unchanged.
+
 Prepared certified libraries include canonical fingerprints of their compiled modules.
 Consumer verification reuses them only while module bytes and the normalizer match,
 avoiding repeated framework serialization even when local receipts are disabled.
@@ -120,12 +124,14 @@ Verified: ExampleProof.correctness
           BitVec.toNat result = (BitVec.toNat x + BitVec.toNat y) % 2 ^ 64
 ```
 
-Every invocation validates the request's identity and required proof evidence. Authenticated caches can reuse unchanged certified builds; source/hash checks, audits and required kernel replay still apply. Use `--fresh` to disable local verification reuse. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
+Every invocation validates the request's identity and required proof evidence. Authenticated caches can reuse unchanged certified builds; source/hash checks, audits and required kernel replay still apply. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache; add `--rebuild-library` to rebuild the library. Release packages can download a package-pinned certified library on first use, with independent integrity checks and kernel replay. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
 Eligible standalone proofs, generated batches and consumer groups audit the environment returned
 by kernel replay, avoiding a second import. Consumer groups retain each request's theorem and
 dependency scope. Duplicate declarations and audits requiring source locations or module metadata
 retain the separate audit path; theorem and artifact checks still apply.
+Standalone verification directly audits the generated translation theorem, as consumer verification
+does, avoiding a separate wrapper compilation while retaining exact-type checks and kernel replay.
 
 List the methods of an assembly with `leancil list`, and check that generated files still match
 the assembly and extraction settings without running Lean with `leancil check`:
@@ -400,6 +406,10 @@ exact overloads and profile requirements.
 Pin LeanCIL as a Lake dependency and import the required `CIL.*` modules. Keep application specifications, method proofs and coverage policies in the consuming project. See [integration guidance](docs/MIGRATION.md) and [validation results](docs/VALIDATION.md).
 
 ## Verification CI
+
+CI builds the shared test runner and contract-export fixtures once per workflow. Suite jobs
+authenticate their manifests and compiled outputs before reuse; source, SDK or runtime changes
+fall back to a local build. Assembly mutation tests still rebuild their changed inputs.
 
 Pushes to `main` and manual runs execute every verification suite. Pull requests
 select suites from changed test entry points, referenced proofs, and their

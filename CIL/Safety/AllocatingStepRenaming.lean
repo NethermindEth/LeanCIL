@@ -1,4 +1,5 @@
 import CIL.Safety.StepTransport
+import CIL.Safety.StepComposition
 import CIL.Safety.StaticInstructionRenaming
 import CIL.Safety.StackAllocationRenaming
 
@@ -7,6 +8,7 @@ import CIL.Safety.StackAllocationRenaming
 
 Static storage and dynamic stack storage extend allocation maps while keeping retained frames,
 operand checks and named exceptions consistent with the actual checked dispatcher.
+The memory case reuses the checked step equation instead of simplifying the full dispatcher.
 -/
 
 namespace CIL.Safety
@@ -39,7 +41,7 @@ theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : Allocatio
         (step sourceBody (.memory operation) pc arguments sourceFrame stack source)
         (step targetBody (.memory operation) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, Bool.or_false, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step_memory_eq, mapping.unspecifiedOperands] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard

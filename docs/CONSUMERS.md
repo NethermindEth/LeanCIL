@@ -138,7 +138,8 @@ across method gates.
 - Modified or unsigned cache files fall back to rebuilding and kernel replay.
 - Republishing the same module set from a new session is a no-op, concurrent
   verifiers publish through an atomic rename, and a corrupt entry is replaced.
-- `--fresh` disables both consumer caches.
+- `--fresh` disables both consumer caches while retaining the source-bound CIL library cache.
+  Add `--rebuild-library` when the CIL library itself must be rebuilt.
 - These receipts are local to the machine; the existing certified CIL producer
   artifact can still supply the base library.
 

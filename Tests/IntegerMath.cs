@@ -106,7 +106,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
             instance = $"wrapper_fault {string.Join(" ", inputs.Select(Bits))} .{fault} (by rfl)";
         }
         claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = {expected}");
-        instances.Add($"theorem case{instances.Count} : {claims[^1]} :=\n  (congrArg (fun result => result.map Prod.snd) ({instance})).trans (by rfl)\n");
+        instances.Add($"({instance})");
     }
 
     var proof = Path.Combine(output, "BoundaryProof.lean");
@@ -131,22 +131,49 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var invocation = $"CIL.Safety.invoke Extracted.program 8 0 [{inputsLean}] Examples.empty";
     var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], [], 0⟩ [{stack}] Examples.empty = _\n";
     var instruction = $"(body := Extracted.method0) (op := .intrinsic (.scalar (.math .{operation} {width} {signed})) {argc})";
+    const int MaxBoundaryGroupSize = 16;
+    var groups = new List<string>();
+    string Grouped(int start, int count)
+    {
+        if (count > MaxBoundaryGroupSize)
+        {
+            var half = count / 2;
+            return $"⟨{Grouped(start, half)}, {Grouped(start + half, count - half)}⟩";
+        }
+        var name = $"boundaryGroup{groups.Count}";
+        groups.Add($"theorem {name} :\n" + Balanced(claims.GetRange(start, count), false) + " :=\n" +
+            Balanced(instances.GetRange(start, count), true) + "\n");
+        return name;
+    }
+    var correctness = Grouped(0, claims.Count);
+    var argumentsLean = string.Join(" ", variables);
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nimport Tests.WrapperProofs\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\n" +
-        $"theorem wrapper_success {binders} (r : CIL.W{resultWidth})\n" +
+        $"theorem wrapper_success_full {binders} (r : CIL.W{resultWidth})\n" +
         $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
         $"    {invocation} = .ok (Examples.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + prefix +
         $"  refine (CIL.Safety.run_next {instruction} (by rfl) (by rfl)\n" +
         $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], [], 0⟩ Examples.empty) from ?_)).trans (by rfl)\n" +
         "  math_wrapper_step evaluated\n" +
-        $"theorem wrapper_fault {binders} (fault : CIL.ArithmeticFault)\n" +
+        $"theorem wrapper_fault_full {binders} (fault : CIL.ArithmeticFault)\n" +
         $"    (evaluated : {evaluation} = .error fault) :\n" +
         $"    {invocation} = .error ⟨0, {argc}, .arithmetic fault⟩ := by\n" + prefix +
         $"  apply Tests.WrapperProofs.run_fault {instruction} (by rfl) (by rfl)\n" +
-        "  math_wrapper_step evaluated\n" + string.Join("\n", instances) +
-        // A balanced tree retains every claim without a linear-depth proof term.
+        "  math_wrapper_step evaluated\n" +
+        $"theorem wrapper_success {binders} (r : CIL.W{resultWidth})\n" +
+        $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
+        $"    ({invocation}).map Prod.snd = .ok [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})] :=\n" +
+        "  congrArg (fun result => result.map Prod.snd) " +
+        $"(wrapper_success_full {argumentsLean} r evaluated)\n" +
+        $"theorem wrapper_fault {binders} (fault : CIL.ArithmeticFault)\n" +
+        $"    (evaluated : {evaluation} = .error fault) :\n" +
+        $"    ({invocation}).map Prod.snd = .error ⟨0, {argc}, .arithmetic fault⟩ :=\n" +
+        "  congrArg (fun result => result.map Prod.snd) " +
+        $"(wrapper_fault_full {argumentsLean} fault evaluated)\n" +
+        string.Join("\n", groups) +
+        // Bounded groups retain the original balanced statement with fewer declarations.
         "\ntheorem correctness :\n" + Balanced(claims, false) + " :=\n" +
-        Balanced(Enumerable.Range(0, claims.Count).Select(i => "case" + i).ToArray(), true) + "\nend ExampleProof\n");
+        correctness + "\n#print axioms correctness\nend ExampleProof\n");
     var selector = $"IntegerMath::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     pending.Add((new GeneratedVerification(selector, proof, output), method.Name, claims.Count));
 }

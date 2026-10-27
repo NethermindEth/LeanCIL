@@ -57,9 +57,11 @@ void Verify(string label, bool expectedBuild)
         .SelectMany(File.ReadLines).Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
     string Transcript(JsonElement stage) => File.ReadAllText(Path.Combine(trace,
         stage.GetProperty("transcript").GetString()!));
-    var certificate = stages.Single(stage =>
-        stage.GetProperty("stage").GetString() == "Checking consumer extraction certificate");
-    var certificateBuild = Transcript(certificate);
+    var certificates = stages.Where(stage =>
+        stage.GetProperty("stage").GetString() == "Checking consumer extraction certificate").ToArray();
+    if (!measureOnly && certificates.Length != (expectedBuild ? 1 : 0))
+        throw new InvalidOperationException("Redundant or missing certificate preparation: " + label);
+    var certificateBuild = string.Join('\n', certificates.Select(Transcript));
     var built = System.Text.RegularExpressions.Regex.IsMatch(certificateBuild, @"\bBuilt Extracted(?:\s|$)");
     var auditBuilt = System.Text.RegularExpressions.Regex.IsMatch(certificateBuild,
         @"\bBuilt ExtractionAudit(?:\s|$)");
@@ -75,8 +77,15 @@ void Verify(string label, bool expectedBuild)
     if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid") ||
         report.GetProperty("libraryBuild").GetString() == "consumer-proof-cache")
         throw new InvalidOperationException("Missing fresh certificate audit: " + label);
+    var rechecks = stages.Where(stage => stage.GetProperty("stage").GetString() ==
+        "Rechecking consumer inputs").ToArray();
+    if (!measureOnly && rechecks.Length != 1)
+        throw new InvalidOperationException("Ordinary consumer verification must recheck inputs once: " + label);
     measurements.Add(new { label, seconds = timer.Elapsed.TotalSeconds, built, auditBuilt,
-        certificateSeconds = certificate.GetProperty("durationSeconds").GetDouble(),
+        certificateProcesses = certificates.Length,
+        certificateSeconds = certificates.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()),
+        inputRechecks = rechecks.Length,
+        inputRecheckSeconds = rechecks.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()),
         replaySeconds = replay.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()), replayed });
     Console.WriteLine((measureOnly ? "MEASURE" : "PASS") + " consumer certificate " + label);
 }
@@ -119,10 +128,15 @@ run_cmd do
   IO.FS.writeBinFile artifact (bytes.push 0)
 
 """);
-var replaced = Execute([.. cli, "verify", output, "--proof", proof, "--proof-root", package, "--fresh"]);
-if (replaced.Code != 1 || !replaced.Output.Contains("Extraction certificate artifacts changed during proof checking") ||
-    File.Exists(Path.Combine(output, "verified.json")))
-    throw new InvalidOperationException("Consumer proof replaced the prechecked extraction artifact: " + replaced.Output);
-Console.WriteLine("PASS consumer proof cannot replace the directly audited extraction artifact");
+foreach (string[] options in new string[][] { [], ["--fresh"] })
+{
+    File.WriteAllText(Path.Combine(output, "verified.json"), "stale report");
+    var replaced = Execute([.. cli, "verify", output, "--proof", proof, "--proof-root", package, .. options]);
+    if (replaced.Code != 1 ||
+        !replaced.Output.Contains("Extraction certificate artifacts changed during proof checking") ||
+        File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException("Consumer proof replaced the prechecked extraction artifact: " + replaced.Output);
+}
+Console.WriteLine("PASS consumer proof cannot replace restored or freshly checked extraction artifacts");
 File.WriteAllText(Path.Combine(directory, "timings.json"), JsonSerializer.Serialize(measurements, Json));
 Console.WriteLine("Measurements: " + Path.Combine(directory, "timings.json"));

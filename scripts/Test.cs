@@ -7,6 +7,18 @@
 
 using System.Text.Json;
 
+// A relocated shared runner must not execute an older suite plan after its source changes.
+var fixtureManifest = Environment.GetEnvironmentVariable(FixtureManifestEnvironment);
+if (!string.IsNullOrEmpty(fixtureManifest) &&
+    typeof(Program).Assembly.Location.StartsWith(Path.GetDirectoryName(Path.GetFullPath(fixtureManifest))! +
+        Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+    PreparedFixtureCommand("scripts/Test.cs", []) is null)
+{
+    Run(["dotnet", "run", "--file", At("scripts/Test.cs"), "--", .. args], streamOutput: true,
+        environment: new Dictionary<string, string> { [FixtureManifestEnvironment] = "" });
+    return;
+}
+
 string suite = args switch
 {
     [] => "all",
@@ -155,6 +167,8 @@ foreach (ExportSuite entry in ExportVerificationSuites.Plan())
 
 foreach (string project in projects.Distinct(StringComparer.Ordinal))
 {
+    if (project.EndsWith(".cs", StringComparison.Ordinal) && PreparedFixtureCommand(project, []) is not null)
+        continue;
     var command = new List<string>
     {
         "dotnet", "build", project, "-c", "Release",

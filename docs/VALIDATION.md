@@ -1,5 +1,24 @@
 # Validation coverage
 
+The workflow builds `scripts/Test.cs`, `Tests/ContractExport.cs` and
+`Tests/FullImportVerification.cs` once with Release analyzer checks. Their shared artifact is
+bound to a separately supplied manifest digest, the SDK/runtime, included sources, repository
+build configuration and the complete output file set. The workflow checks executable hashes
+before starting the runner. Nested fixture invocations check the same identity and use the
+compiled assembly; absent or incompatible preparation falls back to an ordinary local build.
+Modified example assemblies are still rebuilt by their mutation tests.
+Only relocated fixture binaries use the shared checkout override; source-built child scripts
+retain their own source root, including producers running against an isolated modified library.
+Configuration identity includes props, targets and configuration files along the entry script's
+directory chain through the checkout root. Fixtures with `#:project` references use an ordinary
+build because their external MSBuild source graph is not described by file-app includes.
+
+`Tests/PreparedFixtures.cs` covers arguments, included-source changes, nested configuration changes,
+unsupported project references, SDK/runtime mismatches,
+manifest tampering and added or modified output files. This targets the 66 runner builds,
+14 contract-export builds and ten full-import builds observed in run 40486409764. CI timing
+must confirm the net saving, including the shared producer and artifact transfer.
+
 Branch positions and prefix-bypass checks use indexes scoped to each body traversal, and call
 translation uses a method index scoped to the current ordered call graph. Original and specialized
 bodies have separate instruction indexes. Dependency invalidation traverses reverse import edges
@@ -141,11 +160,50 @@ framework once; its cost must be included when assessing a workload's amortized 
 
 `Tests/ConsumerCertificateReuse.cs` measures four independent verifier processes with
 distinct proof sources. Unchanged generated certificates retain their authenticated build
-outputs; changed extraction text and self-rehashed corrupt artifacts force rebuilding both
-`Extracted` and `ExtractionAudit`. Every successful request still replays both modules and
-the proof, and audits the certificate. Generated-source tampering remains rejected before
-receipt reuse. Pass a baseline extractor DLL and `--measure` to collect the same workload
-without requiring compilation reuse; results are written to `timings.json`.
+outputs and skip the otherwise redundant certificate `lake build` invocation. Reuse requires
+the complete certificate module parts and traces, unchanged authenticated restored artifacts,
+and the existing source/import closure binding. Changed extraction text and self-rehashed
+corrupt artifacts force rebuilding `Extracted`. Every successful request still independently
+replays `Extracted` and the proof and audits the certificate. Expected rejection groups retain
+the separate `ExtractionAudit` module. Generated-source tampering remains rejected before
+receipt reuse, and proof code cannot replace restored or freshly built certificate artifacts;
+both rejection paths remove a stale report. Pass a
+baseline extractor DLL and `--measure` to collect the same workload without requiring
+preparation reuse; process counts and elapsed times are written to `timings.json`.
+
+On Windows, the unchanged-extraction request removed one 0.186s certificate process; total
+request time was 4.976s before and 4.952s after, so this run establishes the eliminated work
+but not a significant overall latency gain. Both measurements used an already certified
+library and retained independent replay of `Extracted` and `LeanCILProof`.
+
+Ordinary consumer requests regenerate the extraction and recheck their original inputs once
+after proof execution. Export and full-import callbacks retain another recheck after the
+callback executes. The fixture records these recheck counts and times: four requests dropped
+from eight rechecks (0.675s) to four (0.341s) on Windows. Total request times were noisy, so this
+measures eliminated work rather than an established overall latency improvement. The export
+and full-import mutation cohorts continue to check the post-callback integrity guards.
+
+`Tests/StandaloneCertificateReuse.cs` measures complete CLI requests against an already
+certified library, including source guards, native theorem audits and independent kernel
+replay. Standalone verification audits `Extracted.translation_valid` directly, eliminating
+the separate `ExtractionAudit` elaboration. The fixture checks frontend process counts for
+initial, unchanged, proof-edited, changed-extraction and `--fresh` requests. Pass a baseline
+extractor DLL and `--measure` to compare the previous wrapper-based implementation.
+
+| Windows request | Before | After | Frontend processes before → after |
+| --- | ---: | ---: | ---: |
+| Initial verification | 7.613s | 5.729s | 3 → 2 |
+| Unchanged verification | 1.784s | 1.783s | 0 → 0 |
+| Proof-only edit | 5.611s | 5.611s | 1 → 1 |
+| Changed extraction | 7.603s | 5.740s | 3 → 2 |
+| Fresh proof verification | 7.462s | 5.714s | 3 → 2 |
+
+The existing `Tests/TranslationAudit.cs` independently checks the direct certificate's exact
+type and rejects missing, unrelated, non-theorem and wrong-import-table declarations, as
+well as a definitionally equal but structurally different statement. CLI regressions retain
+unchecked-theorem and transitive-helper rejection, stale-report removal and changed-code
+proof failure. The remaining generated and proof modules still elaborate independently;
+this improvement does not introduce shared frontend environments or native snapshots.
 
 `Tests/TranslationScaling.cs` checks the unchanged extraction prefix once, then imports it
 into the compositional certificate and deliberately failing monolithic certificate. Its
@@ -233,6 +291,28 @@ The runner builds the independent assemblies and the CIL library, then prepares 
 CI prepares the certified library once per workflow attempt and passes its immutable artifact ID, the run that uploaded it and its manifest digest from the producer job to the suite jobs. The producer first looks for a library already certified by a run of the same commit or by the main push of the checkout's first parent. Their own trusted code built that library and printed its digest, so the digest is read from the donor job's log, never from the artifact. `PrepareLibrary.cs --reuse` then rechecks the library key and source binding and kernel-replays the library; any mismatch, or no donor, builds from source. It does not restore compiled libraries from the GitHub Actions cache: a cache's source key and self-described file hashes cannot authenticate the native auditor or establish that compiled modules came from those sources.
 
 `dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` requires an empty or absent destination and publishes a freshly built library through a staging directory. Explicit reuse uses `--reuse <trusted-manifest-sha256>`; obtain this digest independently from a trusted producer, never by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing the destination. Rebuilding an existing library requires a separate output directory. `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests, missing producer digests, and preservation of unrelated destination files.
+
+When only Lean sources changed, `--incremental <donor-directory> <trusted-manifest-sha256>`
+authenticates every donor file before reusing its Lake build traces in a private copy. The runtime,
+compiler, kernel checker and build configuration must match. Changed and removed modules lose their
+compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure.
+The native auditor is relinked, every resulting module is kernel-replayed, and canonical fingerprints
+are regenerated before a new source-bound manifest is published. CI tries this after exact reuse,
+then falls back to a cold build if incremental preparation fails. `Tests/LibraryIncremental.cs`
+covers artifact tampering, incompatible identities/configuration, source removal and copy isolation.
+
+A Windows run with an `OleanAudit`-only comment edit rebuilt that module, its native object and the
+auditor executable: compilation took 4.31s, full replay 11.75s, fingerprints 7.89s, and total
+preparation 32.43s. Exact reuse took 12.36s. The donor's cold compilation on the same host/toolchain
+took 189.40s during fixture setup; that setup overlapped other short validation work, so this is not
+a controlled paired timing. All compiled module-part hashes matched the donor after the comment
+edit; the new certificate bound the changed source. These are local library timings, not full CI
+job measurements.
+
+`Tests/LibraryReplayCoverage.cs` uses a small synthetic producer manifest with a valid aggregate
+and an invalid theorem in a separate module. Both joint replay and its external-checker fallback
+must reject that declaration; checking only the aggregate is insufficient. The cache fixture runs
+this regression alongside the authentication tests.
 
 The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integer`, `narrow`, `primitive`, `division`, `checked`, `conversions`, `native`, `arguments`, `layout`, `copy`, `bits`, `enums`, `nested`, `instance`, `constructors`, `fsharp`, `math`, `divrem`, `unsafe`, `blocks`, `generics`, `loops`, `contracts`, `evidence`, `scaling`, `excluded`, `identity`, `labels`, `names`, `symbols`, `workspace`, `templates`, `callers`, `construction`, `outcomes` and `audit`. These partitions cover the same check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites (in CI, one job builds the extractor and example assembly with `--build-tools` and suite jobs set `LEANCIL_PREBUILT_TOOLS=true` to use them), retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
@@ -416,6 +496,9 @@ a concrete checked read observes the private initializer's bytes. It independent
 checks different source/target allocation counters and rejects changed retained initializers,
 wrong initializer kinds, overflowing bytes, aggregate lengths, unspecified vectors, invalid spans,
 unchanged local operands, changed call targets and an exhausted stack quota.
+Allocation-renaming proofs reuse checked step equations, and IntegerMath groups boundary
+proofs without changing their final statements. See the measured compilation and proof-work
+reductions in [Proof work measurements](performance/ProofWork.md).
 The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, a counted loop composed through its

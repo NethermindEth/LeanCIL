@@ -12,7 +12,7 @@ partial class Program
     sealed record BatchResult(string output, string proof, string theorem, string expect, string status, string stage,
         string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure);
 
-    const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--parallel count] [--results results.json]";
+    const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]";
 
     internal static int VerifyBatch(string[] args)
     {
@@ -20,11 +20,17 @@ partial class Program
             throw new ArgumentException(BatchUsage);
         var manifestPath = Path.GetFullPath(args[0]);
         var fresh = false;
+        var rebuildLibrary = false;
         int? parallelism = null;
         string? resultsPath = null;
         for (var index = 1; index < args.Length; index++)
         {
             var option = args[index];
+            if (option == "--rebuild-library" && !rebuildLibrary)
+            {
+                rebuildLibrary = true;
+                continue;
+            }
             if (option == "--fresh" && !fresh)
             {
                 fresh = true;
@@ -125,7 +131,7 @@ partial class Program
             return passed;
         }
 
-        using (var verification = new Program { freshLibrary = fresh })
+        using (var verification = new Program { freshProofs = fresh, freshLibrary = rebuildLibrary })
         {
             var verified = requests.Count == 0 ? [] : verification.VerifyConsumerRequests(proofRoot, requests, null, batch: true,
                 parallelism ?? Math.Max(1, Environment.ProcessorCount / 8), (k, outcome) => Print(indices[k], outcome));
@@ -171,12 +177,13 @@ partial class Program
     internal static void VerifyArtifacts(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
-            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]");
+            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]");
 
         var output = Path.GetFullPath(args[0]);
         string? proof = null;
         string? theorem = null;
         var fresh = false;
+        var rebuildLibrary = false;
         string? proofRoot = null;
         bool forceFull = false;
         Dictionary<string, string> fullArtifacts = new(StringComparer.Ordinal);
@@ -187,6 +194,11 @@ partial class Program
             if (option == "--force-full-verify" && !forceFull)
             {
                 forceFull = true;
+                continue;
+            }
+            if (option == "--rebuild-library" && !rebuildLibrary)
+            {
+                rebuildLibrary = true;
                 continue;
             }
             if (option == "--fresh" && !fresh)
@@ -266,7 +278,12 @@ partial class Program
             var identity = manifest.GetProperty("assemblyIdentity").GetString()!;
             var entry = manifest.GetProperty("entry").GetString()!;
 
-            using Program verification = new() { freshLibrary = fresh || forceFull, forceFullVerification = forceFull };
+            using Program verification = new()
+            {
+                freshProofs = fresh || forceFull,
+                freshLibrary = rebuildLibrary,
+                forceFullVerification = forceFull
+            };
             if (forceFull) verification.fullImportAudit = (artifact, session, module, leanPath) =>
                 verification.VerifyFullImports(artifact, session, module, theorem, leanPath, fullArtifacts);
             if (forceFull) verification.PreflightFullImports(output, fullArtifacts);

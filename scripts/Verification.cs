@@ -13,7 +13,20 @@ partial class Program : IDisposable
 #if LEANCIL_TOOL
     static string Root { get; } = Path.Combine(AppContext.BaseDirectory, "verification");
 #else
-    static string Root { get; } = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
+    static string Root { get; } = FixtureRoot() ??
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
+
+    // Only relocated binaries need the producer's source path replaced. Source-built children
+    // may belong to an isolated corpus and must retain their own Verification.cs location.
+    static string? FixtureRoot()
+    {
+        var root = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_ROOT");
+        var manifest = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_MANIFEST");
+        if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(manifest)) return null;
+        var directory = Path.GetDirectoryName(Path.GetFullPath(manifest))! + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return typeof(Program).Assembly.Location.StartsWith(directory, comparison) ? Path.GetFullPath(root) : null;
+    }
 #endif
 
     static string Source([CallerFilePath] string path = "") => path;
@@ -34,6 +47,94 @@ partial class Program : IDisposable
 
     const string ExtractorBuildEnvironment = "LEANCIL_PREPARED_EXTRACTOR";
     const string PrebuiltToolsEnvironment = "LEANCIL_PREBUILT_TOOLS";
+
+#if !LEANCIL_TOOL
+    const string FixtureManifestEnvironment = "LEANCIL_FIXTURE_MANIFEST";
+    const string FixtureDigestEnvironment = "LEANCIL_FIXTURE_MANIFEST_SHA256";
+    sealed record PreparedFixture(string Assembly, SortedDictionary<string, string> Inputs,
+        SortedDictionary<string, string> Outputs);
+    sealed record PreparedFixtures(string Sdk, string Runtime, Dictionary<string, PreparedFixture> Fixtures);
+    static string? fixtureSdk;
+
+    static SortedDictionary<string, string>? FixtureInputs(string script)
+    {
+        var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var supported = true;
+        void Add(string path)
+        {
+            path = Path.GetFullPath(path);
+            var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
+            if (relative.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+                throw new InvalidOperationException("Fixture input is outside the checkout: " + path);
+            if (!inputs.TryAdd(relative, Sha(path))) return;
+            if (Path.GetExtension(path) != ".cs") return;
+            var source = File.ReadAllText(path);
+            // Project references bring in an MSBuild graph not described by file-app includes.
+            if (Regex.IsMatch(source, @"(?m)^[\t ]*#:project\b")) supported = false;
+            foreach (Match include in Regex.Matches(source, @"(?m)^[\t ]*#:include\s+([^\r\n]+)"))
+                Add(Path.Combine(Path.GetDirectoryName(path)!, include.Groups[1].Value.Trim()));
+        }
+        Add(At(script));
+        var root = Path.TrimEndingDirectorySeparator(Root);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        for (var directory = Path.GetDirectoryName(Path.GetFullPath(script, Root)); directory is not null;
+             directory = Path.GetDirectoryName(directory))
+        {
+            foreach (var path in Directory.EnumerateFiles(directory))
+                  if (Path.GetExtension(path).ToLowerInvariant() is ".props" or ".targets" ||
+                      Path.GetFileName(path).ToLowerInvariant() is "global.json" or "nuget.config" or ".editorconfig")
+                    Add(path);
+            if (directory.Equals(root, comparison)) break;
+        }
+        return supported ? inputs : null;
+    }
+
+    // The workflow pins this manifest's digest separately from its downloadable artifact.
+    static string[]? PreparedFixtureCommand(string script, string[] arguments)
+    {
+        var manifest = Environment.GetEnvironmentVariable(FixtureManifestEnvironment);
+        if (string.IsNullOrEmpty(manifest)) return null;
+        if (Sha(manifest) != Environment.GetEnvironmentVariable(FixtureDigestEnvironment))
+            throw new InvalidOperationException("Prepared fixture manifest changed");
+        var prepared = JsonSerializer.Deserialize<PreparedFixtures>(File.ReadAllText(manifest))!;
+        var relative = Path.GetRelativePath(Root, Path.GetFullPath(script, Root)).Replace('\\', '/');
+        if (!prepared.Fixtures.TryGetValue(relative, out var fixture)) return null;
+        fixtureSdk ??= Run(["dotnet", "--version"]).Trim();
+        if (prepared.Runtime != RuntimeInformation.RuntimeIdentifier || prepared.Sdk != fixtureSdk ||
+            FixtureInputs(relative) is not { } inputs || !Same(fixture.Inputs, inputs)) return null;
+        var directory = Path.GetDirectoryName(manifest)!;
+        directory = Path.GetFullPath(directory);
+        var assemblyDirectory = Path.GetDirectoryName(Path.GetFullPath(fixture.Assembly, directory))!;
+        if (!Directory.Exists(assemblyDirectory) ||
+            !fixture.Outputs.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(
+                Directory.EnumerateFiles(assemblyDirectory, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(directory, path).Replace('\\', '/'))))
+            throw new InvalidOperationException("Prepared fixture output set changed: " + relative);
+        foreach (var (path, hash) in fixture.Outputs)
+        {
+            var full = Path.GetFullPath(path, directory);
+            if (!full.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(full) || Sha(full) != hash)
+                throw new InvalidOperationException("Prepared fixture output changed: " + path);
+        }
+        if (!fixture.Outputs.ContainsKey(fixture.Assembly))
+            throw new InvalidOperationException("Prepared fixture assembly is missing from the manifest");
+        return ["dotnet", Path.GetFullPath(fixture.Assembly, directory), .. arguments];
+    }
+
+    static string[] ReusePreparedFixture(string[] command, string cwd)
+    {
+        if (command.Length < 4 || command[0] != "dotnet" || command[1] != "run" || command[2] != "--file")
+            return command;
+        var separator = Array.IndexOf(command, "--", 4);
+        var options = command[4..(separator < 0 ? command.Length : separator)];
+        // Only the repository's standard Release build options match the producer.
+        if (options.Length != 0 && !options.SequenceEqual(new[] { "-c", "Release", "--no-build",
+                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" })) return command;
+        return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd),
+            separator < 0 ? [] : command[(separator + 1)..]) ?? command;
+    }
+#endif
 
     static string[] FixtureCommand(string script, string[] arguments, bool prepared)
     {
@@ -94,7 +195,7 @@ partial class Program : IDisposable
     Func<string, string, string, string, FullImportResult>? fullImportAudit { get; set; }
     readonly AsyncLocal<bool> referenceOnlyContext = new();
     bool referenceOnlyAuthoring { get => referenceOnlyContext.Value; set => referenceOnlyContext.Value = value; }
-    bool UseSuccessCache => !referenceOnlyAuthoring && !freshLibrary &&
+    bool UseSuccessCache => !referenceOnlyAuthoring && !freshProofs && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
     static string SuccessCacheRoot => Path.Combine(Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
@@ -436,7 +537,8 @@ partial class Program : IDisposable
     {
         var traceStage = progress;
 #if LEANCIL_TOOL
-        // CLI output is a stable interface; progress belongs to the repository runner.
+        // Keep stdout stable and redirected stderr quiet, but explain long interactive builds.
+        if (!Console.IsErrorRedirected && progress is not null) Console.Error.WriteLine("START " + progress);
         progress = null;
         streamOutput = false;
 #endif
@@ -444,6 +546,9 @@ partial class Program : IDisposable
         var summary = streamOutput && progress is not null ? new ProgressSummary(progress) : null;
         streamOutput |= progress is not null;
         var args = command.ToArray();
+#if !LEANCIL_TOOL
+        args = ReusePreparedFixture(args, cwd ?? Root);
+#endif
         var start = new ProcessStartInfo(args[0])
         {
             WorkingDirectory = cwd ?? Root,
@@ -460,6 +565,10 @@ partial class Program : IDisposable
 
         if (leanPath is not null)
             start.Environment["LEAN_PATH"] = leanPath;
+#if !LEANCIL_TOOL
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(FixtureManifestEnvironment)))
+            start.Environment["LEANCIL_FIXTURE_ROOT"] = Root;
+#endif
         foreach (var (name, value) in environment ?? new Dictionary<string, string>())
             start.Environment[name] = value;
 
@@ -483,7 +592,16 @@ partial class Program : IDisposable
             TextWriter.Synchronized(new StreamWriter(Path.Combine(traceDirectory, transcript), false, Encoding.UTF8));
         var stdout = CaptureOutput(process.StandardOutput, streamOutput ? Console.Out : TextWriter.Null, summary, traceWriter);
         var stderr = CaptureOutput(process.StandardError, streamOutput ? Console.Error : TextWriter.Null, summary, traceWriter);
-        if (summary is null) process.WaitForExit();
+        if (summary is null)
+        {
+#if LEANCIL_TOOL
+            if (!Console.IsErrorRedirected && traceStage is not null)
+                while (!process.WaitForExit(10_000))
+                    Console.Error.WriteLine($"PROGRESS {traceStage} ({elapsed.Elapsed.TotalSeconds:F0}s)");
+            else
+#endif
+                process.WaitForExit();
+        }
         else
             while (!process.WaitForExit(10_000)) summary.Report();
 
@@ -491,6 +609,10 @@ partial class Program : IDisposable
         var error = stderr.GetAwaiter().GetResult();
         if (progress is not null)
             Console.WriteLine($"END {progress} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
+#if LEANCIL_TOOL
+        if (!Console.IsErrorRedirected && traceStage is not null)
+            Console.Error.WriteLine($"END {traceStage} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
+#endif
         Trace(traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, start.WorkingDirectory, elapsed.Elapsed, process.ExitCode, transcript, args);
         return (process.ExitCode, output + error, output, error);
     }
@@ -564,8 +686,102 @@ partial class Program : IDisposable
         left.Count == right.Count && left.All(p => right.TryGetValue(p.Key, out var value) && value == p.Value);
 
     bool freshLibrary { get; init; }
+    bool freshProofs { get; init; }
+    string? incrementalLibrary { get; init; }
+    string? incrementalDigest { get; init; }
     string? libraryKey;
     string? libraryBuild;
+
+    // This descriptor is distributed inside the installed CLI, not read from the downloaded archive.
+    sealed record CertifiedReleaseAsset(int Schema, string Tag, string Runtime, string LibraryKey,
+        string Archive, long ArchiveBytes, string ArchiveSha256, string ManifestSha256);
+
+    static string ReleaseAssetName(string runtime, string key) => $"leancil-library-{runtime}-{key}.zip";
+
+    static bool ValidReleaseAsset(CertifiedReleaseAsset asset, string key) => asset.Schema == 1 &&
+        asset.Runtime == RuntimeInformation.RuntimeIdentifier && asset.LibraryKey == key &&
+        asset.Tag is not null && Regex.IsMatch(asset.Tag, @"\A[A-Za-z0-9][A-Za-z0-9._-]*\z") &&
+        asset.Archive == ReleaseAssetName(asset.Runtime, key) &&
+        asset.ArchiveBytes is > 0 and <= 4L * 1024 * 1024 * 1024 &&
+        asset.ArchiveSha256 is not null && Regex.IsMatch(asset.ArchiveSha256, @"\A[0-9a-f]{64}\z") &&
+        asset.ManifestSha256 is not null && Regex.IsMatch(asset.ManifestSha256, @"\A[0-9a-f]{64}\z");
+
+    // A failed download never becomes a cache entry. The package-pinned archive digest is checked
+    // before extraction, then the producer manifest and full kernel replay authorize local reuse.
+    bool DownloadReleasedLibrary(string cached, string key)
+    {
+#if LEANCIL_TOOL
+        var descriptor = Path.Combine(Root, $"certified-library-release.{RuntimeInformation.RuntimeIdentifier}.json");
+        if (!File.Exists(descriptor)) return false;
+        var staging = cached + ".download-" + Guid.NewGuid().ToString("N");
+        var archive = staging + ".zip";
+        try
+        {
+            var asset = JsonSerializer.Deserialize<CertifiedReleaseAsset>(File.ReadAllBytes(descriptor));
+            if (asset is null || !ValidReleaseAsset(asset, key)) return false;
+            if (!Console.IsErrorRedirected) Console.Error.WriteLine("Downloading certified Lean verification library");
+            using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            var uri = new Uri("https://github.com/NethermindEth/LeanCIL/releases/download/" +
+                Uri.EscapeDataString(asset.Tag) + "/" + Uri.EscapeDataString(asset.Archive));
+            using var response = client.GetAsync(uri, System.Net.Http.HttpCompletionOption.ResponseHeadersRead,
+                    timeout.Token)
+                .GetAwaiter().GetResult();
+            response.EnsureSuccessStatusCode();
+            using (var input = response.Content.ReadAsStream(timeout.Token))
+            using (var output = File.Create(archive))
+            {
+                var buffer = new byte[1024 * 1024];
+                int count;
+                while ((count = input.ReadAsync(buffer, timeout.Token).AsTask().GetAwaiter().GetResult()) != 0)
+                {
+                    if (output.Length + count > asset.ArchiveBytes)
+                        throw new InvalidDataException("Released archive exceeds its package-pinned size");
+                    output.Write(buffer, 0, count);
+                }
+            }
+            InstallReleasedLibrary(archive, staging, cached, asset);
+            return true;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or
+            JsonException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException)
+        {
+            if (!Console.IsErrorRedirected)
+                Console.Error.WriteLine("Certified library download unavailable; building from sources. " +
+                    error.Message);
+            return false;
+        }
+        finally
+        {
+            try { File.Delete(archive); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            try { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+#else
+        return false;
+#endif
+    }
+
+    void InstallReleasedLibrary(string archive, string staging, string cached, CertifiedReleaseAsset asset)
+    {
+        var (key, _) = LibraryIdentity(CommonInputs());
+        if (!ValidReleaseAsset(asset, key) || new FileInfo(archive).Length != asset.ArchiveBytes ||
+            Sha(archive) != asset.ArchiveSha256)
+            throw new InvalidDataException("Release archive identity or integrity mismatch");
+        using (var zip = System.IO.Compression.ZipFile.OpenRead(archive))
+            if (zip.Entries.Count > 100_000 || zip.Entries.Sum(entry => entry.Length) > 8L * 1024 * 1024 * 1024)
+                throw new InvalidDataException("Released library exceeds extraction limits");
+        // ZipFile rejects entries escaping the destination; the entire extracted tree must match the manifest.
+        System.IO.Compression.ZipFile.ExtractToDirectory(archive, staging);
+        if (ReusePreparedLibrary(staging, asset.ManifestSha256) is null)
+            throw new InvalidDataException("Released library identity or integrity mismatch");
+        var manifestBytes = File.ReadAllBytes(Path.Combine(staging, "cache-manifest.json"));
+        File.WriteAllBytes(Path.Combine(staging, "cache-receipt.hmac"),
+            HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifestBytes).ToArray()));
+        if (Directory.Exists(cached)) Directory.Delete(cached, true);
+        Directory.Move(staging, cached);
+    }
 
     static SortedDictionary<string, string> LibrarySources(SortedDictionary<string, string> snapshot) =>
         new(snapshot.Where(p => p.Key.StartsWith("CIL/", StringComparison.Ordinal) ||
@@ -830,7 +1046,7 @@ partial class Program : IDisposable
             }
             var supplied = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY");
             var suppliedDigest = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256");
-            // A supplied certified library is not a local cache, so --fresh still uses it.
+            // A supplied certified library is not a local cache, so --rebuild-library still uses it.
             if (!string.IsNullOrWhiteSpace(supplied))
             {
                 var openStarted = DateTimeOffset.UtcNow;
@@ -850,16 +1066,24 @@ partial class Program : IDisposable
                 manifest = cachedManifest;
                 libraryBuild = "cache";
             }
+            else if (!fresh && DownloadReleasedLibrary(cached, libraryKey))
+            {
+                library = cached;
+                manifest = ReadManifest(cached) ?? throw new InvalidDataException("Missing downloaded library manifest");
+                libraryBuild = "release";
+            }
             else
             {
                 library = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
                 ownsLibrary = true;
                 Directory.CreateDirectory(library);
+                if (incrementalLibrary is not null)
+                    StageIncrementalLibrary(library, incrementalLibrary, incrementalDigest, sources);
                 foreach (var (name, hash) in sources)
                 {
                     var destination = Path.Combine(library, name);
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    File.Copy(At(name), destination);
+                    File.Copy(At(name), destination, true);
                     if (Sha(destination) != hash)
                         throw new InvalidOperationException("Library source changed while copying: " + name);
                 }
@@ -870,11 +1094,15 @@ partial class Program : IDisposable
                     progress: "Building fresh Lean verification library");
                 var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
                 var compiledLibrary = Path.Combine(library, ".lake/build/lib/lean");
-                if (!ReplayModulesJointly(library, [.. ModuleArtifacts(library).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
+                string[] modules = [.. ModuleArtifacts(library).Keys.Select(ModuleName)
+                    .Distinct().Order(StringComparer.Ordinal)];
+                if (!ReplayModulesJointly(library, modules,
                     compiledLibrary, "Joint kernel replay of fresh Lean verification library"))
-                    Run([checker, "CIL"], library, compiledLibrary, streamOutput: true,
+                    Run([checker, .. modules], library, compiledLibrary, streamOutput: true,
                         progress: "Kernel replay of fresh Lean verification library");
-                libraryBuild = "fresh";
+                if (!Same(sources, LibrarySources(CommonInputs())))
+                    throw new InvalidDataException("Library sources changed during preparation");
+                libraryBuild = incrementalLibrary is null ? "fresh" : "incremental";
                 manifest = CacheFiles(library);
                 if (!fresh)
                 {
@@ -1088,6 +1316,50 @@ partial class Program : IDisposable
             .Select(directory => Path.Combine(directory, module.Replace('.', '/') + ".olean"))
             .FirstOrDefault(File.Exists) ?? throw new FileNotFoundException("Missing compiled module: " + module);
 
+    // Authenticate all donor bytes before Lake sees its traces. Lake checks source hashes and
+    // transitive build dependencies; changed/deleted modules cannot retain a compiled output.
+    void StageIncrementalLibrary(string destination, string donor, string? trustedDigest,
+        SortedDictionary<string, string> sources)
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(donor, "cache-manifest.json"));
+        if (string.IsNullOrWhiteSpace(trustedDigest) ||
+            Convert.ToHexStringLower(SHA256.HashData(bytes)) != trustedDigest)
+            throw new InvalidDataException("Incremental donor manifest digest mismatch");
+        var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(bytes)
+            ?? throw new InvalidDataException("Missing incremental donor manifest");
+        var donorSources = LibrarySources(manifest);
+        var (donorKey, _) = LibraryIdentity(donorSources);
+        static bool Configuration(string name) => !name.EndsWith(".lean", StringComparison.Ordinal);
+        if (!Same(new(donorSources.Where(pair => Configuration(pair.Key)).ToDictionary(), StringComparer.Ordinal),
+                new(sources.Where(pair => Configuration(pair.Key)).ToDictionary(), StringComparer.Ordinal)))
+            throw new InvalidDataException("Incremental donor build configuration changed");
+        if (!CopyCertifiedLibrary(donor, destination, trustedDigest, donorKey, donorSources) ||
+            !ValidCertifiedLibrary(destination, trustedDigest, donorKey, donorSources))
+            throw new InvalidDataException("Incremental donor identity or integrity mismatch");
+        var changed = donorSources.Keys.Union(sources.Keys, StringComparer.Ordinal)
+            .Where(name => donorSources.GetValueOrDefault(name) != sources.GetValueOrDefault(name)).ToArray();
+        foreach (var source in changed)
+        {
+            if (!source.EndsWith(".lean", StringComparison.Ordinal))
+                throw new InvalidDataException("Unsupported incremental source: " + source);
+            if (!sources.ContainsKey(source)) File.Delete(Path.Combine(destination, source));
+            var module = source[..^".lean".Length];
+            foreach (var subtree in new[] { ".lake/build/lib/lean/", ".lake/build/ir/" })
+            foreach (var artifact in manifest.Keys.Where(name => name.StartsWith(subtree + module + ".",
+                         StringComparison.Ordinal)))
+                File.Delete(Path.Combine(destination, artifact));
+        }
+        // Re-link the native auditor from current checked sources, and regenerate source-bound metadata.
+        foreach (var artifact in manifest.Keys.Where(name => name.StartsWith(".lake/build/bin/",
+                     StringComparison.Ordinal)))
+            File.Delete(Path.Combine(destination, artifact));
+        foreach (var name in new[] { CertifiedFingerprintsName, "cache-manifest.json", "cache-receipt.hmac",
+                     "library-key.txt" })
+            File.Delete(Path.Combine(destination, name));
+        Console.WriteLine($"Incremental library: {changed.Length} changed, added or removed sources; " +
+            "Lake will rebuild their dependent closure before full kernel replay.");
+    }
+
     string PrepareLibrary(string destination, string? trustedDigest = null)
     {
         if (trustedDigest is not null)
@@ -1205,9 +1477,12 @@ partial class Program : IDisposable
             !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal));
         if (!ValidCertifiedLibrary(directory, trustedDigest, key, sources)) return null;
         var compiled = Path.Combine(directory, ".lake/build/lib/lean");
-        if (!ReplayModulesJointly(directory, [.. ModuleArtifacts(directory).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
+        string[] modules = [.. ModuleArtifacts(directory).Keys.Select(ModuleName)
+            .Distinct().Order(StringComparer.Ordinal)];
+        if (!ReplayModulesJointly(directory, modules,
             compiled, "Joint kernel replay of reused Lean verification library"))
-            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), "CIL"], directory, compiled,
+            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"),
+                .. modules], directory, compiled,
                 streamOutput: true, progress: "Kernel replay of reused Lean verification library");
         return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
     }
@@ -1796,7 +2071,7 @@ partial class Program : IDisposable
                 throw new InvalidOperationException("Proof inputs changed during verification");
         }
 
-        // Use a source-bound build; CI and --fresh bypass the local library cache.
+        // Use a source-bound build; CI and --rebuild-library bypass the local library cache.
         stage?.Invoke("Lean library build");
         var session = Library(before);
         HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
@@ -1873,7 +2148,6 @@ partial class Program : IDisposable
             if (Sha(Path.Combine(fresh, "Extracted.lean")) != extraction.Root.GetProperty("generatedSha256").GetString())
                 throw new InvalidOperationException("Inputs changed during verification");
             string[] importModules = StageImportSources(extraction, fresh);
-            File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
             var leanPath = fresh + Path.PathSeparator + SessionLeanPath(session);
 
             var currentModules = SessionModules(session);
@@ -1889,29 +2163,24 @@ partial class Program : IDisposable
             // Full artifact identities include transitive support dependencies and every
             // olean part. Cached success is never inferred from an unsigned manifest.
             var environmentKey = ContentKey("certified-modules-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" + JsonSerializer.Serialize(currentModules));
-            var extractedKey = ContentKey("extraction-audit-v2\n" + environmentKey + "\n" +
-                Sha(Path.Combine(fresh, "Extracted.lean")) + "\n" + ExtractionAuditSource);
+            var extractedKey = ContentKey("extraction-audit-v3-direct-certificate\n" + environmentKey + "\n" +
+                Sha(Path.Combine(fresh, "Extracted.lean")));
             string? extractionPublication = null;
             if (RestoreSuccess(extractedKey, fresh))
             {
-                extractionAudit = File.ReadAllText(Path.Combine(fresh, "extraction-audit.txt"));
                 extractionCacheHits++;
                 CacheProgress("certified extraction: " + entry);
             }
             else
             {
-                foreach (var name in new[] { "Extracted", "ExtractionAudit" })
-                {
-                    stage?.Invoke(name == "ExtractionAudit" ? "extraction certificate audit" : "proof checking");
-                    var checkedOutput = Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, name + ".olean"), Path.Combine(fresh, name + ".lean")],
-                        leanPath: leanPath, progress: $"Checking {name}: {entry}");
-                    if (name == "ExtractionAudit") extractionAudit = checkedOutput;
-                }
+                // The native audit checks this theorem's exact type after independent kernel replay.
+                stage?.Invoke("proof checking");
+                Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "Extracted.olean"),
+                    Path.Combine(fresh, "Extracted.lean")], leanPath: leanPath, progress: "Checking Extracted: " + entry);
                 var publication = Path.Combine(fresh, "extraction-cache");
                 Directory.CreateDirectory(publication);
                 foreach (var path in Directory.EnumerateFiles(fresh).Where(path =>
-                    Path.GetFileName(path).StartsWith("Extracted.olean", StringComparison.Ordinal) ||
-                    Path.GetFileName(path).StartsWith("ExtractionAudit.olean", StringComparison.Ordinal)))
+                    Path.GetFileName(path).StartsWith("Extracted.olean", StringComparison.Ordinal)))
                     File.Copy(path, Path.Combine(publication, Path.GetFileName(path)));
                 extractionPublication = publication;
             }
@@ -1987,12 +2256,12 @@ partial class Program : IDisposable
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
-            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted", "ExtractionAudit"],
+            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted"],
                 .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(), .. proofRestored ? Array.Empty<string>() : ["Proof"]];
-            string[] auditModules = ["Proof", "ExtractionAudit",
+            string[] auditModules = ["Proof", "Extracted",
                 .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
             AuditRequest[] proofAudits =
-                [ProofTheorem(theorem, extraction), ExtractionCertificate("ExtractionAudit.valid")];
+                [ProofTheorem(theorem, extraction), ExtractionCertificate("Extracted.translation_valid")];
             AuditedOleans? audited = null;
             if (replay.Length > 0)
             {
@@ -2020,12 +2289,13 @@ partial class Program : IDisposable
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
             RequireAuditedModule(audited, "Proof", Path.Combine(fresh, "Proof.olean"));
-            RequireAuditedModule(audited, "ExtractionAudit", Path.Combine(fresh, "ExtractionAudit.olean"));
+            RequireAuditedModule(audited, "Extracted", Path.Combine(fresh, "Extracted.olean"));
             if (HasContractImports(extraction))
                 RequireAuditedModule(audited, "ExtractedImports", Path.Combine(fresh, "ExtractedImports.olean"));
             RequireAuditedConstants(audited);
             stage?.Invoke("extraction certificate audit");
             AuditedAxioms(audited.theorems[1]);
+            extractionAudit = AuditText(audited.theorems[1]);
             stage?.Invoke("theorem audit");
             axioms = AuditedAxioms(audited.theorems[0]);
             audit = AuditText(audited.theorems[0]);
@@ -2046,8 +2316,6 @@ partial class Program : IDisposable
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             if (extractionPublication is not null)
             {
-                extractionAudit += AuditText(audited.theorems[1]);
-                File.WriteAllText(Path.Combine(extractionPublication, "extraction-audit.txt"), extractionAudit);
                 PublishSuccess(extractedKey, extractionPublication);
             }
             fullResult = fullImportAudit?.Invoke(output, fresh, "Proof", leanPath);
