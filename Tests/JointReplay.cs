@@ -57,6 +57,24 @@ Compile("JointHidden", """
     })
     """);
 
+// Deferred kernel checks: a forged definition under a well-typed theorem, and a well-typed
+// theorem resting on a forged one, must still fail replay.
+Compile("JointForgedDefinition", """
+    import Lean
+    set_option debug.skipKernelTC true
+    run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.defnDecl {
+      name := `JointForgedDefinition.value
+      levelParams := []
+      type := Lean.mkConst ``Nat
+      value := Lean.mkConst ``Bool.true
+      hints := .abbrev
+      safety := .safe
+    })
+    """);
+Compile("JointForgedDefinitionUse", "import JointForgedDefinition\n" +
+    "theorem JointForgedDefinitionUse.same : JointForgedDefinition.value = JointForgedDefinition.value := rfl\n");
+Compile("JointForgedChain", "import JointForged\ntheorem JointForgedChain.use : False := JointForged.false\n");
+
 void CheckFusedReplay()
 {
     var shadow = Path.Combine(root, "Shadow");
@@ -191,6 +209,18 @@ void CheckReplays(bool native)
         throw new InvalidOperationException("Forged declaration was not attributed to its module: " +
             string.Join(", ", failures.Keys));
     Console.WriteLine("PASS forged declaration rejected and attributed to its module");
+
+    string[] forgedDefinition = ["JointForgedDefinition", "JointForgedDefinitionUse"];
+    if (verification.ReplayModulesJointly(root, forgedDefinition, root, "Joint replay check"))
+        throw new InvalidOperationException("Joint replay accepted a forged definition under a valid theorem");
+    var definitionFailures = verification.ReplayConsumerModules(root, forgedDefinition, root);
+    if (definitionFailures.Keys.SingleOrDefault() != "JointForgedDefinition" ||
+        !definitionFailures["JointForgedDefinition"].Contains("JointForgedDefinition.value"))
+        throw new InvalidOperationException("Forged definition was not rejected by name: " +
+            string.Join(", ", definitionFailures.Keys));
+    if (verification.ReplayModulesJointly(root, ["JointForged", "JointForgedChain"], root, "Joint replay check"))
+        throw new InvalidOperationException("Joint replay accepted a valid theorem resting on a forged one");
+    Console.WriteLine("PASS concurrent checks reject forged definitions and forged theorem dependencies");
 }
 
 var originalReplayByte = verification.bootstrapReplaySource[0];
