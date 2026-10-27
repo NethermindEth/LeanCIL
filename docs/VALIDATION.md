@@ -160,7 +160,8 @@ and the existing source/import closure binding. Changed extraction text and self
 corrupt artifacts force rebuilding `Extracted`. Every successful request still independently
 replays `Extracted` and the proof and audits the certificate. Expected rejection groups retain
 the separate `ExtractionAudit` module. Generated-source tampering remains rejected before
-receipt reuse, and proof code cannot replace even a restored certificate artifact. Pass a
+receipt reuse, and proof code cannot replace restored or freshly built certificate artifacts;
+both rejection paths remove a stale report. Pass a
 baseline extractor DLL and `--measure` to collect the same workload without requiring
 preparation reuse; process counts and elapsed times are written to `timings.json`.
 

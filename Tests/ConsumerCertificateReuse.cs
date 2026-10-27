@@ -122,10 +122,15 @@ run_cmd do
   IO.FS.writeBinFile artifact (bytes.push 0)
 
 """);
-var replaced = Execute([.. cli, "verify", output, "--proof", proof, "--proof-root", package]);
-if (replaced.Code != 1 || !replaced.Output.Contains("Extraction certificate artifacts changed during proof checking") ||
-    File.Exists(Path.Combine(output, "verified.json")))
-    throw new InvalidOperationException("Consumer proof replaced the prechecked extraction artifact: " + replaced.Output);
-Console.WriteLine("PASS consumer proof cannot replace the directly audited extraction artifact");
+foreach (string[] options in new string[][] { [], ["--fresh"] })
+{
+    File.WriteAllText(Path.Combine(output, "verified.json"), "stale report");
+    var replaced = Execute([.. cli, "verify", output, "--proof", proof, "--proof-root", package, .. options]);
+    if (replaced.Code != 1 ||
+        !replaced.Output.Contains("Extraction certificate artifacts changed during proof checking") ||
+        File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException("Consumer proof replaced the prechecked extraction artifact: " + replaced.Output);
+}
+Console.WriteLine("PASS consumer proof cannot replace restored or freshly checked extraction artifacts");
 File.WriteAllText(Path.Combine(directory, "timings.json"), JsonSerializer.Serialize(measurements, Json));
 Console.WriteLine("Measurements: " + Path.Combine(directory, "timings.json"));
