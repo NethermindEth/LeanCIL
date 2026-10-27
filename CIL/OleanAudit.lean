@@ -160,10 +160,14 @@ def contracts : List Name :=
   [`CIL.Safety.MethodContract.Holds, `CIL.Safety.OutcomeContract.Holds,
     `CIL.Safety.OutcomeContract.HoldsCLR]
 
-/-- The context for pretty-printing and source ranges; no elaboration runs in it. -/
+/-- The context for pretty-printing and source ranges; no elaboration runs in it.
+With no open namespaces or aliases only full names resolve, so `pp.fullNames` prints the same text
+without resolving every name suffix against the environment. -/
 def coreContext : Core.Context :=
   { fileName := "<leancil-audit>", fileMap := default, maxHeartbeats := 200000 * 1000,
-    maxRecDepth := 4096, options := ({} : Options).insert `pp.fieldNotation (.ofBool false) }
+    maxRecDepth := 4096,
+    options := ({} : Options).insert `pp.fieldNotation (.ofBool false)
+      |>.insert `pp.fullNames (.ofBool true) }
 
 /-- Runs a `CoreM` action against the imported environment. -/
 def run (env : Environment) (x : CoreM α) : IO α := do
