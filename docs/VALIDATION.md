@@ -219,7 +219,7 @@ initialization and copies. It rejects missing initialization assumptions, mutabl
 repeated stores, branches and address-taking during initialization. Independent Lean checks
 reject forged scalar signedness, width and literal evidence. It runs in the evidence suite.
 
-The repository pins .NET SDK **10.0.402** and Lean **4.35.0**. The checks below cover semantic behavior, extracted contracts, artifact integrity and rejection cases.
+The repository pins .NET SDK **10.0.403** and Lean **4.35.0**. The checks below cover semantic behavior, extracted contracts, artifact integrity and rejection cases.
 
 ```sh
 lake build
