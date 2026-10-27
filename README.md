@@ -65,6 +65,10 @@ after each case and require that case's own expected diagnostics. The evidence s
 regression modules directly against the certified library, avoiding another CIL build.
 See [validation coverage](docs/VALIDATION.md) for reproducible measurements.
 
+Integer Math boundary tests encode all 21,804 runtime comparisons as checked data. A generic
+execution proof covers every table entry, preserving narrowing and exact arithmetic faults
+without elaborating a separate execution-proof application for each input.
+
 Core consumer tests batch fixed rejection cases to reuse certified-library setup while keeping
 source, environment and cache-invalidation checks isolated. See the reproducible comparison in
 [validation coverage](docs/VALIDATION.md).

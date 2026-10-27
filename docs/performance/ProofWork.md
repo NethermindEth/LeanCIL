@@ -59,6 +59,25 @@ above isolate generated-file compilation, exclude preparation and extraction, an
 baseline shard assignment fixed even though source lengths change. They do not establish the
 elapsed time of the complete Math CI job.
 
+### Checked boundary tables
+
+On main `c59b64e`, a further change replaces the 1,690 conjunction-group theorems with
+40 tables containing the same 21,804 input/outcome pairs, in the same order. Each table's
+Boolean checker has a proved implication to exact scalar-result equality. The kernel checks
+every row; one generic execution theorem then covers every member of the table, including
+narrowing and located arithmetic faults. No comparison is sampled or removed.
+
+The generated `correctness` statement is now universally quantified over that finite table,
+rather than a large conjunction. This changes the internal test theorem's presentation, not
+its coverage. The compiled minimum contract, incorrect maximum rejection, seven forged
+signature/identity checks and BigMul checks remain unchanged.
+
+At four shards on the same Windows machine, the slowest elaboration falls from 29.29s to
+21.32s (27.2%). Independent replay is more expensive with tables, so the elaboration saving
+must not be treated as a whole-job prediction. All positive proofs and independent replay pass.
+Larger conjunction groups, direct reflexivity terms, disabling unused-variable linting and
+single-threaded elaboration did not improve this workload and are not retained.
+
 ## Evidence investigation (#424)
 
 The initial investigation retained no Evidence optimization; the dispatch follow-up below
