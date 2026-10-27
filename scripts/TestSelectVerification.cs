@@ -28,7 +28,7 @@ void Test(string name, Action action)
 Test("longest-first preserves selection", () =>
 {
     var selected = VerificationSelection.Select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"]);
-    Equal(VerificationSelection.Schedule(selected), ["unsafe", "math", "loops"]);
+    Equal(VerificationSelection.Schedule(selected), ["math", "unsafe", "loops"]);
     Equal(VerificationSelection.Schedule(All()).Order(StringComparer.Ordinal), All());
     Equal(VerificationSelection.Schedule(["loops", "newlongsuite"]), ["newlongsuite", "loops"]);
     Equal(VerificationSelection.Schedule([]), []);
@@ -376,6 +376,7 @@ Test("required gate, all 192 actual Bash status combinations", () =>
     foreach (var planned in statuses)
     foreach (var selected in new[] { "true", "false", "" })
     foreach (var prepared in statuses)
+    foreach (var tools in statuses)
     foreach (var result in statuses)
     {
         var command = new ProcessStartInfo(bash)
@@ -387,16 +388,17 @@ Test("required gate, all 192 actual Bash status combinations", () =>
         command.Environment["SELECT_RESULT"] = planned;
         command.Environment["HAS_SUITES"] = selected;
         command.Environment["PREPARE_RESULT"] = prepared;
+        command.Environment["TOOLS_RESULT"] = tools;
         command.Environment["SUITES_RESULT"] = result;
         using var process = Process.Start(command) ?? throw new InvalidOperationException("Could not start Bash");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         process.WaitForExit();
-        var expected = planned == "success" && ((selected, prepared, result) is
-            ("true", "success", "success") or ("false", "skipped", "skipped"));
+        var expected = planned == "success" && ((selected, prepared, tools, result) is
+            ("true", "success", "success", "success") or ("false", "skipped", "skipped", "skipped"));
         string transcript = stdout.GetAwaiter().GetResult() + stderr.GetAwaiter().GetResult();
         Require((process.ExitCode == 0) == expected,
-            $"Unexpected gate result: {planned}/{selected}/{prepared}/{result}\n{transcript}");
+            $"Unexpected gate result: {planned}/{selected}/{prepared}/{tools}/{result}\n{transcript}");
     }
 });
 Test("same-run certified library binding and observability", () =>
@@ -404,10 +406,14 @@ Test("same-run certified library binding and observability", () =>
     string workflow = File.ReadAllText(Path.Combine(root, ".github/workflows/verification.yml"));
     const string dollar = "$";
     foreach (string text in new[] {
-        "needs: [select, prepare]", "needs: [select, prepare, suites]",
+        "needs: [select, prepare, tools]", "needs: [select, prepare, tools, suites]",
+        "artifact-ids: " + dollar + "{{ needs.tools.outputs.artifact-id }}", "LEANCIL_PREBUILT_TOOLS: true",
         "LEANCIL_CERTIFIED_LIBRARY_SHA256: " + dollar + "{{ needs.prepare.outputs.manifest-sha256 }}",
         "artifact-ids: " + dollar + "{{ needs.prepare.outputs.artifact-id }}",
-        "artifact-id: " + dollar + "{{ steps.library-artifact.outputs.artifact-id }}",
+        "run-id: " + dollar + "{{ needs.prepare.outputs.artifact-run-id }}",
+        "artifact-id: " + dollar + "{{ steps.certify.outputs.reused == 'true' && steps.donor.outputs.artifact-id || " +
+            "steps.library-artifact.outputs.artifact-id }}",
+        "--reuse \"" + dollar + "DONATED_SHA256\"",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
         "include-hidden-files: true", "max-parallel: 8", "artifacts/verification-traces/",
         "matrix.suite == 'imports' && 90", "startsWith(matrix.suite, 'exports') && 120 || 30" })

@@ -43,6 +43,9 @@ partial class Program
         finally { File.Delete(path); }
     }
 
+    // More Lean processes add memory pressure without shortening a typical fixture batch.
+    const int MaxBatchShards = 8;
+
     void VerifyGeneratedBatch(string assembly, string identity, IReadOnlyList<GeneratedVerification> requests,
         string profile = "scalar")
     {
@@ -74,7 +77,7 @@ partial class Program
                 return "";
             }, RegexOptions.Multiline);
         }
-        var bodies = new StringBuilder();
+        var bodies = new string[requests.Count];
         var hashes = new string[requests.Count];
         ExtractGeneratedBatch("extract", identity, requests, profile);
         for (var i = 0; i < requests.Count; i++)
@@ -83,13 +86,26 @@ partial class Program
             if (HasContractImports(ExtractionIdentity.Read(request.Output)))
                 throw new InvalidDataException("Generated batch verification does not support contract imports.");
             hashes[i] = Sha(Path.Combine(request.Output, "identity.json"));
-            bodies.AppendLine($"namespace BatchCase{i}");
-            bodies.AppendLine(Body(File.ReadAllText(Path.Combine(request.Output, "Extracted.lean"))));
+            var body = new StringBuilder();
+            body.AppendLine($"namespace BatchCase{i}");
+            body.AppendLine(Body(File.ReadAllText(Path.Combine(request.Output, "Extracted.lean"))));
             var proofSource = File.ReadAllText(request.Proof);
-            if (ImportsSymbols(proofSource)) bodies.AppendLine(File.ReadAllText(SymbolsFor(request.Output)));
-            bodies.AppendLine(Body(proofSource));
-            bodies.AppendLine($"end BatchCase{i}");
+            if (ImportsSymbols(proofSource)) body.AppendLine(File.ReadAllText(SymbolsFor(request.Output)));
+            body.AppendLine(Body(proofSource));
+            body.AppendLine($"end BatchCase{i}");
+            bodies[i] = body.ToString();
         }
+        // One Lean process elaborates its file on one core, so disjoint shards elaborate in parallel
+        // and are replayed and audited together. Largest fixtures go first to the least loaded shard.
+        var shardCount = Math.Min(requests.Count, Math.Min(Environment.ProcessorCount, MaxBatchShards));
+        var shardOf = new int[requests.Count];
+        var loads = new long[shardCount];
+        foreach (var i in Enumerable.Range(0, requests.Count).OrderByDescending(i => bodies[i].Length))
+        {
+            shardOf[i] = Array.IndexOf(loads, loads.Min());
+            loads[shardOf[i]] += bodies[i].Length;
+        }
+        string[] shardModules = [.. Enumerable.Range(0, shardCount).Select(shard => $"Shard{shard}.Batch")];
         var support = imports.Where(n => n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
         if (support.Length > 0)
             Run(["lake", "build", .. support], session, progress: "Building generated batch dependencies");
@@ -110,35 +126,53 @@ partial class Program
                     Run([checker, .. changed], leanPath: leanPath, progress: "Kernel replay of generated batch dependencies");
                 certifiedModules = currentModules;
             }
-            var batchSource = string.Join("\n", imports.Select(n => "import " + n)) + "\n" + bodies;
-            var source = Path.Combine(fresh, "Batch.lean");
-            File.WriteAllText(source, batchSource);
+            var header = string.Join("\n", imports.Select(n => "import " + n)) + "\n";
+            var sources = new string[shardCount];
+            for (var shard = 0; shard < shardCount; shard++)
+            {
+                sources[shard] = Path.Combine(fresh, $"Shard{shard}", "Batch.lean");
+                Directory.CreateDirectory(Path.GetDirectoryName(sources[shard])!);
+                File.WriteAllText(sources[shard], header + string.Concat(Enumerable.Range(0, requests.Count)
+                    .Where(i => shardOf[i] == shard).Select(i => bodies[i])));
+            }
             // Building the batch runs its proofs' code; this session's compiled modules must survive it unchanged.
             var bound = OleanHashes(fresh, session);
-            Run(["lean", "--root=" + fresh, "-o", Path.Combine(fresh, "Batch.olean"), source],
-                leanPath: leanPath, progress: $"Checking {requests.Count} generated fixtures");
+            var failures = new Exception?[shardCount];
+            Parallel.For(0, shardCount, shard =>
+            {
+                try
+                {
+                    var olean = Path.ChangeExtension(sources[shard], ".olean");
+                    Run(["lean", "--root=" + fresh, "-o", olean, sources[shard]], leanPath: leanPath,
+                        progress: $"Checking {requests.Count} generated fixtures, shard {shard + 1} of {shardCount}");
+                }
+                catch (Exception error) { failures[shard] = error; }
+            });
+            if (failures.FirstOrDefault(error => error is not null) is { } failure)
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
             var built = OleanHashes(fresh, session);
-            RequireOnlyAdded(bound, built, "Batch");
+            RequireOnlyAdded(bound, built, [.. shardModules.Select(module => module.Replace('.', '/'))]);
             AuditRequest[] proofAudits = [.. Enumerable.Range(0, requests.Count).SelectMany(i => new[] {
                 ProofTheorem($"BatchCase{i}.{requests[i].Theorem}"),
                 ExtractionCertificate($"BatchCase{i}.Extracted.translation_valid", $"BatchCase{i}.") })];
             AuditedOleans? audited = null;
             if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
             {
-                try { audited = AuditOleans(leanPath, ["Batch"], proofAudits, replayTargets: ["Batch"]); }
+                try { audited = AuditOleans(leanPath, shardModules, proofAudits, replayTargets: shardModules); }
                 catch (InvalidOperationException) { }
             }
             if (audited is null)
             {
-                if (!ReplayModulesJointly(session, ["Batch"], leanPath,
+                if (!ReplayModulesJointly(session, shardModules, leanPath,
                     $"Kernel replay of {requests.Count} generated fixtures"))
-                    Run([checker, "Batch"], leanPath: leanPath,
+                    Run([checker, .. shardModules], leanPath: leanPath,
                         progress: $"Kernel replay of {requests.Count} generated fixtures");
-                audited = AuditOleans(leanPath, ["Batch"], proofAudits);
+                audited = AuditOleans(leanPath, shardModules, proofAudits);
             }
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
-            RequireAuditedModule(audited, "Batch", Path.Combine(fresh, "Batch.olean"));
+            for (var shard = 0; shard < shardCount; shard++)
+                RequireAuditedModule(audited, shardModules[shard], Path.ChangeExtension(sources[shard], ".olean"));
             ExtractGeneratedBatch("check", identity, requests, profile);
             // Every input is checked after the last subprocess, including inputs for earlier fixtures.
             var commonAfter = CommonInputs();
@@ -156,7 +190,8 @@ partial class Program
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
                 reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
-                    libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(source), theorem,
+                    libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes,
+                    Sha(sources[shardOf[i]]), theorem,
                     staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction),
                     contractDependencies: DeploymentDependencies(extraction),
                     initializationAssumptions: InitializationAssumptions(extraction));
@@ -164,7 +199,7 @@ partial class Program
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)
             {
-                File.Copy(source, Path.Combine(requests[i].Output, "Batch.lean"), overwrite: true);
+                File.Copy(sources[shardOf[i]], Path.Combine(requests[i].Output, "Batch.lean"), overwrite: true);
                 File.WriteAllText(Path.Combine(requests[i].Output, "verified.json"), JsonSerializer.Serialize(reports[i], Json) + "\n");
             }
         }

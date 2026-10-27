@@ -1374,7 +1374,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Stage(members, "extraction integrity");
             Parallel.ForEach(Pending(members).GroupBy(i => outputs[i], comparer), parallel, group =>
             {
-                try { Run(["dotnet", ExtractorPath, "check", group.Key]); }
+                try { RunExtractor(["dotnet", ExtractorPath, "check", group.Key]); }
                 catch (Exception error) { Fail(group, error); }
             });
         }

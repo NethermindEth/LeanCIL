@@ -33,6 +33,7 @@ partial class Program : IDisposable
     bool extractorBuilt;
 
     const string ExtractorBuildEnvironment = "LEANCIL_PREPARED_EXTRACTOR";
+    const string PrebuiltToolsEnvironment = "LEANCIL_PREBUILT_TOOLS";
 
     static string[] FixtureCommand(string script, string[] arguments, bool prepared)
     {
@@ -1297,6 +1298,19 @@ partial class Program : IDisposable
             "  Method: " + identity.GetProperty("entry").GetString();
     }
 
+    // Inside the extractor, its own commands run in this process instead of starting another runtime.
+    static void RunExtractor(string[] command)
+    {
+#if LEANCIL_TOOL
+        if (command is ["dotnet", var path, .. var arguments] && path == ExtractorPath)
+        {
+            Nethermind.LeanCIL.Program.RunQuietly(arguments);
+            return;
+        }
+#endif
+        Run(command);
+    }
+
     static string[] Extract(string mode, string assembly, string? identity, string entry, string output, string profile = "scalar") =>
         ["dotnet", ExtractorPath, mode, assembly, entry, output, profile,
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
@@ -1694,11 +1708,13 @@ partial class Program : IDisposable
         return result;
     }
 
-    // An untrusted build may add only its own module's oleans; any other change voids the replayed set.
-    static void RequireOnlyAdded(SortedDictionary<string, string> bound, SortedDictionary<string, string> built, string module)
+    // An untrusted build may add only its own modules' oleans; any other change voids the replayed set.
+    static void RequireOnlyAdded(SortedDictionary<string, string> bound, SortedDictionary<string, string> built,
+        params string[] modules)
     {
         if (bound.Any(pair => !built.TryGetValue(pair.Key, out var hash) || hash != pair.Value) ||
-            built.Keys.Any(name => !bound.ContainsKey(name) && !name.StartsWith(module + ".olean", StringComparison.Ordinal)))
+            built.Keys.Any(name => !bound.ContainsKey(name) &&
+                !modules.Any(module => name.StartsWith(module + ".olean", StringComparison.Ordinal))))
             throw new InvalidOperationException("Compiled artifacts changed during verification");
     }
 
@@ -1735,7 +1751,7 @@ partial class Program : IDisposable
         if (check)
         {
             var old = JsonSerializer.Deserialize<Report>(File.ReadAllText(reportPath)) ?? throw new InvalidOperationException("Missing report");
-            Run(Extract("check", assembly, identity, entry, output, profile));
+            RunExtractor(Extract("check", assembly, identity, entry, output, profile));
 
             if (old.schema != 4 || string.IsNullOrWhiteSpace(old.extractionAudit) || !Same(old.inputs, Inputs(proof, settings)) || old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
                 old.theorem != theorem || old.assemblySha256 != Sha(assembly) ||
@@ -1750,7 +1766,7 @@ partial class Program : IDisposable
         File.Delete(reportPath);
         stage?.Invoke("extraction integrity");
         if (existingArtifacts)
-            Run(["dotnet", ExtractorPath, "check", output]);
+            RunExtractor(["dotnet", ExtractorPath, "check", output]);
         else EnsureExtractorBuilt();
 
         if (!existingArtifacts)
@@ -2038,7 +2054,8 @@ partial class Program : IDisposable
 
             // Bind the report only after confirming inputs stayed unchanged.
             stage?.Invoke("extraction integrity");
-            Run(existingArtifacts ? ["dotnet", ExtractorPath, "check", output] : Extract("check", assembly, identity, entry, output, profile));
+            RunExtractor(existingArtifacts ? ["dotnet", ExtractorPath, "check", output]
+                : Extract("check", assembly, identity, entry, output, profile));
 
             RequireOriginalProofSources();
             if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))

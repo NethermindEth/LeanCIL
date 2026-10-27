@@ -70,7 +70,8 @@ Building the author source elaborates producer code with the verifier's
 privileges: macros, `initialize` and `run_cmd` can read and write any file the
 verifier can, start processes, and use the network. Hashes cannot contain that.
 The verifier snapshots the inputs, caller artifacts and module resolution once
-before and once after each run that elaborates producer-derived code. These
+before and once after each run that elaborates producer-derived code. Caller
+artifacts are compared by size and modification time rather than hashed. These
 snapshots detect accidental mutation only; they omit the trusted toolchain. Run
 full verification of an untrusted bundle in an isolated environment: a
 read-only toolchain, extractor and caller, no network, and a workspace

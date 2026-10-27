@@ -13,7 +13,7 @@ partial class Program
         var identityPath = Path.Combine(artifact, "identity.json");
         var sourceBytes = File.ReadAllBytes(sourcePath);
         var identityBytes = File.ReadAllBytes(identityPath);
-        Run(["dotnet", ExtractorPath, "check", artifact]);
+        RunExtractor(["dotnet", ExtractorPath, "check", artifact]);
         if (Sha(sourcePath) != ContractInterface.Hash(sourceBytes) ||
             Sha(identityPath) != ContractInterface.Hash(identityBytes))
             throw new InvalidDataException("Profile family reference changed during its extraction check.");

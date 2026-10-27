@@ -189,7 +189,7 @@ partial class Program
     {
         string originalLeanPath = CallerLeanPath(callerLeanPath, callerSession);
         string callerRoots = WithoutToolchain(originalLeanPath);
-        SortedDictionary<string, string> acceptedCaller = FullModuleArtifacts(callerRoots);
+        SortedDictionary<string, string> acceptedCaller = FullModuleStamps(callerRoots);
         SortedDictionary<string, string> originalModules = FullModulePaths(originalLeanPath);
         CheckFullResolution(callerSession, originalLeanPath, originalModules);
         JsonElement[] bindings = ExtractionIdentity.Read(output).Imports.OrderBy(BindingSlot).ToArray();
@@ -234,11 +234,11 @@ partial class Program
             foreach ((string directory, string digest) in bundles) ContractSourceBundle.Validate(directory, digest);
         }
         // One snapshot after each run that elaborates producer-derived code.
-        // It detects accidental, not hostile, mutation.
+        // It detects accidental, not hostile, mutation, so caller artifacts are stamped, not hashed.
         void RequireCallerUnchanged()
         {
             RecheckOriginal();
-            RequireFullArtifacts(acceptedCaller);
+            RequireFullStamps(acceptedCaller);
             RequireFullModuleArtifactSet(callerRoots, acceptedCaller);
             RequireFullModulePaths(originalLeanPath, originalModules);
         }
@@ -928,8 +928,26 @@ run_cmd do
                         yield return Path.GetFullPath(path);
     }
 
-    static SortedDictionary<string, string> FullModuleArtifacts(string leanPath) =>
-        HashFiles(FullModuleArtifactPaths(leanPath).Distinct(StringComparer.Ordinal).Select(path => (path, path)));
+    // Length and last-write time of each caller artifact; hashing would reread the whole library each run.
+    static SortedDictionary<string, string> FullModuleStamps(string leanPath)
+    {
+        SortedDictionary<string, string> stamps = new(StringComparer.Ordinal);
+        foreach (string path in FullModuleArtifactPaths(leanPath)) stamps[path] = Stamp(path);
+        return stamps;
+    }
+
+    static string Stamp(string path)
+    {
+        FileInfo file = new(path);
+        return file.Exists ? file.Length + ":" + file.LastWriteTimeUtc.Ticks : "";
+    }
+
+    static void RequireFullStamps(SortedDictionary<string, string> accepted)
+    {
+        foreach ((string path, string stamp) in accepted)
+            if (stamp.Length == 0 || Stamp(path) != stamp)
+                throw new InvalidDataException("Full-verification source or compiled artifact changed: " + path);
+    }
 
     static void RequireFullModuleArtifactSet(string leanPath, SortedDictionary<string, string> expected)
     {

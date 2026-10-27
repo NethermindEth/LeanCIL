@@ -125,10 +125,17 @@ def parts : ConstantInfo → Array Expr
   | .inductInfo v => #[v.type] ++ v.ctors.toArray.map (Expr.const · [])
   | .quotInfo v => #[v.type]
 
+/-- Constants that a declaration's kernel expressions mention; none for an unknown name. -/
+def directDependencies (env : Kernel.Environment) (c : Name) : Array Name :=
+  match env.find? c with
+  | some info => (parts info).foldl (fun found e => found ++ e.getUsedConstants) #[]
+  | none => #[]
+
 /-- Reachable axioms and the first declaration outside `visible`, sharing one dependency walk.
-Persisted olean axiom summaries are ignored. -/
-def axiomClosureOf (env : Kernel.Environment) (roots : Array Name)
-    (visible : Name → Bool := fun _ => true) : Array Name × Option Name := Id.run do
+Persisted olean axiom summaries are ignored. `dependencies` must return `directDependencies`. -/
+def axiomClosureWith [Monad m] (env : Kernel.Environment) (dependencies : Name → m (Array Name))
+    (roots : Array Name) (visible : Name → Bool := fun _ => true) :
+    m (Array Name × Option Name) := do
   let mut seen : Std.HashSet Name := {}
   let mut pending := roots
   let mut axioms : NameSet := {}
@@ -139,12 +146,24 @@ def axiomClosureOf (env : Kernel.Environment) (roots : Array Name)
     if seen.contains c then continue
     seen := seen.insert c
     if invisible.isNone && !visible c then invisible := some c
-    let some info := env.find? c | continue
-    if info matches .axiomInfo _ then axioms := axioms.insert c
-    for e in parts info do
-      for d in e.getUsedConstants do
-        unless seen.contains d do pending := pending.push d
+    if env.find? c matches some (.axiomInfo _) then axioms := axioms.insert c
+    for d in ← dependencies c do
+      unless seen.contains d do pending := pending.push d
   return (axioms.toArray.qsort Name.lt, invisible)
+
+/-- `axiomClosureWith`, computing each declaration's dependencies as it is reached. -/
+def axiomClosureOf (env : Kernel.Environment) (roots : Array Name)
+    (visible : Name → Bool := fun _ => true) : Array Name × Option Name :=
+  Id.run (axiomClosureWith env (fun c => pure (directDependencies env c)) roots visible)
+
+/-- `directDependencies`, remembered across the theorem audits of one request, which share most
+of their closure through the framework. -/
+def cachedDependencies (env : Kernel.Environment) (cache : IO.Ref (Std.HashMap Name (Array Name)))
+    (c : Name) : IO (Array Name) := do
+  if let some known := (← cache.get)[c]? then return known
+  let found := directDependencies env c
+  cache.modify (·.insert c found)
+  return found
 
 /-- Axioms reachable from `root`, walking kernel declarations only. -/
 def axiomClosure (env : Kernel.Environment) (root : Name) : Array Name :=
@@ -160,10 +179,14 @@ def contracts : List Name :=
   [`CIL.Safety.MethodContract.Holds, `CIL.Safety.OutcomeContract.Holds,
     `CIL.Safety.OutcomeContract.HoldsCLR]
 
-/-- The context for pretty-printing and source ranges; no elaboration runs in it. -/
+/-- The context for pretty-printing and source ranges; no elaboration runs in it.
+With no open namespaces or aliases only full names resolve, so `pp.fullNames` prints the same text
+without resolving every name suffix against the environment. -/
 def coreContext : Core.Context :=
   { fileName := "<leancil-audit>", fileMap := default, maxHeartbeats := 200000 * 1000,
-    maxRecDepth := 4096, options := ({} : Options).insert `pp.fieldNotation (.ofBool false) }
+    maxRecDepth := 4096,
+    options := ({} : Options).insert `pp.fieldNotation (.ofBool false)
+      |>.insert `pp.fullNames (.ofBool true) }
 
 /-- Runs a `CoreM` action against the imported environment. -/
 def run (env : Environment) (x : CoreM α) : IO α := do
@@ -198,7 +221,8 @@ def checkAxioms (allowed : Array Name) (found : Array Name) : Option String :=
 
 /-- Audits one theorem's kind, owner scope, level parameters, type and axiom closure. -/
 def theorem? (env : Environment) (req : Json)
-    (ownerOf : Name → Option Name) (replayed : NameSet) : IO Json := do
+    (ownerOf : Name → Option Name) (replayed : NameSet)
+    (dependencies : Name → IO (Array Name)) : IO Json := do
   let thm := name (← IO.ofExcept (req.getObjValAs? String "name"))
   let kernel := env.toKernelEnv
   let result (fields : List (String × Json)) :=
@@ -212,7 +236,7 @@ def theorem? (env : Environment) (req : Json)
   let type := stripMData info.type
   let visible := fun constant => !(req.getObjVal? "allowedModules").isOk ||
     (ownerOf constant).all (fun owner => !replayed.contains owner || allowed.contains owner)
-  let (found, invisible) := axiomClosureOf kernel #[thm] visible
+  let (found, invisible) ← axiomClosureWith kernel dependencies #[thm] visible
   if let some constant := invisible then
     return result [("error", toJson
       s!"Theorem dependency is outside its request's import closure: {constant}")]
@@ -376,8 +400,9 @@ unsafe def writeAudit (req : Json) (output : String) (env : Environment)
   let replayed := (names req "replayTargets").foldl (·.insert ·) ({} : NameSet)
   let mut paths : List (String × Json) := []
   for m in modules do paths := paths ++ [(m.toString, toJson (← findOLean m).toString)]
+  let cache ← IO.mkRef {}
   let theorems ← ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).mapM
-    (fun entry => theorem? env entry ownerOf replayed)
+    (fun entry => theorem? env entry ownerOf replayed (cachedDependencies env.toKernelEnv cache))
   let constants ←
     ((req.getObjValAs? (Array Json) "constants").toOption.getD #[]).mapM (constant? env)
   let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM (closure? env)
