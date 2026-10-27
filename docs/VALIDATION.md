@@ -42,6 +42,17 @@ passes are printed only after both checks and source-stability checks succeed. R
 fixtures still run separately with their original diagnostic assertions. The array read,
 null and bounds checks share one final file instead of checking the read twice.
 
+Generic and constrained-call positive controls retain their narrowed declarations and exact
+obligation types, but reuse the original checked theorem instead of reducing its validator again.
+Generic controls compile and replay in the original positive batch. Missing or changed control
+declarations must still fail type checking; isolated mutation cases retain their original validator
+proofs and diagnostic checks, without access to the positive-control witnesses.
+On Apple M4 with the indexed constrained-dispatch library already built, the constrained positive
+batch fell from 5.67s to 5.26s. Generic positive compilation, independent replay and controls took
+18.79s before reuse and 16.84s afterward, including replay of the controls in the combined batch.
+These fixture measurements exclude extraction, dependency setup and unchanged rejection checks;
+they are incremental gains on top of the dispatch improvement, not whole-suite CI timings.
+
 Each of these five scripts accepts `--measure`, which first checks the same final source files
 separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and
 batch compilation/replay time. One local run measured:

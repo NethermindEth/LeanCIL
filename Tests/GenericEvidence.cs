@@ -16,10 +16,26 @@ var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
 var rejected = new RejectedEvidence(output);
 var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
-var controls = new GeneratedEvidence(Path.Combine(output, "Controls"));
+var controls = new Dictionary<int, List<string>>();
 var controlSources = new HashSet<string>(StringComparer.Ordinal);
 CheckExternalIdentities();
 if (args is ["--external-identities"]) return;
+const string controlBaseline = """
+    import CIL.Extraction.Translation
+    namespace Extracted
+    def controlValue : Nat := 1
+    theorem control_valid : controlValue = 1 := rfl
+    end Extracted
+
+    """;
+foreach (var (name, declaration) in new[]
+         { ("missing-declaration", ""), ("changed-declaration", "def controlValue : Nat := 2\n") })
+{
+    var narrowed = controlBaseline.Replace("def controlValue : Nat := 1\n", declaration, StringComparison.Ordinal);
+    var path = Path.Combine(output, "Control-" + name + ".lean");
+    File.WriteAllText(path, controlBaseline + CheckedEvidenceControl(controlBaseline, narrowed, ["control_valid"], 0));
+    rejected.Add(path, "PASS checked control rejects " + name, "Type mismatch");
+}
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var samples = new[]
@@ -34,13 +50,8 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
 {
     var folder = Path.Combine(output, index.ToString());
     Run(Extract("extract", assembly, "Examples", "GenericMethods::" + selector, folder));
-    evidence.Add(Path.Combine(folder, "Extracted.lean"), "PASS structural specialization " + selector);
 }
 
-evidence.Check();
-CheckEvidenceBatchFailures();
-CheckLeanFixture("Tests.ExtractionGenerics");
-CheckExternalCallTargets();
 string ChangeDefinition(string source, string name, Func<string, string> change)
 {
     var start = source.IndexOf("def " + name + " :", StringComparison.Ordinal);
@@ -59,9 +70,8 @@ void Reject(int sample, string name, Func<string, string> mutate,
         var control = NarrowEvidence(baseline, theorem);
         if (controlSources.Add(control))
         {
-            var controlPath = Path.Combine(output, "Control-" + controlSources.Count + ".lean");
-            File.WriteAllText(controlPath, control);
-            controls.Add(controlPath, "PASS unchanged generic obligation: " + theorem, theorem);
+            if (!controls.TryGetValue(sample, out var sampleControls)) controls[sample] = sampleControls = [];
+            sampleControls.Add(CheckedEvidenceControl(baseline, control, [theorem], controlSources.Count));
         }
         source = NarrowEvidence(source, theorem);
     }
@@ -103,7 +113,17 @@ Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .sign
 Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"),
     "method1_shape_validated");
 
-controls.Check(replay: false);
+foreach (var (selector, index) in samples.Select((selector, index) => (selector, index)))
+{
+    var source = File.ReadAllText(Path.Combine(output, index.ToString(), "Extracted.lean"));
+    var path = Path.Combine(output, "Checked-" + index + ".lean");
+    File.WriteAllText(path, source + "\n" + string.Join('\n', controls.GetValueOrDefault(index) ?? []));
+    evidence.Add(path, "PASS structural specialization and unchanged obligations " + selector);
+}
+evidence.Check();
+CheckEvidenceBatchFailures();
+CheckLeanFixture("Tests.ExtractionGenerics");
+CheckExternalCallTargets();
 rejected.Check();
 void CheckExternalIdentities()
 {
