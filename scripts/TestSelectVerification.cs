@@ -407,7 +407,10 @@ Test("same-run certified library binding and observability", () =>
         "needs: [select, prepare]", "needs: [select, prepare, suites]",
         "LEANCIL_CERTIFIED_LIBRARY_SHA256: " + dollar + "{{ needs.prepare.outputs.manifest-sha256 }}",
         "artifact-ids: " + dollar + "{{ needs.prepare.outputs.artifact-id }}",
-        "artifact-id: " + dollar + "{{ steps.library-artifact.outputs.artifact-id }}",
+        "run-id: " + dollar + "{{ needs.prepare.outputs.artifact-run-id }}",
+        "artifact-id: " + dollar + "{{ steps.certify.outputs.reused == 'true' && steps.donor.outputs.artifact-id || " +
+            "steps.library-artifact.outputs.artifact-id }}",
+        "--reuse \"" + dollar + "DONATED_SHA256\"",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
         "include-hidden-files: true", "max-parallel: 8", "artifacts/verification-traces/",
         "matrix.suite == 'imports' && 90", "startsWith(matrix.suite, 'exports') && 120 || 30" })
