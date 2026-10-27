@@ -174,7 +174,7 @@ if (cohort == "pair")
             import.GetProperty("sourceBundleDigest").GetString() != pairBundle) ||
         pairStages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != 2 ||
         pairStages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != 2 ||
-        pairStages.Count(stage => stage is "Building fresh Lean verification library" or "Copying certified Lean verification library") != 2 ||
+        pairStages.Count(stage => stage is "Building fresh Lean verification library" or "Opening certified Lean verification library") != 2 ||
         pairStages.Count(stage => stage == "Building fresh consumer proof and dependencies") != 2 ||
         pairStages.Count(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal)) != 1)
         throw new InvalidOperationException("Two imports from one bundle were not verified with one library build: " + string.Join(", ", pairStages));

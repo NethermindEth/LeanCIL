@@ -5,26 +5,25 @@
 // Fast cache-integrity regressions; end-to-end cold/warm verification exercises the builder.
 Run(["dotnet", "run", "--file", At("Tests/LibrarySourceExtension.cs")]);
 var directory = Path.Combine(Path.GetTempPath(), "leancil-cache-test-" + Guid.NewGuid().ToString("N"));
-var copy = directory + "-copy";
 var prepared = directory + "-prepared";
 var unrelated = directory + "-unrelated";
 using var verifier = new Program { freshLibrary = true };
 try
 {
+    // Cache entries are read in place, so only a receipt over the exact key and manifest admits one.
     var artifact = Path.Combine(directory, ".lake/build/lib/lean/CIL.olean");
     Directory.CreateDirectory(Path.GetDirectoryName(artifact)!);
     File.WriteAllText(artifact, "compiled artifact");
-    File.WriteAllText(Path.Combine(directory, "cache-manifest.json"), System.Text.Json.JsonSerializer.Serialize(CacheFiles(directory)));
-    if (!ValidCache(directory)) throw new Exception("Valid manifest rejected");
-    CopyTree(directory, copy);
-    if (!ValidCache(copy)) throw new Exception("Private session copy rejected");
-    File.AppendAllText(artifact, "corruption");
-    if (ValidCache(directory)) throw new Exception("Changed artifact accepted");
-    if (!ValidCache(copy)) throw new Exception("Private session shares mutable artifacts");
-    File.WriteAllText(Path.Combine(copy, "unexpected.olean"), "untracked");
-    if (ValidCache(copy)) throw new Exception("Untracked artifact accepted");
-    File.Delete(artifact);
-    if (ValidCache(directory)) throw new Exception("Missing artifact accepted");
+    var cacheManifest = Path.Combine(directory, "cache-manifest.json");
+    File.WriteAllText(cacheManifest, System.Text.Json.JsonSerializer.Serialize(CacheFiles(directory)));
+    void Receipt() => File.WriteAllBytes(Path.Combine(directory, "cache-receipt.hmac"), System.Security.Cryptography.HMACSHA256.HashData(
+        verifier.ReceiptKey, System.Text.Encoding.UTF8.GetBytes("cache-key").Concat(File.ReadAllBytes(cacheManifest)).ToArray()));
+    if (verifier.CertifiedLocalLibrary(directory, "cache-key")) throw new Exception("Unreceipted cache entry accepted");
+    Receipt();
+    if (!verifier.CertifiedLocalLibrary(directory, "cache-key")) throw new Exception("Receipted cache entry rejected");
+    if (verifier.CertifiedLocalLibrary(directory, "other-key")) throw new Exception("Cache receipt accepted for another library key");
+    File.WriteAllText(cacheManifest, System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, string>(StringComparer.Ordinal)));
+    if (verifier.CertifiedLocalLibrary(directory, "cache-key")) throw new Exception("Replaced cache manifest accepted");
 
     var snapshot = new SortedDictionary<string, string>(StringComparer.Ordinal)
     {
@@ -37,7 +36,7 @@ try
     if (!Same(sources, LibrarySources(snapshot))) throw new Exception("Proof edits invalidate base library");
     snapshot["CIL/Types.lean"] = "edited types";
     if (Same(sources, LibrarySources(snapshot))) throw new Exception("Source edit does not invalidate base library");
-    Console.WriteLine("PASS cache corruption, missing and extra artifacts, private copy isolation and source/proof key separation");
+    Console.WriteLine("PASS cache receipts bind key and manifest; source/proof key separation");
 
     Directory.CreateDirectory(unrelated);
     var sentinel = Path.Combine(unrelated, "keep.txt");
@@ -68,7 +67,7 @@ try
         var original = File.ReadAllText(file);
         File.WriteAllText(file, "substituted contents");
         File.WriteAllText(manifest, System.Text.Json.JsonSerializer.Serialize(CacheFiles(prepared)));
-        if (!ValidCache(prepared)) throw new Exception("Tamper fixture must remain internally consistent");
+        if (!Same(ReadManifest(prepared)!, CacheFiles(prepared))) throw new Exception("Tamper fixture must remain internally consistent");
         if (ValidCertifiedLibrary(prepared, trustedDigest, "fixture-key", preparedSources))
             throw new Exception("Self-rehashed substitution accepted against producer digest");
         ExpectRejection(() => verifier.PrepareLibrary(prepared, trustedDigest), "destination left unchanged");
@@ -83,7 +82,6 @@ try
 finally
 {
     Directory.Delete(directory, true);
-    if (Directory.Exists(copy)) Directory.Delete(copy, true);
     if (Directory.Exists(prepared)) Directory.Delete(prepared, true);
     if (Directory.Exists(unrelated)) Directory.Delete(unrelated, true);
 }

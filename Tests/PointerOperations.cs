@@ -59,7 +59,7 @@ foreach (var name in new[]
     if (!source.Contains(".sub", StringComparison.Ordinal)) throw new Exception("Missing difference mutation target");
     var forged = Path.Combine(root, "ForgedDifference.lean");
     File.WriteAllText(forged, source.Replace(".sub", ".add", StringComparison.Ordinal));
-    var rejection = Execute(["lake", "env", "lean", forged]);
+    var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
         throw new Exception("Forged difference was not rejected by scalar evidence: " + rejection.Output);
     Console.WriteLine("PASS independent forged pointer difference rejection");

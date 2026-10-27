@@ -22,7 +22,7 @@ partial class Program
                 leanPath: LeanPath, progress: "Checking unchanged extraction prefix");
         }
 
-        public string LeanPath => directory + Path.PathSeparator + At(".lake/build/lib/lean");
+        public string LeanPath => directory + Path.PathSeparator + FixtureLeanPath();
 
         public string Module => module;
 

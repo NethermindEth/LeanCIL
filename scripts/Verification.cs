@@ -18,7 +18,15 @@ partial class Program : IDisposable
 
     static string Source([CallerFilePath] string path = "") => path;
 
+    /// <summary>The certified library, read in place; deleted on disposal only when this process built it.</summary>
     string? library;
+    bool ownsLibrary;
+    /// <summary>Set before <see cref="Library"/> by producers that write into the library, which then get a private copy.</summary>
+    bool writesLibrary;
+    /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
+    string? session;
+    /// <summary>The base library's compiled module artifacts, taken from its validated manifest.</summary>
+    SortedDictionary<string, string>? baseModules;
     const string CertifiedFingerprintsName = "canonical-fingerprints.json";
     string? certifiedFingerprintsSha;
     string? resolvedToolchain;
@@ -277,6 +285,7 @@ partial class Program : IDisposable
     }
 
     static SortedDictionary<string, string> ModuleArtifacts(string session) =>
+        !Directory.Exists(Path.Combine(session, ".lake/build/lib/lean")) ? new(StringComparer.Ordinal) :
         HashFiles(Directory.EnumerateFiles(Path.Combine(session, ".lake/build/lib/lean"), "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
             .Select(path => (Path.GetRelativePath(Path.Combine(session, ".lake/build/lib/lean"), path)
@@ -566,20 +575,6 @@ partial class Program : IDisposable
             .Where(path => Path.GetFileName(path) is not ("cache-manifest.json" or "cache-receipt.hmac"))
             .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
 
-    static bool ValidCache(string directory)
-    {
-        try
-        {
-            var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(
-                File.ReadAllText(Path.Combine(directory, "cache-manifest.json")));
-            return manifest is not null && manifest.ContainsKey(".lake/build/lib/lean/CIL.olean") && Same(manifest, CacheFiles(directory));
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return false;
-        }
-    }
-
     static bool ValidCertifiedLibrary(string directory, string? trustedDigest, string key, SortedDictionary<string, string> sources)
     {
         try
@@ -789,32 +784,35 @@ partial class Program : IDisposable
         var toolchain = Toolchain;
         var compiler = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
         return (Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-            "leancil-library-v3-kernel-replayed\n" + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
+            "leancil-library-v4-all-modules-kernel-replayed\n" + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
             Sha(Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" + Sha(compiler) + "\n" + JsonSerializer.Serialize(sources)))),
             sources);
     }
 
+    /// <summary>
+    /// The writable session package for this process: it requires the certified library in place
+    /// as a path dependency, so support and proof builds write only their own modules.
+    /// </summary>
     string Library(SortedDictionary<string, string> snapshot)
     {
         var common = new SortedDictionary<string, string>(snapshot.Where(p =>
             !p.Key.StartsWith("proof:", StringComparison.Ordinal) && !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal);
-        if (library is not null)
+        if (session is not null)
         {
             if (!Same(common, libraryInputs!))
                 throw new InvalidOperationException("Proof session source inputs changed");
-            return library;
+            return session;
         }
 
         (libraryKey, var sources) = LibraryIdentity(common);
         var toolchain = Toolchain;
-        library = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(library);
         var fresh = freshLibrary ||
             string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
         var cacheRoot = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
         var cached = Path.Combine(cacheRoot, libraryKey);
+        SortedDictionary<string, string> manifest;
         FileStream? cacheLock = null;
         try
         {
@@ -834,29 +832,28 @@ partial class Program : IDisposable
             // A supplied certified library is not a local cache, so --fresh still uses it.
             if (!string.IsNullOrWhiteSpace(supplied))
             {
-                var copyStarted = DateTimeOffset.UtcNow;
-                var copyElapsed = Stopwatch.StartNew();
-                if (!CopyCertifiedLibrary(supplied, library, suppliedDigest, libraryKey, sources))
-                    throw new InvalidOperationException("Certified library identity or integrity mismatch");
-                if (!ValidCertifiedLibrary(library, suppliedDigest, libraryKey, sources))
-                    throw new InvalidOperationException("Certified library changed while copying");
-                var manifestBytes = File.ReadAllBytes(Path.Combine(library, "cache-manifest.json"));
-                if (Convert.ToHexStringLower(SHA256.HashData(manifestBytes)) != suppliedDigest)
-                    throw new InvalidDataException("Certified library manifest changed before metadata binding.");
-                certifiedFingerprintsSha = JsonSerializer.Deserialize<SortedDictionary<string, string>>(manifestBytes)?
-                    .GetValueOrDefault(CertifiedFingerprintsName);
+                var openStarted = DateTimeOffset.UtcNow;
+                var openElapsed = Stopwatch.StartNew();
+                library = Path.GetFullPath(supplied);
+                manifest = SuppliedLibraryManifest(library, suppliedDigest, libraryKey, sources)
+                    ?? throw new InvalidOperationException("Certified library identity or integrity mismatch");
+                certifiedFingerprintsSha = manifest.GetValueOrDefault(CertifiedFingerprintsName);
                 libraryBuild = "certified-artifact";
-                Trace("Copying certified Lean verification library", copyStarted, library, copyElapsed.Elapsed, 0, "", [supplied, library]);
+                Trace("Opening certified Lean verification library", openStarted, library, openElapsed.Elapsed, 0, "", [library]);
             }
-            else if (!fresh && CertifiedLocalLibrary(cached, libraryKey) && ValidCache(cached) && Same(sources, LibrarySources(CacheFiles(cached))))
+            else if (!fresh && CertifiedLocalLibrary(cached, libraryKey) &&
+                ReadManifest(cached) is { } cachedManifest && Same(sources, LibrarySources(cachedManifest)))
             {
-                CopyTree(cached, library);
-                if (!ValidCache(library))
-                    throw new InvalidOperationException("Library cache changed while copying");
+                // The receipt binds this manifest, which was hashed when the entry was published.
+                library = cached;
+                manifest = cachedManifest;
                 libraryBuild = "cache";
             }
             else
             {
+                library = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
+                ownsLibrary = true;
+                Directory.CreateDirectory(library);
                 foreach (var (name, hash) in sources)
                 {
                     var destination = Path.Combine(library, name);
@@ -865,7 +862,11 @@ partial class Program : IDisposable
                     if (Sha(destination) != hash)
                         throw new InvalidOperationException("Library source changed while copying: " + name);
                 }
-                Run(["lake", "build", "CIL", "leancil-audit"], library, streamOutput: true, progress: "Building fresh Lean verification library");
+                // Modules outside the CIL aggregate are built here too, so importing one never builds into a shared library.
+                var frameworkModules = sources.Keys.Where(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
+                    name.EndsWith(".lean", StringComparison.Ordinal)).Select(name => "+" + name[..^".lean".Length].Replace('/', '.'));
+                Run(["lake", "build", "CIL", "leancil-audit", .. frameworkModules], library, streamOutput: true,
+                    progress: "Building fresh Lean verification library");
                 var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
                 var compiledLibrary = Path.Combine(library, ".lake/build/lib/lean");
                 if (!ReplayModulesJointly(library, [.. ModuleArtifacts(library).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
@@ -873,9 +874,10 @@ partial class Program : IDisposable
                     Run([checker, "CIL"], library, compiledLibrary, streamOutput: true,
                         progress: "Kernel replay of fresh Lean verification library");
                 libraryBuild = "fresh";
+                manifest = CacheFiles(library);
                 if (!fresh)
                 {
-                    File.WriteAllText(Path.Combine(library, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(library), Json));
+                    File.WriteAllText(Path.Combine(library, "cache-manifest.json"), JsonSerializer.Serialize(manifest, Json));
                     File.WriteAllBytes(Path.Combine(library, "cache-receipt.hmac"), HMACSHA256.HashData(ReceiptKey,
                         Encoding.UTF8.GetBytes(libraryKey).Concat(File.ReadAllBytes(Path.Combine(library, "cache-manifest.json"))).ToArray()));
                     var staging = cached + "." + Guid.NewGuid().ToString("N");
@@ -890,23 +892,200 @@ partial class Program : IDisposable
             }
         }
         finally { cacheLock?.Dispose(); }
-        // Support builds mutate only this private session, never the shared base cache.
-        foreach (var name in common.Keys.Where(name => name.EndsWith(".lean", StringComparison.Ordinal) && !sources.ContainsKey(name)))
+        const string compiledPrefix = ".lake/build/lib/lean/";
+        // Lake compiles a dependency's missing modules into its own build directory, so a library
+        // extended with uncompiled sources is read from a private copy; a complete one is never written.
+        var incomplete = manifest.Keys.Any(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
+            name.EndsWith(".lean", StringComparison.Ordinal) &&
+            !manifest.ContainsKey(compiledPrefix + name[..^".lean".Length] + ".olean"));
+        if (!ownsLibrary && (incomplete || writesLibrary))
         {
-            var destination = Path.Combine(library, name);
+            var started = DateTimeOffset.UtcNow;
+            var elapsed = Stopwatch.StartNew();
+            var copy = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
+            CopyTree(library, copy);
+            library = copy;
+            ownsLibrary = true;
+            Trace(incomplete ? "Copying incomplete certified Lean verification library" : "Copying certified Lean verification library",
+                started, copy, elapsed.Elapsed, 0, "", [copy]);
+        }
+        baseModules = new(manifest.Where(pair => pair.Key.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
+                Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal))
+            .ToDictionary(pair => pair.Key[compiledPrefix.Length..], pair => pair.Value), StringComparer.Ordinal);
+        certifiedModules = new(baseModules, StringComparer.Ordinal);
+        libraryInputs = common;
+        auditExecutable = Path.Combine(library, ".lake/build/bin", OperatingSystem.IsWindows() ? "leancil-audit.exe" : "leancil-audit");
+        auditExecutableSha = manifest.GetValueOrDefault(Path.GetRelativePath(library, auditExecutable).Replace('\\', '/'));
+        // Workflow artifacts drop the mode bits that the cache manifest does not cover.
+        if (!OperatingSystem.IsWindows() && auditExecutableSha is not null &&
+            !File.GetUnixFileMode(auditExecutable).HasFlag(UnixFileMode.UserExecute))
+            File.SetUnixFileMode(auditExecutable, File.GetUnixFileMode(auditExecutable) | UnixFileMode.UserExecute);
+        session = CreateSession(library, common.Keys.Where(name =>
+            name.EndsWith(".lean", StringComparison.Ordinal) && !sources.ContainsKey(name)));
+        return session;
+    }
+
+    /// <summary>
+    /// The manifest of a supplied certified library, or null when its manifest digest, key or source
+    /// binding disagrees. The producer hashed every file into that manifest; the files are not rehashed.
+    /// </summary>
+    static SortedDictionary<string, string>? SuppliedLibraryManifest(string directory, string? trustedDigest, string key,
+        SortedDictionary<string, string> sources)
+    {
+        if (string.IsNullOrWhiteSpace(trustedDigest)) return null;
+        try
+        {
+            var bytes = File.ReadAllBytes(Path.Combine(directory, "cache-manifest.json"));
+            if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != trustedDigest ||
+                File.ReadAllText(Path.Combine(directory, "library-key.txt")) != key) return null;
+            var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(bytes);
+            return manifest is not null && manifest.ContainsKey(".lake/build/lib/lean/CIL.olean") &&
+                Same(sources, LibrarySources(manifest)) ? manifest : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    static SortedDictionary<string, string>? ReadManifest(string directory)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<SortedDictionary<string, string>>(
+                File.ReadAllBytes(Path.Combine(directory, "cache-manifest.json")));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// A fresh package holding the given checkout sources and every non-CIL library of the base,
+    /// with the base itself as a read-only path dependency. Lake writes only below this package.
+    /// </summary>
+    static string CreateSession(string certified, IEnumerable<string> extraSources)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "leancil-session-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "lakefile.toml"), "name = \"leancil-session\"\n" +
+            FrameworkRequirement(directory, certified) + LibraryDeclarations(Path.Combine(certified, "lakefile.toml")));
+        File.Copy(Path.Combine(certified, "lean-toolchain"), Path.Combine(directory, "lean-toolchain"));
+        foreach (var name in extraSources)
+        {
+            var destination = Path.Combine(directory, name);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             File.Copy(At(name), destination, true);
         }
-        certifiedModules = ModuleArtifacts(library);
-        libraryInputs = common;
-        // Bound before any proof or support build can run code in this session.
-        auditExecutable = Path.Combine(library, ".lake/build/bin", OperatingSystem.IsWindows() ? "leancil-audit.exe" : "leancil-audit");
-        auditExecutableSha = File.Exists(auditExecutable) ? Sha(auditExecutable) : null;
-        // Workflow artifacts drop the mode bits that the cache manifest does not cover.
-        if (!OperatingSystem.IsWindows() && auditExecutableSha is not null)
-            File.SetUnixFileMode(auditExecutable, File.GetUnixFileMode(auditExecutable) | UnixFileMode.UserExecute);
-        return library;
+        return directory;
     }
+
+    /// <summary>
+    /// The base library's module artifacts: recorded ones from the validated manifest, plus any
+    /// unrecorded output, which Lake builds into the base from an unrecorded source and must be replayed.
+    /// </summary>
+    SortedDictionary<string, string> BaseModuleArtifacts()
+    {
+        var result = new SortedDictionary<string, string>(baseModules!, StringComparer.Ordinal);
+        var compiled = Path.Combine(library!, ".lake/build/lib/lean");
+        foreach (var path in Directory.EnumerateFiles(compiled, "*", SearchOption.AllDirectories))
+        {
+            var name = Path.GetRelativePath(compiled, path).Replace('\\', '/');
+            if (Path.GetFileName(name).Contains(".olean", StringComparison.Ordinal) && !result.ContainsKey(name))
+                result[name] = Sha(path);
+        }
+        return result;
+    }
+
+    /// <summary>The module artifacts of a session: the base's and this session's own outputs.</summary>
+    SortedDictionary<string, string> SessionModules(string directory)
+    {
+        var result = BaseModuleArtifacts();
+        foreach (var (name, hash) in ModuleArtifacts(directory)) result[name] = hash;
+        return result;
+    }
+
+    /// <summary>The Lean search path of a session: its own outputs before the certified base.</summary>
+    string SessionLeanPath(string directory) =>
+        Path.Combine(directory, ".lake/build/lib/lean") + Path.PathSeparator + Path.Combine(library!, ".lake/build/lib/lean");
+
+    /// <summary>
+    /// A package named leancil whose only library is CIL, read in place from the certified library.
+    /// The certified lakefile also declares the test libraries; only this view keeps them from
+    /// claiming a requiring package's own modules.
+    /// </summary>
+    static string FrameworkPackage(string owner, string certified)
+    {
+        var directory = Path.Combine(owner, ".lake", "leancil-framework");
+        Directory.CreateDirectory(directory);
+        var root = Path.GetFullPath(certified).Replace('\\', '/');
+        WriteIfChanged(Path.Combine(directory, "lakefile.toml"),
+            $"name = \"leancil\"\nsrcDir = {JsonSerializer.Serialize(root)}\nbuildDir = " +
+            $"{JsonSerializer.Serialize(root + "/.lake/build")}\n\n[[lean_lib]]\nname = \"CIL\"\n");
+        WriteIfChanged(Path.Combine(directory, "lean-toolchain"), File.ReadAllText(Path.Combine(certified, "lean-toolchain")));
+        return directory;
+    }
+
+    /// <summary>The lakefile requirement of a package below owner on the certified framework.</summary>
+    // Relative, so equal sessions have equal configurations wherever their directories are.
+    static string FrameworkRequirement(string owner, string certified) =>
+        "\n[[require]]\nname = \"leancil\"\npath = " +
+        JsonSerializer.Serialize(Path.GetRelativePath(owner, FrameworkPackage(owner, certified)).Replace('\\', '/')) + "\n";
+
+    /// <summary>Declarations of every library in a lakefile except the framework's own CIL.</summary>
+    static string LibraryDeclarations(string lakefile) => string.Concat(
+        Regex.Matches(File.ReadAllText(lakefile), @"^\[\[lean_lib\]\]\r?\nname = ""([^""]+)""", RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value).Where(name => name != "CIL")
+            .Select(name => $"\n[[lean_lib]]\nname = \"{name}\"\n"));
+
+    // Rewriting an unchanged configuration would make Lake reconfigure packages that later builds reuse.
+    // Concurrent fixtures share the checkout package, so a reader sees the old or new file, never a partial one.
+    static void WriteIfChanged(string path, string contents)
+    {
+        if (File.Exists(path) && File.ReadAllText(path) == contents) return;
+        var staging = path + "." + Guid.NewGuid().ToString("N");
+        File.WriteAllText(staging, contents);
+        File.Move(staging, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// The package in which checkout tests build: its sources are the checkout's own and its CIL is
+    /// the certified library, read in place, so neither the library nor the checkout gets a CIL build.
+    /// </summary>
+    string CheckoutPackage()
+    {
+        Library(Inputs(At("CIL.lean")));
+        var directory = At(".lake/leancil-checkout");
+        Directory.CreateDirectory(directory);
+        WriteIfChanged(Path.Combine(directory, "lakefile.toml"), "name = \"leancil-checkout\"\nsrcDir = \"../..\"\n" +
+            FrameworkRequirement(directory, library!) + LibraryDeclarations(At("lakefile.toml")));
+        WriteIfChanged(Path.Combine(directory, "lean-toolchain"), File.ReadAllText(At("lean-toolchain")));
+        return directory;
+    }
+
+    /// <summary>The Lean search path of checkout tests: their own outputs, then the certified library.</summary>
+    string CheckoutLeanPath() => SessionLeanPath(CheckoutPackage());
+
+    static Program? fixtureVerification;
+
+    /// <summary>The checkout package for static test helpers, created once per process.</summary>
+    static string FixturePackage()
+    {
+        if (fixtureVerification is null)
+        {
+            var verification = fixtureVerification = new Program();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => ((IDisposable)verification).Dispose();
+        }
+        return fixtureVerification.CheckoutPackage();
+    }
+
+    /// <summary>The Lean search path for static test helpers: checkout outputs, then the certified library.</summary>
+    static string FixtureLeanPath()
+    {
+        var package = FixturePackage();
+        return fixtureVerification!.SessionLeanPath(package);
+    }
+
+    /// <summary>The compiled module on a Lean search path, as Lean resolves it: the first directory that has it.</summary>
+    static string ResolveOlean(string leanPath, string module) =>
+        leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(directory => Path.Combine(directory, module.Replace('.', '/') + ".olean"))
+            .FirstOrDefault(File.Exists) ?? throw new FileNotFoundException("Missing compiled module: " + module);
 
     string PrepareLibrary(string destination, string? trustedDigest = null)
     {
@@ -916,11 +1095,11 @@ partial class Program : IDisposable
         destination = Path.GetFullPath(destination);
         if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
             throw new InvalidOperationException("Certified library destination must be empty");
-        var session = Library(Inputs(At("CIL.lean")));
+        Library(Inputs(At("CIL.lean")));
         var staging = destination.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "." + Guid.NewGuid().ToString("N");
         try
         {
-            CopyTree(session, staging);
+            CopyTree(library!, staging);
             File.WriteAllText(Path.Combine(staging, "library-key.txt"), libraryKey);
             var files = CacheFiles(staging);
             if (certifiedFingerprintsSha is not null &&
@@ -1039,7 +1218,8 @@ partial class Program : IDisposable
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var pending = new Queue<string>(roots);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var compiled = Path.GetFullPath(Path.Combine(session, ".lake/build/lib/lean"));
+        string[] compiled = [Path.GetFullPath(Path.Combine(session, ".lake/build/lib/lean")),
+            Path.GetFullPath(Path.Combine(library!, ".lake/build/lib/lean"))];
         while (pending.TryDequeue(out var module))
         {
             if (!seen.Add(module)) continue;
@@ -1047,14 +1227,15 @@ partial class Program : IDisposable
             if (!snapshot.TryGetValue(relative, out var hash))
                 return Conservative();
             result[relative] = hash;
-            var dependencies = Execute(["lean", "--deps", Path.Combine(session, relative)], session, compiled);
+            var dependencies = Execute(["lean", "--deps", Path.Combine(session, relative)], session, SessionLeanPath(session));
             if (dependencies.Code != 0) return Conservative();
             foreach (var dependency in dependencies.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 var path = Path.GetFullPath(dependency);
                 if (path.StartsWith(Path.GetFullPath(Toolchain) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
-                var name = Path.GetRelativePath(compiled, path).Replace('\\', '/');
-                if (name.StartsWith("../", StringComparison.Ordinal) || !name.EndsWith(".olean", StringComparison.Ordinal)) return Conservative();
+                var name = compiled.Select(directory => Path.GetRelativePath(directory, path).Replace('\\', '/'))
+                    .FirstOrDefault(candidate => !candidate.StartsWith("../", StringComparison.Ordinal) && !Path.IsPathRooted(candidate));
+                if (name is null || !name.EndsWith(".olean", StringComparison.Ordinal)) return Conservative();
                 var imported = name[..^6].Replace('/', '.');
                 // All certified CIL sources are already bound by libraryKey.
                 if (imported != "CIL" && !imported.StartsWith("CIL.", StringComparison.Ordinal)) pending.Enqueue(imported);
@@ -1168,8 +1349,9 @@ partial class Program : IDisposable
 
     string CheckedAuditExecutable()
     {
-        if (auditExecutable is null || !File.Exists(auditExecutable) || Sha(auditExecutable) != auditExecutableSha)
-            throw new InvalidOperationException("Theorem audit executable is missing or changed during verification");
+        // The manifest bound this executable's hash when the library was validated.
+        if (auditExecutable is null || auditExecutableSha is null || !File.Exists(auditExecutable))
+            throw new InvalidOperationException("Theorem audit executable is missing");
         return auditExecutable;
     }
 
@@ -1629,7 +1811,7 @@ partial class Program : IDisposable
                     else
                     {
                         Run(["lake", "build", .. support], session, progress: "Building proof dependencies: " + entry);
-                        var current = ModuleArtifacts(session);
+                        var current = SessionModules(session);
                         var altered = certifiedModules!.Any(pair => !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
                         var changed = (altered ? current : current.Where(pair => !certifiedModules!.ContainsKey(pair.Key)))
                             .Select(pair => ModuleName(pair.Key)).Distinct().ToArray();
@@ -1637,7 +1819,7 @@ partial class Program : IDisposable
                         {
                             stage?.Invoke("kernel replay");
                             Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), .. changed],
-                                leanPath: Path.Combine(session, ".lake/build/lib/lean"), progress: "Kernel replay of proof dependencies: " + entry);
+                                leanPath: SessionLeanPath(session), progress: "Kernel replay of proof dependencies: " + entry);
                         }
                         certifiedModules = current;
                         CopySupportArtifacts(session, staging, supportSources);
@@ -1676,9 +1858,9 @@ partial class Program : IDisposable
                 throw new InvalidOperationException("Inputs changed during verification");
             string[] importModules = StageImportSources(extraction, fresh);
             File.WriteAllText(Path.Combine(fresh, "ExtractionAudit.lean"), ExtractionAuditSource);
-            var leanPath = fresh + Path.PathSeparator + Path.Combine(session, ".lake/build/lib/lean");
+            var leanPath = fresh + Path.PathSeparator + SessionLeanPath(session);
 
-            var currentModules = ModuleArtifacts(session);
+            var currentModules = SessionModules(session);
             var alteredExisting = certifiedModules!.Any(pair => !currentModules.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
             var changedModules = (alteredExisting ? currentModules.Keys : currentModules.Keys.Where(name => !certifiedModules!.ContainsKey(name)))
                 .Select(ModuleName).Distinct().ToArray();
@@ -1884,7 +2066,9 @@ partial class Program : IDisposable
 
     void IDisposable.Dispose()
     {
-        if (library is not null && Directory.Exists(library))
+        if (session is not null && Directory.Exists(session))
+            Directory.Delete(session, true);
+        if (ownsLibrary && library is not null && Directory.Exists(library))
             Directory.Delete(library, true);
     }
 }

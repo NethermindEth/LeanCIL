@@ -95,7 +95,7 @@ foreach (var (type, element, width) in elements)
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing mutation target");
             var forged = Path.Combine(root, "ForgedArray.lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
-            var rejection = Execute(["lake", "env", "lean", forged]);
+            var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
             if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
                 throw new Exception("Forged array operation was not rejected: " + rejection.Output);
         }

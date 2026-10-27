@@ -113,7 +113,7 @@ File.AppendAllText(proof, """
 open Lean Elab Command in
 run_cmd do
   let root := ((← getFileName) : System.FilePath).parent.get!
-  let artifact := root / ".lake/packages/leancil/.lake/build/lib/lean/Extracted.olean"
+  let artifact := root / ".lake/packages/leancil_generated/.lake/build/lib/lean/Extracted.olean"
   let bytes ← IO.FS.readBinFile artifact
   IO.FS.rename artifact (artifact.addExtension "original")
   IO.FS.writeBinFile artifact (bytes.push 0)

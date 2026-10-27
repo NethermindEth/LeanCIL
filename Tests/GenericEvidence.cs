@@ -143,7 +143,7 @@ void CheckExternalIdentities()
     baseline = lean.ToString();
     var path = Path.Combine(output, "ExactExternalIdentities.lean");
     File.WriteAllText(path, baseline);
-    Run(["lake", "env", "lean", path]);
+    Run(["lake", "env", "lean", path], cwd: FixturePackage());
     var rejectedIdentities = new RejectedEvidence(Path.Combine(output, "IdentityMutations"));
     foreach (var (name, source) in new[]
     {
@@ -213,7 +213,7 @@ void CheckExternalCallTargets()
     var folder = Path.Combine(output, "ExternalCalls");
     Run(Extract("extract", assembly, "Examples", "DivisionIntrinsics::UnsafeEquals(ulong)", folder, "x64-v3"));
     var path = Path.Combine(folder, "Extracted.lean");
-    Run(["lake", "env", "lean", path]);
+    Run(["lake", "env", "lean", path], cwd: FixturePackage());
     var baseline = File.ReadAllText(path);
     foreach (var (name, source) in new[]
     {

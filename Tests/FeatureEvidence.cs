@@ -57,13 +57,13 @@ Console.WriteLine("PASS runtime profile groups, retired profiles and reduced vec
 RequireLeanFixtures("CIL.Extraction.Features", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var sharedEvidence = Path.Combine(output, "RuntimeProfiles.lean");
 RuntimeProfileValidation.Check(sharedCases, ExtractorPath, sharedEvidence);
-Run(["lake", "env", "lean", sharedEvidence]);
+Run(["lake", "env", "lean", sharedEvidence], cwd: verification.CheckoutPackage());
 RequireLeanFixtures("Tests.FeatureEvidence");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var folder = Path.Combine(output, "CompiledLoop");
 Run(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)", folder, "scalar"));
 var path = Path.Combine(folder, "Extracted.lean");
-Run(["lake", "env", "lean", path]);
+Run(["lake", "env", "lean", path], cwd: verification.CheckoutPackage());
 var baseline = File.ReadAllText(path);
 
 void Reject(string name, string mutated)

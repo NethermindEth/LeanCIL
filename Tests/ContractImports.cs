@@ -81,13 +81,13 @@ catch (InvalidOperationException error) { malformedHeader = error; }
 if (malformedHeader is null || !malformedHeader.Message.Contains("Invalid contract interface import header"))
     throw new InvalidOperationException("Malformed contract header was not rejected by Lean's parser.");
 Run([interfaceVerification.LeanExecutable, At("Tests/ContractClosure.lean")],
-    leanPath: Path.Combine(interfaceLibrary, ".lake/build/lib/lean"),
+    leanPath: interfaceVerification.SessionLeanPath(interfaceLibrary),
     streamOutput: true, progress: "Canonical contract closure tests");
 string interfaceProbe = Path.Combine(directory, "interface-probe");
 Directory.CreateDirectory(interfaceProbe);
 string interfaceSource = File.ReadAllText(Path.Combine(fixture, "ImportFixture.lean"));
 File.WriteAllText(Path.Combine(interfaceProbe, interfaceModule + ".lean"), interfaceSource);
-string interfaceLeanPath = interfaceProbe + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean");
+string interfaceLeanPath = interfaceProbe + Path.PathSeparator + interfaceVerification.SessionLeanPath(interfaceLibrary);
 Run([interfaceVerification.LeanExecutable, "--root=" + interfaceProbe, "-o", Path.Combine(interfaceProbe, interfaceModule + ".olean"),
     Path.Combine(interfaceProbe, interfaceModule + ".lean")], leanPath: interfaceLeanPath);
 string closureProbe = Path.Combine(interfaceProbe, "Closure.lean");
@@ -519,7 +519,7 @@ Run(Command());
 File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
 Run([.. cli, "verify", output, "--proof", consumerProof, "--proof-root", package, "--fresh"]);
 RejectSubstitution(consumerProof,
-    "((System.FilePath.mk (← getFileName)).parent.getD \".\") / \".lake\" / \"packages\" / \"leancil\"",
+    "((System.FilePath.mk (← getFileName)).parent.getD \".\") / \".lake\" / \"packages\" / \"leancil_generated\"",
     ".lake/build/lib/lean/" + interfaceModule + ".olean", "--proof-root", package);
 File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);
 Console.WriteLine("PASS consumer verification rejects post-audit interface artifact substitution with unchanged original sources");
@@ -847,7 +847,7 @@ string hashWindow = Path.Combine(directory, "hash-window");
 Directory.CreateDirectory(hashWindow);
 File.WriteAllText(Path.Combine(hashWindow, interfaceModule + ".lean"), interfaceSource.Replace("output = input + 1", "output = input + 2", StringComparison.Ordinal));
 Run([interfaceVerification.LeanExecutable, "--root=" + hashWindow, "-o", Path.Combine(hashWindow, interfaceModule + ".olean"),
-    Path.Combine(hashWindow, interfaceModule + ".lean")], leanPath: hashWindow + Path.PathSeparator + Path.Combine(interfaceLibrary, ".lake/build/lib/lean"));
+    Path.Combine(hashWindow, interfaceModule + ".lean")], leanPath: hashWindow + Path.PathSeparator + interfaceVerification.SessionLeanPath(interfaceLibrary));
 byte[] unauditedArtifact = File.ReadAllBytes(Path.Combine(hashWindow, interfaceModule + ".olean"));
 void RejectReplayWindowSwap(string expectedDiagnostic, Func<string?> locate, Action<Action<string>> verify)
 {
@@ -884,7 +884,7 @@ try
     RejectReplayWindowSwap("changed after their closure audit", () => new DirectoryInfo(Path.GetTempPath()).EnumerateDirectories("leancil-consumer-*")
             .Where(session => session.CreationTimeUtc >= started && session.Name.Length == "leancil-consumer-".Length + 32 &&
                 session.EnumerateFiles("*.lean").Any(file => File.ReadAllText(file.FullName).Contains(token, StringComparison.Ordinal)))
-            .Select(session => Path.Combine(session.FullName, ".lake/packages/leancil/.lake/build/lib/lean", interfaceModule + ".olean"))
+            .Select(session => Path.Combine(session.FullName, ".lake/packages/leancil_generated/.lake/build/lib/lean", interfaceModule + ".olean"))
             .SingleOrDefault(File.Exists),
         stage => { using Program consumer = new(); consumer.VerifyConsumer(app, consumerProof, output, "ExampleProof.correctness", package, null, stage); });
     File.Copy(Path.Combine(fixture, "Caller.lean"), consumerProof, true);

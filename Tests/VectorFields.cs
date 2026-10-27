@@ -25,7 +25,7 @@ string profile = RuntimeInformation.ProcessArchitecture switch
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
 Dictionary<string, string> selectors = metadata.GetType("Examples.VectorFields").Methods
     .ToDictionary(method => method.Name, method => method.FullName);
-Run(["lake", "build", "+Tests.VectorFields:olean"]);
+Run(["lake", "build", "+Tests.VectorFields:olean"], FixturePackage());
 var pending = new List<(GeneratedVerification Request, string Name, string Profile)>();
 
 int Size(Type type)
@@ -188,7 +188,7 @@ foreach ((string name, string changed) in new[]
     if (changed == baseline) throw new InvalidOperationException("Vector evidence mutation did not change source: " + name);
     string path = Path.Combine(root, "Evidence-" + name + ".lean");
     File.WriteAllText(path, changed);
-    (int Code, string Output, string Stdout, string Stderr) result = Execute(["lake", "env", "lean", path]);
+    (int Code, string Output, string Stdout, string Stderr) result = Execute(["lake", "env", "lean", path], cwd: FixturePackage());
     if (result.Code == 0 || !result.Output.Contains("decide"))
         throw new InvalidOperationException("Malformed vector field evidence accepted: " + name + "\n" + result.Output);
     Console.WriteLine("PASS vector field evidence rejection: " + name);
@@ -201,7 +201,7 @@ string mismatched = Regex.Replace(architectureBaseline, @"def profile : FeatureP
 if (mismatched == architectureBaseline) throw new InvalidOperationException("Architecture mutation did not change source");
 string architecturePath = Path.Combine(root, "Evidence-architecture.lean");
 File.WriteAllText(architecturePath, mismatched);
-(int Code, string Output, string Stdout, string Stderr) architectureResult = Execute(["lake", "env", "lean", architecturePath]);
+(int Code, string Output, string Stdout, string Stderr) architectureResult = Execute(["lake", "env", "lean", architecturePath], cwd: FixturePackage());
 if (architectureResult.Code == 0 || !architectureResult.Output.Contains("decide"))
     throw new InvalidOperationException("Vector layout accepted under a different method architecture\n" + architectureResult.Output);
 Console.WriteLine("PASS vector field evidence rejects method architecture mismatch");

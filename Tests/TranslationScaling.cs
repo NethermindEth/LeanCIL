@@ -22,7 +22,6 @@ Run(["dotnet", "build", Path.Combine(source, "Scaling.csproj"), "-c", "Release"]
 var assembly = Path.Combine(source, "bin/Scaling.dll");
 var output = Path.Combine(directory, "Extraction");
 Run(Extract("extract", assembly, "Scaling", "Scaling::M0(ulong)", output));
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (!extracted.Contains("method5_evidence_validated") || extracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException("Expected six independently checked methods at the default heartbeat budget.");
@@ -42,11 +41,11 @@ if (args.Contains("--measure", StringComparer.Ordinal))
     var trace = Path.Combine(directory, "Trace-" + Guid.NewGuid().ToString("N"));
     Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
     Console.WriteLine("Fixed-workload prefix measurements: " + trace);
-    Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")],
+    Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")], cwd: FixturePackage(),
         progress: "Baseline complete compositional extraction");
     var original = Path.Combine(directory, "FullMonolithic.lean");
     File.WriteAllText(original, monolithicSource);
-    var result = Execute(["lake", "env", "lean", original], progress: "Baseline complete monolithic rejection");
+    var result = Execute(["lake", "env", "lean", original], cwd: FixturePackage(), progress: "Baseline complete monolithic rejection");
     RequireHeartbeatRejection(result.Code, result.Output);
 }
 var prefix = new CheckedExtractionPrefix(extracted, "theorem translation_valid :", directory);

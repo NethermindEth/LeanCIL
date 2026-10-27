@@ -3,7 +3,8 @@
 #:include ../scripts/Verification.cs
 
 // Synthetic performance fixture only: never supplied to a verifier or certified as Lean output.
-var donor = Path.GetFullPath(args.FirstOrDefault() ?? At(".lake/build"));
+using var certified = new Program();
+var donor = Path.GetFullPath(args.FirstOrDefault() ?? CertifiedBuild());
 var root = At("artifacts/CertifiedCopyProfile-" + Guid.NewGuid().ToString("N"));
 var source = Path.Combine(root, "source");
 Directory.CreateDirectory(source);
@@ -51,3 +52,9 @@ foreach (var fused in iteration % 2 == 0 ? new[] { false, true } : new[] { true,
 }
 File.WriteAllText(Path.Combine(root, "timings.json"), System.Text.Json.JsonSerializer.Serialize(results, Json));
 Console.WriteLine(root);
+
+string CertifiedBuild()
+{
+    certified.Library(Inputs(At("CIL.lean")));
+    return Path.Combine(certified.library!, ".lake/build");
+}

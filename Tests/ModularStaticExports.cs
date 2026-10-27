@@ -272,7 +272,7 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
     if (stages.Count(stage => stage == "Fresh extraction of the current imported library DLL") != slots ||
         stages.Count(stage => stage == "Capturing actual checked author and extraction kernel terms") != slots ||
         stages.Count(stage => stage is "Building fresh Lean verification library" or
-            "Copying certified Lean verification library") != 2 ||
+            "Opening certified Lean verification library") != 2 ||
         stages.Count(stage => stage == "Independent kernel replay of the composed caller theorem") != 1 ||
         stages.Count(stage => stage == "Building fresh consumer proof and dependencies") !=
             slots + (package ? 1 : 0) ||

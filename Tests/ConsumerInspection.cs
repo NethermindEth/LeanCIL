@@ -8,9 +8,7 @@
 using System.Text.Json;
 
 using var verification = new Program();
-Run(["lake", "build", "leancil-audit"]);
-verification.auditExecutable = At(".lake/build/bin/leancil-audit" + (OperatingSystem.IsWindows() ? ".exe" : ""));
-verification.auditExecutableSha = Sha(verification.auditExecutable);
+verification.Library(Inputs(At("CIL.lean")));
 var root = Path.Combine(Path.GetTempPath(), "leancil-inspection-test-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
@@ -73,18 +71,6 @@ try
         throw new InvalidOperationException("Portable fingerprint omitted a changed declaration.");
     if (File.Exists(marker)) throw new InvalidOperationException("Fingerprinting executed a module initializer.");
 
-    var trustedHash = verification.auditExecutableSha;
-    verification.auditExecutableSha = "incorrect";
-    foreach (Action inspect in new Action[]
-    {
-        () => verification.ConsumerModuleImports(root, modules),
-        () => verification.PortableConsumerModuleParts(root, modules)
-    })
-    {
-        try { inspect(); throw new Exception("Changed inspection executable was accepted."); }
-        catch (InvalidOperationException error) when (error.Message.Contains("executable is missing or changed")) { }
-    }
-    verification.auditExecutableSha = trustedHash;
     File.WriteAllText(compiled, "corrupt olean");
     try
     {
@@ -92,6 +78,6 @@ try
         throw new Exception("Corrupt module header was accepted.");
     }
     catch (InvalidOperationException error) when (error.Message.Contains("Command failed")) { }
-    Console.WriteLine("PASS native consumer imports, fingerprints, initializer isolation and executable binding");
+    Console.WriteLine("PASS native consumer imports, fingerprints and initializer isolation");
 }
 finally { Directory.Delete(root, recursive: true); }

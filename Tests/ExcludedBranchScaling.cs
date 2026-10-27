@@ -20,7 +20,6 @@ Run(["dotnet", "build", Path.Combine(source, "Excluded.csproj"), "-c", "Release"
 var assembly = Path.Combine(source, "bin/Excluded.dll");
 var output = Path.Combine(directory, "Extraction");
 Run(Extract("extract", assembly, "Excluded", "Excluded::Accumulate(ulong,ulong)", output));
-Run(["lake", "build", "CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution"]);
 var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 
 // Split a generated Lean list literal at its top-level commas.
@@ -44,7 +43,7 @@ var states = Entries("method0FeatureStates");
 var excluded = reachable.Count(live => live == "false");
 if (excluded < 700 || states.Count != reachable.Count || extracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException($"Expected a large excluded branch checked at the default budget; found {excluded} excluded sites.");
-Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")]);
+Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")], cwd: FixturePackage());
 Console.WriteLine($"PASS {excluded} excluded sites validate at the default heartbeat budget");
 
 // Live under AVX2, the same branch is reachable; elaborator `decide` exceeded the budget on bodies this long.
@@ -54,7 +53,7 @@ var liveExtracted = File.ReadAllText(Path.Combine(liveOutput, "Extracted.lean"))
 var liveSites = liveExtracted.Split('\n').Single(l => l.StartsWith("def method0Reachable ", StringComparison.Ordinal)).Split("true").Length - 1;
 if (liveSites < 800 || liveExtracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException($"Expected a long live branch checked at the default budget; found {liveSites} live sites.");
-Run(["lake", "env", "lean", Path.Combine(liveOutput, "Extracted.lean")]);
+Run(["lake", "env", "lean", Path.Combine(liveOutput, "Extracted.lean")], cwd: FixturePackage());
 Console.WriteLine($"PASS {liveSites} live sites validate at the default heartbeat budget");
 
 // Each validator must still reach and reject a forged claim at the last pruned site it checks.
@@ -70,7 +69,7 @@ void Reject(string name, string validator, Func<int, bool> site, bool forgeState
         line.StartsWith("def method0Reachable ", StringComparison.Ordinal) ? $"def method0Reachable : List Bool := [{string.Join(", ", live)}]" :
         line.StartsWith("def method0FeatureStates ", StringComparison.Ordinal) ? $"def method0FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", facts)}]" :
         line)));
-    var rejected = Execute(["lake", "env", "lean", tampered]);
+    var rejected = Execute(["lake", "env", "lean", tampered], cwd: FixturePackage());
     if (rejected.Code == 0 || !rejected.Output.Contains($"Extraction.{validator} ", StringComparison.Ordinal))
         throw new InvalidOperationException($"{validator} accepted pruned site {pc} claimed reachable:\n" + rejected.Output);
     Console.WriteLine($"PASS {validator} rejects pruned site {pc} claimed reachable");

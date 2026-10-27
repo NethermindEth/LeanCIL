@@ -52,8 +52,7 @@ if (templates.Split("@[cil_code] def method").Length != 4 ||
 var renamed = File.ReadAllText(Path.Combine(shared, "TemplateBindings3.lean"));
 if (!renamed.Contains("Templates.method0 Extracted.profile true true 2", StringComparison.Ordinal))
     throw new InvalidOperationException("Wrapper extraction did not exercise changed managed callee indices.");
-Run(["lake", "build", "CIL.InstructionEquations", "CIL.Safety.SymbolicExecution", "CIL.Extraction.Translation"]);
-var library = At(".lake/build/lib/lean");
+var library = FixtureLeanPath();
 var sharedPath = shared + Path.PathSeparator + library;
 
 void Compile(string root, string name, string path)

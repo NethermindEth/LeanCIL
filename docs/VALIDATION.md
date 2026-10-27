@@ -118,12 +118,13 @@ both streamed artifacts and copied metadata retain their file modes.
 `Tests/LibraryCopyScaling.cs` compares separate validation/copying with hashing during
 copying, retaining independent destination validation in both paths. It alternates four
 pairs over the same framework/native build files and records file count, bytes and wall
-time. An optional argument selects the donor `.lake/build` directory; the synthetic
+time. An optional argument selects the donor `.lake/build` directory, by default the certified
+library's; the synthetic
 performance fixture is never supplied to a verifier as a certified library.
 
 `Tests/ConsumerFingerprintReuse.cs` checks authenticated canonical fingerprints across
 independent verifier processes using two framework modules and a multipart fixture. It
-covers corrupt receipts, changed or missing parts, module names, auditor/runtime bytes,
+covers corrupt receipts, changed or missing parts, module names, auditor bytes,
 fresh and disabled caches, diagnostic normalization, source/import invalidation and
 kernel replay. `--measure` uses the fixed full framework plus fixture workload and records
 wall time, raw input bytes, serialization counts and native normalization time. Supply a
@@ -227,7 +228,7 @@ dotnet run --file scripts/Test.cs
 
 The regression runner covers **54 check groups** across twenty-three test partitions. This includes initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem, and the integer opcode, narrow-storage and primitive-operation matrices. The CLI group also passed separately against an isolated installation of the packaged .NET tool before the integer opcode extension.
 
-The runner builds the independent assemblies and the CIL library, then prepares a source-keyed, kernel-replayed library for verification. CI rebuilds from sources; local runs may reuse an integrity-checked cache. Every proof still compiles and undergoes kernel replay in a new private directory. File-based C# apps provide the test runner, verifier and metadata fixture generator. Metadata tooling uses the same pinned Mono.Cecil version as the extractor; the F# example assembly also uses pinned FSharp.Core.
+The runner builds the independent assemblies and the CIL library, then prepares a source-keyed, kernel-replayed library for verification. CI rebuilds from sources; local runs may reuse a cache entry whose receipt binds its key and manifest. The library is checked by its trusted manifest digest and read in place: every proof still compiles and undergoes kernel replay in a new private session package that requires the library as a path dependency, so Lake writes only below that session. File-based C# apps provide the test runner, verifier and metadata fixture generator. Metadata tooling uses the same pinned Mono.Cecil version as the extractor; the F# example assembly also uses pinned FSharp.Core.
 
 CI builds the certified library once per workflow attempt and passes its immutable artifact ID and manifest digest from the producer job to the suite jobs. It does not restore compiled libraries from the GitHub Actions cache: a cache's source key and self-described file hashes cannot authenticate the native auditor or establish that compiled modules came from those sources.
 

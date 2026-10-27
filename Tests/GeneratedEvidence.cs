@@ -63,7 +63,7 @@ partial class Program
             {
                 if (File.ReadAllText(item.Path) != item.Source)
                     throw new InvalidOperationException("Evidence changed before measurement: " + item.Path);
-                var output = Run(["lake", "env", "lean", item.Path]);
+                var output = Run(["lake", "env", "lean", item.Path], cwd: FixturePackage());
                 if (output.Contains("sorryAx", StringComparison.Ordinal))
                     throw new InvalidOperationException("Untrusted evidence: " + item.Path);
             }
@@ -83,13 +83,13 @@ partial class Program
             var compiled = Path.ChangeExtension(batch, ".olean");
             File.Delete(compiled);
             var checkedBatch = Run(["lake", "env", "lean", "--root=" + Path.GetDirectoryName(batch),
-                .. replay ? new[] { "-o", compiled } : [], batch]);
+                .. replay ? new[] { "-o", compiled } : [], batch], cwd: FixturePackage());
             if (checkedBatch.Contains("sorryAx", StringComparison.Ordinal))
                 throw new InvalidOperationException("Untrusted generated evidence batch");
             var buildSeconds = timer.Elapsed.TotalSeconds;
             if (replay)
                 Run(["leanchecker", "PositiveBatch"], leanPath: Path.GetDirectoryName(batch) + Path.PathSeparator +
-                    At(".lake/build/lib/lean"));
+                    FixtureLeanPath());
             timer.Stop();
             foreach (var item in cases)
             {

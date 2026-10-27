@@ -152,18 +152,7 @@ void CheckFusedReplay()
 
 void CheckReplays(bool native)
 {
-    if (native)
-    {
-        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")))
-            verification.Library(Inputs(At("CIL.lean")));
-        else
-        {
-            Run(["lake", "build", "leancil-audit"]);
-            verification.auditExecutable = At(".lake/build/bin/leancil-audit" +
-                (OperatingSystem.IsWindows() ? ".exe" : ""));
-            verification.auditExecutableSha = Sha(verification.auditExecutable);
-        }
-    }
+    if (native) verification.Library(Inputs(At("CIL.lean")));
     Console.WriteLine(native ? "CHECK native joint replay" : "CHECK bootstrap joint replay");
     if (!verification.ReplayModulesJointly(root, ["JointA", "JointB", "JointC"], root, "Joint replay check"))
         throw new InvalidOperationException("Import-closed targets did not replay jointly");

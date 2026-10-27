@@ -439,23 +439,15 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
     Dictionary<string, ExportClosure> CheckPublishedContractInterfaces(ContractExportManifest manifest,
         InterfaceModule[] interfaces, PreparedContractExport[] exports, string staging)
     {
-        string certified = Library(Inputs(exports[0].Proof));
+        Library(Inputs(exports[0].Proof));
+        string certified = library!;
         string isolated = Path.Combine(staging, "interface");
         Directory.CreateDirectory(isolated);
-        CopyTree(Path.Combine(certified, "CIL"), Path.Combine(isolated, "CIL"));
-        foreach (string file in new[] { "CIL.lean", "lakefile.toml", "lake-manifest.json", "lean-toolchain" })
-            File.Copy(Path.Combine(certified, file), Path.Combine(isolated, file));
-        string baseBuild = Path.Combine(certified, ".lake", "build");
-        foreach (string path in Directory.EnumerateFiles(baseBuild, "*", SearchOption.AllDirectories))
-        {
-            string relative = PortableRelativePath(baseBuild, path);
-            if (!new[] { "lib/lean/CIL/", "lib/lean/CIL.", "ir/CIL/", "ir/CIL." }
-                .Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal))) continue;
-            string target = Path.Combine(isolated, ".lake", "build", relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(path, target);
-        }
-        SortedDictionary<string, string> baseModules = ModuleArtifacts(isolated);
+        // Only the framework is visible, read in place; Lake writes only the interface modules here.
+        File.WriteAllText(Path.Combine(isolated, "lakefile.toml"),
+            "name = \"leancil-interface\"\n\n[[require]]\nname = \"leancil\"\npath = " +
+            JsonSerializer.Serialize(certified.Replace('\\', '/')) + "\n");
+        File.Copy(Path.Combine(certified, "lean-toolchain"), Path.Combine(isolated, "lean-toolchain"));
         foreach (InterfaceModule source in interfaces)
         {
             string path = Path.Combine(isolated, source.Name.Replace('.', Path.DirectorySeparatorChar) + ".lean");
@@ -467,15 +459,9 @@ theorem LeanCILExportAudit.publicLayouts : _root_.CIL.Extraction.LayoutProjectio
             progress: "Checking published contract interface sources without implementation proofs");
         (string[] _, string leanPath) = ConsumerImportDirectories(isolated);
         SortedDictionary<string, string> built = ModuleArtifacts(isolated);
-        foreach ((string path, string hash) in baseModules)
-            if (!built.TryGetValue(path, out string? current) || current != hash)
-                throw new InvalidDataException("Contract interface changed a certified framework artifact: " + path);
-        static bool IsFramework(string module) =>
-            module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal);
-        if (built.Keys.Any(path => IsFramework(ModuleName(path)) && !baseModules.ContainsKey(path)))
+        string[] modules = built.Keys.Select(ModuleName).Distinct(StringComparer.Ordinal).ToArray();
+        if (modules.Any(name => name == "CIL" || name.StartsWith("CIL.", StringComparison.Ordinal)))
             throw new InvalidDataException("Contract interface produced an unrecorded framework artifact.");
-        string[] modules = built.Keys.Select(ModuleName).Distinct(StringComparer.Ordinal)
-            .Where(name => name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal)).ToArray();
         if (modules.Any(name => !interfaces.Any(source => source.Name == name)))
             throw new InvalidDataException("Contract interface produced an undeclared module.");
         Dictionary<string, string> failures = ReplayConsumerModules(isolated, modules, leanPath);

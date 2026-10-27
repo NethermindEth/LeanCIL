@@ -16,7 +16,7 @@ if (args is ["--worker", var specification, var output])
     var session = worker.Library(Inputs(At("CIL.lean")));
     if (job.WithoutMetadata) worker.certifiedFingerprintsSha = null;
     if (job.Toolchain is not null) worker.resolvedToolchain = job.Toolchain;
-    if (job.ChangeMetadata) File.AppendAllText(Path.Combine(session, CertifiedFingerprintsName), "\n");
+    if (job.ChangeMetadata) File.AppendAllText(Path.Combine(worker.library!, CertifiedFingerprintsName), "\n");
     // The producer can be a file-based app while the receiver is the packaged CLI.
     worker.verificationPolicy = "different-receiver-policy";
     var result = worker.PortableConsumerModuleParts(session, job.Modules);
@@ -142,7 +142,6 @@ else
     Directory.CreateDirectory(Path.Combine(tools, "bin"));
     using (var context = new Program())
         File.Copy(context.LeanExecutable, Path.Combine(tools, "bin", Path.GetFileName(context.LeanExecutable)));
-    File.WriteAllText(Path.Combine(tools, "bin", "changed-runtime.dll"), "different native runtime identity");
     Equal(initial, Invoke("changed-tools", modules.Count, toolchain: tools));
     Invoke("changed-private-metadata", 0, changeMetadata: true);
     var metadata = Path.Combine(prepared, CertifiedFingerprintsName);

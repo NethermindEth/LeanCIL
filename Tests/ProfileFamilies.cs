@@ -180,7 +180,7 @@ Console.WriteLine("PASS author macro cannot bypass the uniform profile audit");
 File.WriteAllText(proof, familySource + """
 
 run_cmd do
-  let path := ".lake/packages/leancil/.lake/build/lib/lean/LeanCILProfileReference.olean"
+  let path := ".lake/packages/leancil_generated/.lake/build/lib/lean/LeanCILProfileReference.olean"
   let bytes ← IO.FS.readBinFile path
   IO.FS.writeBinFile path (bytes.push 0)
 """);

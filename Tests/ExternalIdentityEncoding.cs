@@ -19,7 +19,7 @@ try
 }
 catch (EncoderFallbackException) { }
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
-var leanPath = directory + Path.PathSeparator + At(".lake/build/lib/lean");
+var leanPath = directory + Path.PathSeparator + FixtureLeanPath();
 var checker = Path.Combine(Run(["lean", "--print-prefix"]).Trim(), "bin",
     OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
 
