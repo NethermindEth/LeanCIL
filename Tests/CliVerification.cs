@@ -45,6 +45,7 @@ var demoAssembly = Path.Combine(fixture, "bin", "Examples.dll");
 // Explicit proof selection becomes portable settings, separate from the generated report.
 Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", output]);
 Verified("--proof", proof);
+Verified("--fresh");
 var settings = File.ReadAllText(settingsPath);
 if (Path.IsPathRooted(JsonSerializer.Deserialize<JsonElement>(settings).GetProperty("proof").GetString()!))
     throw new InvalidOperationException("Expected a relative proof path in verification settings.");

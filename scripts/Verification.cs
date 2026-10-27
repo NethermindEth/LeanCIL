@@ -1023,7 +1023,7 @@ partial class Program : IDisposable
             }
             var supplied = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY");
             var suppliedDigest = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256");
-            // A supplied certified library is not a local cache, so --fresh still uses it.
+            // A supplied certified library is not a local cache, so --rebuild-library still uses it.
             if (!string.IsNullOrWhiteSpace(supplied))
             {
                 var openStarted = DateTimeOffset.UtcNow;
@@ -2048,7 +2048,7 @@ partial class Program : IDisposable
                 throw new InvalidOperationException("Proof inputs changed during verification");
         }
 
-        // Use a source-bound build; CI and --fresh bypass the local library cache.
+        // Use a source-bound build; CI and --rebuild-library bypass the local library cache.
         stage?.Invoke("Lean library build");
         var session = Library(before);
         HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);

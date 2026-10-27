@@ -97,4 +97,10 @@ second.Verify(assembly, "Examples", entry, proof, output);
 var newSession = timer.ElapsedMilliseconds;
 if (second.extractionCacheHits == 0 || second.proofCacheHits == 0 || second.supportCacheHits == 0)
     throw new Exception("New verifier session did not reuse certified dependencies and proofs");
+using var freshProof = new Program { freshProofs = true };
+freshProof.Verify(assembly, "Examples", entry, proof, output);
+if (freshProof.extractionCacheHits != 0 || freshProof.proofCacheHits != 0 || freshProof.supportCacheHits != 0 ||
+    freshProof.libraryKey != second.libraryKey || freshProof.libraryBuild != second.libraryBuild)
+    throw new Exception("Fresh proof reused proof/support artifacts or bypassed the existing certified library");
+Console.WriteLine("PASS fresh proof bypasses proof/support reuse while retaining the certified library");
 Console.WriteLine($"PASS certified reuse, proof-edit invalidation, repeated unchecked-theorem rejection and new-session reuse; first={first}ms repeat={repeated}ms new-session={newSession}ms");
