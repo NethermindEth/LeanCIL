@@ -154,11 +154,20 @@ framework once; its cost must be included when assessing a workload's amortized 
 
 `Tests/ConsumerCertificateReuse.cs` measures four independent verifier processes with
 distinct proof sources. Unchanged generated certificates retain their authenticated build
-outputs; changed extraction text and self-rehashed corrupt artifacts force rebuilding both
-`Extracted` and `ExtractionAudit`. Every successful request still replays both modules and
-the proof, and audits the certificate. Generated-source tampering remains rejected before
-receipt reuse. Pass a baseline extractor DLL and `--measure` to collect the same workload
-without requiring compilation reuse; results are written to `timings.json`.
+outputs and skip the otherwise redundant certificate `lake build` invocation. Reuse requires
+the complete certificate module parts and traces, unchanged authenticated restored artifacts,
+and the existing source/import closure binding. Changed extraction text and self-rehashed
+corrupt artifacts force rebuilding `Extracted`. Every successful request still independently
+replays `Extracted` and the proof and audits the certificate. Expected rejection groups retain
+the separate `ExtractionAudit` module. Generated-source tampering remains rejected before
+receipt reuse, and proof code cannot replace even a restored certificate artifact. Pass a
+baseline extractor DLL and `--measure` to collect the same workload without requiring
+preparation reuse; process counts and elapsed times are written to `timings.json`.
+
+On Windows, the unchanged-extraction request removed one 0.186s certificate process; total
+request time was 4.976s before and 4.952s after, so this run establishes the eliminated work
+but not a significant overall latency gain. Both measurements used an already certified
+library and retained independent replay of `Extracted` and `LeanCILProof`.
 
 `Tests/TranslationScaling.cs` checks the unchanged extraction prefix once, then imports it
 into the compositional certificate and deliberately failing monolithic certificate. Its

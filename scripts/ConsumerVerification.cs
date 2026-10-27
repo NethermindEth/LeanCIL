@@ -1645,6 +1645,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 File.Copy(Within(support, file), target, true);
             }
             if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
+            var certificateRestoration = new SortedDictionary<string, string>(restoredArtifacts, StringComparer.Ordinal);
             // Not part of restoredArtifacts: these are rebuilt only if stale and always replayed.
             if (supportKey.Length > 0)
             {
@@ -1658,6 +1659,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         var target = Within(session, file);
                         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                         File.Copy(Within(own, file), target, true);
+                        certificateRestoration[file] = dependentFiles[file];
                     }
                     if (dependentFiles.Count > 0) CacheProgress("certified extraction-dependent consumer modules");
                 }
@@ -1686,10 +1688,29 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // metaprograms must not redefine the source bytes accepted by this run.
             Stage(members, "extraction certificate audit");
             var certificateTarget = checkRejectedProofs ? "+ExtractionAudit:olean" : "+Extracted:olean";
-            var extractionAudit = Run(["lake", "build", certificateTarget], generatedPackage,
-                progress: "Checking consumer extraction certificate");
             string[] certificateModules = ["Extracted", .. components.Sources.Keys,
                 .. checkRejectedProofs ? new[] { "ExtractionAudit" } : []];
+            // Authenticated source-closed artifacts need no no-op Lake invocation. Their
+            // bytes are still fixed before proof code, then independently replayed and audited.
+            var restoredCertificate = certificateModules.All(module =>
+            {
+                var path = Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
+                var relative = Path.GetRelativePath(session, path).Replace('\\', '/');
+                var parts = ConsumerModuleParts(path);
+                return parts.ContainsKey(".olean") && certificateRestoration.ContainsKey(relative) &&
+                    certificateRestoration.ContainsKey(relative[..^".olean".Length] + ".trace") &&
+                    parts.All(part => certificateRestoration.TryGetValue(
+                        relative[..^".olean".Length] + part.Key, out var hash) && hash == part.Value);
+            }) && certificateRestoration.All(pair =>
+                File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
+            string extractionAudit;
+            if (restoredCertificate)
+            {
+                CacheProgress("certified consumer extraction preparation");
+                extractionAudit = "";
+            }
+            else extractionAudit = Run(["lake", "build", certificateTarget], generatedPackage,
+                progress: "Checking consumer extraction certificate");
             Dictionary<string, SortedDictionary<string, string>> ExtractionArtifacts() => certificateModules.ToDictionary(
                 module => module, module => ConsumerModuleParts(Path.Combine(generatedPackage,
                     ".lake/build/lib/lean", module.Replace('.', '/') + ".olean")), StringComparer.Ordinal);

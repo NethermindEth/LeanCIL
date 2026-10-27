@@ -67,6 +67,10 @@ Core consumer tests batch fixed rejection cases to reuse certified-library setup
 source, environment and cache-invalidation checks isolated. See the reproducible comparison in
 [validation coverage](docs/VALIDATION.md).
 
+Edited consumer proofs reuse authenticated extraction preparation without starting a redundant
+certificate build. Rechecked proofs still independently replay and audit the generated certificate
+and check that proof elaboration leaves its compiled bytes unchanged.
+
 Prepared certified libraries include canonical fingerprints of their compiled modules.
 Consumer verification reuses them only while module bytes and the normalizer match,
 avoiding repeated framework serialization even when local receipts are disabled.
