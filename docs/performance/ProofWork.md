@@ -110,5 +110,25 @@ an additive cost model. Generic's positive batch remains approximately unchanged
 Independent kernel replay of the complete constrained batch passes. All four independently
 forged constrained targets still fail their intended `ConstrainedCallsValid` obligation;
 the constrained metadata regression module also passes, including Unicode scopes and rejected
-decorated or malformed names. A full Evidence comparison is required before claiming suite-wide
-savings.
+decorated or malformed names.
+
+### Integrated Evidence suite
+
+The complete Windows Evidence suite, including checked control reuse, passes in 400.03s against
+440.27s on main `0361ca9` (9.1% faster). Including C# builds, the command takes 431.33s against
+475.72s. Both runs use `dotnet run --file scripts/Test.cs -- --suite evidence`, with each revision's
+authenticated library prepared beforehand, no concurrent benchmarks, and no supplied fixture
+manifest. Library production is excluded from both suite measurements.
+
+| Work | Before | After |
+| --- | ---: | ---: |
+| Complete constrained-call fixture | 28.08s | 14.15s |
+| Complete generic evidence fixture | 65.77s | 59.59s |
+| Lean frontend calls | 52 / 210.80s | 51 / 184.46s |
+| Positive-batch independent replay calls | 6 / 34.69s | 6 / 33.26s |
+| Extractor CLI calls | 182 | 182 |
+
+The original positive claims and independent mutations pass, together with two added rejection
+checks for missing or changed control declarations. Both runs contain 74 expected nonzero child
+commands. Frontend, replay and fixture durations overlap the suite duration; they are not additive
+savings. These are local measurements, not predicted hosted-runner job times.
