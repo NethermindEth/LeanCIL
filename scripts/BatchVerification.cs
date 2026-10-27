@@ -142,8 +142,8 @@ partial class Program
             {
                 try
                 {
-                    Run(["lean", "--root=" + fresh, "-o", Path.ChangeExtension(sources[shard], ".olean"), sources[shard]],
-                        leanPath: leanPath,
+                    var olean = Path.ChangeExtension(sources[shard], ".olean");
+                    Run(["lean", "--root=" + fresh, "-o", olean, sources[shard]], leanPath: leanPath,
                         progress: $"Checking {requests.Count} generated fixtures, shard {shard + 1} of {shardCount}");
                 }
                 catch (Exception error) { failures[shard] = error; }
@@ -190,7 +190,8 @@ partial class Program
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
                 reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
-                    libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(sources[shardOf[i]]), theorem,
+                    libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes,
+                    Sha(sources[shardOf[i]]), theorem,
                     staticValues: StaticValueAssumptions(extraction), imports: PublishedImports(extraction),
                     contractDependencies: DeploymentDependencies(extraction),
                     initializationAssumptions: InitializationAssumptions(extraction));
