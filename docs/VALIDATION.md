@@ -456,6 +456,9 @@ a concrete checked read observes the private initializer's bytes. It independent
 checks different source/target allocation counters and rejects changed retained initializers,
 wrong initializer kinds, overflowing bytes, aggregate lengths, unspecified vectors, invalid spans,
 unchanged local operands, changed call targets and an exhausted stack quota.
+Allocation-renaming proofs reuse checked step equations, and IntegerMath groups boundary
+proofs without changing their final statements. See the measured compilation and proof-work
+reductions in [Proof work measurements](performance/ProofWork.md).
 The extracted-loop suite checks
 universal countdown termination, NOP/reordered variants, runtime comparisons,
 incorrect/nondecreasing loop rejection, a counted loop composed through its
