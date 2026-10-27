@@ -59,6 +59,8 @@ jobs:
       contents: read
       # Reads earlier runs' jobs, logs and library artifacts.
       actions: read
+      # Identifies the same-repository PR merged by a push commit.
+      pull-requests: read
     outputs:
       manifest-sha256: ${{ steps.certify.outputs.manifest-sha256 }}
       artifact-id: ${{ steps.certify.outputs.reused == 'true' && steps.donor.outputs.artifact-id || steps.library-artifact.outputs.artifact-id }}
@@ -98,7 +100,7 @@ jobs:
           use-github-cache: false
           use-mathlib-cache: false
       # A PR-scoped cache does not authenticate its producer or its native audit executable. A run of
-      # this commit, or a main push of its first parent, built its library with trusted code and logged the digest.
+      # this commit, an identical merged PR tree, or previous main built and logged the library digest.
       - name: Find a library certified by this commit or by main
         id: donor
         env:
@@ -107,6 +109,7 @@ jobs:
         run: >-
           dotnet run --file scripts/FindCertifiedLibrary.cs -- --repository "$GITHUB_REPOSITORY"
           --workflow verification.yml --head "$HEAD_SHA" --base "$(git rev-parse HEAD^1)" --output "$GITHUB_OUTPUT"
+          --event "$GITHUB_EVENT_NAME"
       - name: Download the donated certified library
         id: donated
         if: steps.donor.outputs.artifact-id != ''
