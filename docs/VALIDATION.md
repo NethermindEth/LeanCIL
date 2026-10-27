@@ -274,6 +274,11 @@ a controlled paired timing. All compiled module-part hashes matched the donor af
 edit; the new certificate bound the changed source. These are local library timings, not full CI
 job measurements.
 
+`Tests/LibraryReplayCoverage.cs` uses a small synthetic producer manifest with a valid aggregate
+and an invalid theorem in a separate module. Both joint replay and its external-checker fallback
+must reject that declaration; checking only the aggregate is insufficient. The cache fixture runs
+this regression alongside the authentication tests.
+
 The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integer`, `narrow`, `primitive`, `division`, `checked`, `conversions`, `native`, `arguments`, `layout`, `copy`, `bits`, `enums`, `nested`, `instance`, `constructors`, `fsharp`, `math`, `divrem`, `unsafe`, `blocks`, `generics`, `loops`, `contracts`, `evidence`, `scaling`, `excluded`, `identity`, `labels`, `names`, `symbols`, `workspace`, `templates`, `callers`, `construction`, `outcomes` and `audit`. These partitions cover the same check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites (in CI, one job builds the extractor and example assembly with `--build-tools` and suite jobs set `LEANCIL_PREBUILT_TOOLS=true` to use them), retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |

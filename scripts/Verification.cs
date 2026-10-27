@@ -1071,9 +1071,11 @@ partial class Program : IDisposable
                     progress: "Building fresh Lean verification library");
                 var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
                 var compiledLibrary = Path.Combine(library, ".lake/build/lib/lean");
-                if (!ReplayModulesJointly(library, [.. ModuleArtifacts(library).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
+                string[] modules = [.. ModuleArtifacts(library).Keys.Select(ModuleName)
+                    .Distinct().Order(StringComparer.Ordinal)];
+                if (!ReplayModulesJointly(library, modules,
                     compiledLibrary, "Joint kernel replay of fresh Lean verification library"))
-                    Run([checker, "CIL"], library, compiledLibrary, streamOutput: true,
+                    Run([checker, .. modules], library, compiledLibrary, streamOutput: true,
                         progress: "Kernel replay of fresh Lean verification library");
                 if (!Same(sources, LibrarySources(CommonInputs())))
                     throw new InvalidDataException("Library sources changed during preparation");
@@ -1452,9 +1454,12 @@ partial class Program : IDisposable
             !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal));
         if (!ValidCertifiedLibrary(directory, trustedDigest, key, sources)) return null;
         var compiled = Path.Combine(directory, ".lake/build/lib/lean");
-        if (!ReplayModulesJointly(directory, [.. ModuleArtifacts(directory).Keys.Select(ModuleName).Distinct().Order(StringComparer.Ordinal)],
+        string[] modules = [.. ModuleArtifacts(directory).Keys.Select(ModuleName)
+            .Distinct().Order(StringComparer.Ordinal)];
+        if (!ReplayModulesJointly(directory, modules,
             compiled, "Joint kernel replay of reused Lean verification library"))
-            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), "CIL"], directory, compiled,
+            Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"),
+                .. modules], directory, compiled,
                 streamOutput: true, progress: "Kernel replay of reused Lean verification library");
         return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
     }
