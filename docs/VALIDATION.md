@@ -34,6 +34,17 @@ computes a fresh result, so no analysis is cached across method mutation or prof
 `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
 profiles, feature queries and a loop backedge, and retains source/assembly tampering checks.
 
+The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
+extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,
+hashes and whole-assembly signature validation are shared within the batch. Long-form argument
+fixtures use a separate batch after writing their modified assembly. Expected extraction failures
+remain isolated, since a batch stops at its first failure.
+
+On Windows, the 45 positive array/generic extractions took 7.90s as individual commands and
+0.59s in three batches. Their emitted Lean sources were byte-identical, and their positive proofs,
+independent replay and mutation checks passed. This measures extraction work, not the complete
+Evidence suite or hosted CI wall time.
+
 Generated positive evidence in `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`,
 `GenericEvidence` and `StaticScalarValues` shares imports within each fixture. Each extraction
 and its proof remain in their own namespace, following the generated verification batch

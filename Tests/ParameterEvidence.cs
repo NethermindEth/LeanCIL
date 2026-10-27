@@ -22,10 +22,11 @@ var samples = new[]
     "Arguments::Native(nint)", "Arguments::Narrow(byte)",
     "Arguments::ReassignReference(uint&,uint&)", "Arguments::Struct(Examples.Packet)", "Counter::Parameter(byte)"
 };
+ExtractBatch("extract", "Examples", samples.Select((selector, index) =>
+    new GeneratedExtraction(assembly, selector, Path.Combine(output, index.ToString()))));
 foreach (var (selector, index) in samples.Select((selector, index) => (selector, index)))
 {
     var folder = Path.Combine(output, index.ToString());
-    Run(Extract("extract", assembly, "Examples", selector, folder));
     evidence.Add(Path.Combine(folder, "Extracted.lean"), "PASS checked extraction: " + selector);
 }
 
@@ -47,10 +48,11 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         }
     var longAssembly = Path.Combine(output, "LongArguments.dll");
     module.Write(longAssembly);
+    ExtractBatch("extract", "Examples", samples.Take(3).Select((selector, index) =>
+        new GeneratedExtraction(longAssembly, selector, Path.Combine(output, "Long" + index))));
     foreach (var selector in samples.Take(3))
     {
         var folder = Path.Combine(output, "Long" + Array.IndexOf(samples, selector));
-        Run(Extract("extract", longAssembly, "Examples", selector, folder));
         evidence.Add(Path.Combine(folder, "Extracted.lean"), "PASS checked extraction: " + selector);
     }
 }

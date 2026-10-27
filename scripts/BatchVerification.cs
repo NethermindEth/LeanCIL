@@ -28,20 +28,9 @@ partial class Program
     }
 
     static void ExtractGeneratedBatch(string mode, string identity, IReadOnlyList<GeneratedVerification> requests,
-        string profile)
-    {
-        var path = Path.Combine(Path.GetTempPath(), "leancil-extractions-" + Guid.NewGuid().ToString("N") + ".json");
-        try
-        {
-            File.WriteAllText(path, JsonSerializer.Serialize(requests.Select(request => new
-            {
-                assembly = request.Assembly, identity, entry = request.Entry, output = request.Output,
-                profile = request.Profile ?? profile, initializedTypes = request.InitializedTypes
-            })));
-            Run(["dotnet", ExtractorPath, "generated-extraction-batch", mode, path]);
-        }
-        finally { File.Delete(path); }
-    }
+        string profile) => ExtractBatch(mode, identity, requests.Select(request =>
+            new GeneratedExtraction(request.Assembly!, request.Entry, request.Output,
+                request.Profile ?? profile, request.InitializedTypes)));
 
     // More Lean processes add memory pressure without shortening a typical fixture batch.
     const int MaxBatchShards = 8;

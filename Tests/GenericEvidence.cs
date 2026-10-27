@@ -47,11 +47,8 @@ var samples = new[]
     "NativeIdentity(nint)", "TwoTypes(ulong,uint)", "ClearPacked(uint)",
     "NextPacked(Examples.PackedLeaf&,int)", "Instance(ulong)"
 };
-foreach (var (selector, index) in samples.Select((selector, index) => (selector, index)))
-{
-    var folder = Path.Combine(output, index.ToString());
-    Run(Extract("extract", assembly, "Examples", "GenericMethods::" + selector, folder));
-}
+ExtractBatch("extract", "Examples", samples.Select((selector, index) =>
+    new GeneratedExtraction(assembly, "GenericMethods::" + selector, Path.Combine(output, index.ToString()))));
 
 string ChangeDefinition(string source, string name, Func<string, string> change)
 {

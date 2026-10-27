@@ -23,10 +23,11 @@ var samples = new[]
     "UnsafeLayouts::Size15()",
     "UnsafeLayouts::Add15int(Examples.NestedRecord&,int)"
 };
+ExtractBatch("extract", "Examples", samples.Select((selector, index) =>
+    new GeneratedExtraction(At("Examples/Assembly/bin/Examples.dll"), selector, Path.Combine(output, index.ToString()))));
 foreach (var (selector, index) in samples.Select((selector, index) => (selector, index)))
 {
     var folder = Path.Combine(output, index.ToString());
-    Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples", selector, folder));
     evidence.Add(Path.Combine(folder, "Extracted.lean"), "PASS checked extraction: " + selector);
 }
 

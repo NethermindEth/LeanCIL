@@ -1590,6 +1590,26 @@ partial class Program : IDisposable
         ["dotnet", ExtractorPath, mode, assembly, entry, output, profile,
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
 
+    sealed record GeneratedExtraction(string Assembly, string Entry, string Output, string Profile = "scalar",
+        string[]? InitializedTypes = null);
+
+    // Share immutable assembly bytes and signature validation, retaining fresh modules per request
+    // and the extractor's final check that every assembly, symbol and profile input is unchanged.
+    static void ExtractBatch(string mode, string? identity, IEnumerable<GeneratedExtraction> requests)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "leancil-extractions-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(requests.Select(request => new
+            {
+                assembly = request.Assembly, identity, entry = request.Entry, output = request.Output,
+                profile = request.Profile, initializedTypes = request.InitializedTypes
+            })));
+            Run(["dotnet", ExtractorPath, "generated-extraction-batch", mode, path]);
+        }
+        finally { File.Delete(path); }
+    }
+
     // This module imports only the extracted program, never the user proof. The audit
     // checks its compiled theorem against the complete validator application for that
     // program; a declaration with the right name but type True is insufficient.
