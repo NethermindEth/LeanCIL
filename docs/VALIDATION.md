@@ -182,6 +182,28 @@ both rejection paths remove a stale report. Pass a
 baseline extractor DLL and `--measure` to collect the same workload without requiring
 preparation reuse; process counts and elapsed times are written to `timings.json`.
 
+Generated certificates have their own authenticated support records containing only the
+closed generated module set. Their preparation key binds all generated sources and their
+Lake configuration, framework artifacts, tools and declared environment inputs. Consumer
+package configuration changes can reuse this preparation without reusing consumer modules
+or exempting the certificate from replay. The default consumer workload checks this with its
+existing custom-build-directory request and checks invalidation with its existing Lake
+environment mutation; these assertions add no verification requests.
+
+Run `Tests/ConsumerCertificateReuse.cs --configuration-reuse` for focused configuration reuse,
+fresh verification, self-rehashed corruption and post-restoration artifact mutation checks.
+Run `Tests/ConsumerComponents.cs --configuration-reuse` to check that split certificates retain
+their complete generated dependency set across a consumer configuration change. These extra
+requests are opt-in and are excluded from the unchanged full-workload timing comparison.
+
+The complete Windows consumer workload took 615.93s before this configuration reuse and
+605.23s after it, with the same 29 top-level assertions and helper fixtures. Certificate
+builds fell from 37 to 35 (89.31s to 84.88s); fresh consumer builds remained 48, joint
+replays 52 and fallback replays 4. The focused configuration-only request took 5.30s
+versus 7.19s with `--fresh`, avoiding a 2.06s certificate build. Both full runs used
+isolated success caches and the same authenticated framework donor. This removes
+specific redundant work; the 1.7% total improvement is not a substantial suite speedup.
+
 On Windows, the unchanged-extraction request removed one 0.186s certificate process; total
 request time was 4.976s before and 4.952s after, so this run establishes the eliminated work
 but not a significant overall latency gain. Both measurements used an already certified

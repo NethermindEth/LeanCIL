@@ -821,6 +821,34 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // Sources are package-relative paths of every candidate source file for the module.
     sealed record ConsumerSupportModule(SortedDictionary<string, string> Sources, string[] Imports, string[] Files);
 
+    // Generated certificates depend on their own package and certified framework, not the
+    // consumer's package configuration. Keep their authenticated record free of consumer modules.
+    void PublishConsumerCertificateSupport(string family, string collected, HashSet<string> modules)
+    {
+        var record = ReadConsumerSupportRecord(Path.Combine(collected, ConsumerSupportRecordName));
+        if (record is null) return;
+        var selected = new SortedDictionary<string, ConsumerSupportModule>(record
+            .Where(pair => modules.Contains(pair.Key)).ToDictionary(), StringComparer.Ordinal);
+        if (selected.Count != modules.Count || selected.Values.Any(module => module.Imports.Any(import =>
+                !modules.Contains(import) && !ExternalConsumerModule(import)))) return;
+        var publication = Path.Combine(Path.GetTempPath(),
+            "leancil-certificate-support-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(publication);
+        try
+        {
+            foreach (var file in selected.Values.SelectMany(module => module.Files).Distinct(StringComparer.Ordinal))
+            {
+                var target = Within(publication, file);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(Within(collected, file), target);
+            }
+            var manifest = Path.Combine(publication, ConsumerSupportRecordName);
+            File.WriteAllText(manifest, JsonSerializer.Serialize(selected));
+            PublishSuccess(family + "-" + Sha(manifest), publication, family);
+        }
+        finally { Directory.Delete(publication, true); }
+    }
+
     bool ExternalConsumerModule(string name) => name == "CIL" || name.StartsWith("CIL.", StringComparison.Ordinal) ||
         File.Exists(Path.Combine(Toolchain, "lib/lean", name.Replace('.', '/') + ".olean"));
 
@@ -1600,6 +1628,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     i => requestModules[i], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
                 generatedSources: generatedSources, components: components, checkRejectedProofs: checkRejectedProofs);
             var generatedPackage = prepared.Generated;
+            var generatedInputPaths = prepared.Copied.Keys.Where(path =>
+                    path.StartsWith(generatedPackage + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                .Concat([Path.Combine(generatedPackage, "lakefile.toml"),
+                    Path.Combine(generatedPackage, "lean-toolchain")]).ToArray();
+            SortedDictionary<string, string> GeneratedInputs() => HashFiles(generatedInputPaths.Select(path =>
+                (Path.GetRelativePath(generatedPackage, path).Replace('\\', '/'), path)));
+            var generatedInputs = GeneratedInputs();
+            var certificateSupportKey = ConsumerCacheKey("generated-certificate-support", generatedInputs,
+                JsonSerializer.Serialize(baseModules));
             var interfaceModules = extractions[members[0]].Sources.Keys
                 .Where(module => module != "ExtractedImports").ToArray();
             var interfaceModuleNames = interfaceModules.ToHashSet(StringComparer.Ordinal);
@@ -1651,13 +1688,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
             var certificateRestoration = new SortedDictionary<string, string>(restoredArtifacts, StringComparer.Ordinal);
             // Not part of restoredArtifacts: these are rebuilt only if stale and always replayed.
-            if (supportKey.Length > 0)
+            void RestoreCertificateSupport(string key, bool? dependent)
             {
                 var own = Path.Combine(Path.GetTempPath(), "leancil-consumer-dependent-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(own);
                 try
                 {
-                    var dependentFiles = RestoreConsumerSupport(supportKey, bound, own, dependent: true);
+                    var dependentFiles = RestoreConsumerSupport(key, bound, own, dependent);
                     foreach (var file in dependentFiles.Keys)
                     {
                         var target = Within(session, file);
@@ -1669,6 +1706,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 }
                 finally { Directory.Delete(own, true); }
             }
+            if (supportKey.Length > 0) RestoreCertificateSupport(supportKey, dependent: true);
             if (interfaceModules.Length > 0)
             {
                 Stage(members, "contract interface validation");
@@ -1696,7 +1734,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .. checkRejectedProofs ? new[] { "ExtractionAudit" } : []];
             // Authenticated source-closed artifacts need no no-op Lake invocation. Their
             // bytes are still fixed before proof code, then independently replayed and audited.
-            var restoredCertificate = certificateModules.All(module =>
+            bool CertificateRestored() => certificateModules.All(module =>
             {
                 var path = Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
                 var relative = Path.GetRelativePath(session, path).Replace('\\', '/');
@@ -1707,6 +1745,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         relative[..^".olean".Length] + part.Key, out var hash) && hash == part.Value);
             }) && certificateRestoration.All(pair =>
                 File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
+            var restoredCertificate = CertificateRestored();
+            if (!restoredCertificate)
+            {
+                RestoreCertificateSupport(certificateSupportKey, dependent: null);
+                restoredCertificate = CertificateRestored();
+            }
             string extractionAudit;
             if (restoredCertificate)
             {
@@ -2052,6 +2096,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                             currentArtifacts.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph, collected);
                     if (collected is not null)
                     {
+                        if (UseSuccessCache && Same(generatedInputs, GeneratedInputs()))
+                            PublishConsumerCertificateSupport(certificateSupportKey, collected,
+                                certificateModules.ToHashSet(StringComparer.Ordinal));
                         if (supportKey.Length > 0)
                         {
                             PublishSuccess(supportKey + "-" + Sha(Path.Combine(collected, ConsumerSupportRecordName)), collected, supportKey);

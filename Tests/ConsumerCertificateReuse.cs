@@ -7,7 +7,9 @@ using System.Diagnostics;
 using System.Text.Json;
 
 var measureOnly = args.Contains("--measure", StringComparer.Ordinal);
-var cli = new[] { "dotnet", args.FirstOrDefault(value => value != "--measure") ?? ExtractorPath };
+var configurationReuse = args.Contains("--configuration-reuse", StringComparer.Ordinal);
+var cli = new[] { "dotnet", args.FirstOrDefault(value =>
+    value is not ("--measure" or "--configuration-reuse")) ?? ExtractorPath };
 var directory = At("artifacts/ConsumerCertificateReuse-" + Guid.NewGuid().ToString("N"));
 var previousCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
@@ -45,13 +47,13 @@ Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
 var measurements = new List<object>();
 void Extract(string profile) => Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"),
     "Arithmetic::Add(ulong,ulong)", output, profile]);
-void Verify(string label, bool expectedBuild)
+void Verify(string label, bool expectedBuild, params string[] options)
 {
     // Each invocation has a distinct proof source, so a whole-result receipt cannot satisfy it.
     File.AppendAllText(proof, "\n-- " + label + "\n");
     var previous = Directory.GetFiles(trace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
     var timer = Stopwatch.StartNew();
-    Run([.. cli, "verify", output, "--proof", proof, "--proof-root", package]);
+    Run([.. cli, "verify", output, "--proof", proof, "--proof-root", package, .. options]);
     timer.Stop();
     var stages = Directory.EnumerateFiles(trace, "*.jsonl").Where(path => !previous.Contains(path))
         .SelectMany(File.ReadLines).Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
@@ -92,6 +94,12 @@ void Verify(string label, bool expectedBuild)
 Extract("scalar");
 Verify("initial", expectedBuild: true);
 Verify("unchanged", expectedBuild: false);
+if (configurationReuse)
+{
+    File.AppendAllText(Path.Combine(package, "lakefile.toml"), "\n# Different consumer configuration.\n");
+    Verify("consumer-configuration", expectedBuild: false);
+    Verify("fresh-consumer-configuration", true, "--fresh");
+}
 var corrupted = 0;
 Directory.CreateDirectory(SuccessCacheRoot);
 foreach (var generation in Directory.EnumerateDirectories(SuccessCacheRoot))
@@ -117,6 +125,9 @@ if (tampered.Code != 1 || !tampered.Output.Contains("differs from regenerated CI
     throw new InvalidOperationException("Cached certificate bypassed extraction regeneration: " + tampered.Output);
 Console.WriteLine("PASS cached certificate cannot bypass generated-source tampering rejection");
 Extract("scalar");
+if (configurationReuse)
+    File.AppendAllText(Path.Combine(package, "lakefile.toml"),
+        "\n# Restore generated-only preparation before mutation.\n");
 File.AppendAllText(proof, """
 
 open Lean Elab Command in

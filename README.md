@@ -72,6 +72,8 @@ source, environment and cache-invalidation checks isolated. See the reproducible
 Edited consumer proofs reuse authenticated extraction preparation without starting a redundant
 certificate build. Rechecked proofs still independently replay and audit the generated certificate
 and check that proof elaboration leaves its compiled bytes unchanged.
+Generated certificate preparation also survives unrelated consumer package configuration changes;
+its own generated sources, configuration, framework artifacts and toolchain remain bound.
 
 Prepared certified libraries include canonical fingerprints of their compiled modules.
 Consumer verification reuses them only while module bytes and the normalizer match,

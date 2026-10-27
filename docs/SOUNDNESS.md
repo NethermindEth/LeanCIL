@@ -345,6 +345,12 @@ When a consumer proof is rechecked, restored certificates and their extraction-d
 importers still undergo kernel replay. The certificate and theorem audits, extraction
 regeneration, assembly hashes and source-stability checks remain mandatory.
 
+A separate generation contains only the closed generated certificate module set. Its key
+binds all generated sources, the generated package configuration, certified framework
+artifacts and the same toolchain/environment inputs. It can survive unrelated consumer
+package configuration changes, but restores no consumer-owned modules and grants no replay
+exemption. Publication requires unchanged generated inputs after successful verification.
+
 Batch verification shares a source snapshot across requests. Requests with identical generated CIL share a workspace build and kernel replay; other groups may share only certified extraction-independent support. Each request's theorem audit loads only its own proof module's replayed oleans and runs none of their code, so no request's notations or elaborators can affect any printed statement or axiom report. A request fails for any replay failure in its own import closure or in the extraction certificate, and every non-certified module in the workspace is replayed.
 
 For multi-extraction consumer batches, the first workspace prebuilds support found in all

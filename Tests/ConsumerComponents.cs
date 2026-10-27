@@ -10,7 +10,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 
 var measure = args.Contains("--measure", StringComparer.Ordinal);
-var cli = new[] { "dotnet", args.FirstOrDefault(argument => argument != "--measure") ?? ExtractorPath };
+var configurationReuse = args.Contains("--configuration-reuse", StringComparer.Ordinal);
+var cli = new[] { "dotnet", args.FirstOrDefault(argument =>
+    argument is not ("--measure" or "--configuration-reuse")) ?? ExtractorPath };
 var directory = At("artifacts/ConsumerComponents-" + Guid.NewGuid().ToString("N"));
 var assemblyRoot = Path.Combine(directory, "Assembly");
 var package = Path.Combine(directory, "Package");
@@ -85,11 +87,13 @@ if (changedHelper.Sources.Keys.Intersect(first.Sources.Keys).Count() != 2)
 var changedCall = SplitExtractionComponents(original.Replace(".call 1 1", ".call 0 1", StringComparison.Ordinal));
 if (changedCall.Sources.Keys.Intersect(first.Sources.Keys).Count() != 2 || changedCall.InputHash == first.InputHash)
     throw new Exception("A changed callee connection retained the caller component or input identity.");
-var saved = new[] { "LEANCIL_DISABLE_SUCCESS_CACHE", "LEANCIL_TRACE_DIRECTORY" }
+var saved = new[] { "LEANCIL_DISABLE_SUCCESS_CACHE", "LEANCIL_TRACE_DIRECTORY", "LEANCIL_CACHE_DIR" }
     .ToDictionary(name => name, Environment.GetEnvironmentVariable);
 try
 {
-    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", configurationReuse ? "false" : "true");
+    if (configurationReuse)
+        Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(directory, "Cache"));
     // A supplied library is already prepared; the batch authenticates it and verifies every request.
     if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")))
         Run([.. cli, "verify", requests[0].output, "--proof", proof, "--proof-root", package]);
@@ -125,6 +129,25 @@ try
         reused, builds, replayed,
         sourceBytes, factoredBytes
     }, Json));
+    if (configurationReuse)
+    {
+        var previous = Directory.GetFiles(trace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
+        File.AppendAllText(Path.Combine(package, "lakefile.toml"), "\n# Different consumer configuration.\n");
+        Run([.. cli, "verify-batch", manifest, "--parallel", "1"]);
+        var repeated = Directory.GetFiles(trace, "*.jsonl").Where(path => !previous.Contains(path))
+            .SelectMany(File.ReadLines).Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+        var repeatedReplay = repeated.Where(stage => stage.GetProperty("stage").GetString() is
+                "Kernel replay of consumer proof and dependencies" or
+                "Joint kernel replay of consumer proof and dependencies")
+            .SelectMany(stage => Transcript(stage).Split('\n').Where(line => line.StartsWith('{')))
+            .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("module").GetString()).ToArray();
+        if (repeated.Any(stage => stage.GetProperty("stage").GetString() ==
+                "Checking consumer extraction certificate") ||
+            repeatedReplay.Count(module => module == "Extracted") != requests.Length ||
+            reused.Any(module => !repeatedReplay.Contains(module)))
+            throw new Exception("Generated-only component preparation did not retain independent certificate replay.");
+        Console.WriteLine("PASS generated-only component preparation survives a consumer configuration change");
+    }
     if (!measure)
     {
         // A matching module name in consumer sources cannot supply a generated component.
