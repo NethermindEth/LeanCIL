@@ -1708,11 +1708,13 @@ partial class Program : IDisposable
         return result;
     }
 
-    // An untrusted build may add only its own module's oleans; any other change voids the replayed set.
-    static void RequireOnlyAdded(SortedDictionary<string, string> bound, SortedDictionary<string, string> built, string module)
+    // An untrusted build may add only its own modules' oleans; any other change voids the replayed set.
+    static void RequireOnlyAdded(SortedDictionary<string, string> bound, SortedDictionary<string, string> built,
+        params string[] modules)
     {
         if (bound.Any(pair => !built.TryGetValue(pair.Key, out var hash) || hash != pair.Value) ||
-            built.Keys.Any(name => !bound.ContainsKey(name) && !name.StartsWith(module + ".olean", StringComparison.Ordinal)))
+            built.Keys.Any(name => !bound.ContainsKey(name) &&
+                !modules.Any(module => name.StartsWith(module + ".olean", StringComparison.Ordinal))))
             throw new InvalidOperationException("Compiled artifacts changed during verification");
     }
 
