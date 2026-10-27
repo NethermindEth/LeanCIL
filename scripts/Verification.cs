@@ -649,6 +649,8 @@ partial class Program : IDisposable
         left.Count == right.Count && left.All(p => right.TryGetValue(p.Key, out var value) && value == p.Value);
 
     bool freshLibrary { get; init; }
+    string? incrementalLibrary { get; init; }
+    string? incrementalDigest { get; init; }
     string? libraryKey;
     string? libraryBuild;
 
@@ -940,11 +942,13 @@ partial class Program : IDisposable
                 library = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
                 ownsLibrary = true;
                 Directory.CreateDirectory(library);
+                if (incrementalLibrary is not null)
+                    StageIncrementalLibrary(library, incrementalLibrary, incrementalDigest, sources);
                 foreach (var (name, hash) in sources)
                 {
                     var destination = Path.Combine(library, name);
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    File.Copy(At(name), destination);
+                    File.Copy(At(name), destination, true);
                     if (Sha(destination) != hash)
                         throw new InvalidOperationException("Library source changed while copying: " + name);
                 }
@@ -959,7 +963,9 @@ partial class Program : IDisposable
                     compiledLibrary, "Joint kernel replay of fresh Lean verification library"))
                     Run([checker, "CIL"], library, compiledLibrary, streamOutput: true,
                         progress: "Kernel replay of fresh Lean verification library");
-                libraryBuild = "fresh";
+                if (!Same(sources, LibrarySources(CommonInputs())))
+                    throw new InvalidDataException("Library sources changed during preparation");
+                libraryBuild = incrementalLibrary is null ? "fresh" : "incremental";
                 manifest = CacheFiles(library);
                 if (!fresh)
                 {
@@ -1172,6 +1178,50 @@ partial class Program : IDisposable
         leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(directory => Path.Combine(directory, module.Replace('.', '/') + ".olean"))
             .FirstOrDefault(File.Exists) ?? throw new FileNotFoundException("Missing compiled module: " + module);
+
+    // Authenticate all donor bytes before Lake sees its traces. Lake checks source hashes and
+    // transitive build dependencies; changed/deleted modules cannot retain a compiled output.
+    void StageIncrementalLibrary(string destination, string donor, string? trustedDigest,
+        SortedDictionary<string, string> sources)
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(donor, "cache-manifest.json"));
+        if (string.IsNullOrWhiteSpace(trustedDigest) ||
+            Convert.ToHexStringLower(SHA256.HashData(bytes)) != trustedDigest)
+            throw new InvalidDataException("Incremental donor manifest digest mismatch");
+        var manifest = JsonSerializer.Deserialize<SortedDictionary<string, string>>(bytes)
+            ?? throw new InvalidDataException("Missing incremental donor manifest");
+        var donorSources = LibrarySources(manifest);
+        var (donorKey, _) = LibraryIdentity(donorSources);
+        static bool Configuration(string name) => !name.EndsWith(".lean", StringComparison.Ordinal);
+        if (!Same(new(donorSources.Where(pair => Configuration(pair.Key)).ToDictionary(), StringComparer.Ordinal),
+                new(sources.Where(pair => Configuration(pair.Key)).ToDictionary(), StringComparer.Ordinal)))
+            throw new InvalidDataException("Incremental donor build configuration changed");
+        if (!CopyCertifiedLibrary(donor, destination, trustedDigest, donorKey, donorSources) ||
+            !ValidCertifiedLibrary(destination, trustedDigest, donorKey, donorSources))
+            throw new InvalidDataException("Incremental donor identity or integrity mismatch");
+        var changed = donorSources.Keys.Union(sources.Keys, StringComparer.Ordinal)
+            .Where(name => donorSources.GetValueOrDefault(name) != sources.GetValueOrDefault(name)).ToArray();
+        foreach (var source in changed)
+        {
+            if (!source.EndsWith(".lean", StringComparison.Ordinal))
+                throw new InvalidDataException("Unsupported incremental source: " + source);
+            if (!sources.ContainsKey(source)) File.Delete(Path.Combine(destination, source));
+            var module = source[..^".lean".Length];
+            foreach (var subtree in new[] { ".lake/build/lib/lean/", ".lake/build/ir/" })
+            foreach (var artifact in manifest.Keys.Where(name => name.StartsWith(subtree + module + ".",
+                         StringComparison.Ordinal)))
+                File.Delete(Path.Combine(destination, artifact));
+        }
+        // Re-link the native auditor from current checked sources, and regenerate source-bound metadata.
+        foreach (var artifact in manifest.Keys.Where(name => name.StartsWith(".lake/build/bin/",
+                     StringComparison.Ordinal)))
+            File.Delete(Path.Combine(destination, artifact));
+        foreach (var name in new[] { CertifiedFingerprintsName, "cache-manifest.json", "cache-receipt.hmac",
+                     "library-key.txt" })
+            File.Delete(Path.Combine(destination, name));
+        Console.WriteLine($"Incremental library: {changed.Length} changed, added or removed sources; " +
+            "Lake will rebuild their dependent closure before full kernel replay.");
+    }
 
     string PrepareLibrary(string destination, string? trustedDigest = null)
     {

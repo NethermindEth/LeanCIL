@@ -247,6 +247,15 @@ CI prepares the certified library once per workflow attempt and passes its immut
 
 `dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` requires an empty or absent destination and publishes a freshly built library through a staging directory. Explicit reuse uses `--reuse <trusted-manifest-sha256>`; obtain this digest independently from a trusted producer, never by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing the destination. Rebuilding an existing library requires a separate output directory. `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests, missing producer digests, and preservation of unrelated destination files.
 
+When only Lean sources changed, `--incremental <donor-directory> <trusted-manifest-sha256>`
+authenticates every donor file before reusing its Lake build traces in a private copy. The runtime,
+compiler, kernel checker and build configuration must match. Changed and removed modules lose their
+compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure.
+The native auditor is relinked, every resulting module is kernel-replayed, and canonical fingerprints
+are regenerated before a new source-bound manifest is published. CI tries this after exact reuse,
+then falls back to a cold build if incremental preparation fails. `Tests/LibraryIncremental.cs`
+covers artifact tampering, incompatible identities/configuration, source removal and copy isolation.
+
 The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integer`, `narrow`, `primitive`, `division`, `checked`, `conversions`, `native`, `arguments`, `layout`, `copy`, `bits`, `enums`, `nested`, `instance`, `constructors`, `fsharp`, `math`, `divrem`, `unsafe`, `blocks`, `generics`, `loops`, `contracts`, `evidence`, `scaling`, `excluded`, `identity`, `labels`, `names`, `symbols`, `workspace`, `templates`, `callers`, `construction`, `outcomes` and `audit`. These partitions cover the same check groups as the full command and can run concurrently in separate checkouts. Each partition builds its own prerequisites (in CI, one job builds the extractor and example assembly with `--build-tools` and suite jobs set `LEANCIL_PREBUILT_TOOLS=true` to use them), retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes `artifacts/test-results.json`.
 
 | Coverage | Result |

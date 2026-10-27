@@ -130,6 +130,14 @@ jobs:
               --reuse "$DONATED_SHA256" 2>&1 | tee artifacts/verification.log; then
             echo "reused=true" >> "$GITHUB_OUTPUT"
           else
+            if [ -n "$DONATED_SHA256" ]; then
+              mv artifacts/certified-library artifacts/certified-library-donor
+              if dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library \
+                  --incremental artifacts/certified-library-donor "$DONATED_SHA256" \
+                  2>&1 | tee -a artifacts/verification.log; then
+                exit 0
+              fi
+            fi
             rm -rf artifacts/certified-library
             dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library 2>&1 | tee -a artifacts/verification.log
           fi

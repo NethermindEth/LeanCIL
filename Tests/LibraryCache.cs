@@ -4,6 +4,7 @@
 
 // Fast cache-integrity regressions; end-to-end cold/warm verification exercises the builder.
 Run(["dotnet", "run", "--file", At("Tests/LibrarySourceExtension.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/LibraryIncremental.cs")]);
 var directory = Path.Combine(Path.GetTempPath(), "leancil-cache-test-" + Guid.NewGuid().ToString("N"));
 var prepared = directory + "-prepared";
 var unrelated = directory + "-unrelated";
