@@ -33,6 +33,7 @@ partial class Program : IDisposable
     bool extractorBuilt;
 
     const string ExtractorBuildEnvironment = "LEANCIL_PREPARED_EXTRACTOR";
+    const string PrebuiltToolsEnvironment = "LEANCIL_PREBUILT_TOOLS";
 
     static string[] FixtureCommand(string script, string[] arguments, bool prepared)
     {

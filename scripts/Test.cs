@@ -10,6 +10,7 @@ using System.Text.Json;
 string suite = args switch
 {
     [] => "all",
+    ["--build-tools"] => "tools",
     ["--suite", string name] when ExportVerificationSuites.Plan().Any(entry => entry.Name == name) => name,
     ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem" or "imports" or "exports" or "exceptionlint" or "intrinsics" or "audit" or "workspace" or "templates"] => args[1],
     _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|exports|exceptionlint|intrinsics|audit|workspace|templates]")
@@ -100,7 +101,7 @@ string ResultsPath() => At(suite == "all" ? "artifacts/test-results.json" : $"ar
 
 // A failed run must never leave an earlier successful summary behind; a fresh checkout has no artifacts/ yet.
 Directory.CreateDirectory(At("artifacts"));
-File.Delete(ResultsPath());
+if (suite != "tools") File.Delete(ResultsPath());
 
 void Rejected(string[] command, string marker)
 {
@@ -116,7 +117,17 @@ const string identity = "Examples";
 var signatures = CoreExampleSignatures;
 
 // Each suite can run in its own checkout, with only the projects it needs.
-var projects = new List<string> { "Extractor", "Examples/Assembly", "scripts/Test.cs" };
+string[] tools = ["Extractor", "Examples/Assembly"];
+var projects = new List<string>(tools) { "scripts/Test.cs" };
+if (suite == "tools") projects = [.. tools];
+// CI builds the shared tools once per run and ships their outputs to every suite job.
+else if (Environment.GetEnvironmentVariable(PrebuiltToolsEnvironment) == "true")
+{
+    if (!File.Exists(ExtractorPath) || !File.Exists(assembly))
+        throw new InvalidOperationException(
+            PrebuiltToolsEnvironment + " is set, but the extractor or example assembly is missing.");
+    projects.RemoveAll(project => tools.Contains(project));
+}
 if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs",
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
@@ -162,6 +173,7 @@ foreach (string project in projects.Distinct(StringComparer.Ordinal))
         preparedFixtures.Add(project);
 }
 
+if (suite == "tools") return;
 Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, ExtractorBuildIdentity());
 
 if (suite is not ("all" or "core"))
