@@ -58,3 +58,29 @@ For an end-to-end comparison, build each revision's authenticated library first,
 above isolate generated-file compilation, exclude preparation and extraction, and hold the
 baseline shard assignment fixed even though source lengths change. They do not establish the
 elapsed time of the complete Math CI job.
+
+## Evidence investigation (#424)
+
+No Evidence optimization is retained from this investigation; #424 remains unresolved.
+The complete generated Generic positive batch took 15.29s with existing compiled imports.
+Three isolated changes to generic-constraint identity comparison did not materially improve it:
+
+| Discarded experiment | Full positive batch |
+| --- | ---: |
+| Materialize canonical constraint strings as literals | 14.95s |
+| Materialize them as byte-backed strings | 15.15s |
+| Compare UTF-8 byte lists with checked string-equality equivalence | 15.31s |
+
+All three candidate batches compiled, but these single-run differences do not establish a
+useful gain. The experiments were removed. Serial diagnostic profiling identified six generic
+specialization proofs taking roughly 0.42–0.59s in elaboration and 0.59–0.72s in kernel checking
+per proof. Nested traces spend substantial time reducing string equality, but the tested local
+changes did not improve the complete batch. Async profiler durations overlap and must not be
+added; `-DElab.async=false` was used only to diagnose individual reductions, not as a proposed
+production setting.
+
+A separate experiment trimmed generated dependency closures. All tests passed, but complete
+fixture times showed no material improvement: Generic 61.447→60.554s, TypeTests
+24.808→25.139s, and ConstrainedCalls 25.589→25.736s. That change was also discarded.
+Those fixture timings include more work than the positive-batch-only measurements above and
+should not be compared directly with them.
