@@ -64,6 +64,17 @@ def isTodo (name : Lean.Name) : ReplayM Bool := do
     return true
   return false
 
+/-- Kernel-checks one declaration against the environment that preceded it.
+Written inline in `IO.asTask`, the check would run eagerly on the calling thread. -/
+@[noinline] def checkDeclaration (before : Lean.Kernel.Environment) (decl : Lean.Declaration)
+    (cancel : IO.CancelToken) : IO CheckOutcome := do
+  match before.addDeclCore 0 0 decl (some cancel) with
+  | .ok _ => return .accepted
+  | .error .interrupted => return .cancelled
+  | .error ex =>
+    cancel.set
+    return .rejected (← kernelMessage ex)
+
 /-- Adds a declaration; a deferred check sees only the declarations added before it. -/
 def addDecl (decl : Lean.Declaration) : ReplayM Unit := do
   let before := (← get).env
@@ -73,13 +84,7 @@ def addDecl (decl : Lean.Declaration) : ReplayM Unit := do
     | .error ex => throw <| .userError (← kernelMessage ex)
     | .ok env =>
       let cancel := (← read).cancel
-      let check ← IO.asTask do
-        match before.addDeclCore 0 0 decl (some cancel) with
-        | .ok _ => return CheckOutcome.accepted
-        | .error .interrupted => return .cancelled
-        | .error ex =>
-          cancel.set
-          return .rejected (← kernelMessage ex)
+      let check ← IO.asTask (checkDeclaration before decl cancel)
       let name := decl.getNames.headD .anonymous
       (← read).checks.modify (·.push (name, check))
       modify fun s => { s with env }
