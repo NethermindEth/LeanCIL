@@ -26,6 +26,7 @@ var prepared = new PreparedFixtures(Run(["dotnet", "--version"]).Trim(), Runtime
 var manifest = Path.Combine(directory, "manifest.json");
 var savedPath = Environment.GetEnvironmentVariable(FixtureManifestEnvironment);
 var savedDigest = Environment.GetEnvironmentVariable(FixtureDigestEnvironment);
+var savedRoot = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_ROOT");
 void Set(PreparedFixtures value)
 {
     File.WriteAllText(manifest, JsonSerializer.Serialize(value));
@@ -45,6 +46,22 @@ try
     if (Run(command).Trim() != "prepared:one,two" ||
         Run(["dotnet", "run", "--file", source, "--", "nested"]).Trim() != "prepared:nested")
         throw new Exception("Prepared fixture arguments changed");
+    var corpus = Path.Combine(directory, "isolated");
+    Directory.CreateDirectory(Path.Combine(corpus, "scripts"));
+    File.Copy(At("scripts/Verification.cs"), Path.Combine(corpus, "scripts", "Verification.cs"));
+    var probe = Path.Combine(corpus, "Probe.cs");
+    File.WriteAllText(probe, "#!/usr/bin/env dotnet\n#:property PublishAot=false\n" +
+        "#:include scripts/Verification.cs\nConsole.WriteLine(Root);\n");
+    Environment.SetEnvironmentVariable("LEANCIL_FIXTURE_ROOT", Root);
+    var probeOutput = Path.Combine(directory, "probe-bin");
+    Run(["dotnet", "build", probe, "-c", "Release", "--output", probeOutput,
+        "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
+    if (Run(["dotnet", Path.Combine(probeOutput, "Probe.dll")]).Trim() != Root)
+        throw new Exception("Relocated prepared fixture lost the checkout root");
+    var isolated = Run(["dotnet", "run", "--file", probe, "-c", "Release",
+        "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
+    if (!isolated.TrimEnd().EndsWith(Path.GetFullPath(corpus), StringComparison.Ordinal))
+        throw new Exception("Source-built child inherited the prepared fixture's checkout root: " + isolated);
     File.AppendAllText(include, "// changed\n");
     if (PreparedFixtureCommand(relative, []) is not null) throw new Exception("Changed include reused output");
     File.WriteAllText(include, "static class Example { public const string Message = \"prepared:\"; }\n");
@@ -91,4 +108,5 @@ finally
 {
     Environment.SetEnvironmentVariable(FixtureManifestEnvironment, savedPath);
     Environment.SetEnvironmentVariable(FixtureDigestEnvironment, savedDigest);
+    Environment.SetEnvironmentVariable("LEANCIL_FIXTURE_ROOT", savedRoot);
 }

@@ -7,6 +7,8 @@ build configuration and the complete output file set. The workflow checks execut
 before starting the runner. Nested fixture invocations check the same identity and use the
 compiled assembly; absent or incompatible preparation falls back to an ordinary local build.
 Modified example assemblies are still rebuilt by their mutation tests.
+Only relocated fixture binaries use the shared checkout override; source-built child scripts
+retain their own source root, including producers running against an isolated modified library.
 Configuration identity includes props, targets and configuration files along the entry script's
 directory chain through the checkout root. Fixtures with `#:project` references use an ordinary
 build because their external MSBuild source graph is not described by file-app includes.

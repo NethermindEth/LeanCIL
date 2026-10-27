@@ -13,8 +13,20 @@ partial class Program : IDisposable
 #if LEANCIL_TOOL
     static string Root { get; } = Path.Combine(AppContext.BaseDirectory, "verification");
 #else
-    static string Root { get; } = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_ROOT") is { Length: > 0 } root
-        ? Path.GetFullPath(root) : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
+    static string Root { get; } = FixtureRoot() ??
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
+
+    // Only relocated binaries need the producer's source path replaced. Source-built children
+    // may belong to an isolated corpus and must retain their own Verification.cs location.
+    static string? FixtureRoot()
+    {
+        var root = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_ROOT");
+        var manifest = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_MANIFEST");
+        if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(manifest)) return null;
+        var directory = Path.GetDirectoryName(Path.GetFullPath(manifest))! + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return typeof(Program).Assembly.Location.StartsWith(directory, comparison) ? Path.GetFullPath(root) : null;
+    }
 #endif
 
     static string Source([CallerFilePath] string path = "") => path;
