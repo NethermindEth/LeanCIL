@@ -25,6 +25,7 @@ const string controlBaseline = """
     namespace Extracted
     def controlValue : Nat := 1
     theorem control_valid : controlValue = 1 := rfl
+    #print axioms control_valid
     end Extracted
 
     """;
