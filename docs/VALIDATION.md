@@ -1,5 +1,18 @@
 # Validation coverage
 
+The workflow builds `scripts/Test.cs`, `Tests/ContractExport.cs` and
+`Tests/FullImportVerification.cs` once with Release analyzer checks. Their shared artifact is
+bound to a separately supplied manifest digest, the SDK/runtime, included sources, repository
+build configuration and the complete output file set. The workflow checks executable hashes
+before starting the runner. Nested fixture invocations check the same identity and use the
+compiled assembly; absent or incompatible preparation falls back to an ordinary local build.
+Modified example assemblies are still rebuilt by their mutation tests.
+
+`Tests/PreparedFixtures.cs` covers arguments, included-source changes, SDK/runtime mismatches,
+manifest tampering and added or modified output files. This targets the 66 runner builds,
+14 contract-export builds and ten full-import builds observed in run 40486409764. CI timing
+must confirm the net saving, including the shared producer and artifact transfer.
+
 Branch positions and prefix-bypass checks use indexes scoped to each body traversal, and call
 translation uses a method index scoped to the current ordered call graph. Original and specialized
 bodies have separate instruction indexes. Dependency invalidation traverses reverse import edges

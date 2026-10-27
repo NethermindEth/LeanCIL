@@ -13,7 +13,8 @@ partial class Program : IDisposable
 #if LEANCIL_TOOL
     static string Root { get; } = Path.Combine(AppContext.BaseDirectory, "verification");
 #else
-    static string Root { get; } = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
+    static string Root { get; } = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_ROOT") is { Length: > 0 } root
+        ? Path.GetFullPath(root) : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
 #endif
 
     static string Source([CallerFilePath] string path = "") => path;
@@ -34,6 +35,83 @@ partial class Program : IDisposable
 
     const string ExtractorBuildEnvironment = "LEANCIL_PREPARED_EXTRACTOR";
     const string PrebuiltToolsEnvironment = "LEANCIL_PREBUILT_TOOLS";
+
+#if !LEANCIL_TOOL
+    const string FixtureManifestEnvironment = "LEANCIL_FIXTURE_MANIFEST";
+    const string FixtureDigestEnvironment = "LEANCIL_FIXTURE_MANIFEST_SHA256";
+    sealed record PreparedFixture(string Assembly, SortedDictionary<string, string> Inputs,
+        SortedDictionary<string, string> Outputs);
+    sealed record PreparedFixtures(string Sdk, string Runtime, Dictionary<string, PreparedFixture> Fixtures);
+    static string? fixtureSdk;
+
+    static SortedDictionary<string, string> FixtureInputs(string script)
+    {
+        var inputs = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        void Add(string path)
+        {
+            path = Path.GetFullPath(path);
+            var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
+            if (relative.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+                throw new InvalidOperationException("Fixture input is outside the checkout: " + path);
+            if (!inputs.TryAdd(relative, Sha(path))) return;
+            if (Path.GetExtension(path) != ".cs") return;
+            foreach (Match include in Regex.Matches(File.ReadAllText(path), @"(?m)^#:include\s+([^\r\n]+)"))
+                Add(Path.Combine(Path.GetDirectoryName(path)!, include.Groups[1].Value.Trim()));
+        }
+        Add(At(script));
+        foreach (var path in Directory.EnumerateFiles(Root))
+            if (Path.GetExtension(path) is ".props" or ".targets" ||
+                Path.GetFileName(path) is "global.json" or "NuGet.Config" or "nuget.config" or ".editorconfig")
+                Add(path);
+        return inputs;
+    }
+
+    // The workflow pins this manifest's digest separately from its downloadable artifact.
+    static string[]? PreparedFixtureCommand(string script, string[] arguments)
+    {
+        var manifest = Environment.GetEnvironmentVariable(FixtureManifestEnvironment);
+        if (string.IsNullOrEmpty(manifest)) return null;
+        if (Sha(manifest) != Environment.GetEnvironmentVariable(FixtureDigestEnvironment))
+            throw new InvalidOperationException("Prepared fixture manifest changed");
+        var prepared = JsonSerializer.Deserialize<PreparedFixtures>(File.ReadAllText(manifest))!;
+        var relative = Path.GetRelativePath(Root, Path.GetFullPath(script, Root)).Replace('\\', '/');
+        if (!prepared.Fixtures.TryGetValue(relative, out var fixture)) return null;
+        fixtureSdk ??= Run(["dotnet", "--version"]).Trim();
+        if (prepared.Runtime != RuntimeInformation.RuntimeIdentifier || prepared.Sdk != fixtureSdk ||
+            !Same(fixture.Inputs, FixtureInputs(relative))) return null;
+        var directory = Path.GetDirectoryName(manifest)!;
+        directory = Path.GetFullPath(directory);
+        var assemblyDirectory = Path.GetDirectoryName(Path.GetFullPath(fixture.Assembly, directory))!;
+        if (!Directory.Exists(assemblyDirectory) ||
+            !fixture.Outputs.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(
+                Directory.EnumerateFiles(assemblyDirectory, "*", SearchOption.AllDirectories)
+                    .Select(path => Path.GetRelativePath(directory, path).Replace('\\', '/'))))
+            throw new InvalidOperationException("Prepared fixture output set changed: " + relative);
+        foreach (var (path, hash) in fixture.Outputs)
+        {
+            var full = Path.GetFullPath(path, directory);
+            if (!full.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(full) || Sha(full) != hash)
+                throw new InvalidOperationException("Prepared fixture output changed: " + path);
+        }
+        if (!fixture.Outputs.ContainsKey(fixture.Assembly))
+            throw new InvalidOperationException("Prepared fixture assembly is missing from the manifest");
+        return ["dotnet", Path.GetFullPath(fixture.Assembly, directory), .. arguments];
+    }
+
+    static string[] ReusePreparedFixture(string[] command, string cwd)
+    {
+        if (command.Length < 4 || command[0] != "dotnet" || command[1] != "run" || command[2] != "--file")
+            return command;
+        var separator = Array.IndexOf(command, "--", 4);
+        var options = command[4..(separator < 0 ? command.Length : separator)];
+        // Only the repository's standard Release build options match the producer.
+        if (options.Length != 0 && !options.SequenceEqual(new[] { "-c", "Release", "--no-build",
+                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" })) return command;
+        return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd),
+            separator < 0 ? [] : command[(separator + 1)..]) ?? command;
+    }
+#endif
 
     static string[] FixtureCommand(string script, string[] arguments, bool prepared)
     {
@@ -444,6 +522,9 @@ partial class Program : IDisposable
         var summary = streamOutput && progress is not null ? new ProgressSummary(progress) : null;
         streamOutput |= progress is not null;
         var args = command.ToArray();
+#if !LEANCIL_TOOL
+        args = ReusePreparedFixture(args, cwd ?? Root);
+#endif
         var start = new ProcessStartInfo(args[0])
         {
             WorkingDirectory = cwd ?? Root,
@@ -460,6 +541,10 @@ partial class Program : IDisposable
 
         if (leanPath is not null)
             start.Environment["LEAN_PATH"] = leanPath;
+#if !LEANCIL_TOOL
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(FixtureManifestEnvironment)))
+            start.Environment["LEANCIL_FIXTURE_ROOT"] = Root;
+#endif
         foreach (var (name, value) in environment ?? new Dictionary<string, string>())
             start.Environment[name] = value;
 

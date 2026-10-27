@@ -401,6 +401,10 @@ Pin LeanCIL as a Lake dependency and import the required `CIL.*` modules. Keep a
 
 ## Verification CI
 
+CI builds the shared test runner and contract-export fixtures once per workflow. Suite jobs
+authenticate their manifests and compiled outputs before reuse; source, SDK or runtime changes
+fall back to a local build. Assembly mutation tests still rebuild their changed inputs.
+
 Pushes to `main` and manual runs execute every verification suite. Pull requests
 select suites from changed test entry points, referenced proofs, and their
 transitive source imports. Markdown and license-only changes skip the expensive

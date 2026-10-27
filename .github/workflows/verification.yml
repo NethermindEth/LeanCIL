@@ -40,6 +40,7 @@ jobs:
           dotnet run --file Tests/BatchInputs.cs
           dotnet run --file Tests/ConsumerArtifactSnapshot.cs
           dotnet run --file Tests/ConsumerSupportCandidates.cs
+          dotnet run --file Tests/PreparedFixtures.cs
       - name: Select affected suites
         id: select
         env:
@@ -159,13 +160,15 @@ jobs:
           retention-days: 14
 
   tools:
-    name: Build extractor and example assembly
+    name: Build extractor, examples and shared fixtures
     needs: select
     if: needs.select.outputs.has-suites == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       artifact-id: ${{ steps.tools-artifact.outputs.artifact-id }}
+      fixture-manifest-sha256: ${{ steps.fixtures.outputs.manifest-sha256 }}
+      fixture-checksums-sha256: ${{ steps.fixtures.outputs.checksums-sha256 }}
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -178,6 +181,9 @@ jobs:
           global-json-file: global.json
       - name: Build the extractor and example assembly
         run: dotnet run --file scripts/Test.cs -- --build-tools
+      - name: Build shared verification fixtures
+        id: fixtures
+        run: dotnet run --file scripts/PrepareFixtures.cs -- artifacts/verification-fixtures
       - name: Upload the built tools for this workflow attempt
         id: tools-artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -186,6 +192,7 @@ jobs:
           path: |
             Extractor/bin
             Examples/Assembly/bin
+            artifacts/verification-fixtures
           if-no-files-found: error
           retention-days: 14
 
@@ -214,6 +221,9 @@ jobs:
       LEANCIL_TRACE_DIRECTORY: ${{ github.workspace }}/artifacts/verification-traces
       LEANCIL_SUITE: ${{ matrix.suite }}
       LEANCIL_PREBUILT_TOOLS: true
+      LEANCIL_FIXTURE_ROOT: ${{ github.workspace }}
+      LEANCIL_FIXTURE_MANIFEST: ${{ github.workspace }}/artifacts/verification-fixtures/manifest.json
+      LEANCIL_FIXTURE_MANIFEST_SHA256: ${{ needs.tools.outputs.fixture-manifest-sha256 }}
 
     steps:
       - name: Check out sources
@@ -268,10 +278,14 @@ jobs:
 
       - name: Run verification suite
         shell: bash
+        env:
+          FIXTURE_CHECKSUMS_SHA256: ${{ needs.tools.outputs.fixture-checksums-sha256 }}
         run: |
           mkdir -p artifacts
           set -o pipefail
-          dotnet run --file scripts/Test.cs -- --suite ${{ matrix.suite }} 2>&1 | tee artifacts/verification.log
+          echo "$FIXTURE_CHECKSUMS_SHA256  artifacts/verification-fixtures/checksums.sha256" | sha256sum --check --status
+          sha256sum --check --status artifacts/verification-fixtures/checksums.sha256
+          dotnet artifacts/verification-fixtures/Test/Test.dll --suite ${{ matrix.suite }} 2>&1 | tee artifacts/verification.log
 
       - name: Summarize verification timings
         if: always()

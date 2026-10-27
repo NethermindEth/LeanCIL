@@ -155,6 +155,8 @@ foreach (ExportSuite entry in ExportVerificationSuites.Plan())
 
 foreach (string project in projects.Distinct(StringComparer.Ordinal))
 {
+    if (project.EndsWith(".cs", StringComparison.Ordinal) && PreparedFixtureCommand(project, []) is not null)
+        continue;
     var command = new List<string>
     {
         "dotnet", "build", project, "-c", "Release",
