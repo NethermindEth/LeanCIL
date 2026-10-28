@@ -6,6 +6,8 @@
 #:include ConsumerTraceDirectory.cs
 
 using var verification = new Program();
+if (args is not ([] or ["--audit-only"]))
+    throw new ArgumentException("Usage: JointReplay.cs [--audit-only]");
 var root = At("artifacts/JointReplay");
 if (Directory.Exists(root)) Directory.Delete(root, true);
 Directory.CreateDirectory(root);
@@ -90,12 +92,17 @@ void CheckFusedReplay()
     {
         var request = Path.Combine(root, "fused-request.json");
         var result = Path.Combine(root, "fused-result.json");
-        File.WriteAllText(request, System.Text.Json.JsonSerializer.Serialize(new
+        var specification = new Dictionary<string, object>
         {
-            modules = new[] { module }, replayTargets = targets,
-            theorems = new[] { new { name = theorem, axioms = Array.Empty<string>(), statement = true, refutation = true } },
-            interfaces = metadata ? new[] { module } : Array.Empty<string>()
-        }));
+            ["modules"] = new[] { module }, ["replayTargets"] = targets,
+            ["theorems"] = new[]
+            {
+                new { name = theorem, axioms = Array.Empty<string>(), statement = true, refutation = true }
+            }
+        };
+        if (metadata)
+            specification["namespaces"] = new { prefixes = new[] { "JointA" }, axioms = Array.Empty<string>() };
+        File.WriteAllText(request, System.Text.Json.JsonSerializer.Serialize(specification));
         Run([verification.CheckedAuditExecutable(), request, result], root, leanPath, environment: environment);
         var audited = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
             File.ReadAllText(result));
@@ -305,6 +312,72 @@ void CheckReplayedClosures()
     Console.WriteLine("PASS replayed contract closures match imported metadata and reject unapproved axioms");
 }
 
+void CheckReplayedInterfaces()
+{
+    var leanPath = root + Path.PathSeparator + Path.Combine(verification.library!, ".lake/build/lib/lean");
+    foreach (var (module, declarations, rejected) in new[]
+    {
+        ("JointInterface", "private def hidden : Nat := 7\ndef value : Nat := hidden", false),
+        ("JointUnusedInterface", "private axiom unused : Prop\ndef value : Nat := 7", true),
+        ("JointSpoofedInterface", "axiom CIL.Spoofed.unused : Prop\ndef value : Nat := 7", true),
+        ("JointModuleInterface", "private def hidden : Nat := 7\npublic def value : Nat := hidden", false),
+        ("JointModuleUnusedInterface", "private axiom unused : Prop\npublic def value : Nat := 7", true),
+        ("JointEquationInterface", "def sequence : Nat → Nat | 0 => 1 | n + 1 => n\n" +
+            "theorem equation (n : Nat) : sequence (n + 1) = n := sequence.eq_2 n\n#print axioms equation", false)
+    })
+    {
+        var source = Path.Combine(root, module + ".lean");
+        var header = module.StartsWith("JointModule", StringComparison.Ordinal)
+            ? "module\n" : "";
+        File.WriteAllText(source, header + declarations + "\n");
+        Run([verification.LeanExecutable, "--root=" + root, "-o", Path.ChangeExtension(source, ".olean"), source],
+            root, leanPath, environment: environment);
+        var verdicts = new List<string>();
+        foreach (var replay in new[] { false, true })
+        {
+            var request = new Dictionary<string, object>
+            {
+                ["modules"] = new[] { module },
+                ["interfaces"] = new[] { module }
+            };
+            if (replay) request["replayTargets"] = new[] { module };
+            var input = Path.Combine(root, "interface-request.json");
+            var output = Path.Combine(root, "interface-result.json");
+            File.WriteAllText(input, System.Text.Json.JsonSerializer.Serialize(request));
+            Run([verification.CheckedAuditExecutable(), input, output], root, leanPath, environment: environment);
+            var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+                File.ReadAllText(output));
+            if (replay && !result.GetProperty("fused").GetBoolean())
+                throw new InvalidOperationException("Interface validation unnecessarily reimported replayed modules");
+            var verdict = result.GetProperty("interfaces");
+            if (verdict.TryGetProperty("error", out _) != rejected)
+                throw new InvalidOperationException("Interface declaration validation changed: " + module);
+            verdicts.Add(verdict.GetRawText());
+        }
+        if (verdicts[0] != verdicts[1])
+            throw new InvalidOperationException("Replayed interface verdict differs from imported metadata: " + module);
+    }
+    var wrapper = Path.Combine(root, "JointInterfaceWrapper.lean");
+    File.WriteAllText(wrapper, "import JointInterface\n");
+    Run([verification.LeanExecutable, "--root=" + root, "-o", Path.ChangeExtension(wrapper, ".olean"), wrapper],
+        root, leanPath, environment: environment);
+    var importedInput = Path.Combine(root, "imported-interface-request.json");
+    var importedOutput = Path.Combine(root, "imported-interface-result.json");
+    File.WriteAllText(importedInput, System.Text.Json.JsonSerializer.Serialize(new
+    {
+        modules = new[] { "JointInterfaceWrapper" },
+        interfaces = new[] { "JointInterface" },
+        replayTargets = new[] { "JointInterfaceWrapper" }
+    }));
+    Run([verification.CheckedAuditExecutable(), importedInput, importedOutput], root, leanPath,
+        environment: environment);
+    var imported = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+        File.ReadAllText(importedOutput));
+    if (imported.GetProperty("fused").GetBoolean() || imported.GetProperty("interfaces").TryGetProperty("error", out _))
+        throw new InvalidOperationException("Untargeted imported interface lost metadata fallback");
+    Console.WriteLine("PASS replayed interfaces check private and unused declarations despite namespace spoofing");
+}
+
 var originalReplayByte = verification.bootstrapReplaySource[0];
 try
 {
@@ -319,7 +392,12 @@ try
 finally { verification.bootstrapReplaySource[0] = originalReplayByte; }
 Console.WriteLine("PASS bootstrap replay source must match its initial snapshot");
 
-CheckReplays(native: false);
-CheckReplays(native: true);
+if (args is ["--audit-only"]) verification.Library(Inputs(At("CIL.lean")));
+else
+{
+    CheckReplays(native: false);
+    CheckReplays(native: true);
+}
 CheckFusedReplay();
 CheckReplayedClosures();
+CheckReplayedInterfaces();

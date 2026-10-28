@@ -3,7 +3,7 @@
 ## Consistent Release builds
 
 The suite runner builds file-app fixtures in Release with its analyzer properties. Nested
-file-app runs now use those same options instead of implicitly selecting Debug and compiling
+file-app runs use those same options instead of implicitly selecting Debug and compiling
 a second output. They still perform the normal incremental build, so changed sources rebuild;
 only explicitly prepared fixtures use `--no-build`. Explicit configuration options remain
 unchanged, and authenticated shared fixtures retain their source and output validation.
@@ -38,9 +38,9 @@ The complete updated GenericEvidence fixture passed in 40.01 s with its current 
 batch replay taking 2.29 s. The generated/rejected harness controls passed in 19.80 s;
 their unchecked declaration failed native replay and then failed the pinned toolchain-checker
 fallback with the required declaration type mismatch. The ordinary invalid proof still fails
-during compilation. The final C# analyzer builds and all 17 selector checks passed.
+during compilation.
 
-The generated-batch failure controls now live in `RejectedEvidenceTests.cs`, alongside the
+The generated-batch failure controls live in `RejectedEvidenceTests.cs`, alongside the
 rejection-harness controls. They reuse its otherwise-valid theorem instead of checking a full
 generic extraction twice. A valid first case still cannot hide an invalid second case. The
 ordinary false proof must fail with `decide` / `is false`; the unchecked forged declaration
@@ -56,10 +56,10 @@ broader suite.
 
 ## Feature-flow mutation obligations
 
-`FeatureEvidence` and `SpanTables` now check only the feature-flow obligation in their
+`FeatureEvidence` and `SpanTables` check only the feature-flow obligation in their
 negative fixtures, instead of re-proving every unchanged validator and instruction lookup
 equation. All six feature mutations and three forged span receivers remain. Feature
-rejections now require `FeatureFlowValid` and `is false`, so an unrelated failure cannot
+rejections require `FeatureFlowValid` and `is false`, so an unrelated failure cannot
 stand in for the intended rejection.
 
 The original positive certificate is still checked in full. A narrowed positive control
@@ -81,15 +81,3 @@ all positive controls, extraction, runtime comparisons and required consumer rep
 The combined saving is 4.38 s (8.2%) for these two fixtures, not the entire evidence suite.
 Both complete fixtures and their final C# analyzer rebuilds passed. The full generated
 feature mutation batch shrank from 102,193 to 64,315 bytes; no mutation was removed.
-
-## Discarded cross-fixture batching prototype
-
-On Windows at `1eff818`, 12 captured real positive batches (113 cases) took 93.86 s separately
-and 75.21 s through three bounded groups, including required independent replay. Every input
-hash matched and the original batches reconstructed byte-for-byte. However, completion,
-identity and replay regression controls added 10.72 s, leaving only about 7.9 s net improvement
-for substantial new orchestration. The suite deferral API and its extra controls were discarded.
-A direct pinned-Lean invocation also showed no material improvement over `lake env lean`.
-
-Local investigation artifacts are under `artifacts/evidence-next`: `PositiveGroupsBench.cs`,
-`BoundedBench.cs`, `AuditBatches.cs`, their logs and `final-consolidated-trace`. The bounded prototype helper depends on the discarded implementation.

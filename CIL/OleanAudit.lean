@@ -277,8 +277,13 @@ def constant? (env : Environment) (req : Json) : IO Json := do
   return result fields
 
 /-- Validates every declaration of the `interfaces` modules. -/
-def interfaces (env : Environment) (req : Json) : Json :=
-  match CIL.Interface.validateInterfaceDeclarations env (names req "interfaces") with
+def interfaces (env : Environment) (req : Json) (replayed : Option (List Name))
+    (ownerOf : Name → Option Name) : Json :=
+  let checked := match replayed with
+    | some declarations =>
+      CIL.Interface.validateReplayedInterfaceDeclarations env declarations ownerOf
+    | none => CIL.Interface.validateInterfaceDeclarations env (names req "interfaces")
+  match checked with
   | .ok _ => Json.mkObj []
   | .error error => Json.mkObj [("error", toJson error)]
 
@@ -381,8 +386,7 @@ unsafe def writeFingerprints (input : String) : IO Unit := do
 
 /-- Whether an audit needs target metadata absent from a freshly replayed kernel environment. -/
 def needsTargetMetadata (env : Kernel.Environment) (req : Json) : Bool := Id.run do
-  if !(names req "interfaces").isEmpty ||
-      (req.getObjVal? "namespaces").isOk then return true
+  if (req.getObjVal? "namespaces").isOk then return true
   for entry in (req.getObjValAs? (Array Json) "theorems").toOption.getD #[] do
     if entry.getObjValAs? Bool "refutation" matches .ok true then
       let some thm := (entry.getObjValAs? String "name").toOption | return true
@@ -398,7 +402,8 @@ unsafe def writeAudit (req : Json) (output : String) (env : Environment)
     (ownerOf : Name → Option Name := fun name =>
       (env.getModuleIdxFor? name).bind (env.allImportedModuleNames[·.toNat]?))
     (closureOwnerOf : Name → Option Name := fun name =>
-      some (CIL.Interface.definingModule env name)) : IO Unit := do
+      some (CIL.Interface.definingModule env name))
+    (replayedInterfaces : Option (List Name) := none) : IO Unit := do
   let modules := names req "modules"
   let replayed := (names req "replayTargets").foldl (·.insert ·) ({} : NameSet)
   let mut paths : List (String × Json) := []
@@ -415,7 +420,8 @@ unsafe def writeAudit (req : Json) (output : String) (env : Environment)
     | .error _ => pure []
   IO.FS.writeFile output (Json.mkObj ([("modules", Json.mkObj paths),
     ("theorems", toJson theorems), ("constants", toJson constants),
-    ("interfaces", interfaces env req), ("closures", toJson closures)] ++ audited ++ extra)).compress
+    ("interfaces", interfaces env req replayedInterfaces closureOwnerOf),
+    ("closures", toJson closures)] ++ audited ++ extra)).compress
 
 end LeanCILAudit
 
@@ -443,20 +449,26 @@ unsafe def main (args : List String) : IO UInt32 := do
   if modules.isEmpty then throw (IO.userError "No modules to audit")
   if let .ok targets := req.getObjValAs? (List String) "replayTargets" then
     if targets.isEmpty then throw (IO.userError "No modules to replay")
-    CIL.Replay.withReplayedModules targets fun kernel unique ownerOf => do
+    CIL.Replay.withReplayedModules targets fun kernel unique ownerOf owners => do
       let hasOwnerScopes := ((req.getObjValAs? (Array Json) "theorems").toOption.getD #[]).any
         (fun entry => (entry.getObjVal? "allowedModules").isOk)
       if hasOwnerScopes && !unique then
         throw (IO.userError "Scoped theorem audit requires unique replay declarations")
       let fused := unique && modules.all (fun m => targets.contains m.toString) &&
+        (names req "interfaces").all (fun m => targets.contains m.toString) &&
         !needsTargetMetadata kernel req
       let env ← if fused then pure (Environment.ofKernelEnv kernel)
         else importModules (modules.map ({ module := · })) {} (loadExts := false)
       let closureOwnerOf := if fused then ownerOf
         else fun name => some (CIL.Interface.definingModule env name)
+      let interfaceModules := names req "interfaces"
+      let replayedInterfaces := if fused then some <|
+        owners.fold (init := []) fun declarations name module =>
+          if interfaceModules.contains module then name :: declarations else declarations
+        else none
       try
         writeAudit req output env [("replayed", toJson targets), ("fused", toJson fused)]
-          ownerOf closureOwnerOf
+          ownerOf closureOwnerOf replayedInterfaces
       finally unless fused do env.freeRegions
     return 0
   let env ← importModules (modules.map ({ module := · })) {} (loadExts := false)

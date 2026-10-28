@@ -259,6 +259,12 @@ def validateInterfaceDeclarations (environment : Environment) (interfaceModules 
   if interfaceModules.isEmpty then return
   discard <| walk environment (interfaceDeclarations environment interfaceModules) false
 
+/-- Checks complete interface declarations selected from the replayed module ownership map.
+The caller supplies every declaration, including private and unused declarations. -/
+def validateReplayedInterfaceDeclarations (environment : Environment) (declarations : List Name)
+    (ownerOf : Name → Option Name) : Except String Unit := do
+  discard <| walk environment declarations false ownerOf
+
 /-- The kind (`method` or `outcome`) and canonical closure of an exported contract constant.
 Its type must be `MethodContract` or `OutcomeContract`. Entries are sorted by name.
 Replay callers supply checked declaration owners when imported module metadata is absent. -/

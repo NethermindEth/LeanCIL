@@ -58,6 +58,12 @@ obligation types, but reuse the original checked theorem instead of reducing its
 Generic controls compile and replay in the original positive batch. Missing or changed control
 declarations must still fail type checking; isolated mutation cases retain their original validator
 proofs and diagnostic checks, without access to the positive-control witnesses.
+The projected declarations use a distinct namespace, so missing names cannot fall back to the
+original `Extracted` namespace. Controls reject explicit access to that namespace while preserving
+quoted metadata strings and disable automatic implicit parameters. Regression cases cover removed
+declarations used by definitions or obligation types, changed definitions, qualified references and
+opened namespaces. Rejection diagnostics retain their case boundaries with or without Lean's
+diagnostic classification codes.
 Feature-flow and folded-span mutations use the same checked controls and retain only the
 intended feature-flow obligation in each negative fixture. Every rejection must identify
 `FeatureFlowValid` as false. Full positive certificates, runtime comparisons, and consumer
@@ -1250,6 +1256,17 @@ reference to an unapproved sibling axiom; both shared and isolated fallback path
 These measurements exclude fixture setup and do not establish a complete-suite CI timing.
 
 ### Native joint kernel replay
+
+Direct and consumer contract interfaces are replayed and validated in the same native environment when
+their complete declaration ownership is unambiguous. The replayed ownership map enumerates
+private, auxiliary and unused declarations; interface checks do not select only the exported
+contract's dependencies. Imported interfaces outside the replay target set, duplicate ownership
+and conflicting code-generator ownership entries retain the metadata
+import fallback. Source-location audits and replay profiling retain their existing paths.
+`Tests/JointReplay.cs` compares ordinary and replayed interface verdicts, including module-system
+private declarations, unused forbidden axioms, misleading namespaces and equation auxiliaries.
+Use `dotnet run --file Tests/JointReplay.cs -- --audit-only` for the native audit regressions
+without repeating the independent bootstrap and native replay regressions.
 
 The authenticated `leancil-audit --replay INPUT` command accepts a JSON array of module names.
 It uses the same `CIL/Replay.lean` algorithm as fresh-library bootstrap certification: import

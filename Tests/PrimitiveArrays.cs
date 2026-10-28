@@ -3,6 +3,7 @@
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
 
 using System.Reflection;
 
@@ -10,6 +11,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/PrimitiveArrays");
 Directory.CreateDirectory(root);
 var evidence = new GeneratedEvidence(root, args.Contains("--measure", StringComparer.Ordinal));
+var rejected = new RejectedEvidence(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.PrimitiveArrays")!;
 RequireLeanFixtures("CIL.Extraction.Translation", "Tests.PrimitiveArrays");
 var elements = new (Type Type, string Lean, int Width)[]
@@ -94,15 +96,14 @@ foreach (var accessorsByType in accessors.GroupBy(accessor => accessor.Type))
         }
         evidence.Add(proof, "PASS runtime, certificate and checked array execution: " + name);
         if (name != "ReadSByte") continue;
-        foreach (var replacement in new[] { ".arrayLoad 1 false", ".arrayLoad 2 true" })
+        foreach (var (mutation, replacement) in new[]
+            { ("signedness", ".arrayLoad 1 false"), ("width", ".arrayLoad 2 true") })
         {
             const string target = ".arrayLoad 1 true";
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing mutation target");
-            var forged = Path.Combine(root, "ForgedArray.lean");
+            var forged = Path.Combine(root, "ForgedArray-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
-            var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
-            if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
-                throw new Exception("Forged array operation was not rejected: " + rejection.Output);
+            rejected.Add(forged, "PASS forged array operation: " + replacement, "ScalarFlowValid");
         }
     }
 }
@@ -144,6 +145,7 @@ foreach (var (name, _, arguments, expected) in compositions)
     evidence.Add(proof, "PASS certified array composition: " + name);
 }
 evidence.Check();
+rejected.Check();
 foreach (var signature in new[]
 {
     "Allocate(System.Int32)", "ReadObject(System.Object[],System.Int32)",

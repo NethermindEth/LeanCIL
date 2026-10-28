@@ -1,7 +1,7 @@
 # Scalar evidence regression proof work
 
 The scalar evidence fixtures repeat signature, span, and instruction metadata across
-nearby positive and negative cases. Eleven bounded conjunctions now check those related
+nearby positive and negative cases. Eleven bounded conjunctions check those related
 cases together, allowing a single kernel decision to reuse their common reductions.
 All 58 grouped propositions retain their original statements. Four other kernel-decided
 examples and the remaining fixtures stay separate. A token comparison verified that all
@@ -25,9 +25,3 @@ grouped theorems increase replay work relative to the original anonymous example
 the compile-only saving must not be presented as the combined saving. Both checks pass,
 with no `sorryAx` in the compilation log. These are local measurements, not a claim
 about the whole Evidence job or a comparison between different CI runners.
-
-Two investigations produced no retained change. Replacing generic specialization
-reflexivity proofs with kernel decisions measured 10.03 s versus 9.93 s on the same
-positive batch. A serial MemorySpans profile took 4.53 s, with no individual declaration
-above 0.11 s. Serial profiler durations were used for attribution only; overlapping
-asynchronous profiler durations must not be added together.

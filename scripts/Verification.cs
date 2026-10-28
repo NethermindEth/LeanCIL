@@ -1859,14 +1859,30 @@ partial class Program : IDisposable
         File.Exists(Path.Combine(Toolchain, "lib/lean", module.Replace('.', '/') + ".olean"));
 
     // Validation and closures come from leancil-audit on replayed oleans, so interface code cannot forge them.
-    void CheckContractInterfaces(ExtractionIdentity extraction, string[] modules, string leanPath, Func<string, string> artifact)
+    bool TryReplayContractInterfaces(ExtractionIdentity extraction, string[] modules, string leanPath,
+        Func<string, string> artifact)
+    {
+        if (!modules.Any(module => module != "ExtractedImports") ||
+            Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") == "true") return false;
+        try
+        {
+            CheckContractInterfaces(extraction, modules, leanPath, artifact, replayTargets: modules);
+            return true;
+        }
+        // Duplicate declarations and replay failures retain the independent checker diagnostics.
+        catch (InvalidOperationException) { return false; }
+    }
+
+    void CheckContractInterfaces(ExtractionIdentity extraction, string[] modules, string leanPath,
+        Func<string, string> artifact, string[]? replayTargets = null)
     {
         string[] interfaces = modules.Where(module => module != "ExtractedImports").ToArray();
         JsonElement[] imports = extraction.Imports;
         if (interfaces.Length == 0 && imports.Length == 0) return;
         if (interfaces.Length == 0) throw new InvalidDataException("Contract imports without a published interface module");
         string[] constants = imports.Select(import => import.GetProperty("contractConstant").GetString()!).Distinct(StringComparer.Ordinal).ToArray();
-        AuditedOleans audited = AuditOleans(leanPath, interfaces, [], interfaces: interfaces, closures: constants);
+        AuditedOleans audited = AuditOleans(leanPath, interfaces, [], interfaces: interfaces, closures: constants,
+            replayTargets: replayTargets);
         foreach (string module in interfaces) RequireAuditedModule(audited, module, artifact(module));
         if (audited.interfaces?.error is { } invalid) throw new InvalidDataException(invalid);
         Dictionary<string, AuditedClosure> closures = audited.closures!.ToDictionary(closure => closure.name, StringComparer.Ordinal);
@@ -2235,9 +2251,13 @@ partial class Program : IDisposable
             if (importModules.Length > 0)
             {
                 stage?.Invoke("kernel replay");
-                ReplayCheckedModules(importModules, leanPath,
-                    "Kernel replay of published contract interfaces and App import assumptions");
-                CheckContractInterfaces(extraction, importModules, leanPath, module => Path.Combine(fresh, module.Replace('.', '/') + ".olean"));
+                string InterfaceArtifact(string module) => Path.Combine(fresh, module.Replace('.', '/') + ".olean");
+                if (!TryReplayContractInterfaces(extraction, importModules, leanPath, InterfaceArtifact))
+                {
+                    ReplayCheckedModules(importModules, leanPath,
+                        "Kernel replay of published contract interfaces and App import assumptions");
+                    CheckContractInterfaces(extraction, importModules, leanPath, InterfaceArtifact);
+                }
                 if (!Same(bound, OleanHashes(fresh, session)))
                     throw new InvalidOperationException("Compiled artifacts changed during verification");
                 RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);

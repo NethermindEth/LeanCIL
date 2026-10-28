@@ -8,6 +8,13 @@ var directory = At("artifacts/RejectedEvidenceTests");
 Directory.CreateDirectory(directory);
 var invalid = Path.Combine(directory, "Invalid.lean");
 var valid = Path.Combine(directory, "Valid.lean");
+var unknown = Path.Combine(directory, "Unknown.lean");
+File.WriteAllText(unknown, """
+    import CIL
+    namespace Extracted
+    def unknown : Nat := missingEvidenceDeclaration
+    end Extracted
+    """ + "\n");
 File.WriteAllText(invalid, """
     import CIL
     namespace Extracted
@@ -18,6 +25,8 @@ File.WriteAllText(valid, File.ReadAllText(invalid).Replace("= 2", "= 1", StringC
 var rejected = new RejectedEvidence(directory);
 rejected.Add(invalid, "PASS isolated rejection", "decide", "is false");
 rejected.Add(invalid, "PASS repeated generated names remain isolated", "decide", "is false");
+rejected.Add(unknown, "PASS classified diagnostics retain their case", "Unknown identifier",
+    "missingEvidenceDeclaration");
 rejected.Check();
 
 var leaking = Path.Combine(directory, "Leaking.lean");

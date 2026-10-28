@@ -264,7 +264,7 @@ if (stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argume
     stages.Any(stage => stage.GetProperty("command").EnumerateArray().Any(argument => argument.GetString() == "extract")))
     throw new InvalidOperationException("Fresh caller verification obtained library implementation proofs or extracted Lib.");
 if (!stages.Where(stage => stage.GetProperty("exitCode").GetInt32() == 0 &&
-        stage.GetProperty("stage").GetString()!.Contains("Kernel replay", StringComparison.Ordinal))
+        stage.GetProperty("stage").GetString()!.Contains("kernel replay", StringComparison.OrdinalIgnoreCase))
     .SelectMany(stage => File.ReadLines(Path.Combine(trace, stage.GetProperty("transcript").GetString()!)))
     .Where(line => line.StartsWith('{'))
     .Select(line => JsonSerializer.Deserialize<JsonElement>(line))

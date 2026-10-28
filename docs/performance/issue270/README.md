@@ -23,7 +23,7 @@ joint kernel replay of that closure and its extraction.
 | Consumer | `NethermindEth/int256` commit `00fcecf53e22b5c9090052779e14b3ba246fb117` |
 | Before framework | `199af3db744758d0a6ae5b32e559041c9162cf83` |
 | Regressed framework | `08a2d7cacbb58024edb6a282481d2ef11bc1598c` |
-| Current scalar control | `9461a1898aa51234e29e294583c7cc41d1f57fc9` (#354) |
+| Current scalar control | `9461a1898aa51234e29e294583c7cc41d1f57fc9` |
 | Combined current endpoint | `a4a48b6936ba6a43a5a7ab41138c7d8494978e75` |
 | Lean | `leanprover/lean4:v4.35.0` |
 
