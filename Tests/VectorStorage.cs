@@ -190,7 +190,7 @@ foreach (var (name, changed) in new[]
     ("init-width", baseline.Replace(".initAggregate 16", ".initAggregate 32")),
     ("init-missing", baseline.Replace(".initAggregate 16", ".nop")),
     ("element-token", baseline.Replace("\"System.UInt32\"", "\"System.Int16\"")),
-    ("vector-token", baseline.Replace("Vector128`1", "Vector256`1"))
+    ("vector-token", baseline.Replace("Vector128\\u00601", "Vector256\\u00601"))
 })
 {
     if (changed == baseline) throw new InvalidOperationException("Ineffective vector mutation: " + name);
