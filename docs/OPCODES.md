@@ -56,7 +56,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality as described below; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering remains unsupported. No floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted instruction boundary, including backward edges and self-loops. |
 | `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. All reachable targets must be valid instruction boundaries; each arm and the fallthrough participate in dependency and stack analysis. |
-| `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char) or same-assembly explicit- or sequential-layout, reference-free aggregates. Native integers use eight bytes under the validated profile. No reference types, floating-point, generic layouts or vector types. |
+| `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char), same-assembly explicit- or sequential-layout reference-free aggregates, or the integer vectors listed below. Native integers use eight bytes under the validated profile. No reference types, floating-point or generic aggregate layouts. |
 | `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. Also accepts checked references, including readonly references and null. Admitted forward and backward successors. |
 | `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
 | `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64` or two live references within one allocation, branching to admitted forward or backward targets. Cross-allocation reference ordering is unsupported. |
@@ -66,13 +66,13 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `ldind.i1`, `ldind.u1`, `ldind.i2`, `ldind.u2`, `ldind.i4`, `ldind.u4` | Partial | One-, two- or four-byte integer loads through a checked reference. Signed narrow loads sign-extend and unsigned loads zero-extend to `i32`; both four-byte forms return the same `i32` bits. Aggregate snapshots and numeric addresses are rejected. |
 | `stind.i1`, `stind.i2`, `stind.i4` | Partial | Store the low one, two or four bytes of an `i32` through a checked reference. Allocation bounds, write permissions and lifetime apply; adjacent bytes remain unchanged. |
 | `ldfld`, `ldflda`, `stfld` | Partial | Fields in same-assembly, validated explicit- or sequential-layout, reference-free value types, and `Item1`/`Item2` of an equal-width primitive `ValueTuple<T1, T2>` (see [value tuples](SOUNDNESS.md#value-tuples)). Supported field storage is `sbyte`, byte/Boolean, `short`, `ushort`/`char`, 32-bit integer, 64-bit integer, native integer, integer-backed enum or nested reference-free aggregate. Nested snapshots and assignments copy all field bytes, including padding. Narrow stores truncate; narrow loads sign- or zero-extend to `i32` according to field metadata. `ldfld` accepts an aggregate byte snapshot or reference; field addresses and stores require a reference. No general managed objects, auto layouts or static fields through these opcodes. |
-| `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1–65,536 bytes, or exactly `Vector128<ulong>` / `Vector256<ulong>`. No general objects, reference-bearing storage, floating-point tokens. Native-integer tokens use eight-byte storage. |
-| `cpobj` | Partial | Copy validated integer, aggregate or Vector128/256 ulong storage through checked references. Requires initialized readable source and writable destination; self-copy is supported, partial overlap is rejected. No reference-bearing or floating-point tokens. |
-| `initobj` | Partial | Zero the validated width of an admitted integer type or same-assembly explicit- or sequential-layout aggregate. This initializes previously unknown bytes without touching neighboring storage. No general vector or managed-object initialization. |
+| `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1–65,536 bytes or admitted Vector128/256/512 integer values, retaining initialization masks. No general objects, reference-bearing storage or floating-point tokens. Native-integer tokens use eight-byte storage. |
+| `cpobj` | Partial | Copy validated integer, aggregate or admitted Vector128/256/512 integer storage through checked references. Requires initialized readable source and writable destination; self-copy is supported, partial overlap is rejected. No reference-bearing or floating-point tokens. |
+| `initobj` | Partial | Zero the validated width of an admitted integer type, same-assembly explicit- or sequential-layout aggregate, or admitted Vector128/256/512 integer value. This initializes previously unknown bytes without touching neighboring storage. No managed-object initialization. |
 | `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). Other static fields are rejected. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data with an explicit packed blob layout and no static constructor. A `ReadOnlySpan<byte>` over such data may be returned by value (for example from a C# collection-expression property); see [static span tables](#static-span-tables) for other element types. Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist. No arbitrary external calls, generic declaring types, class instance methods or virtual dispatch. |
-| `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also primitive integer `Span<T>(void*, int)` and `ReadOnlySpan<T>(void*, int)` constructors over checked existing storage. Class construction, generic constructors and cyclic dependencies are rejected. |
+| `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted primitive `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage, from `(void*, int)`, an array, or `(array, start, length)`. Class construction, other generic constructors and cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Only `throw new E(...)` with `ldstr`/`ldnull` arguments (see below): it raises a located `thrown "E"` fault. Other throws are rejected. |
 | `constrained.`, `callvirt` | Partial | Adjacent prefix and call resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
@@ -110,6 +110,14 @@ The certificate tracks an `ldnull` object separately from managed references. It
 stored or passed as a managed pointer. Existing `Unsafe.NullRef<T>` values remain managed
 references and can participate in reference comparisons. Numeric zero does not become a
 reference through these rules.
+
+The managed-reference overloads of `Unsafe.AreSame`, `IsAddressLessThan` and
+`IsAddressGreaterThan` use these checked comparisons. Ordering and
+`Unsafe.ByteOffset(origin, target)` require two live references in the same allocation;
+the latter returns the native-width byte displacement from origin to target.
+`Unsafe.AddByteOffset` accepts `nint` or `nuint` offsets, and `SubtractByteOffset`
+accepts `nint`. Reference formation retains bounds and lifetime checks without granting
+read or write authority. Unsigned subtraction and pointer overloads are unsupported.
 
 ## Block memory and alignment prefixes
 
@@ -177,7 +185,8 @@ types and ordinary unconstrained virtual calls remain unsupported.
 
 ### Static span tables
 
-Primitive integer `Span<T>` and `ReadOnlySpan<T>` also have typed, allocation-relative storage
+`Span<T>` and `ReadOnlySpan<T>` over the eight fixed-width integer types, `nint`, `nuint`,
+`char` and `bool` have typed, allocation-relative storage
 for by-value parameters and reusable locals. Their length, indexing, slicing and readonly
 conversion retain element width and allocation lifetime. `MemoryMarshal.CreateSpan` and
 `CreateReadOnlySpan` form views over existing storage; they do not grant access authority or
@@ -185,6 +194,13 @@ initialize bytes. Readonly element references reject stores, while other writabl
 can still update the same backing memory. Slicing checks signed input ranges and permits an
 empty view at the allocation end. Byref span parameters and general ref structs remain outside
 this support.
+
+Array constructors, implicit array conversions and the array overloads of
+`MemoryExtensions.AsSpan` form views over supplied primitive array storage. `AsSpan`
+accepts a whole array, a start index, or a start and length. Null arrays produce empty
+spans only for a zero range; invalid ranges raise `ArgumentOutOfRangeException`.
+These operations allocate no backing storage, preserve aliases and grant no byte-access
+authority. Array allocation and non-array `AsSpan` overloads remain unsupported.
 
 A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda` rules, packing 1, 2, 4 or 8). The span covers the whole field and has `size / sizeof(T)` elements, for any primitive integer `T`. A caller reads it as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with `System.IndexOutOfRangeException` at the call when the index is out of range, compared unsigned as in .NET. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a single-use receiver with a single-load or constant index; other supported uses retain typed span storage. Branches into a folded receiver and byref spans remain rejected.
 
@@ -214,7 +230,7 @@ See the [per-family intrinsic tables](SIMD.md) for the exact Vector128/256, SSE,
 
 SIMD and hardware features enter compiled CIL mostly through `call`, rather than dedicated SIMD CIL opcodes. Selected Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM overloads have models. The exact allowed runtime assembly identities, generic arguments, signatures and capability requirements are defined in [RuntimeModels.cs](../Extractor/RuntimeModels.cs) and [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs). Supporting one overload or CPU feature does not mean the entire API is supported.
 
-`Unsafe.SizeOf<T>()` and the managed-reference `Unsafe.Add<T>` overloads with `int`, `nint` or `nuint` offsets use validated layouts for supported integer primitives, enums, reference-free structs and supported Vector128/256 types. Sizes include managed packing and padding; reference offsets scale by that size and wrap at the validated native width. Forming the resulting reference checks allocation identity, lifetime and bounds, including explicitly admitted one-past positions. It does not grant permission to read or write. Classes, pointer/byref type arguments and unsupported layouts fail extraction.
+`Unsafe.SizeOf<T>()` and the managed-reference `Unsafe.Add<T>` overloads with `int`, `nint` or `nuint` offsets use validated layouts for supported integer primitives, enums, reference-free structs and supported Vector128/256/512 types. Sizes include managed packing and padding; reference offsets scale by that size and wrap at the validated native width. Forming the resulting reference checks allocation identity, lifetime and bounds, including explicitly admitted one-past positions. It does not grant permission to read or write. Classes, pointer/byref type arguments and unsupported layouts fail extraction.
 
 `Unsafe.SkipInit<T>(out T)` admits the same supported storage types. Its checked
 operation validates the managed reference and leaves memory unchanged, including
@@ -273,18 +289,24 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 
 Native-width overloads use the validated 64-bit target. The 128-bit, span, generic-math and other helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.
 
-### Vector fields
+### Vector storage and fields
 
-Instance fields support `Vector128<ulong>` and `Vector256<ulong>`, matching the
-vector types admitted by `ldobj` and `stobj`. The owner must have a validated,
-reference-free sequential or explicit layout. Other vector element types and
-widths in fields are rejected. Auto-layout tuples do not admit vector fields.
+`sizeof`, `initobj`, `ldobj`, `stobj` and `cpobj` admit `Vector128<T>`, `Vector256<T>`
+and `Vector512<T>` for `byte`, `int`, `uint`, `long` and `ulong`. Exact type-token
+checks bind each operation to its storage width. Loads, stores, parameters and returns
+retain initialization masks; using unknown lanes as numeric values is rejected.
+`cpobj` requires initialized source bytes even when the token names a vector.
+
+Instance fields support `Vector128<T>` and `Vector256<T>` for `byte`, `int`, `uint`,
+`long` and `ulong`. The owner must have a validated, reference-free sequential or
+explicit layout. Other vector element types and 512-bit fields are rejected.
+Auto-layout tuples do not admit vector fields.
 Layout computation uses CoreCLR's default packing limit of 64 bytes.
-`Vector128<ulong>` has natural field alignment 16. `Vector256<ulong>` has natural
+`Vector128<T>` has natural field alignment 16. `Vector256<T>` has natural
 field alignment 32 under x64 profiles and 16 under ARM64 profiles. Explicit
 packing caps these values. The checked method profile selects the layout in both
 the extractor and the Lean certificate. A scalar profile must use an explicit
-packing limit of at most 16 for `Vector256<ulong>` fields because it does not
+packing limit of at most 16 for `Vector256<T>` fields because it does not
 select a target architecture.
 
 Field widths come from the vector type. Raw layout evidence keeps vector storage
