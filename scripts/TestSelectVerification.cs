@@ -64,7 +64,7 @@ Test("test entry points", () =>
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]), ["evidence"]);
+    Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]), ["evidence", "excluded"]);
 });
 Test("proof and transitive imports", () =>
 {
