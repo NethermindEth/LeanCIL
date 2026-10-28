@@ -164,6 +164,14 @@ foreach (var (name, before, after) in new[]
     File.WriteAllText(path, byteOffsetSource.Replace(before, after, StringComparison.Ordinal));
     rejected.Add(path, "PASS exact Unsafe identity rejection: " + name, "UnsafeCallsValid");
 }
+var renamedSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "AreSame", "Extracted.lean")),
+    "method0_scalars_validated")
+    .Replace("name := \"AreSame\"", "name := \"Other\"", StringComparison.Ordinal)
+    .Replace("declaringType := .atom Extraction.runtimeScope \"System.Runtime.CompilerServices.Unsafe\"",
+        "declaringType := .atom \"Fixture\" \"Lookalike\"", StringComparison.Ordinal);
+var renamedPath = Path.Combine(root, "AreSame", "ForgedNameAndOwner.lean");
+File.WriteAllText(renamedPath, renamedSource);
+rejected.Add(renamedPath, "PASS forged name and owner cannot emit a scalar comparison", "ScalarFlowValid");
 rejected.Check();
 
 foreach (var mutation in new[] { "reference-field", "class", "pointer", "arity", "parameter", "return", "instance", "scope", "version" })

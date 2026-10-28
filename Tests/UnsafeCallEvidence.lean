@@ -68,3 +68,15 @@ example : UnsafeCallsValid [] nonCall [true] [.pop] := by decide +kernel
 example : UnsafeCallsValid [] (raw nullCall) [false] [.unsupported "excluded"] := by decide +kernel
 
 end Tests.UnsafeCallEvidence
+
+namespace Tests.UnsafeCallEvidence
+
+/-- A genuine managed call to a local lookalike is not reserved as a lowered runtime helper. -/
+theorem local_reference_helper_name :
+    UnsafeCallsValid [] (raw { call with
+      declaringType := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe",
+      name := "AreSame", parameterCount := 2, returnsValue := true }) [true] [.call 1 2] := by
+  decide +kernel
+#print axioms local_reference_helper_name
+
+end Tests.UnsafeCallEvidence

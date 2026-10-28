@@ -76,6 +76,7 @@ def unsafeElementAdd (instruction : RawInstruction) : Bool := Id.run do
 def unsafeReferenceRequired (instruction : RawInstruction) (emitted : Op) : Bool :=
   match emitted with
   | .memory .byteOffset => true
+  | .call .. => (unsafeReferenceHelper instruction).isSome
   | _ => match instruction.opcode, instruction.operand with
     | 0x28, .call site =>
       (match site.declaringType with
