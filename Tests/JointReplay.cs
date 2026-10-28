@@ -251,6 +251,60 @@ void CheckReplays(bool native)
     Console.WriteLine("PASS concurrent checks reject forged definitions and forged theorem dependencies");
 }
 
+void CheckReplayedClosures()
+{
+    var source = Path.Combine(root, "JointContract.lean");
+    File.WriteAllText(source, """
+        import CIL.Safety.MethodContract
+        def CIL.Forged.expected : Nat := 7
+        namespace JointContract
+        private def expected : Nat := CIL.Forged.expected
+        def contract : CIL.Safety.MethodContract Unit Unit where
+          args _ := []
+          results _ := []
+          pre _ _ := True
+          footprint _ := []
+          post _ _ _ _ := expected = 7
+        axiom unapproved : Prop
+        def badContract : CIL.Safety.MethodContract Unit Unit where
+          args _ := []
+          results _ := []
+          pre _ _ := True
+          footprint _ := []
+          post _ _ _ _ := unapproved
+        theorem valid : True := trivial
+        #print axioms valid
+        end JointContract
+        """);
+    var leanPath = root + Path.PathSeparator + Path.Combine(verification.library!, ".lake/build/lib/lean");
+    Run([verification.LeanExecutable, "--root=" + root, "-o", Path.ChangeExtension(source, ".olean"), source],
+        root, leanPath, environment: environment);
+    var results = new List<System.Text.Json.JsonElement>();
+    foreach (var replay in new[] { false, true })
+    {
+        var request = new Dictionary<string, object>
+        {
+            ["modules"] = new[] { "JointContract" },
+            ["theorems"] = new[] { new { name = "JointContract.valid", axioms = Array.Empty<string>() } },
+            ["closures"] = new[] { new { name = "JointContract.contract" }, new { name = "JointContract.badContract" } }
+        };
+        if (replay) request["replayTargets"] = new[] { "JointContract" };
+        var input = Path.Combine(root, "closure-request.json");
+        var output = Path.Combine(root, "closure-result.json");
+        File.WriteAllText(input, System.Text.Json.JsonSerializer.Serialize(request));
+        Run([verification.CheckedAuditExecutable(), input, output], root, leanPath, environment: environment);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(File.ReadAllText(output));
+        if (replay && !result.GetProperty("fused").GetBoolean())
+            throw new InvalidOperationException("Contract closure unnecessarily reimported replayed modules");
+        results.Add(result.GetProperty("closures"));
+    }
+    if (results[0].GetRawText() != results[1].GetRawText() ||
+        !results[1][0].GetProperty("canonical").GetString()!.Contains("Forged", StringComparison.Ordinal) ||
+        !results[1][1].GetProperty("error").GetString()!.Contains("unapproved", StringComparison.Ordinal))
+        throw new InvalidOperationException("Replayed ownership changed closure bytes or trusted a namespace prefix");
+    Console.WriteLine("PASS replayed contract closures match imported metadata and reject unapproved axioms");
+}
+
 var originalReplayByte = verification.bootstrapReplaySource[0];
 try
 {
@@ -268,3 +322,4 @@ Console.WriteLine("PASS bootstrap replay source must match its initial snapshot"
 CheckReplays(native: false);
 CheckReplays(native: true);
 CheckFusedReplay();
+CheckReplayedClosures();

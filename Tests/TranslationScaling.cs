@@ -1,7 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
-#:include CheckedExtractionPrefix.cs
+#:include GeneratedEvidence.cs
 
 using System.Text.Json;
 
@@ -32,7 +32,9 @@ var monolithicSource = extracted[..start] +
     "methodEvidence imports program := by decide\n" + extracted[end..];
 void RequireHeartbeatRejection(int code, string diagnostic)
 {
-    if (code == 0 || !diagnostic.Contains("maximum number of heartbeats", StringComparison.Ordinal))
+    var errors = diagnostic.Split('\n').Where(line => line.Contains(": error:", StringComparison.Ordinal)).ToArray();
+    if (code == 0 || errors.Length != 1 ||
+        !errors[0].Contains("maximum number of heartbeats", StringComparison.Ordinal))
         throw new InvalidOperationException(
             "Fixture no longer demonstrates the original default-budget failure: " + diagnostic);
 }
@@ -48,16 +50,14 @@ if (args.Contains("--measure", StringComparer.Ordinal))
     var result = Execute(["lake", "env", "lean", original], cwd: FixturePackage(), progress: "Baseline complete monolithic rejection");
     RequireHeartbeatRejection(result.Code, result.Output);
 }
-var prefix = new CheckedExtractionPrefix(extracted, "theorem translation_valid :", directory);
-var positive = Path.Combine(directory, "Positive.lean");
-File.WriteAllText(positive, prefix.RemainingSource(extracted));
-Run(["lean", positive], leanPath: prefix.LeanPath, progress: "Checking compositional certificate suffix");
 var old = Path.Combine(directory, "Monolithic.lean");
-File.WriteAllText(old, prefix.RemainingSource(monolithicSource));
-var monolithic = Execute(["lean", old], leanPath: prefix.LeanPath,
+// The monolithic decision uses the raw definitions, not the already-proved component lemmas.
+// The production consumer below checks the complete unchanged positive certificate once.
+File.WriteAllText(old, NarrowEvidence(monolithicSource, "translation_valid"));
+var monolithic = Execute(["lake", "env", "lean", old], cwd: FixturePackage(),
     progress: "Checking monolithic certificate rejection");
 RequireHeartbeatRejection(monolithic.Code, monolithic.Output);
-Console.WriteLine("PASS six-method compiled fixture exceeds monolithic budget and passes compositional checking");
+Console.WriteLine("PASS six-method compiled fixture exceeds the monolithic default budget");
 
 var consumer = Path.Combine(directory, "Consumer");
 Directory.CreateDirectory(consumer);
@@ -71,6 +71,7 @@ import Extracted
 namespace ExampleProof
 theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
     Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
+#print axioms correctness
 end ExampleProof
 """);
 Run(["lake", "update"], consumer);

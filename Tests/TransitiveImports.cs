@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:include ConsumerTraceDirectory.cs
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ImportReviewRegressions.cs
@@ -267,7 +268,7 @@ void FullDiamond()
         "--theorem", "DiamondProof.correctness"];
     string[] Trace(string name, bool full)
     {
-        var trace = Path.Combine(root, name);
+        var trace = ConsumerTraceDirectory.Create(root, name);
         var previous = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
         Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
         try { Run([.. command, .. full ? new[] { "--force-full-verify" } : []]); }
@@ -301,7 +302,7 @@ void FullDiamond()
     var originalC = JsonNode.Parse(File.ReadAllText(cSidecar))!.AsObject();
     void RejectMutation(Action mutate, Action restore, string assembly)
     {
-        var trace = Path.Combine(root, "full-graph-rejection-" + Guid.NewGuid().ToString("N"));
+        var trace = ConsumerTraceDirectory.Create(root, "full-graph-rejection");
         var previous = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
         Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
         try
@@ -391,7 +392,7 @@ void FullTransitive()
     {
         Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,
             .. Import(aSidecar, a), .. Import(bSidecar, b)]);
-        var rejectedTrace = Path.Combine(root, "trace-rejected-b");
+        var rejectedTrace = ConsumerTraceDirectory.Create(root, "trace-rejected-b");
         var outerTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
         Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", rejectedTrace);
         try { RejectFull("Unapproved proof axioms: sorryAx"); }
@@ -438,7 +439,7 @@ void FullTransitive()
     Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", artifact,
         .. Import(aSidecar, a), .. Import(bSidecar, b)]);
 
-    string trace = Path.Combine(root, "trace-full");
+    string trace = ConsumerTraceDirectory.Create(root, "trace-full");
     string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
     Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
     try { Run(command); }

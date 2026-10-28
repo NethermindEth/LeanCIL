@@ -283,10 +283,11 @@ def interfaces (env : Environment) (req : Json) : Json :=
   | .error error => Json.mkObj [("error", toJson error)]
 
 /-- Reports the contract kind and canonical closure of one `closures` entry. -/
-def closure? (env : Environment) (req : Json) : IO Json := do
+def closure? (env : Environment) (req : Json)
+    (ownerOf : Name → Option Name) : IO Json := do
   let c := name (← IO.ofExcept (req.getObjValAs? String "name"))
   return Json.mkObj <| [("name", toJson c.toString)] ++
-    match CIL.Interface.contractClosure env c with
+    match CIL.Interface.contractClosure env c ownerOf with
     | .ok (kind, canonical) => [("kind", toJson kind), ("canonical", toJson canonical)]
     | .error error => [("error", toJson error)]
 
@@ -381,7 +382,6 @@ unsafe def writeFingerprints (input : String) : IO Unit := do
 /-- Whether an audit needs target metadata absent from a freshly replayed kernel environment. -/
 def needsTargetMetadata (env : Kernel.Environment) (req : Json) : Bool := Id.run do
   if !(names req "interfaces").isEmpty ||
-      !((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).isEmpty ||
       (req.getObjVal? "namespaces").isOk then return true
   for entry in (req.getObjValAs? (Array Json) "theorems").toOption.getD #[] do
     if entry.getObjValAs? Bool "refutation" matches .ok true then
@@ -396,7 +396,9 @@ def needsTargetMetadata (env : Kernel.Environment) (req : Json) : Bool := Id.run
 unsafe def writeAudit (req : Json) (output : String) (env : Environment)
     (extra : List (String × Json) := [])
     (ownerOf : Name → Option Name := fun name =>
-      (env.getModuleIdxFor? name).bind (env.allImportedModuleNames[·.toNat]?)) : IO Unit := do
+      (env.getModuleIdxFor? name).bind (env.allImportedModuleNames[·.toNat]?))
+    (closureOwnerOf : Name → Option Name := fun name =>
+      some (CIL.Interface.definingModule env name)) : IO Unit := do
   let modules := names req "modules"
   let replayed := (names req "replayTargets").foldl (·.insert ·) ({} : NameSet)
   let mut paths : List (String × Json) := []
@@ -406,7 +408,8 @@ unsafe def writeAudit (req : Json) (output : String) (env : Environment)
     (fun entry => theorem? env entry ownerOf replayed (cachedDependencies env.toKernelEnv cache))
   let constants ←
     ((req.getObjValAs? (Array Json) "constants").toOption.getD #[]).mapM (constant? env)
-  let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM (closure? env)
+  let closures ← ((req.getObjValAs? (Array Json) "closures").toOption.getD #[]).mapM
+    (fun entry => closure? env entry closureOwnerOf)
   let audited ← match req.getObjVal? "namespaces" with
     | .ok spec => pure [("namespaces", ← namespaces env modules spec)]
     | .error _ => pure []
@@ -449,7 +452,11 @@ unsafe def main (args : List String) : IO UInt32 := do
         !needsTargetMetadata kernel req
       let env ← if fused then pure (Environment.ofKernelEnv kernel)
         else importModules (modules.map ({ module := · })) {} (loadExts := false)
-      try writeAudit req output env [("replayed", toJson targets), ("fused", toJson fused)] ownerOf
+      let closureOwnerOf := if fused then ownerOf
+        else fun name => some (CIL.Interface.definingModule env name)
+      try
+        writeAudit req output env [("replayed", toJson targets), ("fused", toJson fused)]
+          ownerOf closureOwnerOf
       finally unless fused do env.freeRegions
     return 0
   let env ← importModules (modules.map ({ module := · })) {} (loadExts := false)
