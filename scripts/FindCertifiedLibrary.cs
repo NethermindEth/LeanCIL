@@ -7,7 +7,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-// Prefer this commit or an identical merged PR tree before older main pushes.
+// Prefer this commit, an identical merged PR tree and the exact base before recent main pushes.
 // Their own code built the library and printed its digest; PrepareLibrary --reuse rechecks both.
 const int RunsPerCommit = 10;
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -61,6 +61,10 @@ IEnumerable<long> Candidates()
     foreach (var run in Runs(options["--head"], "")) yield return run;
     foreach (var run in MergedPullRuns()) yield return run;
     foreach (var run in Runs(options["--base"], "&event=push&branch=main")) yield return run;
+    // The exact base may have skipped preparation or reused a library without republishing it.
+    var recent = Api($"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}" +
+        "&event=push&branch=main&status=success");
+    foreach (var run in CertifiedLibraryDonor.RecentMainRuns(recent, repository, RunsPerCommit)) yield return run;
 }
 
 IEnumerable<long> MergedPullRuns()

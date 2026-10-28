@@ -129,4 +129,28 @@ Test("merged PR donors require exact trees and same-repository merge provenance"
     Require(!CertifiedLibraryDonor.MergedHeads("owner/repo", commit[..7], Api).Any() && calls.Count == 0,
         "Abbreviated push commit queried unrelated pulls");
 });
+Test("recent fallback admits only bounded successful main pushes from this repository", () =>
+{
+    string Run(long id, string branch = "main", string source = "owner/repo", string trigger = "push",
+        string status = "completed", string? conclusion = "success", string? head = null) =>
+        JsonSerializer.Serialize(new
+        {
+            id, head_branch = branch, head_repository = new { full_name = source }, @event = trigger,
+            status, conclusion, head_sha = head ?? new string('a', 40)
+        });
+    JsonElement Listing(params string[] runs) => Json("{\"workflow_runs\":[" + string.Join(',', runs) + "]}");
+    var valid = Listing(Run(9), Run(7), Run(7));
+    Require(CertifiedLibraryDonor.RecentMainRuns(valid, "owner/repo", 10).SequenceEqual([9L, 7L]),
+        "Main fallback must preserve newest-first order and remove duplicates");
+    foreach (var invalid in new[]
+    {
+        Run(1, branch: "feature"), Run(1, source: "fork/repo"), Run(1, trigger: "pull_request"),
+        Run(1, status: "in_progress"), Run(1, conclusion: "failure"), Run(1, conclusion: null),
+        Run(1, head: "abc123"), Run(1, head: new string('z', 40)), Run(0)
+    })
+        Require(!CertifiedLibraryDonor.RecentMainRuns(Listing(invalid), "owner/repo", 10).Any(),
+            "Ineligible main fallback was accepted: " + invalid);
+    Require(!CertifiedLibraryDonor.RecentMainRuns(Listing(Run(1, branch: "feature"), Run(2)),
+        "owner/repo", 1).Any(), "Fallback exceeded its bounded candidate set");
+});
 Console.WriteLine($"All {checks} certified library donor checks passed.");

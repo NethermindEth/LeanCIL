@@ -1,5 +1,12 @@
 # Verification CI
 
+Library donation first checks this commit, an identical merged PR tree and the exact base-main
+commit, then at most ten recent successful main pushes from this repository. This covers a base
+run that skipped preparation or has no artifact. Every candidate still needs a successful
+producer job, its logged manifest digest and an artifact with sufficient remaining retention.
+Source/toolchain checks and kernel replay remain mandatory; changed sources use dependency-aware
+incremental preparation or fall back to a fresh build. Older PR heads are not fallback donors.
+
 Regression tests share checked setup where their import and replay requirements agree.
 Runtime bit tests [deduplicate identical typed inputs](performance/RuntimeBits.md),
 and replay fallback tests check rejection and attribution in one invocation. Independent

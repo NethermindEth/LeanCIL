@@ -18,6 +18,17 @@ static class CertifiedLibraryDonor
     /// <summary>The artifact one prepare attempt uploads.</summary>
     public static string ArtifactName(long run, int attempt) => $"certified-library-{run}-{attempt}";
 
+    /// <summary>Recent successful main pushes from this repository, bounded before filtering.</summary>
+    public static IEnumerable<long> RecentMainRuns(JsonElement runs, string repository, int limit) =>
+        runs.GetProperty("workflow_runs").EnumerateArray().Take(limit)
+            .Where(run => run.GetProperty("event").GetString() == "push" &&
+                run.GetProperty("head_branch").GetString() == "main" &&
+                run.GetProperty("status").GetString() == "completed" &&
+                run.GetProperty("conclusion").GetString() == "success" &&
+                SameRepository(run.GetProperty("head_repository"), repository) &&
+                Regex.IsMatch(run.GetProperty("head_sha").GetString() ?? "", "^[0-9a-f]{40}$"))
+            .Select(run => run.GetProperty("id").GetInt64()).Where(id => id > 0).Distinct();
+
     /// <summary>Same-repository merged PR heads whose complete tree equals the push commit.</summary>
     public static IEnumerable<string> MergedHeads(string repository, string commit, Func<string, JsonElement> api)
     {
