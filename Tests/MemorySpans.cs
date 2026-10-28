@@ -8,6 +8,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/MemorySpans");
 Directory.CreateDirectory(root);
 var evidence = new GeneratedEvidence(root);
+var spanProofs = new Dictionary<string, string>(StringComparer.Ordinal);
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution");
 
 foreach (var (name, signature, arguments, expected) in new[]
@@ -40,7 +41,7 @@ foreach (var (name, signature, arguments, expected) in new[]
               .ok [.scalar (.i32 {{expected}})] := rfl
         #print axioms compiled_span_result
         """);
-    evidence.Add(proof, "PASS compiled span certificate and execution: " + name);
+    spanProofs.Add(name, proof);
 }
 
 var original = File.ReadAllText(Path.Combine(root, "SliceRead", "Extracted.lean"));
@@ -74,11 +75,20 @@ foreach (var (method, proof) in new[]
     ("SliceWrite", "Tests/MemorySpanWriteContracts.lean")
 })
 {
-    var contractOutput = Path.Combine(root, method);
-    Run(["lake", "env", "lean", "--root=" + contractOutput, "-o", Path.Combine(contractOutput, "Extracted.olean"),
-        Path.Combine(contractOutput, "Extracted.lean")], cwd: FixturePackage());
+    // The contract import also checks the concrete execution theorem, so this extraction
+    // does not need a second certificate proof in the later positive batch.
+    var contractOutput = Path.Combine(root, method, "Contract");
+    Directory.CreateDirectory(contractOutput);
+    var contractExtraction = Path.Combine(contractOutput, "Extracted.lean");
+    File.Copy(spanProofs[method], contractExtraction, overwrite: true);
+    var checkedExtraction = Run(["lake", "env", "lean", "--root=" + contractOutput, "-o",
+        Path.Combine(contractOutput, "Extracted.olean"), contractExtraction], cwd: FixturePackage());
+    if (checkedExtraction.Contains("sorryAx", StringComparison.Ordinal))
+        throw new Exception("Untrusted span certificate or execution");
     var contracts = Run(["lake", "env", "lean", At(proof)], cwd: FixturePackage(), leanPath: contractOutput);
     if (contracts.Contains("sorryAx", StringComparison.Ordinal)) throw new Exception("Untrusted span contract");
+    spanProofs.Remove(method);
+    Console.WriteLine("PASS compiled span certificate and execution: " + method);
 }
 Console.WriteLine("PASS compiled span helper contract and caller composition");
 
@@ -95,4 +105,6 @@ foreach (var (signature, marker) in new[]
     Console.WriteLine("PASS unsupported span signature: " + signature);
 }
 
+foreach (var (name, proof) in spanProofs)
+    evidence.Add(proof, "PASS compiled span certificate and execution: " + name);
 evidence.Check(replay: false);
