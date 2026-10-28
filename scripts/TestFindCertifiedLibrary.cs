@@ -229,4 +229,30 @@ Test("an unavailable run, artifact or log cannot hide the next authenticated don
             "Exhausted lookup must not supply partial evidence");
     }
 });
+Test("archive digest belongs to the same successful producer log as its manifest", () =>
+{
+    JsonElement Api(long run, string suffix) => suffix.StartsWith("/jobs", StringComparison.Ordinal)
+        ? Json("""
+            {"jobs":[{"id":9,"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"success"}]}
+            """)
+        : Json("""
+            {"artifacts":[{"id":70,"name":"certified-library-7-1","expired":false,
+              "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":7}}]}
+            """);
+    foreach (var archive in new[] { "", Other, Other[..63],
+        Other + "\n" + CertifiedLibraryDonor.ArchiveDigestLine + Digest,
+        Other + "\n" + CertifiedLibraryDonor.ArchiveDigestLine + Other[..63] })
+    {
+        var producerLog = CertifiedLibraryDonor.DigestLine + Digest + "\n" +
+            (archive.Length == 0 ? "" : CertifiedLibraryDonor.ArchiveDigestLine + archive + "\n");
+        var result = CertifiedLibraryDonor.Find([7], Api, job =>
+        {
+            Require(job == 9, "Digest came from another job");
+            return producerLog;
+        }, now, _ => { });
+        Require(archive.Length == 0 ? result == new CertifiedLibraryDonor.Selection(7, 70, Digest) :
+            archive == Other ? result == new CertifiedLibraryDonor.Selection(7, 70, Digest, Other) : result is null,
+            "Packed or legacy donor digest mismatch");
+    }
+});
 Console.WriteLine($"All {checks} certified library donor checks passed.");

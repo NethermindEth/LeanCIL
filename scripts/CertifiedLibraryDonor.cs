@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 static class CertifiedLibraryDonor
 {
     /// <summary>A producer artifact authenticated by the digest printed in its job log.</summary>
-    public sealed record Selection(long Run, long Artifact, string Digest);
+    public sealed record Selection(long Run, long Artifact, string Digest, string? ArchiveDigest = null);
 
     /// <summary>Unavailable candidate listings do not prevent independent donors from being checked.</summary>
     public static T[] Available<T>(string description, Func<IEnumerable<T>> lookup, Action<string> warning)
@@ -35,8 +35,12 @@ static class CertifiedLibraryDonor
             {
                 var artifact = Artifact(api(run, "/artifacts?name=" + ArtifactName(run, attempt)), run, attempt, now);
                 if (artifact is null) return Array.Empty<Selection>();
-                var digest = Digest(log(job));
-                return digest is null ? [] : new[] { new Selection(run, artifact.Value, digest) };
+                var producerLog = log(job);
+                var digest = Digest(producerLog);
+                var archiveDigest = ArchiveDigest(producerLog);
+                if (digest is null || (producerLog.Contains(ArchiveDigestLine, StringComparison.Ordinal) &&
+                    archiveDigest is null)) return [];
+                return new[] { new Selection(run, artifact.Value, digest, archiveDigest) };
             }, warning);
             if (selected.Length != 0) return selected[0];
         }
@@ -60,6 +64,9 @@ static class CertifiedLibraryDonor
 
     /// <summary>The line <c>PrepareLibrary.cs</c> prints for the library it certified.</summary>
     public const string DigestLine = "Certified library manifest SHA256: ";
+
+    /// <summary>The packed library's digest, printed by its producer before upload.</summary>
+    public const string ArchiveDigestLine = "Certified library archive SHA256: ";
 
     /// <summary>A donated artifact must outlive every suite job that downloads it.</summary>
     public static readonly TimeSpan MinimumRemainingRetention = TimeSpan.FromDays(1);
@@ -136,5 +143,14 @@ static class CertifiedLibraryDonor
         string[] digests = DigestPattern.Matches(log).Select(match => match.Groups[1].Value)
             .Distinct(StringComparer.Ordinal).ToArray();
         return digests.Length == 1 ? digests[0] : null;
+    }
+
+    /// <summary>The one archive digest from the same prepare-job log, absent for legacy raw artifacts.</summary>
+    public static string? ArchiveDigest(string log)
+    {
+        var pattern = Regex.Escape(ArchiveDigestLine) + "([^\\r\\n]*)";
+        var digests = Regex.Matches(log, pattern).Select(match => match.Groups[1].Value.Trim())
+            .Distinct(StringComparer.Ordinal).ToArray();
+        return digests.Length == 1 && Regex.IsMatch(digests[0], "^[0-9a-f]{64}$") ? digests[0] : null;
     }
 }

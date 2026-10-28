@@ -425,7 +425,15 @@ Test("certified library binding, main republication and observability", () =>
             "(github.event_name == 'push' && github.ref == 'refs/heads/main')",
         "--reuse \"" + dollar + "DONATED_SHA256\"",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
-        "include-hidden-files: true", "max-parallel: 8", "artifacts/verification-traces/",
+        "archive-sha256: " + dollar + "{{ steps.pack-library.outputs.archive-sha256 || " +
+            "steps.donor.outputs.archive-sha256 }}",
+        "ARCHIVE_SHA256: " + dollar + "{{ needs.prepare.outputs.archive-sha256 }}",
+        "ARCHIVE_SHA256: " + dollar + "{{ steps.donor.outputs.archive-sha256 }}",
+        "DONATED_SHA256: " + dollar + "{{ steps.restored.outcome == 'success' && " +
+            "steps.donor.outputs.manifest-sha256 || '' }}",
+        "path: artifacts/library-download", "path: artifacts/certified-library.tar.zst",
+        "dotnet run --file scripts/TestLibraryArchive.cs",
+        "max-parallel: 8", "artifacts/verification-traces/",
         "matrix.suite == 'imports' && 90", "startsWith(matrix.suite, 'exports') && 120 || 30" })
         Require(workflow.Contains(text, StringComparison.Ordinal), "Missing workflow binding: " + text);
     string name = "name: certified-library-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}";

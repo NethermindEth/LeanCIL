@@ -1,5 +1,10 @@
 # Verification CI
 
+Certified libraries travel as authenticated tar/zstd payloads. The archive and manifest digests
+come from the same producer job; restoration verifies the archive before decompression and
+rejects unsafe entries. Legacy raw artifacts retain their manifest checks. See
+[library distribution](performance/LibraryDistribution.md) for the format and measurements.
+
 Library donation first checks this commit, an identical merged PR tree and the exact base-main
 commit, then at most ten recent successful main pushes from this repository. This covers a base
 run that skipped preparation or has no artifact. Every candidate still needs a successful

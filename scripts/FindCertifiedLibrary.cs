@@ -29,7 +29,8 @@ if (selected is null)
 else
 {
     File.AppendAllText(output,
-        $"run-id={selected.Run}\nartifact-id={selected.Artifact}\nmanifest-sha256={selected.Digest}\n");
+        $"run-id={selected.Run}\nartifact-id={selected.Artifact}\nmanifest-sha256={selected.Digest}\n" +
+        $"archive-sha256={selected.ArchiveDigest}\n");
     Console.WriteLine($"Reusing artifact {selected.Artifact} from run {selected.Run} " +
         $"with manifest SHA256 {selected.Digest}");
 }

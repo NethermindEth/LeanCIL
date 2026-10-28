@@ -33,6 +33,7 @@ jobs:
         run: |
           dotnet run --file scripts/TestSelectVerification.cs
           dotnet run --file scripts/TestFindCertifiedLibrary.cs
+          dotnet run --file scripts/TestLibraryArchive.cs -c Release
           dotnet run --file scripts/TestSummarizeVerification.cs
           dotnet run --file scripts/TestLeanDiagnostics.cs
           dotnet run --file Tests/ConsumerTraceRetention.cs
@@ -63,6 +64,7 @@ jobs:
       pull-requests: read
     outputs:
       manifest-sha256: ${{ steps.certify.outputs.manifest-sha256 }}
+      archive-sha256: ${{ steps.pack-library.outputs.archive-sha256 || steps.donor.outputs.archive-sha256 }}
       artifact-id: ${{ steps.library-artifact.outputs.artifact-id || steps.donor.outputs.artifact-id }}
       artifact-run-id: ${{ steps.library-artifact.outputs.artifact-id && github.run_id || steps.donor.outputs.run-id }}
       toolchain-artifact-id: ${{ steps.toolchain-artifact.outputs.artifact-id }}
@@ -147,13 +149,23 @@ jobs:
           artifact-ids: ${{ steps.donor.outputs.artifact-id }}
           run-id: ${{ steps.donor.outputs.run-id }}
           github-token: ${{ github.token }}
-          path: artifacts/certified-library
+          path: artifacts/library-download
+      - name: Restore the authenticated donated library
+        id: restored
+        if: steps.donated.outcome == 'success'
+        continue-on-error: true
+        env:
+          MANIFEST_SHA256: ${{ steps.donor.outputs.manifest-sha256 }}
+          ARCHIVE_SHA256: ${{ steps.donor.outputs.archive-sha256 }}
+        run: >-
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download
+          artifacts/certified-library "$MANIFEST_SHA256" "$ARCHIVE_SHA256"
       # Reuse rechecks the source binding and kernel-replays the library; any mismatch builds from source.
       - name: Kernel-replay a donated library or build it from source
         id: certify
         shell: bash
         env:
-          DONATED_SHA256: ${{ steps.donated.outcome == 'success' && steps.donor.outputs.manifest-sha256 || '' }}
+          DONATED_SHA256: ${{ steps.restored.outcome == 'success' && steps.donor.outputs.manifest-sha256 || '' }}
         run: |
           mkdir -p artifacts
           set -o pipefail
@@ -172,6 +184,14 @@ jobs:
             rm -rf artifacts/certified-library
             dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library 2>&1 | tee -a artifacts/verification.log
           fi
+      - name: Package the certified library
+        id: pack-library
+        if: steps.certify.outputs.reused != 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        env:
+          MANIFEST_SHA256: ${{ steps.certify.outputs.manifest-sha256 }}
+        run: >-
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- pack artifacts/certified-library
+          artifacts/certified-library.tar.zst "$MANIFEST_SHA256"
       - name: Upload certified library for this workflow attempt
         id: library-artifact
         # Main must remain a donor for later PRs even when it reused a merged PR's library.
@@ -179,9 +199,8 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: certified-library-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/certified-library
-          # The certificate covers the hidden .lake tree as well as sources.
-          include-hidden-files: true
+          path: artifacts/certified-library.tar.zst
+          compression-level: 0
           if-no-files-found: error
           retention-days: 14
       - name: Summarize preparation timings
@@ -305,7 +324,14 @@ jobs:
           artifact-ids: ${{ needs.prepare.outputs.artifact-id }}
           run-id: ${{ needs.prepare.outputs.artifact-run-id }}
           github-token: ${{ github.token }}
-          path: artifacts/certified-library
+          path: artifacts/library-download
+
+      - name: Restore the authenticated certified library
+        env:
+          ARCHIVE_SHA256: ${{ needs.prepare.outputs.archive-sha256 }}
+        run: >-
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download
+          artifacts/certified-library "$LEANCIL_CERTIFIED_LIBRARY_SHA256" "$ARCHIVE_SHA256"
 
       - name: Download this run's extractor and example assembly
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
