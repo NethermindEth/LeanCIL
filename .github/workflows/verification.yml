@@ -32,7 +32,7 @@ jobs:
       - name: Test verification helpers
         run: |
           dotnet run --file scripts/TestSelectVerification.cs
-          dotnet run --file scripts/TestVerificationGroup.cs
+          dotnet run --file scripts/TestVerificationGroup.cs -c Release
           dotnet run --file scripts/TestFindCertifiedLibrary.cs
           dotnet run --file scripts/TestLibraryArchive.cs -c Release
           dotnet run --file scripts/TestSummarizeVerification.cs
