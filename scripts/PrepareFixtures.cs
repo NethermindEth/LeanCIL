@@ -10,7 +10,7 @@ var output = Path.GetFullPath(args[0]);
 Directory.CreateDirectory(output);
 var fixtures = new Dictionary<string, PreparedFixture>(StringComparer.Ordinal);
 foreach (var script in new[] { "scripts/Test.cs", "Tests/ContractExport.cs", "Tests/FullImportVerification.cs",
-    "scripts/LibraryArchive.cs", "scripts/RunVerificationGroup.cs" })
+    "Tests/ModularStaticExports.cs", "scripts/LibraryArchive.cs", "scripts/RunVerificationGroup.cs" })
 {
     var inputs = FixtureInputs(script);
     var name = Path.GetFileNameWithoutExtension(script);
