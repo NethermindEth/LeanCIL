@@ -252,7 +252,8 @@ internal static class RuntimeModels
         foreach (var (element, width) in new[]
         {
             ("System.Byte", 1), ("System.SByte", 1), ("System.Int16", 2), ("System.UInt16", 2),
-            ("System.Int32", 4), ("System.UInt32", 4), ("System.Int64", 8), ("System.UInt64", 8)
+            ("System.Int32", 4), ("System.UInt32", 4), ("System.Int64", 8), ("System.UInt64", 8),
+            ("System.IntPtr", 8), ("System.UIntPtr", 8), ("System.Char", 2), ("System.Boolean", 1)
         })
         {
             var span = $"System.ReadOnlySpan`1<{element}>";

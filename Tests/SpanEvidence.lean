@@ -33,6 +33,14 @@ example : spanLocal words ∧ spanLocal (span runtime "System.Byte") := by decid
 example : ¬ spanLocal (span owner "System.UInt32") ∧ ¬ spanLocal (span runtime "System.Double") ∧
     ¬ spanLocal intType := by decide
 
+/-- Native integers and the two small primitive types retain their physical element widths. -/
+theorem primitive_span_widths :
+    spanStorage (span runtime "System.IntPtr") = some (.span 8 false) ∧
+    spanStorage (span runtime "System.UIntPtr") = some (.span 8 false) ∧
+    spanStorage (span runtime "System.Char") = some (.span 2 false) ∧
+    spanStorage (span runtime "System.Boolean") = some (.span 1 false) := by decide
+#print axioms primitive_span_widths
+
 -- 0: ldarg.0; 1: stloc.0; 2: ldloca.s 0; 3: ldarg.1; 4: get_Item; 5: ldind.u4; 6: ret
 private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 getItem, i 74, i 42]
 private def itemStates : FeatureCertificate :=

@@ -47,6 +47,38 @@ foreach (var (name, signature, arguments, expected) in new[]
 }
 
 var original = File.ReadAllText(Path.Combine(root, "SliceRead", "Extracted.lean"));
+foreach (var (name, signature, width, arguments, expected) in new[]
+{
+    ("NativeRead", "System.ReadOnlySpan`1<System.IntPtr>,System.Int32", 8,
+        "[.bufferSpan ⟨.address ⟨0, 0⟩, 2, 8, false⟩, .scalar (.i32 1)]", ".i64 7"),
+    ("NativeWrite", "System.Span`1<System.UIntPtr>,System.Int32,System.UIntPtr", 8,
+        "[.bufferSpan ⟨.address ⟨0, 0⟩, 2, 8, true⟩, .scalar (.i32 1), .scalar (.i64 11)]", ".i64 11"),
+    ("CharacterWrite", "System.Span`1<System.Char>,System.Int32,System.Char", 2,
+        "[.bufferSpan ⟨.address ⟨0, 0⟩, 2, 2, true⟩, .scalar (.i32 1), .scalar (.i32 65535)]", ".i32 65535"),
+    ("BooleanWrite", "System.Span`1<System.Boolean>,System.Int32,System.Boolean", 1,
+        "[.bufferSpan ⟨.address ⟨0, 0⟩, 2, 1, true⟩, .scalar (.i32 1), .scalar (.i32 1)]", ".i32 1")
+})
+{
+    var output = Path.Combine(root, name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"MemorySpans::{name}({signature})", output]);
+    var proof = Path.Combine(root, name + ".lean");
+    File.WriteAllText(proof, File.ReadAllText(Path.Combine(output, "Extracted.lean")) + $$"""
+
+        private def primitiveMemory : CIL.Safety.Memory := {
+          allocations := fun identity => if identity == 0 then
+            some ⟨.callerStack, ⟨{{2 * width}}, 1, []⟩, true, []⟩ else none
+          cells := fun _ offset => ⟨if offset == {{width}} then 7 else 0, true⟩
+          views := [⟨0, 0, {{2 * width}}, true, true⟩]
+          nextIdentity := 1 }
+
+        theorem compiled_primitive_span_result :
+            (CIL.Safety.invoke Extracted.program 64 0 {{arguments}} primitiveMemory).map Prod.snd =
+              .ok [.scalar ({{expected}})] := rfl
+        #print axioms compiled_primitive_span_result
+        """);
+    spanProofs.Add(name, proof);
+}
+
 var argumentStart = original.IndexOf("def method0RawArguments :", StringComparison.Ordinal);
 if (argumentStart < 0) throw new Exception("Missing span argument evidence");
 var argumentEnd = original.IndexOf('\n', argumentStart);
@@ -108,3 +140,4 @@ foreach (var (signature, marker) in new[]
 foreach (var (name, proof) in spanProofs)
     evidence.Add(proof, "PASS compiled span certificate and execution: " + name);
 evidence.Check(replay: false);
+

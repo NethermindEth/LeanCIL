@@ -5,6 +5,27 @@ namespace Examples;
 
 public static class MemorySpans
 {
+    public static nint NativeRead(ReadOnlySpan<nint> values, int index) => values[index];
+
+    public static nuint NativeWrite(Span<nuint> values, int index, nuint value)
+    {
+        values[index] = value;
+        return values[index];
+    }
+
+    public static char CharacterWrite(Span<char> values, int index, char value)
+    {
+        var slice = values.Slice(index, 1);
+        slice[0] = value;
+        return slice[0];
+    }
+
+    public static bool BooleanWrite(Span<bool> values, int index, bool value)
+    {
+        values[index] = value;
+        return values[index];
+    }
+
     public static int ByRefSpan(ref Span<int> values) => values.Length;
 
     public static int FloatingSpan(ReadOnlySpan<double> values) => values.Length;

@@ -42,10 +42,10 @@ def spanStorage : TypeExpr → Option StorageType
     if scope != runtimeScope || elementScope != runtimeScope ||
         name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
     let width ← match element with
-      | "System.Byte" | "System.SByte" => some 1
-      | "System.Int16" | "System.UInt16" => some 2
+      | "System.Byte" | "System.SByte" | "System.Boolean" => some 1
+      | "System.Int16" | "System.UInt16" | "System.Char" => some 2
       | "System.Int32" | "System.UInt32" => some 4
-      | "System.Int64" | "System.UInt64" => some 8
+      | "System.Int64" | "System.UInt64" | "System.IntPtr" | "System.UIntPtr" => some 8
       | _ => none
     return .span width (name == "System.Span`1")
   | _ => none

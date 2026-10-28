@@ -13,14 +13,7 @@ internal static class Spans
     internal static int? Width(TypeReference type) =>
         type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
             span.GenericArguments.Count == 1
-            ? span.GenericArguments[0].FullName switch
-            {
-                "System.Byte" or "System.SByte" => 1,
-                "System.Int16" or "System.UInt16" => 2,
-                "System.Int32" or "System.UInt32" => 4,
-                "System.Int64" or "System.UInt64" => 8,
-                _ => null
-            }
+            ? Arrays.Primitive(span.GenericArguments[0])?.Width
             : null;
 
     internal static bool Writable(TypeReference type) =>
@@ -42,14 +35,17 @@ internal static class Spans
     static Analysis Compute(MethodDefinition method)
     {
         var analysis = new Analysis([], []);
+        var uses = new int[method.Body.Variables.Count];
+        foreach (var instruction in method.Body.Instructions)
+            if (Store(instruction) || Address(instruction) || Load(instruction))
+                uses[FeatureConstants.Local(instruction)]++;
         foreach (var i in method.Body.Instructions)
         {
             if (!(Store(i) || Address(i) || Load(i)) || Width(method.Body.Variables[FeatureConstants.Local(i)].VariableType) is null ||
                 analysis.Operands.Contains(i))
                 continue;
             var local = FeatureConstants.Local(i);
-            if (method.Body.Instructions.Count(other => (Store(other) || Address(other) || Load(other)) &&
-                    FeatureConstants.Local(other) == local) != 2)
+            if (uses[local] != 2)
                 continue;
             // The receiver is read once: by get_Length, or by get_Item after one index push.
             if (!Store(i) || i.Next is not { } address || !Address(address) || FeatureConstants.Local(address) != FeatureConstants.Local(i) ||
