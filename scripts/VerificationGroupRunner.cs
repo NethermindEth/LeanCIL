@@ -6,8 +6,10 @@ internal static class VerificationGroupRunner
 {
     internal static async Task<int> Run(string[] command, string[] suites, string artifacts)
     {
-        if (command.Length == 0 || suites.Length == 0 || suites.Distinct(StringComparer.Ordinal).Count() != suites.Length ||
-            suites.Any(suite => !Regex.IsMatch(suite, "^[a-z]+$")))
+        var invalidSuites = suites.Length == 0 ||
+            suites.Distinct(StringComparer.Ordinal).Count() != suites.Length ||
+            suites.Any(suite => !Regex.IsMatch(suite, "^[a-z]+$"));
+        if (command.Length == 0 || invalidSuites)
             throw new ArgumentException("Expected a command and distinct suite names");
         artifacts = Path.GetFullPath(artifacts);
         Directory.CreateDirectory(artifacts);
@@ -36,8 +38,10 @@ internal static class VerificationGroupRunner
             Console.WriteLine("Running suite " + suite);
             try
             {
-                using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start suite");
-                await Task.WhenAll(Copy(process.StandardOutput), Copy(process.StandardError), process.WaitForExitAsync());
+                using var process = Process.Start(start) ??
+                    throw new InvalidOperationException("Could not start suite");
+                await Task.WhenAll(Copy(process.StandardOutput), Copy(process.StandardError),
+                    process.WaitForExitAsync());
                 log.WriteLine("Suite exit code: " + process.ExitCode);
                 failed |= process.ExitCode != 0;
             }
