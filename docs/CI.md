@@ -68,6 +68,8 @@ Single-request contract exports combine declaration replay with the complete the
 and closure audit. Source and artifact checks still surround the export callback. External-call
 mutation fixtures check only the intended division/intrinsic validator, with a complete positive
 certificate and a checked unchanged-obligation control in the replayed evidence batch.
+For the wrong-raw-target mutation, three serial Windows checks measured median time of 3.10
+seconds before narrowing and 2.37 seconds afterwards, with the same validator rejection.
 
 The required `Build and verify` check always runs. It succeeds only when selection
 succeeds and every selected suite passes, or when selection explicitly reports
