@@ -23,3 +23,31 @@ that cold setup. The original certificate harness also passed against the warm l
 Local build measurements and validation logs are under `artifacts/core-compile/`; the paired
 build measurements are in `paired/timings.json`. See [validation commands](../VALIDATION.md)
 for running an individual consumer check.
+## Replay import overhead investigation
+
+A native probe instrumented `CIL.Replay.withReplayedModules` around target loading,
+`Lean.importModulesCore`, `Lean.finalizeImport`, declaration replay and region cleanup.
+Three quiet Windows runs of a single `rfl` theorem importing `CIL` measured:
+
+| Operation | Range |
+| --- | ---: |
+| Read target module | 0–1 ms |
+| Import dependencies | 992–1,036 ms |
+| Finalize imported environment | 246–254 ms |
+| Replay target declaration | 52–53 ms |
+| Cleanup and report | 166–169 ms |
+| Total | 1,461–1,510 ms |
+
+An existing `JointA` fixture with only implicit `Init` imports took 366–400 ms.
+These are diagnostic targets, not representative averages of the 65 Core replay calls.
+The experiment isolates substantial fixed import cost even when the checked proof is trivial.
+It does not establish that actual consumer proof checking is negligible.
+
+No replay implementation change was retained. Joint replay already shares imports across
+its exact target set, and fused auditing already reuses that replayed environment where
+eligible. Faster dependency traversal would not remove this dominant import cost.
+A future shared-base worker would need to preserve per-request import visibility, exclude
+every target from its trusted imported base, bind all imported bytes and retire environments
+before those bytes can change. Reusing an environment merely because module names match
+would be incorrect. Narrower consumer imports can reduce work without that architecture,
+but require fixture-specific checks that tactic behavior and rejection coverage are unchanged.
