@@ -24,14 +24,16 @@ partial class Program
         File.WriteAllText(Path.Combine(support, "Dependent.lean"), "import Extracted\ndef program := Extracted.program\n");
         File.WriteAllText(Path.Combine(support, "Indirect.lean"), "import Client.Dependent\n");
         File.WriteAllText(Path.Combine(support, "RepeatedImports.lean"), "import Client.Dependent import Client.Late\n");
+        var extractions = Enumerable.Range(0, 3).Select(index => new GeneratedExtraction(
+            At("Examples/Assembly/bin/Examples.dll"),
+            index == 0 ? "InitializedTypes::Add(ulong,ulong)" : "Arithmetic::Add(ulong,ulong)",
+            Path.Combine(root, "Extraction" + index), index == 2 ? "x64-v3" : "scalar",
+            index == 0 ? ["Examples.InitializedTypes"] : null)).ToArray();
+        ExtractBatch("extract", null, extractions, cli[1]);
         var requests = Enumerable.Range(0, 3).Select(index =>
         {
             var output = Path.Combine(root, "Extraction" + index);
             var proof = Path.Combine(package, "Proof" + index + ".lean");
-            var method = index == 0 ? "InitializedTypes::Add(ulong,ulong)" : "Arithmetic::Add(ulong,ulong)";
-            string[] options = index == 0 ? ["--assume-initialized", "Examples.InitializedTypes"]
-                : index == 2 ? ["x64-v3"] : [];
-            Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), method, output, .. options]);
             File.WriteAllText(proof, "import Client." + (index == 0 ? "Early" : "Late") + "\n" +
                 (index == 0 ? "" : "import Client.RepeatedImports\n") + """
         import Client.Indirect

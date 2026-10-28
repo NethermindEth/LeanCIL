@@ -1599,7 +1599,8 @@ partial class Program : IDisposable
 
     // Share immutable assembly bytes and signature validation, retaining fresh modules per request
     // and the extractor's final check that every assembly, symbol and profile input is unchanged.
-    static void ExtractBatch(string mode, string? identity, IEnumerable<GeneratedExtraction> requests)
+    static void ExtractBatch(string mode, string? identity, IEnumerable<GeneratedExtraction> requests,
+        string? extractor = null)
     {
         var path = Path.Combine(Path.GetTempPath(), "leancil-extractions-" + Guid.NewGuid().ToString("N") + ".json");
         try
@@ -1609,7 +1610,7 @@ partial class Program : IDisposable
                 assembly = request.Assembly, identity, entry = request.Entry, output = request.Output,
                 profile = request.Profile, initializedTypes = request.InitializedTypes
             })));
-            Run(["dotnet", ExtractorPath, "generated-extraction-batch", mode, path]);
+            Run(["dotnet", extractor ?? ExtractorPath, "generated-extraction-batch", mode, path]);
         }
         finally { File.Delete(path); }
     }

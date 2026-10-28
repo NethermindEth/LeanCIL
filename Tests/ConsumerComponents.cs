@@ -53,12 +53,12 @@ partial class Program
         #print axioms correctness
         end ExampleProof
         """);
-        var requests = new[] { "First", "Second", "Third", "Fourth" }.Select(method =>
-        {
-            var output = Path.Combine(directory, method);
-            Run([.. cli, "extract", assembly, "Methods::" + method + "(ulong)", output]);
-            return new { output, proof, theorem = "ExampleProof.correctness" };
-        }).ToArray();
+        var extractions = new[] { "First", "Second", "Third", "Fourth" }.Select(method =>
+            new GeneratedExtraction(assembly, "Methods::" + method + "(ulong)",
+                Path.Combine(directory, method))).ToArray();
+        ExtractBatch("extract", null, extractions, cli[1]);
+        var requests = extractions.Select(request =>
+            new { output = request.Output, proof, theorem = "ExampleProof.correctness" }).ToArray();
         var first = SplitExtractionComponents(File.ReadAllText(Path.Combine(requests[0].output, "Extracted.lean")));
         var second = SplitExtractionComponents(File.ReadAllText(Path.Combine(requests[1].output, "Extracted.lean")));
         var reused = first.Sources.Keys.Intersect(second.Sources.Keys).ToArray();
