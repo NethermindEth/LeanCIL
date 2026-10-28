@@ -290,6 +290,13 @@ No `sorry`, `admit`, new axioms, native proof evaluation, or unchecked correctne
 
 ## Independently checked extraction evidence
 
+Shift certificates distinguish native-integer counts from ordinary `int64` counts, although
+both use 64-bit values during execution. Only `int32` and native counts are admitted. Native
+counts normalize to their low 32 bits before the existing modulo-32 or modulo-64 operation;
+`CIL.binary_native_shift_count` proves this normalization for all three shifts. Count masking,
+including negative and oversized counts, is an admitted .NET runtime behavior rather than
+a guarantee for every CLI implementation.
+
 `CIL.Extraction.TranslationValid` binds one evidence record to every emitted method in program order. Its component validators recompute sequential and explicit layouts from raw fields, packing and declared size; require the complete set of layout-dependent instruction/local/parameter sites; derive parameter homes from reachable raw argument operations; check generic substitution through signatures, locals, operands and nested calls; and bind managed calls to the specialized target table. Method initialization and return shape are checked too.
 
 `TranslationValid rawLayouts computedLayouts methodEvidence imports program` also takes the import table `Extracted.imports`. Import slot `j` is method index `program.length + j`, so it never names an extracted method. A live external call site may emit `.call t c` only as a plain `call` of a non-generic method with `t ≥ program.length`, a slot `imports[t - program.length]` whose identity (assembly scope and full method name) equals the site's, whose parameter count, receiver and result match the site's metadata, and `c` equal to the site's argument count; any other external site must emit a non-call operation, as before. `validated_import_call` states these facts for an accepted call and `validated_call_bound` shows every accepted call targets an index below `program.length + imports.length`. The extractor does not yet resolve imports, so it emits `imports := []` and every external site keeps its runtime model or is rejected. A slot's `closureDigest` and `Extracted.importSignatures` are outside `TranslationValid`: like `signatures`, the signature table only locates a slot for `bind_import`, and nothing yet binds a slot to an implementation or contract.
