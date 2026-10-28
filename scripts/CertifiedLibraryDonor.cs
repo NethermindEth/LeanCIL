@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -7,6 +8,56 @@ using System.Text.RegularExpressions;
 /// </summary>
 static class CertifiedLibraryDonor
 {
+    /// <summary>A producer artifact authenticated by the digest printed in its job log.</summary>
+    public sealed record Selection(long Run, long Artifact, string Digest);
+
+    /// <summary>Unavailable candidate listings do not prevent independent donors from being checked.</summary>
+    public static T[] Available<T>(string description, Func<IEnumerable<T>> lookup, Action<string> warning)
+    {
+        try { return lookup().ToArray(); }
+        catch (Exception error) when (error is InvalidOperationException or JsonException or
+                                      Win32Exception or KeyNotFoundException or FormatException or OverflowException)
+        {
+            warning(description + " unavailable; trying other donors. " + error.Message);
+            return [];
+        }
+    }
+
+    /// <summary>Finds a complete authenticated candidate; failures never supply partial evidence.</summary>
+    public static Selection? Find(IEnumerable<long> runs, Func<long, string, JsonElement> api,
+        Func<long, string> log, DateTimeOffset now, Action<string> warning)
+    {
+        foreach (long run in runs.Distinct())
+        foreach (var (attempt, job) in Available($"Run {run} jobs",
+            () => PreparedAttempts(api(run, "/jobs?filter=all&per_page=100")), warning))
+        {
+            var selected = Available($"Run {run} attempt {attempt}", () =>
+            {
+                var artifact = Artifact(api(run, "/artifacts?name=" + ArtifactName(run, attempt)), run, attempt, now);
+                if (artifact is null) return Array.Empty<Selection>();
+                var digest = Digest(log(job));
+                return digest is null ? [] : new[] { new Selection(run, artifact.Value, digest) };
+            }, warning);
+            if (selected.Length != 0) return selected[0];
+        }
+        return null;
+    }
+
+    /// <summary>Retries transient HTTP failures at most twice; unsuccessful responses are never parsed.</summary>
+    public static string Request(Func<(int ExitCode, string Output, string Error)> send, Action<TimeSpan> delay)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            var result = send();
+            if (result.ExitCode == 0) return result.Output;
+            if (attempt == maximumAttempts ||
+                !Regex.IsMatch(result.Error, @"\(HTTP (408|429|500|502|503|504)\)"))
+                throw new InvalidOperationException(result.Error.Trim());
+            delay(TimeSpan.FromSeconds(attempt));
+        }
+    }
+
     /// <summary>The line <c>PrepareLibrary.cs</c> prints for the library it certified.</summary>
     public const string DigestLine = "Certified library manifest SHA256: ";
 

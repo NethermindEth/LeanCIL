@@ -6,6 +6,10 @@ run that skipped preparation or has no artifact. Every candidate still needs a s
 producer job, its logged manifest digest and an artifact with sufficient remaining retention.
 Source/toolchain checks and kernel replay remain mandatory; changed sources use dependency-aware
 incremental preparation or fall back to a fresh build. Older PR heads are not fallback donors.
+Transient HTTP failures (408, 429, 500, 502, 503 and 504) receive at most two retries, after
+one and two seconds. An unavailable listing, job, artifact or log skips that candidate rather
+than aborting the search. Failed responses never supply evidence, and a candidate still needs
+both its own valid artifact and its producer's digest. If no candidate qualifies, CI builds fresh.
 
 Regression tests share checked setup where their import and replay requirements agree.
 Runtime bit tests [deduplicate identical typed inputs](performance/RuntimeBits.md),
