@@ -141,6 +141,15 @@ def StepAppendLocals (op : Op) : Prop :=
     step body op pc args (frame.appendLocals extra) stack memory =
       FrameAction.appendLocals extra <$> outcome
 
+set_option hygiene false in
+/-- Closes dispatcher-tail cases before splitting an irrelevant second operand. -/
+local macro "append_stack_cases" " using " fallback:term : tactic => `(tactic| (
+  rcases stack with _ | ⟨first, rest⟩ <;> (try cases first)
+  all_goals first
+    | exact $fallback
+    | (rcases rest with _ | ⟨second, rest⟩ <;> (try cases second)
+       all_goals first | exact $fallback | frame_natural)))
+
 /-- `nativeBinary` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_nativeBinary (operation : Op) :
     StepAppendLocals (.nativeBinary operation) := by
@@ -149,11 +158,8 @@ theorem step_appendLocals_nativeBinary (operation : Op) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.nativeBinary operation) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.nativeBinary operation) pc _ frame extra memory
 
 #print axioms step_appendLocals_nativeBinary
 
@@ -165,11 +171,8 @@ theorem step_appendLocals_divide (signed remainder : Bool) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.divide signed remainder) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.divide signed remainder) pc _ frame extra memory
 
 #print axioms step_appendLocals_divide
 
@@ -181,12 +184,9 @@ theorem step_appendLocals_checkedArithmetic (kind : CheckedBinaryKind) (signed :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.checkedArithmetic kind signed)
-        pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.checkedArithmetic kind signed)
+      pc _ frame extra memory
 
 #print axioms step_appendLocals_checkedArithmetic
 
@@ -198,12 +198,9 @@ theorem step_appendLocals_checkedConvert (width : Nat) (signed unsignedInput : B
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.checkedConvert width signed unsignedInput)
-        pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.checkedConvert width signed unsignedInput)
+      pc _ frame extra memory
 
 #print axioms step_appendLocals_checkedConvert
 
@@ -286,11 +283,8 @@ theorem step_appendLocals_bleu (target : Nat) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.bleu target) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.bleu target) pc _ frame extra memory
 
 #print axioms step_appendLocals_bleu
 
@@ -766,11 +760,8 @@ theorem step_appendLocals_sub :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile .sub pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile .sub pc _ frame extra memory
 
 #print axioms step_appendLocals_sub
 
@@ -878,11 +869,8 @@ theorem step_appendLocals_ltu :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile .ltu pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile .ltu pc _ frame extra memory
 
 #print axioms step_appendLocals_ltu
 
@@ -894,11 +882,8 @@ theorem step_appendLocals_gtu :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile .gtu pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile .gtu pc _ frame extra memory
 
 #print axioms step_appendLocals_gtu
 
@@ -910,11 +895,8 @@ theorem step_appendLocals_eq :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile .eq pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile .eq pc _ frame extra memory
 
 #print axioms step_appendLocals_eq
 
@@ -998,11 +980,8 @@ theorem step_appendLocals_brzero (target : Nat) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.brzero target) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.brzero target) pc _ frame extra memory
 
 #print axioms step_appendLocals_brzero
 
@@ -1014,11 +993,8 @@ theorem step_appendLocals_brnonzero (target : Nat) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.brnonzero target) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.brnonzero target) pc _ frame extra memory
 
 #print axioms step_appendLocals_brnonzero
 
@@ -1030,11 +1006,8 @@ theorem step_appendLocals_bltu (target : Nat) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.bltu target) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.bltu target) pc _ frame extra memory
 
 #print axioms step_appendLocals_bltu
 
@@ -1046,11 +1019,8 @@ theorem step_appendLocals_bgeu (target : Nat) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.bgeu target) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.bgeu target) pc _ frame extra memory
 
 #print axioms step_appendLocals_bgeu
 
@@ -1062,11 +1032,8 @@ theorem step_appendLocals_bgtu (target : Nat) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.bgtu target) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.bgtu target) pc _ frame extra memory
 
 #print axioms step_appendLocals_bgtu
 
@@ -1102,11 +1069,8 @@ theorem step_appendLocals_beq (target : Nat) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.beq target) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.beq target) pc _ frame extra memory
 
 #print axioms step_appendLocals_beq
 
@@ -1118,11 +1082,8 @@ theorem step_appendLocals_bne (target : Nat) :
   clear kept
   unfold step
   apply observed_appendLocals
-  rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩ <;>
-    (try cases first) <;> (try cases second)
-  all_goals first
-    | exact fallback_appendLocals body.profile (.bne target) pc _ frame extra memory
-    | frame_natural
+  append_stack_cases using
+    fallback_appendLocals body.profile (.bne target) pc _ frame extra memory
 
 #print axioms step_appendLocals_bne
 

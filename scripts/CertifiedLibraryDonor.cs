@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -7,8 +8,65 @@ using System.Text.RegularExpressions;
 /// </summary>
 static class CertifiedLibraryDonor
 {
+    /// <summary>A producer artifact authenticated by the digest printed in its job log.</summary>
+    public sealed record Selection(long Run, long Artifact, string Digest, string? ArchiveDigest = null);
+
+    /// <summary>Unavailable candidate listings do not prevent independent donors from being checked.</summary>
+    public static T[] Available<T>(string description, Func<IEnumerable<T>> lookup, Action<string> warning)
+    {
+        try { return lookup().ToArray(); }
+        catch (Exception error) when (error is InvalidOperationException or JsonException or
+                                      Win32Exception or KeyNotFoundException or FormatException or OverflowException)
+        {
+            warning(description + " unavailable; trying other donors. " + error.Message);
+            return [];
+        }
+    }
+
+    /// <summary>Finds a complete authenticated candidate; failures never supply partial evidence.</summary>
+    public static Selection? Find(IEnumerable<long> runs, Func<long, string, JsonElement> api,
+        Func<long, string> log, DateTimeOffset now, Action<string> warning)
+    {
+        foreach (long run in runs.Distinct())
+        foreach (var (attempt, job) in Available($"Run {run} jobs",
+            () => PreparedAttempts(api(run, "/jobs?filter=all&per_page=100")), warning))
+        {
+            var selected = Available($"Run {run} attempt {attempt}", () =>
+            {
+                var artifact = Artifact(api(run, "/artifacts?name=" + ArtifactName(run, attempt)), run, attempt, now);
+                if (artifact is null) return Array.Empty<Selection>();
+                var producerLog = log(job);
+                var digest = Digest(producerLog);
+                var archiveDigest = ArchiveDigest(producerLog);
+                if (digest is null || (producerLog.Contains(ArchiveDigestLine, StringComparison.Ordinal) &&
+                    archiveDigest is null)) return [];
+                return new[] { new Selection(run, artifact.Value, digest, archiveDigest) };
+            }, warning);
+            if (selected.Length != 0) return selected[0];
+        }
+        return null;
+    }
+
+    /// <summary>Retries transient HTTP failures at most twice; unsuccessful responses are never parsed.</summary>
+    public static string Request(Func<(int ExitCode, string Output, string Error)> send, Action<TimeSpan> delay)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            var result = send();
+            if (result.ExitCode == 0) return result.Output;
+            if (attempt == maximumAttempts ||
+                !Regex.IsMatch(result.Error, @"\(HTTP (408|429|500|502|503|504)\)"))
+                throw new InvalidOperationException(result.Error.Trim());
+            delay(TimeSpan.FromSeconds(attempt));
+        }
+    }
+
     /// <summary>The line <c>PrepareLibrary.cs</c> prints for the library it certified.</summary>
     public const string DigestLine = "Certified library manifest SHA256: ";
+
+    /// <summary>The packed library's digest, printed by its producer before upload.</summary>
+    public const string ArchiveDigestLine = "Certified library archive SHA256: ";
 
     /// <summary>A donated artifact must outlive every suite job that downloads it.</summary>
     public static readonly TimeSpan MinimumRemainingRetention = TimeSpan.FromDays(1);
@@ -17,6 +75,17 @@ static class CertifiedLibraryDonor
 
     /// <summary>The artifact one prepare attempt uploads.</summary>
     public static string ArtifactName(long run, int attempt) => $"certified-library-{run}-{attempt}";
+
+    /// <summary>Recent successful main pushes from this repository, bounded before filtering.</summary>
+    public static IEnumerable<long> RecentMainRuns(JsonElement runs, string repository, int limit) =>
+        runs.GetProperty("workflow_runs").EnumerateArray().Take(limit)
+            .Where(run => run.GetProperty("event").GetString() == "push" &&
+                run.GetProperty("head_branch").GetString() == "main" &&
+                run.GetProperty("status").GetString() == "completed" &&
+                run.GetProperty("conclusion").GetString() == "success" &&
+                SameRepository(run.GetProperty("head_repository"), repository) &&
+                Regex.IsMatch(run.GetProperty("head_sha").GetString() ?? "", "^[0-9a-f]{40}$"))
+            .Select(run => run.GetProperty("id").GetInt64()).Where(id => id > 0).Distinct();
 
     /// <summary>Same-repository merged PR heads whose complete tree equals the push commit.</summary>
     public static IEnumerable<string> MergedHeads(string repository, string commit, Func<string, JsonElement> api)
@@ -74,5 +143,14 @@ static class CertifiedLibraryDonor
         string[] digests = DigestPattern.Matches(log).Select(match => match.Groups[1].Value)
             .Distinct(StringComparer.Ordinal).ToArray();
         return digests.Length == 1 ? digests[0] : null;
+    }
+
+    /// <summary>The one archive digest from the same prepare-job log, absent for legacy raw artifacts.</summary>
+    public static string? ArchiveDigest(string log)
+    {
+        var pattern = Regex.Escape(ArchiveDigestLine) + "([^\\r\\n]*)";
+        var digests = Regex.Matches(log, pattern).Select(match => match.Groups[1].Value.Trim())
+            .Distinct(StringComparer.Ordinal).ToArray();
+        return digests.Length == 1 && Regex.IsMatch(digests[0], "^[0-9a-f]{64}$") ? digests[0] : null;
     }
 }

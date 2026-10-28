@@ -34,6 +34,17 @@ computes a fresh result, so no analysis is cached across method mutation or prof
 `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
 profiles, feature queries and a loop backedge, and retains source/assembly tampering checks.
 
+The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
+extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,
+hashes and whole-assembly signature validation are shared within the batch. Long-form argument
+fixtures use a separate batch after writing their modified assembly. Expected extraction failures
+remain isolated, since a batch stops at its first failure.
+
+On Windows, the 45 positive array/generic extractions took 7.90s as individual commands and
+0.59s in three batches. Their emitted Lean sources were byte-identical, and their positive proofs,
+independent replay and mutation checks passed. This measures extraction work, not the complete
+Evidence suite or hosted CI wall time.
+
 Generated positive evidence in `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`,
 `GenericEvidence` and `StaticScalarValues` shares imports within each fixture. Each extraction
 and its proof remain in their own namespace, following the generated verification batch
@@ -47,6 +58,10 @@ obligation types, but reuse the original checked theorem instead of reducing its
 Generic controls compile and replay in the original positive batch. Missing or changed control
 declarations must still fail type checking; isolated mutation cases retain their original validator
 proofs and diagnostic checks, without access to the positive-control witnesses.
+Feature-flow and folded-span mutations use the same checked controls and retain only the
+intended feature-flow obligation in each negative fixture. Every rejection must identify
+`FeatureFlowValid` as false. Full positive certificates, runtime comparisons, and consumer
+replay remain; folded instructions with an unrecognized theorem cannot silently skip a test.
 On Apple M4 with the indexed constrained-dispatch library already built, the constrained positive
 batch fell from 5.67s to 5.26s. Generic positive compilation, independent replay and controls took
 18.79s before reuse and 16.84s afterward, including replay of the controls in the combined batch.
@@ -132,6 +147,11 @@ compilation and replay times. Use the same fixed files and toolchain when compar
 For per-declaration kernel costs, run the paired Lean files with `--json --profile -j1
 -DElab.async=false -Dprofiler.threshold=0`; JSON source positions identify each declaration.
 
+Consumer checks compile together in `Tests/ConsumerVerification.cs` and run in separate child
+processes. Run one with `dotnet run --file Tests/ConsumerVerification.cs -- --check <name>`.
+Names are `source-resolution`, `support-union`, `certificate-reuse`, `components`,
+`fingerprints`, and `certified-fingerprints`. Each retains its private process and worker checks.
+
 `Tests/ConsumerComponents.cs` checks four independently certified wrappers around one helper.
 The common profile/layout and helper modules must compile and replay once, while all four
 complete extraction certificates must replay. Profile, helper and call-target changes invalidate
@@ -190,9 +210,11 @@ or exempting the certificate from replay. The default consumer workload checks t
 existing custom-build-directory request and checks invalidation with its existing Lake
 environment mutation; these assertions add no verification requests.
 
-Run `Tests/ConsumerCertificateReuse.cs --configuration-reuse` for focused configuration reuse,
+Run `dotnet run --file Tests/ConsumerVerification.cs -- --check certificate-reuse --configuration-reuse`
+for focused configuration reuse,
 fresh verification, self-rehashed corruption and post-restoration artifact mutation checks.
-Run `Tests/ConsumerComponents.cs --configuration-reuse` to check that split certificates retain
+Run `dotnet run --file Tests/ConsumerVerification.cs -- --check components --configuration-reuse`
+to check that split certificates retain
 their complete generated dependency set across a consumer configuration change. These extra
 requests are opt-in and are excluded from the unchanged full-workload timing comparison.
 
@@ -324,6 +346,11 @@ The runner builds the independent assemblies and the CIL library, then prepares 
 CI prepares the certified library once per workflow attempt and passes its immutable artifact ID, the run that uploaded it and its manifest digest from the producer job to the suite jobs. The producer first looks for a library already certified by a run of the same commit. On push events it next checks at most ten associated merged PRs from the same repository, requiring their merge commit to be this push and their complete Git tree to match exactly. Successful runs of those heads precede the main push of the checkout's first parent. API failures or absent eligible artifacts retain the older-main/source-build fallback. Their own trusted code built that library and printed its digest, so the digest is read from the donor job's log, never from the artifact. `PrepareLibrary.cs --reuse` then rechecks the library key and source binding and kernel-replays the library; any mismatch, or no donor, builds from source. It does not restore compiled libraries from the GitHub Actions cache: a cache's source key and self-described file hashes cannot authenticate the native auditor or establish that compiled modules came from those sources.
 
 `dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` requires an empty or absent destination and publishes a freshly built library through a staging directory. Explicit reuse uses `--reuse <trusted-manifest-sha256>`; obtain this digest independently from a trusted producer, never by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing the destination. Rebuilding an existing library requires a separate output directory. `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests, missing producer digests, and preservation of unrelated destination files.
+
+Main push runs publish their validated library even after exact reuse. This keeps the main run
+eligible to donate to later PRs without following a chain of earlier runs. Suite jobs prefer
+the current run's artifact when it uploaded one; PR runs that reuse a donor still consume that
+donor directly. Publication follows the existing source binding and independent kernel replay.
 
 When only Lean sources changed, `--incremental <donor-directory> <trusted-manifest-sha256>`
 authenticates every donor file before reusing its Lake build traces in a private copy. The runtime,
@@ -1234,6 +1261,44 @@ uses the source captured when the verifier starts and rejects changes before exe
 `Tests/JointReplay.cs` exercises both modes against import-closed targets, repeated equation
 lemmas, conflicting declarations, targets hidden behind untargeted imports and forged theorems.
 Rejected joint sets still fall back to per-module replay with individual failure attribution.
+After auditor authentication, `--replay-separately` performs this fallback natively. Each
+module gets its own imported environment and the pinned toolchain's sequential kernel replay;
+no successful sibling can supply an undeclared dependency. Bootstrap and profiling retain
+the toolchain frontend runner. The regression checks forged bodies, hidden declarations,
+malformed and missing target files, and missing imported modules in both paths.
+Three alternating Windows measurements of a fixed mixed valid/forged/undeclared/missing
+target set took 3.36/3.04/3.03s through the frontend and 2.17/2.14/2.04s natively:
+about 0.9–1.2s less per fallback. This measures fallback startup and replay, not a full
+consumer-suite speedup; required independent kernel checks still run.
+For a single consumer request, a fused audit that reports a kernel declaration rejection
+goes directly to isolated replay instead of retrying the identical joint target set.
+Unrecognized diagnostics and metadata/eligibility failures keep the ordinary joint retry;
+a changed diagnostic can therefore only lose this optimization. Multi-request closures
+still receive their own replay attempts. The existing unused-forged-helper regression
+checks the two required stages without adding another verification request.
+Three full negative consumer requests on Windows took 9.68/9.87/9.82s before removing
+the duplicate trial and 8.40/8.27/8.36s afterward. Their joint attempts fell from six
+to three in total; all three isolated checks and the same forged-body rejection remained.
+Positive and refutation consumer cases retain their normal audits and failure classification.
+The joint replay fixture asserts the rejected joint stage and subsequent isolated attribution
+in one invocation for conflicting names, untargeted imports and forged definitions. Both
+bootstrap and native modes remain covered. This removes six duplicate checker processes;
+the six retained joint stages took 9.06s together on Windows, indicating the avoided work
+without treating that estimate as a whole-fixture timing comparison.
+Within a fixed batch workspace, an isolated helper rejection also rejects later requests
+that import that helper. The verifier retains that failure instead of replaying another
+already-invalid request closure. Successful requests still receive their own checks, and
+no successful joint module result is reused across scopes. The existing eleven-request
+mixed batch checks every status, certificate and hidden-sibling rejection and requires one
+isolated rejection of its shared forged helper. Initial Windows measurements were 52.79s
+before and 43.36s after reuse; elapsed time includes runner variance. Joint attempts fell
+from ten to nine and isolated checks from three to two, with three consumer builds unchanged.
+After an eligible fused batch rejects a kernel declaration, each remaining request can fuse
+its own replay with its theorem audit. Only that exact request's checked result is retained;
+partial success never skips a sibling's replay. Ineligible scopes retain ordinary fallback.
+A second paired measurement, including both changes, took 49.06s before and 40.04s afterward
+(18.4%), with all eleven original outcomes and certificates unchanged. Fresh compilation,
+isolated rejection attribution and the hidden-sibling controls remain mandatory.
 The test also rejects a changed bootstrap source snapshot. In one Windows trace, the two
 positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
 through the native auditor. Single-file verification now also shares replay imports for its
@@ -1414,3 +1479,26 @@ still compiled once and was independently replayed in each group. The entire fix
 including setup, took 56.86 seconds. These timings do not establish a whole-suite CI gain.
 The certificate-reuse fixture passed all six checks: its four positive sessions used the
 fused audit, and generated-source tampering and compiled-extraction substitution were rejected.
+
+### Transitive composition replay
+
+The transitive import suite runs its staged-bundle mutation probe in a separate process of
+its already compiled executable. This preserves process isolation and all mutation checks
+without compiling the shared verifier a second time. The helper remains a tracked suite input
+through its include directive. Full composition also shares its final replay and exact audit;
+the transitive fixture checks that this path uses the native auditor in one invocation.
+
+On a Windows App → A → B fixture, final composition replay plus its exact audit fell from
+7.83s to 1.67s when combined. The complete forced-full invocation took 96.16s before and
+87.46s afterward; this is a local sample, not a whole-suite CI measurement. Catalog scans
+covered 2,546 toolchain modules in 23–54ms, so mutable module-resolution rescans remain intact.
+
+### Fixed profile references
+
+The profile-family fixture disables persistent receipts for its initial three-profile export.
+It requires one fixed-reference build and three independent profile extraction replays.
+Source-bound authenticated references already shared compilation; the verifier now also
+avoids Lake invocations when their restored module parts and traces still match exactly.
+A Windows sample removed two no-op builds of 0.20s each; the retained build stayed at 2.96s
+(2.97s before). Total export time was 56.38s before and 55.20s afterward, but this small
+sample establishes the removed process work rather than a stable whole-suite speedup.

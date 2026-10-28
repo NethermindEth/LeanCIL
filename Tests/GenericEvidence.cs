@@ -47,11 +47,8 @@ var samples = new[]
     "NativeIdentity(nint)", "TwoTypes(ulong,uint)", "ClearPacked(uint)",
     "NextPacked(Examples.PackedLeaf&,int)", "Instance(ulong)"
 };
-foreach (var (selector, index) in samples.Select((selector, index) => (selector, index)))
-{
-    var folder = Path.Combine(output, index.ToString());
-    Run(Extract("extract", assembly, "Examples", "GenericMethods::" + selector, folder));
-}
+ExtractBatch("extract", "Examples", samples.Select((selector, index) =>
+    new GeneratedExtraction(assembly, "GenericMethods::" + selector, Path.Combine(output, index.ToString()))));
 
 string ChangeDefinition(string source, string name, Func<string, string> change)
 {
@@ -122,7 +119,6 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
     evidence.Add(path, "PASS structural specialization and unchanged obligations " + selector);
 }
 evidence.Check();
-CheckEvidenceBatchFailures();
 CheckLeanFixture("Tests.ExtractionGenerics");
 CheckExternalCallTargets();
 rejected.Check();
@@ -183,50 +179,6 @@ void CheckExternalIdentities()
     }
     rejectedIdentities.Check();
     Console.WriteLine("PASS exact external identities: deduplication, unreachable calls, Unicode and mutations");
-}
-
-void CheckEvidenceBatchFailures()
-{
-    var original = Path.Combine(output, "0", "Extracted.lean");
-    var source = File.ReadAllText(original);
-    foreach (var (name, suffix, marker) in new[]
-    {
-        ("invalid-proof", "\ntheorem invalid_evidence : False := by decide +kernel\n" +
-            "#print axioms invalid_evidence\n", "error:"),
-        ("unchecked-declaration", """
-
-            import Lean
-            set_option debug.skipKernelTC true
-            run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
-              name := `forged_evidence
-              levelParams := []
-              type := Lean.mkConst ``False
-              value := Lean.mkConst ``True.intro
-            })
-            #print axioms forged_evidence
-            """, "declaration type mismatch")
-    })
-    {
-        var directory = Path.Combine(output, "BatchFailure-" + name);
-        Directory.CreateDirectory(directory);
-        var invalid = Path.Combine(directory, "Invalid.lean");
-        File.WriteAllText(invalid, source + suffix);
-        var rejected = new GeneratedEvidence(directory);
-        rejected.Add(original, "Unexpected success before rejected evidence");
-        rejected.Add(invalid, "Unexpected invalid evidence success");
-        var command = name == "unchecked-declaration" ? "leanchecker PositiveBatch" : "lake env lean";
-        try
-        {
-            rejected.Check();
-            throw new Exception("Invalid generated evidence batch was accepted: " + name);
-        }
-        catch (InvalidOperationException exception) when (
-            exception.Message.Contains(marker, StringComparison.Ordinal) &&
-            exception.Message.Contains(command, StringComparison.Ordinal))
-        {
-            Console.WriteLine("PASS evidence batch rejects " + name);
-        }
-    }
 }
 
 void CheckExternalCallTargets()

@@ -249,4 +249,36 @@ unsafe def replayModulesJointly (args : List String) : IO Unit := do
   Lean.initSearchPath (← Lean.findSysroot)
   withReplayedModules args fun _ _ _ => pure ()
 
+/-- Replays one module with the pinned toolchain's `LeanChecker.replayFromImports` semantics.
+Its imported environment is private to this module, including when another target fails. -/
+unsafe def replayModuleSeparately (name : String) : IO Nat := do
+  let started ← IO.monoMsNow
+  let (exported, complete) ← readReplayParts name.toName
+  let (_, state) ← Lean.importModulesCore exported.imports |>.run
+  let env ← Lean.finalizeImport state exported.imports {} 0 false false (isModule := true)
+  try
+    let mut constants := {}
+    for name in complete.constNames, ci in complete.constants do
+      constants := constants.insert name ci
+    discard <| env.toKernelEnv.replay constants
+  finally env.freeRegions
+  return (← IO.monoMsNow) - started
+
+/-- Reports every independent module's kernel verdict without elaborating a runner source.
+This uses sequential toolchain replay within each module, with independent modules in tasks. -/
+unsafe def replayModulesSeparately (args : List String) : IO UInt32 := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  let tasks ← args.toArray.mapM fun name => do
+    return (name, ← IO.asTask (replayModuleSeparately name))
+  let mut failed := false
+  for (name, task) in tasks do
+    let fields := [("module", Lean.toJson name)]
+    match ← IO.wait task with
+    | .ok elapsed =>
+      IO.println (Lean.Json.mkObj (fields ++ [("milliseconds", Lean.toJson elapsed)])).compress
+    | .error error =>
+      IO.println (Lean.Json.mkObj (fields ++ [("error", Lean.toJson (toString error))])).compress
+      failed := true
+  return if failed then 1 else 0
+
 end CIL.Replay

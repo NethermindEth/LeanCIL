@@ -60,10 +60,11 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
             new[] { (1UL << i) - 1, 1UL << i, unchecked((1UL << i) + 1) })).Distinct().ToArray();
     var counts = rotations ? new[] { int.MinValue, -65, -33, -1, 0, 1, 31, 32, 33, 63, 64, 65, int.MaxValue } : new[] { 0 };
     var claims = new List<string>();
-    foreach (var bits in values)
+    // Different source bit patterns can become the same narrow runtime argument.
+    var arguments = values.Select(bits => Value(parameters[0].ParameterType, bits)).Distinct();
+    foreach (var value in arguments)
     foreach (var count in counts)
     {
-        var value = Value(parameters[0].ParameterType, bits);
         object[] inputs = rotations ? [value, count] : [value];
         var expected = method.Invoke(null, inputs)!;
         claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = .ok [{LeanValue(expected)}]");

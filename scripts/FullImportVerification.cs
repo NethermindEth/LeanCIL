@@ -324,12 +324,23 @@ partial class Program
             FullCompositionSource(callerModule, callerTheorem, libraries, bindings.Length));
         CheckFullResolution(compositionDirectory, fullLeanPath, FullModulePaths(fullLeanPath));
         Compile(composition, "Checking concrete library relocation and caller composition", untrusted: true);
-        Run([checker, composition], callerSession, fullLeanPath,
-            progress: "Independent kernel replay of the composed caller theorem");
+        const string CompositionReplayProgress = "Independent kernel replay of the composed caller theorem";
         AuditRequest certified =
             new(FullCompositionTheorem, type: FullCompositionType(), axioms: ApprovedAxioms, statement: true);
-        AuditedOleans audited = AuditOleans(fullLeanPath, [composition], [certified],
-            FullCompositionConstants(callerTheorem, libraries, bindings.Length));
+        var constants = FullCompositionConstants(callerTheorem, libraries, bindings.Length);
+        AuditedOleans? audited = null;
+        try
+        {
+            audited = AuditOleans(fullLeanPath, [composition], [certified], constants,
+                replayTargets: [composition], replayProgress: CompositionReplayProgress);
+        }
+        catch (InvalidOperationException) { }
+        // A rejected fused replay retains the independent checker's original diagnostics.
+        if (audited is null)
+        {
+            Run([checker, composition], callerSession, fullLeanPath, progress: CompositionReplayProgress);
+            audited = AuditOleans(fullLeanPath, [composition], [certified], constants);
+        }
         RequireAuditedModule(audited, composition, Path.Combine(compositionDirectory, composition + ".olean"));
         RecheckResolution();
         RequireAuditedConstants(audited);

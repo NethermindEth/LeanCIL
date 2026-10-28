@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ConsumerTraceDirectory.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -92,7 +93,32 @@ void Export(JsonObject manifest, string? rejection = null)
         throw new InvalidOperationException("Expected rejection without sidecar publication: " +
             rejection + "\n" + result.Output);
 }
-Export(Manifest(0, 1, 2));
+var trace = ConsumerTraceDirectory.Create(root, "FixedReferences");
+var previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+var previousCache = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
+try
+{
+    // Only authenticated sharing inside this export may avoid fixed-reference compilation.
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
+    Export(Manifest(0, 1, 2));
+}
+finally
+{
+    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", previousCache);
+}
+var stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+    .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+if (stages.Count(stage => stage.GetProperty("stage").GetString() ==
+        "Checking fixed export reference modules") != 1)
+    throw new InvalidOperationException("Identical fixed references did not share authenticated compilation.");
+var replayedProfiles = stages.Count(stage =>
+    stage.GetProperty("stage").GetString() == "Joint kernel replay of consumer proof and dependencies" &&
+    File.ReadAllText(Path.Combine(trace, stage.GetProperty("transcript").GetString()!))
+        .Contains("\"module\":\"Extracted\"", StringComparison.Ordinal));
+if (replayedProfiles != 3)
+    throw new InvalidOperationException("Fixed reference reuse skipped a profile's extraction replay.");
 var published = JsonNode.Parse(File.ReadAllText(sidecar))!;
 if (published["exports"]![0]!["profiles"]!.AsArray().Count != 3)
     throw new InvalidOperationException("One family entry did not publish all three checked profiles.");

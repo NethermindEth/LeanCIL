@@ -64,7 +64,7 @@ Test("test entry points", () =>
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]), ["evidence"]);
+    Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]), ["evidence", "excluded"]);
 });
 Test("proof and transitive imports", () =>
 {
@@ -401,7 +401,7 @@ Test("required gate, all 192 actual Bash status combinations", () =>
             $"Unexpected gate result: {planned}/{selected}/{prepared}/{tools}/{result}\n{transcript}");
     }
 });
-Test("same-run certified library binding and observability", () =>
+Test("certified library binding, main republication and observability", () =>
 {
     string workflow = File.ReadAllText(Path.Combine(root, ".github/workflows/verification.yml"));
     const string dollar = "$";
@@ -410,16 +410,39 @@ Test("same-run certified library binding and observability", () =>
         "artifact-ids: " + dollar + "{{ needs.tools.outputs.artifact-id }}", "LEANCIL_PREBUILT_TOOLS: true",
         "LEANCIL_CERTIFIED_LIBRARY_SHA256: " + dollar + "{{ needs.prepare.outputs.manifest-sha256 }}",
         "artifact-ids: " + dollar + "{{ needs.prepare.outputs.artifact-id }}",
+        "toolchain-artifact-id: " + dollar + "{{ steps.toolchain-artifact.outputs.artifact-id }}",
+        "toolchain-sha256: " + dollar + "{{ steps.pack-toolchain.outputs.sha256 }}",
+        "toolchain-pin-sha256: " + dollar + "{{ steps.pack-toolchain.outputs.pin-sha256 }}",
+        "artifact-ids: " + dollar + "{{ needs.prepare.outputs.toolchain-artifact-id }}",
+        "TOOLCHAIN_SHA256: " + dollar + "{{ needs.prepare.outputs.toolchain-sha256 }}",
+        "TOOLCHAIN_PIN_SHA256: " + dollar + "{{ needs.prepare.outputs.toolchain-pin-sha256 }}",
         "run-id: " + dollar + "{{ needs.prepare.outputs.artifact-run-id }}",
-        "artifact-id: " + dollar + "{{ steps.certify.outputs.reused == 'true' && steps.donor.outputs.artifact-id || " +
-            "steps.library-artifact.outputs.artifact-id }}",
+        "artifact-id: " + dollar + "{{ steps.library-artifact.outputs.artifact-id || " +
+            "steps.donor.outputs.artifact-id }}",
+        "artifact-run-id: " + dollar + "{{ steps.library-artifact.outputs.artifact-id && github.run_id || " +
+            "steps.donor.outputs.run-id }}",
+        "if: steps.certify.outputs.reused != 'true' || " +
+            "(github.event_name == 'push' && github.ref == 'refs/heads/main')",
         "--reuse \"" + dollar + "DONATED_SHA256\"",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
-        "include-hidden-files: true", "max-parallel: 8", "artifacts/verification-traces/",
+        "archive-sha256: " + dollar + "{{ steps.pack-library.outputs.archive-sha256 || " +
+            "steps.donor.outputs.archive-sha256 }}",
+        "ARCHIVE_SHA256: " + dollar + "{{ needs.prepare.outputs.archive-sha256 }}",
+        "ARCHIVE_SHA256: " + dollar + "{{ steps.donor.outputs.archive-sha256 }}",
+        "DONATED_SHA256: " + dollar + "{{ steps.restored.outcome == 'success' && " +
+            "steps.donor.outputs.manifest-sha256 || '' }}",
+        "path: artifacts/library-download", "path: artifacts/certified-library.tar.zst",
+        "dotnet run --file scripts/TestLibraryArchive.cs",
+        "max-parallel: 8", "artifacts/verification-traces/",
         "matrix.suite == 'imports' && 90", "startsWith(matrix.suite, 'exports') && 120 || 30" })
         Require(workflow.Contains(text, StringComparison.Ordinal), "Missing workflow binding: " + text);
     string name = "name: certified-library-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}";
     Require(workflow.Split(name, StringSplitOptions.None).Length == 2,
         "Producer artifact name must appear exactly once");
+    var suites = workflow[workflow.IndexOf("  suites:", StringComparison.Ordinal)..];
+    Require(!suites.Contains("uses: leanprover/lean-action@", StringComparison.Ordinal),
+        "Suite jobs must restore the producer toolchain without another installation");
+    Require(workflow.ReplaceLineEndings("\n").Split("timeout-minutes: 3\n", StringSplitOptions.None).Length == 3,
+        "Both toolchain installation attempts must have bounded timeouts");
 });
 Console.WriteLine($"All {checks} selection checks passed.");

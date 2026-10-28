@@ -3,6 +3,7 @@
 #:include ../scripts/Verification.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
+#:include ConsumerTraceDirectory.cs
 
 using var verification = new Program();
 var root = At("artifacts/JointReplay");
@@ -22,6 +23,8 @@ void Compile(string module, string source)
 Compile("JointA", "theorem JointA.base : 1 + 1 = 2 := rfl\n");
 Compile("JointB", "import JointA\ntheorem JointB.step : 1 + 1 = 2 := JointA.base\n");
 Compile("JointC", "import JointB\ntheorem JointC.top : 1 + 1 = 2 := JointB.step\n");
+Compile("JointMissingImport", "import JointA\ntheorem JointMissingImport.valid : True := trivial\n");
+File.WriteAllText(Path.Combine(root, "JointMalformed.olean"), "Not an olean");
 Compile("JointForged", """
     import Lean
     set_option debug.skipKernelTC true
@@ -188,32 +191,57 @@ void CheckReplays(bool native)
         throw new InvalidOperationException("Identical on-demand equation lemmas blocked joint replay");
     Console.WriteLine("PASS identical on-demand equation lemmas in several targets replay jointly");
 
-    if (verification.ReplayModulesJointly(root, ["JointClash1", "JointClash2"], root, "Joint replay check"))
-        throw new InvalidOperationException("Joint replay merged one name with different statements");
-    if (verification.ReplayConsumerModules(root, ["JointClash1", "JointClash2"], root).Count != 0)
+    Dictionary<string, string> CheckFallback(string[] targets, string rejection)
+    {
+        var previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+        var trace = ConsumerTraceDirectory.Create(root, "Fallback");
+        try
+        {
+            Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+            var failures = verification.ReplayConsumerModules(root, targets, root);
+            var records = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+                .Select(line => System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(line))
+                .ToArray();
+            var joint = records.Single(item => item.GetProperty("stage").GetString() ==
+                "Joint kernel replay of consumer proof and dependencies");
+            if (joint.GetProperty("exitCode").GetInt32() == 0 ||
+                !File.ReadAllText(Path.Combine(trace, joint.GetProperty("transcript").GetString()!))
+                    .Contains(rejection, StringComparison.Ordinal) ||
+                records.Count(item => item.GetProperty("stage").GetString() ==
+                    "Kernel replay of consumer proof and dependencies") != 1)
+                throw new InvalidOperationException("Expected joint rejection followed by isolated replay: " + rejection);
+            return failures;
+        }
+        finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+    }
+
+    if (CheckFallback(["JointClash1", "JointClash2"], "declared by more than one replay target").Count != 0)
         throw new InvalidOperationException("Per-module fallback rejected valid modules");
     Console.WriteLine("PASS one name with different statements falls back to per-module replay");
 
     // JointA arrives through the untargeted JointB, so its theorems would be skipped as duplicates.
-    if (verification.ReplayModulesJointly(root, ["JointA", "JointC"], root, "Joint replay check"))
-        throw new InvalidOperationException("Joint replay accepted a target loaded through an untargeted import");
-    if (verification.ReplayConsumerModules(root, ["JointA", "JointC"], root).Count != 0)
+    if (CheckFallback(["JointA", "JointC"], "is already imported").Count != 0)
         throw new InvalidOperationException("Per-module fallback rejected valid modules");
     Console.WriteLine("PASS target loaded through an untargeted import falls back to per-module replay");
 
     if (verification.ReplayModulesJointly(root, ["JointA", "JointForged"], root, "Joint replay check"))
         throw new InvalidOperationException("Joint replay accepted a forged declaration");
-    var failures = verification.ReplayConsumerModules(root, ["JointA", "JointForged"], root);
-    if (failures.Keys.SingleOrDefault() != "JointForged" ||
-        !failures["JointForged"].Contains("while replaying declaration"))
-        throw new InvalidOperationException("Forged declaration was not attributed to its module: " +
-            string.Join(", ", failures.Keys));
-    Console.WriteLine("PASS forged declaration rejected and attributed to its module");
-
+    var dependency = Path.Combine(root, "JointA.olean");
+    File.Move(dependency, dependency + ".hidden");
+    try
+    {
+        var failures = verification.ReplayConsumerModules(root,
+            ["JointVisible", "JointForged", "JointHidden", "JointMalformed", "JointAbsent", "JointMissingImport"], root);
+        if (!failures.Keys.Order(StringComparer.Ordinal).SequenceEqual(
+                new[] { "JointAbsent", "JointForged", "JointHidden", "JointMalformed", "JointMissingImport" }) ||
+            !failures["JointForged"].Contains("while replaying declaration"))
+            throw new InvalidOperationException("Isolated replay lost failure attribution: " +
+                string.Join(", ", failures.Keys));
+    }
+    finally { File.Move(dependency + ".hidden", dependency); }
+    Console.WriteLine("PASS isolated replay rejects forged and hidden declarations and malformed or missing imports");
     string[] forgedDefinition = ["JointForgedDefinition", "JointForgedDefinitionUse"];
-    if (verification.ReplayModulesJointly(root, forgedDefinition, root, "Joint replay check"))
-        throw new InvalidOperationException("Joint replay accepted a forged definition under a valid theorem");
-    var definitionFailures = verification.ReplayConsumerModules(root, forgedDefinition, root);
+    var definitionFailures = CheckFallback(forgedDefinition, "JointForgedDefinition.value");
     if (definitionFailures.Keys.SingleOrDefault() != "JointForgedDefinition" ||
         !definitionFailures["JointForgedDefinition"].Contains("JointForgedDefinition.value"))
         throw new InvalidOperationException("Forged definition was not rejected by name: " +

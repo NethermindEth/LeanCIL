@@ -3,12 +3,19 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ImportReviewRegressions.cs
+#:include StagedBundleMutation.cs
 
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+
+if (args is ["--staged-bundle-mutation", var fixture])
+{
+    CheckStagedBundleMutation(fixture);
+    return;
+}
 
 string root = At("artifacts/TransitiveImports-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
@@ -125,7 +132,8 @@ JsonObject originalA = JsonNode.Parse(File.ReadAllText(aSidecar))!.AsObject();
 JsonObject originalB = JsonNode.Parse(File.ReadAllText(bSidecar))!.AsObject();
 FullTransitive();
 FullDiamond();
-Run(["dotnet", "run", "--file", At("Tests/StagedBundleMutation.cs"), "--", root]);
+// Keep the mutation probe in its own process without compiling the common harness again.
+Run(["dotnet", typeof(Program).Assembly.Location, "--staged-bundle-mutation", root]);
 ImportReviewRegressions.ValidateGraph_WhenDuplicateImplementationHashDiffers_RejectsIdentity(ExtractorPath, originalB);
 ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
     ExtractorPath, bSidecar, b, Path.Combine(root, "AmbiguousVersions"));
@@ -457,6 +465,11 @@ void FullTransitive()
         Capture(1) < 0 || Capture(0) < 0 || Capture(1) > libraries[2] || Capture(1) > Capture(0))
         throw new InvalidOperationException(
             "Full verification skipped or misordered a transitive replay: " + string.Join(", ", stages));
+    var compositionReplay = traced.Single(record => record.Stage ==
+        "Independent kernel replay of the composed caller theorem");
+    if (!compositionReplay.Command.Contains("leancil-audit", StringComparison.Ordinal) ||
+        compositionReplay.Command.Contains("--replay", StringComparison.Ordinal))
+        throw new InvalidOperationException("Composition did not share its replay and theorem audit.");
     JsonElement verified =
         JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
     JsonElement import = verified.GetProperty("imports").EnumerateArray().Single();

@@ -7,9 +7,16 @@ interpreter definitions and approved axioms are unchanged; no stepping attribute
 The return proof uses an explicit simplification set: unrestricted `simp_all` repeatedly tries
 to discharge irrelevant dispatcher exclusions. Keep that set narrow when extending the proof.
 The callee proof reduces each fixed opcode before splitting the remaining dispatcher matches,
-avoiding repeated case analysis of branches already excluded by that opcode.
+avoiding repeated case analysis of branches already excluded by that opcode. Successful binds
+supply their successful result directly, so their impossible error branches are never expanded.
 Trailing-local proofs normalize maps over monadic binds before trying congruence, so shared
 computations need not be split into their possible results to prove the continuation unchanged.
+They also discharge dispatcher-tail cases before inspecting an irrelevant second operand.
+
+Relabeling proofs close unary and invalid-first-operand cases before inspecting a second
+operand. Their local `stack_cases => ...` helper tries the instruction's proof after each
+operand split, avoiding duplicate dispatcher-tail proofs for irrelevant stack shapes. The
+success and named-exception statements, interpreter definitions and allowed axioms are unchanged.
 
 Ordinary allocation-renaming instructions share the proof of `Memory.Renamed.instructionResult`.
 Reference-aware subtraction, comparisons and branches share `Memory.Renamed.stepReference` and
@@ -432,6 +439,9 @@ replace these checks. Nothing is published unless all selected profiles pass.
 Published source bundles retain every selected extraction; full verification freshly extracts
 both the selected profile and its fixed reference from the pinned implementation DLL, then
 repeats the family checks before composing the caller theorem.
+Identical fixed-reference modules can reuse authenticated, source-bound compilation across
+profile workspaces. Their compiled artifacts are still fixed before producer proof code runs
+and checked afterward; every selected profile retains its extraction replay and exact audit.
 
 Profiles must be distinct built-in names and match their artifacts. A family entry cannot
 also specify `artifact`; ordinary single-profile entries are unchanged. Family transport

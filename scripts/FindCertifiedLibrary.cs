@@ -2,12 +2,11 @@
 #:property PublishAot=false
 #:include CertifiedLibraryDonor.cs
 
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-// Prefer this commit or an identical merged PR tree before older main pushes.
+// Prefer this commit, an identical merged PR tree and the exact base before recent main pushes.
 // Their own code built the library and printed its digest; PrepareLibrary --reuse rechecks both.
 const int RunsPerCommit = 10;
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -22,36 +21,27 @@ for (var i = 0; i < args.Length; i++)
 string repository = options["--repository"], workflow = options["--workflow"], output = options["--output"];
 string runs = $"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}&head_sha=";
 string RunPath(long run) => $"repos/{repository}/actions/runs/{run}";
-try
-{
-    foreach (long run in Candidates().Distinct())
-    foreach ((int attempt, long job) in
-        CertifiedLibraryDonor.PreparedAttempts(Api(RunPath(run) + "/jobs?filter=all&per_page=100")))
-    {
-        string name = CertifiedLibraryDonor.ArtifactName(run, attempt);
-        long? artifact = CertifiedLibraryDonor.Artifact(Api(RunPath(run) + "/artifacts?name=" + name), run, attempt,
-            DateTimeOffset.UtcNow);
-        if (artifact is null) continue;
-        // Job logs carry ANSI colour codes, which gh refuses to print unless allowed.
-        string? digest = CertifiedLibraryDonor.Digest(
-            Gh($"repos/{repository}/actions/jobs/{job}/logs", "--allow-escape-sequences"));
-        if (digest is null) continue;
-        File.AppendAllText(output, $"run-id={run}\nartifact-id={artifact}\nmanifest-sha256={digest}\n");
-        Console.WriteLine($"Reusing {name} (artifact {artifact}) with manifest SHA256 {digest}");
-        return;
-    }
+var selected = CertifiedLibraryDonor.Find(Candidates(), (run, suffix) => Api(RunPath(run) + suffix),
+    job => Gh($"repos/{repository}/actions/jobs/{job}/logs", "--allow-escape-sequences"),
+    DateTimeOffset.UtcNow, Warning);
+if (selected is null)
     Console.WriteLine("No certified library to reuse; building from sources.");
-}
-// Reuse only saves time, so an unavailable API falls back to a fresh build.
-catch (Exception error) when (error is InvalidOperationException or JsonException or Win32Exception)
+else
 {
-    Console.WriteLine("::warning::Certified library lookup failed; building from sources. " + error.Message);
+    File.AppendAllText(output,
+        $"run-id={selected.Run}\nartifact-id={selected.Artifact}\nmanifest-sha256={selected.Digest}\n" +
+        $"archive-sha256={selected.ArchiveDigest}\n");
+    Console.WriteLine($"Reusing artifact {selected.Artifact} from run {selected.Run} " +
+        $"with manifest SHA256 {selected.Digest}");
 }
+
+void Warning(string message) => Console.WriteLine("::warning::" + message);
 
 // An empty or abbreviated commit would match unrelated runs instead of none.
 IEnumerable<long> Runs(string commit, string filter) => Regex.IsMatch(commit, "^[0-9a-f]{40}$")
-    ? Api(runs + commit + filter).GetProperty("workflow_runs").EnumerateArray()
-        .Select(run => run.GetProperty("id").GetInt64()).ToArray()
+    ? CertifiedLibraryDonor.Available("Commit " + commit, () =>
+        Api(runs + commit + filter).GetProperty("workflow_runs").EnumerateArray()
+            .Select(run => run.GetProperty("id").GetInt64()), Warning)
     : [];
 
 JsonElement Api(string path) => JsonSerializer.Deserialize<JsonElement>(Gh(path));
@@ -61,25 +51,26 @@ IEnumerable<long> Candidates()
     foreach (var run in Runs(options["--head"], "")) yield return run;
     foreach (var run in MergedPullRuns()) yield return run;
     foreach (var run in Runs(options["--base"], "&event=push&branch=main")) yield return run;
+    // The exact base may have skipped preparation or reused a library without republishing it.
+    var recent = CertifiedLibraryDonor.Available("Recent main runs", () =>
+        CertifiedLibraryDonor.RecentMainRuns(Api(
+            $"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}" +
+            "&event=push&branch=main&status=success"), repository, RunsPerCommit), Warning);
+    foreach (var run in recent) yield return run;
 }
 
 IEnumerable<long> MergedPullRuns()
 {
     if (options.GetValueOrDefault("--event") != "push") return [];
-    try
-    {
-        return CertifiedLibraryDonor.MergedHeads(repository, options["--head"], Api)
-            .SelectMany(head => Runs(head, "&event=pull_request&status=success")).ToArray();
-    }
-    catch (Exception error) when (error is InvalidOperationException or JsonException or Win32Exception or
-                                  KeyNotFoundException)
-    {
-        Console.WriteLine("::warning::Merged PR library lookup unavailable; trying main donors. " + error.Message);
-        return [];
-    }
+    return CertifiedLibraryDonor.Available("Merged PR libraries", () =>
+        CertifiedLibraryDonor.MergedHeads(repository, options["--head"], Api)
+            .SelectMany(head => Runs(head, "&event=pull_request&status=success")), Warning);
 }
 
-string Gh(string path, params string[] flags)
+string Gh(string path, params string[] flags) =>
+    CertifiedLibraryDonor.Request(() => Send(path, flags), Thread.Sleep);
+
+(int ExitCode, string Output, string Error) Send(string path, string[] flags)
 {
     var start = new ProcessStartInfo("gh")
     {
@@ -94,6 +85,5 @@ string Gh(string path, params string[] flags)
     var stderr = process.StandardError.ReadToEndAsync();
     var stdout = process.StandardOutput.ReadToEnd();
     process.WaitForExit();
-    if (process.ExitCode != 0) throw new InvalidOperationException($"gh api {path} failed: {stderr.Result.Trim()}");
-    return stdout;
+    return (process.ExitCode, stdout, $"gh api {path} failed: {stderr.Result.Trim()}");
 }

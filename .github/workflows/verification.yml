@@ -33,6 +33,7 @@ jobs:
         run: |
           dotnet run --file scripts/TestSelectVerification.cs
           dotnet run --file scripts/TestFindCertifiedLibrary.cs
+          dotnet run --file scripts/TestLibraryArchive.cs -c Release
           dotnet run --file scripts/TestSummarizeVerification.cs
           dotnet run --file scripts/TestLeanDiagnostics.cs
           dotnet run --file Tests/ConsumerTraceRetention.cs
@@ -63,8 +64,12 @@ jobs:
       pull-requests: read
     outputs:
       manifest-sha256: ${{ steps.certify.outputs.manifest-sha256 }}
-      artifact-id: ${{ steps.certify.outputs.reused == 'true' && steps.donor.outputs.artifact-id || steps.library-artifact.outputs.artifact-id }}
-      artifact-run-id: ${{ steps.certify.outputs.reused == 'true' && steps.donor.outputs.run-id || github.run_id }}
+      archive-sha256: ${{ steps.pack-library.outputs.archive-sha256 || steps.donor.outputs.archive-sha256 }}
+      artifact-id: ${{ steps.library-artifact.outputs.artifact-id || steps.donor.outputs.artifact-id }}
+      artifact-run-id: ${{ steps.library-artifact.outputs.artifact-id && github.run_id || steps.donor.outputs.run-id }}
+      toolchain-artifact-id: ${{ steps.toolchain-artifact.outputs.artifact-id }}
+      toolchain-sha256: ${{ steps.pack-toolchain.outputs.sha256 }}
+      toolchain-pin-sha256: ${{ steps.pack-toolchain.outputs.pin-sha256 }}
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -81,6 +86,7 @@ jobs:
           global-json-file: global.json
       - name: Install Lean toolchain
         id: lean
+        timeout-minutes: 3
         # The toolchain download fails transiently; retry once after a pause.
         continue-on-error: true
         uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
@@ -94,11 +100,35 @@ jobs:
         run: sleep 30
       - name: Retry Lean toolchain install
         if: steps.lean.outcome == 'failure'
+        timeout-minutes: 3
         uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
         with:
           auto-config: false
           use-github-cache: false
           use-mathlib-cache: false
+      - name: Package the installed Lean toolchain
+        id: pack-toolchain
+        shell: bash
+        run: |
+          prefix="$(lean --print-prefix)"
+          case "$prefix" in
+            "$HOME/.elan/toolchains/"*) ;;
+            *) echo "Unexpected Lean installation: $prefix" >&2; exit 1 ;;
+          esac
+          test -x "$prefix/bin/leanchecker"
+          archive="$RUNNER_TEMP/lean-toolchain.tar.zst"
+          tar -C "$HOME" -cf - .elan/bin .elan/settings.toml "${prefix#"$HOME/"}" | zstd -T2 -6 -q > "$archive"
+          echo "sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "pin-sha256=$(sha256sum lean-toolchain | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Upload the installed Lean toolchain
+        id: toolchain-artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lean-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lean-toolchain.tar.zst
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
       # A PR-scoped cache does not authenticate its producer or its native audit executable. A run of
       # this commit, an identical merged PR tree, or previous main built and logged the library digest.
       - name: Find a library certified by this commit or by main
@@ -119,13 +149,23 @@ jobs:
           artifact-ids: ${{ steps.donor.outputs.artifact-id }}
           run-id: ${{ steps.donor.outputs.run-id }}
           github-token: ${{ github.token }}
-          path: artifacts/certified-library
+          path: artifacts/library-download
+      - name: Restore the authenticated donated library
+        id: restored
+        if: steps.donated.outcome == 'success'
+        continue-on-error: true
+        env:
+          MANIFEST_SHA256: ${{ steps.donor.outputs.manifest-sha256 }}
+          ARCHIVE_SHA256: ${{ steps.donor.outputs.archive-sha256 }}
+        run: >-
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download
+          artifacts/certified-library "$MANIFEST_SHA256" "$ARCHIVE_SHA256"
       # Reuse rechecks the source binding and kernel-replays the library; any mismatch builds from source.
       - name: Kernel-replay a donated library or build it from source
         id: certify
         shell: bash
         env:
-          DONATED_SHA256: ${{ steps.donated.outcome == 'success' && steps.donor.outputs.manifest-sha256 || '' }}
+          DONATED_SHA256: ${{ steps.restored.outcome == 'success' && steps.donor.outputs.manifest-sha256 || '' }}
         run: |
           mkdir -p artifacts
           set -o pipefail
@@ -144,15 +184,23 @@ jobs:
             rm -rf artifacts/certified-library
             dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library 2>&1 | tee -a artifacts/verification.log
           fi
+      - name: Package the certified library
+        id: pack-library
+        if: steps.certify.outputs.reused != 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        env:
+          MANIFEST_SHA256: ${{ steps.certify.outputs.manifest-sha256 }}
+        run: >-
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- pack artifacts/certified-library
+          artifacts/certified-library.tar.zst "$MANIFEST_SHA256"
       - name: Upload certified library for this workflow attempt
         id: library-artifact
-        if: steps.certify.outputs.reused != 'true'
+        # Main must remain a donor for later PRs even when it reused a merged PR's library.
+        if: steps.certify.outputs.reused != 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: certified-library-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/certified-library
-          # The certificate covers the hidden .lake tree as well as sources.
-          include-hidden-files: true
+          path: artifacts/certified-library.tar.zst
+          compression-level: 0
           if-no-files-found: error
           retention-days: 14
       - name: Summarize preparation timings
@@ -250,27 +298,24 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Install Lean toolchain
-        id: lean
-        # The toolchain download fails transiently; retry once after a pause.
-        continue-on-error: true
-        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+      - name: Download the successful producer job's Lean toolchain
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          # scripts/Test.cs handles building and testing.
-          auto-config: false
-          use-github-cache: false
-          use-mathlib-cache: false
-      - name: Wait before retrying the Lean toolchain install
-        if: steps.lean.outcome == 'failure'
+          artifact-ids: ${{ needs.prepare.outputs.toolchain-artifact-id }}
+          path: ${{ runner.temp }}/lean-toolchain
+      - name: Restore the authenticated Lean toolchain
         shell: bash
-        run: sleep 30
-      - name: Retry Lean toolchain install
-        if: steps.lean.outcome == 'failure'
-        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
-        with:
-          auto-config: false
-          use-github-cache: false
-          use-mathlib-cache: false
+        env:
+          TOOLCHAIN_SHA256: ${{ needs.prepare.outputs.toolchain-sha256 }}
+          TOOLCHAIN_PIN_SHA256: ${{ needs.prepare.outputs.toolchain-pin-sha256 }}
+        run: |
+          archive="$RUNNER_TEMP/lean-toolchain/lean-toolchain.tar.zst"
+          echo "$TOOLCHAIN_PIN_SHA256  lean-toolchain" | sha256sum --check --status
+          echo "$TOOLCHAIN_SHA256  $archive" | sha256sum --check --status
+          tar --zstd -xf "$archive" --no-same-owner -C "$HOME"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/lean" --version
+          "$HOME/.elan/bin/lake" --version
 
       - name: Download the successful producer job's certified library
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -279,7 +324,14 @@ jobs:
           artifact-ids: ${{ needs.prepare.outputs.artifact-id }}
           run-id: ${{ needs.prepare.outputs.artifact-run-id }}
           github-token: ${{ github.token }}
-          path: artifacts/certified-library
+          path: artifacts/library-download
+
+      - name: Restore the authenticated certified library
+        env:
+          ARCHIVE_SHA256: ${{ needs.prepare.outputs.archive-sha256 }}
+        run: >-
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download
+          artifacts/certified-library "$LEANCIL_CERTIFIED_LIBRARY_SHA256" "$ARCHIVE_SHA256"
 
       - name: Download this run's extractor and example assembly
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

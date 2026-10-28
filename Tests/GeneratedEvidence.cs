@@ -100,7 +100,7 @@ partial class Program
         }
 
         // Direct semantic fixtures already kernel-check during elaboration. Certificate audit
-        // fixtures additionally replay their serialized declarations in leanchecker.
+        // fixtures additionally replay every serialized declaration with the authenticated auditor.
         public void Check(bool replay = true)
         {
             if (cases.Count == 0) return;
@@ -117,8 +117,9 @@ partial class Program
                 throw new InvalidOperationException("Untrusted generated evidence batch");
             var buildSeconds = timer.Elapsed.TotalSeconds;
             if (replay)
-                Run(["leanchecker", "PositiveBatch"], leanPath: Path.GetDirectoryName(batch) + Path.PathSeparator +
-                    FixtureLeanPath());
+                fixtureVerification!.ReplayCheckedModules(["PositiveBatch"],
+                    Path.GetDirectoryName(batch) + Path.PathSeparator + FixtureLeanPath(),
+                    "Kernel replay of generated evidence");
             timer.Stop();
             foreach (var item in cases)
             {

@@ -24,8 +24,15 @@ try
         "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
     if (Run(FixtureCommand(fixture, ["prepared"], prepared: true)).Trim() != "Release prepared")
         throw new Exception("Prepared fixture did not use its Release build or forward arguments");
-    if (Run(FixtureCommand(fixture, ["unprepared"], prepared: false)).Trim() != "Debug unprepared")
+    if (Run(FixtureCommand(fixture, ["unprepared"], prepared: false)).Trim() != "Release unprepared")
         throw new Exception("Unprepared fixture did not build normally or forward arguments");
+    if (Run(["dotnet", "run", "--file", fixture, "--", "nested"]).Trim() != "Release nested")
+        throw new Exception("Nested fixture did not use Release or forward arguments");
+    File.AppendAllText(fixture, "\nConsole.WriteLine(\"changed\");\n");
+    if (!Run(["dotnet", "run", "--file", fixture, "--", "nested"]).TrimEnd().EndsWith("changed"))
+        throw new Exception("Nested fixture did not rebuild changed source");
+    if (!Run(["dotnet", "run", "--file", fixture, "-c", "Debug", "--", "explicit"]).Contains("Debug explicit"))
+        throw new Exception("Explicit fixture configuration was overridden");
     Environment.SetEnvironmentVariable(ExtractorBuildEnvironment, "true");
     if (PreparedExtractorMatches()) throw new Exception("Boolean bypass accepted");
     var identity = ExtractorBuildIdentity();

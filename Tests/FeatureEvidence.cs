@@ -4,6 +4,7 @@
 #:include PreparedLeanFixtures.cs
 #:include ../scripts/BatchVerification.cs
 #:include RejectedEvidence.cs
+#:include GeneratedEvidence.cs
 #:include ../scripts/RuntimeProfileValidation.cs
 
 using System.Text.RegularExpressions;
@@ -63,23 +64,29 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var folder = Path.Combine(output, "CompiledLoop");
 Run(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)", folder, "scalar"));
 var path = Path.Combine(folder, "Extracted.lean");
-Run(["lake", "env", "lean", path], cwd: verification.CheckoutPackage());
 var baseline = File.ReadAllText(path);
+const string featureObligation = "method0_features_validated";
+var control = CheckedEvidenceControl(baseline, NarrowEvidence(baseline, featureObligation),
+    [featureObligation], 0);
+var checkedPath = Path.Combine(folder, "Checked.lean");
+File.WriteAllText(checkedPath, baseline + control);
+Run(["lake", "env", "lean", checkedPath], cwd: verification.CheckoutPackage());
 
 void Reject(string name, string mutated)
 {
     if (mutated == baseline) throw new InvalidOperationException("Feature mutation did not change source: " + name);
     var target = Path.Combine(output, name + ".lean");
-    File.WriteAllText(target, mutated);
-    rejected.Add(target, "PASS feature certificate rejects " + name, "decide");
+    File.WriteAllText(target, NarrowEvidence(mutated, featureObligation));
+    rejected.Add(target, "PASS feature certificate rejects " + name,
+        "Extraction.FeatureFlowValid", "is false");
 }
 
 string MutateState(string source, string update) => Regex.Replace(source,
     @"(?m)^(def method0FeatureStates : Extraction.FeatureCertificate := )([^\r\n]+)",
     match => match.Groups[1].Value + "(" + match.Groups[2].Value + ")." + update);
 
-// Keep instruction lookup lemmas in sync with each output mutation. Failure must
-// come from independently checking extraction evidence, rather than a stale rfl.
+// Each mutation checks feature flow independently, without unrelated validator proofs
+// or instruction lookup equations that could reject it for a different reason.
 Reject("wrong-feature", baseline.Replace(".feature .avx2", ".feature .sse2"));
 Reject("wrong-branch", baseline.Replace(".brzero 10", ".brzero 11"));
 Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))]", "stack := [some (BitVec.ofInt 32 (1))]"));

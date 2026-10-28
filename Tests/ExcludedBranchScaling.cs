@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 
 using System.Text.Json;
 
@@ -43,8 +44,11 @@ var states = Entries("method0FeatureStates");
 var excluded = reachable.Count(live => live == "false");
 if (excluded < 700 || states.Count != reachable.Count || extracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException($"Expected a large excluded branch checked at the default budget; found {excluded} excluded sites.");
-Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")], cwd: FixturePackage());
-Console.WriteLine($"PASS {excluded} excluded sites validate at the default heartbeat budget");
+const string featureObligation = "method0_features_validated";
+const string parameterObligation = "method0_parameters_validated";
+var controls =
+    CheckedEvidenceControl(extracted, NarrowEvidence(extracted, featureObligation), [featureObligation], 0) +
+    CheckedEvidenceControl(extracted, NarrowEvidence(extracted, parameterObligation), [parameterObligation], 1);
 
 // Live under AVX2, the same branch is reachable; elaborator `decide` exceeded the budget on bodies this long.
 var liveOutput = Path.Combine(directory, "Live");
@@ -57,7 +61,7 @@ Run(["lake", "env", "lean", Path.Combine(liveOutput, "Extracted.lean")], cwd: Fi
 Console.WriteLine($"PASS {liveSites} live sites validate at the default heartbeat budget");
 
 // Each validator must still reach and reject a forged claim at the last pruned site it checks.
-void Reject(string name, string validator, Func<int, bool> site, bool forgeState)
+void Reject(string name, string validator, string obligation, Func<int, bool> site, bool forgeState)
 {
     var live = Entries("method0Reachable");
     var facts = Entries("method0FeatureStates");
@@ -65,19 +69,22 @@ void Reject(string name, string validator, Func<int, bool> site, bool forgeState
     live[pc] = "true";
     if (forgeState) facts[pc] = "some { stack := [], locals := [] }";
     var tampered = Path.Combine(directory, name + ".lean");
-    File.WriteAllText(tampered, string.Join('\n', extracted.Split('\n').Select(line =>
+    var changed = string.Join('\n', extracted.Split('\n').Select(line =>
         line.StartsWith("def method0Reachable ", StringComparison.Ordinal) ? $"def method0Reachable : List Bool := [{string.Join(", ", live)}]" :
         line.StartsWith("def method0FeatureStates ", StringComparison.Ordinal) ? $"def method0FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", facts)}]" :
-        line)));
+        line));
+    File.WriteAllText(tampered, NarrowEvidence(changed, obligation));
     var rejected = Execute(["lake", "env", "lean", tampered], cwd: FixturePackage());
-    if (rejected.Code == 0 || !rejected.Output.Contains($"Extraction.{validator} ", StringComparison.Ordinal))
+    if (rejected.Code == 0 || !rejected.Output.Contains($"Extraction.{validator} ", StringComparison.Ordinal) ||
+        !rejected.Output.Contains("is false", StringComparison.Ordinal))
         throw new InvalidOperationException($"{validator} accepted pruned site {pc} claimed reachable:\n" + rejected.Output);
     Console.WriteLine($"PASS {validator} rejects pruned site {pc} claimed reachable");
 }
 var argumentCode = extracted.Split('\n').Single(l => l.StartsWith("def method0RawArguments ", StringComparison.Ordinal));
 var operations = argumentCode[(argumentCode.LastIndexOf("code := [", StringComparison.Ordinal) + 9)..argumentCode.LastIndexOf(']')].Split(", ");
-Reject("ForgedFeatureSite", "FeatureFlowValid", _ => true, forgeState: true);
-Reject("ForgedArgumentSite", "ParameterHomesValid", pc => operations[pc].StartsWith(".load", StringComparison.Ordinal), forgeState: true);
+Reject("ForgedFeatureSite", "FeatureFlowValid", featureObligation, _ => true, forgeState: true);
+Reject("ForgedArgumentSite", "ParameterHomesValid", parameterObligation,
+    pc => operations[pc].StartsWith(".load", StringComparison.Ordinal), forgeState: true);
 
 var consumer = Path.Combine(directory, "Consumer");
 Directory.CreateDirectory(consumer);
@@ -96,11 +103,15 @@ theorem correctness :
     (CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 2), .scalar (.i64 3)] empty).map Prod.snd =
       .ok [.scalar (.i64 5)] := by rfl
 end ExampleProof
-""");
+""" + "\n" + controls);
 Run(["lake", "update"], consumer);
-Run(["dotnet", ExtractorPath, "verify", output, "--proof", proof, "--proof-root", consumer]);
+// This fresh certificate build also checks the scalar positive at the default heartbeat budget.
+// The consumer's independent replay includes both narrowed controls and the complete certificate.
+Run(["dotnet", ExtractorPath, "verify", output, "--proof", proof, "--proof-root", consumer],
+    environment: new Dictionary<string, string> { ["LEANCIL_DISABLE_SUCCESS_CACHE"] = "true" });
 var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid") ||
     !report.GetProperty("theoremAudit").GetString()!.Contains("ExampleProof.correctness"))
     throw new InvalidOperationException("Missing independent certificate/theorem audits.");
+Console.WriteLine($"PASS {excluded} excluded sites validate at the default heartbeat budget");
 Console.WriteLine("PASS fresh consumer proof-root verifies the scalar path past the excluded branch");

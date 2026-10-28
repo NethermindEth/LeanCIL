@@ -129,4 +129,130 @@ Test("merged PR donors require exact trees and same-repository merge provenance"
     Require(!CertifiedLibraryDonor.MergedHeads("owner/repo", commit[..7], Api).Any() && calls.Count == 0,
         "Abbreviated push commit queried unrelated pulls");
 });
+Test("recent fallback admits only bounded successful main pushes from this repository", () =>
+{
+    string Run(long id, string branch = "main", string source = "owner/repo", string trigger = "push",
+        string status = "completed", string? conclusion = "success", string? head = null) =>
+        JsonSerializer.Serialize(new
+        {
+            id, head_branch = branch, head_repository = new { full_name = source }, @event = trigger,
+            status, conclusion, head_sha = head ?? new string('a', 40)
+        });
+    JsonElement Listing(params string[] runs) => Json("{\"workflow_runs\":[" + string.Join(',', runs) + "]}");
+    var valid = Listing(Run(9), Run(7), Run(7));
+    Require(CertifiedLibraryDonor.RecentMainRuns(valid, "owner/repo", 10).SequenceEqual([9L, 7L]),
+        "Main fallback must preserve newest-first order and remove duplicates");
+    foreach (var invalid in new[]
+    {
+        Run(1, branch: "feature"), Run(1, source: "fork/repo"), Run(1, trigger: "pull_request"),
+        Run(1, status: "in_progress"), Run(1, conclusion: "failure"), Run(1, conclusion: null),
+        Run(1, head: "abc123"), Run(1, head: new string('z', 40)), Run(0)
+    })
+        Require(!CertifiedLibraryDonor.RecentMainRuns(Listing(invalid), "owner/repo", 10).Any(),
+            "Ineligible main fallback was accepted: " + invalid);
+    Require(!CertifiedLibraryDonor.RecentMainRuns(Listing(Run(1, branch: "feature"), Run(2)),
+        "owner/repo", 1).Any(), "Fallback exceeded its bounded candidate set");
+});
+Test("transient HTTP failures retry with a fixed bound, without accepting failed response bodies", () =>
+{
+    foreach (int status in new[] { 408, 429, 500, 502, 503, 504 })
+    {
+        var calls = 0;
+        var delays = new List<TimeSpan>();
+        var result = CertifiedLibraryDonor.Request(() => ++calls < 3
+            ? (1, "untrusted body", $"gh: Server Error (HTTP {status})") : (0, "valid", ""), delays.Add);
+        Require(result == "valid" && calls == 3 &&
+            delays.SequenceEqual([TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2)]), "Incorrect retry policy");
+    }
+    foreach (var error in new[] { "gh: Server Error (HTTP 502)", "gh: Not Found (HTTP 404)",
+        "gh: Forbidden (HTTP 403)", "gh: Unauthorized (HTTP 401)", "unknown failure" })
+    {
+        var calls = 0;
+        try
+        {
+            CertifiedLibraryDonor.Request(() => { calls++; return (1, "untrusted body", error); }, _ => { });
+            throw new Exception("Failed response accepted");
+        }
+        catch (InvalidOperationException rejected) { Require(rejected.Message == error, "Lost failure reason"); }
+        Require(calls == (error.Contains("502") ? 3 : 1), "Permanent failures retried or transient bound exceeded");
+    }
+});
+
+Test("failed candidate listings discard partial results and permit subsequent lookup", () =>
+{
+    IEnumerable<long> Interrupted()
+    {
+        yield return 1;
+        throw new JsonException("incomplete listing");
+    }
+    var warnings = new List<string>();
+    var candidates = CertifiedLibraryDonor.Available("base", Interrupted, warnings.Add)
+        .Concat(CertifiedLibraryDonor.Available("recent main", () => new long[] { 2 }, warnings.Add));
+    Require(candidates.SequenceEqual([2L]) && warnings.Count == 1, "Partial listing used or fallback lost");
+});
+
+Test("an unavailable run, artifact or log cannot hide the next authenticated donor", () =>
+{
+    foreach (var failure in new[] { "jobs", "artifact", "log", "malformed", "number", "date", "digest" })
+    {
+        var warnings = new List<string>();
+        var firstRunCalls = 0;
+        JsonElement Api(long run, string suffix)
+        {
+            if (run == 1) firstRunCalls++;
+            if (run == 1 && failure == "malformed") return Json("{}");
+            bool jobs = suffix.StartsWith("/jobs", StringComparison.Ordinal);
+            if (run == 1 && failure == "number") return Json("""
+                {"jobs":[{"id":99999999999999999999999,"name":"Prepare certified Lean library",
+                  "run_attempt":1,"conclusion":"success"}]}
+                """);
+            if (run == 1 && failure == (jobs ? "jobs" : "artifact"))
+                throw new InvalidOperationException("gh: Server Error (HTTP 502)");
+            var response = jobs ? Json($$"""
+                {"jobs":[{"id":{{run}},"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"success"}]}
+                """) : Json($$$"""
+                {"artifacts":[{"id":{{{run * 10}}},"name":"certified-library-{{{run}}}-1","expired":false,
+                  "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":{{{run}}}}}]}
+                """);
+            return run == 1 && !jobs && failure == "date"
+                ? Json(response.GetRawText().Replace("2026-11-05T00:00:00Z", "invalid-date")) : response;
+        }
+        string Log(long job)
+        {
+            if (job == 1 && failure == "log") throw new InvalidOperationException("missing log");
+            return job == 1 && failure == "digest" ? "no digest" : CertifiedLibraryDonor.DigestLine + Digest;
+        }
+        var result = CertifiedLibraryDonor.Find([1, 1, 2], Api, Log, now, warnings.Add);
+        Require(result == new CertifiedLibraryDonor.Selection(2, 20, Digest), "Unauthenticated donor selected");
+        Require(firstRunCalls <= 2 && warnings.Count == (failure == "digest" ? 0 : 1), "Candidate was retried wholesale");
+        Require(CertifiedLibraryDonor.Find([1], Api, Log, now, warnings.Add) is null,
+            "Exhausted lookup must not supply partial evidence");
+    }
+});
+Test("archive digest belongs to the same successful producer log as its manifest", () =>
+{
+    JsonElement Api(long run, string suffix) => suffix.StartsWith("/jobs", StringComparison.Ordinal)
+        ? Json("""
+            {"jobs":[{"id":9,"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"success"}]}
+            """)
+        : Json("""
+            {"artifacts":[{"id":70,"name":"certified-library-7-1","expired":false,
+              "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":7}}]}
+            """);
+    foreach (var archive in new[] { "", Other, Other[..63],
+        Other + "\n" + CertifiedLibraryDonor.ArchiveDigestLine + Digest,
+        Other + "\n" + CertifiedLibraryDonor.ArchiveDigestLine + Other[..63] })
+    {
+        var producerLog = CertifiedLibraryDonor.DigestLine + Digest + "\n" +
+            (archive.Length == 0 ? "" : CertifiedLibraryDonor.ArchiveDigestLine + archive + "\n");
+        var result = CertifiedLibraryDonor.Find([7], Api, job =>
+        {
+            Require(job == 9, "Digest came from another job");
+            return producerLog;
+        }, now, _ => { });
+        Require(archive.Length == 0 ? result == new CertifiedLibraryDonor.Selection(7, 70, Digest) :
+            archive == Other ? result == new CertifiedLibraryDonor.Selection(7, 70, Digest, Other) : result is null,
+            "Packed or legacy donor digest mismatch");
+    }
+});
 Console.WriteLine($"All {checks} certified library donor checks passed.");

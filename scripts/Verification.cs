@@ -130,9 +130,13 @@ partial class Program : IDisposable
         var options = command[4..(separator < 0 ? command.Length : separator)];
         // Only the repository's standard Release build options match the producer.
         if (options.Length != 0 && !options.SequenceEqual(new[] { "-c", "Release", "--no-build",
+                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" }) &&
+            !options.SequenceEqual(new[] { "-c", "Release",
                 "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" })) return command;
-        return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd),
-            separator < 0 ? [] : command[(separator + 1)..]) ?? command;
+        var arguments = separator < 0 ? [] : command[(separator + 1)..];
+        // Nested fixtures share the parent's Release configuration but still rebuild changed sources.
+        return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd), arguments) ??
+            (options.Length == 0 ? FixtureCommand(command[3], arguments, prepared: false) : command);
     }
 #endif
 
@@ -141,7 +145,7 @@ partial class Program : IDisposable
         string[] buildArguments = prepared
             ? ["-c", "Release", "--no-build", "-p:EnforceCodeStyleInBuild=true",
                 "-p:GenerateDocumentationFile=true"]
-            : [];
+            : ["-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"];
         return ["dotnet", "run", "--file", script, .. buildArguments, "--", .. arguments];
     }
 
@@ -1590,6 +1594,26 @@ partial class Program : IDisposable
         ["dotnet", ExtractorPath, mode, assembly, entry, output, profile,
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
 
+    sealed record GeneratedExtraction(string Assembly, string Entry, string Output, string Profile = "scalar",
+        string[]? InitializedTypes = null);
+
+    // Share immutable assembly bytes and signature validation, retaining fresh modules per request
+    // and the extractor's final check that every assembly, symbol and profile input is unchanged.
+    static void ExtractBatch(string mode, string? identity, IEnumerable<GeneratedExtraction> requests)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "leancil-extractions-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(requests.Select(request => new
+            {
+                assembly = request.Assembly, identity, entry = request.Entry, output = request.Output,
+                profile = request.Profile, initializedTypes = request.InitializedTypes
+            })));
+            Run(["dotnet", ExtractorPath, "generated-extraction-batch", mode, path]);
+        }
+        finally { File.Delete(path); }
+    }
+
     // This module imports only the extracted program, never the user proof. The audit
     // checks its compiled theorem against the complete validator application for that
     // program; a declaration with the right name but type True is insufficient.
@@ -1647,7 +1671,7 @@ partial class Program : IDisposable
     // Reads the kernel-replayed oleans only: no imported elaborator, notation, extension or initializer runs.
     AuditedOleans AuditOleans(string leanPath, string[] modules, AuditRequest[] theorems, AuditConstantRequest[]? constants = null,
         string[]? interfaces = null, string[]? closures = null, AuditNamespaces? namespaces = null,
-        string[]? replayTargets = null)
+        string[]? replayTargets = null, string? replayProgress = null)
     {
         var executable = CheckedAuditExecutable();
         var request = Path.Combine(Path.GetTempPath(), "leancil-audit-" + Guid.NewGuid().ToString("N") + ".json");
@@ -1660,7 +1684,8 @@ partial class Program : IDisposable
             File.WriteAllText(request, JsonSerializer.Serialize(new { modules, theorems, constants, interfaces,
                 closures = closures.Select(name => new { name }), namespaces, replayTargets }, AuditJson));
             Run([executable, request, result], leanPath: leanPath, environment: LeanEnvironment,
-                progress: replayTargets is null ? null : "Joint kernel replay of consumer proof and dependencies");
+                progress: replayTargets is null ? null :
+                    replayProgress ?? "Joint kernel replay of consumer proof and dependencies");
             CheckedAuditExecutable();
             var audited = JsonSerializer.Deserialize<AuditedOleans>(File.ReadAllText(result))
                 ?? throw new InvalidDataException("Missing theorem audit result");

@@ -129,6 +129,14 @@ partial class Program
                     "Batch certificates were not bound per request or a stale certificate survived.");
             var stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
                 .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+            var forgedChecks = stages.Where(stage => stage.GetProperty("stage").GetString() is
+                    "Kernel replay of consumer proof and dependencies" or "Profiled kernel replay of consumer modules")
+                .SelectMany(stage => File.ReadLines(Path.Combine(trace, stage.GetProperty("transcript").GetString()!)))
+                .Where(line => line.StartsWith('{')).Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+                .Count(record => record.TryGetProperty("module", out var module) &&
+                    module.GetString() == "Client.Forged" && record.TryGetProperty("error", out _));
+            if (!separate && forgedChecks != 1)
+                throw new InvalidOperationException("A shared rejected helper was replayed more than once.");
             var opens = stages.Where(stage => stage.GetProperty("stage").GetString() ==
                 "Opening certified Lean verification library").ToArray();
             if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")) &&

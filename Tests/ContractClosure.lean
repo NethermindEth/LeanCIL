@@ -71,6 +71,16 @@ run_cmd do
     let indexedSet := indexed.foldl (fun set name => set.insert name) ({} : NameSet)
     unless expectedSet.toArray.qsort Name.lt == indexedSet.toArray.qsort Name.lt do
       throwError "Indexed interface declarations differ from full environment traversal"
+  -- An explicitly reused imported module name must retain imported declarations too.
+  let imported ← importModules #[{ module := `Init.Prelude }] {}
+  let colliding := imported.setMainModule `Init.Prelude
+  let expected := colliding.constants.toList.filterMap fun (name, _) =>
+    if definingModule colliding name == `Init.Prelude then some name else none
+  let actual := interfaceDeclarations colliding #[`Init.Prelude]
+  let names (values : List Name) :=
+    values.foldl (fun set name => set.insert name) ({} : NameSet)
+  unless (names expected).toArray.qsort Name.lt == (names actual).toArray.qsort Name.lt do
+    throwError "Current module name collision omitted imported declarations"
   let shared := Expr.app (.const `first []) (.const `second [])
   let expression := Expr.proj `Container 0 (.app shared shared)
   unless expressionDependencies expression == [`Container, `first, `second] do

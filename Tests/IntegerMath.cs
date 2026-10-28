@@ -62,19 +62,6 @@ string Narrow(Type type, string value) => type == typeof(sbyte) ? $"(CIL.NarrowK
     type == typeof(short) ? $"(CIL.NarrowKind.signed16.extend {value})" :
     type == typeof(ushort) ? $"(CIL.NarrowKind.unsigned16.extend {value})" : value;
 int Width(Type type) => type == typeof(long) || type == typeof(ulong) || type == typeof(nint) || type == typeof(nuint) ? 64 : 32;
-string Balanced(IReadOnlyList<string> entries, bool proof)
-{
-    string Build(int start, int count)
-    {
-        if (count == 1) return entries[start];
-        var half = count / 2;
-        var left = Build(start, half);
-        var right = Build(start + half, count - half);
-        return proof ? $"⟨{left}, {right}⟩" : $"({left} ∧ {right})";
-    }
-    return Build(0, entries.Count);
-}
-
 // Compare all overloads against the runtime, including exceptional outcomes.
 foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Static).Where(m => !m.Name.StartsWith("Wrong", StringComparison.Ordinal)))
 {
@@ -84,29 +71,24 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var type = parameters[0].ParameterType;
     var values = new ulong[] { 0, 1, 2, 127, 128, 255, 32767, 32768, 65535, int.MaxValue, 1UL << 31, uint.MaxValue, long.MaxValue, 1UL << 63, ulong.MaxValue }
         .Select(x => Value(type, x)).Distinct().ToArray();
-    var claims = new List<string>();
-    var instances = new List<string>();
+    var boundaryCases = new List<string>();
     foreach (var x in values)
     foreach (var y in parameters.Length > 1 ? values : values.Take(1))
     foreach (var z in parameters.Length > 2 ? values : values.Take(1))
     {
         object[] inputs = parameters.Length switch { 1 => [x], 2 => [x, y], _ => [x, y, z] };
         string expected;
-        string instance;
         try
         {
             var result = method.Invoke(null, inputs)!;
-            expected = $".ok [{LeanValue(result)}]";
-            instance = $"wrapper_success {string.Join(" ", inputs.Select(Bits))} {Bits(result)} (by rfl)";
+            expected = $".ok {Bits(result)}";
         }
         catch (TargetInvocationException error) when (error.InnerException is OverflowException or ArgumentException)
         {
             var fault = error.InnerException is OverflowException ? "overflow" : "invalidBounds";
-            expected = $".error ⟨0, {parameters.Length}, .arithmetic .{fault}⟩";
-            instance = $"wrapper_fault {string.Join(" ", inputs.Select(Bits))} .{fault} (by rfl)";
+            expected = $".error .{fault}";
         }
-        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = {expected}");
-        instances.Add($"({instance})");
+        boundaryCases.Add($"⟨{string.Join(", ", inputs.Select(Bits))}, {expected}⟩");
     }
 
     var proof = Path.Combine(output, "BoundaryProof.lean");
@@ -131,22 +113,13 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var invocation = $"CIL.Safety.invoke Extracted.program 8 0 [{inputsLean}] Examples.empty";
     var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], [], 0⟩ [{stack}] Examples.empty = _\n";
     var instruction = $"(body := Extracted.method0) (op := .intrinsic (.scalar (.math .{operation} {width} {signed})) {argc})";
-    const int MaxBoundaryGroupSize = 16;
-    var groups = new List<string>();
-    string Grouped(int start, int count)
-    {
-        if (count > MaxBoundaryGroupSize)
-        {
-            var half = count / 2;
-            return $"⟨{Grouped(start, half)}, {Grouped(start + half, count - half)}⟩";
-        }
-        var name = $"boundaryGroup{groups.Count}";
-        groups.Add($"theorem {name} :\n" + Balanced(claims.GetRange(start, count), false) + " :=\n" +
-            Balanced(instances.GetRange(start, count), true) + "\n");
-        return name;
-    }
-    var correctness = Grouped(0, claims.Count);
     var argumentsLean = string.Join(" ", variables);
+    var caseArguments = string.Join(" ", variables.Select(variable => "test." + variable));
+    string ForCase(string expression)
+    {
+        foreach (var variable in variables) expression = expression.Replace(variable, "test." + variable);
+        return expression;
+    }
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nimport Tests.WrapperProofs\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\n" +
         $"theorem wrapper_success_full {binders} (r : CIL.W{resultWidth})\n" +
@@ -170,12 +143,48 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         $"    ({invocation}).map Prod.snd = .error ⟨0, {argc}, .arithmetic fault⟩ :=\n" +
         "  congrArg (fun result => result.map Prod.snd) " +
         $"(wrapper_fault_full {argumentsLean} fault evaluated)\n" +
-        string.Join("\n", groups) +
-        // Bounded groups retain the original balanced statement with fewer declarations.
-        "\ntheorem correctness :\n" + Balanced(claims, false) + " :=\n" +
-        correctness + "\n#print axioms correctness\nend ExampleProof\n");
+        "/-- One runtime comparison, including its normal result or arithmetic fault. -/\n" +
+        "structure BoundaryCase where\n" +
+        string.Join("\n", variables.Select(variable => $"  {variable} : CIL.W{stackWidth}")) + "\n" +
+        $"  expected : Except CIL.ArithmeticFault CIL.W{resultWidth}\n" +
+        "/-- Every input tuple and observed outcome from the compiled runtime fixture. -/\n" +
+        "def boundaryCases : List BoundaryCase := [\n" + string.Join(",\n", boundaryCases) + "]\n" +
+        "/-- The scalar evaluator produces exactly the observed result or fault. -/\n" +
+        "def boundaryMatches (test : BoundaryCase) : Bool :=\n" +
+        $"  match {ForCase(evaluation)}, test.expected with\n" +
+        $"  | .ok (.i{resultWidth} actual), .ok expected => {Narrow(method.ReturnType, "actual")} == expected\n" +
+        "  | .error actual, .error expected => actual == expected\n" +
+        "  | _, _ => false\n" +
+        "/-- A checked scalar outcome gives exactly the observed result or located fault. -/\n" +
+        "theorem boundaryMatches_correct (test : BoundaryCase) (checked : boundaryMatches test = true) :\n" +
+        $"  ({ForCase(invocation)}).map Prod.snd =\n" +
+        $"    (test.expected.map (fun r => [.scalar (.i{resultWidth} r)])).mapError\n" +
+        $"      (fun fault => ⟨0, {argc}, .arithmetic fault⟩) := by\n" +
+        "  unfold boundaryMatches at checked\n" +
+        "  split at checked\n" +
+        "  · rename_i actual expected evaluated outcome\n" +
+        "    have same := beq_iff_eq.mp checked\n" +
+        "    simpa only [outcome, Except.map, Except.mapError, same] using\n" +
+        $"      (wrapper_success {caseArguments} actual evaluated)\n" +
+        "  · rename_i actual expected evaluated outcome\n" +
+        "    have same := beq_iff_eq.mp checked\n" +
+        "    simpa only [outcome, Except.map, Except.mapError, same] using\n" +
+        $"      (wrapper_fault {caseArguments} actual evaluated)\n" +
+        "  · simp at checked\n" +
+        "#print axioms boundaryMatches_correct\n" +
+        "/-- The kernel checks all recorded runtime comparisons. -/\n" +
+        "theorem boundaryEvaluations : boundaryCases.all boundaryMatches = true := by decide +kernel\n" +
+        "#print axioms boundaryEvaluations\n" +
+        "/-- Every recorded input executes with its observed result, narrowing and located fault. -/\n" +
+        "theorem correctness : ∀ test ∈ boundaryCases,\n" +
+        $"  ({ForCase(invocation)}).map Prod.snd =\n" +
+        $"    (test.expected.map (fun r => [.scalar (.i{resultWidth} r)])).mapError\n" +
+        $"      (fun fault => ⟨0, {argc}, .arithmetic fault⟩) := by\n" +
+        "  intro test member\n" +
+        "  exact boundaryMatches_correct test (List.all_eq_true.mp boundaryEvaluations test member)\n" +
+        "#print axioms correctness\nend ExampleProof\n");
     var selector = $"IntegerMath::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
-    pending.Add((new GeneratedVerification(selector, proof, output), method.Name, claims.Count));
+    pending.Add((new GeneratedVerification(selector, proof, output), method.Name, boundaryCases.Count));
 }
 Flush();
 

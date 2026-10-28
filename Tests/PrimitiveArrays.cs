@@ -21,20 +21,25 @@ var elements = new (Type Type, string Lean, int Width)[]
     (typeof(nint), "nativeInt", 8), (typeof(nuint), "nativeUInt", 8),
     (typeof(bool), "boolean", 1), (typeof(char), "character", 2)
 };
-foreach (var (type, element, width) in elements)
+var accessors = elements.SelectMany(element => new[] { false, true }.Select(store =>
+    (element.Type, element.Lean, element.Width, Store: store,
+        Name: (store ? "Write" : "Read") + element.Type.Name,
+        Signature: $"{element.Type.FullName}[],System.Int32" + (store ? $",{element.Type.FullName}" : ""))))
+    .ToArray();
+ExtractBatch("extract", null, accessors.Select(accessor => new GeneratedExtraction(assembly,
+    $"PrimitiveArrays::{accessor.Name}({accessor.Signature})", Path.Combine(root, accessor.Name))));
+foreach (var accessorsByType in accessors.GroupBy(accessor => accessor.Type))
 {
+    var type = accessorsByType.Key;
     var values = Array.CreateInstance(type, 2);
     var value = type == typeof(nint) ? (object)(nint)1 : type == typeof(nuint) ? (nuint)1 :
         Convert.ChangeType(1, type);
     runtime.GetMethod("Write" + type.Name)!.Invoke(null, [values, 1, value]);
     var actual = runtime.GetMethod("Read" + type.Name)!.Invoke(null, [values, 1]);
     if (!Equals(actual, value)) throw new Exception("Runtime array mismatch: " + type);
-    foreach (var store in new[] { false, true })
+    foreach (var (_, element, width, store, name, _) in accessorsByType)
     {
-        var name = (store ? "Write" : "Read") + type.Name;
-        var signature = $"{type.FullName}[],System.Int32" + (store ? $",{type.FullName}" : "");
         var output = Path.Combine(root, name);
-        Run(["dotnet", ExtractorPath, "extract", assembly, $"PrimitiveArrays::{name}({signature})", output]);
         var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
         var scalar = width == 8 ? "i64" : "i32";
         var arguments = $".array ⟨.address ⟨0, 0⟩, 2, .{element}⟩, .scalar (.i32 1)" +
@@ -101,7 +106,7 @@ foreach (var (type, element, width) in elements)
         }
     }
 }
-foreach (var (name, signature, arguments, expected) in new[]
+var compositions = new (string Name, string Signature, string Arguments, string Expected)[]
 {
     ("Length", "System.Int32[]", ".array inputArray", "[.scalar (.i32 2)]"),
     ("ReadHelper", "System.Int32[],System.Int32", ".array inputArray, .scalar (.i32 1)",
@@ -113,10 +118,12 @@ foreach (var (name, signature, arguments, expected) in new[]
     ("Identity", "System.Int32[]", ".array inputArray", "[.array inputArray]"),
     ("ReadAlias", "System.Int32[],System.Int32,System.Int32",
         ".array inputArray, .scalar (.i32 1), .scalar (.i32 7)", "[.scalar (.i32 7)]")
-})
+};
+ExtractBatch("extract", null, compositions.Select(composition => new GeneratedExtraction(assembly,
+    $"PrimitiveArrays::{composition.Name}({composition.Signature})", Path.Combine(root, composition.Name))));
+foreach (var (name, _, arguments, expected) in compositions)
 {
     var output = Path.Combine(root, name);
-    Run(["dotnet", ExtractorPath, "extract", assembly, $"PrimitiveArrays::{name}({signature})", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var proof = Path.Combine(root, name + ".lean");
     File.WriteAllText(proof, source + $$"""
