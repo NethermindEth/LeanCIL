@@ -2018,6 +2018,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     {
                         // A sibling's undeclared constants must not make another proof replay successfully.
                         var closure = RequestClosure(index)!;
+                        // An unchanged dependency already rejected by isolated replay dooms this request too.
+                        if (failures.Keys.Any(closure.Contains)) continue;
                         var own = ReplayConsumerModules(session,
                             replayTargets.Where(closure.Contains).ToArray(), leanPath);
                         foreach (var (module, error) in own) failures.TryAdd(module, error);

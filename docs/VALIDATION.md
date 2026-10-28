@@ -1269,6 +1269,14 @@ Three full negative consumer requests on Windows took 9.68/9.87/9.82s before rem
 the duplicate trial and 8.40/8.27/8.36s afterward. Their joint attempts fell from six
 to three in total; all three isolated checks and the same forged-body rejection remained.
 Positive and refutation consumer cases retain their normal audits and failure classification.
+Within a fixed batch workspace, an isolated helper rejection also rejects later requests
+that import that helper. The verifier retains that failure instead of replaying another
+already-invalid request closure. Successful requests still receive their own checks, and
+no successful joint module result is reused across scopes. The existing eleven-request
+mixed batch checks every status, certificate and hidden-sibling rejection and requires one
+isolated rejection of its shared forged helper. On Windows this workload took 52.79s before
+and 43.36s after reuse: joint attempts fell from ten to nine and isolated checks from three
+to two, with three consumer builds unchanged.
 The test also rejects a changed bootstrap source snapshot. In one Windows trace, the two
 positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
 through the native auditor. Single-file verification now also shares replay imports for its
