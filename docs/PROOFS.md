@@ -11,6 +11,11 @@ avoiding repeated case analysis of branches already excluded by that opcode.
 Trailing-local proofs normalize maps over monadic binds before trying congruence, so shared
 computations need not be split into their possible results to prove the continuation unchanged.
 
+Relabeling proofs close unary and invalid-first-operand cases before inspecting a second
+operand. Their local `stack_cases => ...` helper tries the instruction's proof after each
+operand split, avoiding duplicate dispatcher-tail proofs for irrelevant stack shapes. The
+success and named-exception statements, interpreter definitions and allowed axioms are unchanged.
+
 Ordinary allocation-renaming instructions share the proof of `Memory.Renamed.instructionResult`.
 Reference-aware subtraction, comparisons and branches share `Memory.Renamed.stepReference` and
 `FixedStepFamily.reference`. These replace `stepSubtract`, `stepCompare`, `stepUnsignedBranch`

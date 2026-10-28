@@ -239,16 +239,22 @@ theorem mapError_ok {x : Except ε α} {f : ε → ε'} {a : α} (h : x.mapError
   | ok _ => cases h; rfl
 
 set_option hygiene false in
-/-- `explicit_intro`, then splits the top two stack entries by constructor and rewrites the
-    profile, for instructions that dispatch on their operand shapes. -/
-macro "stack_cases" : tactic => `(tactic| (
+/-- Splits operand shapes only while needed: unary and invalid-first-operand cases close
+    before examining the second operand. -/
+local macro "stack_cases" " => " close:tacticSeq : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
   dsimp only [CIL.Op.relabel] at h ⊢
   step_observers
-  rcases stack with _ | ⟨v1, _ | ⟨v2, rest⟩⟩ <;> (try cases v1) <;> (try cases v2)
-  all_goals dsimp only [CIL.Op.relabel] at h ⊢
-  all_goals (try rw [context.profile])))
+  rcases stack with _ | ⟨v1, rest⟩ <;> (try cases v1)
+  all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+  all_goals (try rw [context.profile])
+  all_goals first
+    | (($close); done)
+    | (rcases rest with _ | ⟨v2, rest⟩ <;> (try cases v2)
+       all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+       all_goals (try rw [context.profile])
+       all_goals ($close))))
 
 set_option hygiene false in
 /-- Closes a case that reached the shared tail of `step`, where `instruction` cannot succeed. -/
@@ -279,28 +285,28 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 -- Instructions with a dedicated case in `step`.
 
 theorem step_relabel_nativeBinary (operation : Op) : StepRelabel (.nativeBinary operation) := by
-  stack_cases
-  all_goals first
-    | fallback_vacuous
-    | (obtain ⟨⟨target, values⟩, found, h⟩ := except_bind_ok h
-       have native := nativeBinaryValues_relabel r operation pc q _ _ (context.next rfl) target
-         values (mapError_ok found)
-       simp only [native, Except.mapError, ok_bind_eq] at h ⊢
-       lockstep)
+  stack_cases =>
+    first
+      | fallback_vacuous
+      | (obtain ⟨⟨target, values⟩, found, h⟩ := except_bind_ok h
+         have native := nativeBinaryValues_relabel r operation pc q _ _ (context.next rfl) target
+           values (mapError_ok found)
+         simp only [native, Except.mapError, ok_bind_eq] at h ⊢
+         lockstep)
 
 theorem step_relabel_divide (signed remainder : Bool) : StepRelabel (.divide signed remainder) := by
-  stack_cases
-  all_goals first | fallback_vacuous | lockstep
+  stack_cases =>
+    first | fallback_vacuous | lockstep
 
 theorem step_relabel_checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool) :
     StepRelabel (.checkedArithmetic kind signed) := by
-  stack_cases
-  all_goals first | fallback_vacuous | lockstep
+  stack_cases =>
+    first | fallback_vacuous | lockstep
 
 theorem step_relabel_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
     StepRelabel (.checkedConvert width signed unsignedInput) := by
-  stack_cases
-  all_goals first | fallback_vacuous | lockstep
+  stack_cases =>
+    first | fallback_vacuous | lockstep
 
 theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
     StepRelabel (.arg index narrow) := by
@@ -329,8 +335,8 @@ theorem step_relabel_vectorLocalAddr (index : Nat) : StepRelabel (.vectorLocalAd
   lookup_lockstep
 
 theorem step_relabel_setVectorLocal (index : Nat) : StepRelabel (.setVectorLocal index) := by
-  stack_cases
-  all_goals first | fallback_vacuous | lookup_lockstep
+  stack_cases =>
+    first | fallback_vacuous | lookup_lockstep
 
 theorem step_relabel_localAddr (index : Nat) : StepRelabel (.localAddr index) := by
   plain_cases
@@ -338,8 +344,8 @@ theorem step_relabel_localAddr (index : Nat) : StepRelabel (.localAddr index) :=
 
 theorem step_relabel_setLocal (index : Nat) (narrow : Option NarrowKind) :
     StepRelabel (.setLocal index narrow) := by
-  stack_cases
-  all_goals first | fallback_vacuous | lookup_lockstep
+  stack_cases =>
+    first | fallback_vacuous | lookup_lockstep
 
 theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) := by
   plain_cases
@@ -441,145 +447,145 @@ elab "base_relabels" : tactic => withMainContext do
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_eq : StepRelabel .eq := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_eq
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_brzero (target : Nat) : StepRelabel (.brzero target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_brzero
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_brnonzero (target : Nat) : StepRelabel (.brnonzero target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_brnonzero
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_beq
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_bne (target : Nat) : StepRelabel (.bne target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_bne
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_sub : StepRelabel .sub := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_sub
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_ltu : StepRelabel .ltu := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_ltu
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_gtu : StepRelabel .gtu := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_gtu
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_bltu (target : Nat) : StepRelabel (.bltu target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_bltu
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_bgeu (target : Nat) : StepRelabel (.bgeu target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_bgeu
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_bgtu (target : Nat) : StepRelabel (.bgtu target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_bgtu
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_relabel (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
-         cases h
-         simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_bleu
 
@@ -589,15 +595,16 @@ theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
 theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   cases op
   case stackAlloc initLocals =>
-    stack_cases
-    all_goals first | fallback_vacuous | skip
-    all_goals cases ‹CIL.Value›
-    all_goals dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
-    all_goals try cases h
-    all_goals repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
-    all_goals cases h
-    all_goals simp only [FrameAction.relabel]
-    all_goals rw [context.next rfl]
+    stack_cases =>
+      first
+      | fallback_vacuous
+      | (cases ‹CIL.Value›
+         all_goals dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+         all_goals try cases h
+         all_goals repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+         all_goals cases h
+         all_goals simp only [FrameAction.relabel]
+         all_goals rw [context.next rfl])
   case nativeBinary operation => exact step_relabel_nativeBinary operation
   case divide signed remainder => exact step_relabel_divide signed remainder
   case checkedArithmetic kind signed => exact step_relabel_checkedArithmetic kind signed
@@ -839,29 +846,29 @@ macro "lookup_raise" : tactic => `(tactic| (
 -- Instructions with a dedicated case in `step`.
 
 theorem step_raise_nativeBinary (operation : Op) : StepRaise (.nativeBinary operation) := by
-  stack_cases
-  all_goals first
-    | fallback_raise_vacuous
-    | (rcases except_bind_error h with found | ⟨⟨target, values⟩, found, h⟩
-       · exact absurd found mapError_arithmetic_ne_thrown
-       · have native := nativeBinaryValues_relabel r operation pc q _ _ (context.next rfl) target
-           values (mapError_ok found)
-         simp only [native, Except.mapError, ok_bind_eq] at h ⊢
-         raise_lockstep)
+  stack_cases =>
+    first
+      | fallback_raise_vacuous
+      | (rcases except_bind_error h with found | ⟨⟨target, values⟩, found, h⟩
+         · exact absurd found mapError_arithmetic_ne_thrown
+         · have native := nativeBinaryValues_relabel r operation pc q _ _ (context.next rfl) target
+             values (mapError_ok found)
+           simp only [native, Except.mapError, ok_bind_eq] at h ⊢
+           raise_lockstep)
 
 theorem step_raise_divide (signed remainder : Bool) : StepRaise (.divide signed remainder) := by
-  stack_cases
-  all_goals first | fallback_raise_vacuous | raise_lockstep
+  stack_cases =>
+    first | fallback_raise_vacuous | raise_lockstep
 
 theorem step_raise_checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool) :
     StepRaise (.checkedArithmetic kind signed) := by
-  stack_cases
-  all_goals first | fallback_raise_vacuous | raise_lockstep
+  stack_cases =>
+    first | fallback_raise_vacuous | raise_lockstep
 
 theorem step_raise_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
     StepRaise (.checkedConvert width signed unsignedInput) := by
-  stack_cases
-  all_goals first | fallback_raise_vacuous | raise_lockstep
+  stack_cases =>
+    first | fallback_raise_vacuous | raise_lockstep
 
 theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := by
   plain_cases
@@ -934,121 +941,121 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_eq : StepRaise .eq := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_eq
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_brzero (target : Nat) : StepRaise (.brzero target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_brzero
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_brnonzero (target : Nat) : StepRaise (.brnonzero target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_brnonzero
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_beq (target : Nat) : StepRaise (.beq target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_beq
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_bne (target : Nat) : StepRaise (.bne target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_bne
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_sub : StepRaise .sub := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_sub
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_ltu : StepRaise .ltu := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_ltu
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_gtu : StepRaise .gtu := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_gtu
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_bltu (target : Nat) : StepRaise (.bltu target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_bltu
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_bgeu (target : Nat) : StepRaise (.bgeu target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_bgeu
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_bgtu (target : Nat) : StepRaise (.bgtu target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_bgtu
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_bleu (target : Nat) : StepRaise (.bleu target) := by
-  stack_cases
-  all_goals first
-      | exact fallback_raise (profile := expected.profile) _ rfl
-          (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
-      | raise_lockstep
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
 
 #print axioms step_raise_bleu
 
@@ -1082,12 +1089,12 @@ set_option maxHeartbeats 400000 in
 theorem step_raise (op : CIL.Op) : StepRaise op := by
   cases op
   case stackAlloc initLocals =>
-    stack_cases
-    all_goals first
-      | fallback_raise_vacuous
-      | (cases ‹CIL.Value› <;>
-          dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢ <;>
-          first | cases h | raise_lockstep)
+    stack_cases =>
+      first
+        | fallback_raise_vacuous
+        | (cases ‹CIL.Value› <;>
+            dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢ <;>
+            first | cases h | raise_lockstep)
   case nativeBinary operation => exact step_raise_nativeBinary operation
   case divide signed remainder => exact step_raise_divide signed remainder
   case checkedArithmetic kind signed => exact step_raise_checkedArithmetic kind signed
@@ -1103,8 +1110,8 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
     plain_cases
     lookup_raise
   case setVectorLocal | setLocal =>
-    stack_cases
-    all_goals first | fallback_raise_vacuous | lookup_raise
+    stack_cases =>
+      first | fallback_raise_vacuous | lookup_raise
   case call callee argc => exact step_raise_call callee argc
   case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
