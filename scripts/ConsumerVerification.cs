@@ -1951,6 +1951,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 !baseUnchanged || extractionDependent.Contains(module.Name) ||
                 (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name).ToArray();
             Dictionary<int, AuditedOleans>? combinedAudits = null;
+            bool jointReplayRejected = false;
             var premise = ImportPremise(extractions[proceeding[0]]);
             var premiseIdentity = JsonSerializer.Serialize(premise);
             var replayedNames = replayTargets.ToHashSet(StringComparer.Ordinal);
@@ -1994,7 +1995,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         });
                 }
                 // An ineligible or rejected joint set still needs individual failure attribution.
-                catch (InvalidOperationException) { }
+                catch (InvalidOperationException error)
+                {
+                    // Eligibility or metadata failures may still permit a plain joint replay.
+                    jointReplayRejected = error.Message.Contains("while replaying declaration", StringComparison.Ordinal);
+                }
             }
             HashSet<string>? RequestClosure(int index) => graph is null ? null
                 : ImportClosure(graph, [requestModules[index], "Extracted",
@@ -2003,7 +2008,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var failures = new Dictionary<string, string>();
             if (combinedAudits is null)
             {
-                if (members.Length == 1) failures = ReplayConsumerModules(session, replayTargets, leanPath);
+                if (members.Length == 1)
+                    // The failed fused audit already tried this exact joint target set.
+                    failures = jointReplayRejected
+                        ? ReplayConsumerModulesSeparately(session, replayTargets, leanPath, profile: false)
+                        : ReplayConsumerModules(session, replayTargets, leanPath);
                 else
                     foreach (int index in proceeding)
                     {

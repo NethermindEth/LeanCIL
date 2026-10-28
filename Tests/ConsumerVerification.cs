@@ -525,7 +525,11 @@ try
     File.WriteAllText(sharedPath, "import Client.Poison\n" + shared);
     // The selected theorem does not use the forged declaration, so axiom audit
     // alone cannot detect it. Require the kernel replay diagnostic specifically.
+    previous = Directory.GetFiles(testTrace, "*.jsonl").ToHashSet(StringComparer.Ordinal);
     Reject("while replaying declaration");
+    var failedReplay = NewReplayCommands(previous);
+    if (failedReplay.Length != 2 || failedReplay.Count(modules => modules.Contains("Client.Poison")) != 1)
+        throw new InvalidOperationException("A rejected joint kernel check repeated instead of attributing failures.");
 }
 finally
 {

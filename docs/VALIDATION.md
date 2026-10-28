@@ -1259,6 +1259,16 @@ Three alternating Windows measurements of a fixed mixed valid/forged/undeclared/
 target set took 3.36/3.04/3.03s through the frontend and 2.17/2.14/2.04s natively:
 about 0.9–1.2s less per fallback. This measures fallback startup and replay, not a full
 consumer-suite speedup; required independent kernel checks still run.
+For a single consumer request, a fused audit that reports a kernel declaration rejection
+goes directly to isolated replay instead of retrying the identical joint target set.
+Unrecognized diagnostics and metadata/eligibility failures keep the ordinary joint retry;
+a changed diagnostic can therefore only lose this optimization. Multi-request closures
+still receive their own replay attempts. The existing unused-forged-helper regression
+checks the two required stages without adding another verification request.
+Three full negative consumer requests on Windows took 9.68/9.87/9.82s before removing
+the duplicate trial and 8.40/8.27/8.36s afterward. Their joint attempts fell from six
+to three in total; all three isolated checks and the same forged-body rejection remained.
+Positive and refutation consumer cases retain their normal audits and failure classification.
 The test also rejects a changed bootstrap source snapshot. In one Windows trace, the two
 positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
 through the native auditor. Single-file verification now also shares replay imports for its
