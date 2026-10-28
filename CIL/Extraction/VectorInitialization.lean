@@ -5,9 +5,10 @@ import CIL.Extraction.Generics
 
 `initobj` (0xFE15) zeroes its target, so its emitted `initAggregate` must zero exactly the
 type's width. `VectorInitializationsValid` checks that an `initAggregate` emitted for a live
-`initobj` of a struct, a `Vector128/256/512<ulong>` or a primitive has the right width, and
-forbids any other emission for an `initobj` of a vector type. Aggregate widths themselves are
-bound by the layout checks.
+`initobj` of a struct, an admitted integer vector or a primitive has the right width.
+Vector object loads, stores, copies and sizes are also bound to their exact type token and
+width; these operations use the existing initialization-preserving vector snapshots.
+Aggregate widths themselves are bound by the layout checks.
 -/
 
 namespace CIL.Extraction
@@ -18,30 +19,47 @@ private def vectorFamily : TypeExpr → Bool
       "System.Runtime.Intrinsics.Vector256`1", "System.Runtime.Intrinsics.Vector512`1"]
   | _ => false
 
-/-- The byte width of an exactly identified `Vector128/256/512<ulong>`. -/
-private def vectorWidth : TypeExpr → Option Nat
-  | .apply (.constructor scope name) (.atom elementScope "System.UInt64") =>
-    if scope != intrinsicsScope || elementScope != runtimeScope then none
-    else if name == "System.Runtime.Intrinsics.Vector128`1" then some 16
-    else if name == "System.Runtime.Intrinsics.Vector256`1" then some 32
-    else if name == "System.Runtime.Intrinsics.Vector512`1" then some 64
-    else none
-  | _ => none
-
 /-- The byte width of a primitive integer, `bool` or `char` type. -/
 private def primitiveWidth (type : TypeExpr) : Option Nat := do
   let .field kind ← typeStorage [] type | none
   primitiveFieldWidth kind
 
+/-- Whether an emitted memory operation transfers a vector snapshot. -/
+private def vectorMemory : Op → Bool
+  | .memory .load128 | .memory .load256 | .memory .load512
+  | .memory .store128 | .memory .store256 | .memory .store512 => true
+  | _ => false
+
+/-- Vector object operations preserve the exact token's storage width and opcode semantics. -/
+def vectorObjectMatches (raw : RawInstruction) (emitted : Op) : Bool :=
+  match raw.operand with
+  | .type type =>
+    if !vectorFamily type || raw.opcode ∉ [0x70, 0x71, 0x81, 0xfe15, 0xfe1c] then
+      if raw.opcode ∈ [0x71, 0x81] && vectorMemory emitted then false else
+      match raw.opcode, type, emitted with
+      | 0x70, .aggregate .., _ => true
+      | 0x70, _, .copyObject width => primitiveWidth type == some width
+      | _, _, _ => true
+    else match integerVectorWidth type with
+      | none => false
+      | some width => match raw.opcode, emitted with
+        | 0x70, .copyObject bytes | 0xfe15, .initAggregate bytes => bytes == width
+        | 0xfe1c, .const32 bits => bits.toNat == width
+        | 0x71, .memory .load128 | 0x81, .memory .store128 => width == 16
+        | 0x71, .memory .load256 | 0x81, .memory .store256 => width == 32
+        | 0x71, .memory .load512 | 0x81, .memory .store512 => width == 64
+        | _, _ => false
+  | _ => raw.opcode ∉ [0x70, 0x71, 0x81, 0xfe15, 0xfe1c]
+
 /-- An emitted `initAggregate` comes from an `initobj` of a struct, whose width the layout
     check binds, or of a vector or primitive of exactly that width; no other emission may
     come from an `initobj` of a vector type. -/
 def vectorInitializationMatches (raw : RawInstruction) (emitted : Op) : Bool :=
-  match emitted with
+  vectorObjectMatches raw emitted && match emitted with
   | .initAggregate width =>
     raw.opcode == 65045 && match raw.operand with
     | .type (.aggregate _ _) => true
-    | .type type => (vectorWidth type).orElse (fun _ => primitiveWidth type) == some width
+    | .type type => (integerVectorWidth type).orElse (fun _ => primitiveWidth type) == some width
     | _ => false
   | _ => !(raw.opcode == 65045 && match raw.operand with
     | .type type => vectorFamily type

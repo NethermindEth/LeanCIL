@@ -20,6 +20,18 @@ namespace CIL.Extraction
 def intrinsicsScope : String :=
   "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
+/-- Byte width of an admitted integer vector, bound to both exact runtime type identities. -/
+def integerVectorWidth : TypeExpr → Option Nat
+  | .apply (.constructor scope name) (.atom elementScope element) =>
+    if scope != intrinsicsScope || elementScope != runtimeScope ||
+        element ∉ ["System.Byte", "System.Int32", "System.UInt32", "System.Int64",
+          "System.UInt64"] then none
+    else if name == "System.Runtime.Intrinsics.Vector128`1" then some 16
+    else if name == "System.Runtime.Intrinsics.Vector256`1" then some 32
+    else if name == "System.Runtime.Intrinsics.Vector512`1" then some 64
+    else none
+  | _ => none
+
 /-- The field type of a primitive runtime type, by full name. -/
 private def primitiveField : String → Option FieldType
   | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8

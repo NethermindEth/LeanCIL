@@ -60,7 +60,7 @@ internal sealed class LayoutEvidence
             if (index < 0) throw new InvalidDataException("Missing raw aggregate metadata: " + type.FullName);
             return $".aggregate {index}";
         }
-        if (MetadataValidation.VectorWidth(type) is int width) return width == 16 ? ".vector128" : ".vector256";
+        if (MetadataValidation.VectorFieldWidth(type) is int width) return width == 16 ? ".vector128" : ".vector256";
         return EnumTypes.Storage(type).FullName switch
         {
             "System.SByte" => ".signed8", "System.Byte" => ".unsigned8", "System.Boolean" => ".boolean",

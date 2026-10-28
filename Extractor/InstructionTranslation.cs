@@ -157,7 +157,7 @@ internal static class InstructionTranslation
             Code.Switch => ".switch [" +
                 string.Join(", ", ((Instruction[])i.Operand).Select(instructions.Position)) + "]",
             Code.Sizeof => $".const32 {TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)}",
-            Code.Cpobj => $".copyObject {CopyWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)}",
+            Code.Cpobj => $".copyObject {TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)}",
             Code.Ldind_I1 => ".loadScalar 1 true", Code.Ldind_U1 => ".loadScalar 1",
             Code.Ldind_I2 => ".loadScalar 2 true", Code.Ldind_U2 => ".loadScalar 2",
             Code.Ldind_I4 or Code.Ldind_U4 => ".loadScalar 4",
@@ -178,15 +178,12 @@ internal static class InstructionTranslation
                 $".initAggregate {Layout((TypeReference)i.Operand)}",
             Code.Stobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) =>
                 $".storeAggregate {Layout((TypeReference)i.Operand)}",
-            Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .load128",
-            Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .load256",
-            Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".memory .load512",
-            Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".memory .store512",
-            Code.Initobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".initAggregate 16",
-            Code.Initobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".initAggregate 32",
-            Code.Initobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".initAggregate 64",
-            Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .store128",
-            Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .store256",
+            Code.Ldobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
+                $".memory .load{width * 8}",
+            Code.Stobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
+                $".memory .store{width * 8}",
+            Code.Initobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
+                $".initAggregate {width}",
             Code.Ldobj => $".loadScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}" +
                 (EnumTypes.Storage((TypeReference)i.Operand).FullName is "System.SByte" or "System.Int16" ? " true" : ""),
             Code.Stobj => $".storeScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}",
@@ -231,14 +228,5 @@ internal static class InstructionTranslation
     static int TypeWidth(TypeReference type, ModuleDefinition module, string architecture,
         MetadataValidation.LayoutContext? layouts) => MetadataValidation.IsAggregate(type, module)
         ? layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)
-        : MetadataValidation.PrimitiveWidth(type);
-
-    static int CopyWidth(TypeReference type, ModuleDefinition module, string architecture,
-        MetadataValidation.LayoutContext? layouts) => type.FullName switch
-    {
-        "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
-        "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
-        "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => 64,
-        _ => TypeWidth(type, module, architecture, layouts)
-    };
+        : MetadataValidation.IntegerVectorWidth(type) ?? MetadataValidation.PrimitiveWidth(type);
 }

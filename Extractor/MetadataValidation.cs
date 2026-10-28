@@ -42,12 +42,27 @@ internal static class MetadataValidation
         _ => throw new InvalidDataException($"Unsupported field type: {type.FullName}")
     };
 
-    internal static int? VectorWidth(TypeReference type) => type is GenericInstanceType ? type.FullName switch
+    internal static int? IntegerVectorWidth(TypeReference type)
     {
-        "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
-        "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
-        _ => null
-    } : null;
+        if (type is not GenericInstanceType { GenericArguments.Count: 1 } vector ||
+            !RuntimeModels.ExactScope(vector.ElementType.Scope, "System.Runtime.Intrinsics") ||
+            !RuntimeModels.ExactScope(vector.GenericArguments[0].Scope, "System.Runtime") ||
+            vector.GenericArguments[0].FullName is not ("System.Byte" or "System.Int32" or "System.UInt32" or
+                "System.Int64" or "System.UInt64")) return null;
+        return vector.ElementType.FullName switch
+        {
+            "System.Runtime.Intrinsics.Vector128`1" => 16,
+            "System.Runtime.Intrinsics.Vector256`1" => 32,
+            "System.Runtime.Intrinsics.Vector512`1" => 64,
+            _ => null
+        };
+    }
+
+    // Vector512 field alignment is not established by the admitted aggregate layout model.
+    internal static int? VectorFieldWidth(TypeReference type) => IntegerVectorWidth(type) switch
+    {
+        16 => 16, 32 => 32, _ => null
+    };
 
     internal sealed record AggregateInfo(int Size, int Alignment, IReadOnlyDictionary<string, int> Offsets);
 
@@ -118,7 +133,7 @@ internal static class MetadataValidation
 
         internal int Size(TypeReference reference) => AggregateLayout(reference).Size;
         internal int FieldSize(TypeReference type) => IsAggregate(type, module)
-            ? Size(type) : VectorWidth(type) ?? PrimitiveWidth(type);
+            ? Size(type) : VectorFieldWidth(type) ?? PrimitiveWidth(type);
         internal int FieldOffset(TypeReference owner, FieldDefinition field) =>
             AggregateLayout(owner).Offsets[field.FullName];
     }
@@ -127,7 +142,7 @@ internal static class MetadataValidation
         AggregateLayout(reference, module, architecture).Size;
 
     internal static int FieldSize(TypeReference type, ModuleDefinition module, string architecture = "scalar") =>
-        IsAggregate(type, module) ? Layout(type, module, architecture) : VectorWidth(type) ?? PrimitiveWidth(type);
+        IsAggregate(type, module) ? Layout(type, module, architecture) : VectorFieldWidth(type) ?? PrimitiveWidth(type);
 
     internal static int FieldOffset(TypeReference owner, FieldDefinition field, ModuleDefinition module, string architecture = "scalar") =>
         AggregateLayout(owner, module, architecture).Offsets[field.FullName];
@@ -165,7 +180,7 @@ internal static class MetadataValidation
         var alignment = 1;
         foreach (var field in type.Fields.Where(f => !f.IsStatic))
         {
-            int? vectorWidth = VectorWidth(field.FieldType);
+            int? vectorWidth = VectorFieldWidth(field.FieldType);
             if (field.FieldType is TypeSpecification && vectorWidth is null)
                 throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
             var nested = IsAggregate(field.FieldType, module)

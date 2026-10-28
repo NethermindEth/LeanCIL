@@ -289,6 +289,7 @@ private def primitiveSize (type : TypeExpr) : Option Nat :=
   | some (.field kind) => primitiveFieldWidth kind
   | some .vector128 => some 16
   | some .vector256 => some 32
+  | some .vector512 => some 64
   | _ => none
 
 /-- Exactly `call Unsafe.SizeOf<T>()`. -/

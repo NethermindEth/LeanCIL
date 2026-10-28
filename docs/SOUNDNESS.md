@@ -216,6 +216,18 @@ Ordinary reference-free accesses use alignment 1, for the modeled CoreCLR x64/AR
 
 Primitive indirect loads/stores and integer `ldobj`/`stobj` use those same access checks and one-, two-, four- or eight-byte storage. They accept managed references, not numeric addresses or aggregate snapshots. Narrow stores truncate; loads extend according to the opcode or validated type token. Integer `initobj` zeroes and initializes exactly that storage width. `sizeof` emits a constant from validated integer widths or validated aggregate layout metadata, under the same layout correspondence assumption as aggregate memory operations; it is not a model of arbitrary runtime type layout.
 
+Integer `Vector128<T>`, `Vector256<T>` and `Vector512<T>` storage accepts the already
+admitted `byte`, `int`, `uint`, `long` and `ulong` elements. `sizeof`, `initobj`, `ldobj`,
+`stobj` and `cpobj` use the exact 16-, 32- or 64-byte type width, independently of ISA
+availability. The extraction certificate checks the raw object opcode and exact runtime
+type identities against the emitted vector operation and width. Loads, stores and copies
+retain byte initialization masks through the existing checked snapshot operations; the
+guards against observing unspecified SIMD lanes remain in force. Fields admit the same
+integer elements at 128 and 256 bits using the existing architecture-dependent layout
+rules. Vector512 fields remain unsupported because their aggregate alignment is not
+established by this layout model. These storage forms do not admit floating-point vector
+operations or additional vector element types.
+
 `switch` uses unsigned `i32` indexing, with out-of-range indices falling through. Reachability includes every target and the fallthrough, conservatively even for a constant index. Reachable backedges are validated by the same fixed-point feature and stack analyses as other branches; switch-only dependencies and unsupported arms receive the normal validation. These rules follow the [CLI switch operation](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.switch); they do not establish loop termination or admit exception-region transfers.
 
 A null managed reference is a distinct value, not address zero. `Unsafe.NullRef<T>` produces it and `Unsafe.IsNullRef<T>` compares against it without any access check, as .NET compares the pointer. Every checked memory instruction faults with `nullDereference` on it, before forming a field or lane offset; this models the `NullReferenceException` that the runtime raises for an access through a null byref, under the same runtime correspondence assumption as other faults. The fault is not `thrown`, so an `OutcomeContract` cannot name it as raised; methods with handlers remain rejected, so nothing observes it.
