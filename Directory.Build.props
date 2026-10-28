@@ -9,7 +9,7 @@
     <RepositoryUrl>https://github.com/NethermindEth/LeanCIL</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/NethermindEth/LeanCIL</PackageProjectUrl>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseExpression>Apache-2.0 OR MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(FileBasedProgram)' != 'true'">

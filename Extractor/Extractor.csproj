@@ -18,6 +18,8 @@
     <PackageReference Include="Mono.Cecil" />
     <None Include="../README.md" Pack="true" PackagePath="/" />
     <None Include="../LICENSE" Pack="true" PackagePath="/" />
+    <None Include="../LICENSE-APACHE" Pack="true" PackagePath="/" />
+    <None Include="../LICENSE-MIT" Pack="true" PackagePath="/" />
     <Compile Include="../scripts/Verification.cs" Link="Verification.cs" />
     <Compile Include="../scripts/ConsumerVerification.cs" Link="ConsumerVerification.cs" />
     <Compile Include="../scripts/ProofWorkspace.cs" Link="ProofWorkspace.cs" />

@@ -1,5 +1,7 @@
 name = "leancil"
 version = "0.1.0"
+license = "Apache-2.0 OR MIT"
+licenseFiles = ["LICENSE", "LICENSE-APACHE", "LICENSE-MIT"]
 defaultTargets = ["CIL"]
 
 [[lean_lib]]
