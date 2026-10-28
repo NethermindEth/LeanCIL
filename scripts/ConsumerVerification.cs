@@ -1987,19 +1987,22 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 "Theorem dependency is outside its request's import closure:", StringComparison.Ordinal);
             if (replayTargets.Length > 0 && fullImportAudit is null &&
                 (members.Length == 1 || completeConsumerReplay) &&
-                proceeding.All(index => requests[index].ExportAudit is null &&
+                proceeding.All(index => (requests[index].ExportAudit is null || members.Length == 1) &&
                     JsonSerializer.Serialize(ImportPremise(extractions[index])) == premiseIdentity) &&
                 Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
             {
                 try
                 {
-                    var proofAudits = proceeding.Select(ScopedProof).ToArray();
+                    var exportAudit = members.Length == 1 ? requests[proceeding[0]].ExportAudit : null;
+                    var proofAudits = exportAudit?.Theorems ?? proceeding.Select(ScopedProof).ToArray();
                     var audited = AuditOleans(leanPath,
                         proceeding.SelectMany(AuditModules).Distinct(StringComparer.Ordinal).ToArray(),
                         [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")],
-                        premise, replayTargets: replayTargets);
+                        premise, closures: exportAudit?.Closures, replayTargets: replayTargets);
                     jointReplaySucceeded = true;
-                    combinedAudits = proceeding.Select((index, position) => (index, position))
+                    combinedAudits = exportAudit is not null
+                        ? new Dictionary<int, AuditedOleans> { [proceeding[0]] = audited }
+                        : proceeding.Select((index, position) => (index, position))
                         // A conservative owner scope may omit a transitive toolchain import.
                         // Hidden target dependencies are definitive failures, never audit-only fallbacks.
                         .Where(item => RetainScopedAudit(audited.theorems[item.position].error))
