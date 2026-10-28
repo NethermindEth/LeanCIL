@@ -1269,6 +1269,11 @@ Three full negative consumer requests on Windows took 9.68/9.87/9.82s before rem
 the duplicate trial and 8.40/8.27/8.36s afterward. Their joint attempts fell from six
 to three in total; all three isolated checks and the same forged-body rejection remained.
 Positive and refutation consumer cases retain their normal audits and failure classification.
+The joint replay fixture asserts the rejected joint stage and subsequent isolated attribution
+in one invocation for conflicting names, untargeted imports and forged definitions. Both
+bootstrap and native modes remain covered. This removes six duplicate checker processes;
+the six retained joint stages took 9.06s together on Windows, indicating the avoided work
+without treating that estimate as a whole-fixture timing comparison.
 Within a fixed batch workspace, an isolated helper rejection also rejects later requests
 that import that helper. The verifier retains that failure instead of replaying another
 already-invalid request closure. Successful requests still receive their own checks, and
