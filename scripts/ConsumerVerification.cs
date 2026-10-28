@@ -1728,6 +1728,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 acceptedInterfaceArtifacts = InterfaceArtifacts();
                 string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
                 Stage(members, "kernel replay");
+                RequireInterfaceArtifacts();
                 string InterfaceArtifact(string module) =>
                     Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
                 if (!TryReplayContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
