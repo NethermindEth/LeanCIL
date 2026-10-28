@@ -8,6 +8,7 @@ Local gains are not automatically whole-job CI gains; inclusive stage times can 
 | Shared Lean installation and compression | [Toolchain distribution](ToolchainDistribution.md) |
 | Authenticated certified-library transport | [Library distribution](LibraryDistribution.md) |
 | Consumer harness compilation | [Consumer harness](ConsumerHarness.md) |
+| Export closure imports and repeated fixture work | [Export audits and fixtures](ExportAuditAndFixtures.md) |
 | Current-file declaration lookup | [Import declarations](ImportDeclarations.md) |
 | Feature-flow mutation checks | [Evidence harness reuse](EvidenceHarnessReuse.md) |
 | Long excluded-branch certificates | [Excluded-branch scaling](ExcludedBranchScaling.md) |
