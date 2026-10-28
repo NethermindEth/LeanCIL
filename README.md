@@ -141,6 +141,7 @@ dependency scope. Duplicate declarations and audits requiring source locations o
 retain the separate audit path; theorem and artifact checks still apply.
 After a merge, CI can reuse the same-repository PR head's certified library when its complete Git
 tree matches the push commit. Source binding, artifact authentication and kernel replay still apply.
+Main republishes the validated library under its own run so later PRs can reuse it too.
 
 Standalone verification directly audits the generated translation theorem, as consumer verification
 does, avoiding a separate wrapper compilation while retaining exact-type checks and kernel replay.

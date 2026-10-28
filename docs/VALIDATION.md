@@ -336,6 +336,11 @@ CI prepares the certified library once per workflow attempt and passes its immut
 
 `dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` requires an empty or absent destination and publishes a freshly built library through a staging directory. Explicit reuse uses `--reuse <trusted-manifest-sha256>`; obtain this digest independently from a trusted producer, never by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing the destination. Rebuilding an existing library requires a separate output directory. `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests, missing producer digests, and preservation of unrelated destination files.
 
+Main push runs publish their validated library even after exact reuse. This keeps the main run
+eligible to donate to later PRs without following a chain of earlier runs. Suite jobs prefer
+the current run's artifact when it uploaded one; PR runs that reuse a donor still consume that
+donor directly. Publication follows the existing source binding and independent kernel replay.
+
 When only Lean sources changed, `--incremental <donor-directory> <trusted-manifest-sha256>`
 authenticates every donor file before reusing its Lake build traces in a private copy. The runtime,
 compiler, kernel checker and build configuration must match. Changed and removed modules lose their
