@@ -112,7 +112,8 @@ Boundary("ByteOffset", "end_pointer_difference",
 Boundary("ByteOffset", "cross_allocation_unsupported",
     "[.reference (.address ⟨0, 5⟩), .reference (.address ⟨1, 2⟩)]",
     ".error ⟨0, 2, .unsupported \"Cross-allocation pointer arithmetic\"⟩",
-    "{ memory with allocations := fun _ => some ⟨.callerStack, ⟨32, 1, []⟩, true, [32]⟩ }");
+    "{ memory with nextIdentity := 2, allocations := fun identity => if identity < 2 then " +
+    "some ⟨.callerStack, ⟨32, 1, []⟩, true, [32]⟩ else none }");
 Boundary("ByteOffset", "expired_difference",
     "[.reference (.address ⟨0, 5⟩), .reference (.address ⟨0, 2⟩)]",
     ".error ⟨0, 2, .memory .expiredLifetime (.address ⟨0, 2⟩) 0⟩", "CIL.Safety.expire memory 0");
@@ -155,7 +156,9 @@ foreach (var (name, before, after) in new[]
     ("result", "returnType := .atom Extraction.runtimeScope \"System.IntPtr\"",
         "returnType := .atom Extraction.runtimeScope \"System.UIntPtr\""),
     ("generic", "typeArguments := [.atom Extraction.runtimeScope \"System.Byte\"]",
-        "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Byte\")]")
+        "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Byte\") ]"),
+    ("array-storage", ".atom Extraction.runtimeScope \"System.Byte\"",
+        ".array (.atom Extraction.runtimeScope \"System.Byte\")")
 })
 {
     if (!byteOffsetSource.Contains(before, StringComparison.Ordinal))

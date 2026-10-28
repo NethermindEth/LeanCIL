@@ -27,6 +27,13 @@ private def admittedArgument (layouts : List RawLayout) : List TypeExpr → Bool
     | some _ => true
   | _ => false
 
+/-- Reference helpers use supported stored values, excluding array and span descriptors. -/
+private def admittedReferenceArgument (layouts : List RawLayout) : List TypeExpr → Bool
+  | [type] => match typeStorage layouts type with
+    | some (.field _) | some .vector128 | some .vector256 | some .vector512 => true
+    | _ => false
+  | _ => false
+
 /-- `helper` when the call has its exact target and an admitted type argument. -/
 private def bound (layouts : List RawLayout) (site : CallSite) (signature : String)
     (helper : UnsafeHelper) : Option UnsafeHelper :=
@@ -66,7 +73,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
       if unsafeReferenceRequired instruction emitted then
         match unsafeReferenceHelper instruction, instruction.operand with
         | some helper, .call site =>
-          admittedArgument layouts site.typeArguments && helper.matches emitted
+          admittedReferenceArgument layouts site.typeArguments && helper.matches emitted
         | _, _ => false
       else if instruction.opcode == 20 && instruction.operand == .none &&
           emittedUnsafeHelper emitted == some .nullRef then true
