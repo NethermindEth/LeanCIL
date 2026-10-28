@@ -1,5 +1,23 @@
 # Evidence harness reuse
 
+## Consistent Release builds
+
+The suite runner builds file-app fixtures in Release with its analyzer properties. Nested
+file-app runs now use those same options instead of implicitly selecting Debug and compiling
+a second output. They still perform the normal incremental build, so changed sources rebuild;
+only explicitly prepared fixtures use `--no-build`. Explicit configuration options remain
+unchanged, and authenticated shared fixtures retain their source and output validation.
+
+A Windows probe including the real `Verification.cs`, prebuilt in Release, took 1.77 s with
+the previous implicit Debug run and 1.10 s with the matching Release run. The latter reused
+the existing Release assembly and emitted no compilation warnings; the former compiled a
+separate Debug assembly. This measures one nested launch, not a whole-suite speedup.
+`BuildReuse.cs` checks nested Release execution, argument forwarding, source mutation rebuilds
+and explicit Debug overrides. `PreparedFixtures.cs` retains authenticated-output and
+source-invalidation coverage.
+
+## Generated-batch controls
+
 The generated-batch failure controls now live in `RejectedEvidenceTests.cs`, alongside the
 rejection-harness controls. They reuse its otherwise-valid theorem instead of checking a full
 generic extraction twice. A valid first case still cannot hide an invalid second case. The

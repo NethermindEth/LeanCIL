@@ -130,9 +130,13 @@ partial class Program : IDisposable
         var options = command[4..(separator < 0 ? command.Length : separator)];
         // Only the repository's standard Release build options match the producer.
         if (options.Length != 0 && !options.SequenceEqual(new[] { "-c", "Release", "--no-build",
+                "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" }) &&
+            !options.SequenceEqual(new[] { "-c", "Release",
                 "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true" })) return command;
-        return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd),
-            separator < 0 ? [] : command[(separator + 1)..]) ?? command;
+        var arguments = separator < 0 ? [] : command[(separator + 1)..];
+        // Nested fixtures share the parent's Release configuration but still rebuild changed sources.
+        return PreparedFixtureCommand(Path.GetFullPath(command[3], cwd), arguments) ??
+            (options.Length == 0 ? FixtureCommand(command[3], arguments, prepared: false) : command);
     }
 #endif
 
@@ -141,7 +145,7 @@ partial class Program : IDisposable
         string[] buildArguments = prepared
             ? ["-c", "Release", "--no-build", "-p:EnforceCodeStyleInBuild=true",
                 "-p:GenerateDocumentationFile=true"]
-            : [];
+            : ["-c", "Release", "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"];
         return ["dotnet", "run", "--file", script, .. buildArguments, "--", .. arguments];
     }
 
