@@ -49,7 +49,8 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
       (memoryInstruction operation stack n) := by
   unfold CIL.Safety.memoryInstruction
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
-    same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement, same.arrayValidate, same.arrayElement]
+    same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
+    same.arrayValidate, same.arrayElement]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
