@@ -1,4 +1,5 @@
 import CIL.Extraction.Features
+import CIL.Extraction.SpanCalls
 
 set_option maxRecDepth 4096
 
@@ -40,6 +41,37 @@ theorem primitive_span_widths :
     spanStorage (span runtime "System.Char") = some (.span 2 false) ∧
     spanStorage (span runtime "System.Boolean") = some (.span 1 false) := by decide
 #print axioms primitive_span_widths
+
+/-- A closed int32 array extension call with its exact defining assembly. -/
+private def arraySpanCall : CallSite := {
+  declaringType := .atom spanMemoryScope "System.MemoryExtensions"
+  name := "AsSpan"
+  target := .external (spanMemoryScope ++
+    "::System.Span`1<!!0> System.MemoryExtensions::AsSpan<System.Int32>(!!0[],System.Int32)")
+  typeArguments := [intType], parameterCount := 2, hasThis := false, returnsValue := true
+  returnType := .apply (.constructor runtime "System.Span`1") intType
+  parameterTypes := [.array intType, intType] }
+
+/-- Array conversion certificates bind element identity, range arity and all call metadata. -/
+theorem exact_array_span_call :
+    spanCallMatches (i 40 (.call arraySpanCall))
+      (.memory (.arraySpan .signed32 true .fromStart)) = true ∧
+    spanCallMatches (i 40 (.call arraySpanCall))
+      (.memory (.arraySpan .unsigned32 true .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call arraySpanCall))
+      (.memory (.arraySpan .signed32 false .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call arraySpanCall))
+      (.memory (.arraySpan .signed32 true .whole)) = false ∧
+    spanCallMatches (i 115 (.call arraySpanCall))
+      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call { arraySpanCall with hasThis := true }))
+      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call { arraySpanCall with
+      declaringType := .atom runtime "System.MemoryExtensions" }))
+      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call { arraySpanCall with parameterTypes := [intType, intType] }))
+      (.memory (.arraySpan .signed32 true .fromStart)) = false := by decide
+#print axioms exact_array_span_call
 
 -- 0: ldarg.0; 1: stloc.0; 2: ldloca.s 0; 3: ldarg.1; 4: get_Item; 5: ldind.u4; 6: ret
 private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 getItem, i 74, i 42]

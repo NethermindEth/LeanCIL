@@ -113,6 +113,15 @@ def unsafeAdd (sizeBytes : Nat) (offset : Int) : Address → Option Address
     unsafeAdd size (offset : Int) (.byte base) = some (.byte (base + size * offset)) := by
   simp [unsafeAdd, ← Int.natCast_mul, ← Int.natCast_add]
 
+/-- The integer arguments of an array-to-span conversion. -/
+inductive ArraySpanRange where
+  | whole | fromStart | counted
+  deriving DecidableEq, Repr
+
+/-- The array plus any start and length arguments. -/
+def ArraySpanRange.argumentCount : ArraySpanRange → Nat
+  | .whole => 1 | .fromStart => 2 | .counted => 3
+
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
@@ -132,6 +141,8 @@ inductive MemoryOp where
   /-- Primitive spans over supplied storage; these operations never grant memory authority. -/
   | spanFromReference (width : Nat) (writable : Bool)
   | spanSlice (explicitLength : Bool) | spanReadOnly
+  /-- A span view over supplied primitive array storage, without allocation or copying. -/
+  | arraySpan (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   /-- Integer operations over supplied array storage; allocation is not modelled. -/
   | arrayLength | arrayLoad (width : Nat) (signed : Bool) | arrayStore (width : Nat)
   /-- A checked element address retains allocation provenance without granting authority. -/
@@ -145,6 +156,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2
+  | .arraySpan _ _ range => range.argumentCount
   | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayStore _ => 3

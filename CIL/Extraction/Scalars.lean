@@ -1,5 +1,6 @@
 import CIL.Extraction.Features
 import CIL.Extraction.UnsafeReferences
+import CIL.Extraction.SpanCalls
 
 /-!
 # Scalar flow
@@ -676,6 +677,7 @@ private def checkScalarSite (raw : RawMethod)
   | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       spanCreateMatches instruction emitted &&
+      spanCallMatches instruction emitted &&
       readOnlySiteMatches raw pc instruction emitted &&
       scalarEmissionMatches role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||

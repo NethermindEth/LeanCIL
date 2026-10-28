@@ -5,6 +5,27 @@ namespace Examples;
 
 public static class MemorySpans
 {
+    public static Span<int> ArrayWritable(int[] values) => values;
+
+    public static ReadOnlySpan<int> ArrayReadOnly(int[] values) => values;
+
+    public static Span<char> ArrayConstructor(char[] values) => new(values);
+
+    public static ReadOnlySpan<int> ArrayRange(int[] values, int start, int length) => new(values, start, length);
+
+    public static Span<bool> ArrayAsSpan(bool[] values) => values.AsSpan();
+
+    public static Span<nint> ArrayAsSpanStart(nint[] values, int start) => values.AsSpan(start);
+
+    public static Span<nuint> ArrayAsSpanRange(nuint[] values, int start, int length) => values.AsSpan(start, length);
+
+    public static int ArraySliceWrite(int[] values, int start, int length, int value)
+    {
+        var slice = values.AsSpan(start, length);
+        Write(slice, 0, value);
+        return values[start];
+    }
+
     public static nint NativeRead(ReadOnlySpan<nint> values, int index) => values[index];
 
     public static nuint NativeWrite(Span<nuint> values, int index, nuint value)

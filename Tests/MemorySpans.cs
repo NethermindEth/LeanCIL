@@ -22,7 +22,10 @@ foreach (var (name, signature, arguments, expected) in new[]
         "[.bufferSpan ⟨.address ⟨0, 0⟩, 3, 4, true⟩, .scalar (.i32 1), " +
         ".scalar (.i32 2), .scalar (.i32 0), .scalar (.i32 11)]", 11),
     ("Existing", "System.Int32&,System.Int32,System.Int32",
-        "[.reference (.address ⟨0, 0⟩), .scalar (.i32 3), .scalar (.i32 1)]", 7)
+        "[.reference (.address ⟨0, 0⟩), .scalar (.i32 3), .scalar (.i32 1)]", 7),
+    ("ArraySliceWrite", "System.Int32[],System.Int32,System.Int32,System.Int32",
+        "[.array ⟨.address ⟨0, 0⟩, 3, .signed32⟩, .scalar (.i32 1), " +
+        ".scalar (.i32 2), .scalar (.i32 11)]", 11)
 })
 {
     var output = Path.Combine(root, name);
@@ -76,10 +79,132 @@ foreach (var (name, signature, width, arguments, expected) in new[]
               .ok [.scalar ({{expected}})] := rfl
         #print axioms compiled_primitive_span_result
         """);
+    if (name == "BooleanWrite")
+        File.AppendAllText(proof, """
+
+            -- Boolean storage is a byte; it does not imply canonical zero-or-one contents.
+            theorem compiled_boolean_raw_byte :
+                (CIL.Safety.invoke Extracted.program 64 0
+                  [.bufferSpan ⟨.address ⟨0, 0⟩, 2, 1, true⟩,
+                    .scalar (.i32 1), .scalar (.i32 2)] primitiveMemory).map Prod.snd =
+                  .ok [.scalar (.i32 2)] := rfl
+            #print axioms compiled_boolean_raw_byte
+            """);
     spanProofs.Add(name, proof);
 }
 
 var argumentStart = original.IndexOf("def method0RawArguments :", StringComparison.Ordinal);
+foreach (var (name, signature, element, width, writable, range) in new[]
+{
+    ("ArrayWritable", "System.Int32[]", "signed32", 4, true, 0),
+    ("ArrayReadOnly", "System.Int32[]", "signed32", 4, false, 0),
+    ("ArrayConstructor", "System.Char[]", "character", 2, true, 0),
+    ("ArrayRange", "System.Int32[],System.Int32,System.Int32", "signed32", 4, false, 2),
+    ("ArrayAsSpan", "System.Boolean[]", "boolean", 1, true, 0),
+    ("ArrayAsSpanStart", "System.IntPtr[],System.Int32", "nativeInt", 8, true, 1),
+    ("ArrayAsSpanRange", "System.UIntPtr[],System.Int32,System.Int32", "nativeUInt", 8, true, 2)
+})
+{
+    var output = Path.Combine(root, name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"MemorySpans::{name}({signature})", output]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var capability = writable ? "true" : "false";
+    var suffix = range == 0 ? "" : range == 1 ? ", .scalar (.i32 1)" : ", .scalar (.i32 1), .scalar (.i32 2)";
+    var zeros = string.Concat(Enumerable.Repeat(", .scalar (.i32 0)", range));
+    var proof = Path.Combine(root, name + ".lean");
+    File.WriteAllText(proof, source + $$"""
+
+        private def arrayMemory : CIL.Safety.Memory := {
+          allocations := fun identity => if identity == 0 then
+            some ⟨.callerStack, ⟨{{3 * width}}, 1, []⟩, true, []⟩ else none
+          nextIdentity := 1 }
+
+        -- Forming a view needs neither initialized bytes nor write authority.
+        theorem compiled_array_span_result :
+            (CIL.Safety.invoke Extracted.program 64 0
+              [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩{{suffix}}] arrayMemory).map Prod.snd =
+              .ok [.bufferSpan ⟨.address ⟨0, {{(range == 0 ? 0 : width)}}⟩,
+                {{(range == 0 ? 3 : 2)}}, {{width}}, {{capability}}⟩] := rfl
+        #print axioms compiled_array_span_result
+
+        theorem compiled_null_array_span :
+            (CIL.Safety.invoke Extracted.program 64 0
+              [.reference .null{{zeros}}] arrayMemory).map Prod.snd =
+              .ok [.bufferSpan ⟨.null, 0, {{width}}, {{capability}}⟩] := rfl
+        #print axioms compiled_null_array_span
+        """);
+    if (range > 0)
+    {
+        var tail = range == 1 ? "" : ", .scalar (.i32 0)";
+        File.AppendAllText(proof, $$"""
+
+            theorem compiled_empty_end_slice :
+                (CIL.Safety.invoke Extracted.program 64 0
+                  [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
+                    .scalar (.i32 3){{tail}}] arrayMemory).map Prod.snd =
+                  .ok [.bufferSpan ⟨.address ⟨0, {{3 * width}}⟩, 0,
+                    {{width}}, {{capability}}⟩] := rfl
+            #print axioms compiled_empty_end_slice
+
+            theorem compiled_negative_start :
+                (CIL.Safety.invoke Extracted.program 64 0
+                  [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
+                    .scalar (.i32 (-1)){{tail}}] arrayMemory).map Prod.snd =
+                  .error (.thrown "System.ArgumentOutOfRangeException") := rfl
+            #print axioms compiled_negative_start
+
+            theorem compiled_null_invalid_start :
+                (CIL.Safety.invoke Extracted.program 64 0
+                  [.reference .null, .scalar (.i32 1){{tail}}] arrayMemory).map Prod.snd =
+                  .error (.thrown "System.ArgumentOutOfRangeException") := rfl
+            #print axioms compiled_null_invalid_start
+            """);
+    }
+    if (range == 2)
+    {
+        File.AppendAllText(proof, $$"""
+
+            theorem compiled_overflowing_range :
+                (CIL.Safety.invoke Extracted.program 64 0
+                  [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
+                    .scalar (.i32 2147483647), .scalar (.i32 2147483647)] arrayMemory).map Prod.snd =
+                  .error (.thrown "System.ArgumentOutOfRangeException") := rfl
+            #print axioms compiled_overflowing_range
+
+            theorem compiled_negative_length :
+                (CIL.Safety.invoke Extracted.program 64 0
+                  [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
+                    .scalar (.i32 0), .scalar (.i32 (-1))] arrayMemory).map Prod.snd =
+                  .error (.thrown "System.ArgumentOutOfRangeException") := rfl
+            #print axioms compiled_negative_length
+
+            theorem expired_array_is_not_a_range_exception :
+                (CIL.Safety.memoryInstruction (.arraySpan .{{element}} {{capability}} .counted)
+                  [.scalar (.i32 0), .scalar (.i32 0), .array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩]
+                  { arrayMemory with allocations := fun _ =>
+                    some ⟨.callerStack, ⟨{{3 * width}}, 1, []⟩, false, []⟩ }).map Prod.snd =
+                  .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
+            #print axioms expired_array_is_not_a_range_exception
+            """);
+    }
+    spanProofs.Add(name, proof);
+    if (name == "ArrayReadOnly")
+    {
+        foreach (var (mutation, before, after) in new[]
+        {
+            ("array-element", ".arraySpan .signed32 false .whole", ".arraySpan .unsigned32 false .whole"),
+            ("array-writability", ".arraySpan .signed32 false .whole", ".arraySpan .signed32 true .whole")
+        })
+        {
+            if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing " + mutation);
+            var forged = Path.Combine(root, "Forged-" + mutation + ".lean");
+            File.WriteAllText(forged, source.Replace(before, after, StringComparison.Ordinal));
+            rejected.Add(forged, "PASS independent span call rejection: " + mutation,
+                "⊢ Extraction.ScalarFlowValid");
+        }
+    }
+}
+
 if (argumentStart < 0) throw new Exception("Missing span argument evidence");
 var argumentEnd = original.IndexOf('\n', argumentStart);
 var argumentDefinition = original[argumentStart..argumentEnd];
@@ -139,5 +264,5 @@ foreach (var (signature, marker) in new[]
 
 foreach (var (name, proof) in spanProofs)
     evidence.Add(proof, "PASS compiled span certificate and execution: " + name);
-evidence.Check(replay: false);
+evidence.Check();
 

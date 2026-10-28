@@ -352,6 +352,46 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     let _ ← formValue memory r
     return (memory, rest)
   -- Arrays retain the supplied length; reads and writes use checked element storage.
+  | .arraySpan element writable .whole, .array array :: rest =>
+    if array.elementType != element then .error .invalidState else pure ()
+    let view : SpanView := ⟨array.reference, array.length, element.width, writable⟩
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
+  | .arraySpan element writable .fromStart,
+      .scalar (.i32 start) :: .array array :: rest =>
+    if array.elementType != element then .error .invalidState else pure ()
+    let view : SpanView := ⟨array.reference, array.length, element.width, writable⟩
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if start.toNat ≤ view.length then pure ()
+      else .error (.thrown "System.ArgumentOutOfRangeException")
+    let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat
+      (view.length - start.toNat))
+    return (memory, .bufferSpan sliced :: rest)
+  | .arraySpan element writable .counted,
+      .scalar (.i32 length) :: .scalar (.i32 start) :: .array array :: rest =>
+    if array.elementType != element then .error .invalidState else pure ()
+    let view : SpanView := ⟨array.reference, array.length, element.width, writable⟩
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if start.toNat ≤ view.length && length.toNat ≤ view.length - start.toNat then pure ()
+      else .error (.thrown "System.ArgumentOutOfRangeException")
+    let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat length.toNat)
+    return (memory, .bufferSpan sliced :: rest)
+  | .arraySpan element writable .whole, .reference .null :: rest =>
+    let view : SpanView := ⟨.null, 0, element.width, writable⟩
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
+  | .arraySpan element writable .fromStart, .scalar (.i32 start) :: .reference .null :: rest =>
+    if start == 0 then pure () else .error (.thrown "System.ArgumentOutOfRangeException")
+    let view : SpanView := ⟨.null, 0, element.width, writable⟩
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
+  | .arraySpan element writable .counted,
+      .scalar (.i32 length) :: .scalar (.i32 start) :: .reference .null :: rest =>
+    if start == 0 && length == 0 then pure ()
+      else .error (.thrown "System.ArgumentOutOfRangeException")
+    let view : SpanView := ⟨.null, 0, element.width, writable⟩
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
   | .arrayAddress element writable, .scalar index :: .array view :: rest =>
     if view.elementType != element then .error .invalidState else pure ()
     let some index := arrayIndex index | .error .invalidState

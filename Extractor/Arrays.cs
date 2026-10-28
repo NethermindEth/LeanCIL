@@ -24,8 +24,10 @@ internal static class Arrays
         ["System.Char"] = new("character", 2, false, NativeOperands.Kind.ArrayCharacter)
     };
 
+    internal static Element? Primitive(string name) => elements.GetValueOrDefault(name);
+
     internal static Element? Primitive(TypeReference type) =>
-        type is not TypeSpecification && elements.TryGetValue(type.FullName, out var element) ? element : null;
+        type is not TypeSpecification ? Primitive(type.FullName) : null;
 
     internal static Element? Of(TypeReference type) =>
         type is ArrayType { IsVector: true } array ? Primitive(array.ElementType) : null;
