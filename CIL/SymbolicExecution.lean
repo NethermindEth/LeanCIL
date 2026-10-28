@@ -65,6 +65,13 @@ elab "if_extracted " name:ident " {" commands:command* "}" : command => do
     logInfo m!"Optional summary candidate {name.getId} was not proved; \
       using raw execution ({failureClass}):\n{detail}"
 
+open Lean Elab Tactic in
+/-- Avoid constructing the general instruction simplifier after exact equations resolve a step. -/
+elab "cil_reference_step_pending" : tactic => do
+  let target ← getMainTarget
+  unless (target.find? (·.isConstOf ``CIL.step)).isSome do
+    throwError "No reference instruction remains"
+
 /-- Execute instructions until execution finishes or a symbolic obligation prevents further
     reduction. Facts are ordinary proved hypotheses or lemmas. There is no instruction trace,
     method identity or local layout in this procedure; Lean's heartbeat and depth limits
@@ -79,9 +86,13 @@ macro "cil_steps" facts:term,+ : tactic =>
      -- Retain checked rewrite proofs instead of making the kernel repeat large
      -- definitional reductions when checking the resulting execution proof.
      simp (config := { implicitDefEqProofs := false })
-      [cil_code, step, binary, truth, write64, initLocals, initFrame, Value.initialized,
-      cil_feature, Intrinsic.available,
-      fin_val_three, $[$facts:term],*])))
+       [cil_code, step_feature, step_return, binary, truth, write64, initLocals, initFrame,
+       Value.initialized, cil_feature, Intrinsic.available, fin_val_three, $[$facts:term],*];
+     try
+       cil_reference_step_pending
+       simp (config := { implicitDefEqProofs := false })
+        [cil_code, step, binary, truth, write64, initLocals, initFrame, Value.initialized,
+        cil_feature, Intrinsic.available, fin_val_three, $[$facts:term],*])))
 
 /-- `cil_steps` with no extra facts. -/
 macro "cil_steps" : tactic => `(tactic| cil_steps Nat.add_zero)

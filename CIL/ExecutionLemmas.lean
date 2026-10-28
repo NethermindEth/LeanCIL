@@ -1,13 +1,30 @@
 import CIL.Semantics
 
 /-!
-# Fuel and determinism of the reference interpreter
+# Instruction equations, fuel and determinism of the reference interpreter
 
 `run` takes fuel, so a proof picks some amount. These lemmas show the choice does not
 matter: more fuel never changes a successful result, and any two successful runs agree.
+Exact feature and return equations avoid expanding the complete instruction dispatcher.
 -/
 
 namespace CIL
+
+/-- A feature test pushes the profile's answer as `1` or `0`. -/
+theorem step_feature (id : Feature) (returns : Bool) (pc : Nat) (args : List Value)
+    (frame : Nat) (stack : List Value) (memory : Memory) (profile : FeatureProfile) :
+    step (.feature id) returns pc args frame stack memory profile =
+      some (.next (pc + 1) (.i32 (if profile.evaluate id then 1 else 0) :: stack) memory) :=
+  rfl
+#print axioms step_feature
+
+/-- A return instruction checks the result without inspecting other instruction families. -/
+theorem step_return (narrow : Option NarrowKind) (returns : Bool) (pc : Nat)
+    (args : List Value) (frame : Nat) (stack : List Value) (memory : Memory)
+    (profile : FeatureProfile) :
+    step (.ret narrow) returns pc args frame stack memory profile =
+      returnFromStack narrow returns stack memory := rfl
+#print axioms step_return
 
 /-- What `run` does with the action a step at `pc` returned: continue, enter a callee and
     resume after it, or return. -/
