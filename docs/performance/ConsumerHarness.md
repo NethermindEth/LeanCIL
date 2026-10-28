@@ -23,6 +23,7 @@ that cold setup. The original certificate harness also passed against the warm l
 Local build measurements and validation logs are under `artifacts/core-compile/`; the paired
 build measurements are in `paired/timings.json`. See [validation commands](../VALIDATION.md)
 for running an individual consumer check.
+
 ## Replay import overhead investigation
 
 A native probe instrumented `CIL.Replay.withReplayedModules` around target loading,
@@ -51,3 +52,8 @@ every target from its trusted imported base, bind all imported bytes and retire 
 before those bytes can change. Reusing an environment merely because module names match
 would be incorrect. Narrower consumer imports can reduce work without that architecture,
 but require fixture-specific checks that tactic behavior and rejection coverage are unchanged.
+
+The follow-up source review found Core's hot consumer fixtures already import `CIL.Semantics`
+or specific proof modules. Generated extraction uses `Translation`, `SymbolicExecution` and
+`Safety.Execution`. The remaining umbrella imports in the inspected harnesses belong to a
+non-elaborated parser fixture and an Evidence control. No narrower-import change was retained.
