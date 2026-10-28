@@ -3,6 +3,7 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
+#:include NativeShiftCounts.cs
 
 using System.Numerics;
 using System.Reflection;
@@ -20,6 +21,13 @@ var owner = runtime.GetType("Examples.NativeIntegers")!;
 using var source = ModuleDefinition.ReadModule(assembly);
 var cases = 0;
 var queue = new GeneratedQueue(verification, assembly);
+if (args is ["--shift-counts"])
+{
+    QueueNativeShiftCounts(queue, assembly, root);
+    queue.Flush();
+    return;
+}
+if (args.Length != 0) throw new ArgumentException("Usage: NativeIntegers.cs [--shift-counts]");
 
 void Prove(string dll, string selector, string name, List<string> claims)
 {
@@ -185,6 +193,7 @@ foreach (var (operations, group) in candidates.Chunk(6).Select((ops, index) => (
     }
     Prove(dll, selector, name, claims);
 }
+QueueNativeShiftCounts(queue, assembly, root);
 queue.Flush();
 
 // No argument-only exception: inlining/constant propagation can change whether

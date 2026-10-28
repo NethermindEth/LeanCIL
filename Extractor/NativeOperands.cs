@@ -81,6 +81,15 @@ internal static class NativeOperands
                     source != (code == Code.Cpblk ? Kind.Reference : Kind.Word32))
                     throw new InvalidDataException($"Unsupported block memory operand types: {instruction}");
             }
+            else if (code is Code.Shl or Code.Shr or Code.Shr_Un)
+            {
+                var count = Pop();
+                var value = Pop();
+                if (count is not (Kind.Word32 or Kind.Native) ||
+                    value is not (Kind.Word32 or Kind.Word64 or Kind.Native))
+                    throw new InvalidDataException($"Unsupported shift operand types: {instruction}");
+                stack.Add(value);
+            }
             else if (Binary(code))
             {
                 var right = Pop();
@@ -169,7 +178,6 @@ internal static class NativeOperands
                         Code.Ldtoken => Kind.Other,
                         Code.Ldnull => Kind.NullObject,
                         Code.Neg or Code.Not => popped[0],
-                        Code.Shl or Code.Shr or Code.Shr_Un => popped[1],
                         // All remaining supported pushi encodings produce int32 (constants,
                         // narrow conversions, sizeof and narrow indirect loads).
                         _ => pushes == StackBehaviour.Pushi ? Kind.Word32 : Kind.Other

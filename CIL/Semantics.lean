@@ -81,6 +81,13 @@ def binary (op : Op) (a b : Value) : Option Value :=
   | .shrUn, .i32 x, .i32 count => some (.i32 (x >>> (count.toNat % 32)))
   | .shr, .i64 x, .i32 count => some (.i64 (x.sshiftRight (count.toNat % 64)))
   | .shr, .i32 x, .i32 count => some (.i32 (x.sshiftRight (count.toNat % 32)))
+  -- Native counts use their low bits; extraction distinguishes native values from int64.
+  | .shl, .i64 x, .i64 count => some (.i64 (x <<< ((count.setWidth 32).toNat % 64)))
+  | .shl, .i32 x, .i64 count => some (.i32 (x <<< ((count.setWidth 32).toNat % 32)))
+  | .shrUn, .i64 x, .i64 count => some (.i64 (x >>> ((count.setWidth 32).toNat % 64)))
+  | .shrUn, .i32 x, .i64 count => some (.i32 (x >>> ((count.setWidth 32).toNat % 32)))
+  | .shr, .i64 x, .i64 count => some (.i64 (x.sshiftRight ((count.setWidth 32).toNat % 64)))
+  | .shr, .i32 x, .i64 count => some (.i32 (x.sshiftRight ((count.setWidth 32).toNat % 32)))
   -- Comparisons.
   | .eq, .i64 x, .i64 y => some (.i32 (if x = y then 1 else 0))
   | .eq, .i32 x, .i32 y => some (.i32 (if x = y then 1 else 0))
@@ -93,6 +100,14 @@ def binary (op : Op) (a b : Value) : Option Value :=
   | .gtu, .i64 x, .i64 y => some (.i32 (if y < x then 1 else 0))
   | .gtu, .i32 x, .i32 y => some (.i32 (if y < x then 1 else 0))
   | _ , _, _ => none
+
+/-- Native shift counts normalize to their low 32 bits under the admitted 64-bit runtime. -/
+theorem binary_native_shift_count (operation : Op) (value : Value) (count : W64)
+    (shift : operation = .shl ∨ operation = .shr ∨ operation = .shrUn) :
+    binary operation value (.i64 count) = binary operation value (.i32 (count.setWidth 32)) := by
+  rcases shift with rfl | rfl | rfl <;> cases value <;> rfl
+
+#print axioms binary_native_shift_count
 
 /-- One-operand instructions: negation, complement and integer conversions. A narrowing
     conversion truncates, then sign- or zero-extends back to `i32`. -/
