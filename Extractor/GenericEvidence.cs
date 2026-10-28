@@ -112,11 +112,24 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         ? LayoutEvidence.Identity(modifier.ModifierType) + "!" + LayoutEvidence.Identity(modifier.ElementType)
         : LayoutEvidence.Identity(type);
 
+    static string Constraint(TypeReference type)
+    {
+        var identity = ConstraintType(type);
+        return identity switch
+        {
+            TypeTests.RuntimeScope + "::System.ValueType" => "Extraction.valueTypeConstraint",
+            TypeTests.RuntimeScope + "::System.Runtime.InteropServices.UnmanagedType!" +
+                TypeTests.RuntimeScope + "::System.ValueType" => "Extraction.unmanagedTypeConstraint",
+            _ => Quote(identity)
+        };
+    }
+
     string Method(MethodDefinition method, MethodDefinition admitted, IReadOnlySet<Instruction> reachable)
     {
         var instructions = new InstructionIndex(method);
         var constraints = method.GenericParameters.Select(parameter =>
-            $"{{ flags := {(uint)parameter.Attributes}, types := {List(parameter.Constraints.Select(constraint => Quote(ConstraintType(constraint.ConstraintType))))} }}");
+            $"{{ flags := {(uint)parameter.Attributes}, types := " +
+            $"{List(parameter.Constraints.Select(constraint => Constraint(constraint.ConstraintType)))} }}");
         if (method.MetadataToken.ToUInt32() != admitted.MetadataToken.ToUInt32() ||
             method.Body.Instructions.Count != admitted.Body.Instructions.Count)
             throw new InvalidDataException("Specialization instruction mapping differs from the original method.");
