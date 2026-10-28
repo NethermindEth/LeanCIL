@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 #:include RejectedEvidence.cs
+#:include GeneratedEvidence.cs
 
 var directory = At("artifacts/RejectedEvidenceTests");
 Directory.CreateDirectory(directory);
@@ -12,7 +13,7 @@ File.WriteAllText(invalid, """
     namespace Extracted
     theorem invalid : (1 : Nat) = 2 := by decide +kernel
     end Extracted
-    """ + "\n");
+    """.ReplaceLineEndings("\n") + "\n");
 File.WriteAllText(valid, File.ReadAllText(invalid).Replace("= 2", "= 1", StringComparison.Ordinal));
 var rejected = new RejectedEvidence(directory);
 rejected.Add(invalid, "PASS isolated rejection", "decide", "is false");
@@ -55,3 +56,51 @@ foreach (var (path, marker) in new[] { (valid, "decide"), (invalid, "absent diag
     throw new InvalidOperationException("A neighboring rejection satisfied the wrong case: " + path);
 }
 Console.WriteLine("PASS valid evidence and mismatched diagnostics cannot borrow another case's rejection");
+
+CheckEvidenceBatchFailures(valid);
+
+static void CheckEvidenceBatchFailures(string original)
+{
+    var output = At("artifacts/RejectedEvidenceTests/GeneratedBatches");
+    Directory.CreateDirectory(output);
+    var source = File.ReadAllText(original);
+    foreach (var (name, suffix, marker) in new[]
+    {
+        ("invalid-proof", "\ntheorem invalid_evidence : False := by decide +kernel\n" +
+            "#print axioms invalid_evidence\n", "is false"),
+        ("unchecked-declaration", """
+
+            import Lean
+            set_option debug.skipKernelTC true
+            run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+              name := `forged_evidence
+              levelParams := []
+              type := Lean.mkConst ``False
+              value := Lean.mkConst ``True.intro
+            })
+            #print axioms forged_evidence
+            """, "declaration type mismatch")
+    })
+    {
+        var directory = Path.Combine(output, "BatchFailure-" + name);
+        Directory.CreateDirectory(directory);
+        var invalid = Path.Combine(directory, "Invalid.lean");
+        File.WriteAllText(invalid, source + suffix);
+        var rejected = new GeneratedEvidence(directory);
+        rejected.Add(original, "Unexpected success before rejected evidence", "invalid");
+        rejected.Add(invalid, "Unexpected invalid evidence success", "invalid");
+        var command = name == "unchecked-declaration" ? "leanchecker PositiveBatch" : "lake env lean";
+        try
+        {
+            rejected.Check();
+            throw new Exception("Invalid generated evidence batch was accepted: " + name);
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.Contains(marker, StringComparison.Ordinal) &&
+            exception.Message.Contains(command, StringComparison.Ordinal) &&
+            (name != "invalid-proof" || exception.Message.Contains("decide", StringComparison.Ordinal)))
+        {
+            Console.WriteLine("PASS evidence batch rejects " + name);
+        }
+    }
+}
