@@ -23,4 +23,11 @@ internal static class UnsafeReferences
 
     public static ulong PastEnd(ref FourLimbs value) => Unsafe.Add(ref Unsafe.As<FourLimbs, ulong>(ref value), 4);
     public static ulong Read(ref FourLimbs value) => Unsafe.As<FourLimbs, ulong>(ref value);
+    public static bool AreSame(ref byte origin, ref byte target) => Unsafe.AreSame(ref origin, ref target);
+    public static bool Less(ref byte origin, ref byte target) => Unsafe.IsAddressLessThan(ref origin, ref target);
+    public static bool Greater(ref byte origin, ref byte target) => Unsafe.IsAddressGreaterThan(ref origin, ref target);
+    public static nint ByteOffset(ref byte origin, ref byte target) => Unsafe.ByteOffset(ref origin, ref target);
+    public static ref byte AddSigned(ref byte origin, nint offset) => ref Unsafe.AddByteOffset(ref origin, offset);
+    public static ref byte AddUnsigned(ref byte origin, nuint offset) => ref Unsafe.AddByteOffset(ref origin, offset);
+    public static ref byte Subtract(ref byte origin, nint offset) => ref Unsafe.SubtractByteOffset(ref origin, offset);
 }
