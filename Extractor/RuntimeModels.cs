@@ -246,9 +246,14 @@ internal static class RuntimeModels
         _ => Span(signature)
     };
 
-    // Primitive spans over whole static fields: creation, bounds-checked indexing, length and the first element.
-    private static string? Span(string signature)
+    private static readonly Dictionary<string, string> SpanOperations = BuildSpanOperations();
+
+    // Signatures are immutable: runtime lookup performs no interpolation or per-element scan.
+    private static string? Span(string signature) => SpanOperations.GetValueOrDefault(signature);
+
+    private static Dictionary<string, string> BuildSpanOperations()
     {
+        var operations = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (element, width) in new[]
         {
             ("System.Byte", 1), ("System.SByte", 1), ("System.Int16", 2), ("System.UInt16", 2),
@@ -256,53 +261,47 @@ internal static class RuntimeModels
             ("System.IntPtr", 8), ("System.UIntPtr", 8), ("System.Char", 2), ("System.Boolean", 1)
         })
         {
+            var arrayElement = Arrays.Primitive(element)!.Lean;
             var span = $"System.ReadOnlySpan`1<{element}>";
-            if (signature == "System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
-                $"CreateSpan<{element}>(System.RuntimeFieldHandle)")
-                return $".memory (.createSpan {width})";
-            if (signature == $"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)")
-                return $".memory (.spanItem {width})";
-            if (signature == $"System.Int32 {span}::get_Length()") return ".memory .spanLength";
-            if (signature == "!!0& System.Runtime.InteropServices.MemoryMarshal::" +
-                $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)")
-                return ".memory .spanReference";
+            operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
+                $"CreateSpan<{element}>(System.RuntimeFieldHandle)", $".memory (.createSpan {width})");
+            operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",
+                $".memory (.spanItem {width})");
+            operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
+                $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)", ".memory .spanReference");
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";
                 var writable = name == "System.Span`1";
                 var capability = writable ? "true" : "false";
-                var arrayElement = Arrays.Primitive(element)!.Lean;
-                if (signature == $"System.Void {owner}::.ctor(!0[])" ||
-                    signature == $"{name}<!0> {owner}::op_Implicit(!0[])")
-                    return $".memory (.arraySpan .{arrayElement} {capability} .whole)";
-                if (signature == $"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)")
-                    return $".memory (.arraySpan .{arrayElement} {capability} .counted)";
-                if (signature == $"System.Void {owner}::.ctor(System.Void*,System.Int32)")
-                    return $".memory (.spanFromReference {width} {(writable ? "true" : "false")})";
-                if (signature == $"System.Int32 {owner}::get_Length()") return ".memory .spanLength";
-                if (writable && signature == $"!0& {owner}::get_Item(System.Int32)")
-                    return $".memory (.spanItem {width})";
-                if (signature == $"{name}<!0> {owner}::Slice(System.Int32)")
-                    return ".memory (.spanSlice false)";
-                if (signature == $"{name}<!0> {owner}::Slice(System.Int32,System.Int32)")
-                    return ".memory (.spanSlice true)";
+                var arrayWhole = $".memory (.arraySpan .{arrayElement} {capability} .whole)";
+                operations.Add($"System.Void {owner}::.ctor(!0[])", arrayWhole);
+                operations.Add($"{name}<!0> {owner}::op_Implicit(!0[])", arrayWhole);
+                operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
+                    $".memory (.arraySpan .{arrayElement} {capability} .counted)");
+                operations.Add($"System.Void {owner}::.ctor(System.Void*,System.Int32)",
+                    $".memory (.spanFromReference {width} {capability})");
+                operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
+                if (writable)
+                    operations.Add($"!0& {owner}::get_Item(System.Int32)", $".memory (.spanItem {width})");
+                operations.Add($"{name}<!0> {owner}::Slice(System.Int32)", ".memory (.spanSlice false)");
+                operations.Add($"{name}<!0> {owner}::Slice(System.Int32,System.Int32)", ".memory (.spanSlice true)");
                 var factory = writable ? "CreateSpan" : "CreateReadOnlySpan";
-                if (signature == $"{name}<!!0> System.Runtime.InteropServices.MemoryMarshal::" +
-                    $"{factory}<{element}>(!!0&,System.Int32)")
-                    return $".memory (.spanFromReference {width} {(writable ? "true" : "false")})";
+                operations.Add($"{name}<!!0> System.Runtime.InteropServices.MemoryMarshal::" +
+                    $"{factory}<{element}>(!!0&,System.Int32)",
+                    $".memory (.spanFromReference {width} {capability})");
             }
-            if (signature == $"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
-                "op_Implicit(System.Span`1<!0>)") return ".memory .spanReadOnly";
+            operations.Add($"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
+                "op_Implicit(System.Span`1<!0>)", ".memory .spanReadOnly");
             foreach (var (parameters, range) in new[]
             {
                 ("!!0[]", "whole"), ("!!0[],System.Int32", "fromStart"),
                 ("!!0[],System.Int32,System.Int32", "counted")
             })
-                if (signature == "System.Span`1<!!0> System.MemoryExtensions::" +
-                    $"AsSpan<{element}>({parameters})")
-                    return $".memory (.arraySpan .{Arrays.Primitive(element)!.Lean} true .{range})";
+                operations.Add("System.Span`1<!!0> System.MemoryExtensions::" +
+                    $"AsSpan<{element}>({parameters})", $".memory (.arraySpan .{arrayElement} true .{range})");
         }
-        return null;
+        return operations;
     }
 
     private static string? Intrinsic(string signature, FeatureProfile profile)
