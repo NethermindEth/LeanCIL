@@ -1274,9 +1274,15 @@ that import that helper. The verifier retains that failure instead of replaying 
 already-invalid request closure. Successful requests still receive their own checks, and
 no successful joint module result is reused across scopes. The existing eleven-request
 mixed batch checks every status, certificate and hidden-sibling rejection and requires one
-isolated rejection of its shared forged helper. On Windows this workload took 52.79s before
-and 43.36s after reuse: joint attempts fell from ten to nine and isolated checks from three
-to two, with three consumer builds unchanged.
+isolated rejection of its shared forged helper. Initial Windows measurements were 52.79s
+before and 43.36s after reuse; elapsed time includes runner variance. Joint attempts fell
+from ten to nine and isolated checks from three to two, with three consumer builds unchanged.
+After an eligible fused batch rejects a kernel declaration, each remaining request can fuse
+its own replay with its theorem audit. Only that exact request's checked result is retained;
+partial success never skips a sibling's replay. Ineligible scopes retain ordinary fallback.
+A second paired measurement, including both changes, took 49.06s before and 40.04s afterward
+(18.4%), with all eleven original outcomes and certificates unchanged. Fresh compilation,
+isolated rejection attribution and the hidden-sibling controls remain mandatory.
 The test also rejects a changed bootstrap source snapshot. In one Windows trace, the two
 positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
 through the native auditor. Single-file verification now also shares replay imports for its

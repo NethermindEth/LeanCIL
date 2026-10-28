@@ -1952,12 +1952,26 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name).ToArray();
             Dictionary<int, AuditedOleans>? combinedAudits = null;
             bool jointReplayRejected = false;
+            bool jointReplaySucceeded = false;
             var premise = ImportPremise(extractions[proceeding[0]]);
             var premiseIdentity = JsonSerializer.Serialize(premise);
             var replayedNames = replayTargets.ToHashSet(StringComparer.Ordinal);
             // Duplicate declarations in skipped support must not select another request's proof body.
             bool completeConsumerReplay = discovered.All(module => module.Name == "CIL" ||
                 module.Name.StartsWith("CIL.", StringComparison.Ordinal) || replayedNames.Contains(module.Name));
+            string[] AuditModules(int index) => [requestModules[index], "Extracted",
+                .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()];
+            AuditRequest ScopedProof(int index)
+            {
+                var audit = ProofTheorem(requests[index].Theorem, extractions[index]);
+                // Another proof's declarations must not satisfy this request's missing theorem.
+                return members.Length == 1 ? audit : audit with
+                {
+                    allowedModules = ImportClosure(graph!, AuditModules(index)).Order(StringComparer.Ordinal).ToArray()
+                };
+            }
+            static bool RetainScopedAudit(string? error) => error is null || error.StartsWith(
+                "Theorem dependency is outside its request's import closure:", StringComparison.Ordinal);
             if (replayTargets.Length > 0 && fullImportAudit is null &&
                 (members.Length == 1 || completeConsumerReplay) &&
                 proceeding.All(index => requests[index].ExportAudit is null &&
@@ -1966,29 +1980,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 try
                 {
-                    string[] Modules(int index) => [requestModules[index], "Extracted",
-                        .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()];
-                    var proofAudits = proceeding.Select(index =>
-                    {
-                        var audit = ProofTheorem(requests[index].Theorem, extractions[index]);
-                        // Another proof's declarations must not satisfy this request's missing theorem.
-                        return members.Length == 1 ? audit : audit with
-                        {
-                            allowedModules = ImportClosure(graph!, Modules(index))
-                                .Order(StringComparer.Ordinal).ToArray()
-                        };
-                    }).ToArray();
+                    var proofAudits = proceeding.Select(ScopedProof).ToArray();
                     var audited = AuditOleans(leanPath,
-                        proceeding.SelectMany(Modules).Distinct(StringComparer.Ordinal).ToArray(),
+                        proceeding.SelectMany(AuditModules).Distinct(StringComparer.Ordinal).ToArray(),
                         [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")],
                         premise, replayTargets: replayTargets);
+                    jointReplaySucceeded = true;
                     combinedAudits = proceeding.Select((index, position) => (index, position))
                         // A conservative owner scope may omit a transitive toolchain import.
                         // Hidden target dependencies are definitive failures, never audit-only fallbacks.
-                        .Where(item => audited.theorems[item.position].error is null ||
-                            audited.theorems[item.position].error!.StartsWith(
-                                "Theorem dependency is outside its request's import closure:",
-                                StringComparison.Ordinal))
+                        .Where(item => RetainScopedAudit(audited.theorems[item.position].error))
                         .ToDictionary(item => item.index, item => audited with
                         {
                             theorems = [audited.theorems[item.position], audited.theorems[^1]]
@@ -2006,7 +2007,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     .. checkRejectedProofs ? new[] { "ExtractionAudit" } : [],
                     .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()]);
             var failures = new Dictionary<string, string>();
-            if (combinedAudits is null)
+            if (!jointReplaySucceeded)
             {
                 if (members.Length == 1)
                     // The failed fused audit already tried this exact joint target set.
@@ -2020,8 +2021,32 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         var closure = RequestClosure(index)!;
                         // An unchanged dependency already rejected by isolated replay dooms this request too.
                         if (failures.Keys.Any(closure.Contains)) continue;
-                        var own = ReplayConsumerModules(session,
-                            replayTargets.Where(closure.Contains).ToArray(), leanPath);
+                        var ownTargets = replayTargets.Where(closure.Contains).ToArray();
+                        bool ownKernelRejected = false;
+                        if (jointReplayRejected && ownTargets.Length > 0)
+                        {
+                            try
+                            {
+                                var audited = AuditOleans(leanPath, AuditModules(index),
+                                    [ScopedProof(index), ExtractionCertificate("Extracted.translation_valid")],
+                                    premise, replayTargets: ownTargets);
+                                // Only this request's exact scope has been replayed and audited.
+                                if (RetainScopedAudit(audited.theorems[0].error))
+                                {
+                                    combinedAudits ??= [];
+                                    combinedAudits[index] = audited;
+                                }
+                                continue;
+                            }
+                            catch (InvalidOperationException error)
+                            {
+                                ownKernelRejected = error.Message.Contains(
+                                    "while replaying declaration", StringComparison.Ordinal);
+                            }
+                        }
+                        var own = ownKernelRejected
+                            ? ReplayConsumerModulesSeparately(session, ownTargets, leanPath, profile: false)
+                            : ReplayConsumerModules(session, ownTargets, leanPath);
                         foreach (var (module, error) in own) failures.TryAdd(module, error);
                     }
             }

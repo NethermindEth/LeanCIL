@@ -133,8 +133,8 @@ partial class Program
                     "Kernel replay of consumer proof and dependencies" or "Profiled kernel replay of consumer modules")
                 .SelectMany(stage => File.ReadLines(Path.Combine(trace, stage.GetProperty("transcript").GetString()!)))
                 .Where(line => line.StartsWith('{')).Select(line => JsonSerializer.Deserialize<JsonElement>(line))
-                .Count(record => record.TryGetProperty("module", out var module) && module.GetString() == "Client.Forged" &&
-                    record.TryGetProperty("error", out _));
+                .Count(record => record.TryGetProperty("module", out var module) &&
+                    module.GetString() == "Client.Forged" && record.TryGetProperty("error", out _));
             if (!separate && forgedChecks != 1)
                 throw new InvalidOperationException("A shared rejected helper was replayed more than once.");
             var opens = stages.Where(stage => stage.GetProperty("stage").GetString() ==
