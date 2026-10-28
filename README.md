@@ -79,6 +79,8 @@ certificate build. Rechecked proofs still independently replay and audit the gen
 and check that proof elaboration leaves its compiled bytes unchanged.
 Generated certificate preparation also survives unrelated consumer package configuration changes;
 its own generated sources, configuration, framework artifacts and toolchain remain bound.
+Rejected joint replays use native per-module checking, preserving isolated failure attribution
+without elaborating a temporary checker script.
 
 Prepared certified libraries include canonical fingerprints of their compiled modules.
 Consumer verification reuses them only while module bytes and the normalizer match,

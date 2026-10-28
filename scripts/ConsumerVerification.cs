@@ -487,13 +487,14 @@ partial class Program
             throw new InvalidDataException("LEAN_NUM_THREADS must be a positive integer.");
         var runner = Path.Combine(Path.GetTempPath(), "leancil-replay-" + Guid.NewGuid().ToString("N") + ".lean");
         var targetsPath = Path.ChangeExtension(runner, ".json");
+        var native = !profile && auditExecutable is not null;
         try
         {
             // A literal target list exceeds Lean's recursion limit for large module sets.
             File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
             // Use the pinned toolchain's checker, not a consumer implementation
             // of kernel replay. Explicit targets avoid repeated search-path scans.
-            File.WriteAllText(runner, """
+            if (!native) File.WriteAllText(runner, """
 import LeanChecker
 unsafe def replayConsumerModule (name : String) : IO Nat := do
   let started ← IO.monoMsNow
@@ -530,10 +531,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 profile.ToString().ToLowerInvariant() + "\n");
             // Unlike leanchecker, the lean frontend defaults to hardware
             // concurrency rather than honoring LEAN_NUM_THREADS itself.
-            string[] command = [LeanExecutable, "-j" + threads, runner];
+            string[] command = native ? [CheckedAuditExecutable(), "--replay-separately", targetsPath]
+                : [LeanExecutable, "-j" + threads, runner];
+            var environment = new Dictionary<string, string>(LeanEnvironment) { ["LEAN_NUM_THREADS"] = threads };
             var result = Execute(command, session, leanPath, progress: profile
                 ? "Profiled kernel replay of consumer modules" : "Kernel replay of consumer proof and dependencies",
-                environment: LeanEnvironment);
+                environment: environment);
+            if (native) CheckedAuditExecutable();
             var replayed = new HashSet<string>(StringComparer.Ordinal);
             var failures = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))

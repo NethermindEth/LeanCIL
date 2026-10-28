@@ -1250,6 +1250,15 @@ uses the source captured when the verifier starts and rejects changes before exe
 `Tests/JointReplay.cs` exercises both modes against import-closed targets, repeated equation
 lemmas, conflicting declarations, targets hidden behind untargeted imports and forged theorems.
 Rejected joint sets still fall back to per-module replay with individual failure attribution.
+After auditor authentication, `--replay-separately` performs this fallback natively. Each
+module gets its own imported environment and the pinned toolchain's sequential kernel replay;
+no successful sibling can supply an undeclared dependency. Bootstrap and profiling retain
+the toolchain frontend runner. The regression checks forged bodies, hidden declarations,
+malformed and missing target files, and missing imported modules in both paths.
+Three alternating Windows measurements of a fixed mixed valid/forged/undeclared/missing
+target set took 3.36/3.04/3.03s through the frontend and 2.17/2.14/2.04s natively:
+about 0.9–1.2s less per fallback. This measures fallback startup and replay, not a full
+consumer-suite speedup; required independent kernel checks still run.
 The test also rejects a changed bootstrap source snapshot. In one Windows trace, the two
 positive target sets took 2.03/2.19 seconds through the Lean frontend and 0.37/0.37 seconds
 through the native auditor. Single-file verification now also shares replay imports for its
