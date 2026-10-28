@@ -116,7 +116,7 @@ Boundary("ByteOffset", "cross_allocation_unsupported",
     "some ⟨.callerStack, ⟨32, 1, []⟩, true, [32]⟩ else none }");
 Boundary("ByteOffset", "expired_difference",
     "[.reference (.address ⟨0, 5⟩), .reference (.address ⟨0, 2⟩)]",
-    ".error ⟨0, 2, .memory .expiredLifetime (.address ⟨0, 2⟩) 0⟩", "CIL.Safety.expire memory 0");
+    ".error ⟨0, 0, .memory .expiredLifetime (.address ⟨0, 5⟩) 0⟩", "CIL.Safety.expire memory 0");
 Boundary("AreSame", "null_equality", "[.reference .null, .reference .null]",
     ".ok (memory, [.scalar (.i32 1)])");
 Boundary("AddSigned", "negative_byte_offset", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 (-3))]",
@@ -124,7 +124,7 @@ Boundary("AddSigned", "negative_byte_offset", "[.reference (.address ⟨0, 5⟩)
 Boundary("AddUnsigned", "end_byte_offset", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 27)]",
     ".ok (memory, [.reference (.address ⟨0, 32⟩)])");
 Boundary("AddUnsigned", "outside_byte_offset", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 28)]",
-    ".error ⟨0, 2, .memory .outsideAllocation (.address ⟨0, 5⟩) 0⟩");
+    ".error ⟨0, 2, .memory .invalidReference (.address ⟨0, 5⟩) 0⟩");
 Boundary("Subtract", "negative_subtraction", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 (-3))]",
     ".ok (memory, [.reference (.address ⟨0, 8⟩)])");
 queue.Flush();
