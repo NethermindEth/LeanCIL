@@ -87,6 +87,26 @@ static class CertifiedLibraryDonor
                 Regex.IsMatch(run.GetProperty("head_sha").GetString() ?? "", "^[0-9a-f]{40}$"))
             .Select(run => run.GetProperty("id").GetInt64()).Where(id => id > 0).Distinct();
 
+    /// <summary>Earlier successful runs of this same-repository PR, restricted to ancestors of its head.</summary>
+    public static IEnumerable<long> PullAncestors(JsonElement runs, string repository, int pull, string head,
+        Func<string, bool> isAncestor, int limit)
+    {
+        if (pull <= 0 || !Regex.IsMatch(head, "^[0-9a-f]{40}$")) yield break;
+        foreach (var run in runs.GetProperty("workflow_runs").EnumerateArray().Take(limit))
+        {
+            if (run.GetProperty("event").GetString() != "pull_request" ||
+                run.GetProperty("status").GetString() != "completed" ||
+                run.GetProperty("conclusion").GetString() != "success" ||
+                !SameRepository(run.GetProperty("head_repository"), repository) ||
+                !run.GetProperty("pull_requests").EnumerateArray().Any(request =>
+                    request.GetProperty("number").GetInt32() == pull)) continue;
+            var commit = run.GetProperty("head_sha").GetString() ?? "";
+            var id = run.GetProperty("id").GetInt64();
+            if (id > 0 && commit != head && Regex.IsMatch(commit, "^[0-9a-f]{40}$") && isAncestor(commit))
+                yield return id;
+        }
+    }
+
     /// <summary>Same-repository merged PR heads whose complete tree equals the push commit.</summary>
     public static IEnumerable<string> MergedHeads(string repository, string commit, Func<string, JsonElement> api)
     {
