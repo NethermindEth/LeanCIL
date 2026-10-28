@@ -65,6 +65,9 @@ jobs:
       manifest-sha256: ${{ steps.certify.outputs.manifest-sha256 }}
       artifact-id: ${{ steps.library-artifact.outputs.artifact-id || steps.donor.outputs.artifact-id }}
       artifact-run-id: ${{ steps.library-artifact.outputs.artifact-id && github.run_id || steps.donor.outputs.run-id }}
+      toolchain-artifact-id: ${{ steps.toolchain-artifact.outputs.artifact-id }}
+      toolchain-sha256: ${{ steps.pack-toolchain.outputs.sha256 }}
+      toolchain-pin-sha256: ${{ steps.pack-toolchain.outputs.pin-sha256 }}
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -81,6 +84,7 @@ jobs:
           global-json-file: global.json
       - name: Install Lean toolchain
         id: lean
+        timeout-minutes: 3
         # The toolchain download fails transiently; retry once after a pause.
         continue-on-error: true
         uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
@@ -94,11 +98,35 @@ jobs:
         run: sleep 30
       - name: Retry Lean toolchain install
         if: steps.lean.outcome == 'failure'
+        timeout-minutes: 3
         uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
         with:
           auto-config: false
           use-github-cache: false
           use-mathlib-cache: false
+      - name: Package the installed Lean toolchain
+        id: pack-toolchain
+        shell: bash
+        run: |
+          prefix="$(lean --print-prefix)"
+          case "$prefix" in
+            "$HOME/.elan/toolchains/"*) ;;
+            *) echo "Unexpected Lean installation: $prefix" >&2; exit 1 ;;
+          esac
+          test -x "$prefix/bin/leanchecker"
+          archive="$RUNNER_TEMP/lean-toolchain.tar.gz"
+          tar -C "$HOME" -cf - .elan/bin .elan/settings.toml "${prefix#"$HOME/"}" | gzip -1 > "$archive"
+          echo "sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "pin-sha256=$(sha256sum lean-toolchain | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Upload the installed Lean toolchain
+        id: toolchain-artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lean-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/lean-toolchain.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
       # A PR-scoped cache does not authenticate its producer or its native audit executable. A run of
       # this commit, an identical merged PR tree, or previous main built and logged the library digest.
       - name: Find a library certified by this commit or by main
@@ -251,27 +279,24 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Install Lean toolchain
-        id: lean
-        # The toolchain download fails transiently; retry once after a pause.
-        continue-on-error: true
-        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+      - name: Download the successful producer job's Lean toolchain
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          # scripts/Test.cs handles building and testing.
-          auto-config: false
-          use-github-cache: false
-          use-mathlib-cache: false
-      - name: Wait before retrying the Lean toolchain install
-        if: steps.lean.outcome == 'failure'
+          artifact-ids: ${{ needs.prepare.outputs.toolchain-artifact-id }}
+          path: ${{ runner.temp }}/lean-toolchain
+      - name: Restore the authenticated Lean toolchain
         shell: bash
-        run: sleep 30
-      - name: Retry Lean toolchain install
-        if: steps.lean.outcome == 'failure'
-        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
-        with:
-          auto-config: false
-          use-github-cache: false
-          use-mathlib-cache: false
+        env:
+          TOOLCHAIN_SHA256: ${{ needs.prepare.outputs.toolchain-sha256 }}
+          TOOLCHAIN_PIN_SHA256: ${{ needs.prepare.outputs.toolchain-pin-sha256 }}
+        run: |
+          archive="$RUNNER_TEMP/lean-toolchain/lean-toolchain.tar.gz"
+          echo "$TOOLCHAIN_PIN_SHA256  lean-toolchain" | sha256sum --check --status
+          echo "$TOOLCHAIN_SHA256  $archive" | sha256sum --check --status
+          tar -xzf "$archive" --no-same-owner -C "$HOME"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/lean" --version
+          "$HOME/.elan/bin/lake" --version
 
       - name: Download the successful producer job's certified library
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

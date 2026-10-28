@@ -440,6 +440,11 @@ CI builds the shared test runner and contract-export fixtures once per workflow.
 authenticate their manifests and compiled outputs before reuse; source, SDK or runtime changes
 fall back to a local build. Assembly mutation tests still rebuild their changed inputs.
 
+The preparation job also publishes its pinned Lean installation as a compressed archive.
+Suite jobs verify the producer's archive and toolchain-file hashes before restoring executable
+permissions and links, avoiding repeated release downloads. The initial installation and its
+retry each have a three-minute limit. Failed-suite reruns retain the producer's artifact ID.
+
 Pushes to `main` and manual runs execute every verification suite. Pull requests
 select suites from changed test entry points, referenced proofs, and their
 transitive source imports. Markdown and license-only changes skip the expensive

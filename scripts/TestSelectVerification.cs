@@ -410,6 +410,12 @@ Test("certified library binding, main republication and observability", () =>
         "artifact-ids: " + dollar + "{{ needs.tools.outputs.artifact-id }}", "LEANCIL_PREBUILT_TOOLS: true",
         "LEANCIL_CERTIFIED_LIBRARY_SHA256: " + dollar + "{{ needs.prepare.outputs.manifest-sha256 }}",
         "artifact-ids: " + dollar + "{{ needs.prepare.outputs.artifact-id }}",
+        "toolchain-artifact-id: " + dollar + "{{ steps.toolchain-artifact.outputs.artifact-id }}",
+        "toolchain-sha256: " + dollar + "{{ steps.pack-toolchain.outputs.sha256 }}",
+        "toolchain-pin-sha256: " + dollar + "{{ steps.pack-toolchain.outputs.pin-sha256 }}",
+        "artifact-ids: " + dollar + "{{ needs.prepare.outputs.toolchain-artifact-id }}",
+        "TOOLCHAIN_SHA256: " + dollar + "{{ needs.prepare.outputs.toolchain-sha256 }}",
+        "TOOLCHAIN_PIN_SHA256: " + dollar + "{{ needs.prepare.outputs.toolchain-pin-sha256 }}",
         "run-id: " + dollar + "{{ needs.prepare.outputs.artifact-run-id }}",
         "artifact-id: " + dollar + "{{ steps.library-artifact.outputs.artifact-id || " +
             "steps.donor.outputs.artifact-id }}",
@@ -425,5 +431,10 @@ Test("certified library binding, main republication and observability", () =>
     string name = "name: certified-library-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}";
     Require(workflow.Split(name, StringSplitOptions.None).Length == 2,
         "Producer artifact name must appear exactly once");
+    var suites = workflow[workflow.IndexOf("  suites:", StringComparison.Ordinal)..];
+    Require(!suites.Contains("uses: leanprover/lean-action@", StringComparison.Ordinal),
+        "Suite jobs must restore the producer toolchain without another installation");
+    Require(workflow.ReplaceLineEndings("\n").Split("timeout-minutes: 3\n", StringSplitOptions.None).Length == 3,
+        "Both toolchain installation attempts must have bounded timeouts");
 });
 Console.WriteLine($"All {checks} selection checks passed.");
