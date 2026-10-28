@@ -9,7 +9,8 @@ if (args.Length != 1) throw new ArgumentException("Usage: PrepareFixtures.cs <ou
 var output = Path.GetFullPath(args[0]);
 Directory.CreateDirectory(output);
 var fixtures = new Dictionary<string, PreparedFixture>(StringComparer.Ordinal);
-foreach (var script in new[] { "scripts/Test.cs", "Tests/ContractExport.cs", "Tests/FullImportVerification.cs" })
+foreach (var script in new[] { "scripts/Test.cs", "Tests/ContractExport.cs", "Tests/FullImportVerification.cs",
+    "scripts/LibraryArchive.cs", "scripts/RunVerificationGroup.cs" })
 {
     var inputs = FixtureInputs(script);
     var name = Path.GetFileNameWithoutExtension(script);

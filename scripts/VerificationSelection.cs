@@ -35,6 +35,30 @@ internal static class VerificationSelection
             .ThenBy(name => name, StringComparer.Ordinal).ToArray();
     }
 
+    internal sealed record Group(string Suite, string[] Suites, int Timeout);
+
+    // Bound sequential work so grouping removes setup without creating another long tail.
+    internal static Group[] Groups(IEnumerable<string> suites, string? root = null)
+    {
+        var durations = ReadDurations(root);
+        var groups = new List<List<string>>();
+        foreach (var suite in Schedule(suites.Distinct(StringComparer.Ordinal), root))
+        {
+            var seconds = durations.GetValueOrDefault(suite, double.PositiveInfinity);
+            var group = seconds <= 60 ? groups.Where(group => group.Count < 3 &&
+                    group.All(name => durations.GetValueOrDefault(name, double.PositiveInfinity) <= 60) &&
+                    group.Sum(name => durations[name]) + seconds <= 120)
+                .OrderByDescending(group => group.Sum(name => durations[name])).FirstOrDefault() : null;
+            if (group is null) groups.Add([suite]);
+            else group.Add(suite);
+        }
+        return groups.OrderByDescending(group => group.Sum(name =>
+                durations.GetValueOrDefault(name, double.PositiveInfinity)))
+            .Select(group => new Group(string.Join("+", group), group.ToArray(),
+                group.Max(name => name == "imports" ? 90 :
+                    name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30))).ToArray();
+    }
+
     internal static Dictionary<string, HashSet<string>> SuiteInputs(string? root = null)
     {
         root ??= Root;

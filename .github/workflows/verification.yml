@@ -32,6 +32,7 @@ jobs:
       - name: Test verification helpers
         run: |
           dotnet run --file scripts/TestSelectVerification.cs
+          dotnet run --file scripts/TestVerificationGroup.cs
           dotnet run --file scripts/TestFindCertifiedLibrary.cs
           dotnet run --file scripts/TestLibraryArchive.cs -c Release
           dotnet run --file scripts/TestSummarizeVerification.cs
@@ -130,15 +131,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       # A PR-scoped cache does not authenticate its producer or its native audit executable. A run of
-      # this commit, an identical merged PR tree, or previous main built and logged the library digest.
-      - name: Find a library certified by this commit or by main
+      # this commit, a same-PR ancestor, an identical merged tree, or main logged the library digest.
+      - name: Find an authenticated library from this PR or main
         id: donor
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: >-
           dotnet run --file scripts/FindCertifiedLibrary.cs -- --repository "$GITHUB_REPOSITORY"
           --workflow verification.yml --head "$HEAD_SHA" --base "$(git rev-parse HEAD^1)" --output "$GITHUB_OUTPUT"
+          --pull-request "$PR_NUMBER"
           --event "$GITHUB_EVENT_NAME"
       - name: Download the donated certified library
         id: donated
@@ -264,7 +267,7 @@ jobs:
       contents: read
       # The certified library may be an artifact of the earlier run that donated it.
       actions: read
-    timeout-minutes: ${{ matrix.suite == 'imports' && 90 || startsWith(matrix.suite, 'exports') && 120 || 30 }}
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       # Longest measured suites start first; eight runners bound concurrent load.
@@ -326,29 +329,35 @@ jobs:
           github-token: ${{ github.token }}
           path: artifacts/library-download
 
-      - name: Restore the authenticated certified library
-        env:
-          ARCHIVE_SHA256: ${{ needs.prepare.outputs.archive-sha256 }}
-        run: >-
-          dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download
-          artifacts/certified-library "$LEANCIL_CERTIFIED_LIBRARY_SHA256" "$ARCHIVE_SHA256"
-
       - name: Download this run's extractor and example assembly
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.tools.outputs.artifact-id }}
           path: .
 
-      - name: Run verification suite
+      - name: Authenticate prepared executables
         shell: bash
         env:
           FIXTURE_CHECKSUMS_SHA256: ${{ needs.tools.outputs.fixture-checksums-sha256 }}
         run: |
-          mkdir -p artifacts
-          set -o pipefail
           echo "$FIXTURE_CHECKSUMS_SHA256  artifacts/verification-fixtures/checksums.sha256" | sha256sum --check --status
           sha256sum --check --status artifacts/verification-fixtures/checksums.sha256
-          dotnet artifacts/verification-fixtures/Test/Test.dll --suite ${{ matrix.suite }} 2>&1 | tee artifacts/verification.log
+
+      - name: Restore the authenticated certified library
+        env:
+          ARCHIVE_SHA256: ${{ needs.prepare.outputs.archive-sha256 }}
+        run: >-
+          dotnet artifacts/verification-fixtures/LibraryArchive/LibraryArchive.dll restore artifacts/library-download
+          artifacts/certified-library "$LEANCIL_CERTIFIED_LIBRARY_SHA256" "$ARCHIVE_SHA256"
+
+      - name: Run verification suite
+        shell: bash
+        env:
+          VERIFICATION_SUITES: ${{ toJSON(matrix.suites) }}
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          dotnet artifacts/verification-fixtures/RunVerificationGroup/RunVerificationGroup.dll 2>&1 | tee artifacts/verification.log
 
       - name: Summarize verification timings
         if: always()
@@ -361,6 +370,7 @@ jobs:
           name: verification-results-${{ matrix.suite }}-${{ github.run_attempt }}
           path: |
             artifacts/verification.log
+            artifacts/verification-*.log
             artifacts/verification-traces/
             artifacts/stage-timings.*
             artifacts/test-results-*.json
