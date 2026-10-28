@@ -153,3 +153,27 @@ The original positive claims and independent mutations pass, together with two a
 checks for missing or changed control declarations. Both runs contain 74 expected nonzero child
 commands. Frontend, replay and fixture durations overlap the suite duration; they are not additive
 savings. These are local measurements, not predicted hosted-runner job times.
+
+## Operand case pruning in embedding proofs
+
+On Windows, the same warm imported libraries and sequential `lake env lean <module>.lean`
+commands gave these frontend and kernel-check times. Each command recompiles the source file;
+these figures exclude Lake dependency rebuilding, artifact serialization and independent replay.
+
+| Module | Before | After | Reduction |
+| --- | ---: | ---: | ---: |
+| `CIL/Safety/Embedding/Step.lean` | 102.59s | 66.26s | 35.4% |
+| `CIL/Safety/StepFlow.lean` | 31.14s | 21.79s | 30.0% |
+| `CIL/Safety/Embedding/AppendLocals.lean` | 24.60s | 21.10s | 14.2% |
+
+Relabeling closes each operand-shape case before inspecting the next operand. Padding first
+tries its existing dispatcher-tail theorem, so an invalid first operand does not repeat that
+proof for every second-operand constructor. Callee classification extracts the successful result
+of a bind instead of expanding its impossible error branch. The interpreter, theorem statements
+and permitted axioms are unchanged. All 27 existing relabeling and 92 padding axiom reports match
+before and after; the callee theorem explicitly reports only `propext` and `Quot.sound`.
+
+An exploratory padding variant tried its full monadic normalization before splitting the second
+operand. That increased compilation to 58.12s by speculatively expanding unresolved matches and
+was rejected. Importing the existing shared equations alone also showed no improvement for the
+relabeling module (102.88s versus 102.59s); the retained change does not add that import.

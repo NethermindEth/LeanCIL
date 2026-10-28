@@ -7,7 +7,8 @@ interpreter definitions and approved axioms are unchanged; no stepping attribute
 The return proof uses an explicit simplification set: unrestricted `simp_all` repeatedly tries
 to discharge irrelevant dispatcher exclusions. Keep that set narrow when extending the proof.
 The callee proof reduces each fixed opcode before splitting the remaining dispatcher matches,
-avoiding repeated case analysis of branches already excluded by that opcode.
+avoiding repeated case analysis of branches already excluded by that opcode. Successful binds
+supply their successful result directly, so their impossible error branches are never expanded.
 Trailing-local proofs normalize maps over monadic binds before trying congruence, so shared
 computations need not be split into their possible results to prove the continuation unchanged.
 They also discharge dispatcher-tail cases before inspecting an irrelevant second operand.

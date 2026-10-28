@@ -34,11 +34,15 @@ theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Va
   all_goals dsimp only at h
   all_goals split at h
   all_goals
-    (try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.mapError] at h)
-    repeat' (first | contradiction | split at h)
+    repeat' first
+      | contradiction
+      | (obtain ⟨_, _, h⟩ := except_bind_ok h)
+      | split at h
   all_goals (try (cases h; first | rfl | (cases op <;>
     simp_all [Op.callees, FrameAction.callee]); done))
   all_goals done
+
+#print axioms step_callee
 
 /-- A step that stays in the frame resumes at the fallthrough of a continuing instruction or
     at one of its targets. -/
