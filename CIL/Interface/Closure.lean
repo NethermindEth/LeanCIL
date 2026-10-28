@@ -176,7 +176,8 @@ declarations, and the trusted ones they name, must be `permitted`; every reachab
 trusted or not, must be approved. With `serialize`, untrusted declarations reached through
 types, values and inductive families (not proofs) are serialized. Kernel declarations are
 read directly, never an axiom summary. -/
-private def walk (environment : Environment) (roots : List Name) (serialize : Bool) :
+private def walk (environment : Environment) (roots : List Name) (serialize : Bool)
+    (ownerOf : Name → Option Name := fun name => some (definingModule environment name)) :
     Except String (List (String × Json)) := do
   let lookup (name : Name) : Except String ConstantInfo := match environment.find? name with
     | some info => pure info
@@ -193,7 +194,9 @@ private def walk (environment : Environment) (roots : List Name) (serialize : Bo
       unless visited.contains name do
         let info <- lookup name
         permitted info
-        if trustedModule (definingModule environment name) then
+        let some owner := ownerOf name
+          | throw ("Missing declaration owner in contract closure: " ++ name.toString)
+        if trustedModule owner then
           trusted := name :: trusted
         else
           visited := visited.insert name
@@ -205,7 +208,9 @@ private def walk (environment : Environment) (roots : List Name) (serialize : Bo
       unless visited.contains name do
         let info <- lookup name
         permitted info
-        if trustedModule (definingModule environment name) then
+        let some owner := ownerOf name
+          | throw ("Missing declaration owner in contract closure: " ++ name.toString)
+        if trustedModule owner then
           trusted := name :: trusted
         else
           visited := visited.insert name
@@ -254,9 +259,11 @@ def validateInterfaceDeclarations (environment : Environment) (interfaceModules 
   if interfaceModules.isEmpty then return
   discard <| walk environment (interfaceDeclarations environment interfaceModules) false
 
-/-- The kind (`method` or `outcome`) and canonical closure of an exported contract constant,
-    whose type must be `MethodContract` or `OutcomeContract`. Entries are sorted by name. -/
-def contractClosure (environment : Environment) (constant : Name) :
+/-- The kind (`method` or `outcome`) and canonical closure of an exported contract constant.
+Its type must be `MethodContract` or `OutcomeContract`. Entries are sorted by name.
+Replay callers supply checked declaration owners when imported module metadata is absent. -/
+def contractClosure (environment : Environment) (constant : Name)
+    (ownerOf : Name → Option Name := fun name => some (definingModule environment name)) :
     Except String (String × String) := do
   let some info := environment.find? constant |
     throw ("Missing contract constant: " ++ constant.toString)
@@ -266,7 +273,7 @@ def contractClosure (environment : Environment) (constant : Name) :
       else if name == `CIL.Safety.OutcomeContract then pure "outcome"
       else throw "Export must have the canonical MethodContract or OutcomeContract type"
     | none => throw "Export must be a closed contract constant"
-  let entries <- walk environment [constant] true
+  let entries <- walk environment [constant] true ownerOf
   let ordered := entries.mergeSort (fun left right => left.1 <= right.1)
   return (kind, (node "leancil-contract-closure-1" [canonicalName constant, Json.str kind,
     toJson (ordered.map Prod.snd)]).compress)
