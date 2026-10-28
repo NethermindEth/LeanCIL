@@ -118,9 +118,9 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
     File.WriteAllText(path, source + "\n" + string.Join('\n', controls.GetValueOrDefault(index) ?? []));
     evidence.Add(path, "PASS structural specialization and unchanged obligations " + selector);
 }
+CheckExternalCallTargets();
 evidence.Check();
 CheckLeanFixture("Tests.ExtractionGenerics");
-CheckExternalCallTargets();
 rejected.Check();
 void CheckExternalIdentities()
 {
@@ -186,8 +186,12 @@ void CheckExternalCallTargets()
     var folder = Path.Combine(output, "ExternalCalls");
     Run(Extract("extract", assembly, "Examples", "DivisionIntrinsics::UnsafeEquals(ulong)", folder, "x64-v3"));
     var path = Path.Combine(folder, "Extracted.lean");
-    Run(["lake", "env", "lean", path], cwd: FixturePackage());
     var baseline = File.ReadAllText(path);
+    const string theorem = "method0_division_validated";
+    var control = NarrowEvidence(baseline, theorem);
+    var positive = Path.Combine(folder, "Checked.lean");
+    File.WriteAllText(positive, baseline + "\n" + CheckedEvidenceControl(baseline, control, [theorem], 0));
+    evidence.Add(positive, "PASS complete materialized external call certificate and mutation control");
     foreach (var (name, source) in new[]
     {
         ("wrong-raw-target", baseline.Replace("target := .external externalIdentity0",
@@ -198,7 +202,7 @@ void CheckExternalCallTargets()
     {
         if (source == baseline) throw new InvalidOperationException("Call mutation was not applied: " + name);
         var rejectedPath = Path.Combine(folder, name + ".lean");
-        File.WriteAllText(rejectedPath, source);
+        File.WriteAllText(rejectedPath, NarrowEvidence(source, theorem));
         rejected.Add(rejectedPath, "PASS materialized external call rejects " + name,
             "Extraction.DivisionIntrinsicsValid", "is false");
     }

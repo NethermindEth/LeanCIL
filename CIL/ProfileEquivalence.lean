@@ -28,13 +28,6 @@ def Op.ProfileAgreement (op : Op) (p q : FeatureProfile) : Prop :=
 def Program.ProfileAgreement (program : Program) (p q : FeatureProfile) : Prop :=
   ∀ body ∈ program, ∀ op ∈ body.code, op.ProfileAgreement p q
 
-/-- A feature test pushes the profile's answer as `1` or `0`. -/
-theorem step_feature (id : Feature) (returns : Bool) (pc : Nat) (args : List Value)
-    (frame : Nat) (stack : List Value) (memory : Memory) (profile : FeatureProfile) :
-    step (.feature id) returns pc args frame stack memory profile =
-      some (.next (pc + 1) (.i32 (if profile.evaluate id then 1 else 0) :: stack) memory) :=
-  rfl
-
 /-- An intrinsic step observes the profile only through the intrinsic's availability. -/
 theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool) (pc : Nat)
     (args : List Value) (frame : Nat) (stack : List Value) (memory : Memory)
@@ -45,7 +38,6 @@ theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool) (pc
           ((← evalIntrinsic operation (stack.take argc).reverse) :: stack.drop argc) memory :=
   rfl
 
-#print axioms step_feature
 #print axioms step_intrinsic
 
 /-- A step under agreeing profiles has the same outcome. -/

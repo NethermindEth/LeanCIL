@@ -653,11 +653,32 @@ elab_rules : tactic
         if type.isAppOf `CIL.Safety.InvocationCertificate ||
             (type.eq?.any fun (_, left, _) => left.isAppOf ``CIL.Safety.invoke) then
           candidates := candidates.push (← Term.exprToSyntax declaration.toExpr)
+    let mut attempted : Array Expr := #[]
+    let target ← instantiateMVars (← getMainTarget)
     for candidate in candidates do
       let saved ← saveState
       try
         let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm candidate none
+        if attempted.contains proof then
+          throwError "Already considered this invocation fact"
+        attempted := attempted.push proof
         let type := (← instantiateMVars (← inferType proof)).consumeMData
+        let invocationType ← if type.isAppOf `CIL.Safety.InvocationCertificate then
+          inferType (← mkAppM ``And.left #[proof])
+        else pure type
+        if let some (_, provided, _) := invocationType.eq? then
+          if let some (_, requested, _) := target.eq? then
+            if provided.isAppOf ``CIL.Safety.invoke && requested.isAppOf ``CIL.Safety.invoke then
+              let providedFuel ← getNatValue? provided.getAppArgs[1]!
+              let requestedFuel ← getNatValue? requested.getAppArgs[1]!
+              -- An abstract program cannot reduce to reconcile different concrete budgets.
+              let program := requested.getAppArgs[0]!
+              if program.isFVar && (← program.fvarId!.getDecl).value?.isNone &&
+                  provided.getAppArgs[0]! == program then
+                if let some supplied := providedFuel then
+                  if let some needed := requestedFuel then
+                    if supplied != needed then
+                      throwError "Child invocation has a different concrete fuel budget"
         if type.isAppOf `CIL.Safety.InvocationCertificate then
           evalTactic (← `(tactic| cil_strict exact ($candidate).1))
         else if type.eq?.any (fun (_, left, _) => left.isAppOf ``CIL.Safety.invoke) then

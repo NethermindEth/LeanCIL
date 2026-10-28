@@ -6,16 +6,17 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-// Prefer this commit, an identical merged PR tree and the exact base before recent main pushes.
+// Prefer this commit and same-PR ancestors before merged PR trees and main pushes.
 // Their own code built the library and printed its digest; PrepareLibrary --reuse rechecks both.
 const int RunsPerCommit = 10;
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 for (var i = 0; i < args.Length; i++)
 {
-    if (args[i] is not ("--repository" or "--workflow" or "--head" or "--base" or "--output" or "--event") ||
+    if (args[i] is not ("--repository" or "--workflow" or "--head" or "--base" or "--output" or "--event" or
+        "--pull-request") ||
         i + 1 == args.Length)
         throw new ArgumentException("Usage: FindCertifiedLibrary.cs --repository <owner/name> --workflow <file> " +
-            "--head <commit> --base <commit> --output <file> [--event <event>]");
+            "--head <commit> --base <commit> --output <file> [--event <event>] [--pull-request <number>]");
     options[args[i]] = args[++i];
 }
 string repository = options["--repository"], workflow = options["--workflow"], output = options["--output"];
@@ -49,6 +50,7 @@ JsonElement Api(string path) => JsonSerializer.Deserialize<JsonElement>(Gh(path)
 IEnumerable<long> Candidates()
 {
     foreach (var run in Runs(options["--head"], "")) yield return run;
+    foreach (var run in PullAncestorRuns()) yield return run;
     foreach (var run in MergedPullRuns()) yield return run;
     foreach (var run in Runs(options["--base"], "&event=push&branch=main")) yield return run;
     // The exact base may have skipped preparation or reused a library without republishing it.
@@ -57,6 +59,25 @@ IEnumerable<long> Candidates()
             $"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}" +
             "&event=push&branch=main&status=success"), repository, RunsPerCommit), Warning);
     foreach (var run in recent) yield return run;
+}
+
+IEnumerable<long> PullAncestorRuns()
+{
+    if (options.GetValueOrDefault("--event") != "pull_request" ||
+        !int.TryParse(options.GetValueOrDefault("--pull-request"), out var pull) || pull <= 0) return [];
+    return CertifiedLibraryDonor.Available("Earlier PR libraries", () =>
+    {
+        var request = Api($"repos/{repository}/pulls/{pull}");
+        var head = request.GetProperty("head");
+        if (head.GetProperty("repo").GetProperty("full_name").GetString() != repository ||
+            head.GetProperty("sha").GetString() != options["--head"]) return Array.Empty<long>();
+        var branch = Uri.EscapeDataString(head.GetProperty("ref").GetString()!);
+        var previous = Api($"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}" +
+            "&event=pull_request&status=success&branch=" + branch);
+        return CertifiedLibraryDonor.PullAncestors(previous, repository, pull, options["--head"],
+            commit => Api($"repos/{repository}/compare/{commit}...{options["--head"]}")
+                .GetProperty("status").GetString() == "ahead", RunsPerCommit);
+    }, Warning);
 }
 
 IEnumerable<long> MergedPullRuns()

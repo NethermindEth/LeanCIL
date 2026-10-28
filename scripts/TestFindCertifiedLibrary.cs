@@ -20,6 +20,26 @@ const string Digest = "0123456789abcdef0123456789abcdef0123456789abcdef012345678
 const string Other = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 DateTimeOffset now = DateTimeOffset.Parse("2026-10-27T00:00:00Z");
 
+Test("PR donors require the same PR, repository and successful ancestor", () =>
+{
+    var head = new string('a', 40);
+    var ancestor = new string('b', 40);
+    string Run(int pull = 42, string repository = "owner/repo", string status = "completed",
+        string conclusion = "success", string? commit = null) => JsonSerializer.Serialize(new
+        {
+            workflow_runs = new[] { new { id = 9, @event = "pull_request", status, conclusion,
+                head_sha = commit ?? ancestor, head_repository = new { full_name = repository },
+                pull_requests = new[] { new { number = pull } } } }
+        });
+    long[] Select(string json, bool related = true) => CertifiedLibraryDonor.PullAncestors(Json(json),
+        "owner/repo", 42, head, _ => related, 10).ToArray();
+    Require(Select(Run()).SequenceEqual([9L]), "Successful ancestor was omitted");
+    foreach (var invalid in new[] { Run(pull: 43), Run(repository: "fork/repo"),
+        Run(status: "in_progress"), Run(conclusion: "failure"), Run(commit: head), Run(commit: "bad") })
+        Require(Select(invalid).Length == 0, "Unrelated or incomplete run accepted");
+    Require(Select(Run(), related: false).Length == 0, "Nonancestor accepted");
+});
+
 Test("only successful prepare jobs donate, newest attempt first", () =>
 {
     var jobs = Json("""

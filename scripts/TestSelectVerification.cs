@@ -28,7 +28,7 @@ void Test(string name, Action action)
 Test("longest-first preserves selection", () =>
 {
     var selected = VerificationSelection.Select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"]);
-    Equal(VerificationSelection.Schedule(selected), ["math", "unsafe", "loops"]);
+    Equal(VerificationSelection.Schedule(selected), ["unsafe", "math", "loops"]);
     Equal(VerificationSelection.Schedule(All()).Order(StringComparer.Ordinal), All());
     Equal(VerificationSelection.Schedule(["loops", "newlongsuite"]), ["newlongsuite", "loops"]);
     Equal(VerificationSelection.Schedule([]), []);
@@ -49,6 +49,19 @@ Test("measured schedule reduces estimated tail without skipping jobs", () =>
     }
     Require(Makespan(VerificationSelection.Schedule(All()), 8) < Makespan(All(), 4),
         "Measured scheduling did not improve the simulated tail");
+});
+Test("short groups preserve selection, isolation and bounded duration", () =>
+{
+    var durations = VerificationSelection.ReadDurations();
+    var groups = VerificationSelection.Groups(All());
+    Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), All());
+    Require(groups.Length < All().Length, "Short suites were not grouped");
+    foreach (var group in groups.Where(group => group.Suites.Length > 1))
+        Require(group.Suites.Length <= 3 && group.Suites.All(suite => durations[suite] <= 60) &&
+            group.Suites.Sum(suite => durations[suite]) <= 120, "Unbounded group");
+    Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
+        ["unknown", "contracts"]);
+    Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");
 });
 Test("docs only", () => Equal(VerificationSelection.Select(["README.md", "docs/design.md"]), []));
 Test("main and manual always full", () =>
@@ -434,7 +447,9 @@ Test("certified library binding, main republication and observability", () =>
         "path: artifacts/library-download", "path: artifacts/certified-library.tar.zst",
         "dotnet run --file scripts/TestLibraryArchive.cs",
         "max-parallel: 8", "artifacts/verification-traces/",
-        "matrix.suite == 'imports' && 90", "startsWith(matrix.suite, 'exports') && 120 || 30" })
+        "timeout-minutes: " + dollar + "{{ matrix.timeout }}",
+        "VERIFICATION_SUITES: " + dollar + "{{ toJSON(matrix.suites) }}",
+        "dotnet artifacts/verification-fixtures/LibraryArchive/LibraryArchive.dll restore" })
         Require(workflow.Contains(text, StringComparison.Ordinal), "Missing workflow binding: " + text);
     string name = "name: certified-library-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}";
     Require(workflow.Split(name, StringSplitOptions.None).Length == 2,
