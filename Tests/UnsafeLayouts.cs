@@ -136,3 +136,4 @@ Run(["dotnet", "run", "--file", "Tests/ValueBitCasts.cs"], streamOutput: true, p
 Run(["dotnet", "run", "--file", "Tests/StaticSpans.cs"], streamOutput: true, progress: "Static byte span checks");
 
 Run(["dotnet", "run", "--file", "Tests/VectorFields.cs"], streamOutput: true, progress: "Vector field checks");
+Run(["dotnet", "run", "--file", "Tests/VectorStorage.cs"], streamOutput: true, progress: "Vector storage checks");

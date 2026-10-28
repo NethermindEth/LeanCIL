@@ -92,6 +92,7 @@ void Prove(string name, int width, int offset = 0, bool copy = false)
         $"  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{size}, 1, []⟩, true, [{size}]⟩ else none\n" +
         $"  cells := fun _ _ => ⟨173, true⟩\n  views := [⟨0, 0, {size}, true, true⟩]\n  nextIdentity := 1 }}\n";
     var claims = new List<string>();
+    var proofs = new List<string>();
     foreach (var mask in new[] { "full", "partial", "unknown" })
     {
         var cells = "[" + string.Join(", ", Enumerable.Range(0, width).Select(index =>
@@ -110,13 +111,28 @@ void Prove(string name, int width, int offset = 0, bool copy = false)
             initial = inputMemory;
         }
         var invocation = $"CIL.Safety.invoke Extracted.program 128 0 {arguments} {initial}";
+        if (copy && mask != "full")
+        {
+            claims.Add($"({invocation}).map Prod.snd = " +
+                $".error ⟨0, 2, .memory .uninitialized (.address ⟨1, 0⟩) {width}⟩");
+            proofs.Add("by rfl");
+            continue;
+        }
         claims.Add($"({invocation}).map Prod.snd = .ok [.scalar ({value})]");
-        claims.Add($"({invocation}).map (fun result => CIL.Safety.readSnapshot result.1 ⟨0, 0⟩ {size} 1) = " +
-            $".ok (.ok (List.replicate {offset} (173, true) ++ {cells}))");
+        claims.Add($"({invocation}).map (fun result => (CIL.Safety.readSnapshot result.1 ⟨0, 0⟩ {size} 1).toOption) = " +
+            $".ok (some (List.replicate {offset} (173, true) ++ {cells}))");
+        proofs.Add("by apply result_of_toOption; decide +kernel");
+        proofs.Add("by apply result_of_toOption; decide +kernel");
     }
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + definitions +
+    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+        private theorem result_of_toOption {error value : Type} {result : Except error value}
+            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
+          cases result <;> simp_all [Except.toOption]
+        #print axioms result_of_toOption
+
+        """ + definitions +
         "theorem correctness :\n" + string.Join(" ∧\n", claims) + " := by exact ⟨" +
-        string.Join(", ", claims.Select(_ => "by rfl")) + "⟩\n#print axioms correctness\nend ExampleProof\n");
+        string.Join(", ", proofs) + "⟩\n#print axioms correctness\nend ExampleProof\n");
     pending.Add(new(selectors[name], proof, output), () => Console.WriteLine("PASS vector storage masks: " + name));
 }
 
@@ -162,6 +178,10 @@ pending.Flush();
 
 var baseline = File.ReadAllText(Path.Combine(root, "Roundtrip128uint/Extracted.lean"));
 const string obligation = "method0_vector_initializations_validated";
+var controlPath = Path.Combine(root, "Roundtrip128uint/Control.lean");
+File.WriteAllText(controlPath, baseline +
+    CheckedEvidenceControl(baseline, NarrowEvidence(baseline, obligation), [obligation], 0));
+Run(["lake", "env", "lean", controlPath], cwd: verification.CheckoutPackage());
 var rejected = new RejectedEvidence(root);
 foreach (var (name, changed) in new[]
 {
@@ -186,6 +206,7 @@ foreach (var mutation in new[] { "element", "scope", "encoding", "field512" })
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var malformed = Path.Combine(output, "Storage.dll");
+    string selector;
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
         var owner = module.GetType("Storage");
@@ -199,11 +220,13 @@ foreach (var mutation in new[] { "element", "scope", "encoding", "field512" })
             case "encoding": vector.IsValueType = false; break;
             case "field512": vector.ElementType.Name = "Vector512`1"; break;
         }
+        selector = owner.Methods.Single(method =>
+            method.Name == (mutation == "field512" ? "Field128" : "Roundtrip128uint")).FullName;
         module.Write(malformed);
     }
-    var selector = selectors[mutation == "field512" ? "Field128" : "Roundtrip128uint"];
     var result = Execute(Extract("extract", malformed, "Storage", selector, output));
-    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")))
+    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
+        result.Output.Contains("No method matches selector", StringComparison.Ordinal))
         throw new InvalidOperationException("Malformed vector metadata accepted: " + mutation);
     Console.WriteLine("PASS vector metadata rejection: " + mutation);
 }

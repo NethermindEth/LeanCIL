@@ -7,7 +7,7 @@ import CIL.Extraction.Generics
 type's width. `VectorInitializationsValid` checks that an `initAggregate` emitted for a live
 `initobj` of a struct, an admitted integer vector or a primitive has the right width.
 Vector object loads, stores, copies and sizes are also bound to their exact type token and
-width; these operations use the existing initialization-preserving vector snapshots.
+width. Loads and stores retain initialization masks; typed copies require initialized bytes.
 Aggregate widths themselves are bound by the layout checks.
 -/
 

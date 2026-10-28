@@ -220,9 +220,11 @@ Integer `Vector128<T>`, `Vector256<T>` and `Vector512<T>` storage accepts the al
 admitted `byte`, `int`, `uint`, `long` and `ulong` elements. `sizeof`, `initobj`, `ldobj`,
 `stobj` and `cpobj` use the exact 16-, 32- or 64-byte type width, independently of ISA
 availability. The extraction certificate checks the raw object opcode and exact runtime
-type identities against the emitted vector operation and width. Loads, stores and copies
-retain byte initialization masks through the existing checked snapshot operations; the
-guards against observing unspecified SIMD lanes remain in force. Fields admit the same
+type identities against the emitted vector operation and width. Loads and stores retain
+byte initialization masks through the existing checked snapshot operations. Typed copies
+require initialized source bytes and reject partial overlap; they do not turn unreadable
+bytes into concrete values. The guards against observing unspecified SIMD lanes remain in
+force. Fields admit the same
 integer elements at 128 and 256 bits using the existing architecture-dependent layout
 rules. Vector512 fields remain unsupported because their aggregate alignment is not
 established by this layout model. These storage forms do not admit floating-point vector
