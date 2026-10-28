@@ -117,12 +117,15 @@ static class CertifiedLibraryArchive
             throw new InvalidDataException("Library restore destination already exists");
         var archive = Path.Combine(download, FileName);
         var packed = archiveDigest.Length != 0;
+        var elapsed = Stopwatch.StartNew();
         if (packed) RequireDigest(archive, archiveDigest);
         else
         {
             if (File.Exists(archive)) throw new InvalidDataException("Library archive has no trusted digest");
             RequireDigest(Path.Combine(download, "cache-manifest.json"), manifestDigest);
         }
+        Console.WriteLine($"Library restore authentication: {elapsed.Elapsed.TotalSeconds:F3}s");
+        elapsed.Restart();
         var staging = destination + ".restore-" + Guid.NewGuid().ToString("N");
         Directory.CreateDirectory(staging);
         try
@@ -167,8 +170,11 @@ static class CertifiedLibraryArchive
                     File.Copy(path, target);
                 }
             }
+            Console.WriteLine($"Library restore extraction: {elapsed.Elapsed.TotalSeconds:F3}s");
+            elapsed.Restart();
             RequireDigest(Path.Combine(staging, "cache-manifest.json"), manifestDigest);
             Directory.Move(staging, destination);
+            Console.WriteLine($"Library restore publication: {elapsed.Elapsed.TotalSeconds:F3}s");
         }
         finally
         {
