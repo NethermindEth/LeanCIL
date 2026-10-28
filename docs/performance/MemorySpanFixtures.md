@@ -1,14 +1,11 @@
 # Reusing checked span extraction in contract fixtures
 
-`Tests/MemorySpans.cs` previously checked the complete `SliceRead` and `SliceWrite`
-extraction certificates twice: once to produce the modules imported by their contract
-proofs, and again beside their concrete execution theorems in the positive batch.
-
-The contract import now compiles each complete source, including its existing concrete
-execution theorem. The later positive batch contains only the remaining `Existing`
+`Tests/MemorySpans.cs` compiles the complete `SliceRead` and `SliceWrite` extraction sources
+for their contract imports, including each concrete execution theorem.
+The later positive batch contains only the remaining `Existing`
 fixture. Both independent evidence mutations still run against the original extraction,
 and both functional contract proofs and unsupported-signature checks remain unchanged.
-The fixture's existing `replay: false` policy and number of Lean processes are unchanged.
+The positive batch uses `replay: false`; mutations share an isolated rejection batch.
 
 On an isolated Windows checkout at `16b79a4`, the complete fixture improved from
 25.81 s to 22.34 s (about 13%). Both runs passed every positive and negative check.
