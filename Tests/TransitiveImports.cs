@@ -3,12 +3,19 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ImportReviewRegressions.cs
+#:include StagedBundleMutation.cs
 
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+
+if (args is ["--staged-bundle-mutation", var fixture])
+{
+    CheckStagedBundleMutation(fixture);
+    return;
+}
 
 string root = At("artifacts/TransitiveImports-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
@@ -125,7 +132,8 @@ JsonObject originalA = JsonNode.Parse(File.ReadAllText(aSidecar))!.AsObject();
 JsonObject originalB = JsonNode.Parse(File.ReadAllText(bSidecar))!.AsObject();
 FullTransitive();
 FullDiamond();
-Run(["dotnet", "run", "--file", At("Tests/StagedBundleMutation.cs"), "--", root]);
+// Keep the mutation probe in its own process without compiling the common harness again.
+Run(["dotnet", typeof(Program).Assembly.Location, "--staged-bundle-mutation", root]);
 ImportReviewRegressions.ValidateGraph_WhenDuplicateImplementationHashDiffers_RejectsIdentity(ExtractorPath, originalB);
 ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
     ExtractorPath, bSidecar, b, Path.Combine(root, "AmbiguousVersions"));

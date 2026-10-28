@@ -1479,3 +1479,10 @@ still compiled once and was independently replayed in each group. The entire fix
 including setup, took 56.86 seconds. These timings do not establish a whole-suite CI gain.
 The certificate-reuse fixture passed all six checks: its four positive sessions used the
 fused audit, and generated-source tampering and compiled-extraction substitution were rejected.
+
+### Transitive verification harness
+
+The transitive import suite runs its staged-bundle mutation probe in a separate process of
+its already compiled executable. This preserves process isolation and all mutation checks
+without compiling the shared verifier a second time. The helper remains a tracked suite input
+through its include directive.
