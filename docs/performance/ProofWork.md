@@ -172,8 +172,24 @@ proof for every second-operand constructor. Callee classification extracts the s
 of a bind instead of expanding its impossible error branch. The interpreter, theorem statements
 and permitted axioms are unchanged. All 27 existing relabeling and 92 padding axiom reports match
 before and after; the callee theorem explicitly reports only `propext` and `Quot.sound`.
+The compiled `Step.olean` also shrank from 54,298,952 to 36,064,856 bytes (33.6%). This
+reduces serialized proof data; no downstream import or replay saving is inferred from its size.
 
 An exploratory padding variant tried its full monadic normalization before splitting the second
 operand. That increased compilation to 58.12s by speculatively expanding unresolved matches and
 was rejected. Importing the existing shared equations alone also showed no improvement for the
 relabeling module (102.88s versus 102.59s); the retained change does not add that import.
+
+### Execution equivalence and equation generation experiments
+
+No change was retained in `ExecutionEquivalence` or `Equations`. Moving the stack-allocation
+rule after cheaper proof alternatives measured 30.59s versus 29.85s on Windows with the same
+profiling options, too small to establish a useful gain. On Apple M4, importing `Equations`
+measured 12.95s versus 12.92s. Generating all of `step`'s direct matcher equations in a shared
+module cost another 3.68s while the consumer still took 13.32s.
+
+Lean 4.35.0's `Meta.Match.getEquationsForImpl` deliberately generates private splitters under
+the current module, so importing an earlier module does not eliminate that generation.
+A further experiment splitting the opcode before unfolding `step` exceeded the existing
+heartbeat limit and was discarded. These experiments changed neither the retained source nor
+its resource limits; their timings are not claimed as improvements.

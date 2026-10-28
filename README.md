@@ -66,6 +66,11 @@ after each case and require that case's own expected diagnostics. The evidence s
 regression modules directly against the certified library, avoiding another CIL build.
 See [validation coverage](docs/VALIDATION.md) for reproducible measurements.
 
+Embedding proofs close impossible operand cases before splitting further, and control-flow
+proofs eliminate impossible bind errors. Scalar evidence groups related checks to share metadata
+reductions; span contract fixtures reuse the certificates checked alongside their execution tests.
+The proof statements and rejection cases remain unchanged. See [proof timings](docs/performance/ProofWork.md).
+
 Integer Math boundary tests encode all 21,804 runtime comparisons as checked data. A generic
 execution proof covers every table entry, preserving narrowing and exact arithmetic faults
 without elaborating a separate execution-proof application for each input.
