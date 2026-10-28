@@ -193,3 +193,24 @@ the current module, so importing an earlier module does not eliminate that gener
 A further experiment splitting the opcode before unfolding `step` exceeded the existing
 heartbeat limit and was discarded. These experiments changed neither the retained source nor
 its resource limits; their timings are not claimed as improvements.
+
+### Definitional observer normalization
+
+The shared `step_observers` proof helper now uses `dsimp` when unfolding `observerCount`.
+That step needs only definitional equality; `simp` previously constructed congruence proofs
+while traversing the same large dispatcher terms for every instruction family. The following
+simplification still checks and removes the observer guard using its proved false result.
+
+On Windows with the same compiled imports and Lean 4.35.0, recompiling
+`CIL/Safety/Embedding/Step.lean` with `-Dprofiler=true` took 74.05s before and 58.81s after.
+The simplifier's cumulative counter fell from 43.6s to 24.9s; definitional simplification was
+17.7s before and 17.3s after. These profiler counters overlap and are not additive timings.
+A second candidate compilation, additionally writing the module's `.olean`, took 63.51s;
+its serialized declarations passed independent `leanchecker` replay. All 27 existing axiom
+reports match the baseline. Public theorem statements, execution semantics and proof-facing
+step equations are unchanged. These are module measurements, not predicted CI job times.
+
+Hoisting profile rewrites before operand splitting did not materially help and was discarded.
+Removing operand normalization or restricting observer normalization to its hypothesis broke
+proof matching. Removing the preliminary opcode split in `StepFlow` exceeded its existing
+heartbeat limit. None of those experiments or higher resource limits are retained.
