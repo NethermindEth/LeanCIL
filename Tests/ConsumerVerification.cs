@@ -3,15 +3,36 @@
 #:include ../scripts/Verification.cs
 #:include ConsumerTraceDirectory.cs
 #:include ConsumerBatchOutcomes.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/LibraryAudit.cs
+#:include ConsumerSourceResolution.cs
+#:include ConsumerSupportUnion.cs
+#:include ConsumerCertificateReuse.cs
+#:include ConsumerComponents.cs
+#:include ConsumerFingerprintReuse.cs
+#:include CertifiedFingerprints.cs
 
 using System.Text.Json;
 
-Run(["dotnet", "run", "--file", At("Tests/ConsumerSourceResolution.cs")]);
-Run(["dotnet", "run", "--file", At("Tests/ConsumerSupportUnion.cs")]);
-Run(["dotnet", "run", "--file", At("Tests/ConsumerCertificateReuse.cs")]);
-Run(["dotnet", "run", "--file", At("Tests/ConsumerComponents.cs")]);
-Run(["dotnet", "run", "--file", At("Tests/ConsumerFingerprintReuse.cs")]);
-Run(["dotnet", "run", "--file", At("Tests/CertifiedFingerprints.cs")]);
+var checks = new Dictionary<string, Action<string[]>>(StringComparer.Ordinal)
+{
+    ["source-resolution"] = CheckConsumerSourceResolution,
+    ["support-union"] = CheckConsumerSupportUnion,
+    ["certificate-reuse"] = CheckConsumerCertificateReuse,
+    ["components"] = CheckConsumerComponents,
+    ["fingerprints"] = CheckConsumerFingerprintReuse,
+    ["certified-fingerprints"] = CheckCertifiedFingerprints
+};
+if (args is ["--check", var check, .. var options])
+{
+    if (!checks.TryGetValue(check, out var run)) throw new ArgumentException("Unknown consumer check: " + check);
+    run(options);
+    return;
+}
+// Compile the harness once; separate processes retain private environment and verifier state.
+foreach (var name in checks.Keys)
+    Run(["dotnet", typeof(Program).Assembly.Location, "--check", name]);
 
 var cli = new[] { "dotnet", args.Length == 0 ? ExtractorPath : Path.GetFullPath(args[0]) };
 var root = Path.GetFullPath(At("artifacts/ConsumerPackage"));

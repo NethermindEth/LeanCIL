@@ -143,6 +143,11 @@ compilation and replay times. Use the same fixed files and toolchain when compar
 For per-declaration kernel costs, run the paired Lean files with `--json --profile -j1
 -DElab.async=false -Dprofiler.threshold=0`; JSON source positions identify each declaration.
 
+Consumer checks compile together in `Tests/ConsumerVerification.cs` and run in separate child
+processes. Run one with `dotnet run --file Tests/ConsumerVerification.cs -- --check <name>`.
+Names are `source-resolution`, `support-union`, `certificate-reuse`, `components`,
+`fingerprints`, and `certified-fingerprints`. Each retains its private process and worker checks.
+
 `Tests/ConsumerComponents.cs` checks four independently certified wrappers around one helper.
 The common profile/layout and helper modules must compile and replay once, while all four
 complete extraction certificates must replay. Profile, helper and call-target changes invalidate
@@ -201,9 +206,11 @@ or exempting the certificate from replay. The default consumer workload checks t
 existing custom-build-directory request and checks invalidation with its existing Lake
 environment mutation; these assertions add no verification requests.
 
-Run `Tests/ConsumerCertificateReuse.cs --configuration-reuse` for focused configuration reuse,
+Run `dotnet run --file Tests/ConsumerVerification.cs -- --check certificate-reuse --configuration-reuse`
+for focused configuration reuse,
 fresh verification, self-rehashed corruption and post-restoration artifact mutation checks.
-Run `Tests/ConsumerComponents.cs --configuration-reuse` to check that split certificates retain
+Run `dotnet run --file Tests/ConsumerVerification.cs -- --check components --configuration-reuse`
+to check that split certificates retain
 their complete generated dependency set across a consumer configuration change. These extra
 requests are opt-in and are excluded from the unchanged full-workload timing comparison.
 

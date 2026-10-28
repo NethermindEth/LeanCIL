@@ -84,7 +84,9 @@ execution proof covers every table entry, preserving narrowing and exact arithme
 without elaborating a separate execution-proof application for each input.
 
 Core consumer tests batch fixed rejection cases to reuse certified-library setup while keeping
-source, environment and cache-invalidation checks isolated. See the reproducible comparison in
+source, environment and cache-invalidation checks isolated. Their harness compiles once and
+dispatches each check to a separate process, avoiding repeated compilation of shared verifier code.
+See the reproducible comparison in
 [validation coverage](docs/VALIDATION.md).
 
 Edited consumer proofs reuse authenticated extraction preparation without starting a redundant
