@@ -439,6 +439,9 @@ replace these checks. Nothing is published unless all selected profiles pass.
 Published source bundles retain every selected extraction; full verification freshly extracts
 both the selected profile and its fixed reference from the pinned implementation DLL, then
 repeats the family checks before composing the caller theorem.
+Identical fixed-reference modules can reuse authenticated, source-bound compilation across
+profile workspaces. Their compiled artifacts are still fixed before producer proof code runs
+and checked afterward; every selected profile retains its extraction replay and exact audit.
 
 Profiles must be distinct built-in names and match their artifacts. A family entry cannot
 also specify `artifact`; ordinary single-profile entries are unchanged. Family transport

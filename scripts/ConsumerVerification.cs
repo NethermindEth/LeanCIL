@@ -1746,7 +1746,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .. checkRejectedProofs ? new[] { "ExtractionAudit" } : []];
             // Authenticated source-closed artifacts need no no-op Lake invocation. Their
             // bytes are still fixed before proof code, then independently replayed and audited.
-            bool CertificateRestored() => certificateModules.All(module =>
+            bool GeneratedModulesRestored(IEnumerable<string> modules) => modules.All(module =>
             {
                 var path = Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
                 var relative = Path.GetRelativePath(session, path).Replace('\\', '/');
@@ -1757,11 +1757,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         relative[..^".olean".Length] + part.Key, out var hash) && hash == part.Value);
             }) && certificateRestoration.All(pair =>
                 File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
-            var restoredCertificate = CertificateRestored();
+            var restoredCertificate = GeneratedModulesRestored(certificateModules);
             if (!restoredCertificate)
             {
                 RestoreCertificateSupport(certificateSupportKey, dependent: null);
-                restoredCertificate = CertificateRestored();
+                restoredCertificate = GeneratedModulesRestored(certificateModules);
             }
             string extractionAudit;
             if (restoredCertificate)
@@ -1792,8 +1792,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 }));
             }
             if (generatedSources.Count > 0)
-                Run(["lake", "build", .. generatedSources.Keys.Select(module => "+" + module + ":olean")],
-                    generatedPackage, progress: "Checking fixed export reference modules");
+            {
+                if (GeneratedModulesRestored(generatedSources.Keys))
+                    CacheProgress("certified fixed export references");
+                else
+                    Run(["lake", "build", .. generatedSources.Keys.Select(module => "+" + module + ":olean")],
+                        generatedPackage, progress: "Checking fixed export reference modules");
+            }
             var fixedGeneratedArtifacts = GeneratedArtifacts();
             if (generatedSources.Keys.Any(module => !fixedGeneratedArtifacts.ContainsKey(
                 (module.Replace('.', '/') + ".olean").Replace('/', Path.DirectorySeparatorChar))))

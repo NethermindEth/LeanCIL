@@ -1492,3 +1492,13 @@ On a Windows App → A → B fixture, final composition replay plus its exact au
 7.83s to 1.67s when combined. The complete forced-full invocation took 96.16s before and
 87.46s afterward; this is a local sample, not a whole-suite CI measurement. Catalog scans
 covered 2,546 toolchain modules in 23–54ms, so mutable module-resolution rescans remain intact.
+
+### Fixed profile references
+
+The profile-family fixture disables persistent receipts for its initial three-profile export.
+It requires one fixed-reference build and three independent profile extraction replays.
+Source-bound authenticated references already shared compilation; the verifier now also
+avoids Lake invocations when their restored module parts and traces still match exactly.
+A Windows sample removed two no-op builds of 0.20s each; the retained build stayed at 2.96s
+(2.97s before). Total export time was 56.38s before and 55.20s afterward, but this small
+sample establishes the removed process work rather than a stable whole-suite speedup.
