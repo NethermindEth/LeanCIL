@@ -21,6 +21,25 @@ source-invalidation coverage.
 
 ## Generated-batch controls
 
+Generated positive batches use the authenticated native auditor for declaration replay through
+the existing `ReplayCheckedModules` helper. The target remains exactly `PositiveBatch`;
+every safe, total declaration is checked, and the toolchain checker remains the fallback if
+native replay rejects or cannot confirm the exact target set. The library manifest authenticates
+the auditor before fixture compilation. Neither imported initializers nor source commands run
+during native replay.
+
+Two alternating Windows replay comparisons on the same captured GenericEvidence batch measured
+12.34 / 12.08 s with the toolchain checker and 3.06 / 3.08 s with native replay. This is a
+replay-only result, excluding compilation and library preparation; it does not predict a whole
+Evidence-job saving. The captured `.olean` SHA256 was
+`fd8863719258344669794fa0a9a631fa448c1a564e74f2657924eaecd622e845`.
+
+The complete updated GenericEvidence fixture passed in 40.01 s with its current positive
+batch replay taking 2.29 s. The generated/rejected harness controls passed in 19.80 s;
+their unchecked declaration failed native replay and then failed the pinned toolchain-checker
+fallback with the required declaration type mismatch. The ordinary invalid proof still fails
+during compilation. The final C# analyzer builds and all 17 selector checks passed.
+
 The generated-batch failure controls now live in `RejectedEvidenceTests.cs`, alongside the
 rejection-harness controls. They reuse its otherwise-valid theorem instead of checking a full
 generic extraction twice. A valid first case still cannot hide an invalid second case. The

@@ -89,7 +89,9 @@ static void CheckEvidenceBatchFailures(string original)
         var rejected = new GeneratedEvidence(directory);
         rejected.Add(original, "Unexpected success before rejected evidence", "invalid");
         rejected.Add(invalid, "Unexpected invalid evidence success", "invalid");
-        var command = name == "unchecked-declaration" ? "leanchecker PositiveBatch" : "lake env lean";
+        var checker = Path.Combine(fixtureVerification!.Toolchain, "bin",
+            OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
+        var command = name == "unchecked-declaration" ? checker + " PositiveBatch" : "lake env lean";
         try
         {
             rejected.Check();
