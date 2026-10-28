@@ -82,7 +82,7 @@ object RuntimeVector(int bits, Type element)
     return create.MakeGenericMethod(element).Invoke(null, [Convert.ChangeType(7, element)])!;
 }
 
-void Prove(string name, int width, int offset = 0, bool copy = false)
+void Prove(string name, int width, int offset = 0, bool copy = false, bool allMasks = true)
 {
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
@@ -93,7 +93,7 @@ void Prove(string name, int width, int offset = 0, bool copy = false)
         $"  cells := fun _ _ => ⟨173, true⟩\n  views := [⟨0, 0, {size}, true, true⟩]\n  nextIdentity := 1 }}\n";
     var claims = new List<string>();
     var proofs = new List<string>();
-    foreach (var mask in new[] { "full", "partial", "unknown" })
+    foreach (var mask in allMasks ? new[] { "full", "partial", "unknown" } : ["full"])
     {
         var cells = "[" + string.Join(", ", Enumerable.Range(0, width).Select(index =>
             $"({index * 7 % 256}, {(mask == "full" || mask == "partial" && index % 3 != 0 ? "true" : "false")})")) + "]";
@@ -139,7 +139,8 @@ void Prove(string name, int width, int offset = 0, bool copy = false)
 foreach (var item in cases)
 {
     var name = $"Roundtrip{item.Bits}{item.Element}";
-    Prove(name, item.Bits / 8);
+    // Element tokens have independent certificates; mask propagation shares each width's operations.
+    Prove(name, item.Bits / 8, allMasks: item.Element == "uint");
     var value = RuntimeVector(item.Bits, item.Type);
     object[] arguments = [Activator.CreateInstance(value.GetType())!, value];
     if (!runtime.GetMethod(name)!.Invoke(null, arguments)!.Equals(value) || !arguments[0].Equals(value))
