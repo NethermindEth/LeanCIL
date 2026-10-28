@@ -33,3 +33,7 @@ Both complete fixtures passed, including independent rejection of forged declara
 The updated library also passed independent kernel replay. The exact-identity equality
 proofs introduce no unchecked axioms. The extractor build with code-style analyzers
 completed with no warnings or errors.
+
+These measurements predate moving harness-only invalid-batch probes into
+`RejectedEvidenceTests`. That fixture now reuses its existing valid control for those
+probes; generic specialization claims and independent metadata mutations remain here.
