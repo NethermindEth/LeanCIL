@@ -133,4 +133,4 @@ See [validation coverage and suite commands](docs/VALIDATION.md) and [CI operati
 
 ## License
 
-[MIT](LICENSE).
+Licensed under either [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
