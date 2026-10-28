@@ -120,6 +120,8 @@ inductive MemoryOp where
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | load512 | store128 | store256 | store512 | init256
   | asRef | add (sizeBytes : Nat) (signed : Bool)
+  /-- The target-minus-origin byte displacement within one live allocation. -/
+  | byteOffset
   | bitcast256 | bitcastByteBool | skipInit
   | bitcastValue (source target : SnapshotShape)
   | staticAddress (bytes : List (BitVec 8)) | spanCreate | spanReference
@@ -142,7 +144,7 @@ inductive MemoryOp where
 def MemoryOp.argumentCount : MemoryOp → Nat
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
-  | .spanFromReference .. => 2
+  | .spanFromReference .. | .byteOffset => 2
   | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayStore _ => 3

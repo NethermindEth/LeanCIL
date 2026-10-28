@@ -245,6 +245,23 @@ def formValue (memory : Memory) (reference : ManagedReference) : ExecutionResult
     let result ← checkedAt reference 0 (form memory r)
     return .reference (.address result)
 
+/-- Two non-null, live references to one allocation, checked without byte access authority. -/
+def referencePositions (memory : Memory) (left right : ManagedReference) :
+    ExecutionResult (Nat × Nat) := do
+  let first ← referenceAt left
+  let second ← referenceAt right
+  let _ ← checkedAt left 0 (form memory first)
+  let _ ← checkedAt right 0 (form memory second)
+  if first.allocation != second.allocation then
+    .error (.unsupported "Cross-allocation pointer arithmetic")
+  else return (first.offset, second.offset)
+
+/-- Pointer differences return the native-width signed byte displacement, with modular bits. -/
+def referenceDifference (memory : Memory) (left right : ManagedReference) :
+    ExecutionResult CIL.W64 := do
+  let (first, second) ← referencePositions memory left right
+  return BitVec.ofNat 64 first - BitVec.ofNat 64 second
+
 /-- Array indices use unsigned bounds checks, so negative int32/native values are out of range. -/
 def arrayIndex : CIL.Value → Option Nat
   | .i32 bits => some bits.toNat
@@ -310,6 +327,12 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     return (← storeValue memory r (.snapshot .vector256 bytes), rest)
   | .init256, .reference r :: rest => return (← storeValue memory r (.v256 0), rest)
   -- References, pointer arithmetic and bit casts
+  | .byteOffset, .reference target :: .reference origin :: rest
+  | .byteOffset, .readOnlyReference target :: .reference origin :: rest
+  | .byteOffset, .reference target :: .readOnlyReference origin :: rest
+  | .byteOffset, .readOnlyReference target :: .readOnlyReference origin :: rest => do
+    let offset ← referenceDifference memory target origin
+    return (memory, .scalar (.i64 offset) :: rest)
   | .asRef, .reference r :: rest => return (memory, (← formValue memory r) :: rest)
   | .add size signed, .scalar offset :: .reference r :: rest =>
     let some offset := CIL.offsetValue signed offset | .error .invalidState

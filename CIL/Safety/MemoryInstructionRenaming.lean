@@ -59,6 +59,10 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     all_goals repeat first
       | exact .ok ⟨related, rfl⟩
       | exact .error _
+      | (apply (related.referenceDifference _ _ (by assumption) (by assumption)).bindWithSuccess
+         intro first second sourceStep same
+         subst second
+         exact .ok ⟨related, rfl⟩)
       | (apply (related.formValue _ (by assumption)).bindWithSuccess
          intro first second sourceStep same
          subst second

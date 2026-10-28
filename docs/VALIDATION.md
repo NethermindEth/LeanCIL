@@ -1519,3 +1519,16 @@ avoids Lake invocations when their restored module parts and traces still match 
 A Windows sample removed two no-op builds of 0.20s each; the retained build stayed at 2.96s
 (2.97s before). Total export time was 56.38s before and 55.20s afterward, but this small
 sample establishes the removed process work rather than a stable whole-suite speedup.
+
+`Unsafe.AreSame<T>`, `IsAddressLessThan<T>`, `IsAddressGreaterThan<T>`, `ByteOffset<T>`,
+`AddByteOffset<T>` (signed and unsigned native offsets), and signed `SubtractByteOffset<T>`
+reuse checked allocation-relative reference operations. Generic storage types must already
+have a supported managed layout. Exact runtime identity, closed signatures, offset signedness
+and byte scaling are checked by Lean translation evidence.
+
+Byte differences and ordering require live references in the same allocation. Equality supports
+nulls and distinct allocation interiors; cross-allocation end-pointer equality remains unsupported.
+Byte offsets preserve bounds and grant no read/write authority. `ByteOffset` accepts readonly
+views; addition retains the existing writable-reference input restriction, and subtraction
+preserves a readonly input. Unsigned native subtraction remains unsupported. These operations
+do not model arbitrary numeric addresses or establish runtime placement of separate allocations.

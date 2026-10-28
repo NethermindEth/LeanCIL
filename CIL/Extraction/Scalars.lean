@@ -1,4 +1,5 @@
 import CIL.Extraction.Features
+import CIL.Extraction.UnsafeReferences
 
 /-!
 # Scalar flow
@@ -314,7 +315,8 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     (bound by the feature check) or a size constant may emit a scalar operation. -/
 def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
-  if arrayEmission emitted then arrayMatches instruction stack emitted
+  if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
+  else if arrayEmission emitted then arrayMatches instruction stack emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted

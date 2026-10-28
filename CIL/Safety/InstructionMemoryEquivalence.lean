@@ -29,13 +29,27 @@ theorem Memory.Equivalent.storeValue {m n : Memory} (same : m.Equivalent n)
        | exact (same.writeSnapshot address _ ordinaryAccessAlignment).mapError _)
     | split
 
+/-- Pointer subtraction and observations depend only on allocation metadata. -/
+theorem Memory.Equivalent.referencePositions {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) :
+    referencePositions m left right = referencePositions n left right := by
+  simp only [CIL.Safety.referencePositions, checkedAt, same.form]
+#print axioms Memory.Equivalent.referencePositions
+
+/-- Equivalent memories give the same native pointer difference. -/
+theorem Memory.Equivalent.referenceDifference {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) :
+    referenceDifference m left right = referenceDifference n left right := by
+  simp only [CIL.Safety.referenceDifference, same.referencePositions]
+#print axioms Memory.Equivalent.referenceDifference
+
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (memoryInstruction operation stack m)
       (memoryInstruction operation stack n) := by
   unfold CIL.Safety.memoryInstruction
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
-    same.spanValidate, same.spanSlice, same.spanElement, same.arrayValidate, same.arrayElement]
+    same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement, same.arrayValidate, same.arrayElement]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩

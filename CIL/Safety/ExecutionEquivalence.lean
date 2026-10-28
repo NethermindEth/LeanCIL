@@ -27,20 +27,6 @@ theorem Memory.Equivalent.referenceEqual {m n : Memory} (same : m.Equivalent n)
 
 #print axioms Memory.Equivalent.referenceEqual
 
-/-- Pointer subtraction and observations depend only on allocation metadata. -/
-theorem Memory.Equivalent.referencePositions {m n : Memory} (same : m.Equivalent n)
-    (left right : ManagedReference) :
-    referencePositions m left right = referencePositions n left right := by
-  simp only [CIL.Safety.referencePositions, checkedAt, same.form]
-#print axioms Memory.Equivalent.referencePositions
-
-/-- Equivalent memories give the same native pointer difference. -/
-theorem Memory.Equivalent.referenceDifference {m n : Memory} (same : m.Equivalent n)
-    (left right : ManagedReference) :
-    referenceDifference m left right = referenceDifference n left right := by
-  simp only [CIL.Safety.referenceDifference, same.referencePositions]
-#print axioms Memory.Equivalent.referenceDifference
-
 /-- Equivalent memories give the same unsigned pointer ordering. -/
 theorem Memory.Equivalent.referenceLess {m n : Memory} (same : m.Equivalent n)
     (left right : ManagedReference) : referenceLess m left right = referenceLess n left right := by

@@ -31,7 +31,20 @@ internal static class UnsafeModels
         var nullRef = reference.Name == "NullRef" && reference.Parameters.Count == 0 && Reference(reference.ReturnType);
         var isNullRef = reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Boolean;
-        if (!sizeOf && !add && !skipInit && !nullRef && !isNullRef) return null;
+        var referencePair = reference.Parameters.Count == 2 &&
+            Reference(reference.Parameters[0].ParameterType) && Reference(reference.Parameters[1].ParameterType);
+        var comparison = referencePair && reference.ReturnType.MetadataType == MetadataType.Boolean &&
+            reference.Name is "AreSame" or "IsAddressLessThan" or "IsAddressGreaterThan";
+        var byteOffset = referencePair && reference.Name == "ByteOffset" &&
+            reference.ReturnType.FullName == "System.IntPtr";
+        var addBytes = reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
+            Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
+            reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
+        var subtractBytes = reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
+            Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
+            reference.Parameters[1].ParameterType.FullName == "System.IntPtr";
+        if (!sizeOf && !add && !skipInit && !nullRef && !isNullRef && !comparison && !byteOffset &&
+            !addBytes && !subtractBytes) return null;
 
         if (element is ByReferenceType || element is PointerType || element is GenericParameter)
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
@@ -50,9 +63,17 @@ internal static class UnsafeModels
             }
             : MetadataValidation.FieldSize(element, reference.Module, architecture);
 
+        if (comparison) return reference.Name switch
+        {
+            "AreSame" => ".eq",
+            "IsAddressLessThan" => ".ltu",
+            _ => ".gtu"
+        };
+        if (byteOffset) return ".memory .byteOffset";
+        if (subtractBytes) return ".sub";
         if (sizeOf) return $".const32 {width}";
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
-        return $".memory (.add {width} {signed.ToString().ToLowerInvariant()})";
+        return $".memory (.add {(addBytes ? 1 : width)} {signed.ToString().ToLowerInvariant()})";
     }
 
     // A byref reinterpretation changes only its static type, never the allocation,

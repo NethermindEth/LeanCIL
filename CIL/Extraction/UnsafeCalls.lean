@@ -1,4 +1,4 @@
-import CIL.Extraction.Generics
+import CIL.Extraction.UnsafeReferences
 
 /-!
 # Unsafe helper calls
@@ -63,7 +63,12 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
     (reachable : List Bool) (code : List Op) : Prop :=
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
   all3 (fun instruction live emitted => !live ||
-      if instruction.opcode == 20 && instruction.operand == .none &&
+      if unsafeReferenceRequired instruction emitted then
+        match unsafeReferenceHelper instruction, instruction.operand with
+        | some helper, .call site =>
+          admittedArgument layouts site.typeArguments && helper.matches emitted
+        | _, _ => false
+      else if instruction.opcode == 20 && instruction.operand == .none &&
           emittedUnsafeHelper emitted == some .nullRef then true
       else unsafeHelper layouts instruction == emittedUnsafeHelper emitted)
     closed.code reachable code = true
