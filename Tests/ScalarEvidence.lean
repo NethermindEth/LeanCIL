@@ -227,8 +227,18 @@ example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Sc
 theorem external_call_validated : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M()", parameterCount := 0, parameterTypes := [] })) [] = some [.word64] := by decide +kernel
 
 /-- Generic return kinds agree with the substituted method argument. -/
-private theorem generic_return_cases : (scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::!!0 Owner::M()", parameterCount := 0, parameterTypes := [], typeArguments := [word] })) [] = some [.word64]) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::!!0 Owner::M()", parameterCount := 0, parameterTypes := [], typeArguments := [intType] })) [] = some [.other]) := by decide +kernel
+private theorem generic_return_cases :
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::!!0 Owner::M()",
+        parameterCount := 0,
+        parameterTypes := [],
+        typeArguments := [word] })) [] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::!!0 Owner::M()",
+        parameterCount := 0,
+        parameterTypes := [],
+        typeArguments := [intType] })) [] = some [.other]) := by
+  decide +kernel
 
 #print axioms generic_return_cases
 
@@ -237,18 +247,57 @@ example : validateManagedCall [⟨[], addRaw⟩] []
 example : scalarTransfer addRaw (i 40 (.call site)) [.word64, .word64] = some [.word64] := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.other, .word64] = none := by decide
 /-- Call signatures retain parameter order, receiver kinds and generic substitutions. -/
-private theorem call_signature_cases : (scalarTransfer addRaw (i 40 (.call { site with parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with parameterTypes := [intType, word] })) [.word32, .word64] = none) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with hasThis := true, parameterTypes := [intType, word] })) [.word64, .word32, .reference] = some [.word64]) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with hasThis := true, parameterTypes := [intType, word] })) [.word64, .word32, .other] = none) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(System.Int32)", parameterCount := 1, parameterTypes := [intType] })) [.word32] = some [.word64]) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(System.Int32)", parameterCount := 1, parameterTypes := [word] })) [.word64] = none) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(!!0)", typeArguments := [intType], parameterCount := 1, parameterTypes := [intType] })) [.word32] = some [.word64]) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(!!0)", typeArguments := [intType], parameterCount := 1, parameterTypes := [word] })) [.word64] = none) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with declaringType := .apply (.constructor "Scope" "Owner`1") intType, target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)", parameterCount := 1, parameterTypes := [intType], returnType := intType })) [.word32] = some [.word32]) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with declaringType := .apply (.constructor "Scope" "Owner`1") intType, target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)", parameterCount := 1, parameterTypes := [word], returnType := intType })) [.word64] = none) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with declaringType := .aggregate "Scope::Owner`2<System.Int32,System.UInt64>" 0, target := .external "Scope::!1 Owner`2<System.Int32,System.UInt64>::M(!0,!1)", parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(Container`2<System.Int32,System.UInt64>,System.Int32)", parameterTypes := [.aggregate "Scope::Container`2<System.Int32,System.UInt64>" 0, intType] })) [.word32, .other] = some [.word64]) := by decide +kernel
+private theorem call_signature_cases :
+    (scalarTransfer addRaw (i 40 (.call { site with
+        parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        parameterTypes := [intType, word] })) [.word32, .word64] = none) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        hasThis := true,
+        parameterTypes := [intType, word] })) [.word64, .word32, .reference] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        hasThis := true,
+        parameterTypes := [intType, word] })) [.word64, .word32, .other] = none) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::System.UInt64 Owner::M(System.Int32)",
+        parameterCount := 1,
+        parameterTypes := [intType] })) [.word32] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::System.UInt64 Owner::M(System.Int32)",
+        parameterCount := 1,
+        parameterTypes := [word] })) [.word64] = none) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::System.UInt64 Owner::M(!!0)",
+        typeArguments := [intType],
+        parameterCount := 1,
+        parameterTypes := [intType] })) [.word32] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::System.UInt64 Owner::M(!!0)",
+        typeArguments := [intType],
+        parameterCount := 1,
+        parameterTypes := [word] })) [.word64] = none) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        declaringType := .apply (.constructor "Scope" "Owner`1") intType,
+        target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)",
+        parameterCount := 1,
+        parameterTypes := [intType],
+        returnType := intType })) [.word32] = some [.word32]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        declaringType := .apply (.constructor "Scope" "Owner`1") intType,
+        target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)",
+        parameterCount := 1,
+        parameterTypes := [word],
+        returnType := intType })) [.word64] = none) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        declaringType := .aggregate "Scope::Owner`2<System.Int32,System.UInt64>" 0,
+        target := .external "Scope::!1 Owner`2<System.Int32,System.UInt64>::M(!0,!1)",
+        parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external
+          "Scope::System.UInt64 Owner::M(Container`2<System.Int32,System.UInt64>,System.Int32)",
+        parameterTypes := [.aggregate "Scope::Container`2<System.Int32,System.UInt64>" 0,
+          intType] })) [.word32, .other] = some [.word64]) := by
+  decide +kernel
 
 #print axioms call_signature_cases
 
@@ -326,22 +375,25 @@ private def byteSpanFeatures : FeatureCertificate := [unknown 0, unknown 1, stat
 private def byteSpanStates : ScalarCertificate := [some [], some [.reference], some [.word32, .reference], some [.other]]
 private def byteSpanCode : List Op := [.arg 0, .const32 16, .memory .spanCreate, .ret]
 /-- Span construction checks its exact signature and managed backing reference. -/
-private theorem span_constructor_cases : (ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates byteSpanCode) ∧
-    (¬ ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates
-    (byteSpanCode.set 2 (.memory (.spanItem 1)))) ∧
-    (scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .reference] = some [.other]) ∧
+private theorem span_constructor_cases :
+    (ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates byteSpanCode) ∧
+    (¬ ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates (byteSpanCode.set 2 (.memory
+      (.spanItem 1)))) ∧
+    (scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .reference] = some
+      [.other]) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .other] = none) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .native] = none) ∧
-    (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with target := .external "forged" }))
-    [.word32, .reference] = none) ∧
-    (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with name := "Other" }))
-    [.word32, .reference] = none) ∧
-    (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with declaringType := .atom runtime "Other" }))
-    [.word32, .reference] = none) ∧
-    (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with parameterTypes := [.pointer word, intType] }))
-    [.word32, .reference] = none) ∧
-    (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite))
-    [.word32, .reference, .reference] = none) := by decide +kernel
+    (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
+        target := .external "forged" })) [.word32, .reference] = none) ∧
+    (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
+        name := "Other" })) [.word32, .reference] = none) ∧
+    (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
+        declaringType := .atom runtime "Other" })) [.word32, .reference] = none) ∧
+    (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
+        parameterTypes := [.pointer word, intType] })) [.word32, .reference] = none) ∧
+    (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .reference] =
+      none) := by
+  decide +kernel
 
 #print axioms span_constructor_cases
 
@@ -356,20 +408,24 @@ private def tupleSite : CallSite := {
 private def tupleRaw := { raw [i 2, i 3, i 4, i 40 (.call tupleSite), i 42] [word, word, word] with
   returnType := tupleType, maxStack := 3 }
 /-- Tuple results retain their declared input kinds. -/
-private theorem tuple_result_cases : (ScalarFlowValid tupleRaw [unknown 0, unknown 1, unknown 2, unknown 3, unknown 1]
-    [some [], some [.word64], some [.word64, .word64], some [.word64, .word64, .word64], some [.other]]
-    [.arg 0, .arg 1, .arg 2, .intrinsic (.x86Base .divRem64) 3, .ret]) ∧
-    (scalarTransfer tupleRaw (i 40 (.call { tupleSite with parameterTypes := [word, intType, word] }))
-    [.word64, .word32, .word64] = none) := by decide +kernel
+private theorem tuple_result_cases :
+    (ScalarFlowValid tupleRaw [unknown 0, unknown 1, unknown 2, unknown 3, unknown 1] [some [],
+      some [.word64], some [.word64, .word64], some [.word64, .word64, .word64], some [.other]]
+      [.arg 0, .arg 1, .arg 2, .intrinsic (.x86Base .divRem64) 3, .ret]) ∧
+    (scalarTransfer tupleRaw (i 40 (.call { tupleSite with
+        parameterTypes := [word, intType, word] })) [.word64, .word32, .word64] = none) := by
+  decide +kernel
 
 #print axioms tuple_result_cases
 
 private def tupleFieldRaw := raw [i 2, i 123 (.field tupleType 0 word false), i 42] [.byref tupleType]
 /-- Tuple field loads preserve the declared scalar result kind. -/
-private theorem tuple_field_cases : (ScalarFlowValid tupleFieldRaw [unknown 0, unknown 1, unknown 1]
-    [some [], some [.reference], some [.word64]] [.arg 0, .fieldAt 0 8, .ret]) ∧
-    (¬ ScalarFlowValid tupleFieldRaw [unknown 0, unknown 1, unknown 1]
-    [some [], some [.reference], some [.other]] [.arg 0, .fieldAt 0 8, .ret]) := by decide +kernel
+private theorem tuple_field_cases :
+    (ScalarFlowValid tupleFieldRaw [unknown 0, unknown 1, unknown 1] [some [], some
+      [.reference], some [.word64]] [.arg 0, .fieldAt 0 8, .ret]) ∧
+    (¬ ScalarFlowValid tupleFieldRaw [unknown 0, unknown 1, unknown 1] [some [], some
+      [.reference], some [.other]] [.arg 0, .fieldAt 0 8, .ret]) := by
+  decide +kernel
 
 #print axioms tuple_field_cases
 
@@ -381,19 +437,25 @@ private def spanSite : CallSite := {
   returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)" }
 private def spanRaw := { raw [i 2, i 3, i 40 (.call spanSite), i 113 (.type intType), i 42] [.byref spanType, intType] with returnType := intType }
 /-- Span and external signatures reject malformed metadata and distinguish Unicode names. -/
-private theorem span_signature_cases : (ScalarFlowValid spanRaw [unknown 0, unknown 1, unknown 2, unknown 1, unknown 1]
-    [some [], some [.reference], some [.word32, .reference], some [.other], some [.word32]]
-    [.arg 0, .arg 1, .memory (.spanItem 4), .loadScalar 4, .ret]) ∧
-    (scalarTransfer spanRaw (i 40 (.call { spanSite with parameterTypes := [word] }))
-    [.word64, .reference] = none) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M(garbage(System.Int32)", parameterCount := 1, parameterTypes := [intType] }))
-    [.word32] = none) ∧
+private theorem span_signature_cases :
+    (ScalarFlowValid spanRaw [unknown 0, unknown 1, unknown 2, unknown 1, unknown 1] [some [],
+      some [.reference], some [.word32, .reference], some [.other], some [.word32]] [.arg 0,
+      .arg 1, .memory (.spanItem 4), .loadScalar 4, .ret]) ∧
+    (scalarTransfer spanRaw (i 40 (.call { spanSite with
+        parameterTypes := [word] })) [.word64, .reference] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-    target := .external "Scope::System.UInt64 Owner::M(Container\u0394)", parameterCount := 1,
-    parameterTypes := [.aggregate "Scope::Container\u0394" 0] })) [.other] = some [.word64]) ∧
+        target := .external "Scope::System.UInt64 Owner::M(garbage(System.Int32)",
+        parameterCount := 1,
+        parameterTypes := [intType] })) [.word32] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-    target := .external "Scope::System.UInt64 Owner::M(Container\u0394)", parameterCount := 1,
-    parameterTypes := [.aggregate "Scope::Container\u03a9" 0] })) [.other] = none) := by decide +kernel
+        target := .external "Scope::System.UInt64 Owner::M(Container\u0394)",
+        parameterCount := 1,
+        parameterTypes := [.aggregate "Scope::Container\u0394" 0] })) [.other] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::System.UInt64 Owner::M(Container\u0394)",
+        parameterCount := 1,
+        parameterTypes := [.aggregate "Scope::Container\u03a9" 0] })) [.other] = none) := by
+  decide +kernel
 
 #print axioms span_signature_cases
 
@@ -423,10 +485,15 @@ private def unsignedSite : CallSite := {
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
 /-- External unsigned signatures retain their exact parameter and return metadata. -/
-private theorem unsigned_signature_cases : (scalarTransfer addRaw (i 40 (.call { unsignedSite with
-    target := .external "Scope::System.UInt64 Owner::M(System.UInt64,System.UInt64)" })) [.word64, .word64] = none) ∧
+private theorem unsigned_signature_cases :
     (scalarTransfer addRaw (i 40 (.call { unsignedSite with
-    target := .external "Scope::System.Void Owner::M()", parameterCount := 0, returnsValue := false })) [] = some []) := by decide +kernel
+        target := .external "Scope::System.UInt64 Owner::M(System.UInt64,System.UInt64)" }))
+      [.word64, .word64] = none) ∧
+    (scalarTransfer addRaw (i 40 (.call { unsignedSite with
+        target := .external "Scope::System.Void Owner::M()",
+        parameterCount := 0,
+        returnsValue := false })) [] = some []) := by
+  decide +kernel
 
 #print axioms unsigned_signature_cases
 
@@ -448,8 +515,11 @@ private def holeEvidence (opcode : Nat) (states : ScalarCertificate) : MethodEvi
   reachable := List.replicate 6 true, featureStates := holeFeatures, scalarStates := states, layoutUses := [] }
 private def holeMethod (emitted : Op) : Method := { locals := [], returnsValue := true, code := holeCode emitted }
 /-- A scalar opcode cannot be replaced by an unrelated instruction with the same stack effect. -/
-private theorem scalar_opcode_cases : (TranslationValid [] #[] [holeEvidence 88 (holeStates.set 3 (some [.word64]))] [] [holeMethod .add]) ∧
-    (¬ TranslationValid [] #[] [holeEvidence 149 holeStates] [] [holeMethod .add]) := by decide +kernel
+private theorem scalar_opcode_cases :
+    (TranslationValid [] #[] [holeEvidence 88 (holeStates.set 3 (some [.word64]))] []
+      [holeMethod .add]) ∧
+    (¬ TranslationValid [] #[] [holeEvidence 149 holeStates] [] [holeMethod .add]) := by
+  decide +kernel
 
 #print axioms scalar_opcode_cases
 
@@ -487,7 +557,8 @@ private def vector128 : TypeExpr := .apply
     "System.Runtime.Intrinsics.Vector128`1") word
 private def packet : TypeExpr := .aggregate "Fixture::Packet" 0
 /-- Size instructions retain exact widths and reject unsupported pointer and void types. -/
-private theorem size_instruction_cases : (sizeAt (i 65052 (.type intType)) 4 = true) ∧
+private theorem size_instruction_cases :
+    (sizeAt (i 65052 (.type intType)) 4 = true) ∧
     (sizeAt (i 65052 (.type nativeType)) 8 = true) ∧
     (sizeAt (i 65052 (.type packet)) 24 = true) ∧
     (sizeAt (i 65052 (.type intType)) 7 = false) ∧
@@ -495,14 +566,19 @@ private theorem size_instruction_cases : (sizeAt (i 65052 (.type intType)) 4 = t
     (sizeAt (i 40 (.call (sizeOfSite intType))) 4 = true) ∧
     (sizeAt (i 40 (.call (sizeOfSite vector128))) 16 = true) ∧
     (sizeAt (i 40 (.call (sizeOfSite packet))) 24 = true) ∧
-    (sizeAt (i 40 (.call (sizeOfSite intType))) 5 = false) := by decide +kernel
+    (sizeAt (i 40 (.call (sizeOfSite intType))) 5 = false) := by
+  decide +kernel
 
 #print axioms size_instruction_cases
 private def otherSite : CallSite := { sizeOfSite intType with
   name := "Other", target := .external (runtime ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::Other()") }
 /-- Size intrinsics require the expected declaring identity. -/
-private theorem size_identity_cases : (sizeAt (i 40 (.call otherSite)) 4 = false) ∧
-    (sizeAt (i 40 (.call { sizeOfSite intType with declaringType := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" })) 4 = false) := by decide +kernel
+private theorem size_identity_cases :
+    (sizeAt (i 40 (.call otherSite)) 4 = false) ∧
+    (sizeAt (i 40 (.call { sizeOfSite intType with
+        declaringType := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" }))
+      4 = false) := by
+  decide +kernel
 
 #print axioms size_identity_cases
 
@@ -520,19 +596,23 @@ private def branches : List (Nat × Op) := [
   (53, .bgtu 3), (54, .bleu 3), (55, .bltu 3), (59, .beq 3), (60, .bge 3), (61, .bgt 3), (62, .ble 3),
   (63, .blt 3), (64, .bne 3), (65, .bgeu 3), (66, .bgtu 3), (67, .bleu 3), (68, .bltu 3)]
 /-- Branch encodings retain operand kinds and the raw opcode family. -/
-private theorem branch_encoding_cases : (branches.all (fun (opcode, emitted) => branchAt opcode .word64 .word64 emitted) = true) ∧
+private theorem branch_encoding_cases :
+    (branches.all (fun (opcode, emitted) => branchAt opcode .word64 .word64 emitted) = true) ∧
     (branches.all (fun (opcode, emitted) => branchAt opcode .word32 .word32 emitted) = true) ∧
-    (branches.all (fun (opcode, emitted) => !branchAt opcode .word64 .word64 (.nativeBinary emitted)) = true) ∧
-    (branches.all (fun (opcode, _) => !branchAt opcode .word64 .word64 (if opcode ∈ [50, 63] then .bge 3 else .blt 3)) = true) ∧
-    (branches.all (fun (opcode, emitted) => branchAt opcode .native .word32 (.nativeBinary emitted) ==
-    (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true) ∧
-    (branches.all (fun (opcode, emitted) => branchAt opcode .word32 .native (.nativeBinary emitted) ==
-    (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true) ∧
+    (branches.all (fun (opcode, emitted) => !branchAt opcode .word64 .word64 (.nativeBinary
+      emitted)) = true) ∧
+    (branches.all (fun (opcode, _) => !branchAt opcode .word64 .word64 (if opcode ∈ [50, 63]
+      then .bge 3 else .blt 3)) = true) ∧
+    (branches.all (fun (opcode, emitted) => branchAt opcode .native .word32 (.nativeBinary
+      emitted) == (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true) ∧
+    (branches.all (fun (opcode, emitted) => branchAt opcode .word32 .native (.nativeBinary
+      emitted) == (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true) ∧
     (branches.all (fun (opcode, emitted) => !branchAt opcode .native .word32 emitted) = true) ∧
     (branches.all (fun (opcode, emitted) => !branchAt opcode .native .word64 emitted) = true) ∧
     (branches.all (fun (opcode, emitted) => !branchAt opcode .word32 .word64 emitted) = true) ∧
     (branches.all (fun (opcode, emitted) => branchAt opcode .reference .reference emitted ==
-    (opcode ∈ [46, 51, 52, 53, 54, 55, 59, 64, 65, 66, 67, 68])) = true) := by decide +kernel
+      (opcode ∈ [46, 51, 52, 53, 54, 55, 59, 64, 65, 66, 67, 68])) = true) := by
+  decide +kernel
 
 #print axioms branch_encoding_cases
 
