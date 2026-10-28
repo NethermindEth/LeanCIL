@@ -33,6 +33,10 @@ Generic value-type constraints also share exact byte-backed identities between e
 and validation. Their [equivalence proofs and measurements](docs/performance/GenericEvidence.md)
 retain the original scoped metadata strings and rejection rules.
 
+Published-interface declaration discovery uses Lean's local constant map for current-file
+queries, avoiding scans of imported declarations while retaining ownership checks and
+full-traversal regression coverage. See [import declaration measurements](docs/performance/ImportDeclarations.md).
+
 ## Build and test
 
 Caller proofs can register proved interfaces with `@[cil_contract]` and use

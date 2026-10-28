@@ -234,7 +234,15 @@ def interfaceDeclarations (environment : Environment) (interfaceModules : Array 
         if interfaceModules.contains (definingModule environment name) then
           declarations := name :: declarations
   if interfaceModules.contains environment.mainModule then
-    for (name, _) in environment.constants.toList do
+    let constants := environment.constants
+    -- Imported declarations live in stage one; new declarations live in stage two.
+    -- A colliding module name still requires the complete ownership check.
+    let candidates := if constants.stage₁ ||
+        environment.header.moduleNames.contains environment.mainModule then
+      constants.toList
+    else
+      constants.map₂.toList
+    for (name, _) in candidates do
       if definingModule environment name == environment.mainModule then
         declarations := name :: declarations
   return declarations
