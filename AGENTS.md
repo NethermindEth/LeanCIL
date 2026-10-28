@@ -33,6 +33,13 @@ Write for the next reader; [Semantics.lean](./CIL/Semantics.lean) is the model.
   are built from exact terms, so compare heartbeats on the shared tactic tests and list each
   consumer-visible change in the PR.
 
+## Documentation
+
+- Keep the README focused on project capabilities, limitations and getting started. Put proof API
+  details, CI operation and performance measurements in `docs/`, with links from the README.
+- Update documentation in the PR that changes the behavior. Avoid adding implementation history
+  or benchmark results to the README for each change.
+
 ## Proofs and tests
 
 - Never weaken a contract, precondition or soundness check to make a proof go through. Report an

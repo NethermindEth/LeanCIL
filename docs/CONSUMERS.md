@@ -5,7 +5,7 @@ SDK deps/NuGet asset selection; see [resolving imports](CONTRACT-INTERFACES.md#r
 It only locates files. Pins, caller audits, kernel replay and deployment
 obligations are unchanged.
 
-The [README](../README.md#consumer-packages-and-batches) shows the commands. This page states what
+This page shows the commands and states what
 consumer and batch verification check, what they reuse, and how support is shared across machines.
 
 ## Consumer proof packages

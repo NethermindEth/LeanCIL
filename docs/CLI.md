@@ -1,6 +1,6 @@
 # Command-line reference
 
-The [README](../README.md#quick-start) walks through a first verification. This page gives the
+The [getting-started guide](GETTING-STARTED.md) walks through a first verification. This page gives the
 details of each command.
 
 ## Build
