@@ -3,11 +3,13 @@
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/MemorySpans");
 Directory.CreateDirectory(root);
 var evidence = new GeneratedEvidence(root);
+var rejected = new RejectedEvidence(root);
 var spanProofs = new Dictionary<string, string>(StringComparer.Ordinal);
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution");
 
@@ -61,12 +63,10 @@ foreach (var (name, before, after) in new[]
     // Keep both raw methods intact: rejection must bind argument evidence to the closed signature.
     File.WriteAllText(proof, original[..argumentStart] +
         argumentDefinition.Replace(before, after, StringComparison.Ordinal) + original[argumentEnd..]);
-    var result = Execute(["lake", "env", "lean", proof], cwd: FixturePackage());
     var rejectedGoal = "⊢ Extraction.closedArguments rawLayouts method0Closed = some method0RawArguments";
-    if (result.Code == 0 || !result.Output.Contains(rejectedGoal, StringComparison.Ordinal))
-        throw new Exception("Incorrect span evidence rejection: " + name + "\n" + result.Output);
-    Console.WriteLine("PASS independent span evidence rejection: " + name);
+    rejected.Add(proof, "PASS independent span evidence rejection: " + name, rejectedGoal);
 }
+rejected.Check();
 
 RequireLeanFixtures("CIL.Safety.MethodContract", "CIL.Safety.BufferContents");
 foreach (var (method, proof) in new[]

@@ -19,7 +19,12 @@ var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringCo
 var controls = new Dictionary<int, List<string>>();
 var controlSources = new HashSet<string>(StringComparer.Ordinal);
 CheckExternalIdentities();
-if (args is ["--external-identities"]) return;
+if (args is ["--external-identities"])
+{
+    evidence.Check();
+    rejected.Check();
+    return;
+}
 const string controlBaseline = """
     import CIL.Extraction.Translation
     namespace Extracted
@@ -124,7 +129,7 @@ CheckLeanFixture("Tests.ExtractionGenerics");
 rejected.Check();
 void CheckExternalIdentities()
 {
-    var evidence = new ExternalIdentityEvidence();
+    var identityEvidence = new ExternalIdentityEvidence();
     var identities = new[]
     {
         "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::" +
@@ -134,20 +139,20 @@ void CheckExternalIdentities()
             "System.UInt64 Namespace.Type::Method(System.UInt64)"
     };
     var lean = new StringBuilder("import Lean\nset_option maxRecDepth 4096\n");
-    if (evidence.Reference("unreachable only", false) != JsonSerializer.Serialize("unreachable only"))
+    if (identityEvidence.Reference("unreachable only", false) != JsonSerializer.Serialize("unreachable only"))
         throw new InvalidOperationException("Unreachable identity was materialized.");
-    evidence.Emit(lean);
+    identityEvidence.Emit(lean);
     if (lean.ToString().Contains("externalIdentity", StringComparison.Ordinal))
         throw new InvalidOperationException("Unreachable identity emitted proof declarations.");
     foreach (var (identity, index) in identities.Select((identity, index) => (identity, index)))
     {
         var name = "externalIdentity" + index;
-        if (evidence.Reference(identity, true) != name || evidence.Reference(identity, true) != name)
+        if (identityEvidence.Reference(identity, true) != name || identityEvidence.Reference(identity, true) != name)
             throw new InvalidOperationException("Exact identity deduplication changed.");
     }
-    evidence.Emit(lean);
+    identityEvidence.Emit(lean);
     var baseline = lean.ToString();
-    evidence.Emit(lean);
+    identityEvidence.Emit(lean);
     if (lean.ToString() != baseline)
         throw new InvalidOperationException("Repeated identity emission duplicated declarations.");
     // Literal equality is an independent encoding oracle, not part of the generated certificate.
@@ -159,9 +164,10 @@ void CheckExternalIdentities()
     }
     baseline = lean.ToString();
     var path = Path.Combine(output, "ExactExternalIdentities.lean");
-    File.WriteAllText(path, baseline);
-    Run(["lake", "env", "lean", path], cwd: FixturePackage());
-    var rejectedIdentities = new RejectedEvidence(Path.Combine(output, "IdentityMutations"));
+    File.WriteAllText(path, "import Lean\nnamespace Extracted\n" +
+        baseline.Replace("import Lean\n", "", StringComparison.Ordinal) + "\nend Extracted\n");
+    evidence.Add(path, "PASS exact external identities: deduplication, unreachable calls and Unicode",
+        "exactIdentity2");
     foreach (var (name, source) in new[]
     {
         ("changed-byte", baseline.Replace("#[83,", "#[84,", StringComparison.Ordinal)),
@@ -173,12 +179,10 @@ void CheckExternalIdentities()
         var rejectedPath = Path.Combine(output, "Identity-" + name + ".lean");
         File.WriteAllText(rejectedPath, "import Lean\nnamespace Extracted\n" +
             source.Replace("import Lean\n", "", StringComparison.Ordinal) + "\nend Extracted\n");
-        rejectedIdentities.Add(rejectedPath, "PASS exact identity mutation: " + name,
+        rejected.Add(rejectedPath, "PASS exact identity mutation: " + name,
             diagnostic => diagnostic.Contains("rfl", StringComparison.Ordinal) ||
                 diagnostic.Contains("Type mismatch", StringComparison.Ordinal));
     }
-    rejectedIdentities.Check();
-    Console.WriteLine("PASS exact external identities: deduplication, unreachable calls, Unicode and mutations");
 }
 
 void CheckExternalCallTargets()
