@@ -200,7 +200,7 @@ foreach (var (name, signature, element, width, writable, range) in new[]
             var forged = Path.Combine(root, "Forged-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(before, after, StringComparison.Ordinal));
             rejected.Add(forged, "PASS independent span call rejection: " + mutation,
-                "⊢ Extraction.ScalarFlowValid");
+                "Extraction.ScalarFlowValid method0Closed method0FeatureStates method0ScalarStates method0.code");
         }
     }
 }
