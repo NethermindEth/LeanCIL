@@ -401,7 +401,7 @@ Test("required gate, all 192 actual Bash status combinations", () =>
             $"Unexpected gate result: {planned}/{selected}/{prepared}/{tools}/{result}\n{transcript}");
     }
 });
-Test("same-run certified library binding and observability", () =>
+Test("certified library binding, main republication and observability", () =>
 {
     string workflow = File.ReadAllText(Path.Combine(root, ".github/workflows/verification.yml"));
     const string dollar = "$";
@@ -411,8 +411,12 @@ Test("same-run certified library binding and observability", () =>
         "LEANCIL_CERTIFIED_LIBRARY_SHA256: " + dollar + "{{ needs.prepare.outputs.manifest-sha256 }}",
         "artifact-ids: " + dollar + "{{ needs.prepare.outputs.artifact-id }}",
         "run-id: " + dollar + "{{ needs.prepare.outputs.artifact-run-id }}",
-        "artifact-id: " + dollar + "{{ steps.certify.outputs.reused == 'true' && steps.donor.outputs.artifact-id || " +
-            "steps.library-artifact.outputs.artifact-id }}",
+        "artifact-id: " + dollar + "{{ steps.library-artifact.outputs.artifact-id || " +
+            "steps.donor.outputs.artifact-id }}",
+        "artifact-run-id: " + dollar + "{{ steps.library-artifact.outputs.artifact-id && github.run_id || " +
+            "steps.donor.outputs.run-id }}",
+        "if: steps.certify.outputs.reused != 'true' || " +
+            "(github.event_name == 'push' && github.ref == 'refs/heads/main')",
         "--reuse \"" + dollar + "DONATED_SHA256\"",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
         "include-hidden-files: true", "max-parallel: 8", "artifacts/verification-traces/",
