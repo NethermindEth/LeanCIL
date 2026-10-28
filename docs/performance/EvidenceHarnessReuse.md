@@ -8,8 +8,11 @@ must compile and then fail independent `leanchecker` replay with a declaration t
 Generic extraction positives and all metadata mutations remain unchanged.
 
 The focused existing script and analyzer rebuilds passed. The two moved controls took 6.07 s
-locally, including independent replay. This is not a whole-suite timing comparison; CI runs
-the broader suite.
+locally, including independent replay. Rechecking the two captured original generic probes
+against the same authenticated library took 6.82 s (2.15 s for the false proof; 4.67 s for
+compilation and forged-declaration replay). The observed saving is small, about 0.75 s; this
+primarily consolidates harness coverage. This is not a whole-suite comparison; CI runs the
+broader suite.
 
 ## Discarded cross-fixture batching prototype
 
