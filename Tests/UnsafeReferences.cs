@@ -81,8 +81,9 @@ foreach (var name in new[] { "AreSame", "Less", "Greater", "ByteOffset", "AddSig
     }
     else expected = method.CreateDelegate<ReferenceComparison>()(ref bytes[5], ref bytes[2]) ? 1 : 0;
     var argument = offset ? ".scalar (.i64 3)" : ".reference (.address ⟨0, 2⟩)";
+    var resultBits = unchecked((ulong)expected);
     var resultValue = offset ? $".reference (.address ⟨0, {expected}⟩)" :
-        $".scalar (.{(name == "ByteOffset" ? "i64" : "i32")} ({expected}))";
+        $".scalar (.{(name == "ByteOffset" ? "i64" : "i32")} {resultBits})";
     Prove(name, selector,
         $"CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 5⟩), {argument}] memory = " +
         $".ok (memory, [{resultValue}])");
