@@ -58,6 +58,12 @@ obligation types, but reuse the original checked theorem instead of reducing its
 Generic controls compile and replay in the original positive batch. Missing or changed control
 declarations must still fail type checking; isolated mutation cases retain their original validator
 proofs and diagnostic checks, without access to the positive-control witnesses.
+The projected declarations use a distinct namespace, so missing names cannot fall back to the
+original `Extracted` namespace. Controls reject explicit access to that namespace while preserving
+quoted metadata strings and disable automatic implicit parameters. Regression cases cover removed
+declarations used by definitions or obligation types, changed definitions, qualified references and
+opened namespaces. Rejection diagnostics retain their case boundaries with or without Lean's
+diagnostic classification codes.
 Feature-flow and folded-span mutations use the same checked controls and retain only the
 intended feature-flow obligation in each negative fixture. Every rejection must identify
 `FeatureFlowValid` as false. Full positive certificates, runtime comparisons, and consumer

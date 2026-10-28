@@ -28,6 +28,14 @@ partial class Program
     // proof instead of reducing the same validator twice. Mutations never use these witnesses.
     static string CheckedEvidenceControl(string original, string narrowed, IEnumerable<string> theorems, int index)
     {
+        // Explicit references could bypass the projected declarations and reach the original.
+        var code = Regex.Replace(narrowed, @"""(?:\\.|[^""\\])*""", "\"\"");
+        code = Regex.Replace(code, @"(?m)^(?:namespace|end) Extracted\r?$", "");
+        if (Regex.IsMatch(code, @"\bExtracted\b"))
+            throw new InvalidOperationException("Evidence controls require namespace-relative references.");
+        if (Regex.Matches(narrowed, @"(?m)^namespace Extracted\r?$").Count != 1 ||
+            Regex.Matches(narrowed, @"(?m)^end Extracted\r?$").Count != 1)
+            throw new InvalidOperationException("Missing unique evidence control namespace.");
         var witnesses = new StringBuilder();
         var audits = new StringBuilder();
         foreach (var theorem in theorems)
@@ -46,10 +54,12 @@ partial class Program
             var obligation = narrowedMatches[0];
             narrowed = narrowed[..obligation.Index] + header + " := by exact " + witness +
                 narrowed[(obligation.Index + obligation.Length)..];
-            audits.AppendLine($"#print axioms EvidenceControl{index}.Extracted.{theorem}");
+            audits.AppendLine($"#print axioms EvidenceControl{index}.{theorem}");
         }
         narrowed = Regex.Replace(narrowed, @"(?m)^import [^\r\n]+\r?\n", "");
-        return witnesses + $"\nnamespace EvidenceControl{index}\n" + narrowed +
+        // A nested Extracted namespace can resolve missing names in the original Extracted.
+        narrowed = Regex.Replace(narrowed, @"(?m)^(?:namespace|end) Extracted\r?\n", "");
+        return witnesses + $"\nnamespace EvidenceControl{index}\nset_option autoImplicit false\n" + narrowed +
             $"\nend EvidenceControl{index}\n" + audits;
     }
 

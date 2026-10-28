@@ -71,10 +71,12 @@ partial class Program
             File.WriteAllText(path, source);
             var result = Execute(["lake", "env", "lean", path], cwd: FixturePackage(), leanPath: leanPath);
             var diagnostics = Regex.Matches(result.Output,
-                @"(?m)^" + Regex.Escape(path.Replace('\\', '/')) + @":(\d+):\d+: (error|warning|information):");
+                @"(?m)^" + Regex.Escape(path.Replace('\\', '/')) +
+                @":(\d+):\d+: (error|warning|information)(?:\([^)\r\n]+\))?:");
             if (diagnostics.Count == 0)
                 diagnostics = Regex.Matches(result.Output,
-                    @"(?m)^" + Regex.Escape(path) + @":(\d+):\d+: (error|warning|information):");
+                    @"(?m)^" + Regex.Escape(path) +
+                    @":(\d+):\d+: (error|warning|information)(?:\([^)\r\n]+\))?:");
             var starts = ranges.Select(range => range.Start).ToArray();
             var errors = cases.Select(_ => new StringBuilder()).ToArray();
             for (var diagnostic = 0; diagnostic < diagnostics.Count; diagnostic++)

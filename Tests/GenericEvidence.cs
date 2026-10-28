@@ -29,18 +29,64 @@ const string controlBaseline = """
     import CIL.Extraction.Translation
     namespace Extracted
     def controlValue : Nat := 1
+    def storedName : String := "Extracted.controlValue"
     theorem control_valid : controlValue = 1 := rfl
     #print axioms control_valid
     end Extracted
 
     """;
-foreach (var (name, declaration) in new[]
-         { ("missing-declaration", ""), ("changed-declaration", "def controlValue : Nat := 2\n") })
+var controlPath = Path.Combine(output, "Control-unchanged.lean");
+File.WriteAllText(controlPath, controlBaseline + CheckedEvidenceControl(controlBaseline,
+    NarrowEvidence(controlBaseline, "control_valid"), ["control_valid"], 0));
+evidence.Add(controlPath, "PASS unchanged evidence projection and literal namespace name", "control_valid");
+foreach (var (name, declaration, diagnostic) in new[]
+{
+    ("missing-declaration", "", "Unknown identifier"),
+    ("changed-declaration", "def controlValue : Nat := 2\n", "Type mismatch")
+})
 {
     var narrowed = controlBaseline.Replace("def controlValue : Nat := 1\n", declaration, StringComparison.Ordinal);
     var path = Path.Combine(output, "Control-" + name + ".lean");
     File.WriteAllText(path, controlBaseline + CheckedEvidenceControl(controlBaseline, narrowed, ["control_valid"], 0));
-    rejected.Add(path, "PASS checked control rejects " + name, "Type mismatch");
+    rejected.Add(path, "PASS checked control rejects " + name, diagnostic);
+}
+foreach (var (name, declarations) in new[]
+{
+    ("theorem-dependent-definition", """
+        def dependentWitness : controlValue = 1 := control_valid
+        theorem second_valid : controlValue = 1 := dependentWitness
+        #print axioms second_valid
+        """),
+    ("theorem-dependent-type", """
+        theorem second_valid : control_valid = control_valid := rfl
+        #print axioms second_valid
+        """)
+})
+{
+    var baseline = controlBaseline.Replace("end Extracted", declarations + "\nend Extracted",
+        StringComparison.Ordinal);
+    var path = Path.Combine(output, "Control-" + name + ".lean");
+    File.WriteAllText(path, baseline + CheckedEvidenceControl(baseline, NarrowEvidence(baseline, "second_valid"),
+        ["second_valid"], 0));
+    rejected.Add(path, "PASS checked control rejects " + name, "Unknown identifier", "control_valid");
+}
+foreach (var (name, control) in new[]
+{
+    ("qualified-reference", NarrowEvidence(controlBaseline, "control_valid").Replace("Nat := 1",
+        "Nat := Extracted.controlValue", StringComparison.Ordinal)),
+    ("opened-namespace", "open Extracted\n" + NarrowEvidence(controlBaseline, "control_valid"))
+})
+{
+    try
+    {
+        CheckedEvidenceControl(controlBaseline, control, ["control_valid"], 0);
+        throw new InvalidOperationException("Explicit reference escaped the evidence projection: " + name);
+    }
+    catch (InvalidOperationException failure) when
+        (failure.Message == "Evidence controls require namespace-relative references.")
+    {
+        Console.WriteLine("PASS checked control rejects " + name);
+    }
 }
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
