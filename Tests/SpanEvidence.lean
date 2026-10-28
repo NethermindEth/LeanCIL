@@ -47,7 +47,7 @@ private def arraySpanCall : CallSite := {
   declaringType := .atom spanMemoryScope "System.MemoryExtensions"
   name := "AsSpan"
   target := .external (spanMemoryScope ++
-    "::System.Span`1<!!0> System.MemoryExtensions::AsSpan<System.Int32>(!!0[],System.Int32)")
+    "::System.Span`1<!!0> System.MemoryExtensions::AsSpan(!!0[],System.Int32)")
   typeArguments := [intType], parameterCount := 2, hasThis := false, returnsValue := true
   returnType := .apply (.constructor runtime "System.Span`1") intType
   parameterTypes := [.array intType, intType] }

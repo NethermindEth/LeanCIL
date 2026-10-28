@@ -468,6 +468,10 @@ internal static class MetadataValidation
                         if (instruction.OpCode.Code == Code.Newobj && instruction.Next?.OpCode.Code == Code.Throw)
                             throw Call("Unsupported exception constructor", reference, method, instruction,
                                 "Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
+                        if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
+                            Spans.Width(reference.DeclaringType) is not null)
+                            throw Call("Unsupported in-place span constructor", reference, method, instruction,
+                                "Use an array conversion or AsSpan to initialize a reusable span local.");
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);

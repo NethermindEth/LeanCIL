@@ -87,7 +87,7 @@ private def arrayExtensionCall (opcode : Nat) (site : CallSite) : Option SpanCal
   if opcode != 40 || site.hasThis || !site.returnsValue || site.name != "AsSpan" ||
       site.declaringType != .atom spanMemoryScope "System.MemoryExtensions" ||
       site.parameterCount != site.parameterTypes.length then none else pure ()
-  let [elementType@(.atom _ elementName)] := site.typeArguments | none
+  let [elementType] := site.typeArguments | none
   let element ← arrayElementType elementType
   if site.returnType != .apply (.constructor runtimeScope "System.Span`1") elementType then none
     else pure ()
@@ -99,7 +99,7 @@ private def arrayExtensionCall (opcode : Nat) (site : CallSite) : Option SpanCal
     else if site.parameterTypes == [.array elementType, intType, intType] then
       some (.counted, "!!0[],System.Int32,System.Int32") else none
   if site.target != .external (spanMemoryScope ++
-      "::System.Span`1<!!0> System.MemoryExtensions::AsSpan<" ++ elementName ++ ">(" ++
+      "::System.Span`1<!!0> System.MemoryExtensions::AsSpan(" ++
       parameters ++ ")") then none else some (.array element true range)
 
 /-- Covered calls cannot be replaced with another operation of the same stack effect. -/

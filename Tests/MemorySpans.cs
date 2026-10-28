@@ -117,6 +117,8 @@ foreach (var (name, signature, element, width, writable, range) in new[]
         private def arrayMemory : CIL.Safety.Memory := {
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨{{3 * width}}, 1, []⟩, true, []⟩ else none
+          cells := fun _ _ => ⟨0, false⟩
+          views := []
           nextIdentity := 1 }
 
         -- Forming a view needs neither initialized bytes nor write authority.
@@ -150,13 +152,13 @@ foreach (var (name, signature, element, width, writable, range) in new[]
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
                     .scalar (.i32 (-1)){{tail}}] arrayMemory).map Prod.snd =
-                  .error (.thrown "System.ArgumentOutOfRangeException") := rfl
+                  .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
             #print axioms compiled_negative_start
 
             theorem compiled_null_invalid_start :
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.reference .null, .scalar (.i32 1){{tail}}] arrayMemory).map Prod.snd =
-                  .error (.thrown "System.ArgumentOutOfRangeException") := rfl
+                  .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
             #print axioms compiled_null_invalid_start
             """);
     }
@@ -168,21 +170,22 @@ foreach (var (name, signature, element, width, writable, range) in new[]
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
                     .scalar (.i32 2147483647), .scalar (.i32 2147483647)] arrayMemory).map Prod.snd =
-                  .error (.thrown "System.ArgumentOutOfRangeException") := rfl
+                  .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
             #print axioms compiled_overflowing_range
 
             theorem compiled_negative_length :
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
                     .scalar (.i32 0), .scalar (.i32 (-1))] arrayMemory).map Prod.snd =
-                  .error (.thrown "System.ArgumentOutOfRangeException") := rfl
+                  .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
             #print axioms compiled_negative_length
 
             theorem expired_array_is_not_a_range_exception :
                 (CIL.Safety.memoryInstruction (.arraySpan .{{element}} {{capability}} .counted)
                   [.scalar (.i32 0), .scalar (.i32 0), .array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩]
-                  { arrayMemory with allocations := fun _ =>
-                    some ⟨.callerStack, ⟨{{3 * width}}, 1, []⟩, false, []⟩ }).map Prod.snd =
+                  { arrayMemory with
+                    allocations := fun _ => some ⟨.callerStack, ⟨{{3 * width}}, 1, []⟩, false, []⟩
+                  }).map Prod.snd =
                   .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
             #print axioms expired_array_is_not_a_range_exception
             """);
@@ -252,7 +255,8 @@ Console.WriteLine("PASS compiled span helper contract and caller composition");
 foreach (var (signature, marker) in new[]
 {
     ("ByRefSpan(System.Span`1<System.Int32>&)", "Unsupported by-reference span"),
-    ("FloatingSpan(System.ReadOnlySpan`1<System.Double>)", "Unsupported type")
+    ("FloatingSpan(System.ReadOnlySpan`1<System.Double>)", "Unsupported type"),
+    ("InPlaceArrayConstructor(System.Int32[],System.Int32,System.Int32)", "Unsupported in-place span constructor")
 })
 {
     var result = Execute(["dotnet", ExtractorPath, "extract", assembly, "MemorySpans::" + signature,

@@ -11,6 +11,12 @@ public static class MemorySpans
 
     public static Span<char> ArrayConstructor(char[] values) => new(values);
 
+    public static int InPlaceArrayConstructor(int[] values, int start, int length)
+    {
+        var span = new Span<int>(values, start, length);
+        return span[0];
+    }
+
     public static ReadOnlySpan<int> ArrayRange(int[] values, int start, int length) => new(values, start, length);
 
     public static Span<bool> ArrayAsSpan(bool[] values) => values.AsSpan();
