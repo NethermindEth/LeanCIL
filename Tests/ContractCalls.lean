@@ -206,6 +206,13 @@ theorem malformed_candidate (program : Program) (memory final : Safety.Memory) (
   cil_checked_child [(by exact False.elim (by assumption)), child]
 #print axioms malformed_candidate
 
+/-- Definitionally equal symbolic budgets still use exact invocation evidence. -/
+theorem symbolic_budget (program : Program) (memory final : Safety.Memory) (fuel : Nat)
+    (child : Safety.invoke program fuel 1 [] memory = .ok (final, [])) :
+    Safety.invoke program (fuel + 0) 1 [] memory = .ok (final, []) := by
+  cil_checked_child [child]
+#print axioms symbolic_budget
+
 /-- A specification-only field cannot be guessed from an empty runtime argument list. -/
 structure GhostInput where
   witness : Nat
