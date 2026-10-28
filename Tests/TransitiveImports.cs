@@ -465,6 +465,11 @@ void FullTransitive()
         Capture(1) < 0 || Capture(0) < 0 || Capture(1) > libraries[2] || Capture(1) > Capture(0))
         throw new InvalidOperationException(
             "Full verification skipped or misordered a transitive replay: " + string.Join(", ", stages));
+    var compositionReplay = traced.Single(record => record.Stage ==
+        "Independent kernel replay of the composed caller theorem");
+    if (!compositionReplay.Command.Contains("leancil-audit", StringComparison.Ordinal) ||
+        compositionReplay.Command.Contains("--replay", StringComparison.Ordinal))
+        throw new InvalidOperationException("Composition did not share its replay and theorem audit.");
     JsonElement verified =
         JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(artifact, "verified.json")));
     JsonElement import = verified.GetProperty("imports").EnumerateArray().Single();

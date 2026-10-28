@@ -63,6 +63,9 @@ A separate fresh compilation of the regenerated extraction supplies the concrete
 program definitions. Kernel proofs check program equality, extraction evidence,
 library closure, prefix linking, relocation and `CIL.Safety.composed`. The final
 composed theorem uses the actual rechecked library proof terms and caller theorem.
+Its independent kernel replay and exact theorem/constant audit share one authenticated native
+auditor invocation. If that invocation rejects or is unavailable, the toolchain checker runs
+before a separate audit; source, module ownership and axiom checks remain mandatory.
 Staging and composition use a temporary directory outside every Lean search
 root, so their files cannot shadow a caller or toolchain module.
 

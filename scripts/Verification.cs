@@ -1671,7 +1671,7 @@ partial class Program : IDisposable
     // Reads the kernel-replayed oleans only: no imported elaborator, notation, extension or initializer runs.
     AuditedOleans AuditOleans(string leanPath, string[] modules, AuditRequest[] theorems, AuditConstantRequest[]? constants = null,
         string[]? interfaces = null, string[]? closures = null, AuditNamespaces? namespaces = null,
-        string[]? replayTargets = null)
+        string[]? replayTargets = null, string? replayProgress = null)
     {
         var executable = CheckedAuditExecutable();
         var request = Path.Combine(Path.GetTempPath(), "leancil-audit-" + Guid.NewGuid().ToString("N") + ".json");
@@ -1684,7 +1684,8 @@ partial class Program : IDisposable
             File.WriteAllText(request, JsonSerializer.Serialize(new { modules, theorems, constants, interfaces,
                 closures = closures.Select(name => new { name }), namespaces, replayTargets }, AuditJson));
             Run([executable, request, result], leanPath: leanPath, environment: LeanEnvironment,
-                progress: replayTargets is null ? null : "Joint kernel replay of consumer proof and dependencies");
+                progress: replayTargets is null ? null :
+                    replayProgress ?? "Joint kernel replay of consumer proof and dependencies");
             CheckedAuditExecutable();
             var audited = JsonSerializer.Deserialize<AuditedOleans>(File.ReadAllText(result))
                 ?? throw new InvalidDataException("Missing theorem audit result");

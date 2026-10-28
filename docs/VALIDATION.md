@@ -1480,9 +1480,15 @@ including setup, took 56.86 seconds. These timings do not establish a whole-suit
 The certificate-reuse fixture passed all six checks: its four positive sessions used the
 fused audit, and generated-source tampering and compiled-extraction substitution were rejected.
 
-### Transitive verification harness
+### Transitive composition replay
 
 The transitive import suite runs its staged-bundle mutation probe in a separate process of
 its already compiled executable. This preserves process isolation and all mutation checks
 without compiling the shared verifier a second time. The helper remains a tracked suite input
-through its include directive.
+through its include directive. Full composition also shares its final replay and exact audit;
+the transitive fixture checks that this path uses the native auditor in one invocation.
+
+On a Windows App → A → B fixture, final composition replay plus its exact audit fell from
+7.83s to 1.67s when combined. The complete forced-full invocation took 96.16s before and
+87.46s afterward; this is a local sample, not a whole-suite CI measurement. Catalog scans
+covered 2,546 toolchain modules in 23–54ms, so mutable module-resolution rescans remain intact.
