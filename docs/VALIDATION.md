@@ -1251,6 +1251,17 @@ These measurements exclude fixture setup and do not establish a complete-suite C
 
 ### Native joint kernel replay
 
+Direct and consumer contract interfaces are replayed and validated in the same native environment when
+their complete declaration ownership is unambiguous. The replayed ownership map enumerates
+private, auxiliary and unused declarations; interface checks do not select only the exported
+contract's dependencies. Imported interfaces outside the replay target set, duplicate ownership
+and conflicting code-generator ownership entries retain the metadata
+import fallback. Source-location audits and replay profiling retain their existing paths.
+`Tests/JointReplay.cs` compares ordinary and replayed interface verdicts, including module-system
+private declarations, unused forbidden axioms, misleading namespaces and equation auxiliaries.
+Use `dotnet run --file Tests/JointReplay.cs -- --audit-only` for the native audit regressions
+without repeating the independent bootstrap and native replay regressions.
+
 The authenticated `leancil-audit --replay INPUT` command accepts a JSON array of module names.
 It uses the same `CIL/Replay.lean` algorithm as fresh-library bootstrap certification: import
 non-target dependencies without extensions, reject conflicting declarations and replay target

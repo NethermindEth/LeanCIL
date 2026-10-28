@@ -1728,14 +1728,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 acceptedInterfaceArtifacts = InterfaceArtifacts();
                 string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
                 Stage(members, "kernel replay");
-                Dictionary<string, string> interfaceFailures = ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
-                if (interfaceFailures.Count > 0)
-                    throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
-                        string.Join(", ", interfaceFailures.Keys) + "\n" + string.Join("\n", interfaceFailures.Values));
-                RequireInterfaceArtifacts();
-                // The checker reads only the bytes just replayed.
-                CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
-                    module => Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean"));
+                string InterfaceArtifact(string module) =>
+                    Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
+                if (!TryReplayContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
+                        InterfaceArtifact))
+                {
+                    Dictionary<string, string> interfaceFailures =
+                        ReplayConsumerModules(session, interfaceModules, interfaceLeanPath);
+                    if (interfaceFailures.Count > 0)
+                        throw new InvalidDataException("Kernel replay rejected published contract interfaces: " +
+                            string.Join(", ", interfaceFailures.Keys) + "\n" +
+                            string.Join("\n", interfaceFailures.Values));
+                    RequireInterfaceArtifacts();
+                    CheckContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
+                        InterfaceArtifact);
+                }
                 RequireInterfaceArtifacts();
             }
             // Snapshot before invoking Lake: configuration elaboration and imported

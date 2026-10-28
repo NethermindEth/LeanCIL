@@ -190,10 +190,12 @@ def replay (newConstants : Std.HashMap Lean.Name Lean.ConstantInfo)
   return replayed
 
 /-- Replays every target and exposes the checked environment while its imported regions live.
-The callback flag excludes duplicate declarations whose selected proof body may differ.
-The owner resolver identifies target and external declarations for request-local audit scopes. -/
+The callback flag excludes ambiguous ownership and duplicates whose selected proof body may differ.
+The owner resolver identifies target and external declarations for request-local audit scopes.
+The target owner map also enumerates every private, auxiliary and unused target declaration. -/
 unsafe def withReplayedModules (args : List String)
-    (checked : Lean.Kernel.Environment → Bool → (Lean.Name → Option Lean.Name) → IO Unit) :
+    (checked : Lean.Kernel.Environment → Bool → (Lean.Name → Option Lean.Name) →
+      Std.HashMap Lean.Name Lean.Name → IO Unit) :
     IO Unit := do
   let started ← IO.monoMsNow
   let names := args.map String.toName
@@ -201,9 +203,14 @@ unsafe def withReplayedModules (args : List String)
   let mut imports : Std.HashMap Lean.Name Lean.Import := {}
   let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
   let mut owners : Std.HashMap Lean.Name Lean.Name := {}
+  let mut extraOwners : Std.HashMap Lean.Name Lean.Name := {}
   let mut unique := true
   for module in names do
     let (exported, complete) ← readReplayParts module
+    for name in complete.extraConstNames do
+      if let some owner := extraOwners[name]? then
+        if owner != module then unique := false
+      extraOwners := extraOwners.insert name module
     for dependency in exported.imports do
       unless targets.contains dependency.module do
         imports := imports.insert dependency.module <| match imports[dependency.module]? with
@@ -227,6 +234,12 @@ unsafe def withReplayedModules (args : List String)
   let env ← Lean.finalizeImport s external {} 0 false false (isModule := true)
   try
     let imported := env.allImportedModuleNames
+    -- Same-module auxiliaries retain their owner. Conflicting entries need the imported
+    -- catalog's ownership precedence instead of a synthesized fused ownership map.
+    for (name, owner) in extraOwners do
+      if let some declaredOwner := owners[name]? then
+        if owner != declaredOwner then unique := false
+      else if (env.find? name).isSome then unique := false
     for (name, ci) in constants do
       if let some prior := env.find? name then
         unique := false
@@ -237,7 +250,7 @@ unsafe def withReplayedModules (args : List String)
     let replayed ← replay constants env.toKernelEnv
     let ownerOf := fun name => owners[name]? <|>
       ((env.getModuleIdxFor? name).bind (imported[·.toNat]?))
-    checked replayed unique ownerOf
+    checked replayed unique ownerOf owners
   finally env.freeRegions
   let elapsed := (← IO.monoMsNow) - started
   for name in args do
@@ -247,7 +260,7 @@ unsafe def withReplayedModules (args : List String)
 /-- Replays every target declaration against shared dependencies without loading extensions. -/
 unsafe def replayModulesJointly (args : List String) : IO Unit := do
   Lean.initSearchPath (← Lean.findSysroot)
-  withReplayedModules args fun _ _ _ => pure ()
+  withReplayedModules args fun _ _ _ _ => pure ()
 
 /-- Replays one module with the pinned toolchain's `LeanChecker.replayFromImports` semantics.
 Its imported environment is private to this module, including when another target fails. -/
