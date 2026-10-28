@@ -441,6 +441,9 @@ Regression tests share checked setup where their import and replay requirements 
 Runtime bit tests [deduplicate identical typed inputs](docs/performance/RuntimeBits.md),
 and replay fallback tests check rejection and attribution in one invocation. Independent
 metadata mutations, malformed proofs, cache invalidation and native/bootstrap paths remain covered.
+Feature-flow mutation tests check their intended validator obligation with
+[checked positive controls](docs/performance/EvidenceHarnessReuse.md), avoiding repeated
+unrelated certificate proofs.
 
 CI builds the shared test runner and contract-export fixtures once per workflow. Suite jobs
 authenticate their manifests and compiled outputs before reuse; source, SDK or runtime changes

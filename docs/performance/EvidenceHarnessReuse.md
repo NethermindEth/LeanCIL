@@ -14,6 +14,34 @@ compilation and forged-declaration replay). The observed saving is small, about 
 primarily consolidates harness coverage. This is not a whole-suite comparison; CI runs the
 broader suite.
 
+## Feature-flow mutation obligations
+
+`FeatureEvidence` and `SpanTables` now check only the feature-flow obligation in their
+negative fixtures, instead of re-proving every unchanged validator and instruction lookup
+equation. All six feature mutations and three forged span receivers remain. Feature
+rejections now require `FeatureFlowValid` and `is false`, so an unrelated failure cannot
+stand in for the intended rejection.
+
+The original positive certificate is still checked in full. A narrowed positive control
+retains the declarations and exact obligation type and checks them against the original
+theorem, using the same helper as generic evidence. Span controls accompany the existing
+consumer proofs and their independent kernel replay. A folded span instruction without a
+recognizable instruction theorem is an error, rather than silently dropping its mutation.
+
+Complete Windows fixture runs against the same warm certified library, with proof-success
+reuse disabled, measured the following. Both variants were explicitly rebuilt before using
+`dotnet run --no-build`; timings exclude the C# build and library preparation but include
+all positive controls, extraction, runtime comparisons and required consumer replay.
+
+| Fixture | Original | Bounded obligations |
+| --- | ---: | ---: |
+| FeatureEvidence | 28.91 s | 26.96 s |
+| SpanTables | 24.33 s | 21.90 s |
+
+The combined saving is 4.38 s (8.2%) for these two fixtures, not the entire evidence suite.
+Both complete fixtures and their final C# analyzer rebuilds passed. The full generated
+feature mutation batch shrank from 102,193 to 64,315 bytes; no mutation was removed.
+
 ## Discarded cross-fixture batching prototype
 
 On Windows at `1eff818`, 12 captured real positive batches (113 cases) took 93.86 s separately

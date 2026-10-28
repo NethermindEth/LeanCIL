@@ -58,6 +58,10 @@ obligation types, but reuse the original checked theorem instead of reducing its
 Generic controls compile and replay in the original positive batch. Missing or changed control
 declarations must still fail type checking; isolated mutation cases retain their original validator
 proofs and diagnostic checks, without access to the positive-control witnesses.
+Feature-flow and folded-span mutations use the same checked controls and retain only the
+intended feature-flow obligation in each negative fixture. Every rejection must identify
+`FeatureFlowValid` as false. Full positive certificates, runtime comparisons, and consumer
+replay remain; folded instructions with an unrecognized theorem cannot silently skip a test.
 On Apple M4 with the indexed constrained-dispatch library already built, the constrained positive
 batch fell from 5.67s to 5.26s. Generic positive compilation, independent replay and controls took
 18.79s before reuse and 16.84s afterward, including replay of the controls in the combined batch.

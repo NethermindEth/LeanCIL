@@ -4,6 +4,7 @@
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
+#:include GeneratedEvidence.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -27,11 +28,12 @@ string Scalar(object value) => value switch
 };
 string Claim(string dll, string name, int[] input, string outcome) =>
     $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => Scalar(v)))}] Examples.empty).map Prod.snd = {outcome}";
-void Prove(string dll, string selector, string folder, IReadOnlyList<string> claims, Action passed)
+void Prove(string dll, string selector, string folder, IReadOnlyList<string> claims, Action passed,
+    string control = "")
 {
     var proof = Path.Combine(root, folder + ".lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
-        string.Join(" ∧\n", claims) + " := by\n  and_intros <;> rfl\nend ExampleProof\n");
+        string.Join(" ∧\n", claims) + " := by\n  and_intros <;> rfl\nend ExampleProof\n" + control);
     queue.Add(new(selector, proof, Path.Combine(root, folder), Assembly: dll), passed);
 }
 
@@ -56,13 +58,20 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
             return Claim(assembly, name, input, $".error ⟨{site.Groups[1].Value}, {site.Groups[2].Value}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩");
         }
     }).ToList();
+    var folded = Regex.Match(source,
+        @"theorem method(\d+)_instruction\d+ : [^\r\n]*some \(\.nop : Op\)");
+    if (source.Contains("(.nop : Op)", StringComparison.Ordinal) && !folded.Success)
+        throw new InvalidOperationException("Missing instruction theorem for a folded span receiver");
+    var obligation = $"method{folded.Groups[1].Value}_features_validated";
+    var control = folded.Success
+        ? CheckedEvidenceControl(source, NarrowEvidence(source, obligation), [obligation], 0) : "";
     Prove(assembly, selector, name + "-Verified", claims,
-        () => Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons"));
+        () => Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons"), control);
 
     // The receiver fold is bound by the feature certificate, independently of the instruction lemmas.
-    if (!source.Contains("(.nop : Op)")) continue;
+    if (!folded.Success) continue;
     var forged = Path.Combine(root, name + "-forged.lean");
-    File.WriteAllText(forged, source.Replace(".nop", ".localAddr 0"));
+    File.WriteAllText(forged, NarrowEvidence(source.Replace(".nop", ".localAddr 0"), obligation));
     rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
         diagnostic => Regex.IsMatch(diagnostic, @"Extraction\.FeatureFlowValid method\d+Closed"), "is false");
 }
