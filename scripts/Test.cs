@@ -1,5 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:property EnforceCodeStyleInBuild=true
+#:property GenerateDocumentationFile=true
 #:include Verification.cs
 #:include BatchVerification.cs
 #:include CoreExamples.cs

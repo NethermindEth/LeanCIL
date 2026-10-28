@@ -7,6 +7,9 @@ file-app runs now use those same options instead of implicitly selecting Debug a
 a second output. They still perform the normal incremental build, so changed sources rebuild;
 only explicitly prepared fixtures use `--no-build`. Explicit configuration options remain
 unchanged, and authenticated shared fixtures retain their source and output validation.
+The runner declares the analyzer properties in its file-app header too, so a plain Release
+launch and its self-build use identical settings. This avoids rebuilding a running apphost,
+which Windows locks, while retaining the analyzer-enabled build.
 
 A Windows probe including the real `Verification.cs`, prebuilt in Release, took 1.77 s with
 the previous implicit Debug run and 1.10 s with the matching Release run. The latter reused
