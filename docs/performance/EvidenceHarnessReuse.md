@@ -38,7 +38,7 @@ The complete updated GenericEvidence fixture passed in 40.01 s with its current 
 batch replay taking 2.29 s. The generated/rejected harness controls passed in 19.80 s;
 their unchecked declaration failed native replay and then failed the pinned toolchain-checker
 fallback with the required declaration type mismatch. The ordinary invalid proof still fails
-during compilation. The final C# analyzer builds and all 17 selector checks passed.
+during compilation.
 
 The generated-batch failure controls live in `RejectedEvidenceTests.cs`, alongside the
 rejection-harness controls. They reuse its otherwise-valid theorem instead of checking a full
