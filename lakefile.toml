@@ -176,6 +176,9 @@ name = "Tests.ScalarEvidence"
 name = "Tests.VectorFields"
 
 [[lean_lib]]
+name = "Tests.VectorStorage"
+
+[[lean_lib]]
 name = "Tests.ProfileContract"
 
 [[lean_lib]]
