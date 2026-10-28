@@ -29,6 +29,10 @@ re-encoding long assembly-qualified signatures while retaining exact byte identi
 all translation validators. See [validation coverage](docs/VALIDATION.md) for the fixed-input
 compilation and replay benchmark.
 
+Generic value-type constraints also share exact byte-backed identities between extraction
+and validation. Their [equivalence proofs and measurements](docs/performance/GenericEvidence.md)
+retain the original scoped metadata strings and rejection rules.
+
 ## Build and test
 
 Caller proofs can register proved interfaces with `@[cil_contract]` and use
@@ -426,6 +430,11 @@ exact overloads and profile requirements.
 Pin LeanCIL as a Lake dependency and import the required `CIL.*` modules. Keep application specifications, method proofs and coverage policies in the consuming project. See [integration guidance](docs/MIGRATION.md) and [validation results](docs/VALIDATION.md).
 
 ## Verification CI
+
+Regression tests share checked setup where their import and replay requirements agree.
+Runtime bit tests [deduplicate identical typed inputs](docs/performance/RuntimeBits.md),
+and replay fallback tests check rejection and attribution in one invocation. Independent
+metadata mutations, malformed proofs, cache invalidation and native/bootstrap paths remain covered.
 
 CI builds the shared test runner and contract-export fixtures once per workflow. Suite jobs
 authenticate their manifests and compiled outputs before reuse; source, SDK or runtime changes

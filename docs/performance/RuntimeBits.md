@@ -28,3 +28,6 @@ indicative 4% wall-time saving; the 21.75% reduction in repeated propositions is
 Bounded parallel proof shards and unchanged validation/replay overhead limit the total
 wall-time gain. Code-style analyzer validation found no unnecessary imports; the shared
 verification helper retains its existing unassigned-field warning.
+
+A second candidate run passed in 37.71 seconds. The variation reinforces that the exact
+claim-count reduction is stronger evidence than a precise percentage from these timings.
