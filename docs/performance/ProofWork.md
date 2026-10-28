@@ -214,3 +214,27 @@ Hoisting profile rewrites before operand splitting did not materially help and w
 Removing operand normalization or restricting observer normalization to its hypothesis broke
 proof matching. Removing the preliminary opcode split in `StepFlow` exceeded its existing
 heartbeat limit. None of those experiments or higher resource limits are retained.
+
+### Linux observer follow-up
+
+The observer guard is absent from the hypothesis returned by `observer_ok` or
+`observer_thrown`. After definitional normalization, the final guard simplification now visits
+only the goal. Re-simplifying the already normalized hypothesis traversed its full dispatcher
+again for every successful and throwing instruction proof.
+
+Measurements use Linux x86-64 Lean 4.35.0 under WSL, source and imports on ext4, fixed
+`-j2 -Dprofiler=true`, and no concurrent benchmark. With warm imports, the earlier full-`simp`
+observer variant takes 70.11s and the existing `dsimp` variant takes 54.16s. This reproduces the
+previous improvement on Linux; it does not establish a regression from the slower hosted CI run.
+The new goal-only simplification reduces the same module from 54.16s to 49.14s. Its cumulative
+`simp` counter falls from 20.7s to 12.7s while `dsimp` is 14.8s versus 15.3s; these overlapping
+counters are not additive. An initial cold-import sample was excluded from this comparison.
+
+Early action closure in `StepFlow` measured 20.63s versus 20.74s; early reflexivity in
+`AppendLocals` measured 21.58s versus 21.11s. Neither establishes a useful gain, so neither is
+retained. A targeted rewrite in place of guard simplification failed proof matching and was
+also discarded. No execution definitions, theorem statements or resource limits change.
+
+A second paired run writing `.olean` files takes 56.63s before and 53.22s after. Both serialized
+modules pass independent `leanchecker` replay and all 27 axiom reports match. The smaller
+repeat saving is reported separately rather than treating the first run as a CI prediction.

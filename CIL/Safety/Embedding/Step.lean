@@ -188,10 +188,10 @@ macro "step_observers" : tactic => `(tactic| (
   first
   | (obtain ⟨observed, h⟩ := observer_ok h
      dsimp only [observerCount] at observed h ⊢
-     simp only [observed, Bool.false_eq_true, ite_false] at h ⊢)
+     simp only [observed, Bool.false_eq_true, ite_false])
   | (obtain ⟨observed, h⟩ := observer_thrown h
      dsimp only [observerCount] at observed h ⊢
-     simp only [observed, Bool.false_eq_true, ite_false] at h ⊢)
+     simp only [observed, Bool.false_eq_true, ite_false])
   | skip))
 
 set_option hygiene false in
