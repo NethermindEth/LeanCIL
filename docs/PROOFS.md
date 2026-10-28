@@ -10,6 +10,7 @@ The callee proof reduces each fixed opcode before splitting the remaining dispat
 avoiding repeated case analysis of branches already excluded by that opcode.
 Trailing-local proofs normalize maps over monadic binds before trying congruence, so shared
 computations need not be split into their possible results to prove the continuation unchanged.
+They also discharge dispatcher-tail cases before inspecting an irrelevant second operand.
 
 Relabeling proofs close unary and invalid-first-operand cases before inspecting a second
 operand. Their local `stack_cases => ...` helper tries the instruction's proof after each
