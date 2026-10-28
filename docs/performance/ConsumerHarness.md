@@ -57,3 +57,28 @@ The follow-up source review found Core's hot consumer fixtures already import `C
 or specific proof modules. Generated extraction uses `Translation`, `SymbolicExecution` and
 `Safety.Execution`. The remaining umbrella imports in the inspected harnesses belong to a
 non-elaborated parser fixture and an Evidence control. No narrower-import change was retained.
+
+## Reusing certified fingerprints during preparation
+
+Core's `CertifiedFingerprints` fixture supplied an authenticated library containing canonical
+fingerprint metadata, but `PrepareCertifiedFingerprints` ignored that table and normalized all
+269 modules again. The latest measured CI trace attributes 9.37 seconds to that normalization.
+This was an existing reuse opportunity, not a reason to weaken source-change or corruption tests.
+
+Preparation now uses the same authenticated table as consumer fingerprinting. A matching module
+name, exact raw module-part hashes and normalizer/tool identity are required. Only unmatched
+modules are normalized; the metadata digest, reused module bytes, tools and complete input bytes
+are checked again before publication. No new cache or persistent trust source is introduced.
+Cold preparation without matching metadata still normalizes its modules normally.
+
+On quiet Windows runs from `7d89897`, using the same supplied certified library, the focused
+`--check certified-fingerprints` fixture takes 25.68 seconds before and 16.47 seconds after.
+The original redundant normalization takes 9.3 seconds locally. The candidate also runs a new
+regression requiring repeated preparation to launch no normalizer and produce byte-identical
+metadata. Both preparation calls report 269 reused modules and zero serialized modules.
+Existing fresh-normalization, renamed-module, relocation, changed-part, changed-toolchain,
+private-metadata and self-rehashed-manifest rejection controls remain and pass.
+
+These are complete focused-fixture timings including its worker processes, not a measurement
+of the complete Core job. The 39 consumer proof builds and other replay calls were not removed.
+Validation also includes the affected extractor and consumer-test analyzer builds.

@@ -35,6 +35,25 @@ partial class Program
             digest = producer.PrepareLibrary(prepared);
             if (!measure)
             {
+                var previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+                var preparationTrace = Path.Combine(directory, "repeated-preparation.trace");
+                var metadataBefore = Sha(Path.Combine(producer.library!, CertifiedFingerprintsName));
+                try
+                {
+                    Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", preparationTrace);
+                    producer.PrepareCertifiedFingerprints();
+                }
+                finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previousTrace); }
+                var repeatedStages = Directory.Exists(preparationTrace)
+                    ? Directory.EnumerateFiles(preparationTrace, "*.jsonl").SelectMany(File.ReadLines)
+                        .Select(line => JsonSerializer.Deserialize<JsonElement>(line)).ToArray()
+                    : [];
+                if (repeatedStages.Any(stage => stage.GetProperty("stage").GetString() ==
+                        "Fingerprinting portable consumer modules") ||
+                    Sha(Path.Combine(producer.library!, CertifiedFingerprintsName)) != metadataBefore)
+                    throw new InvalidOperationException(
+                        "Unchanged certified preparation repeated normalization or changed metadata.");
+                Console.WriteLine("PASS unchanged certified preparation reuses authenticated fingerprints");
                 File.AppendAllText(Path.Combine(producer.library!, CertifiedFingerprintsName), "\n");
                 try
                 {

@@ -61,7 +61,14 @@ partial class Program
                 StringComparer.Ordinal);
         var raw = modules.ToDictionary(pair => pair.Key, pair => ConsumerModuleParts(pair.Value),
             StringComparer.Ordinal);
-        var normalized = NormalizeConsumerParts(certified, executable, modules);
+        var reused = CertifiedFingerprintParts(modules, tools);
+        var pending = modules.Where(pair => !reused.ContainsKey(pair.Key))
+            .ToDictionary(StringComparer.Ordinal);
+        var normalized = pending.Count == 0
+            ? new Dictionary<string, SortedDictionary<string, string>>(StringComparer.Ordinal)
+            : NormalizeConsumerParts(certified, executable, pending);
+        foreach (var (name, fingerprint) in reused) normalized.Add(name, fingerprint.Canonical);
+        RequireCertifiedFingerprints(reused, modules, tools);
         CheckedAuditExecutable();
         if (tools != CanonicalFingerprintTools(auditExecutableSha!) || modules.Any(pair =>
                 !Same(raw[pair.Key], ConsumerModuleParts(pair.Value))))
@@ -73,7 +80,8 @@ partial class Program
         var json = JsonSerializer.Serialize(manifest);
         File.WriteAllText(path, json);
         certifiedFingerprintsSha = ContentKey(json);
-        Console.WriteLine($"Prepared canonical fingerprints for {modules.Count} certified library modules.");
+        Console.WriteLine($"Prepared canonical fingerprints for {modules.Count} certified library modules " +
+            $"({reused.Count} reused, {pending.Count} serialized).");
     }
 
     // A matching name is insufficient: every module part and the actual normalizer must
