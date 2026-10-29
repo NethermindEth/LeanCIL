@@ -12,7 +12,8 @@ namespace CIL
 
 /-- Every method index an instruction calls or constructs with. -/
 def Op.callees : Op → List Nat
-  | .call method _ | .newVector256 method _ | .newAggregate method _ _ => [method]
+  | .call method _ | .tailCall method _ | .newVector256 method _
+  | .newAggregate method _ _ => [method]
   | _ => []
 
 end CIL
@@ -21,11 +22,11 @@ namespace CIL.Safety
 
 /-- The method an action enters, if any. -/
 def FrameAction.callee : FrameAction → Option Nat
-  | .call callee .. | .construct callee .. => some callee
+  | .call callee .. | .tailCall callee .. | .construct callee .. => some callee
   | _ => none
 
 set_option maxHeartbeats 800000 in
-/-- Only `.call`, `.newVector256` and `.newAggregate` enter a method, and each enters the
+/-- Only calls and constructor instructions enter a method, and each enters the
     one it names. -/
 theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
@@ -74,6 +75,17 @@ theorem step_call_action {body : CIL.Method} {callee argc pc : Nat} {args : List
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
   all_goals (cases h; exact ⟨_, _, _, rfl⟩)
+
+/-- A tail-call instruction requests frame retirement and exactly its named callee. -/
+theorem step_tailCall_action {body : CIL.Method} {callee argc pc : Nat} {args : List Value}
+    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+    (h : step body (.tailCall callee argc) pc args frame stack m = .ok action) :
+    ∃ arguments updated, action = .tailCall callee arguments updated := by
+  unfold step at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  repeat' (first | contradiction | split at h)
+  all_goals (cases h; exact ⟨_, _, rfl⟩)
+#print axioms step_tailCall_action
 
 /-- Vector and aggregate construction enter the constructor they name with a temporary, never
     as a plain call. -/

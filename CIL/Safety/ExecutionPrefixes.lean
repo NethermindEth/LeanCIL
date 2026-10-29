@@ -43,6 +43,7 @@ inductive RunVisits (program : CIL.Program) : Nat → Nat → Nat → List Value
       (enter : enterFrame child arguments action.memory = .ok (childFrame, childMemory))
       (later : RunVisits program fuel callee 0 arguments childFrame [] childMemory observed) :
       RunVisits program (fuel + 1) method pc args frame stack m observed
+  /-- A tail callee starts only after frame retirement and successful argument rechecking. -/
   | tailChild {fuel method pc args frame stack m callee arguments updated body child checked
         childFrame childMemory observed}
       (step : ProgramStep program method pc args frame stack m
@@ -55,9 +56,13 @@ inductive RunVisits (program : CIL.Program) : Nat → Nat → Nat → List Value
         .ok (childFrame, childMemory))
       (later : RunVisits program fuel callee 0 checked childFrame [] childMemory observed) :
       RunVisits program (fuel + 1) method pc args frame stack m observed
-  | tailExpired {fuel method pc args frame stack m callee arguments updated}
+  /-- Frame retirement occurs before a tail callee can observe its arguments. -/
+  | tailExpired {fuel method pc args frame stack m callee arguments updated body child}
       (step : ProgramStep program method pc args frame stack m
-        (.tailCall callee arguments updated)) :
+        (.tailCall callee arguments updated))
+      (bodyLookup : program[method]? = some body)
+      (lookup : program[callee]? = some child)
+      (returns : (child.returnsValue != body.returnsValue) = false) :
       RunVisits program (fuel + 1) method pc args frame stack m (leaveFrame frame updated)
   | callContinue {fuel method pc args frame stack m callee arguments rest updated child
         childFrame childMemory returned result observed}
@@ -104,7 +109,7 @@ theorem runVisits_wellFormed {program : CIL.Program} {fuel method pc : Nat}
     exact ih (enterFrame_preserves_wellFormed _ _ _ _ _
       (leaveFrame_preserves_wellFormed _ _
         (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)) enter)
-  | tailExpired step =>
+  | tailExpired step _ _ _ =>
     exact leaveFrame_preserves_wellFormed _ _
       (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
   | callContinue step lookup enter finish later ih =>

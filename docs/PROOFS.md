@@ -2,8 +2,13 @@
 
 `CIL.Safety.step_return_properties` proves declared return arity and the absence of unspecified
 SIMD lanes together. `step_return_length` and `step_return_known` project the two results, so
-the checked dispatcher is analyzed once. The existing step, run and invocation statements,
-interpreter definitions and approved axioms are unchanged; no stepping attributes are added.
+the checked dispatcher is analyzed once. Run traces preserve the declared arity across tail
+calls, whose callees must have the same return arity. A tail call retires the current frame
+before rechecking its arguments and entering the callee; pointers into that frame's local
+storage therefore cannot escape through a tail call, even if the callee ignores them.
+`run_success_return_trace` and `run_success_live_return_trace` expose the terminal method and
+arguments as existential witnesses: after a tail call, the final `ret` belongs to the callee.
+`run_return_length` and invocation result-validity guarantees apply to the original invocation.
 The return proof uses an explicit simplification set: unrestricted `simp_all` repeatedly tries
 to discharge irrelevant dispatcher exclusions. Keep that set narrow when extending the proof.
 The callee proof reduces each fixed opcode before splitting the remaining dispatcher matches,

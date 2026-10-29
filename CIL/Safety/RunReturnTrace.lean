@@ -11,14 +11,16 @@ live too, so contract proofs can reason about the last frame instead of the whol
 namespace CIL.Safety
 
 /-- Every normal interpreter result comes from an actual fetched return reached
-    through the running-prefix relation, followed by teardown and result checks. -/
+    through the running-prefix relation, followed by teardown and result checks.
+    Tail calls may change the terminal method and its arguments. -/
 theorem run_success_return_trace (program : CIL.Program) (fuel method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m final : Memory)
     (values : List Value)
     (h : run program fuel method pc args frame stack m = .ok (final, values)) :
     ∃ lastMethod lastArgs lastPc lastFrame lastStack before returned raw,
       RunningVisits program fuel method pc args frame stack m lastArgs lastFrame lastStack before ∧
-      ProgramStep program lastMethod lastPc lastArgs lastFrame lastStack before (.returned raw returned) ∧
+      ProgramStep program lastMethod lastPc lastArgs lastFrame lastStack before
+        (.returned raw returned) ∧
       final = leaveFrame lastFrame returned ∧ raw.mapM (checkedValue final) = .ok values := by
   have trace := run_success_trace program fuel method pc args frame stack m final values h
   clear h
@@ -50,11 +52,12 @@ theorem run_success_live_return_trace (program : CIL.Program) (fuel method pc : 
     ∃ lastMethod lastArgs lastPc lastFrame lastStack before returned raw,
       RunningVisits program fuel method pc args frame stack m lastArgs lastFrame lastStack before ∧
       LiveState program lastArgs lastFrame lastStack before ∧
-      ProgramStep program lastMethod lastPc lastArgs lastFrame lastStack before (.returned raw returned) ∧
+      ProgramStep program lastMethod lastPc lastArgs lastFrame lastStack before
+        (.returned raw returned) ∧
       final = leaveFrame lastFrame returned ∧ raw.mapM (checkedValue final) = .ok values ∧
       ReturnedState program final values := by
-  obtain ⟨lastMethod, lastArgs, lastPc, lastFrame, lastStack, before, returned, raw, visit, fetched, ended,
-      checked⟩ := run_success_return_trace _ _ _ _ _ _ _ _ _ _ h
+  obtain ⟨lastMethod, lastArgs, lastPc, lastFrame, lastStack, before, returned, raw,
+      visit, fetched, ended, checked⟩ := run_success_return_trace _ _ _ _ _ _ _ _ _ _ h
   exact ⟨lastMethod, lastArgs, lastPc, lastFrame, lastStack, before, returned, raw, visit,
     runningVisits_live_state visit state, fetched, ended, checked,
     run_returned_state _ _ _ _ _ _ _ _ _ _ state h⟩

@@ -135,7 +135,7 @@ theorem runVisits_preserves_caller_allocations {program : CIL.Program} {fuel met
     AllocationsBelow m observed watermark := by
   induction visit with
   | initial => exact (AllocationExtension.refl _).below watermark bound
-  | tailExpired step =>
+  | tailExpired step _ _ _ =>
     have first := (programStep_extends_allocations step).below watermark bound
     exact first.trans ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
       fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩

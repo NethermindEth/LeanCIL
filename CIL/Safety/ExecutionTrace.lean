@@ -45,6 +45,7 @@ inductive RunTrace (program : CIL.Program) : Nat → Nat → Nat → List Value 
       (later : RunTrace program fuel method (pc + 1) args frame (result ++ rest) returned
         final values) :
       RunTrace program (fuel + 1) method pc args frame stack m final values
+  /-- A tail call retires its frame and delegates the result to an arity-compatible callee. -/
   | tailCall {fuel method pc args frame stack m callee arguments updated body child checked
         childFrame childMemory final values}
       (step : ProgramStep program method pc args frame stack m

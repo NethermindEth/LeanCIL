@@ -88,7 +88,8 @@ theorem run_preserves_static_world (program : CIL.Program) (fuel method pc : Nat
     exact leaveFrame_preserves_static_world _ _ _
       (programStep_preserves_frame_allocations step hm owns)
       (programStep_preserves_static_world step hm world)
-  | @tailCall fuel method pc args frame stack m callee arguments updated body child checked childFrame childMemory final values step _ _ _ _ enter _ _ ih =>
+  | @tailCall fuel method pc args frame stack m callee arguments updated body child checked
+      childFrame childMemory final values step _ _ _ _ enter _ _ ih =>
     have hw := leaveFrame_preserves_wellFormed frame _
       (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
     have updated := leaveFrame_preserves_static_world _ _ _
@@ -129,11 +130,12 @@ theorem runVisits_preserves_static_world {program : CIL.Program} {fuel method pc
     StaticWorldValid (programStaticDescriptors program) observed := by
   induction visit with
   | initial => exact world
-  | tailExpired step =>
+  | tailExpired step _ _ _ =>
     exact leaveFrame_preserves_static_world _ _ _
       (programStep_preserves_frame_allocations step hm owns)
       (programStep_preserves_static_world step hm world)
-  | @tailChild fuel method pc args frame stack m callee arguments updated body child checked childFrame childMemory observed step _ _ _ _ enter _ ih =>
+  | @tailChild fuel method pc args frame stack m callee arguments updated body child checked
+      childFrame childMemory observed step _ _ _ _ enter _ ih =>
     have hw := leaveFrame_preserves_wellFormed frame _
       (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
     have updated := leaveFrame_preserves_static_world _ _ _

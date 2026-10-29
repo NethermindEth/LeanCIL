@@ -17,6 +17,7 @@ namespace CIL
     dispatches its operand. -/
 def Op.relocate (f : Nat → Nat) : Op → Op
   | .call method argc => .call (f method) argc
+  | .tailCall method argc => .tailCall (f method) argc
   | .newVector256 method argc => .newVector256 (f method) argc
   | .newAggregate method argc size => .newAggregate (f method) argc size
   | op => op
@@ -65,6 +66,7 @@ def LocatedFault.relocateMethod (f : Nat → Nat) (fault : LocatedFault) : Locat
 /-- Renames the method a call or construction enters. -/
 def FrameAction.relocate (f : Nat → Nat) : FrameAction → FrameAction
   | .call callee arguments rest memory => .call (f callee) arguments rest memory
+  | .tailCall callee arguments memory => .tailCall (f callee) arguments memory
   | .construct callee arguments rest frame temporary kind memory =>
     .construct (f callee) arguments rest frame temporary kind memory
   | action => action
@@ -103,6 +105,9 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Op) (pc : 
       simp only [CIL.Op.relocate, observerCount, Bool.or_false,
         Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map]
       repeat' (split <;> simp_all [FrameAction.relocate])
+    all_goals
+      split <;> try rfl
+      split <;> rfl
 
 /-- A method that `step` enters is a callee its instruction names, so it is in a closed library. -/
 theorem Closed.callee {lib : CIL.Program} (closed : Closed lib) {method pc : Nat}
@@ -173,6 +178,25 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
             | ok result =>
               obtain ⟨final, values⟩ := result
               exact ih method (pc + 1) args frame (values ++ rest) final bound
+        | tailCall callee arguments updated =>
+          have inside := closed.callee found ho hs rfl
+          have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
+          have childMoved := relocates callee inside
+          generalize lib[callee] = callBody at child childMoved
+          simp only [run, found, moved, ho, lo, ls, hs, child, childMoved,
+            Except.map, FrameAction.relocate, Bind.bind, Except.bind, Except.mapError]
+          change (if (callBody.returnsValue != body.returnsValue) then _ else _) = _
+          cases returns : callBody.returnsValue != body.returnsValue with
+          | true => rfl
+          | false =>
+            simp only [Bool.false_eq_true, ite_false, enterFrame_relocate]
+            cases checked : arguments.mapM (checkedValue (leaveFrame frame updated)) with
+            | error fault => rfl
+            | ok values =>
+              simp only [Except.mapError, Bind.bind, Except.bind]
+              cases entered : enterFrame callBody values (leaveFrame frame updated) with
+              | error fault => rfl
+              | ok setup => exact ih callee 0 values setup.1 [] setup.2 inside
         | construct callee arguments rest nextFrame temporary kind updated =>
           have inside := closed.callee found ho hs rfl
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
