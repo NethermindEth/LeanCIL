@@ -39,8 +39,9 @@ inductive TypeExpr where
   | pointer (element : TypeExpr)
   /-- A zero-based, single-dimensional CLI array signature. -/
   | array (element : TypeExpr)
-  /-- A static function pointer using the default managed calling convention. -/
-  | functionPointer (result parameters : TypeExpr)
+  /-- A function pointer retains its exact calling convention and receiver flags. -/
+  | functionPointer (result parameters : TypeExpr) (convention : Nat)
+      (hasThis explicitThis : Bool)
   /-- One parameter in a function-pointer signature; the parameter chain ends in `.void`. -/
   | signatureParameter (head tail : TypeExpr)
   | constructor (scope name : String)

@@ -25,6 +25,9 @@ internal static class LeanEmitter
         MetadataValidation.LayoutContext? layouts = null)
     {
         layouts?.Require(module, architecture);
+        if (ManagedPointers.Signature(type) is { } pointer)
+            return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
+                ManagedPointers.SignatureEvidence(pointer);
         if (type is ByReferenceType or PointerType) return ".reference";
         if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
         if (Spans.Width(type) is { } width)
@@ -58,7 +61,9 @@ internal static class LeanEmitter
         ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
         string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
         string kind when kind.StartsWith(".span ", StringComparison.Ordinal) ||
-            kind.StartsWith(".array ", StringComparison.Ordinal) => ".nullRef",
+            kind.StartsWith(".array ", StringComparison.Ordinal) ||
+            kind.StartsWith(".methodPointer ", StringComparison.Ordinal) ||
+            kind.StartsWith(".methodTable ", StringComparison.Ordinal) => ".nullRef",
         ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
         _ => ".aggregate (List.replicate " +
             (layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)) + " 0)"

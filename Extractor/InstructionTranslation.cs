@@ -23,6 +23,25 @@ internal static class InstructionTranslation
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!);
+        if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
+            return $".managed (.call {ManagedPointers.SignatureEvidence(indirect)} " +
+                $"{ManagedPointers.Catalog(indirect, methods, methodIndex, i.Previous?.OpCode.Code == Code.Tail)} " +
+                $"{(i.Previous?.OpCode.Code == Code.Tail ? "true" : "false")})";
+        if (i.OpCode.Code is Code.Ldlen or Code.Ldelem_I or Code.Ldelem_Any &&
+            nativeOperands.Incoming.TryGetValue(i, out var tableStack) &&
+            tableStack.Length >= (i.OpCode.Code == Code.Ldlen ? 1 : 2) &&
+            tableStack[^(i.OpCode.Code == Code.Ldlen ? 1 : 2)] is
+                { Kind: NativeOperands.Kind.MethodTable, Metadata: { } table })
+            return i.OpCode.Code == Code.Ldlen ? ".managed .tableLength" :
+                ".managed (.tableElement " + table[".methodTable ".Length..] + ")";
+        if (i.OpCode.Code == Code.Ldftn && i.Operand is MethodReference address)
+        {
+            var target = address.Resolve() ?? throw new InvalidDataException("Unresolved managed pointer target");
+            var targetIndex = methods.GetValueOrDefault(target, -1);
+            if (targetIndex < 0) throw new InvalidDataException("Managed pointer target is outside the catalog");
+            return $".managed (.address {ManagedPointers.TargetEvidence(target, targetIndex)} " +
+                $"{ManagedPointers.SignatureEvidence(target)})";
+        }
         if (TailCalls.IsCall(i) && i.Operand is MethodReference tailTarget &&
             nativeOperands.Incoming.TryGetValue(i, out var tailStack) &&
             tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
@@ -128,7 +147,7 @@ internal static class InstructionTranslation
             if (RuntimeModel(r, profile) is string modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);
-            if (index > methodIndex)
+            if (index > methodIndex || index >= 0 && TailCalls.IsCall(i))
             {
                 if (i.OpCode.Code == Code.Newobj)
                     return $".newAggregate {index} {resolved.Parameters.Count} {Layout(resolved.DeclaringType)}";

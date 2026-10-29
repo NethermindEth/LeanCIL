@@ -248,6 +248,8 @@ private def foldAt (locals receiverLocals : List TypeExpr)
     Option (List (Option FoldRole)) :=
   spanConstructorFold locals a tail <|>
   (match a, tail with
+    | ⟨_, 65044, .none⟩, ⟨_, 41, .indirectCall _ _ false false 0⟩ ::
+        ⟨_, 42, .none⟩ :: _ => some [some .head, some .tailCall, some .argument]
     | ⟨_, 65044, .none⟩, ⟨_, 40, .call site⟩ :: ⟨_, 42, .none⟩ :: _ =>
       match site.target with
       | .managed _ => some [some .head, some .tailCall, some .argument]

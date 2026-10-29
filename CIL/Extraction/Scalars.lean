@@ -23,6 +23,8 @@ inductive ScalarKind where
   | word32 | word64 | native | reference | nullObject | other
   | array (element : ArrayElement)
   | enumSpan (element : ArrayElement) (writable : Bool) (reference : Bool)
+  | methodPointer (signature : ManagedSignature)
+  | methodTable (signature : ManagedSignature)
   deriving DecidableEq, Repr
 
 /-- The claimed stack kinds (top first) at each raw pc; `none` where the pc is unreachable. -/
@@ -37,7 +39,10 @@ def scalarType : TypeExpr → ScalarKind
       | .enumSpan identity writable _ => .enumSpan identity writable true
       | _ => .reference
   | .pointer _ => .reference
-  | .array element => (arrayElementType element).map ScalarKind.array |>.getD .other
+  | .array element => match managedSignature element with
+    | some signature => .methodTable signature
+    | none => (arrayElementType element).map ScalarKind.array |>.getD .other
+  | type@(.functionPointer ..) => (managedSignature type).map ScalarKind.methodPointer |>.getD .other
   | type@(.apply _ element@(.enum ..)) =>
     match spanStorage type, arrayElementType element with
     | some (.span _ writable), some identity => .enumSpan identity writable false
@@ -55,7 +60,8 @@ private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .n
 /-- A value of kind `value` may be stored in a slot of kind `home`; `word64` and `native`
     share one representation on the admitted 64-bit targets. -/
 private def storageCompatible (value home : ScalarKind) : Bool :=
-  value == home || (value == .nullObject && (match home with | .array _ => true | _ => false)) ||
+  value == home || (value == .nullObject &&
+    (match home with | .array _ | .methodTable _ => true | _ => false)) ||
     value ∈ [.word64, .native] && home ∈ [.word64, .native]
 
 /-- Two-operand arithmetic: `add` through `xor`, the overflow-checked forms, and `ceq`
@@ -325,7 +331,16 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     (bound by the feature check) or a size constant may emit a scalar operation. -/
 def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
-  if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
+  if let .managed operation := emitted then match operation, stack with
+    | .address .., _ => instruction.opcode == 65030
+    | .call .., _ => instruction.opcode == 41
+    | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
+    | .tableElement signature, index :: .methodTable actual :: _ =>
+      index ∈ [.word32, .native] && signature == actual &&
+        (instruction.opcode == 151 || (instruction.opcode == 163 &&
+          instruction.operand == .type signature.typeExpr))
+    | _, _ => false
+  else if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
   else if arrayEmission emitted then arrayMatches instruction stack emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
@@ -382,6 +397,7 @@ private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   -- The name after `::`.
   | .aggregate identity _ | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
   | .parameter index => some (signatureBytes ("!!" ++ toString index))
+  | .functionPointer .. | .signatureParameter .. => none
   -- `&` and `*`.
   | .byref element => (· ++ [38]) <$> scalarTypeBytes element
   | .pointer element => (· ++ [42]) <$> scalarTypeBytes element
@@ -579,6 +595,27 @@ private def pushedKind (raw : RawMethod) (instruction : RawInstruction) : Option
 def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     (stack : List ScalarKind) (role : Option FoldRole := none) : Option (List ScalarKind) := do
   let opcode := instruction.opcode
+  if opcode == 65030 then
+    let .call site := instruction.operand | none
+    let signature : ManagedSignature := ⟨site.returnType, site.parameterTypes⟩
+    if site.hasThis || managedSignature signature.typeExpr != some signature then none else
+      return .methodPointer signature :: stack
+  if opcode == 41 then
+    let .indirectCall result parameters false false 0 := instruction.operand | none
+    let signature : ManagedSignature := ⟨result, parameters⟩
+    let .methodPointer actual :: values := stack | none
+    if actual != signature || managedSignature signature.typeExpr != some signature then none else
+    let expected := parameters.reverse.map scalarType
+    if expected.length > values.length ||
+        !(values.take expected.length == expected) then none else
+      return (if result == .void then [] else [scalarType result]) ++ values.drop expected.length
+  if opcode == 142 then
+    if let .methodTable _ :: rest := stack then return .native :: rest
+  if opcode == 151 || opcode == 163 then
+    if let index :: .methodTable signature :: rest := stack then
+      if index ∉ [.word32, .native] || (opcode == 163 &&
+          instruction.operand != .type signature.typeExpr) then none else
+        return .methodPointer signature :: rest
   if arrayCovered opcode then return (← arrayStep instruction stack).2
   if opcode == 20 then
     if instruction.operand == .none then return .nullObject :: stack else none

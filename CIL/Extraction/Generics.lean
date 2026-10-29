@@ -81,6 +81,31 @@ def spanStorage : TypeExpr → Option StorageType
 /-- Whether a local is a supported primitive span. -/
 def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
 
+/-- Function-pointer parameters are primitive integers, enums or their managed references. -/
+def managedParameter : TypeExpr → Bool
+  | .atom scope name => scope == runtimeScope && (primitiveField name).isSome
+  | .enum _ (.atom scope name) => scope == runtimeScope &&
+      ((primitiveField name).map enumField).getD false
+  | .byref element => match element with
+      | .atom .. | .enum .. => managedParameter element
+      | _ => false
+  | _ => false
+
+/-- Decode the ordered parameter chain without accepting another metadata constructor. -/
+def managedParameters : TypeExpr → Option (List TypeExpr)
+  | .void => some []
+  | .signatureParameter head tail => do
+    if !managedParameter head then none else pure ()
+    return head :: (← managedParameters tail)
+  | _ => none
+
+/-- Only the exact static managed convention gives callable provenance. -/
+def managedSignature : TypeExpr → Option ManagedSignature
+  | .functionPointer result parameters 0 false false => do
+    if result != .void && !managedParameter result then none else pure ()
+    return ⟨result, ← managedParameters parameters⟩
+  | _ => none
+
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
@@ -91,7 +116,10 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
-  | .array element => StorageType.array <$> arrayElementType element
+  | .array element => match managedSignature element with
+    | some signature => some (.methodTable signature)
+    | none => StorageType.array <$> arrayElementType element
+  | type@(.functionPointer ..) => StorageType.methodPointer <$> managedSignature type
   | .pointer (.atom scope name) =>
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
@@ -113,6 +141,11 @@ def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
   | .byref element => TypeExpr.byref <$> substituteType arguments element
   | .pointer element => TypeExpr.pointer <$> substituteType arguments element
   | .array element => TypeExpr.array <$> substituteType arguments element
+  | .functionPointer result parameters convention hasThis explicitThis => do
+    return .functionPointer (← substituteType arguments result)
+      (← substituteType arguments parameters) convention hasThis explicitThis
+  | .signatureParameter head tail => do
+    return .signatureParameter (← substituteType arguments head) (← substituteType arguments tail)
   | .enum identity underlying => TypeExpr.enum identity <$> substituteType arguments underlying
   | .apply constructor argument => do
     return .apply (← substituteType arguments constructor) (← substituteType arguments argument)
@@ -366,12 +399,51 @@ def validateImportCallWith (methodCount : Nat) (imports : Nat → Option ImportS
     count == site.parameterCount + (if site.hasThis then 1 else 0) &&
       importSignatureMatches slot site
 
+/-- A callable catalog entry binds stable metadata and its signature to one extracted body. -/
+def managedTargetMatches (methods : Nat → Option SpecializedMethod)
+    (signature : ManagedSignature) (target : ManagedTarget) : Bool :=
+  match methods target.method with
+  | none => false
+  | some callee =>
+    target.identity.owner == callee.closed.owner &&
+    target.identity.token == callee.closed.token && target.identity.arguments == callee.arguments &&
+    !callee.closed.hasThis && !callee.closed.explicitThis && callee.closed.callingConvention == 0 &&
+    callee.closed.returnType == signature.result && callee.closed.parameters == signature.parameters &&
+    managedSignature signature.typeExpr == some signature
+
+/-- Exact function address evidence; integer constants cannot acquire callable provenance. -/
+def managedAddressMatches (methods : Nat → Option SpecializedMethod)
+    (raw : RawInstruction) (target : ManagedTarget) (signature : ManagedSignature) : Bool :=
+  raw.opcode == 65030 && managedTargetMatches methods signature target &&
+  match raw.operand with
+  | .call site => site.target == .managed target.identity.token &&
+    site.typeArguments == target.identity.arguments && !site.hasThis &&
+    site.returnType == signature.result && site.parameterTypes == signature.parameters &&
+    site.parameterCount == signature.parameters.length &&
+    site.returnsValue == (signature.result != .void)
+  | _ => false
+
+/-- Indirect calls bind the exact raw managed signature and every possible selected target. -/
+def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
+    (raw : RawInstruction) (signature : ManagedSignature) (catalog : List ManagedTarget) : Bool :=
+  raw.opcode == 41 && !catalog.isEmpty &&
+    catalog.all (managedTargetMatches methods signature) &&
+    (catalog.map (·.identity)).Nodup &&
+  match raw.operand with
+  | .indirectCall result parameters false false 0 =>
+    result == signature.result && parameters == signature.parameters
+  | _ => false
+
 /-- Every live managed call must select the independently instantiated definition
 with the exact substituted type arguments and signature; an external one, a matching import slot. -/
 def validateManagedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
     (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
   if !live then true else
+  match emitted with
+  | .managed (.address target signature) => managedAddressMatches methods raw target signature
+  | .managed (.call signature catalog _) => managedIndirectMatches methods raw signature catalog
+  | _ =>
   match raw.operand with
   | .call site => match site.target with
     | .managed token => match managedCallTarget raw.opcode emitted with
@@ -391,6 +463,7 @@ def validateManagedCallWith (methodCount : Nat)
         validateImportCallWith methodCount imports raw.opcode site identity target count
       | .tailCall .. | .newAggregate .. | .newVector256 .. => false
       | _ => true
+  | .indirectCall .. => false
   | _ => match emitted with
     | .call .. | .tailCall .. | .newAggregate .. | .newVector256 .. => false
     | _ => true

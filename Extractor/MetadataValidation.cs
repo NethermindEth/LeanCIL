@@ -229,6 +229,11 @@ internal static class MetadataValidation
 
     internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, string architecture = "scalar")
     {
+        if (ManagedPointers.Signature(type) is { } managed)
+        {
+            ManagedPointers.Validate(managed, module, architecture);
+            return;
+        }
         if (type is PointerType pointer)
         {
             if (pointer.ElementType is TypeSpecification ||
@@ -248,6 +253,8 @@ internal static class MetadataValidation
         }
         if (type is ByReferenceType byRef)
         {
+            if (ManagedPointers.Signature(byRef.ElementType) is not null)
+                throw new InvalidDataException("Unsupported address of managed callable root");
             if (byRef.ElementType is ArrayType)
                 throw new InvalidDataException("Unsupported by-reference array root");
             if (Spans.Width(byRef.ElementType) is not null)
@@ -295,8 +302,9 @@ internal static class MetadataValidation
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
         List<MethodDefinition> ordered = [];
-        List<MethodDefinition> path = [];
         Dictionary<MethodDefinition, MethodDefinition[]> chains = [];
+        Dictionary<MethodDefinition, List<(MethodDefinition Method, bool Deferred)>> dependencies = [];
+        MethodReference[]? addressedMethods = null;
         // Call sites already reported, or whose callee was not analysed, have no translation to check.
         HashSet<Instruction> skipped = [];
         bool Check(MethodDefinition method, Instruction? at, Action check, bool named = false)
@@ -316,15 +324,32 @@ internal static class MetadataValidation
         }
         void Visit(MethodDefinition method)
         {
-            if (state.TryGetValue(method, out int visited))
+            var pending = new Stack<(MethodDefinition Method, bool Finish, bool Deferred,
+                MethodDefinition[] Chain)>();
+            pending.Push((method, false, false, [method]));
+            while (pending.TryPop(out var item))
             {
-                if (visited == 1) throw new InvalidDataException($"Recursive managed dependency: {method.FullName}");
-                return;
+                if (item.Finish)
+                {
+                    state[item.Method] = 2;
+                    ordered.Add(item.Method);
+                    continue;
+                }
+                if (state.TryGetValue(item.Method, out var visited))
+                {
+                    if (visited == 1 && !item.Deferred)
+                        throw new InvalidDataException($"Recursive managed dependency: {item.Method.FullName}");
+                    continue;
+                }
+                chains[item.Method] = item.Chain;
+                dependencies[item.Method] = [];
+                Walk(item.Method);
+                if (state[item.Method] == 3) continue;
+                pending.Push((item.Method, true, false, item.Chain));
+                foreach (var dependency in dependencies[item.Method].AsEnumerable().Reverse())
+                    pending.Push((dependency.Method, false, dependency.Deferred,
+                        [.. item.Chain, dependency.Method]));
             }
-            path.Add(method);
-            chains[method] = [.. path];
-            try { Walk(method); }
-            finally { path.RemoveAt(path.Count - 1); }
         }
         void Walk(MethodDefinition method)
         {
@@ -371,10 +396,11 @@ internal static class MetadataValidation
             state[method] = 1;
             void Enter(MethodDefinition callee, MethodReference reference, Instruction instruction)
             {
-                if (state.GetValueOrDefault(callee) == 1)
+                var deferred = TailCalls.IsCall(instruction) ||
+                    instruction.OpCode.Code is Code.Ldftn or Code.Calli;
+                if (state.GetValueOrDefault(callee) == 1 && !deferred)
                     throw Call("Recursive managed dependency", reference, method, instruction);
-                Visit(callee);
-                if (state[callee] == 3) skipped.Add(instruction);
+                dependencies[method].Add((callee, deferred));
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
@@ -399,7 +425,7 @@ internal static class MetadataValidation
                 }
                 if (reference is GenericInstanceMethod generic)
                 {
-                    if (instruction.OpCode.Code != Code.Call)
+                    if (instruction.OpCode.Code is not (Code.Call or Code.Ldftn or Code.Calli))
                         throw Call("Unsupported generic constructor call", reference, method, instruction);
                     MethodDefinition specialized;
                     try { specialized = specializations.Instantiate(generic); }
@@ -453,6 +479,22 @@ internal static class MetadataValidation
             }
             foreach (Instruction instruction in reachable)
             {
+                if (instruction.OpCode.Code == Code.Calli && instruction.Operand is Mono.Cecil.CallSite site)
+                {
+                    Check(method, instruction, () =>
+                    {
+                        ManagedPointers.Validate(site, module, profile.Architecture);
+                        addressedMethods ??= ManagedPointers.AddressedMethods(module).ToArray();
+                        foreach (var target in addressedMethods)
+                        {
+                            var closed = target is GenericInstanceMethod generic
+                                ? specializations.Instantiate(generic) : target.Resolve();
+                            if (closed is not null && ManagedPointers.SameSignature(site, closed))
+                                CallSite(instruction, closed);
+                        }
+                    });
+                    continue;
+                }
                 if (instruction.OpCode.Code == Code.Ldsfld && instruction.Operand is FieldReference loaded)
                 {
                     if (!Check(method, instruction, () => StaticLoad(instruction, loaded), named: true))
@@ -477,8 +519,6 @@ internal static class MetadataValidation
                     }))
                     skipped.Add(instruction);
             }
-            state[method] = 2;
-            ordered.Add(method);
         }
         Visit(entry);
         ordered.Reverse();

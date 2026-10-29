@@ -22,6 +22,8 @@ inductive StorageType where
   | reference | vector128 | vector256 | vector512
   | span (width : Nat) (writable : Bool)
   | array (element : ArrayElement)
+  | methodPointer (signature : ManagedSignature)
+  | methodTable (signature : ManagedSignature)
   deriving DecidableEq, Repr
 
 /-- One entry per original instruction, including instructions pruned by the profile. -/
@@ -45,6 +47,8 @@ structure RawArguments where
 def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalKind
   | .reference => some .reference
   | .array element => some (.array element)
+  | .methodPointer signature => some (.methodPointer signature)
+  | .methodTable signature => some (.methodTable signature)
   | .span width writable =>
     if width ∈ [1, 2, 4, 8] then some (.span width writable) else none
   | .vector128 => some .vector128

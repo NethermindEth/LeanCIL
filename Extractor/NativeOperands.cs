@@ -9,7 +9,7 @@ internal static class NativeOperands
 {
     internal enum Kind
     {
-        Other, Word32, Word64, Native, Reference, NullObject,
+        Other, Word32, Word64, Native, Reference, NullObject, MethodPointer, MethodTable,
         ArraySigned8, ArrayUnsigned8, ArraySigned16, ArrayUnsigned16, ArraySigned32, ArrayUnsigned32,
         ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter
     }
@@ -23,6 +23,8 @@ internal static class NativeOperands
 
     static StackType Type(TypeReference type)
     {
+        if (ManagedPointers.Signature(type) is { } pointer)
+            return CallableType(pointer, type is ArrayType);
         if (Arrays.Of(type) is { } array)
             return type is ArrayType buffer && EnumTypes.IsEnum(buffer.ElementType)
                 ? new StackType(array.Kind, $".array {array.Expression}") : array.Kind;
@@ -38,6 +40,10 @@ internal static class NativeOperands
         }
         return PrimitiveType(type);
     }
+
+    static StackType CallableType(IMethodSignature signature, bool table = false) =>
+        new(table ? Kind.MethodTable : Kind.MethodPointer,
+            $".{(table ? "methodTable" : "methodPointer")} {ManagedPointers.SignatureEvidence(signature)}");
 
     static StackType PrimitiveType(TypeReference type) => type is ByReferenceType or PointerType
         ? Kind.Reference : Arrays.Of(type)?.Kind ?? EnumTypes.Storage(type).MetadataType switch
@@ -143,6 +149,26 @@ internal static class NativeOperands
                 var value = Pop();
                 stack.Add(value);
                 stack.Add(value);
+            }
+            else if (code == Code.Ldftn)
+                stack.Add(CallableType((MethodReference)instruction.Operand));
+            else if (code == Code.Calli)
+            {
+                var signature = (Mono.Cecil.CallSite)instruction.Operand;
+                if (Pop() != CallableType(signature))
+                    throw new InvalidDataException("Indirect call requires an exact-signature managed pointer");
+                for (var index = 0; index < signature.Parameters.Count; index++) Pop();
+                if (instruction.Previous?.OpCode.Code == Code.Tail && stack.Count != 0)
+                    throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
+                if (signature.ReturnType.MetadataType != MetadataType.Void) stack.Add(Type(signature.ReturnType));
+            }
+            else if (code == Code.Ldelem_I && stack.Count >= 2 && stack[^2].Kind == Kind.MethodTable)
+            {
+                if (Pop().Kind is not (Kind.Word32 or Kind.Native))
+                    throw new InvalidDataException("Managed table index must be an integer");
+                var table = Pop();
+                stack.Add(new(Kind.MethodPointer,
+                    table.Metadata!.Replace(".methodTable ", ".methodPointer ", StringComparison.Ordinal)));
             }
             else if (code is Code.Call or Code.Callvirt or Code.Newobj)
             {

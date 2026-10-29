@@ -220,6 +220,10 @@ private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32
         else if instruction.opcode == 97 then a ^^^ b else if a == b then 1 else 0
     return { state with stack := value :: stack }
   -- `call` and `newobj`; a feature getter pushes the profile's answer.
+  if instruction.opcode == 41 then
+    let .indirectCall result parameters false false 0 := instruction.operand | none
+    forget state (parameters.length + 1) (if result == .void then 0 else 1)
+  else
   if instruction.opcode == 40 || instruction.opcode == 111 || instruction.opcode == 115 then
     let .call site := instruction.operand | none
     let next ← forget state
@@ -244,6 +248,9 @@ private def featureTransferAtWith (raw : RawMethod) (eligible : Nat → Option W
     (instruction : RawInstruction) (state : FeatureState) : Option FeatureState :=
   match role with
   | some .tailCall => match instruction.operand with
+    | .indirectCall _ parameters false false 0 =>
+      if state.stack.length == parameters.length + 1 then
+        featureTransferWith raw eligible profile instruction state else none
     | .call site =>
       if state.stack.length == site.parameterCount + (if site.hasThis then 1 else 0) then
         featureTransferWith raw eligible profile instruction state else none
@@ -283,6 +290,9 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
 
 /-- The raw stack effect, with calls taken from their signature. -/
 private def rawFeatureEffect (instruction : RawInstruction) : Option (Nat × Nat) := do
+  if instruction.opcode == 41 then
+    let .indirectCall result parameters false false 0 := instruction.operand | none
+    return (parameters.length + 1, if result == .void then 0 else 1)
   if instruction.opcode == 40 || instruction.opcode == 111 || instruction.opcode == 115 then
     let .call site := instruction.operand | none
     return (site.parameterCount + if instruction.opcode != 115 && site.hasThis then 1 else 0,
@@ -294,6 +304,7 @@ private def rawFeatureEffect (instruction : RawInstruction) : Option (Nat × Nat
 private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) : Bool :=
   let returnsValue := match instruction.operand with
     | .call site => site.returnsValue
+    | .indirectCall result .. => result != .void
     | _ => false
   let properCall := match emitted with
     | .call .. => instruction.opcode == 40 || instruction.opcode == 111
@@ -311,7 +322,8 @@ private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W3
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65044, 65050] then return false
-  if (match emitted with | .tailCall .. => true | _ => false) then return false
+  if (match emitted with
+    | .tailCall .. | .managed (.call _ _ true) => true | _ => false) then return false
   if instruction.opcode == 65039 then
     return match instruction.operand, emitted with
       | .none, .stackAlloc flag => flag == raw.initLocals
@@ -400,6 +412,9 @@ private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option 
     | .call site => site.returnType == raw.returnType &&
       featureOpMatchesWith raw eligible instruction (.call target count)
     | _ => false
+  | some .tailCall, .managed (.call signature catalog true) =>
+    signature.result == raw.returnType &&
+      featureOpMatchesWith raw eligible instruction (.managed (.call signature catalog false))
   | some .argument, _ => featureOpMatchesWith raw eligible instruction emitted
   | some _, _ => false
   | none, _ => !typeTestInstruction instruction && featureOpMatchesWith raw eligible instruction emitted

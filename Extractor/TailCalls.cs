@@ -27,6 +27,13 @@ internal static class TailCalls
 
     internal static void ValidateReachable(MethodDefinition method, Instruction prefix)
     {
+        if (prefix.Next is { OpCode.Code: Code.Calli, Operand: Mono.Cecil.CallSite indirect })
+        {
+            ManagedPointers.Validate(indirect, method.Module, "scalar");
+            if (ManagedPointers.TypeEvidence(indirect.ReturnType) != ManagedPointers.TypeEvidence(method.ReturnType))
+                throw new InvalidDataException("Unsupported tail prefix: mismatched indirect return type");
+            return;
+        }
         if (prefix.Next is not { OpCode.Code: Code.Call, Operand: MethodReference target } ||
             target.ReturnType.FullName != method.ReturnType.FullName ||
             target.DeclaringType.Scope != method.Module ||

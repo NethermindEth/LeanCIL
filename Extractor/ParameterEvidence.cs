@@ -10,6 +10,9 @@ internal static class ParameterEvidence
 {
     static string Type(TypeReference type, ModuleDefinition module, LayoutEvidence layouts)
     {
+        if (ManagedPointers.Signature(type) is { } signature)
+            return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
+                ManagedPointers.SignatureEvidence(signature);
         if (type is ByReferenceType or PointerType) return ".reference";
         if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
         if (Spans.Width(type) is { } width)

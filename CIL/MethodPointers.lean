@@ -18,7 +18,7 @@ structure ManagedSignature where
 /-- Canonical metadata encoding, retaining every parameter's scoped type. -/
 def ManagedSignature.typeExpr (signature : ManagedSignature) : Extraction.TypeExpr :=
   .functionPointer signature.result
-    (signature.parameters.foldr Extraction.TypeExpr.signatureParameter .void)
+    (signature.parameters.foldr Extraction.TypeExpr.signatureParameter .void) 0 false false
 
 /-- Stable metadata identity, unaffected by relocating a library's program indices. -/
 structure ManagedIdentity where

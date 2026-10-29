@@ -24,6 +24,15 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
 
     string Type(TypeReference type)
     {
+        if (type is FunctionPointerType callable)
+        {
+            var parameters = ".void";
+            foreach (var argument in callable.Parameters.Reverse())
+                parameters = $".signatureParameter ({Type(argument.ParameterType)}) ({parameters})";
+            return $".functionPointer ({Type(callable.ReturnType)}) ({parameters}) " +
+                $"{(int)callable.CallingConvention} {callable.HasThis.ToString().ToLowerInvariant()} " +
+                callable.ExplicitThis.ToString().ToLowerInvariant();
+        }
         if (type is GenericParameter parameter)
             return parameter.Type == GenericParameterType.Method ? $".parameter {parameter.Position}" :
                 $".atom \"\" {Quote("type-parameter:" + parameter.FullName)}";
