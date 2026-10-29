@@ -150,7 +150,8 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     let selected ← checkedAt .null nativeMethodWidth
       (addNativeTable base memory (BitVec.ofNat 64 (nativeMethodWidth * index)))
     return .next (pc + 1) (.methodTable selected :: rest) frame memory
-  | .tableOffset, .scalar offset :: .methodTable table :: rest =>
+  | .tableOffset, .scalar offset :: .methodTable table :: rest
+  | .tableOffset, .methodTable table :: .scalar offset :: rest =>
     let offset ← match offset with
       | .i32 bits => .ok (bits.signExtend 64)
       | .i64 bits => .ok bits

@@ -99,7 +99,8 @@ program indices. Supported signatures contain primitive integer, enum, reference
 integer-vector parameters/results, managed references to those types, and void results. Closed
 generic structs retain their exact scoped identity. Calling conventions are checked exactly.
 
-Supplied immutable `nint*` tables admit byte-offset addition, `ldind.i` and native target locals.
+Supplied immutable `nint*` tables admit byte-offset addition in either operand order, `ldind.i`
+and native target locals. Offsets are int32 or native integers; other scalar types are rejected.
 An explicit binding identifies the static allocation and authenticated catalog identities;
 numeric bytes alone cannot establish callable provenance. Loads check bounds, eight-byte
 alignment, initialization and read authority. Forming a one-past reference is allowed, but
