@@ -78,7 +78,7 @@ Test("test entry points", () =>
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
     Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
-        ["enums", "evidence", "excluded", "generics", "scaling", "unsafe"]);
+        ["blocks", "enums", "evidence", "excluded", "generics", "scaling", "unsafe"]);
     Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/GenericLayouts.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["evidence"]);
