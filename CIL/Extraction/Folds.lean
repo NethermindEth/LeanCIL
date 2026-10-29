@@ -220,6 +220,8 @@ inductive FoldRole where
   | argument
   /-- A checked constructor initializes the local whose address starts the fold. -/
   | spanConstructor (index : Nat) (constructor : SpanConstructor)
+  /-- A direct managed call whose prefix requests frame retirement before transfer. -/
+  | tailCall
   deriving DecidableEq, Repr
 
 /-- A constructor fold admits at most three pure single-value argument pushes. -/
@@ -245,6 +247,12 @@ private def foldAt (locals receiverLocals : List TypeExpr)
     (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
   spanConstructorFold locals a tail <|>
+  (match a, tail with
+    | ⟨_, 65044, .none⟩, ⟨_, 40, .call site⟩ :: ⟨_, 42, .none⟩ :: _ =>
+      match site.target with
+      | .managed _ => some [some .head, some .tailCall, some .argument]
+      | _ => none
+    | _, _ => none) <|>
   (match tail with
     | b :: rest => if receiverFold receiverLocals a b && spanReceiverUse rest then
         some [some .head, some .interior] else none
@@ -315,6 +323,7 @@ def foldEntry (role : Option (Option FoldRole)) : Bool :=
   match role with
   | some (some .interior) | some (some (.result _)) | some (some (.raise _))
   | some (some .argument) | some (some (.spanConstructor ..)) => false
+  | some (some .tailCall) => false
   | _ => true
 
 end CIL.Extraction

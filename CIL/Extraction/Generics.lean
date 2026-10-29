@@ -331,7 +331,8 @@ structure SpecializedMethod where
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
     opcode: `call` (40) for `.call`, `newobj` (115) for a construction. -/
 private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
-  | .call target count => if opcode = 40 then some (target, count) else none
+  | .call target count | .tailCall target count =>
+    if opcode = 40 then some (target, count) else none
   | .newAggregate target count _ | .newVector256 target count =>
     if opcode = 115 then some (target, count) else none
   | _ => none
@@ -383,10 +384,10 @@ def validateManagedCallWith (methodCount : Nat)
     | .external identity => match emitted with
       | .call target count =>
         validateImportCallWith methodCount imports raw.opcode site identity target count
-      | .newAggregate .. | .newVector256 .. => false
+      | .tailCall .. | .newAggregate .. | .newVector256 .. => false
       | _ => true
   | _ => match emitted with
-    | .call .. | .newAggregate .. | .newVector256 .. => false
+    | .call .. | .tailCall .. | .newAggregate .. | .newVector256 .. => false
     | _ => true
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/

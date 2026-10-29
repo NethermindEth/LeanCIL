@@ -13,6 +13,7 @@ internal static class Reachability
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
         MemoryPrefixes.Validate(method);
+        TailCalls.Validate(method);
         var instructions = method.Body.Instructions;
         var boundaries = instructions.ToHashSet();
         foreach (Instruction instruction in instructions)
@@ -64,6 +65,8 @@ internal static class Reachability
             // Folded operands push nothing, so a fold must be entered at its start.
             void Jump(Instruction target)
             {
+                if (TailCalls.IsInterior(target))
+                    throw new InvalidDataException($"Branch enters the middle of a tail transfer: {i}");
                 if (typeTests.Interior.Contains(target))
                     throw new InvalidDataException($"Branch into a folded type comparison: {i}");
                 if (throws.Interior.Contains(target))

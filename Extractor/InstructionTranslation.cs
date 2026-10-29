@@ -23,6 +23,10 @@ internal static class InstructionTranslation
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!);
+        if (TailCalls.IsCall(i) && i.Operand is MethodReference tailTarget &&
+            nativeOperands.Incoming.TryGetValue(i, out var tailStack) &&
+            tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
+            throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
         if (i.OpCode.Code == Code.Add && nativeOperands.Incoming.TryGetValue(i, out var incoming) &&
             incoming.Length >= 2 && incoming[^2] == NativeOperands.Kind.Reference &&
             incoming[^1].Kind is NativeOperands.Kind.Word32 or NativeOperands.Kind.Native)
@@ -123,13 +127,15 @@ internal static class InstructionTranslation
             {
                 if (i.OpCode.Code == Code.Newobj)
                     return $".newAggregate {index} {resolved.Parameters.Count} {Layout(resolved.DeclaringType)}";
-                return $".call {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
+                var operation = TailCalls.IsCall(i) ? "tailCall" : "call";
+                return $".{operation} {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
             }
             throw new InvalidDataException($"Unsupported or unresolved call: {r.FullName} [{r.DeclaringType.Scope.Name}]");
         }
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
+            Code.Tail => ".nop",
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => ".nop",

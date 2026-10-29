@@ -448,6 +448,17 @@ The extractor admits direct calls to methods on validated reference-free structs
 
 Direct calls to a void instance constructor are allowed on existing struct storage. Such calls do not allocate an object or bypass initialization checks. `newobj` for admitted structs allocates zero-initialized caller-owned temporary storage, passes a managed-reference `this` to the constructor, requires a void return and reads back a checked aggregate snapshot. Constructor calls propagate arithmetic and memory faults. The temporary remains owned by the caller until frame cleanup; resource exhaustion is not modelled. Zero-initialized fields follow the CIL construction contract; correspondence of padding bytes and physical runtime layout remains a runtime assumption. Class instance methods, indirect/virtual dispatch and generic declaring types remain unsupported.
 
+Direct `tail.; call; ret` transfers are admitted for the existing same-assembly managed-call
+subset. The certificate binds the prefix to its call and immediate return, requires exactly
+the call arguments on the stack, checks the complete callee signature and equal return types,
+and rejects branches into the call or return. The checked driver retires the current frame
+before revalidating arguments and entering the callee. References or views into that frame's
+locals therefore fail even if the callee would ignore them; references to still-live caller
+storage remain valid. The callee result returns directly, without a caller continuation.
+Indirect `tail.calli`, imported or intrinsic tail calls, and recursive managed graphs remain
+unsupported. Table-loaded native-integer targets need a separate checked function-pointer
+provenance and signature model; direct tail support does not cover an indirect EVM dispatcher.
+
 ## Integer enums
 
 Same-assembly, non-generic enums use the storage of their validated underlying integer type: `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long` or `ulong`. The extractor validates the `System.Enum` base identity and the single `value__` instance field before normalizing types for execution. Method signatures retain enum names for artifact identity. Narrow enum loads and returns use the same truncation and sign/zero extension as their underlying integers; enum fields use that integer's size and alignment.

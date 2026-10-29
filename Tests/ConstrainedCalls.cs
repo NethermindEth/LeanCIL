@@ -5,6 +5,7 @@
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include TailCallFixtures.cs
 
 using System.Text.RegularExpressions;
 using Mono.Cecil;
@@ -67,7 +68,8 @@ foreach (var (name, type, expected) in new[]
     rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
 }
 
-evidence.Check(replay: false);
+AddTailCallFixtures(assembly, root, evidence, rejected);
+evidence.Check();
 rejected.Check();
 
 foreach (var (mutation, marker) in new[]

@@ -243,6 +243,11 @@ private def featureTransferAtWith (raw : RawMethod) (eligible : Nat → Option W
     (profile : FeatureProfile) (role : Option FoldRole)
     (instruction : RawInstruction) (state : FeatureState) : Option FeatureState :=
   match role with
+  | some .tailCall => match instruction.operand with
+    | .call site =>
+      if state.stack.length == site.parameterCount + (if site.hasThis then 1 else 0) then
+        featureTransferWith raw eligible profile instruction state else none
+    | _ => none
   | some (.result value) => match state.stack with
     | _ :: _ :: stack => some { state with stack := some (if value then 1 else 0) :: stack }
     | _ => none
@@ -305,7 +310,8 @@ private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W3
     (instruction : RawInstruction) (emitted : Op) : Bool :=
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
-  if instruction.opcode ∈ [39, 122, 220, 65041, 65050] then return false
+  if instruction.opcode ∈ [39, 122, 220, 65041, 65044, 65050] then return false
+  if (match emitted with | .tailCall .. => true | _ => false) then return false
   if instruction.opcode == 65039 then
     return match instruction.operand, emitted with
       | .none, .stackAlloc flag => flag == raw.initLocals
@@ -390,6 +396,10 @@ private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option 
   | some (.raise name), .throw exception => name == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
     index == actual && constructor == operation
+  | some .tailCall, .tailCall target count => match instruction.operand with
+    | .call site => site.returnType == raw.returnType &&
+      featureOpMatchesWith raw eligible instruction (.call target count)
+    | _ => false
   | some .argument, _ => featureOpMatchesWith raw eligible instruction emitted
   | some _, _ => false
   | none, _ => !typeTestInstruction instruction && featureOpMatchesWith raw eligible instruction emitted
