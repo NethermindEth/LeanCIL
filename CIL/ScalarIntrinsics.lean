@@ -105,6 +105,16 @@ def evalScalarIntrinsic : ScalarIntrinsic → List Value → Option Value
     some (.i32 (if signed then result.signExtend 32 else result.zeroExtend 32))
   | .reverseEndianness 32 _, [.i32 x] => some (.i32 (reverseBytes x))
   | .reverseEndianness 64 _, [.i64 x] => some (.i64 (reverseBytes x))
+  -- Narrow helper parameters truncate at the call boundary, even for noncanonical CIL inputs.
+  | .isPow2 width signed, [.i32 bits] =>
+    if width == 8 || width == 16 then
+      some (.i32 (if isPowerOfTwo (bits.setWidth width) signed then 1 else 0)) else none
+  | .popCount width, [.i32 bits] =>
+    if width == 8 || width == 16 then
+      some (.i32 (BitVec.ofNat 32 (population (bits.setWidth width)))) else none
+  | .log2 width, [.i32 bits] =>
+    if width == 8 || width == 16 then
+      some (.i32 (BitVec.ofNat 32 (bits.setWidth width).toNat.log2)) else none
   | _, _ => none
 
 end CIL

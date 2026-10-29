@@ -458,8 +458,9 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 | Primitive integer types | Static `RotateLeft` / `RotateRight` on `int`, `uint`, `long`, `ulong`, `nint` or `nuint`, with `int` count | The same 32/64-bit rotation semantics, including signed inputs and negative counts |
 | `System.Numerics.BitOperations` | `PopCount`, `LeadingZeroCount`, `TrailingZeroCount` on `uint`, `ulong` or `nuint` | `int` result; zero has 32/64 leading/trailing zeros |
 | `System.Int32`, `System.UInt32` | Static `PopCount`, `LeadingZeroCount`, `TrailingZeroCount` | Result retains the input's `int`/`uint` type; zero has 32 leading/trailing zeros |
+| `System.Byte`, `System.UInt16` | Static `PopCount`, `Log2` | Input truncates to the declared width; result retains the input type, represented on the CIL stack as `i32`. Narrow leading/trailing-zero counts and signed `Log2` remain unsupported. |
 | `System.Numerics.BitOperations` | `IsPow2` on `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | True for positive powers of two; false for zero and signed negative values |
-| Primitive integer types | Static `IsPow2` on `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | The same signedness-aware power-of-two test, returning `bool` |
+| Primitive integer types | Static `IsPow2` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | The same signedness-aware power-of-two test, returning `bool`; narrow arguments truncate before interpreting the sign bit. |
 | `System.Numerics.BitOperations` | `Log2` on `uint`, `ulong` or `nuint` | Floor base-two logarithm as `int`; zero input returns zero |
 | `System.UInt32` | Static `Log2(uint)` | Floor base-two logarithm as `uint`; zero input returns zero |
 | `System.Numerics.BitOperations` | `RoundUpToPowerOf2` on `uint`, `ulong` or `nuint` | Least power of two at least the input; zero for zero input or overflow |

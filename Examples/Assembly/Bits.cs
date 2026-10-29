@@ -71,6 +71,13 @@ public static class Bits
     public static long ReverseI64(long value) => BinaryPrimitives.ReverseEndianness(value);
     public static ulong ReverseU64(ulong value) => BinaryPrimitives.ReverseEndianness(value);
 
+    public static int PrimitiveNarrow8(uint value) => byte.PopCount((byte)value) |
+        (byte.Log2((byte)value) << 8) | ((byte.IsPow2((byte)value) ? 1 : 0) << 16);
+    public static int PrimitiveNarrow16(uint value) => ushort.PopCount((ushort)value) |
+        (ushort.Log2((ushort)value) << 8) | ((ushort.IsPow2((ushort)value) ? 1 : 0) << 16);
+    public static int PrimitiveNarrowSigned(uint value) => (sbyte.IsPow2((sbyte)value) ? 1 : 0) |
+        ((short.IsPow2((short)value) ? 1 : 0) << 1);
+
     public static ulong RoundTrip(ulong value) => BitOperations.RotateRight(BitOperations.RotateLeft(value, 13), 13);
     public static ulong WrongRoundTrip(ulong value) => BitOperations.RotateRight(BitOperations.RotateLeft(value, 13), 12);
     public static int WrongLog64(ulong value) => BitOperations.Log2(value) + 1;

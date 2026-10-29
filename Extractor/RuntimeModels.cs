@@ -253,6 +253,15 @@ internal static class RuntimeModels
             operations.Add($"System.Boolean System.Numerics.BitOperations::IsPow2({type})", model);
             operations.Add($"System.Boolean {type}::IsPow2({type})", model);
         }
+        foreach (var (type, width, signed) in MathIntegers.Where(integer => integer.Width is 8 or 16))
+        {
+            operations.Add($"System.Boolean {type}::IsPow2({type})",
+                $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
+            if (signed) continue;
+            foreach (var (name, operation) in new[] { ("PopCount", "popCount"), ("Log2", "log2") })
+                operations.Add($"{type} {type}::{name}({type})",
+                    $".intrinsic (.scalar (.{operation} {width})) 1");
+        }
         return operations;
     }
 
