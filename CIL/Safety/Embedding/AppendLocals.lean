@@ -1,4 +1,4 @@
-import CIL.Safety.Embedding.Step
+import CIL.Safety.Execution
 
 /-!
 # Steps under trailing local slots
@@ -1239,6 +1239,25 @@ theorem step_appendLocals_unsupported (description : String) :
 
 #print axioms step_appendLocals_unsupported
 
+/-- Managed pointers and tables never inspect the unused trailing frame slots. -/
+theorem step_appendLocals_managed (operation : ManagedOp) :
+    StepAppendLocals (.managed operation) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  unfold managedStep
+  split
+  all_goals repeat' first
+    | rfl
+    | contradiction
+    | (simp only [map_bind, map_pure, FrameAction.appendLocals, Frame.appendLocals]; done)
+    | (apply bind_congr; intro)
+    | split
+    | simp only [map_bind]
+#print axioms step_appendLocals_managed
+
 /-- Every instruction preserves successful and throwing steps under trailing local slots. -/
 theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Value)
     (frame : Frame) (extra : List LocalSlot) (stack : List Value) (memory : Memory)
@@ -1248,6 +1267,7 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       FrameAction.appendLocals extra <$> outcome := by
   have padded : StepAppendLocals op := by
     cases op
+    case managed operation => exact step_appendLocals_managed operation
     case nativeBinary operation =>
       exact step_appendLocals_nativeBinary operation
     case divide signed remainder =>
