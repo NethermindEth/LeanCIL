@@ -116,9 +116,11 @@ The managed-reference overloads of `Unsafe.AreSame`, `IsAddressLessThan` and
 `IsAddressGreaterThan` use these checked comparisons. Ordering and
 `Unsafe.ByteOffset(origin, target)` require two live references in the same allocation;
 the latter returns the native-width byte displacement from origin to target.
-`Unsafe.AddByteOffset` accepts `nint` or `nuint` offsets, and `SubtractByteOffset`
-accepts `nint`. Reference formation retains bounds and lifetime checks without granting
-read or write authority. Unsigned subtraction and pointer overloads are unsupported.
+`Unsafe.AddByteOffset` and `SubtractByteOffset` accept `nint` or `nuint` offsets.
+`Unsafe.Subtract<T>` accepts `int`, `nint` or `nuint` element offsets for admitted scalar,
+aggregate and vector storage. Scaling and subtraction wrap at the native 64-bit width;
+the resulting reference must still be live and in bounds. These operations grant no read
+or write authority. Numeric pointer overloads remain unsupported.
 
 ## Block memory and alignment prefixes
 
@@ -214,6 +216,18 @@ reused or reinitialized; construction faults remain at the call instruction.
 require write authority, but not initialized or readable destination bytes. Empty spans require
 no byte access; nonempty fills establish repeated sequence contents and preserve neighbouring
 bytes, including other slices in the same allocation. Readonly views do not admit these members.
+
+`MemoryMarshal.AsBytes` and `Cast<TFrom,TTo>` reinterpret primitive integer and admitted enum
+spans without copying or reading their bytes. They retain allocation identity, lifetime and
+write capability. The result length is the source byte extent divided by the target element
+width, rounded down; a length exceeding `Int32.MaxValue` raises `OverflowException`.
+Readonly views stay readonly, and reinterpreting uninitialized storage does not initialize it.
+
+`CopyTo` and `TryCopyTo` accept writable destination spans of the same element type, from
+either writable or readonly source spans. Copying captures initialized, readable source bytes
+before writing, so either overlap direction and exact aliases are supported. A short destination
+raises `ArgumentException` or returns false without reading or writing bytes. Empty copies need
+no byte access. Successful nonempty copies require write authority and preserve neighboring bytes.
 
 `MemoryMarshal.Read<T>`, `Write<T>`, `TryRead<T>` and `TryWrite<T>` transfer admitted integer,
 aggregate or integer-vector values through byte spans. Short `Read`/`Write` calls raise

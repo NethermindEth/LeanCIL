@@ -139,3 +139,5 @@ Run(["dotnet", "run", "--file", "Tests/VectorFields.cs"], streamOutput: true, pr
 Run(["dotnet", "run", "--file", "Tests/VectorStorage.cs"], streamOutput: true, progress: "Vector storage checks");
 Run(["dotnet", "run", "--file", "Tests/UnalignedMemory.cs"], streamOutput: true, progress: "Unaligned transfer checks");
 Run(["dotnet", "run", "--file", "Tests/MarshaledMemory.cs"], streamOutput: true, progress: "Byte-span transfer checks");
+Run(["dotnet", "run", "--file", "Tests/ReinterpretedSpans.cs"], streamOutput: true, progress: "Span reinterpretation checks");
+Run(["dotnet", "run", "--file", "Tests/SpanCopies.cs"], streamOutput: true, progress: "Span copy checks");

@@ -151,6 +151,7 @@ import CIL.Safety.WordPrefix
 import CIL.Safety.WordRoots
 import CIL.Safety.WordSnapshotPreservation
 import CIL.Safety.WordSnapshots
+import CIL.Safety.IndexedWriteLemmas
 import CIL.Safety.WriteEffects
 import CIL.Safety.TypedCopy
 -- Mixed: symbolic execution, verification, extraction checks, interfaces, later results

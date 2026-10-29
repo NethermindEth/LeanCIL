@@ -391,6 +391,7 @@ The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integ
 | Layout-based Unsafe helpers | 418 checks across 19 element types and all three managed offset overloads; ten malformed generic calls rejected |
 | Managed-reference unaligned transfers | Twelve runtime comparisons and checked execution proofs cover signed and unsigned scalars, aggregates and integer vectors at byte offset one. Boundary proofs retain initialization masks, reject uninitialized scalar reads, out-of-bounds reads and readonly writes. Seven independent certificate mutations reject wrong widths, signedness, helper identity and aggregate layout uses. |
 | Byte-span value transfers | Eight compiled MemoryMarshal wrappers cover reads, writes and their try forms for scalars, aggregates and integer vectors. Nineteen checked behavior claims include short-span exceptions, default-initialized out values, write-free failed try-writes, write authority and initialization masks. Seven certificate mutations reject changed signatures, operations, flags and scalar/vector/aggregate widths. |
+| Span reinterpretation | Compiled mutable and readonly AsBytes/Cast wrappers cover enum types, aliasing writes, empty and uninitialized storage, truncated lengths and overflow. Lean certificate mutations reject changed widths, capability and operation. |
 | Overlapping span copies | Six compiled wrappers and seventeen checked claims cover mutable and readonly sources, enums and 64-bit elements, both overlap directions, self-copy, disjoint slices within one allocation, empty spans, short destinations, initialization, write authority and neighboring bytes. Six independent certificate mutations reject changed widths, operation, try flag, external identity, readonly destination and enum identity. Runtime checks compare copied contents with snapshot copying. |
 | Null managed references | `IsNullRef` of `NullRef` and of a live argument, reads and writes through `NullRef` (indirect and field) and an optional `ref` local: ten outcomes compared with .NET, each `NullReferenceException` matched to a located null-dereference fault; forged `NullRef`/`IsNullRef` translations rejected by the call binding; 22 malformed generic calls rejected |
 | Reference/null observations | Emitted CIL fixtures compare .NET and checked Lean execution for `ceq`, `brtrue`, `brfalse`, `beq`, `bne.un` and bounded `ldnull`; an independently changed equality operation must fail scalar evidence. Semantic fixtures cover readonly views, null, lifetime, invalid addresses, end pointers and disjoint allocation interiors. A null-message throw fixture preserves existing folding. |
@@ -1524,7 +1525,7 @@ A Windows sample removed two no-op builds of 0.20s each; the retained build stay
 sample establishes the removed process work rather than a stable whole-suite speedup.
 
 `Unsafe.AreSame<T>`, `IsAddressLessThan<T>`, `IsAddressGreaterThan<T>`, `ByteOffset<T>`,
-`AddByteOffset<T>` (signed and unsigned native offsets), and signed `SubtractByteOffset<T>`
+`AddByteOffset<T>` and `SubtractByteOffset<T>` (signed and unsigned native offsets)
 reuse checked allocation-relative reference operations. Generic storage types must already
 have a supported managed layout. Exact runtime identity, closed signatures, offset signedness
 and byte scaling are checked by Lean translation evidence.
@@ -1533,5 +1534,7 @@ Byte differences and ordering require live references in the same allocation. Eq
 nulls and distinct allocation interiors; cross-allocation end-pointer equality remains unsupported.
 Byte offsets preserve bounds and grant no read/write authority. `ByteOffset` accepts readonly
 views; addition retains the existing writable-reference input restriction, and subtraction
-preserves a readonly input. Unsigned native subtraction remains unsupported. These operations
+preserves a readonly input. Element `Subtract<T>` covers signed 32-bit and signed/unsigned
+native offsets, including aggregate and vector scaling. Tests compare native wraparound with
+the runtime and reject forged strides and signedness in Lean evidence. These operations
 do not model arbitrary numeric addresses or establish runtime placement of separate allocations.
