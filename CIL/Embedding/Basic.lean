@@ -53,6 +53,7 @@ theorem Op.relabel_of_targets_nil (r : Nat → Nat) (op : Op) (none : op.targets
 
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Op.continues : Op → Bool
+  | .managed (.call _ _ true) => false
   | .branch _ | .tailCall .. | .ret _ | .throw _ | .unsupported _ => false
   | _ => true
 

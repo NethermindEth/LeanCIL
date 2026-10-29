@@ -445,7 +445,7 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
         cases rest <;> fallback_vacuous
       | span reference length =>
         cases rest <;> fallback_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ =>
+      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ =>
         cases rest <;> fallback_vacuous
 
 theorem step_relabel_unsupported (description : String) :
@@ -620,6 +620,15 @@ theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
 theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   cases op
+  case managed operation =>
+    cases operation
+    all_goals plain_cases
+    all_goals simp only [managedStep] at h ⊢
+    all_goals repeat' first
+      | solve | lockstep
+      | cases h
+      | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+          Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case stackAlloc initLocals =>
     stack_cases =>
       first
@@ -972,7 +981,7 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
         cases rest <;> fallback_raise_vacuous
       | span reference length =>
         cases rest <;> fallback_raise_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ =>
+      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ =>
         cases rest <;> fallback_raise_vacuous
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
@@ -1124,6 +1133,14 @@ set_option maxHeartbeats 400000 in
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/
 theorem step_raise (op : CIL.Op) : StepRaise op := by
   cases op
+  case managed operation =>
+    plain_cases
+    simp only [managedStep] at h ⊢
+    repeat' first
+      | solve | raise_lockstep
+      | cases h
+      | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+          Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case stackAlloc initLocals =>
     stack_cases =>
       first
