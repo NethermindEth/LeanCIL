@@ -53,25 +53,25 @@ var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Gener
 foreach (var (name, signature) in new[]
 {
     ("Roundtrip", "ulong,ulong"), ("Composed", "ulong,ulong"), ("Nested", "uint,uint"),
-    ("Field", "Examples.GenericPair`1<ulong>&"), ("VectorSize", "")
+    ("Field", "Examples.GenericPair`1<ulong>&"), ("VectorSize", ""), ("TupleSize", "")
 })
 {
     var output = Path.Combine(root, name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"GenericLayouts::{name}({signature})", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var proof = source;
-    if (name == "VectorSize")
+    if (name is "VectorSize" or "TupleSize")
     {
         if (!Equals(runtime.GetMethod(name)!.Invoke(null, []), 32))
-            throw new InvalidOperationException("Unexpected CLR generic vector layout");
-        proof += """
+            throw new InvalidOperationException("Unexpected CLR nested generic layout");
+        proof += $$"""
 
-            /-- Generic integer-vector storage has the same size as the CLR value type. -/
-            theorem generic_vector_size :
+            /-- Nested generic storage has the same size as the CLR value type. -/
+            theorem generic_size_{{name}} :
                 (CIL.Safety.invoke Extracted.program 8 0 []
                   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
                     views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 32)] := rfl
-            #print axioms generic_vector_size
+            #print axioms generic_size_{{name}}
             """;
     }
     if (name is "Roundtrip" or "Composed")

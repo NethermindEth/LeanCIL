@@ -21,6 +21,7 @@ public static class GenericLayouts
 {
     public static int VectorSize() => System.Runtime.CompilerServices.Unsafe.SizeOf<
         GenericPair<System.Runtime.Intrinsics.Vector128<int>>>();
+    public static int TupleSize() => System.Runtime.CompilerServices.Unsafe.SizeOf<GenericPair<(ulong, ulong)>>();
 
     public static ulong Roundtrip(ulong first, ulong second)
     {

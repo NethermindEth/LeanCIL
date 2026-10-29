@@ -44,8 +44,14 @@ internal sealed class LayoutEvidence
     internal static string Scope(TypeReference type) => type.Scope is AssemblyNameReference assembly
         ? assembly.FullName : type.Module.Assembly.Name.FullName;
 
-    internal static string Identity(TypeReference type) => GenericStructs.Is(type)
-        ? MethodSpecialization.SignatureType(type) : Scope(type) + "::" + type.FullName;
+    internal static string Identity(TypeReference type)
+    {
+        if (type is GenericInstanceType generic && GenericStructs.Is(type))
+            return Identity(generic.ElementType) + "<" + string.Join(",", generic.GenericArguments.Select(argument =>
+                MetadataValidation.IsAggregate(argument, type.Module)
+                    ? Identity(argument) : MethodSpecialization.SignatureType(argument))) + ">";
+        return Scope(type) + "::" + type.FullName;
+    }
 
     internal MetadataValidation.LayoutContext Metadata => layouts;
 
