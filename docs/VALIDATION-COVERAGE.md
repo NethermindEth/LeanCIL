@@ -302,7 +302,7 @@ wall, build and replay timings and module counts in `timings.json`. Run it with 
 path and `--measure` to record a baseline without asserting the improved reuse counts. The ordinary
 consumer suite runs the assertions.
 
-For checked-step and loop tactics, see [proof automation](#proof-automation).
+For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#proof-automation).
 
 `Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping through vector and int32
 stores, reloads and overwrites with abstract homes and memory, plus signed-byte narrowing. The

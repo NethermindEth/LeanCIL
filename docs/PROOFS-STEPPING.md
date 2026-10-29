@@ -111,7 +111,7 @@ end ProofGuide
 The [automation regression](../Tests/Automation.lean) checks this pattern and symbolic branch
 proofs. This handwritten body demonstrates the tactic; a proof about an assembly must bind its body
 to the generated program, as described in in [Bind bodies to the
-extraction](#bind-bodies-to-the-extraction), and pass verification.
+extraction](PROOFS-BINDING.md#bind-bodies-to-the-extraction), and pass verification.
 
 `cil_checked_steps` composes `invoke_of_run`, `run_next`, `run_return` and `run_call_of_invoke`. It
 checks method/instruction lookups and frame setup, infers intermediate states, and checks the
