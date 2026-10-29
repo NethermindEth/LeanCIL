@@ -625,6 +625,8 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
     all_goals plain_cases
     all_goals simp only [managedStep] at h ⊢
     all_goals repeat' first
+      | contradiction
+      | solve | simp only [FrameAction.relabel, context.next rfl]
       | solve | lockstep
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,

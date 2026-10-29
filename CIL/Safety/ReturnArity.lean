@@ -17,6 +17,16 @@ private theorem bind_success {source : Except ε α} {continuation : α → Exce
       ∃ input, source = .ok input ∧ continuation input = .ok value := by
   cases source <;> simp [Except.bind]
 
+/-- Managed dispatch produces a next step or child invocation, never a method return. -/
+private theorem managedStep_not_returned (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory final : Memory) (values : List Value) :
+    managedStep operation pc frame stack memory ≠ .ok (.returned values final) := by
+  intro executed
+  unfold managedStep at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first | cases executed | split at executed
+#print axioms managedStep_not_returned
+
 set_option maxHeartbeats 400000 in
 /-- A successful return has its declared arity and exposes no unspecified SIMD lanes. -/
 theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
@@ -28,6 +38,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Na
   unfold step at executed
   dsimp only at executed
   repeat' first
+    | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ executed)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
           reduceCtorEq, and_false, exists_false] at executed
