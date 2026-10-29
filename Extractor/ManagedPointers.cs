@@ -59,8 +59,10 @@ internal static class ManagedPointers
         if (type is ByReferenceType reference) return $".byref ({TypeEvidence(reference.ElementType)})";
         if (type.MetadataType == MetadataType.Void) return ".void";
         if (EnumTypes.IsEnum(type))
-            return $".enum {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} ({TypeEvidence(EnumTypes.Storage(type))})";
-        return $".atom {JsonSerializer.Serialize(LayoutEvidence.Scope(type))} {JsonSerializer.Serialize(type.FullName)}";
+            return $".enum {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} " +
+                $"({TypeEvidence(EnumTypes.Storage(type))})";
+        return $".atom {JsonSerializer.Serialize(LayoutEvidence.Scope(type))} " +
+            JsonSerializer.Serialize(type.FullName);
     }
 
     internal static string SignatureEvidence(IMethodSignature signature) =>
@@ -87,7 +89,8 @@ internal static class ManagedPointers
         TypeReference Substitute(TypeReference type) => type switch
         {
             GenericParameter { Type: GenericParameterType.Method } parameter
-                when parameter.Position < generic.GenericArguments.Count => generic.GenericArguments[parameter.Position],
+                when parameter.Position < generic.GenericArguments.Count =>
+                    generic.GenericArguments[parameter.Position],
             ByReferenceType reference => new ByReferenceType(Substitute(reference.ElementType)),
             _ => type
         };
