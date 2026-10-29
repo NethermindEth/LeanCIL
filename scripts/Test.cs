@@ -152,7 +152,7 @@ if (suite is "all" or "evidence")
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/ManagedDispatch.cs",
-        "Tests/StackAllocation.cs"]);
+        "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange([
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",

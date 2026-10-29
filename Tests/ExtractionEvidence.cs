@@ -19,6 +19,7 @@ Run(["dotnet", "run", "--file", "Tests/RejectedEvidenceTests.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ConstrainedResolution.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ConstrainedCalls.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ManagedDispatch.cs"]);
+Run(["dotnet", "run", "--file", "Tests/NativeManagedDispatch.cs"]);
 Run(["dotnet", "run", "--file", "Tests/StackAllocation.cs"]);
 Run(["dotnet", "run", "--file", "Tests/PrimitiveArrays.cs"], streamOutput: true,
     progress: "Supplied primitive arrays");
