@@ -56,7 +56,7 @@ void Prove(string dll, string selector, string folder, string claim, Action<Json
 }
 
 // Limbs agree with the values .NET's static constructor stored.
-foreach (var (method, field) in new[] { ("One", "One"), ("Zero", "Zero"), ("Min", "MinValue") })
+foreach (var (method, field) in new[] { ("One", "One"), ("Zero", "Zero"), ("Min", "MinValue"), ("Max", "MaxValue") })
 {
     Prove(assembly, $"StaticValues::{method}()", method, Claim(method, Limbs(field)), report =>
     {
@@ -130,7 +130,6 @@ void Reject(string dll, string selector, string name, string marker, bool assume
 }
 
 Reject(assembly, "StaticValues::One()", "unassumed", $"requires --assume-initialized {word}", assume: false);
-Reject(assembly, "StaticValues::Max()", "constructor-initializer", $"Unsupported static initializer: {word} {word}::MaxValue");
 Reject(assembly, "StaticValues::Overwrite()", "address", $"Unsupported static field address: {word} {word}::One");
 
 // A store outside the static constructor is rejected, and the field is no longer fixed elsewhere.
@@ -158,6 +157,18 @@ var mutations = new Dictionary<string, Action<ModuleDefinition>>
         var code = module.GetType(word).Methods.Single(m => m.Name == ".cctor").Body;
         var target = module.GetType("Examples.StaticValues").Methods.Single(m => m.Name == "Overwrite");
         code.GetILProcessor().InsertBefore(code.Instructions[0], Instruction.Create(OpCodes.Jmp, target));
+    },
+    ["constructor-static"] = module =>
+    {
+        var constructor = module.GetType(word).Methods.Single(method => method.Name == ".cctor");
+        var store = constructor.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Stsfld &&
+            ((FieldReference)instruction.Operand).Name == "MaxValue");
+        constructor.Body.Instructions[constructor.Body.Instructions.IndexOf(store) - 1].Operand = constructor;
+    },
+    ["constructor-return"] = module =>
+    {
+        var constructor = module.GetType(word).Methods.Single(method => method.Name == ".ctor");
+        constructor.ReturnType = module.TypeSystem.Int32;
     }
 };
 foreach (var (name, mutate) in mutations)
@@ -175,6 +186,8 @@ foreach (var (name, mutate) in mutations)
         Reject(dll, "StaticValues::One()", "stored-outside-constructor", "It is also stored outside its static constructor, in Examples.Word256 Examples.StaticValues::Zero()");
     }
     else if (name == "twice") Reject(dll, "StaticValues::One()", "stored-twice", "stores it 2 times");
+    else if (name.StartsWith("constructor-", StringComparison.Ordinal))
+        Reject(dll, "StaticValues::Max()", name, "Its value is not a same-assembly static call or struct construction");
     else Reject(dll, "StaticValues::One()", "jump-before-store", "Control flow precedes its store");
 }
 Console.WriteLine("PASS static readonly values, runtime limbs, changed initializers, forged certificates and write rejection");

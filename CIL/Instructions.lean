@@ -163,12 +163,14 @@ inductive Op where
   | unsupported (description : String)
   deriving Repr
 
-/-- The call `method arguments` whose result a static constructor stores in a readonly field. -/
+/-- A literal, call or construction whose value a static constructor stores in a readonly field. -/
 structure StaticInitializer where
   method : Nat
   arguments : List Value
   /-- A direct integer literal store; no method is called when this is present. -/
   literal : Option Value := none
+  /-- Construct a zero-initialized aggregate with this instance constructor. -/
+  construct : Bool := false
   deriving DecidableEq, Repr
 
 /-- A static field the method reads: its bytes as extracted, and where they came from. -/
