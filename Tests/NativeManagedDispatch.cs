@@ -96,7 +96,7 @@ theorem native_forged_identity :
       false := by decide +kernel
 #print axioms native_forged_identity
 """;
-RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution");
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.NativeMethodTables");
 var evidence = new GeneratedEvidence(root);
 var path = Path.Combine(root, "NativeProof.lean");
 File.WriteAllText(path, proof);
