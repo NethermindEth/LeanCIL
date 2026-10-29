@@ -105,6 +105,7 @@ Zero-byte blocks access no memory, including through null. Prefix operands/follo
 are validated; correspondence to CoreCLR remains assumed.
 
 `BinaryPrimitives` span operations bind width, endian order, signedness and try behavior exactly.
+Native integer overloads use eight-byte transfers under the validated 64-bit deployment profile.
 Short ordinary operations raise `ArgumentOutOfRangeException`; short try-reads initialize the output
 to zero and short try-writes preserve memory. Reads capture source before writing an aliased output.
 These are runtime-helper assumptions backed by validation, not verified runtime implementations.

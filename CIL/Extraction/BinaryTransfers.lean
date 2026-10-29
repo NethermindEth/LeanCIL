@@ -4,7 +4,7 @@ import CIL.Extraction.MetadataNames
 # Exact endian-aware integer transfers
 
 BinaryPrimitives span operations retain their integer width, result signedness, byte order
-and failure behavior. Only the fixed 16-, 32- and 64-bit overloads are admitted.
+and failure behavior. The 16-, 32-, 64-bit and native integer overloads use the validated 64-bit target.
 -/
 
 namespace CIL.Extraction
@@ -35,7 +35,8 @@ private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
   let endian := if bigEndian then "BigEndian" else "LittleEndian"
   let (name, width, signed) ←
     [("Int16", 2, true), ("UInt16", 2, false), ("Int32", 4, true),
-      ("UInt32", 4, false), ("Int64", 8, true), ("UInt64", 8, false)].find?
+      ("UInt32", 4, false), ("Int64", 8, true), ("UInt64", 8, false),
+      ("IntPtr", 8, true), ("UIntPtr", 8, false)].find?
       (fun (name, _, _) => suffix == name ++ endian)
   let integer := TypeExpr.atom runtimeScope ("System." ++ name)
   let spanName := if read then "System.ReadOnlySpan`1" else "System.Span`1"

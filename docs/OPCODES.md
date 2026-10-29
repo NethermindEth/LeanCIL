@@ -469,12 +469,13 @@ These exact signatures share the checked integer semantics used for `System.Math
 Native-width overloads use the validated 64-bit target. The 128-bit, generic-math and other unlisted helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.
 
 `BinaryPrimitives.Read{Int,UInt}{16,32,64}{Little,Big}Endian`, their `TryRead` forms,
+native-width `IntPtr`/`UIntPtr` counterparts,
 `Write` forms and `TryWrite` forms operate on checked byte spans. Reads sign- or zero-extend
 according to the named integer type after applying byte order; writes store exactly that width.
 Short ordinary transfers raise `ArgumentOutOfRangeException`; short try-reads write zero to
 the output and return false, while short try-writes return false without modifying memory.
 Successful transfers retain bounds, lifetime, initialization and authority checks. These
-48 exact signatures do not admit floating-point, 128-bit or native-width span overloads.
+64 exact signatures do not admit floating-point or 128-bit span overloads.
 
 ### Vector storage and fields
 
