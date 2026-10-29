@@ -46,7 +46,7 @@ theorem write_holds : writeContract.Holds Extracted.program 2 := by
       memoryInstruction (.spanItem 4) (.scalar (.i32 input.index) :: .bufferSpan input.view :: rest)
         memory = .ok (memory, .reference
           (.address (input.base.element 4 input.index.toNat)) :: rest) := by
-    simp only [memoryInstruction]
+    simp only [memoryInstruction, otherMemoryInstruction]
     simp only [WriteInput.view] at element ⊢
     simp [bound, element, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure, unspecifiedOperands, MemoryOp.argumentCount,
@@ -109,7 +109,7 @@ theorem read_holds : readContract.Holds Extracted.program 1 := by
       memoryInstruction (.spanItem 4) (.scalar (.i32 input.index) :: .bufferSpan input.view :: rest)
         memory = .ok (memory, .readOnlyReference
           (.address (input.base.element 4 input.index.toNat)) :: rest) := by
-    simp only [memoryInstruction]
+    simp only [memoryInstruction, otherMemoryInstruction]
     simp only [ReadInput.view] at element ⊢
     simp [bound, element, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure, unspecifiedOperands, MemoryOp.argumentCount,
@@ -172,7 +172,8 @@ theorem slice_write_composes (program : Program)
       returned = [.scalar (.i32 input.replacement)] := by
     cil_contract_steps [caller, args, frame, checkedValue, numericValue, loadLocal, storeLocal,
       sourceValid, sourceWidth, sourceWritable, valid, sliced, startBound, lengthBound,
-      WriteInput.view, instruction, staticInstruction, memoryInstruction, MemoryOp.argumentCount,
+      WriteInput.view, instruction, staticInstruction, memoryInstruction,
+        otherMemoryInstruction, MemoryOp.argumentCount,
       observerCount, unspecifiedOperands, Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
     cil_contract_call writer input [caller, args, WriteInput.view, checkedValue, numericValue,
@@ -199,7 +200,8 @@ theorem slice_write_composes (program : Program)
         simp [readInput, bound]
       cil_contract_steps [caller, args, writeContract, loadLocal, checkedValue, numericValue,
         validUpdated,
-        WriteInput.view, instruction, staticInstruction, memoryInstruction, MemoryOp.argumentCount,
+        WriteInput.view, instruction, staticInstruction, memoryInstruction,
+        otherMemoryInstruction, MemoryOp.argumentCount,
         observerCount, unspecifiedOperands, Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
         checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
       refine run_call_of_contract reader readInput
