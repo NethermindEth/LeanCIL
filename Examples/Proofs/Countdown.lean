@@ -1,7 +1,7 @@
 import Extracted
 import Examples.Support
 import CIL.Verification
-import CIL.Safety.NumericLocals
+import CIL.Safety.LoopVC
 import CIL.Safety.LoopScaffold
 
 open CIL.Safety
@@ -30,24 +30,18 @@ private theorem terminates (args : List CIL.Safety.Value) (state : W32 × Memory
   · left
     subst x
     cil_loop_finish [entry.frame, header, cutpoint, loaded]
-  · right
-    have nonzero : x ≠ 0#32 := zero
-    obtain ⟨updated, written, stored, bytes⟩ := store_numeric_local .word32 (.i32 (x - 1))
-      (x - 1).toNat rfl writable
-    have readback := load_numeric_local .word32 (.i32 (x - 1)) (x - 1).toNat rfl bytes
-    simp only [BitVec.ofNat_eq_ofNat] at stored readback
-    obtain ⟨allocation, ready⟩ := access_requirements writable
-    have path : LoopReaches Extracted.program 0 args (header (x, m)) (header (x - 1, updated)) := by
-      cil_loop_steps [entry.frame, header, cutpoint, loaded, stored, readback, nonzero]
-    obtain ⟨cost, segment⟩ := path
-    refine ⟨(x - 1, updated), cost, ⟨readback, (ready.after_write written).access⟩, ?_, segment⟩
-    have positive : 0 < x.toNat := by
-      have : x.toNat ≠ 0 := by intro h; exact zero (BitVec.eq_of_toNat_eq h)
-      omega
-    rw [BitVec.toNat_sub_of_le]
-    · simp; omega
-    · change 1 ≤ x.toNat
-      omega
+  · have nonzero : x ≠ 0#32 := zero
+    cil_store_vc updated stored readback nextWritable := .word32 (.i32 (x - 1)) using writable
+    cil_loop_continue (x - 1, updated)
+      [entry.frame, header, cutpoint, loaded, stored, readback, nonzero]
+    · exact ⟨readback, nextWritable⟩
+    · have positive : 0 < x.toNat := by
+        have : x.toNat ≠ 0 := by intro h; exact zero (BitVec.eq_of_toNat_eq h)
+        omega
+      rw [BitVec.toNat_sub_of_le]
+      · simp; omega
+      · change 1 ≤ x.toNat
+        omega
 
 -- The invariant cutpoint is found in compiled code. Every path and its cost are
 -- derived by checked stepping, so instruction positions and block order are not assumptions.
@@ -58,17 +52,16 @@ theorem correctness : CIL.Safety.Ensures Extracted.program 0
   intro args initial permitted
   obtain ⟨x, rfl, rfl⟩ := permitted
   let entered := entry.memory
-  have setup : enterFrame Extracted.method0 [.scalar (.i32 x)] Examples.empty = .ok (entry.frame, entered) := by
+  have setup : enterFrame Extracted.method0 [.scalar (.i32 x)] Examples.empty =
+      .ok (entry.frame, entered) := by
     rfl
   have writable : access entered entry.home0 4 1 true = .ok () := by rfl
-  obtain ⟨updated, written, stored, bytes⟩ := store_numeric_local .word32 (.i32 x) x.toNat rfl writable
-  have readback := load_numeric_local .word32 (.i32 x) x.toNat rfl bytes
-  obtain ⟨allocation, ready⟩ := access_requirements writable
+  cil_store_vc updated stored readback nextWritable := .word32 (.i32 x) using writable
   have entryPath : LoopReaches Extracted.program 0 [.scalar (.i32 x)]
       ⟨0, entry.frame, [], entered⟩ (header (x, updated)) := by
     cil_loop_steps [entry.frame, header, cutpoint, stored, readback]
   obtain ⟨fuel, final, values, executed, satisfied⟩ := loop_reaches_terminates entryPath
-    (terminates [.scalar (.i32 x)] (x, updated) ⟨readback, (ready.after_write written).access⟩)
+    (terminates [.scalar (.i32 x)] (x, updated) ⟨readback, nextWritable⟩)
   exact ⟨Extracted.method0, entry.frame, entered, Extracted.lookup0, rfl, setup,
     fuel, final, values, executed, satisfied⟩
 

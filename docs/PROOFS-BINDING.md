@@ -31,15 +31,57 @@ allocation, with no default state or unchecked adapter. Numeric `homeN` declarat
 frame's local list to reduce; arbitrary symbolic memory may leave that layout symbolic. The command
 does not infer allocation premises or generate invariant-preservation verification conditions.
 
+When the success premises are available as rewrite facts, use `simplifying [facts]` instead of
+`using`. This derives an explicit frame and memory expression and checks the resulting entry
+equation, allowing stepping to inspect the local slots:
+
+```lean
+bind_entry entry (memory : Memory) (view : SpanView)
+    (valid : view.validate memory = .ok ()) (width : view.width = 4)
+    (readOnly : view.writable = false) := Extracted.method0
+  with [.bufferSpan view] from memory
+  simplifying [valid, width, readOnly]
+```
+
+Facts must suffice to derive a successful entry; unresolved allocation is an error. This uses the
+checked allocator and does not assume a frame layout. The [span loop](../Examples/Proofs/SpanDrain.lean)
+proves method invocation, repeated slicing and parameter reassignment, termination and exact caller
+memory preservation for any valid readonly integer span. Empty spans are included. It requires no
+read authority or initialization because the method only observes length and constructs subviews.
+
 `cutpoint stack memory` constructs the loop state. `cutpoint.checked` proves the selected
 instruction satisfies the predicate and is its unique match. Missing or ambiguous matches are
 errors. The predicate locates an instruction; it does not prove that it is a loop header or that
 execution reaches it. The loop proof establishes those properties.
 
+For repeated instruction shapes, `bind_cutpoint name := body at location matching predicate
+with frame` checks that particular instruction rather than requiring a unique predicate match.
+`location` is an emitted instruction index, not a raw CIL byte offset. Reuse `bind_loop` from
+`CIL.StructuralLabels` to select nested or sequential loops:
+
+```lean
+bind_loop outer := Extracted.method0 [0]
+bind_loop inner := Extracted.method0 [1]
+bind_cutpoint cutpoint (frame : Frame) := Extracted.method0 at inner.latch matching
+  (fun op => match op with | .brnonzero _ => true | _ => false) with frame
+```
+
+Structural loop occurrences are ordered by head index. Out-of-range locations and wrong instruction
+shapes are rejected. The explicit-location form also accepts binders for symbolic frames.
+
 [Countdown](../Examples/Proofs/Countdown.lean) uses these commands without literal frame layouts,
 allocation identifiers or instruction offsets. The author still supplies the invariant, measure,
 specification and preservation proof using the existing checked loop tactics. Only requesting proofs
 elaborate the scaffold; ordinary extraction certificates do not grow.
+
+`CIL.Safety.LoopVC` supplies bounded verification-condition generation for explicit loop paths.
+`cil_store_vc updated stored loaded writable := kind value using ready` derives numeric-store
+progress, readback and retained write authority, then exposes the post-state proof obligation.
+`cil_loop_continue next [facts]` checks the path with `cil_loop_steps`, infers its cost, and leaves
+invariant-preservation and strict-measure-decrease goals. Countdown uses both commands. Failed
+encoding, access, path, invariant or decrease obligations cannot produce a successful proof.
+The author supplies branch cases, next states, invariants, measures and any remaining arithmetic.
+This is not an automatic whole-method VC generator or invariant discovery engine.
 
 [FillWords](../Examples/Proofs/FillWords.lean) is a larger result: its contract describes an
 arbitrary-length buffer fill, termination and preservation outside the writable region. See [buffer

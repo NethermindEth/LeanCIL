@@ -387,6 +387,34 @@ if (!rejected || File.Exists(Path.Combine(wrong, "verified.json")))
     throw new InvalidOperationException("Incorrect countdown passed or retained a verification report");
 Console.WriteLine("PASS unchanged universal contract rejects incorrect loop");
 
+var constantMeasure = File.ReadAllText(contract).Replace("(fun s => s.1.toNat)", "(fun _ => 0)",
+    StringComparison.Ordinal);
+if (constantMeasure == File.ReadAllText(contract))
+    throw new InvalidOperationException("Countdown measure mutation did not match");
+var constantMeasureProof = Path.Combine(root, "CountdownConstantMeasure.lean");
+File.WriteAllText(constantMeasureProof, constantMeasure);
+RejectedLines(assembly, constantMeasureProof, "CountdownConstantMeasure", false, "Loops::Countdown(uint)");
+Console.WriteLine("PASS generated loop continuation obligations reject a constant measure");
+
+const string Drain = "Loops::Drain(System.ReadOnlySpan`1<System.Int32>)";
+var drainProof = At("Examples/Proofs/SpanDrain.lean");
+verification.Verify(assembly, "Examples", Drain, drainProof, Path.Combine(root, "SpanDrain"));
+Console.WriteLine("PASS symbolic span entry, slicing loop, zero result and exact caller-memory preservation");
+
+var stutteringSpan = Path.Combine(root, "SpanDrainStuttering");
+Directory.CreateDirectory(stutteringSpan);
+var stutteringSpanAssembly = Path.Combine(stutteringSpan, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.Loops").Methods.Single(method => method.Name == "Drain");
+    method.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_0;
+    module.Write(stutteringSpanAssembly);
+}
+Run(Extract("extract", stutteringSpanAssembly, "Examples", Drain, stutteringSpan));
+var rejectedSpan = RejectedLines(stutteringSpanAssembly, drainProof, "SpanDrainStuttering", true, Drain);
+if (rejectedSpan.Length == 0) throw new InvalidOperationException("Span loop rejection has no proof diagnostic");
+Console.WriteLine("PASS unchanged span loop proof rejects a nondecreasing slice");
+
 // A buffer loop is proved as a sequence property: every nonnegative count fills exactly that
 // many words from write authority alone and changes no other caller byte.
 const string FillWords = "Loops::FillWords(ulong&,ulong,int)";

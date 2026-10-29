@@ -1,5 +1,6 @@
 import CIL.Safety.LoopScaffold
 import Examples.Support
+import CIL.StructuralLabels
 
 /-! Kernel-checked frame and cutpoint generation, including rejected ambiguous scaffolds. -/
 
@@ -30,13 +31,44 @@ bind_cutpoint absent := body matching (fun _ => false) with entry.frame
 bind_cutpoint ambiguous := body matching (fun _ => true) with entry.frame
 
 /-- Missing vector arguments cannot supply a frame witness. -/
-def missingArgument : CIL.Method := { code := [.ret], locals := [], returnsValue := false, vectorArgs := [0] }
+def missingArgument : CIL.Method := {
+  code := [.ret], locals := [], returnsValue := false, vectorArgs := [0] }
 
 /-- error: Frame entry must reduce to a successful checked allocation -/
 #guard_msgs in
 bind_entry invalid := missingArgument with [] from Examples.empty
 
 end Tests.LoopScaffold
+
+namespace Tests.RepeatedCutpoints
+open CIL.Safety
+
+/-- Both nested loop latches have the same opcode, so instruction shape is ambiguous. -/
+def body : CIL.Method := {
+  code := [.nop, .const32 0, .brnonzero 1, .const32 0, .brnonzero 0, .ret]
+  locals := [], returnsValue := false }
+
+bind_loop outer := body [0]
+bind_loop inner := body [1]
+bind_cutpoint outerExit (frame : Frame) := body at outer.latch matching
+  (fun op => match op with | .brnonzero _ => true | _ => false) with frame
+bind_cutpoint innerExit (frame : Frame) := body at inner.latch matching
+  (fun op => match op with | .brnonzero _ => true | _ => false) with frame
+
+/-- Structural labels select distinct checked latches despite identical instruction shapes. -/
+theorem distinct_latches : outerExit.pc = 4 ∧ innerExit.pc = 2 := by exact ⟨rfl, rfl⟩
+#print axioms distinct_latches
+
+/-- error: Selected cutpoint must exist and match the instruction predicate -/
+#guard_msgs in
+bind_cutpoint outside (frame : Frame) := body at 99 matching (fun _ => true) with frame
+
+/-- error: Selected cutpoint must exist and match the instruction predicate -/
+#guard_msgs in
+bind_cutpoint wrongShape (frame : Frame) := body at outer.latch matching
+  (fun op => match op with | .ret _ => true | _ => false) with frame
+
+end Tests.RepeatedCutpoints
 
 namespace Tests.SymbolicLoopScaffold
 open CIL.Safety
