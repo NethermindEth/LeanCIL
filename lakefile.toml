@@ -26,6 +26,9 @@ name = "Tests.MethodIdentity"
 name = "Tests.StructuralLabels"
 
 [[lean_lib]]
+name = "Tests.LoopScaffold"
+
+[[lean_lib]]
 name = "Tests.DebugNames"
 
 [[lean_lib]]
@@ -214,7 +217,7 @@ name = "Tests.ArrayElementReferences"
 name = "Tests.ReadOnlyArrayReferences"
 
 [[lean_lib]]
-name = "Tests.LegacyFeatures"
+name = "Tests.FeatureExecution"
 
 [[lean_lib]]
 name = "Tests.CertificateFlow"

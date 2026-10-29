@@ -1,14 +1,7 @@
 import Lean
 import CIL.ExecutionLemmas
 
-/-!
-# Symbolic execution of the reference interpreter
-
-`cil_steps` runs `CIL.run` on an extracted method by rewriting, one instruction at a time,
-until the method returns or a symbolic fact is needed. `if_extracted` admits optional
-summary proofs that fall back to raw stepping when they fail. Everything here is a tactic
-or a simp set; the kernel still checks every resulting proof.
--/
+/-! Shared extraction simp sets, bounded execution estimates and checked summary elaboration. -/
 
 /-- Definitions and facts emitted from the current extracted assembly, and nothing else.
     Registering a definition supplies its kernel-checked unfolding equations; it does not
@@ -64,37 +57,5 @@ elab "if_extracted " name:ident " {" commands:command* "}" : command => do
     set saved
     logInfo m!"Optional summary candidate {name.getId} was not proved; \
       using raw execution ({failureClass}):\n{detail}"
-
-open Lean Elab Tactic in
-/-- Avoid constructing the general instruction simplifier after exact equations resolve a step. -/
-elab "cil_reference_step_pending" : tactic => do
-  let target ← getMainTarget
-  unless (target.find? (·.isConstOf ``CIL.step)).isSome do
-    throwError "No reference instruction remains"
-
-/-- Execute instructions until execution finishes or a symbolic obligation prevents further
-    reduction. Facts are ordinary proved hypotheses or lemmas. There is no instruction trace,
-    method identity or local layout in this procedure; Lean's heartbeat and depth limits
-    remain explicit failure limits. -/
-macro "cil_steps" facts:term,+ : tactic =>
-  `(tactic| ((try (simp only [cil_code])); repeat
-    (rw [run];
-     -- Resolve the method and instruction before unfolding the selected step.
-     -- Otherwise simp explores instruction cases under unresolved bind lambdas.
-     simp only [List.getElem_eq_getElem?_get, cil_code, Option.get_some,
-       Option.pure_def, Option.bind_eq_bind, Option.bind_some];
-     -- Retain checked rewrite proofs instead of making the kernel repeat large
-     -- definitional reductions when checking the resulting execution proof.
-     simp (config := { implicitDefEqProofs := false })
-       [cil_code, step_feature, step_return, binary, truth, write64, initLocals, initFrame,
-       Value.initialized, cil_feature, Intrinsic.available, fin_val_three, $[$facts:term],*];
-     try
-       cil_reference_step_pending
-       simp (config := { implicitDefEqProofs := false })
-        [cil_code, step, binary, truth, write64, initLocals, initFrame, Value.initialized,
-        cil_feature, Intrinsic.available, fin_val_three, $[$facts:term],*])))
-
-/-- `cil_steps` with no extra facts. -/
-macro "cil_steps" : tactic => `(tactic| cil_steps Nat.add_zero)
 
 end CIL

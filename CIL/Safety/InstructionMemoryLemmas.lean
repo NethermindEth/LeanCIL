@@ -598,6 +598,20 @@ theorem arrayTransferInstruction_contract (element : CIL.ArrayElement) (store : 
     | split at transferred
 #print axioms arrayTransferInstruction_contract
 
+/-- Aligned transfers preserve the existing typed write effect and return only valid scalars. -/
+theorem pointerTransferInstruction_contract (kind : CIL.TransferKind) (alignment : Nat)
+    (store : Bool) (stack values : List Value) (memory result : Memory)
+    (transferred : pointerTransferInstruction kind alignment store stack memory =
+      .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold pointerTransferInstruction at transferred
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at transferred
+  repeat' first
+    | solve | cases transferred; instruction_contract_close
+    | cases transferred
+    | split at transferred
+#print axioms pointerTransferInstruction_contract
+
 /-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
@@ -606,6 +620,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   split at h
   · cases h
   · split at h
+    · exact pointerTransferInstruction_contract _ _ _ _ _ _ _ h
     · exact arrayTransferInstruction_contract _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h

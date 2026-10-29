@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:property AllowUnsafeBlocks=true
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
@@ -21,16 +22,19 @@ using var metadata = ModuleDefinition.ReadModule(assembly);
 var methods = metadata.GetType("Examples.UnalignedMemory").Methods.ToDictionary(method => method.Name);
 var queue = new GeneratedQueue(verification, assembly);
 var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-foreach (var (suffix, width, shape) in new[]
+var alignedOnly = args.Contains("--aligned-only", StringComparer.Ordinal);
+foreach (var (suffix, width, shape, alignment) in new[]
 {
-    ("Signed", 1, ""), ("Half", 2, ""), ("Word", 8, ""),
-    ("Aggregate", 32, "aggregate"), ("128", 16, "v128"), ("512", 64, "v512")
-})
+    ("Signed", 1, "", 1), ("Half", 2, "", 1), ("Word", 8, "", 1),
+    ("Aggregate", 32, "aggregate", 1), ("128", 16, "v128", 1), ("512", 64, "v512", 1),
+    ("PointerWord", 8, "", 1), ("PointerAggregate", 32, "aggregate", 1),
+    ("AlignedWord", 8, "", 8), ("AlignedAggregate", 32, "aggregate", 8), ("Aligned128", 16, "v128", 16)
+}.Where(item => !alignedOnly || item.Item1.StartsWith("Aligned", StringComparison.Ordinal)))
 {
     var runtimeRead = runtime.GetMethod("Read" + suffix)!;
     var type = runtimeRead.ReturnType;
     var readValue = typeof(Program).GetMethod(nameof(RuntimeRead), BindingFlags.Static | BindingFlags.NonPublic)!
-        .MakeGenericMethod(type).Invoke(null, [runtimeRead, width])!;
+        .MakeGenericMethod(type).Invoke(null, [runtimeRead, width, alignment])!;
     var bits = readValue switch
     {
         sbyte value => new BigInteger(unchecked((uint)value)),
@@ -39,7 +43,7 @@ foreach (var (suffix, width, shape) in new[]
         _ => new BigInteger(Enumerable.Repeat((byte)255, width).ToArray(), isUnsigned: true)
     };
     typeof(Program).GetMethod(nameof(RuntimeWrite), BindingFlags.Static | BindingFlags.NonPublic)!
-        .MakeGenericMethod(type).Invoke(null, [runtime.GetMethod("Write" + suffix)!, width]);
+        .MakeGenericMethod(type).Invoke(null, [runtime.GetMethod("Write" + suffix)!, width, alignment]);
     foreach (var read in new[] { true, false })
     {
         var name = (read ? "Read" : "Write") + suffix;
@@ -49,16 +53,29 @@ foreach (var (suffix, width, shape) in new[]
         var valueBits = read ? bits : new BigInteger(Enumerable.Repeat((byte)9, width).ToArray(), isUnsigned: true);
         var value = shape == "aggregate" ? $".aggregate (List.replicate {width} {(read ? 255 : 9)})" :
             $".{(shape == "" ? width == 8 ? "i64" : "i32" : shape)} {valueBits}";
-        var arguments = read ? "[.readOnlyReference (.address ⟨0, 1⟩)]" :
-            $"[.reference (.address ⟨0, 1⟩), .scalar ({value})]";
+        var arguments = read ? $"[.readOnlyReference (.address ⟨0, {alignment}⟩)]" :
+            $"[.reference (.address ⟨0, {alignment}⟩), .scalar ({value})]";
         var claim = read
             ? $"({{RUN}}).map Prod.snd = .ok [.scalar ({value})]"
             : $"({{RUN}}).map (fun result => (result.2, " +
-                $"(CIL.Safety.read result.1 ⟨0, 0⟩ {width + 2} 1).toOption)) = " +
-                $".ok ([], some ([255] ++ List.replicate {width} 9 ++ [255]))";
+                $"(CIL.Safety.read result.1 ⟨0, 0⟩ {width + alignment + 1} 1).toOption)) = " +
+                $".ok ([], some (List.replicate {alignment} 255 ++ List.replicate {width} 9 ++ [255]))";
         var invocation = $"CIL.Safety.invoke Extracted.program 32 0 {arguments} memory";
         var boundaries = name switch
         {
+            "ReadAlignedWord" => """
+                /-- Natural alignment is required independently of byte permissions and bounds. -/
+                theorem misaligned : (CIL.Safety.invoke Extracted.program 32 0
+                    [.reference (.address ⟨0, 1⟩)] memory) =
+                    .error ⟨0, 1, .memory .alignment (.address ⟨0, 1⟩) 8⟩ := by rfl
+                #print axioms misaligned
+                """,
+            "ReadPointerWord" => """
+                /-- Numeric addresses cannot acquire pointer provenance at the call boundary. -/
+                theorem numericPointer : (CIL.Safety.invoke Extracted.program 32 0
+                    [.scalar (.i64 1)] memory).toOption = none := by rfl
+                #print axioms numericPointer
+                """,
             "ReadWord" => """
                 /-- Scalar loads require initialized bytes. -/
                 theorem unreadable : CIL.Safety.invoke Extracted.program 32 0
@@ -72,12 +89,18 @@ foreach (var (suffix, width, shape) in new[]
                     .error ⟨0, 1, .memory .outsideAllocation (.address ⟨0, 3⟩) 8⟩ := by rfl
                 #print axioms extent
                 """,
-            "WriteWord" => """
+            "WriteWord" or "WriteAlignedWord" => $$"""
                 /-- Readonly references cannot acquire write authority. -/
                 theorem readonly : CIL.Safety.invoke Extracted.program 32 0
-                    [.readOnlyReference (.address ⟨0, 1⟩), .scalar (.i64 0)] memory =
-                    .error ⟨0, 2, .memory .unwritable (.address ⟨0, 1⟩) 8⟩ := by rfl
+                    [.readOnlyReference (.address ⟨0, {{alignment}}⟩), .scalar (.i64 0)] memory =
+                    .error ⟨0, 2, .memory .unwritable (.address ⟨0, {{alignment}}⟩) 8⟩ := by rfl
                 #print axioms readonly
+                /-- Stores do not require read permission for the overwritten bytes. -/
+                theorem writeOnly : (CIL.Safety.invoke Extracted.program 32 0
+                    [.reference (.address ⟨0, {{alignment}}⟩), .scalar (.i64 0)]
+                    { memory with views := [⟨0, 0, {{width + alignment + 1}}, false, true⟩] }).map Prod.snd =
+                    .ok [] := by rfl
+                #print axioms writeOnly
                 """,
             "Read128" or "ReadAggregate" => $$"""
                 /-- Snapshot transfers preserve uninitialized bytes. -/
@@ -102,11 +125,12 @@ foreach (var (suffix, width, shape) in new[]
             #print axioms result_of_toOption
             def memory : CIL.Safety.Memory := { Examples.empty with
               allocations := fun identity => if identity == 0 then
-                some ⟨.callerStack, ⟨{{width + 2}}, 1, []⟩, true, [{{width + 2}}]⟩ else none
+                some ⟨.callerStack, ⟨{{width + alignment + 1}}, {{alignment}}, []⟩, true,
+                  [{{width + alignment + 1}}]⟩ else none
               cells := fun _ _ => ⟨255, true⟩
-              views := [⟨0, 0, {{width + 2}}, true, true⟩]
+              views := [⟨0, 0, {{width + alignment + 1}}, true, true⟩]
               nextIdentity := 1 }
-            /-- The exact unaligned runtime value and caller-visible footprint agree. -/
+            /-- The exact runtime value and caller-visible footprint agree. -/
             theorem correctness : {{claim.Replace("{RUN}", invocation, StringComparison.Ordinal)}} := by
               apply result_of_toOption
               decide +kernel
@@ -128,8 +152,18 @@ foreach (var (name, theorem, before, after) in new[]
     ("Write512", "method0_unsafe_validated", ".memory .store512", ".memory .store256"),
     ("ReadAggregate", "method0_layouts_validated", ".loadAggregate 32", ".loadAggregate 16"),
     ("WriteAggregate", "method0_coverage_validated", ".size 2 0 .store", ".size 2 0 .load"),
-    ("ReadWord", "method0_unsafe_validated", "target := .external externalIdentity0", "target := .external \"forged\"")
-})
+    ("ReadWord", "method0_unsafe_validated", "target := .external externalIdentity0", "target := .external \"forged\""),
+    ("ReadPointerWord", "method0_unsafe_validated", "target := .external externalIdentity0", "target := .external \"forged\""),
+    ("ReadPointerAggregate", "method0_layouts_validated", ".loadAggregate 32", ".loadAggregate 16"),
+    ("ReadAlignedWord", "method0_unsafe_validated", ".pointerTransfer (.scalar 8 false) 8 false",
+        ".pointerTransfer (.scalar 8 false) 1 false"),
+    ("ReadAlignedWord", "method0_unsafe_validated", ".pointerTransfer (.scalar 8 false) 8 false",
+        ".pointerTransfer (.scalar 8 false) 8 true"),
+    ("ReadAlignedAggregate", "method0_layouts_validated", ".pointerTransfer (.snapshot (.aggregate 32)) 8 false",
+        ".pointerTransfer (.snapshot (.aggregate 32)) 4 false"),
+    ("ReadAligned128", "method0_unsafe_validated", ".pointerTransfer (.snapshot .vector128) 16 false",
+        ".pointerTransfer (.snapshot .vector128) 8 false")
+}.Where(item => !alignedOnly || item.Item1.Contains("Aligned", StringComparison.Ordinal)))
 {
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
     if (!source.Contains(before, StringComparison.Ordinal))
@@ -146,23 +180,44 @@ partial class Program
 {
     delegate T Reader<T>(in byte source);
     delegate void Writer<T>(ref byte destination, T value);
+    unsafe delegate T PointerReader<T>(byte* source);
+    unsafe delegate void PointerWriter<T>(byte* destination, T value);
 
-    static object RuntimeRead<T>(MethodInfo method, int width) where T : struct
+    static unsafe int AlignedOffset(byte* buffer, int alignment) =>
+        1 + (int)(((nuint)alignment - (nuint)(buffer + 1) % (nuint)alignment) % (nuint)alignment);
+
+    static unsafe object RuntimeRead<T>(MethodInfo method, int width, int alignment) where T : struct
     {
-        var bytes = Enumerable.Repeat((byte)255, width + 2).ToArray();
-        var value = method.CreateDelegate<Reader<T>>()(in bytes[1]);
+        var bytes = Enumerable.Repeat((byte)255, width + alignment + 1).ToArray();
+        T value;
+        int offset;
+        fixed (byte* buffer = bytes)
+        {
+            offset = AlignedOffset(buffer, alignment);
+            value = method.GetParameters()[0].ParameterType.IsPointer
+                ? method.CreateDelegate<PointerReader<T>>()(buffer + offset)
+                : method.CreateDelegate<Reader<T>>()(in bytes[offset]);
+        }
         var actual = MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, 1));
-        if (!actual.SequenceEqual(bytes.AsSpan(1, width))) throw new Exception("Runtime read differs");
+        if (!actual.SequenceEqual(bytes.AsSpan(offset, width))) throw new Exception("Runtime read differs");
         return value;
     }
 
-    static void RuntimeWrite<T>(MethodInfo method, int width) where T : struct
+    static unsafe void RuntimeWrite<T>(MethodInfo method, int width, int alignment) where T : struct
     {
-        var bytes = Enumerable.Repeat((byte)255, width + 2).ToArray();
+        var bytes = Enumerable.Repeat((byte)255, width + alignment + 1).ToArray();
         var valueBytes = Enumerable.Repeat((byte)9, width).ToArray();
         var value = Unsafe.ReadUnaligned<T>(ref valueBytes[0]);
-        method.CreateDelegate<Writer<T>>()(ref bytes[1], value);
-        if (bytes[0] != 255 || bytes[^1] != 255 || !bytes.AsSpan(1, width).SequenceEqual(valueBytes))
+        int offset;
+        fixed (byte* buffer = bytes)
+        {
+            offset = AlignedOffset(buffer, alignment);
+            if (method.GetParameters()[0].ParameterType.IsPointer)
+                method.CreateDelegate<PointerWriter<T>>()(buffer + offset, value);
+            else method.CreateDelegate<Writer<T>>()(ref bytes[offset], value);
+        }
+        if (bytes.Take(offset).Any(value => value != 255) || bytes.Skip(offset + width).Any(value => value != 255) ||
+            !bytes.AsSpan(offset, width).SequenceEqual(valueBytes))
             throw new Exception("Runtime write footprint differs");
     }
 }

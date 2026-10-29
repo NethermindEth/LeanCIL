@@ -4,19 +4,11 @@ import CIL.AggregateMemory
 import CIL.IntegerArithmetic
 
 /-!
-# Reference interpreter
+# Instruction evaluation
 
-The executable meaning of an extracted method. `step` runs one instruction on an
-evaluation stack and says what happens next (an `Action`); `run` drives a method body
-with fuel, entering callees with a fresh frame; `invoke` starts a method in frame 0 on
-caller-supplied memory, after initializing that frame's locals and vector homes.
-
-Every function returns `none` for a stuck state: an ill-typed stack, a missing value,
-an uninitialized read, or exhausted fuel. There is no undefined behaviour to reason
-about, only success or `none`.
-
-Vector homes are addressed by kind: `0` holds vector locals, `1` holds vector
-arguments and `2` holds temporaries for vector construction.
+Shared arithmetic, feature and intrinsic evaluation used by checked execution. Whole-method
+execution, frame entry and call composition are defined only in `CIL.Safety.Execution`.
+The optional single-step result is an internal evaluator, not a memory-safety judgment.
 -/
 
 namespace CIL
@@ -24,30 +16,6 @@ namespace CIL
 /-- Writes `values` into the locals of `frame`, local `i` getting the `i`th value. -/
 def initLocals (memory : Memory) (frame : Nat) (values : List Value) : Memory :=
   values.zipIdx.foldl (fun memory (value, i) => write memory (.local frame i) value) memory
-
-/-- Sets up a callee frame: plain locals, then the 256-bit vector homes of its locals
-    (kind 0) and value arguments (kind 1). Homes are disjoint from caller bytes. -/
-def initFrame (memory : Memory) (frame : Nat) (body : Method) (args : List Value) : Memory :=
-  let locals := body.vectorLocals.foldl (fun memory index =>
-    let cleared := clearHome memory frame 0 index
-    match body.locals[index]? with
-    | some (.v256 bits) => writeVectorHome cleared frame 0 index bits
-    | _ => cleared) (initLocals memory frame body.locals)
-  body.vectorArgs.foldl (fun memory index =>
-    let cleared := clearHome memory frame 1 index
-    match args[index]? with
-    | some (.v256 bits) => writeVectorHome cleared frame 1 index bits
-    | _ => cleared) locals
-
-@[simp] theorem initFrame_plain (memory : Memory) (frame : Nat) (body : Method) (args : List Value)
-    (noVectorLocals : body.vectorLocals = []) (noVectorArgs : body.vectorArgs = []) :
-    initFrame memory frame body args = initLocals memory frame body.locals := by
-  simp [initFrame, noVectorLocals, noVectorArgs]
-
-@[simp] theorem initFrame_profile (memory : Memory) (frame : Nat) (body : Method)
-    (args : List Value) (profile : FeatureProfile) :
-    initFrame memory frame { body with profile := profile } args = initFrame memory frame body args :=
-  rfl
 
 /-- The truth value a conditional branch tests: a nonzero integer is true. -/
 def truth : Value → Option Bool
@@ -293,36 +261,5 @@ def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
   -- Return.
   | .ret narrow, _ => returnFromStack narrow returns stack memory
   | _, _ => none
-
-/-- Runs `method` from `pc` until it returns. Each instruction spends one unit of fuel, and a
-    callee and the caller's continuation each get what remains at the call, so fuel bounds
-    every path, not the total. Running out is failure, not a result. A callee gets frame
-    `frame + 1`, and a constructor must return nothing. -/
-def run (program : Program) : Nat → Nat → Nat → List Value → Nat → List Value → Memory →
-    Option (Memory × List Value)
-  | 0, _, _, _, _, _, _ => none
-  | fuel + 1, method, pc, args, frame, stack, memory => do
-    let body ← program[method]?
-    let op ← body.code[pc]?
-    match ← step op body.returnsValue pc args frame stack memory body.profile with
-    | .next target stack' memory' => run program fuel method target args frame stack' memory'
-    | .call callee args' rest memory' =>
-      let child ← program[callee]?
-      let (final, result) ← run program fuel callee 0 args' (frame + 1) []
-        (initFrame memory' (frame + 1) child args')
-      run program fuel method (pc + 1) args frame (result ++ rest) final
-    | .construct callee args' rest memory' =>
-      let child ← program[callee]?
-      let (final, result) ← run program fuel callee 0 args' (frame + 1) []
-        (initFrame memory' (frame + 1) child args')
-      if !result.isEmpty then none else
-        run program fuel method (pc + 1) args frame
-          ((← readVectorHome final frame 2 pc) :: rest) final
-    | .returned result final => some (final, result)
-
-/-- Calls `method` with `args` in frame 0. -/
-def invoke (program : Program) (fuel method : Nat) (args : List Value) (memory : Memory) := do
-  let body ← program[method]?
-  run program fuel method 0 args 0 [] (initFrame memory 0 body args)
 
 end CIL

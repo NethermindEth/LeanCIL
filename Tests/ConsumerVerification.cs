@@ -61,12 +61,12 @@ var independent = Path.Combine(root, "Client", "Independent.lean");
 File.WriteAllText(independent, "namespace Client\ntheorem independent (x : Nat) : x = x := rfl\nend Client\n");
 const string shared = """
 import Extracted
-import CIL.Semantics
+import CIL.Safety.Execution
 import Client.Independent
 namespace Client
-theorem execution (x y : CIL.W64) (memory : CIL.Memory) :
-    CIL.invoke Extracted.program 4 0 [.i64 x, .i64 y] memory =
-      some (memory, [.i64 (x + y)]) := by rfl
+theorem execution (x y : CIL.W64) (memory : CIL.Safety.Memory) :
+    CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i64 x), .scalar (.i64 y)] memory =
+      .ok (memory, [.scalar (.i64 (x + y))]) := by rfl
 end Client
 """;
 var sharedPath = Path.Combine(root, "Client", "Shared.lean");
@@ -75,9 +75,9 @@ var proof = Path.Combine(root, "Proof.lean");
 File.WriteAllText(proof, """
 import Client.Shared
 namespace ExampleProof
-theorem correctness (x y : CIL.W64) (memory : CIL.Memory) :
-    CIL.invoke Extracted.program 4 0 [.i64 x, .i64 y] memory =
-      some (memory, [.i64 (x + y)]) := Client.execution x y memory
+theorem correctness (x y : CIL.W64) (memory : CIL.Safety.Memory) :
+    CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i64 x), .scalar (.i64 y)] memory =
+      .ok (memory, [.scalar (.i64 (x + y))]) := Client.execution x y memory
 end ExampleProof
 """);
 Run(["lake", "update"], root);

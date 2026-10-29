@@ -139,7 +139,7 @@ private def messageLoad (instruction : RawInstruction) : Bool :=
 
 /-- Admitted framework exceptions with parameterless/string constructors, plus the three
     argument exceptions' two-string overloads. Other constructors remain unsupported. -/
-def exceptionConstructor (name : String) (count : Nat) : Bool :=
+private def stringExceptionConstructor (name : String) (count : Nat) : Bool :=
   (count ≤ 1 && name ∈ ["System.Exception", "System.SystemException",
     "System.ApplicationException", "System.ArithmeticException",
     "System.DivideByZeroException", "System.OverflowException",
@@ -151,37 +151,54 @@ def exceptionConstructor (name : String) (count : Nat) : Bool :=
   (count == 2 && name ∈ ["System.ArgumentException", "System.ArgumentNullException",
     "System.ArgumentOutOfRangeException"])
 
+/-- Exact framework signatures whose literal/null arguments cannot change the raised type. -/
+def exceptionConstructor (name : String) (parameters : List TypeExpr) : Bool :=
+  let string := TypeExpr.atom runtimeScope "System.String"
+  let exception := TypeExpr.atom runtimeScope "System.Exception"
+  (parameters.all (· == string) && stringExceptionConstructor name parameters.length) ||
+    (parameters == [string, exception] && name ∈ ["System.Exception",
+      "System.InvalidOperationException", "System.ArgumentException",
+      "System.ArgumentOutOfRangeException"]) ||
+    (name == "System.ArgumentException" && parameters == [string, string, exception]) ||
+    (name == "System.ArgumentOutOfRangeException" &&
+      parameters == [string, .atom runtimeScope "System.Object", string])
+
 /-- An exact allowlisted `System.Runtime` constructor, including its complete signature. -/
-private def raisedType (count : Nat) : RawInstruction → Option String
+private def raisedType (count : Nat) (arguments : List RawInstruction)
+    (instruction : RawInstruction) : Option String :=
+  if 3 < count then none else match instruction with
   | ⟨_, 115, .call site⟩ => match site.declaringType, site.target with
     | .atom scope name, .external signature =>
-      if scope == runtimeScope && exceptionConstructor name count &&
+      if scope == runtimeScope && exceptionConstructor name site.parameterTypes &&
+        site.parameterTypes.length == count && arguments.length == count &&
+        (arguments.zip site.parameterTypes).all (fun (argument, parameter) =>
+          parameter == .atom runtimeScope "System.String" || argument.opcode == 20) &&
         signature == runtimeScope ++ "::System.Void " ++ name ++ "::.ctor(" ++
-          ",".intercalate (List.replicate count "System.String") ++ ")" &&
+          ",".intercalate (site.parameterTypes.map fun type =>
+            match type with | .atom _ name => name | _ => "") ++ ")" &&
         site.name == ".ctor" && site.hasThis && !site.returnsValue &&
-        site.typeArguments.isEmpty && site.parameterCount == count then some name else none
+        site.returnType == .void && site.typeArguments.isEmpty &&
+        site.parameterCount == count then some name else none
     | _, _ => none
   | _ => none
 
 /-- One beyond the largest admitted message arity; reaching it rules out a throw fold. -/
-private def throwMessageLimit : Nat := 3
+private def throwMessageLimit : Nat := 4
 
 /-- `throw new E(...)` with only string or null arguments: the argument count and raised type. -/
 def throwFold (code : List RawInstruction) : Option (Nat × String) :=
   let count := ((code.take throwMessageLimit).takeWhile messageLoad).length
   if count == throwMessageLimit then none else
   match code.drop count with
-  | constructor :: ⟨_, 122, .none⟩ :: _ => (count, ·) <$> raisedType count constructor
+  | constructor :: ⟨_, 122, .none⟩ :: _ =>
+    (count, ·) <$> raisedType count (code.take count) constructor
   | _ => none
 
-/-- Admitted exception constructors never consume more than two message arguments. -/
-private theorem raisedType_large (count : Nat) (instruction : RawInstruction)
-    (large : 2 < count) : raisedType count instruction = none := by
-  have notOne : ¬ count ≤ 1 := by omega
-  have notTwo : count ≠ 2 := by omega
-  unfold raisedType
-  split <;> try rfl
-  split <;> simp_all [exceptionConstructor] <;> omega
+/-- Admitted exception constructors never consume more than three literal/null arguments. -/
+private theorem raisedType_large (count : Nat) (arguments : List RawInstruction)
+    (instruction : RawInstruction) (large : 3 < count) :
+    raisedType count arguments instruction = none := by
+  simp [raisedType, large]
 
 #print axioms raisedType_large
 
@@ -190,19 +207,20 @@ theorem throwFold_eq_takeWhile (code : List RawInstruction) :
     throwFold code =
       let count := (code.takeWhile messageLoad).length
       match code.drop count with
-      | constructor :: ⟨_, 122, .none⟩ :: _ => (count, ·) <$> raisedType count constructor
+      | constructor :: ⟨_, 122, .none⟩ :: _ =>
+        (count, ·) <$> raisedType count (code.take count) constructor
       | _ => none := by
   unfold throwFold throwMessageLimit
   rw [← List.take_takeWhile, List.length_take]
-  by_cases short : (code.takeWhile messageLoad).length ≤ 2
-  · have bound : min 3 (code.takeWhile messageLoad).length =
+  by_cases short : (code.takeWhile messageLoad).length ≤ 3
+  · have bound : min 4 (code.takeWhile messageLoad).length =
         (code.takeWhile messageLoad).length := by omega
-    have notThree : (code.takeWhile messageLoad).length ≠ 3 := by omega
-    simp only [bound, beq_iff_eq, notThree, ↓reduceIte]
-  · have bound : min 3 (code.takeWhile messageLoad).length = 3 := by omega
-    have large : 2 < (code.takeWhile messageLoad).length := by omega
+    have notFour : (code.takeWhile messageLoad).length ≠ 4 := by omega
+    simp only [bound, beq_iff_eq, notFour, ↓reduceIte]
+  · have bound : min 4 (code.takeWhile messageLoad).length = 4 := by omega
+    have large : 3 < (code.takeWhile messageLoad).length := by omega
     simp only [bound, beq_self_eq_true, ↓reduceIte]
-    split <;> simp [raisedType_large _ _ large]
+    split <;> simp [raisedType_large _ _ _ large]
 
 #print axioms throwFold_eq_takeWhile
 

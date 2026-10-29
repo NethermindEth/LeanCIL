@@ -19,6 +19,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .binaryRead _ _ _ trying => (if trying then 2 else 1, 1)
   | .binaryWrite _ _ trying => (2, if trying then 1 else 0)
   | .marshalWrite _ trying => (2, if trying then 1 else 0)
+  | .pointerTransfer _ _ store => if store then (2, 0) else (1, 1)
   | .bigMul64 => (3, 1)
   | .spanSlice explicitLength => (if explicitLength then 3 else 2, 1)
   | .spanFromReference .. | .byteOffset => (2, 1)
@@ -46,7 +47,7 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
-  | .stackAlloc _ => some (1, 1)
+  | .stackAlloc _ | .newArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
   | .const32 _ | .const64 _ | .arg .. | .vectorArg _ | .local .. | .vectorLocal _ => some (0, 1)

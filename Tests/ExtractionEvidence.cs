@@ -14,6 +14,10 @@ fixtures.PrepareLeanFixtures(
     "Tests.StackAllocation", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences", "Tests.ReadOnlyArrayReferences",
     "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations", "Tests.NativeMethodTables");
 if (args is ["--prepare-only"]) return;
+Run(["dotnet", "run", "--file", "Tests/RuntimeModelInventory.cs"], streamOutput: true,
+    progress: "Runtime model catalog");
+Run(["dotnet", "run", "--file", "Tests/CompilerCoverage.cs"], streamOutput: true,
+    progress: "Pinned compiler coverage");
 Run(["dotnet", "run", "--file", "Tests/PreparedLeanFixturesTests.cs"]);
 Run(["dotnet", "run", "--file", "Tests/RejectedEvidenceTests.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ConstrainedResolution.cs"]);

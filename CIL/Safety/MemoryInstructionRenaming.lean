@@ -399,6 +399,42 @@ private theorem Memory.Renamed.singleSpanInstructionResult {mapping : Allocation
   all_goals repeat first | contradiction | cases observable | split at observable
 #print axioms Memory.Renamed.singleSpanInstructionResult
 
+/-- Aligned pointer transfers preserve allocation-relative accesses and typed values. -/
+private theorem Memory.Renamed.pointerTransferInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (kind : CIL.TransferKind)
+    (alignment : Nat) (store : Bool) (stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (pointerTransferInstruction kind alignment store stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (pointerTransferInstruction kind alignment store stack source)
+      (pointerTransferInstruction kind alignment store (stack.map mapping.value) target) := by
+  unfold pointerTransferInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (mapping.referenceAt _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound := referenceAt_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.checkedAccess _ (by assumption) _ _ _ _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.loadTransfer _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.storeTransfer _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+#print axioms Memory.Renamed.pointerTransferInstructionResult
+
 /-- A memory instruction's successful effect is preserved on the corresponding allocations. -/
 theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -418,6 +454,7 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
   · rename_i observed
     simp only [observed, Bool.false_eq_true, ite_false]
     split at observable
+    · exact related.pointerTransferInstructionResult _ _ _ _ bounds observable
     · exact related.arrayTransferInstructionResult formed _ _ _ bounds observable
     · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
     · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable

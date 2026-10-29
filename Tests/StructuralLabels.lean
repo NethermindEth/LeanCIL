@@ -1,3 +1,4 @@
+import Tests.LoopScaffold
 import CIL.StructuralLabels
 
 /-! A synthetic extraction: `Root` calls `Step` before two loops and again after them. -/

@@ -49,7 +49,7 @@ internal static class LeanEmitter
         };
     }
     static bool StaticSite(Instruction i) => i.OpCode.Code is Code.Ldsflda or Code.Ldsfld || (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
-    static FieldDefinition StaticField(Instruction i, ModuleDefinition module, string architecture) => i.OpCode.Code == Code.Ldsfld
+    static FieldDefinition StaticField(Instruction i, ModuleDefinition module, string architecture) => StaticValues.IsLoad(i)
         ? StaticValues.Resolve((FieldReference)i.Operand, module, architecture).Field : StaticData.Validate((FieldReference)i.Operand, module);
     internal static StaticIdentityRecord[] StaticIdentities(MethodDefinition[] methods, FeatureProfile profile) =>
         methods.SelectMany(method => Reachability.Analyze(method, profile)).Where(StaticSite)
@@ -179,7 +179,7 @@ internal static class LeanEmitter
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
                 {
-                    if (s.i.OpCode.Code == Code.Ldsfld)
+                    if (StaticValues.IsLoad(s.i))
                     {
                         StaticValues.Value value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module, profile.Architecture);
                         var initializer = value.Initializer is null ? 0 : methodIndices.GetValueOrDefault(value.Initializer, -1);

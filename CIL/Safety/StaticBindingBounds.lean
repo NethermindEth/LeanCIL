@@ -134,6 +134,7 @@ theorem StepEffect.staticBindingsBounded {body : CIL.Method} {source target : Me
     {frame final : Frame} (effect : StepEffect body frame source final target)
     (bounded : source.StaticBindingsBounded) : target.StaticBindingsBounded := by
   cases effect with
+  | arrayAllocation effect => exact bounded.preserve effect.registry effect.allocations.next
   | stackAllocation effect => exact effect.staticBindingsBounded bounded
   | memory effect => exact effect.staticBindingsBounded bounded
   | store _ stored =>

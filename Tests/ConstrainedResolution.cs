@@ -40,7 +40,7 @@ foreach (var (mutation, marker) in new[]
     ("reference", "concrete same-assembly struct"),
     ("missing", "no unique struct implementation"),
     ("ordinary", "adjacent concrete constrained receiver"),
-    ("generic-direct", "require a non-generic interface slot")
+    ("open-direct-owner", "Unsupported constrained method owner")
 })
 {
     using var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll"));
@@ -60,7 +60,7 @@ foreach (var (mutation, marker) in new[]
         case "reference": prefix.Operand = module.GetType("Examples.ConstrainedCalls"); break;
         case "missing": receiver.Methods.Remove(receiver.Methods.Single(method => method.Name == "Read")); break;
         case "ordinary": prefix.OpCode = OpCodes.Nop; prefix.Operand = null; break;
-        case "generic-direct":
+        case "open-direct-owner":
             var definition = module.GetType("Examples.GenericCounterValue`1");
             var generic = new GenericInstanceType(definition);
             generic.GenericArguments.Add(module.TypeSystem.Int32);

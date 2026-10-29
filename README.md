@@ -10,6 +10,9 @@ You can prove results for every input satisfying a contract, show that a loop te
 check memory access conditions, or establish a counterexample to an incorrect implementation.
 Proofs can compose previously proved method contracts without unfolding helper bodies.
 
+The [buffer-fill example](Examples/Proofs/FillWords.lean) proves an arbitrary-length fill,
+including termination, the resulting contents and preservation outside the writable region.
+
 ```mermaid
 flowchart TD
     source["C#, F# or other .NET source"] -- ".NET compiler" --> assembly["Compiled assembly<br/>(the actual CIL)"]
@@ -94,13 +97,14 @@ Lake configuration and Lean elaborators execute code, so use packages you trust.
 LeanCIL supports integer arithmetic, selected control flow and managed calls, reference-free
 structs, checked memory access, and arrays and spans of integers, enums,
 reference-free structs and supported integer vectors over supplied storage,
-typed managed dispatch, and selected runtime helpers and SIMD intrinsics. Each has restrictions
+primitive integer array allocation, typed managed dispatch, and selected runtime helpers and
+SIMD intrinsics. Each has restrictions
 documented in the [opcode support table](docs/OPCODES.md) and [intrinsic support tables](docs/SIMD.md).
 Unsupported instructions and signatures are rejected explicitly.
 
 The checked memory model tracks allocation identity, lifetime, bounds, permissions,
-initialization and alignment. Use `CIL.Safety.invoke` for memory-safety claims; successful
-execution in the simpler `CIL.invoke` model alone does not establish them.
+initialization and alignment. `CIL.Safety.invoke` is the execution model for both functional
+correctness and memory-safety claims.
 
 General class allocation and virtual dispatch, ordinary recursive calls, exception handlers,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.

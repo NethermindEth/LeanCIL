@@ -191,8 +191,8 @@ Allocation-renaming proofs are optional: import `CIL.Safety.AllocationRefinement
 
 * `CIL.Types`, `CIL.Instructions`, `CIL.Layout` and `CIL.Memory`: values, opcodes, aggregate
   layouts and byte memory.
-* `CIL.Semantics`: the reference interpreter (`CIL.step`, `CIL.run`, `CIL.invoke`), which
-  `CIL.SymbolicExecution` steps by rewriting.
+* `CIL.Semantics`: the shared single-instruction evaluator (`CIL.step`). Checked execution
+  delegates value-only instructions to it; `CIL.SymbolicExecution` supplies shared simp sets.
 * `CIL.Features`, `CIL.SIMD.*` and `CIL.ProfileEquivalence`: hardware feature profiles, the
   intrinsic semantics, and when a result does not depend on the profile.
 * `CIL.Safety.*`: the checked interpreter (`CIL.Safety.invoke`) over allocation-aware memory,

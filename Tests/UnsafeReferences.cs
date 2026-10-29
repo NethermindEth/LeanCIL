@@ -35,6 +35,8 @@ foreach (var name in new[] { "Word", "Half", "Vector", "Mutable" })
         "CIL.Safety.invoke Extracted.program 4 0 [Examples.reference] memory = .ok (memory, [Examples.reference])");
 Prove("Null", "UnsafeReferences::Word(Examples.FourLimbs&)",
     "CIL.Safety.invoke Extracted.program 4 0 [.reference .null] memory = .ok (memory, [.reference .null])");
+Prove("Pointer", "UnsafeReferences::Pointer(byte*)",
+    "CIL.Safety.invoke Extracted.program 4 0 [Examples.reference] memory = .ok (memory, [Examples.reference])");
 Prove("Expired", "UnsafeReferences::Word(Examples.FourLimbs&)",
     "CIL.Safety.invoke Extracted.program 4 0 [Examples.reference] (CIL.Safety.expire memory 0) = .error ⟨0, 0, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩");
 Prove("VectorUninitialized", "UnsafeReferences::ReadHalf(Examples.FourLimbs&)",

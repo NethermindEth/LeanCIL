@@ -24,7 +24,10 @@ RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
 {
     ("Quotient", "Throws::Quotient(uint,uint)", [[7, 2], [7, 0], [0, 0], [uint.MaxValue, 1]]),
-    ("Percent", "Throws::Percent(uint)", [[0], [100], [101], [uint.MaxValue]])
+    ("Percent", "Throws::Percent(uint)", [[0], [100], [101], [uint.MaxValue]]),
+    ("Inner", "Throws::Inner(uint)", [[0], [1]]),
+    ("ArgumentInner", "Throws::ArgumentInner(uint)", [[0], [1]]),
+    ("ActualValue", "Throws::ActualValue(uint)", [[0], [1]])
 })
 {
     var folder = Path.Combine(root, name);
@@ -45,16 +48,30 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     }).ToList();
     var proof = Path.Combine(folder, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
-        string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
+        string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) +
+        "⟩\n#print axioms correctness\nend ExampleProof\n");
     queue.Add(new(selector, proof, Path.Combine(root, name + "-Verified")), () =>
         Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons, {label} located at method {method} pc {pc}"));
 
     // A forged type must fail the feature certificate, independently of the instruction lemma.
-    var forged = source.Replace($".throw \"{label}\"", ".throw \"System.InvalidOperationException\"");
+    var forgedLabel = label == "System.InvalidOperationException"
+        ? "System.DivideByZeroException" : "System.InvalidOperationException";
+    var forged = source.Replace($".throw \"{label}\"", $".throw \"{forgedLabel}\"");
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, forged);
     rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
         $"Extraction.FeatureFlowValid method{method}Closed", "is false");
+    if (name is "Inner" or "ArgumentInner" or "ActualValue")
+    {
+        var nonNull = Path.Combine(root, name + "-non-null.lean");
+        const string nullLoad = "opcode := 20, operand := .none";
+        if (!source.Contains(nullLoad, StringComparison.Ordinal))
+            throw new InvalidOperationException("Missing null constructor argument");
+        File.WriteAllText(nonNull, source.Replace(nullLoad,
+            "opcode := 114, operand := .text \"not null\"", StringComparison.Ordinal));
+        rejected.Add(nonNull, $"PASS {name}: non-null constructor operand rejected",
+            $"Extraction.FeatureFlowValid method{method}Closed", "is false");
+    }
 }
 
 queue.Flush();

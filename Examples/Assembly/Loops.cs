@@ -26,7 +26,7 @@ public static class Loops
         while (remaining != 0)
         {
             if (System.Runtime.Intrinsics.X86.Avx2.IsSupported)
-                return (uint)new int[remaining].Length;
+                return (uint)new float[remaining].Length;
             remaining = unchecked(remaining - 1);
         }
         return remaining;

@@ -47,6 +47,17 @@ public static class PrimitiveArrays
     }
 
     public static int[] Allocate(int length) => new int[length];
+    public static byte[] AllocateBytes(int length) => new byte[length];
+    public static short[] AllocateShorts(int length) => new short[length];
+    public static long[] AllocateLongs(int length) => new long[length];
+    public static int AllocateAndWrite(int length, int index, int value)
+    {
+        var values = Allocate(length);
+        WriteInt32(values, index, value);
+        return ReadInt32(values, index);
+    }
+
+    public static float[] AllocateSingles(int length) => new float[length];
     public static object ReadObject(object[] values, int index) => values[index];
     public static float ReadSingle(float[] values, int index) => values[index];
     public static int[] ReadJagged(int[][] values, int index) => values[index];

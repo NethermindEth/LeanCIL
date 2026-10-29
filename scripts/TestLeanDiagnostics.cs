@@ -20,9 +20,9 @@ var transcript = "Command failed (1): lake build +LeanCILProof:olean\n" + replay
     {failed} [418/420] Building Client.Shared (2.1s)
     trace: .> LEAN_PATH=D:\work\.lake\build\lib\lean lean.exe D:\work\Client\Shared.lean -o D:\work\Shared.olean
     error: Client/Shared.lean:7:43: Tactic `rfl` failed: The left-hand side
-      CIL.invoke Extracted.program 4 0 [CIL.Value.i64 x, CIL.Value.i64 y] memory
+      CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i64 x), .scalar (.i64 y)] memory
     is not definitionally equal to the right-hand side
-      some (memory, [CIL.Value.i64 (x - y)])
+      .ok (memory, [.scalar (.i64 (x - y))])
 
     error: Client/Shared.lean:9:0: unknown identifier 'missing'
     warning: Client/Shared.lean:11:0: declaration uses 'sorry'
@@ -48,7 +48,7 @@ Require(errors.Count == 4, "expected the four located errors of the failing modu
 Require(errors[0].Module == "Client.Shared" && errors[0].Location == "Client/Shared.lean:7:43",
     "location or module of the first error");
 // The whole message block is kept, including unindented continuation lines.
-Require(errors[0].Lines.Count == 4 && errors[0].Lines[3] == "  some (memory, [CIL.Value.i64 (x - y)])",
+Require(errors[0].Lines.Count == 4 && errors[0].Lines[3] == "  .ok (memory, [.scalar (.i64 (x - y))])",
     "first message block", string.Join("\n", errors[0].Lines));
 Require(errors[1].Lines.Count == 1 && errors[1].Lines[0] == "unknown identifier 'missing'",
     "second block stops at the next entry");

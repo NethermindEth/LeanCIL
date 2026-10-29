@@ -1,4 +1,4 @@
-import Tests.LegacyFeatures
+import Tests.FeatureExecution
 import CIL.Safety.SymbolicExecution
 import CIL.SIMD.VectorLemmas
 

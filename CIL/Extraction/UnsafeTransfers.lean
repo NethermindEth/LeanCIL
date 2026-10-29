@@ -3,8 +3,8 @@ import CIL.Extraction.Generics
 /-!
 # Checked Unsafe transfers
 
-Unsafe byte-reference reads and writes lower to existing checked typed operations. Scalar and
-vector widths are bound here; aggregate widths are additionally bound by complete layout uses.
+Unsafe reads and writes reuse checked typed transfers. Scalar and vector widths and alignment
+are bound here; aggregate width and alignment are additionally bound by complete layout uses.
 -/
 
 namespace CIL.Extraction
@@ -63,35 +63,67 @@ def typedTransferMatches (layouts : List RawLayout) (type : TypeExpr) (read : Bo
         | _, _ => false
     | _ => false
 
+/-- The transfer representation agrees with the validated value type. -/
+def transferKindMatches (layouts : List RawLayout) (type : TypeExpr)
+    (kind : TransferKind) : Bool :=
+  match kind with
+  | .scalar width signed => typedTransferMatches layouts type true (.loadScalar width signed)
+  | .snapshot (.aggregate width) => typedTransferMatches layouts type true (.loadAggregate width)
+  | .snapshot .vector128 => typedTransferMatches layouts type true (.memory .load128)
+  | .snapshot .vector256 => typedTransferMatches layouts type true (.memory .load256)
+  | .snapshot .vector512 => typedTransferMatches layouts type true (.memory .load512)
+
 /-- Exact static generic Unsafe identity, including both closed parameter and result types. -/
-private def unalignedCall (raw : RawInstruction) : Option (TypeExpr × Bool) := do
+def unsafeValueCall (raw : RawInstruction) : Option (TypeExpr × Bool × Bool) := do
   if raw.opcode != 40 then none else pure ()
   let .call site := raw.operand | none
   let [type] := site.typeArguments | none
   if site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" ||
       site.hasThis then none else pure ()
   let byte := TypeExpr.atom runtimeScope "System.Byte"
-  if site.name == "ReadUnaligned" && site.parameterCount == 1 && site.returnsValue &&
-      site.parameterTypes == [.byref byte] && site.returnType == type &&
+  let pointer := site.parameterTypes.head? == some (.pointer .void)
+  let aligned := site.name == "Read" || site.name == "Write"
+  if aligned && !pointer then none else pure ()
+  let address := if pointer then .pointer .void else .byref byte
+  let addressName := if pointer then "System.Void*" else "System.Byte&"
+  if (site.name == "ReadUnaligned" || site.name == "Read") &&
+      site.parameterCount == 1 && site.returnsValue &&
+      site.parameterTypes == [address] && site.returnType == type &&
       site.target == .external (runtimeScope ++
-        "::!!0 System.Runtime.CompilerServices.Unsafe::ReadUnaligned(System.Byte&)") then
-    some (type, true)
-  else if site.name == "WriteUnaligned" && site.parameterCount == 2 && !site.returnsValue &&
-      site.parameterTypes == [.byref byte, type] && site.returnType == .void &&
+        "::!!0 System.Runtime.CompilerServices.Unsafe::" ++
+        site.name ++ "(" ++ addressName ++ ")") then
+    some (type, true, aligned)
+  else if (site.name == "WriteUnaligned" || site.name == "Write") &&
+      site.parameterCount == 2 && !site.returnsValue &&
+      site.parameterTypes == [address, type] && site.returnType == .void &&
       site.target == .external (runtimeScope ++
         "::System.Void System.Runtime.CompilerServices.Unsafe::" ++
-        "WriteUnaligned(System.Byte&,!!0)") then
-    some (type, false)
+        site.name ++ "(" ++ addressName ++ ",!!0)") then
+    some (type, false, aligned)
   else none
 
-/-- Typed memory operations from calls are reserved for an exact admitted unaligned helper. -/
+/-- Primitive and vector alignment is fixed here; aggregate alignment uses complete layout uses. -/
+private def transferAlignmentMatches (layouts : List RawLayout) (type : TypeExpr)
+    (alignment : Nat) : Bool :=
+  if let some width := integerVectorWidth type then alignment == width else
+  match typeStorage layouts type with
+  | some (.field (.aggregate _)) => true
+  | some (.field kind) => primitiveFieldWidth kind == some alignment
+  | _ => false
+
+/-- Typed memory operations from calls are reserved for exact admitted Unsafe transfer helpers. -/
 def unsafeTransferMatches (layouts : List RawLayout) (raw : RawInstruction) (emitted : Op) : Bool :=
-  match unalignedCall raw with
-  | some (type, read) => typedTransferMatches layouts type read emitted
+  match unsafeValueCall raw with
+  | some (type, read, false) => typedTransferMatches layouts type read emitted
+  | some (type, read, true) => match emitted with
+    | .memory (.pointerTransfer kind alignment store) => store == !read &&
+      transferKindMatches layouts type kind && transferAlignmentMatches layouts type alignment
+    | _ => false
   | none => match raw.opcode, emitted with
     | 40, .loadScalar .. | 40, .storeScalar _ | 40, .loadAggregate _ | 40, .storeAggregate _
     | 40, .memory .load128 | 40, .memory .load256 | 40, .memory .load512
     | 40, .memory .store128 | 40, .memory .store256 | 40, .memory .store512 => false
+    | _, .memory (.pointerTransfer ..) => false
     | _, _ => true
 
 end CIL.Extraction

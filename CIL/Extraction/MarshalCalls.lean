@@ -9,16 +9,6 @@ Aggregate widths additionally require the existing complete layout-use certifica
 
 namespace CIL.Extraction
 
-/-- The transfer representation agrees with the validated value type. -/
-private def transferKindMatches (layouts : List RawLayout) (type : TypeExpr)
-    (kind : TransferKind) : Bool :=
-  match kind with
-  | .scalar width signed => typedTransferMatches layouts type true (.loadScalar width signed)
-  | .snapshot (.aggregate width) => typedTransferMatches layouts type true (.loadAggregate width)
-  | .snapshot .vector128 => typedTransferMatches layouts type true (.memory .load128)
-  | .snapshot .vector256 => typedTransferMatches layouts type true (.memory .load256)
-  | .snapshot .vector512 => typedTransferMatches layouts type true (.memory .load512)
-
 /-- An exact runtime generic call agrees with its lowered byte-span operation. -/
 private def marshalCallMatches (layouts : List RawLayout) (raw : RawInstruction)
     (kind : TransferKind) (read trying : Bool) : Bool := Id.run do

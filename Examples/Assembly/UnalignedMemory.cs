@@ -5,6 +5,19 @@ namespace Examples;
 
 internal static class UnalignedMemory
 {
+    public static unsafe ulong ReadAlignedWord(byte* source) => Unsafe.Read<ulong>(source);
+    public static unsafe FourLimbs ReadAlignedAggregate(byte* source) => Unsafe.Read<FourLimbs>(source);
+    public static unsafe Vector128<byte> ReadAligned128(byte* source) => Unsafe.Read<Vector128<byte>>(source);
+    public static unsafe void WriteAlignedWord(byte* destination, ulong value) => Unsafe.Write(destination, value);
+    public static unsafe void WriteAlignedAggregate(byte* destination, FourLimbs value) =>
+        Unsafe.Write(destination, value);
+    public static unsafe void WriteAligned128(byte* destination, Vector128<byte> value) =>
+        Unsafe.Write(destination, value);
+    public static unsafe ulong ReadPointerWord(byte* source) => Unsafe.ReadUnaligned<ulong>(source);
+    public static unsafe FourLimbs ReadPointerAggregate(byte* source) => Unsafe.ReadUnaligned<FourLimbs>(source);
+    public static unsafe void WritePointerWord(byte* destination, ulong value) => Unsafe.WriteUnaligned(destination, value);
+    public static unsafe void WritePointerAggregate(byte* destination, FourLimbs value) =>
+        Unsafe.WriteUnaligned(destination, value);
     public static sbyte ReadSigned(in byte source) => Unsafe.ReadUnaligned<sbyte>(in source);
     public static short ReadHalf(in byte source) => Unsafe.ReadUnaligned<short>(in source);
     public static ulong ReadWord(in byte source) => Unsafe.ReadUnaligned<ulong>(in source);

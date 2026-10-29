@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Mono.Cecil;
-using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -282,7 +281,7 @@ internal static partial class Program
                 staticIdentities, collectTemplates: checkedTemplate is not null);
             string source = emitted.Source;
             var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
-                .Where(i => i.OpCode.Code == Code.Ldsfld)
+                .Where(StaticValues.IsLoad)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +

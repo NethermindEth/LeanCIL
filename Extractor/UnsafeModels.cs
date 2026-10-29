@@ -7,7 +7,7 @@ internal static class UnsafeModels
 {
     internal static string? Translate(MethodReference reference, string architecture = "scalar")
     {
-        if (MemoryTransfers.Unaligned(reference, architecture) is { } transfer) return transfer;
+        if (MemoryTransfers.Unsafe(reference, architecture) is { } transfer) return transfer;
         if (ReinterpretReference(reference, architecture) is { } cast) return cast;
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
@@ -95,7 +95,10 @@ internal static class UnsafeModels
         bool Reference(TypeReference type, int position) => type is ByReferenceType byRef &&
             byRef.ElementType is GenericParameter parameter && parameter.Type == GenericParameterType.Method &&
             parameter.Position == position && parameter.Owner == definition;
-        if (!Reference(definition.Parameters[0].ParameterType, 0) || !Reference(definition.ReturnType, arity - 1))
+        var pointer = reference.Name == "AsRef" &&
+            definition.Parameters[0].ParameterType is PointerType { ElementType.MetadataType: MetadataType.Void };
+        if ((!pointer && !Reference(definition.Parameters[0].ParameterType, 0)) ||
+            !Reference(definition.ReturnType, arity - 1))
             return null;
         foreach (var type in generic.GenericArguments)
         {

@@ -67,7 +67,7 @@ internal static class Arithmetic
         ulong local = 1;
         return ref Unsafe.AsRef(in local);
     }
-    public static int Unsupported(int x) => new int[x].Length;
+    public static int Unsupported(int x) => new double[x].Length;
     // Only Type.op_Equality and op_Inequality fold; GetTypeFromHandle stays an unmodelled CoreLib call.
     public static ulong TypeCheck(ulong x) => ReferenceEquals(typeof(ulong), typeof(uint)) ? x : unchecked(x + 1);
 }

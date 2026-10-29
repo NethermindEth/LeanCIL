@@ -5,8 +5,8 @@ import CIL.ExecutionLemmas
 
 Shows when a method's result does not depend on the hardware it runs on. Two feature
 profiles agree on a program when every feature test and intrinsic availability check in it
-gives the same answer under both; agreeing profiles then give identical `run` and `invoke`
-results, so one proof covers every such deployment.
+gives the same answer under both. Checked execution equivalence is proved in
+`CIL.Safety.ProfileEquivalence`.
 -/
 
 namespace CIL
@@ -68,54 +68,6 @@ theorem step_profile_eq (op : Op) (p q : FeatureProfile)
       program[index]?.map (fun body => { body with profile := profile }) := by
   simp [reprofile]
 
-/-- Running a program under either of two agreeing profiles gives the same result. -/
-theorem run_reprofile_eq (program : Program) (p q : FeatureProfile)
-    (h : program.ProfileAgreement p q) (fuel method pc : Nat) (args : List Value)
-    (frame : Nat) (stack : List Value) (memory : Memory) :
-    run (reprofile program p) fuel method pc args frame stack memory =
-      run (reprofile program q) fuel method pc args frame stack memory := by
-  induction fuel generalizing method pc args frame stack memory with
-  | zero => rfl
-  | succ fuel ih =>
-    rw [run_succ, run_succ]
-    simp only [reprofile_lookup]
-    cases hbody : program[method]? with
-    | none => rfl
-    | some body =>
-      cases hop : body.code[pc]? with
-      | none => simp [hop]
-      | some op =>
-        have agree := h body (List.mem_of_getElem? hbody) op (List.mem_of_getElem? hop)
-        simp only [Option.map_some, Option.bind_some, hop,
-          step_profile_eq op p q agree body.returnsValue pc args frame stack memory]
-        have callees (source target : FeatureProfile) (callee : Nat) (child : Method)
-            (found : (reprofile program source)[callee]? = some child) :
-            ∃ child', (reprofile program target)[callee]? = some child' ∧
-              ∀ memory frame args, initFrame memory frame child args =
-                initFrame memory frame child' args := by
-          simp only [reprofile_lookup, Option.map_eq_some_iff] at found
-          obtain ⟨original, found, rfl⟩ := found
-          exact ⟨{ original with profile := target }, by simp [found],
-            fun _ _ _ => by simp only [initFrame_profile]⟩
-        congr 1
-        funext action
-        exact Option.ext fun result =>
-          ⟨runAction_transfer (callees p q) (fun _ _ _ _ _ _ _ run => (ih ..).symm.trans run)
-              _ _ _ _ _ _,
-            runAction_transfer (callees q p) (fun _ _ _ _ _ _ _ run => (ih ..).trans run)
-              _ _ _ _ _ _⟩
-
-theorem invoke_reprofile_eq (program : Program) (p q : FeatureProfile)
-    (h : program.ProfileAgreement p q) (fuel method : Nat) (args : List Value) (memory : Memory) :
-    invoke (reprofile program p) fuel method args memory =
-      invoke (reprofile program q) fuel method args memory := by
-  cases hb : program[method]? with
-  | none => simp [invoke, hb]
-  | some body =>
-    simpa only [invoke, reprofile_lookup, hb, Option.map_some, Option.bind_eq_bind,
-      Option.bind_some, initFrame_profile] using
-      run_reprofile_eq program p q h fuel method 0 args 0 [] (initFrame memory 0 body args)
-
 theorem reprofile_eq_of_uniform (program : Program) (p : FeatureProfile)
     (h : ∀ body ∈ program, body.profile = p) : reprofile program p = program := by
   induction program with
@@ -138,17 +90,6 @@ theorem uniform_of_profile_map (program : Program) (p : FeatureProfile)
   have hm : body.profile ∈ program.map (·.profile) := List.mem_map.mpr ⟨body, hb, rfl⟩
   rw [h] at hm
   exact (List.mem_replicate.mp hm).2
-
-/-- A program whose methods all carry profile `p` behaves the same under any profile that
-    agrees with `p`. -/
-theorem invoke_uniform_reprofile_eq (program : Program) (p q : FeatureProfile)
-    (hu : ∀ body ∈ program, body.profile = p) (ha : program.ProfileAgreement p q)
-    (fuel method : Nat) (args : List Value) (memory : Memory) :
-    invoke program fuel method args memory =
-      invoke (reprofile program q) fuel method args memory := by
-  have he := invoke_reprofile_eq program p q ha fuel method args memory
-  rw [reprofile_eq_of_uniform program p hu] at he
-  exact he
 
 /-- The features an intrinsic needs; `available_of_required` shows they suffice. -/
 def Intrinsic.requiredFeatures : Intrinsic → List Feature

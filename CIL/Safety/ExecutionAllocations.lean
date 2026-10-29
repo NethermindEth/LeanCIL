@@ -88,7 +88,7 @@ theorem step_ownedAbove (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
         rcases List.mem_cons.mp member with rfl | member
         · exact (allocateHome_fresh _ _ _ _ _ allocated).2.1 ▸ bound
         · exact old id member
-    | memory | store => exact old
+    | arrayAllocation | memory | store => exact old
     | valueHome allocated _ | localHome allocated _ =>
       intro id member
       rcases List.mem_cons.mp member with rfl | member

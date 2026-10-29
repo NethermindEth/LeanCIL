@@ -211,6 +211,23 @@ theorem Memory.Equivalent.arrayTransferInstruction {m n : Memory} (same : m.Equi
     | split
 #print axioms Memory.Equivalent.arrayTransferInstruction
 
+/-- Aligned transfers retain exact access failures and the existing typed transfer equivalence. -/
+theorem Memory.Equivalent.pointerTransferInstruction {m n : Memory} (same : m.Equivalent n)
+    (kind : CIL.TransferKind) (alignment : Nat) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (pointerTransferInstruction kind alignment store stack m)
+      (pointerTransferInstruction kind alignment store stack n) := by
+  unfold CIL.Safety.pointerTransferInstruction
+  split <;> try simp only [same.access, same.loadTransfer]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind (same.storeTransfer _ _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.pointerTransferInstruction
+
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -220,6 +237,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   split
   · exact .error _
   · split
+    · exact same.pointerTransferInstruction _ _ _ _
     · exact same.arrayTransferInstruction _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _

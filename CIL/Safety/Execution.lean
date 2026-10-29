@@ -1,5 +1,6 @@
 import CIL.Safety.Frames
 import CIL.Safety.StackAllocation
+import CIL.Safety.ArrayAllocation
 import CIL.Safety.StaticMemory
 import CIL.Safety.ReferenceObservations
 import CIL.Safety.NativeMethodTables
@@ -363,6 +364,9 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     if stack.length = (if body.returnsValue then 1 else 0) then
       return .returned (← stack.mapM (checkedValue m)) m
     else .error .invalidState
+  | .newArray element, .scalar length :: rest =>
+    let (view, memory) ← newArray m element length
+    return .next (pc + 1) (.array view :: rest) frame memory
   | _, _ =>
     match pureArity op with
     | some argc =>

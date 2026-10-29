@@ -536,7 +536,7 @@ internal static class MetadataValidation
                     });
                     continue;
                 }
-                if (instruction.OpCode.Code == Code.Ldsfld && instruction.Operand is FieldReference loaded)
+                if (StaticValues.IsLoad(instruction) && instruction.Operand is FieldReference loaded)
                 {
                     if (!Check(method, instruction, () => StaticLoad(instruction, loaded), named: true))
                         skipped.Add(instruction);
@@ -550,7 +550,7 @@ internal static class MetadataValidation
                         // Fold recognition scans the whole body, but only reachable unsupported throws are rejected.
                         if (instruction.OpCode.Code == Code.Newobj && instruction.Next?.OpCode.Code == Code.Throw)
                             throw Call("Unsupported exception constructor", reference, method, instruction,
-                                "Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
+                                "Folded throws require an allowlisted System.Runtime constructor with literal strings or null arguments.");
                         if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
                             Spans.Is(reference.DeclaringType) &&
                             !Spans.Analyze(method, profile).Constructors.ContainsKey(instruction))

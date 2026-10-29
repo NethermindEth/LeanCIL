@@ -57,7 +57,10 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
   | _, _ => false
 
 /-- The emitted size-dependent operation uses exactly the computed struct size. -/
-private def checkSize (size : Nat) : SizeAccess → Op → Bool
+private def checkSize (size alignment : Nat) : SizeAccess → Op → Bool
+  | .load, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual false)
+  | .store, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual true) =>
+    width == size && actual == alignment
   | .arrayElement, .memory (.arrayAddress (.aggregate _ width) _)
   | .arrayElement, .memory (.arrayTransfer (.aggregate _ width) _)
   | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
@@ -95,7 +98,7 @@ def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
   | .size pc type access => (do
       let layout ← layouts[type]?
       let operation ← method.code[pc]?
-      return checkSize layout.layout.size access operation).getD false
+      return checkSize layout.layout.size layout.alignment access operation).getD false
   | .local slot type => (do
       let layout ← layouts[type]?
       match ← method.localKinds[slot]? with

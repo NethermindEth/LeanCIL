@@ -3,7 +3,7 @@
 | Layer | Public modules | Purpose |
 | --- | --- | --- |
 | Values and instructions | `CIL.Types`, `CIL.Instructions`, `CIL.Layout` | Bit vectors, references, byte snapshots, validated aggregate layouts |
-| Execution | `CIL.Semantics`, `CIL.ExecutionLemmas` | Functional byte-memory interpreter, calls, finite fuel, result uniqueness |
+| Execution | `CIL.Semantics`, `CIL.ExecutionLemmas` | Shared arithmetic, intrinsic and instruction evaluation |
 | Memory safety | `CIL.Safety.Memory`, `CIL.Safety.Execution` | Allocation-aware interpreter, access checks, initialization, permissions and lifetime |
 | Proofs | `CIL.Safety.ExecutionTrace`, `CIL.Safety.ExecutionInvariants`, `CIL.Safety.Certificate`, `CIL.Safety.BufferContents`, `CIL.Verification` | Shared execution traces and instruction contracts, invariants, invocation certificates, typed buffer contents and total-correctness specifications |
 | Automation | `CIL.Safety.SymbolicExecution`, `CIL.Safety.LoopAutomation`, `CIL.Safety.LoopContract`, `CIL.Safety.LoopOutcome`, `CIL.SymbolicExecution` | Checked instruction composition, loop segments, loop calls through method and outcome contracts, definitional reduction and transactional proved summaries |
@@ -11,7 +11,7 @@
 | Extraction | `Extractor/` | Metadata validation, managed-call reachability, CIL translation and Lean generation |
 | Verification | `leancil verify` | Source-keyed library cache, explicit fresh builds, kernel replay, theorem audit and assembly/source identity binding |
 
-**Use `CIL.Safety.invoke` for memory-safety claims.** Successful `CIL.invoke` alone does not establish allocation bounds or lifetime. The checked interpreter supports arbitrary admitted aggregate widths; the earlier interpreter retains explicitly named fixed vector-home operations and rejects the new general aggregate instructions. These are two defined models, not an unproved correspondence theorem between them.
+`CIL.Safety.invoke` is the sole whole-method execution model. Functional results and memory-safety claims use its checked frames, allocation-aware memory and located faults. Shared value evaluation lives in `CIL.Semantics`; it does not provide a separate method runner.
 
 ## Writing compact checked proofs
 
@@ -32,7 +32,7 @@ their abstract results before per-shape evaluation, avoiding unnecessary byte ex
 Loop segments use
 `CIL.Safety.LoopAutomation` and still require an invariant and a decreasing measure.
 Contract stepping also handles signed and unsigned widening in either argument order;
-the [consumer stepping regressions](PROOFS.md#consumer-stepping-regressions)
+the [consumer stepping regressions](PROOFS-STEPPING.md#consumer-stepping-regressions)
 cover all eight wrapper combinations under a fixed heartbeat budget.
 
 `Segment` contracts compose checked prefixes through exact intermediate states and fuel costs.
@@ -53,7 +53,7 @@ initializers, scalar results and caller-memory prefixes transfer,
 as do named exceptions, while fresh allocation identities may differ. Import
 `CIL.Safety.AllocationRefinement` explicitly for this API; the `CIL` umbrella does not load
 its proof dependencies. See
-[dead-local refinement](PROOFS.md#bodies-modulo-dead-code) for its frame restrictions.
+[dead-local refinement](PROOFS-BINDING.md#bodies-modulo-dead-code) for its frame restrictions.
 Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
 For unused numeric locals, retain the extracted declarations and local indices in
@@ -69,7 +69,7 @@ flags left unconstrained are rejected, and the kernel checks the complete instru
 `leancil templates shared scalar-extraction sse42-extraction v3-extraction` generates
 the shared bodies from compiled CIL, including per-instruction equations and a binding
 module for each input. Prove the template once and use the generated bindings for the
-selected profiles; see [generated profile templates](PROOFS.md#generated-profile-templates)
+selected profiles; see [generated profile templates](PROOFS-BINDING.md#generated-profile-templates)
 for the supported domain and checking workflow.
 
 Public and protected static methods can publish contracts for separately compiled callers,
@@ -107,5 +107,5 @@ retains its own theorem, contract closure, replay and publication checks.
 
 The [proof-writing guide](PROOFS.md) includes a complete example, reusable
 contracts for framework proofs, and advice on avoiding repeated interpreter
-expansion. See [proof automation validation](VALIDATION.md#proof-automation)
+expansion. See [proof automation validation](VALIDATION-PROOFS.md#proof-automation)
 for the regression coverage and commands to run it.

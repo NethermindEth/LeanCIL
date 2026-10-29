@@ -3,6 +3,18 @@ using System.Runtime.CompilerServices;
 
 namespace Examples;
 
+public readonly struct StaticPair<T> where T : unmanaged
+{
+    public readonly T First;
+    public readonly ulong Second;
+
+    public StaticPair(T first, ulong second)
+    {
+        First = first;
+        Second = second;
+    }
+}
+
 // Shaped like UInt256: the static constructor fixes Zero and One through an implicit conversion.
 public readonly struct Word256
 {
@@ -22,6 +34,8 @@ public readonly struct Word256
     public static readonly Word256 One = 1ul;
     public static readonly Word256 MinValue = Zero;
     public static readonly Word256 MaxValue = new(ulong.MaxValue, ulong.MaxValue, ulong.MaxValue, ulong.MaxValue);
+    public static readonly StaticPair<uint> Pair32 = new(7u, 9ul);
+    public static readonly StaticPair<ulong> Pair64 = new(11ul, 13ul);
     // Unmodelled code in the same static constructor.
     public static readonly long Seed = Environment.TickCount64;
 }
@@ -32,6 +46,16 @@ public static class StaticValues
     public static Word256 Zero() => Word256.Zero;
     public static Word256 Min() => Word256.MinValue;
     public static Word256 Max() => Word256.MaxValue;
+    public static StaticPair<uint> Pair32() => Word256.Pair32;
+    public static StaticPair<ulong> Pair64() => Word256.Pair64;
+    public static ulong ReadAddress() => Read(in Word256.One);
+    static ulong Read(in Word256 value) => value.U0;
+
+    public static bool SameAddress() => Unsafe.AreSame(
+        ref Unsafe.AsRef(in Word256.One), ref Unsafe.AsRef(in Word256.One));
+
+    public static bool DifferentAddresses() => Unsafe.AreSame(
+        ref Unsafe.AsRef(in Word256.Zero), ref Unsafe.AsRef(in Word256.MinValue));
 
     // ExpMod's shape: store a loaded value through an out parameter.
     public static void Select(bool one, out Word256 result)

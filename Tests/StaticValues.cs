@@ -29,13 +29,13 @@ ulong[] Limbs(string field)
 // The theorem names each limb, so a wrong byte order or value cannot satisfy it.
 string Claim(string method, ulong[] limbs) =>
     $"∃ bytes, (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.aggregate bytes)] ∧\n" +
-    $"  (List.range 4).map (fun i => CIL.Safety.byteNumber ((bytes.drop (8 * i)).take 8)) = [{string.Join(", ", limbs)}]";
+    $"  (List.range {limbs.Length}).map (fun i => CIL.Safety.byteNumber ((bytes.drop (8 * i)).take 8)) = [{string.Join(", ", limbs)}]";
 void Prove(string dll, string selector, string folder, string claim, Action<JsonElement> passed)
 {
     var output = Path.Combine(root, folder);
     var proof = Path.Combine(root, folder + ".lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
-        claim + " :=\n  ⟨_, rfl, by decide⟩\nend ExampleProof\n");
+        claim + " :=\n  ⟨_, rfl, by decide⟩\n#print axioms correctness\nend ExampleProof\n");
     void Report()
     {
         var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
@@ -65,6 +65,10 @@ foreach (var (method, field) in new[] { ("One", "One"), ("Zero", "Zero"), ("Min"
         Console.WriteLine($"PASS {field}: limbs {string.Join(", ", Limbs(field))} from the static constructor");
     });
 }
+
+foreach (var (method, limbs) in new[] { ("Pair32", new ulong[] { 7, 9 }), ("Pair64", new ulong[] { 11, 13 }) })
+    Prove(assembly, $"StaticValues::{method}()", method, Claim(method, limbs), _ =>
+        Console.WriteLine($"PASS closed generic static constructor {method}, including zero-filled padding"));
 
 // ExpMod's shape: a loaded value stored through an out parameter.
 var select = Path.Combine(root, "Select");
@@ -104,6 +108,39 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 Prove(changed, "StaticValues::One()", "Changed", Claim("One", [7, 0, 0, 0]),
     _ => Console.WriteLine("PASS changed static constructor argument changes the proved limbs"));
+
+foreach (var (method, result) in new[]
+    { ("ReadAddress", ".ok [.scalar (.i64 1)]"), ("SameAddress", ".ok [.scalar (.i32 1)]"),
+      ("DifferentAddresses", ".ok [.scalar (.i32 0)]") })
+{
+    var proof = Path.Combine(root, method + ".lean");
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import Examples.Support
+        namespace ExampleProof
+        theorem correctness :
+            (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = {{result}} := by
+          rfl
+        #print axioms correctness
+        end ExampleProof
+        """);
+    pending.Add(new($"StaticValues::{method}()", proof, Path.Combine(root, method), InitializedTypes: [word]),
+        () => Console.WriteLine("PASS readonly static address " + method));
+}
+var writeProof = Path.Combine(root, "Overwrite.lean");
+File.WriteAllText(writeProof, """
+    import Extracted
+    import Examples.Support
+    namespace ExampleProof
+    def denied : Bool := match CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty with
+      | .error ⟨_, _, .memory .unwritable _ _⟩ => true
+      | _ => false
+    theorem correctness : denied = true := by decide +kernel
+    #print axioms correctness
+    end ExampleProof
+    """);
+pending.Add(new("StaticValues::Overwrite()", writeProof, Path.Combine(root, "Overwrite"), InitializedTypes: [word]),
+    () => Console.WriteLine("PASS readonly static address cannot be written through Unsafe.AsRef"));
 pending.Flush();
 
 // The certificate recomputes the initializer: forged bytes in the extracted program fail translation_valid.
@@ -130,7 +167,8 @@ void Reject(string dll, string selector, string name, string marker, bool assume
 }
 
 Reject(assembly, "StaticValues::One()", "unassumed", $"requires --assume-initialized {word}", assume: false);
-Reject(assembly, "StaticValues::Overwrite()", "address", $"Unsupported static field address: {word} {word}::One");
+Reject(assembly, "StaticValues::ReadAddress()", "address-unassumed",
+    $"requires --assume-initialized {word}", assume: false);
 
 // A store outside the static constructor is rejected, and the field is no longer fixed elsewhere.
 var mutations = new Dictionary<string, Action<ModuleDefinition>>

@@ -18,6 +18,17 @@ var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.ConstrainedEvidence");
 
+var directAssembly = Path.Combine(root, "direct-generic.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.ConstrainedCalls").Methods.Single(method => method.Name == "DirectGeneric");
+    var call = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Call);
+    var target = (MethodReference)call.Operand;
+    method.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Constrained, target.DeclaringType));
+    call.OpCode = OpCodes.Callvirt;
+    module.Write(directAssembly);
+}
+
 foreach (var (name, type, expected) in new[]
 {
     ("Implicit", "CounterValue", 42),
@@ -25,11 +36,15 @@ foreach (var (name, type, expected) in new[]
     ("Mutating", "CounterValue", 43),
     ("MutatingExplicit", "ExplicitCounterValue", 44),
     ("Generic", "GenericCounterValue`1<System.Int32>", 42),
-    ("GenericExplicit", "ExplicitGenericCounterValue`1<System.Int32>", 44)
+    ("GenericExplicit", "ExplicitGenericCounterValue`1<System.Int32>", 44),
+    ("DirectGeneric", "GenericCounterValue`1<System.Int32>", 42),
+    ("ClosedBoth", "ClosedInterfaceCounter", 85),
+    ("ClosedGeneric", "GenericInterfaceCounter`1<System.Int32>", 42)
 })
 {
     var output = Path.Combine(root, name);
-    Run(["dotnet", ExtractorPath, "extract", assembly, $"ConstrainedCalls::{name}(Examples.{type}&)", output]);
+    Run(["dotnet", ExtractorPath, "extract", name == "DirectGeneric" ? directAssembly : assembly,
+        $"ConstrainedCalls::{name}(Examples.{type}&)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var proof = Path.Combine(root, name + ".lean");
     var extent = type.Contains('`') ? 8 : 4;
@@ -47,7 +62,7 @@ foreach (var (name, type, expected) in new[]
         #print axioms constrained_result
         """);
 
-    const string call = ".call 2 1";
+    var call = name == "DirectGeneric" ? ".call 1 2" : ".call 2 1";
     if (!source.Contains(call, StringComparison.Ordinal)) throw new Exception("Missing constrained call mutation target");
     var forged = Path.Combine(root, name + "-wrong-target.lean");
     // Keep the exact emitted definitions and constrained obligations; unrelated certificates
@@ -67,7 +82,7 @@ foreach (var (name, type, expected) in new[]
         Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value), 0);
     File.AppendAllText(proof, "\n" + control);
     evidence.Add(proof, "PASS compiled constrained call, certificate and obligation eligibility: " + name);
-    if (!type.Contains('`'))
+    if (!type.Contains('`') && !name.StartsWith("Closed", StringComparison.Ordinal))
     {
         File.WriteAllText(forged, narrowed.Replace(call, ".call 0 1", StringComparison.Ordinal));
         rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
@@ -81,6 +96,17 @@ foreach (var (name, type, expected) in new[]
         File.WriteAllText(wrongOwner, narrowed.Replace(arguments,
             "ownerArguments := [.atom Extraction.runtimeScope \"System.Int64\"]", StringComparison.Ordinal));
         rejected.Add(wrongOwner, "PASS forged constrained owner specialization: " + name, "ConstrainedCallsValid");
+    }
+    if (name == "ClosedBoth")
+    {
+        var forgedOwner = Path.Combine(root, name + "-wrong-interface.lean");
+        var overrides = Regex.Match(narrowed, @"overrides := \[\(\d+, \.apply \([^\r\n]+?System.Int32""\)\)\]");
+        if (!overrides.Success) throw new Exception("Missing closed interface override mutation target");
+        File.WriteAllText(forgedOwner, narrowed.Replace(overrides.Value,
+            overrides.Value.Replace("System.Int32", "System.Int64", StringComparison.Ordinal),
+            StringComparison.Ordinal));
+        rejected.Add(forgedOwner, "PASS wrong closed interface override with identical signature",
+            "ConstrainedCallsValid");
     }
 }
 

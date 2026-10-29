@@ -37,11 +37,11 @@ partial class Program
             File.WriteAllText(proof, "import Client." + (index == 0 ? "Early" : "Late") + "\n" +
                 (index == 0 ? "" : "import Client.RepeatedImports\n") + """
         import Client.Indirect
-        import CIL.Semantics
+        import CIL.Safety.Execution
         namespace ExampleProof
-        theorem correctness (x y : CIL.W64) (memory : CIL.Memory) :
-            CIL.invoke Extracted.program 4 0 [.i64 x, .i64 y] memory =
-              some (memory, [.i64 (x + y)]) := by rfl
+        theorem correctness (x y : CIL.W64) (memory : CIL.Safety.Memory) :
+            CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i64 x), .scalar (.i64 y)] memory =
+              .ok (memory, [.scalar (.i64 (x + y))]) := by rfl
         #print axioms correctness
         end ExampleProof
         """);

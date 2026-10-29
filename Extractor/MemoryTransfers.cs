@@ -29,25 +29,29 @@ internal static class MemoryTransfers
                 reference.ReturnType.MetadataType == MetadataType.Void)) return null;
         RuntimeModels.ValidateSignature(reference, architecture);
         var type = generic.GenericArguments[0];
-        MetadataValidation.Type(type, reference.Module, architecture: architecture);
-        string kind;
-        if (MetadataValidation.IsAggregate(type, reference.Module))
-            kind = $".snapshot (.aggregate {MetadataValidation.Layout(type, reference.Module, architecture)})";
-        else if (MetadataValidation.IntegerVectorWidth(type) is { } vectorWidth)
-            kind = $".snapshot .vector{vectorWidth * 8}";
-        else
-        {
-            if (type is TypeSpecification)
-                throw new InvalidDataException($"Unsupported marshaled value type: {type.FullName}");
-            var storage = EnumTypes.Storage(type);
-            var width = MetadataValidation.PrimitiveWidth(storage);
-            var signed = storage.FullName is "System.SByte" or "System.Int16";
-            kind = $".scalar {width} {signed.ToString().ToLowerInvariant()}";
-        }
+        var (kind, _) = Describe(type, reference.Module, architecture);
         return $".memory (.marshal{(read ? "Read" : "Write")} ({kind}) {trying.ToString().ToLowerInvariant()})";
     }
 
-    internal static string? Unaligned(MethodReference reference, string architecture)
+    static (string Kind, int Alignment) Describe(TypeReference type, ModuleDefinition module, string architecture)
+    {
+        if (MetadataValidation.IsAggregate(type, module))
+        {
+            var layout = MetadataValidation.AggregateLayout(type, module, architecture);
+            return ($".snapshot (.aggregate {layout.Size})", layout.Alignment);
+        }
+        MetadataValidation.Type(type, module, architecture: architecture);
+        if (MetadataValidation.IntegerVectorWidth(type) is { } vectorWidth)
+            return ($".snapshot .vector{vectorWidth * 8}", vectorWidth);
+        if (type is TypeSpecification)
+            throw new InvalidDataException($"Unsupported transferred value type: {type.FullName}");
+        var storage = EnumTypes.Storage(type);
+        var width = MetadataValidation.PrimitiveWidth(storage);
+        var signed = storage.FullName is "System.SByte" or "System.Int16";
+        return ($".scalar {width} {signed.ToString().ToLowerInvariant()}", width);
+    }
+
+    internal static string? Unsafe(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
@@ -59,16 +63,25 @@ internal static class MemoryTransfers
         bool Parameter(TypeReference type) => type is GenericParameter parameter &&
             parameter.Type == GenericParameterType.Method && parameter.Position == 0 &&
             parameter.Owner == generic.ElementMethod;
-        bool ByteReference(TypeReference type) => type is ByReferenceType byRef &&
-            byRef.ElementType.FullName == "System.Byte";
-        var read = reference.Name == "ReadUnaligned" && reference.Parameters.Count == 1 &&
-            ByteReference(reference.Parameters[0].ParameterType) && Parameter(reference.ReturnType);
-        var write = reference.Name == "WriteUnaligned" && reference.Parameters.Count == 2 &&
-            ByteReference(reference.Parameters[0].ParameterType) && Parameter(reference.Parameters[1].ParameterType) &&
+        bool Address(TypeReference type) => type is ByReferenceType byRef &&
+            byRef.ElementType.FullName == "System.Byte" ||
+            type is PointerType { ElementType.MetadataType: MetadataType.Void };
+        var aligned = reference.Name is "Read" or "Write";
+        if (aligned && reference.Parameters.FirstOrDefault()?.ParameterType is not
+            PointerType { ElementType.MetadataType: MetadataType.Void }) return null;
+        var read = reference.Name is "ReadUnaligned" or "Read" && reference.Parameters.Count == 1 &&
+            Address(reference.Parameters[0].ParameterType) && Parameter(reference.ReturnType);
+        var write = reference.Name is "WriteUnaligned" or "Write" && reference.Parameters.Count == 2 &&
+            Address(reference.Parameters[0].ParameterType) && Parameter(reference.Parameters[1].ParameterType) &&
             reference.ReturnType.MetadataType == MetadataType.Void;
         if (!read && !write) return null;
         RuntimeModels.ValidateSignature(reference, architecture);
         var type = generic.GenericArguments[0];
+        if (aligned)
+        {
+            var (kind, alignment) = Describe(type, reference.Module, architecture);
+            return $".memory (.pointerTransfer ({kind}) {alignment} {write.ToString().ToLowerInvariant()})";
+        }
         MetadataValidation.Type(type, reference.Module, architecture: architecture);
         if (MetadataValidation.IsAggregate(type, reference.Module))
         {

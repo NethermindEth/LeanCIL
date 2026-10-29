@@ -157,6 +157,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
 
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
 private def arrayEmission : Op → Bool
+  | .newArray _ => true
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
   | .memory (.arrayAddress ..) => true
   | .memory (.arrayTransfer ..) => true
@@ -165,6 +166,12 @@ private def arrayEmission : Op → Bool
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode. -/
 private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Op) : Bool :=
+  if instruction.opcode == 141 then
+    match instruction.operand, stack, emitted with
+    | .type token, length :: _, .newArray element =>
+      length ∈ [.word32, .native] && element.primitive && arrayElementType token == some element
+    | _, _, _ => false
+  else
   match arrayStep instruction stack, emitted with
   | some (.arrayLength, _), .memory .arrayLength => true
   | some (.arrayLoad width signed, _), .memory (.arrayLoad actual polarity) =>
@@ -178,7 +185,8 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
 /-- Opcodes whose emitted encoding the scalar check fixes: integer constants, arithmetic,
     shifts, `neg`, `not`, conversions and compare-branches. -/
 def scalarCovered (opcode : Nat) : Bool :=
-  arrayCovered opcode || (21 <= opcode && opcode <= 33) || scalarBinary opcode || conversion opcode ||
+  opcode == 141 || arrayCovered opcode || (21 <= opcode && opcode <= 33) ||
+    scalarBinary opcode || conversion opcode ||
     compareBranch opcode || opcode ∈ [20, 44, 45, 57, 58, 98, 99, 100, 101, 102, 65054]
 
 /-- The emitted operation each covered non-branch opcode must produce. -/
@@ -256,7 +264,8 @@ private def literal (instruction : RawInstruction) : Option Op :=
 /-- A covered opcode emits exactly the encoding its operand kinds imply. -/
 def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Op) :
     Bool :=
-  if arrayCovered instruction.opcode || arrayEmission emitted then arrayMatches instruction stack emitted
+  if instruction.opcode == 141 || arrayCovered instruction.opcode || arrayEmission emitted then
+    arrayMatches instruction stack emitted
   else if instruction.opcode == 65054 then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
@@ -674,6 +683,12 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
           (match instruction.operand with
            | .type type => managedSignature type != some signature | _ => true)) then none else
         return .methodPointer signature :: rest
+  if opcode == 141 then
+    let .type token := instruction.operand | none
+    let element ← arrayElementType token
+    let length :: tail := stack | none
+    if !element.primitive || length ∉ [.word32, .native] then none else
+      return .array element :: tail
   if arrayCovered opcode then return (← arrayStep instruction stack).2
   if opcode == 20 then
     if instruction.operand == .none then return .nullObject :: stack else none
@@ -727,6 +742,9 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let .call site := instruction.operand | none
     let expected := if let some (copy, _) := unsafeBlockCall instruction then
         [.word32, if copy then .reference else .word32, .reference] else
+        if let some (type, read, _) := unsafeValueCall instruction then
+        (if read then [] else [scalarType type]) ++ [.reference] else
+      if unsafeReferenceHelper instruction == some .asRef then [.reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
