@@ -74,18 +74,18 @@ private def code (writable : Bool) : List CIL.Op :=
     .unsupported "unreachable"]
 
 /-- A branch to the prefix itself does not bypass the restriction. -/
-theorem prefix_certificate : CIL.Extraction.ScalarFlowValid (raw 2) features states (code false) :=
+theorem prefix_certificate : CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code false) :=
   by decide +kernel
 #print axioms prefix_certificate
 
 /-- Independently forging a writable address under the same readonly raw CIL fails. -/
 theorem writable_forgery_rejected :
-    ¬ CIL.Extraction.ScalarFlowValid (raw 2) features states (code true) := by decide +kernel
+    ¬ CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code true) := by decide +kernel
 #print axioms writable_forgery_rejected
 
 /-- Changing only the branch target to skip the prefix is rejected, even for a dead branch. -/
 theorem branch_into_address_rejected :
-    ¬ CIL.Extraction.ScalarFlowValid (raw 3) features states (code false) := by decide +kernel
+    ¬ CIL.Extraction.ScalarFlowValid #[] (raw 3) features states (code false) := by decide +kernel
 #print axioms branch_into_address_rejected
 
 end Tests.ReadOnlyArrayReferences

@@ -1,9 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:property AllowUnsafeBlocks=true
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -12,6 +14,7 @@ using Mono.Cecil.Cil;
 var root = At("artifacts/ReferenceInstructions");
 Directory.CreateDirectory(root);
 var evidence = new GeneratedEvidence(root);
+var rejected = new RejectedEvidence(root);
 var assembly = Path.Combine(root, "Examples.dll");
 var cases = new[]
 {
@@ -21,6 +24,13 @@ var cases = new[]
     (Name: "LiveBranch", Arguments: 1, Expected: 1),
     (Name: "EqualBranch", Arguments: 1, Expected: 1),
     (Name: "UnequalBranch", Arguments: 2, Expected: 1)
+};
+var additions = new[]
+{
+    (Name: "Offset32Reference", Native: false, Pointer: false),
+    (Name: "OffsetNativeReference", Native: true, Pointer: false),
+    (Name: "Offset32Pointer", Native: false, Pointer: true),
+    (Name: "OffsetNativePointer", Native: true, Pointer: true)
 };
 
 // Emit real CLI bodies so compiler folding cannot remove the opcodes under test.
@@ -60,6 +70,29 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
         }
         il.Emit(OpCodes.Ret);
     }
+    foreach (var (name, native, pointer) in additions)
+        AddOffset(name, native ? module.TypeSystem.IntPtr : module.TypeSystem.Int32,
+            pointer, OpCodes.Add);
+    AddOffset("InvalidInt64Offset", module.TypeSystem.Int64, true, OpCodes.Add);
+    AddOffset("InvalidReferenceSum", new ByReferenceType(module.TypeSystem.Int64), false, OpCodes.Add);
+    AddOffset("InvalidReversedSubtract", module.TypeSystem.Int32, true, OpCodes.Sub);
+
+    void AddOffset(string name, TypeReference offset, bool pointer, OpCode operation)
+    {
+        var method = new MethodDefinition(name,
+            Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+        method.Parameters.Add(new ParameterDefinition(offset));
+        method.Parameters.Add(new ParameterDefinition(pointer ? new PointerType(module.TypeSystem.Byte) :
+            new ByReferenceType(module.TypeSystem.Int64)));
+        type.Methods.Add(method);
+        var body = method.Body.GetILProcessor();
+        body.Emit(OpCodes.Ldarg_0);
+        body.Emit(OpCodes.Ldarg_1);
+        body.Emit(operation);
+        body.Emit(OpCodes.Ldind_U1);
+        body.Emit(OpCodes.Ret);
+    }
+
     var throws = new MethodDefinition("NullMessageThrow",
         Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
     type.Methods.Add(throws);
@@ -102,15 +135,91 @@ foreach (var (name, count, expected) in cases)
               .ok (inputMemory, [.scalar (.i32 {{expected}})]) := rfl
         #print axioms reference_result
         """);
+    if (name == "ReferenceEqual")
+    {
+        var narrowed = NarrowEvidence(source, "method0_scalars_validated");
+        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
+        if (!narrowed.Contains(".eq", StringComparison.Ordinal)) throw new Exception("Missing equality mutation target");
+        var forged = Path.Combine(root, "ForgedEquality.lean");
+        File.WriteAllText(forged, narrowed.Replace(".eq", ".lt", StringComparison.Ordinal));
+        rejected.Add(forged, "PASS independent forged reference equality rejection", "ScalarFlowValid");
+    }
     evidence.Add(proof, "PASS runtime, certificate and reference execution: " + name);
-    if (name != "ReferenceEqual") continue;
-    if (!source.Contains(".eq", StringComparison.Ordinal)) throw new Exception("Missing equality mutation target");
-    var forged = Path.Combine(root, "ForgedEquality.lean");
-    File.WriteAllText(forged, source.Replace(".eq", ".lt", StringComparison.Ordinal));
-    var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
-    if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
-        throw new Exception("Forged reference equality was not rejected by scalar evidence: " + rejection.Output);
-    Console.WriteLine("PASS independent forged reference equality rejection");
+}
+
+string AdditionSignature(string name, bool native, bool pointer) =>
+    $"ReferenceInstructions::{name}({(native ? "System.IntPtr" : "System.Int32")}," +
+    (pointer ? "System.Byte*)" : "System.Int64&)");
+ExtractBatch("extract", null, additions.Select(item => new GeneratedExtraction(assembly,
+    AdditionSignature(item.Name, item.Native, item.Pointer), Path.Combine(root, item.Name))));
+foreach (var (name, native, pointer) in additions)
+{
+    var method = runtime.GetMethod(name)!;
+    foreach (var (origin, offset, expected) in new[] { (0, 0, 1), (0, 1, 2), (0, 7, 8), (4, -1, 4) })
+    {
+        unsafe
+        {
+            long value = 0x0807060504030201;
+            object count = native ? (object)(nint)offset : offset;
+            ref var reference = ref System.Runtime.CompilerServices.Unsafe.AddByteOffset(ref value, (nint)origin);
+            var actual = pointer ? method.Invoke(null, [count, Pointer.Box((byte*)&value + origin, typeof(byte*))]) :
+                native ? method.CreateDelegate<NativeOffset>()((nint)offset, ref reference) :
+                method.CreateDelegate<Int32Offset>()(offset, ref reference);
+            if (!Equals(actual, expected))
+                throw new Exception("Unexpected runtime commuted addition: " + name);
+        }
+    }
+    var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    var proof = Path.Combine(root, name + ".lean");
+    File.WriteAllText(proof, source + $$"""
+
+        private def inputMemory : CIL.Safety.Memory := {
+          allocations := fun identity => if identity == 0 then
+            some ⟨.callerStack, ⟨8, 1, []⟩, true, [8]⟩ else none
+          cells := fun _ offset => ⟨BitVec.ofNat 8 (offset + 1), true⟩
+          views := [⟨0, 0, 8, true, false⟩]
+          nextIdentity := 1 }
+        theorem commuted_reference_result :
+            ([(0, 0, 1), (0, 1, 2), (0, 7, 8), (4, -1, 4)] : List (Nat × Int × Nat)).all
+              (fun (origin, offset, expected) =>
+                ((CIL.Safety.invoke Extracted.program 16 0
+                  [.scalar (.i{{(native ? 64 : 32)}} (BitVec.ofInt {{(native ? 64 : 32)}} offset)),
+                    .reference (.address ⟨0, origin⟩)] inputMemory).map Prod.snd).toOption ==
+                  some [.scalar (.i32 (BitVec.ofNat 32 expected))]) = true :=
+          by decide +kernel
+        #print axioms commuted_reference_result
+        """);
+    if (name == "Offset32Reference")
+    {
+        var narrowed = NarrowEvidence(source, "method0_scalars_validated");
+        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
+        const string target = ".memory (.add 1 true)";
+        foreach (var (mutation, replacement) in new[]
+        {
+            ("scalar", ".add"), ("subtract", ".sub"),
+            ("stride", ".memory (.add 2 true)"), ("unsigned", ".memory (.add 1 false)")
+        })
+        {
+            if (!narrowed.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing commuted add target");
+            var forged = Path.Combine(root, "ForgedAdd-" + mutation + ".lean");
+            File.WriteAllText(forged, narrowed.Replace(target, replacement, StringComparison.Ordinal));
+            rejected.Add(forged, "PASS independent forged commuted addition: " + mutation, "ScalarFlowValid");
+        }
+    }
+    evidence.Add(proof, "PASS runtime, certificate and commuted reference addition: " + name);
+}
+foreach (var signature in new[]
+{
+    "InvalidInt64Offset(System.Int64,System.Byte*)", "InvalidReferenceSum(System.Int64&,System.Int64&)",
+    "InvalidReversedSubtract(System.Int32,System.Byte*)"
+})
+{
+    var rejection = Execute(["dotnet", ExtractorPath, "extract", assembly,
+        "ReferenceInstructions::" + signature, Path.Combine(root, "InvalidAdd")]);
+    if (rejection.Code == 0 || !rejection.Output.Contains("Unsupported reference arithmetic operand types",
+            StringComparison.Ordinal))
+        throw new Exception("Expected reference arithmetic rejection: " + signature + "\n" + rejection.Output);
+    Console.WriteLine("PASS invalid reference arithmetic rejected: " + signature);
 }
 
 try
@@ -134,3 +243,7 @@ evidence.Add(throwProof, "PASS existing null-message throw folding, runtime and 
 
 
 evidence.Check(replay: false);
+rejected.Check();
+
+delegate int Int32Offset(int offset, ref long value);
+delegate int NativeOffset(nint offset, ref long value);

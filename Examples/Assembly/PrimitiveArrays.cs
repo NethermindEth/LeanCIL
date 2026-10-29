@@ -1,5 +1,7 @@
 namespace Examples;
 
+public enum AllocationTag : byte { One = 1 }
+
 public static class PrimitiveArrays
 {
     public static int Length(int[] values) => values.Length;
@@ -50,12 +52,32 @@ public static class PrimitiveArrays
     public static byte[] AllocateBytes(int length) => new byte[length];
     public static short[] AllocateShorts(int length) => new short[length];
     public static long[] AllocateLongs(int length) => new long[length];
+    public static PackedLeaf[] AllocatePacked(int length) => new PackedLeaf[length];
+    public static NestedRecord[] AllocateNested(int length) => new NestedRecord[length];
+    public static System.Runtime.Intrinsics.Vector256<ulong>[] AllocateVector(int length) =>
+        new System.Runtime.Intrinsics.Vector256<ulong>[length];
+    public static int AllocatePackedAndWrite(int length, int index, int value)
+    {
+        var values = AllocatePacked(length);
+        values[index].Value = (uint)value;
+        return (int)values[index].Value;
+    }
     public static int AllocateAndWrite(int length, int index, int value)
     {
         var values = Allocate(length);
         WriteInt32(values, index, value);
         return ReadInt32(values, index);
     }
+
+    public static Signed8[] AllocateSigned8(int length) => new Signed8[length];
+    public static Unsigned8[] AllocateUnsigned8(int length) => new Unsigned8[length];
+    public static Signed16[] AllocateSigned16(int length) => new Signed16[length];
+    public static Unsigned16[] AllocateUnsigned16(int length) => new Unsigned16[length];
+    public static Signed32[] AllocateSigned32(int length) => new Signed32[length];
+    public static Unsigned32[] AllocateUnsigned32(int length) => new Unsigned32[length];
+    public static Signed64[] AllocateSigned64(int length) => new Signed64[length];
+    public static Unsigned64[] AllocateUnsigned64(int length) => new Unsigned64[length];
+    public static AllocationTag[] AllocateUnnamedZero(int length) => new AllocationTag[length];
 
     public static float[] AllocateSingles(int length) => new float[length];
     public static object ReadObject(object[] values, int index) => values[index];

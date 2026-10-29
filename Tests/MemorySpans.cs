@@ -151,7 +151,7 @@ foreach (var (name, signature, arguments, expected) in new[]
         File.WriteAllText(forged, source.Replace(operation,
             ".initializeSpanLocal 1 (.array .signed32 true .counted)", StringComparison.Ordinal));
         rejected.Add(forged, "PASS independent constructor destination rejection",
-            "Extraction.FeatureFlowValid method0Closed");
+            "Extraction.FeatureFlowValid rawLayouts.toArray method0Closed");
     }
 }
 
@@ -179,7 +179,8 @@ foreach (var (name, signature, width, arguments, bytes) in new[]
         File.WriteAllText(forged, source.Replace(".spanFill 4 false", ".spanFill 8 false",
             StringComparison.Ordinal));
         rejected.Add(forged, "PASS independent span fill width rejection",
-            "Extraction.ScalarFlowValid method0Closed method0FeatureStates method0ScalarStates method0.code");
+            "Extraction.ScalarFlowValid rawLayouts.toArray method0Closed " +
+                "method0FeatureStates method0ScalarStates method0.code");
     }
     var start = name == "FillLongSlice" ? width : 0;
     var count = name == "FillLongSlice" ? 4 : 2;
@@ -359,7 +360,8 @@ foreach (var (name, signature, element, width, writable, range) in new[]
             var forged = Path.Combine(root, "Forged-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(before, after, StringComparison.Ordinal));
             rejected.Add(forged, "PASS independent span call rejection: " + mutation,
-                "Extraction.ScalarFlowValid method0Closed method0FeatureStates method0ScalarStates method0.code");
+                "Extraction.ScalarFlowValid rawLayouts.toArray method0Closed " +
+                "method0FeatureStates method0ScalarStates method0.code");
         }
     }
 }

@@ -4,6 +4,7 @@
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
+#:include GeneratedEvidence.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -17,12 +18,14 @@ var root = At("artifacts/Throws");
 Directory.CreateDirectory(root);
 var rejected = new RejectedEvidence(root);
 var queue = new GeneratedQueue(verification, assembly);
+var controls = new GeneratedEvidence(Path.Combine(root, "EvidenceControls"));
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Throws")!;
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
 // Every fault is located at the folded `throw` and names the type .NET raises.
 foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
 {
+    ("Null", "Throws::Null(uint)", [[0], [1]]),
     ("Quotient", "Throws::Quotient(uint,uint)", [[7, 2], [7, 0], [0, 0], [uint.MaxValue, 1]]),
     ("Percent", "Throws::Percent(uint)", [[0], [100], [101], [uint.MaxValue]]),
     ("Inner", "Throws::Inner(uint)", [[0], [1]]),
@@ -38,6 +41,25 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         @"(?m)^@\[cil_code ↓\] theorem method(\d+)_instruction(\d+) : method\d+\.code\[\d+\]\? = some \(\.throw ""([\w.]+)"" : Op\) := rfl\r?$");
     if (!site.Success) throw new InvalidOperationException($"No folded throw in {name}");
     var (method, pc, label) = (site.Groups[1].Value, site.Groups[2].Value, site.Groups[3].Value);
+    if (name == "Null")
+    {
+        var obligation = $"method{method}_features_validated";
+        source = NarrowEvidence(source, obligation);
+        var control = Path.Combine(folder, "EvidenceControl.lean");
+        File.WriteAllText(control, source);
+        controls.Add(control, "PASS exact null-throw evidence control", obligation);
+        foreach (var opcode in new[] { 20, 122 })
+        {
+            var before = $"opcode := {opcode}, operand := .none";
+            if (!source.Contains(before, StringComparison.Ordinal))
+                throw new InvalidOperationException("Missing null-throw operand: " + opcode);
+            var forgedOperand = Path.Combine(folder, $"Operand-{opcode}.lean");
+            File.WriteAllText(forgedOperand, source.Replace(before,
+                $"opcode := {opcode}, operand := .integer 0", StringComparison.Ordinal));
+            rejected.Add(forgedOperand, "PASS null-throw operand forgery rejected: " + opcode,
+                $"Extraction.FeatureFlowValid rawLayouts.toArray method{method}Closed", "is false");
+        }
+    }
 
     var claims = inputs.Select(input =>
     {
@@ -60,8 +82,8 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, forged);
     rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
-        $"Extraction.FeatureFlowValid method{method}Closed", "is false");
-    if (name is "Inner" or "ArgumentInner" or "ActualValue")
+        $"Extraction.FeatureFlowValid rawLayouts.toArray method{method}Closed", "is false");
+    if (name is "Null" or "Inner" or "ArgumentInner" or "ActualValue")
     {
         var nonNull = Path.Combine(root, name + "-non-null.lean");
         const string nullLoad = "opcode := 20, operand := .none";
@@ -70,11 +92,12 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         File.WriteAllText(nonNull, source.Replace(nullLoad,
             "opcode := 114, operand := .text \"not null\"", StringComparison.Ordinal));
         rejected.Add(nonNull, $"PASS {name}: non-null constructor operand rejected",
-            $"Extraction.FeatureFlowValid method{method}Closed", "is false");
+            $"Extraction.FeatureFlowValid rawLayouts.toArray method{method}Closed", "is false");
     }
 }
 
 queue.Flush();
+controls.Check(replay: false);
 rejected.Check();
 
 // Anything other than the exact encoding without handlers stays unsupported.
@@ -82,7 +105,8 @@ foreach (var (mutation, marker) in new[]
 {
     ("handler", "Unsupported method metadata"),
     ("no-throw", "Contract imports support call only, not callvirt, newobj or ldftn."),
-    ("thrown-null", "Unsupported instruction"),
+    ("separated-null", "Unsupported instruction"),
+    ("null-interior-branch", "Branch into a folded throw"),
     ("interior-branch", "Branch into a folded throw"),
     ("non-exception", "Unsupported exception constructor"),
     ("dead-non-exception", ""),
@@ -120,7 +144,15 @@ foreach (var (mutation, marker) in new[]
                 il.Replace(code[1], il.Create(OpCodes.Pop));
                 il.Append(il.Create(OpCodes.Ret));
                 break;
-            case "thrown-null": il.Replace(code[0], il.Create(OpCodes.Ldnull)); break;
+            case "separated-null":
+                il.Replace(code[0], il.Create(OpCodes.Ldnull));
+                il.InsertBefore(code[1], il.Create(OpCodes.Nop));
+                break;
+            case "null-interior-branch":
+                il.Replace(code[0], il.Create(OpCodes.Ldnull));
+                il.InsertBefore(code[0], il.Create(OpCodes.Br, code[1]));
+                il.InsertBefore(code[0], il.Create(OpCodes.Ldnull));
+                break;
             case "non-exception":
             case "dead-non-exception":
             case "missing-constructor":

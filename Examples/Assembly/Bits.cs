@@ -5,6 +5,31 @@ namespace Examples;
 
 public static class Bits
 {
+    public static int PrimitivePopulation32(int value) => int.PopCount(value);
+    public static uint PrimitivePopulationU32(uint value) => uint.PopCount(value);
+    public static int PrimitiveLeading32(int value) => int.LeadingZeroCount(value);
+    public static uint PrimitiveLeadingU32(uint value) => uint.LeadingZeroCount(value);
+    public static int PrimitiveTrailing32(int value) => int.TrailingZeroCount(value);
+    public static uint PrimitiveTrailingU32(uint value) => uint.TrailingZeroCount(value);
+    public static uint PrimitiveLogU32(uint value) => uint.Log2(value);
+    public static bool PrimitivePower32(int value) => int.IsPow2(value);
+    public static bool PrimitivePowerU32(uint value) => uint.IsPow2(value);
+    public static bool PrimitivePower64(long value) => long.IsPow2(value);
+    public static bool PrimitivePowerU64(ulong value) => ulong.IsPow2(value);
+    public static bool PrimitivePowerNative(nint value) => nint.IsPow2(value);
+    public static bool PrimitivePowerUNative(nuint value) => nuint.IsPow2(value);
+    public static int PrimitiveLeft32(int value, int count) => int.RotateLeft(value, count);
+    public static int PrimitiveRight32(int value, int count) => int.RotateRight(value, count);
+    public static uint PrimitiveLeftU32(uint value, int count) => uint.RotateLeft(value, count);
+    public static uint PrimitiveRightU32(uint value, int count) => uint.RotateRight(value, count);
+    public static long PrimitiveLeft64(long value, int count) => long.RotateLeft(value, count);
+    public static long PrimitiveRight64(long value, int count) => long.RotateRight(value, count);
+    public static ulong PrimitiveLeftU64(ulong value, int count) => ulong.RotateLeft(value, count);
+    public static ulong PrimitiveRightU64(ulong value, int count) => ulong.RotateRight(value, count);
+    public static nint PrimitiveLeftNative(nint value, int count) => nint.RotateLeft(value, count);
+    public static nint PrimitiveRightNative(nint value, int count) => nint.RotateRight(value, count);
+    public static nuint PrimitiveLeftUNative(nuint value, int count) => nuint.RotateLeft(value, count);
+    public static nuint PrimitiveRightUNative(nuint value, int count) => nuint.RotateRight(value, count);
     public static nuint LeftNative(nuint value, int count) => BitOperations.RotateLeft(value, count);
     public static nuint RightNative(nuint value, int count) => BitOperations.RotateRight(value, count);
     public static int PopulationNative(nuint value) => BitOperations.PopCount(value);
@@ -45,6 +70,13 @@ public static class Bits
     public static uint ReverseU32(uint value) => BinaryPrimitives.ReverseEndianness(value);
     public static long ReverseI64(long value) => BinaryPrimitives.ReverseEndianness(value);
     public static ulong ReverseU64(ulong value) => BinaryPrimitives.ReverseEndianness(value);
+
+    public static int PrimitiveNarrow8(uint value) => byte.PopCount((byte)value) |
+        (byte.Log2((byte)value) << 8) | ((byte.IsPow2((byte)value) ? 1 : 0) << 16);
+    public static int PrimitiveNarrow16(uint value) => ushort.PopCount((ushort)value) |
+        (ushort.Log2((ushort)value) << 8) | ((ushort.IsPow2((ushort)value) ? 1 : 0) << 16);
+    public static int PrimitiveNarrowSigned(uint value) => (sbyte.IsPow2((sbyte)value) ? 1 : 0) |
+        ((short.IsPow2((short)value) ? 1 : 0) << 1);
 
     public static ulong RoundTrip(ulong value) => BitOperations.RotateRight(BitOperations.RotateLeft(value, 13), 13);
     public static ulong WrongRoundTrip(ulong value) => BitOperations.RotateRight(BitOperations.RotateLeft(value, 13), 12);

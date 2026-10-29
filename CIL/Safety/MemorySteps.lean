@@ -19,7 +19,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
     dispatchers check the same operands, so a decided guard leaves one arm and no `if`. -/
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
-    otherMemoryInstruction, observerCount,
+    otherMemoryInstruction, referenceAddInstruction, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     Bool.or_false, Bool.false_eq_true, ite_false, CIL.offsetValue, cil_guard, bind_ite,
     bind_assoc, pure_bind]
@@ -151,6 +151,16 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       let value ← formValue memory r
       return .next (pc + 1) (value :: rest) frame memory := by
   memory_step_proof
+
+/-- Commuted reference offsets reuse the scalar-first memory step equations. -/
+@[cil_step high] theorem step_memory_add_commuted_eq (size : Nat) (signed : Bool)
+    (reference : ManagedReference) (offset : CIL.Value) (rest : List Value) :
+    step body (.memory (.add size signed)) pc args frame
+      (.reference reference :: .scalar offset :: rest) memory =
+    step body (.memory (.add size signed)) pc args frame
+      (.scalar offset :: .reference reference :: rest) memory := by
+  rfl
+#print axioms step_memory_add_commuted_eq
 
 -- One equation per `offsetValue` shape, so the offset is a term and needs no side condition.
 @[cil_step high] theorem step_memory_add_signed_i32_eq (size : Nat) (offset : CIL.W32)

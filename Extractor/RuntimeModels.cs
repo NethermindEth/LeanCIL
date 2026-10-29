@@ -124,6 +124,8 @@ internal static class RuntimeModels
 
     internal static string? Translate(MethodReference reference, FeatureProfile profile)
     {
+        if (ReferenceQueries.Constant(reference, profile.Architecture) is int constant)
+            return $".const32 {constant}";
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
             (reference.HasThis && reference.Name is not
                 (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill" or
@@ -188,6 +190,8 @@ internal static class RuntimeModels
         ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
     ];
 
+    private static readonly Dictionary<string, string> ScalarOperations = BuildScalarOperations();
+
     // Match exact non-generic static signatures, including the defining assembly.
     private static string? Scalar(MethodReference reference)
     {
@@ -201,35 +205,64 @@ internal static class RuntimeModels
         };
     }
 
-    // System.Math and System.Numerics.BitOperations, both defined in System.Runtime.
-    private static string? RuntimeScalar(string signature)
+    private static string? RuntimeScalar(string signature) => ScalarOperations.GetValueOrDefault(signature);
+
+    // Exact signatures share the same semantics across Math and primitive integer entry points.
+    private static Dictionary<string, string> BuildScalarOperations()
     {
-        if (signature == "System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)")
-            return ".memory .bigMul64";
+        var operations = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)"] =
+                ".memory .bigMul64"
+        };
         foreach (var (type, width, signed) in MathIntegers)
         foreach (var (name, operation, arity) in MathOperations)
         {
             if (!signed && arity == 1) continue;
             var result = name == "Sign" ? "System.Int32" : type;
             var parameters = string.Join(",", Enumerable.Repeat(type, arity));
-            if (signature == $"{result} System.Math::{name}({parameters})")
-                return $".intrinsic (.scalar (.math .{operation} {width} {LeanBool(signed)})) {arity}";
+            var model = $".intrinsic (.scalar (.math .{operation} {width} {LeanBool(signed)})) {arity}";
+            operations.Add($"{result} System.Math::{name}({parameters})", model);
+            operations.Add($"{result} {type}::{name}({parameters})", model);
         }
         foreach (var (type, width) in RotatableWords)
         {
             foreach (var (name, operation) in Rotations)
-                if (signature == $"{type} System.Numerics.BitOperations::{name}({type},System.Int32)")
-                    return $".intrinsic (.scalar (.{operation} {width})) 2";
+                operations.Add($"{type} System.Numerics.BitOperations::{name}({type},System.Int32)",
+                    $".intrinsic (.scalar (.{operation} {width})) 2");
             foreach (var (name, operation) in BitCounts)
-                if (signature == $"System.Int32 System.Numerics.BitOperations::{name}({type})")
-                    return $".intrinsic (.scalar (.{operation} {width})) 1";
-            if (signature == $"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})")
-                return $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1";
+                operations.Add($"System.Int32 System.Numerics.BitOperations::{name}({type})",
+                    $".intrinsic (.scalar (.{operation} {width})) 1");
+            operations.Add($"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})",
+                $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1");
+        }
+        foreach (var (type, width, _) in MathIntegers.Where(integer => integer.Width is 32 or 64))
+        foreach (var (name, operation) in Rotations)
+            operations.Add($"{type} {type}::{name}({type},System.Int32)",
+                $".intrinsic (.scalar (.{operation} {width})) 2");
+        foreach (var (type, width, signed) in Pow2Integers.Where(integer => integer.Width == 32))
+        foreach (var (name, operation) in BitCounts)
+        {
+            if (name == "Log2" && signed) continue;
+            operations.Add($"{type} {type}::{name}({type})",
+                $".intrinsic (.scalar (.{operation} {width})) 1");
         }
         foreach (var (type, width, signed) in Pow2Integers)
-            if (signature == $"System.Boolean System.Numerics.BitOperations::IsPow2({type})")
-                return $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1";
-        return null;
+        {
+            var model = $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1";
+            operations.Add($"System.Boolean System.Numerics.BitOperations::IsPow2({type})", model);
+            operations.Add($"System.Boolean {type}::IsPow2({type})", model);
+        }
+        foreach (var (type, width, signed) in MathIntegers.Where(integer => integer.Width is 8 or 16))
+        {
+            operations.Add($"System.Boolean {type}::IsPow2({type})",
+                $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
+            if (signed) continue;
+            foreach (var (name, operation) in new[] { ("PopCount", "popCount"), ("Log2", "log2") })
+                operations.Add($"{type} {type}::{name}({type})",
+                    $".intrinsic (.scalar (.{operation} {width})) 1");
+        }
+        return operations;
     }
 
     // System.Buffers.Binary.BinaryPrimitives, defined in System.Memory.
@@ -370,8 +403,43 @@ internal static class RuntimeModels
         return operations;
     }
 
+    private static readonly Dictionary<string, string> PortableVectorOperations = BuildPortableVectorOperations();
+
+    // Lane-independent integer aliases bind exact signatures to the existing whole-vector operations.
+    private static Dictionary<string, string> BuildPortableVectorOperations()
+    {
+        var operations = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var width in new[] { 128, 256 })
+        {
+            var genericVector = Vector(width, "!!0");
+            var memberVector = Vector(width, "!0");
+            var owner = $"System.Runtime.Intrinsics.Vector{width}";
+            foreach (var element in new[]
+                { "System.Byte", "System.Int64", "System.UInt64", "System.UInt32", "System.Int32" })
+            {
+                var vectorOwner = Vector(width, element);
+                foreach (var (name, op) in new[]
+                    { ("op_BitwiseAnd", "band"), ("op_BitwiseOr", "bor"), ("op_ExclusiveOr", "bxor") })
+                    operations.Add($"{memberVector} {vectorOwner}::{name}({memberVector},{memberVector})",
+                        $".intrinsic (.vector (.{op} {width})) 2");
+                operations.Add($"System.Boolean {vectorOwner}::op_Equality({memberVector},{memberVector})",
+                    $".intrinsic (.vector (.equalsAll {width})) 2");
+                operations.Add($"{memberVector} {vectorOwner}::op_OnesComplement({memberVector})",
+                    $".intrinsic (.vector (.bnot {width})) 1");
+                operations.Add($"System.Boolean {owner}::EqualsAll<{element}>({genericVector},{genericVector})",
+                    $".intrinsic (.vector (.equalsAll {width})) 2");
+                operations.Add($"{memberVector} {vectorOwner}::get_Zero()",
+                    $".intrinsic (.vector (.zero {width})) 0");
+                operations.Add($"{memberVector} {vectorOwner}::get_AllBitsSet()",
+                    $".intrinsic (.vector (.ones {width})) 0");
+            }
+        }
+        return operations;
+    }
+
     private static string? Intrinsic(string signature, FeatureProfile profile)
     {
+        if (PortableVectorOperations.TryGetValue(signature, out var operation)) return operation;
         string? Finish(string intrinsic, int argc, Feature? required = null)
         {
             if (required is Feature feature && !profile.Get(feature))
@@ -407,34 +475,14 @@ internal static class RuntimeModels
             string memberVector = Vector(width, "!0");
             string owner = $"System.Runtime.Intrinsics.Vector{width}";
             string genericOwner = Vector(width, "System.UInt64");
-            foreach ((string name, string op) in new[] { ("op_Addition", "add64"), ("op_Subtraction", "sub64"),
-                ("op_BitwiseAnd", "band"), ("op_BitwiseOr", "bor"), ("op_ExclusiveOr", "bxor") })
+            foreach ((string name, string op) in new[] { ("op_Addition", "add64"), ("op_Subtraction", "sub64") })
                 if (signature == $"{memberVector} {genericOwner}::{name}({memberVector},{memberVector})")
                     return Finish($".vector (.{op} {width})", 2);
-            foreach (string element in new[] { "System.UInt64", "System.UInt32", "System.Int32" })
-            {
-                string vectorOwner = Vector(width, element);
-                foreach ((string name, string op) in new[]
-                    { ("op_BitwiseAnd", "band"), ("op_BitwiseOr", "bor"), ("op_ExclusiveOr", "bxor") })
-                    if (signature == $"{memberVector} {vectorOwner}::{name}({memberVector},{memberVector})")
-                        return Finish($".vector (.{op} {width})", 2);
-                if (signature == $"System.Boolean {vectorOwner}::op_Equality({memberVector},{memberVector})")
-                    return Finish($".vector (.equalsAll {width})", 2);
-                if (signature == $"{memberVector} {vectorOwner}::op_OnesComplement({memberVector})")
-                    return Finish($".vector (.bnot {width})", 1);
-            }
             foreach ((string name, string op) in new[] { ("LessThan", "ltu64"), ("Equals", "eq64") })
                 if (signature == $"{genericVector} {owner}::{name}<System.UInt64>({genericVector},{genericVector})")
                     return Finish($".vector (.{op} {width})", 2);
-            if (signature == $"System.Boolean {owner}::EqualsAll<System.UInt64>({genericVector},{genericVector})")
-                return Finish($".vector (.equalsAll {width})", 2);
             if (signature == $"!!0 {owner}::GetElement<System.UInt64>({genericVector},System.Int32)")
                 return Finish($".vector (.extract64 {width})", 2);
-            foreach (string element in new[] { "System.UInt64", "System.UInt32" })
-                if (signature == $"{memberVector} {Vector(width, element)}::get_Zero()")
-                    return Finish($".vector (.zero {width})", 0);
-            if (signature == $"{memberVector} {genericOwner}::get_AllBitsSet()")
-                return Finish($".vector (.ones {width})", 0);
             foreach ((string method, string target) in new[] { ("AsByte", "System.Byte"), ("AsUInt32", "System.UInt32"),
                 ("AsInt64", "System.Int64"), ("AsDouble", "System.Double"), ("AsUInt64", "System.UInt64"),
                 ("AsInt32", "System.Int32"), ("AsSingle", "System.Single") })

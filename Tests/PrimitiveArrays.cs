@@ -1,11 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 
 using System.Reflection;
+using Mono.Cecil;
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/PrimitiveArrays");
@@ -144,7 +146,7 @@ foreach (var (name, _, arguments, expected) in compositions)
         """);
     evidence.Add(proof, "PASS certified array composition: " + name);
 }
-var allocations = new[]
+var allocations = new List<(string Name, string Element, int Width)>
 {
     (Name: "Allocate", Element: "signed32", Width: 4),
     (Name: "AllocateBytes", Element: "unsigned8", Width: 1),
@@ -152,19 +154,46 @@ var allocations = new[]
     (Name: "AllocateLongs", Element: "signed64", Width: 8),
     (Name: "AllocateAndWrite", Element: "signed32", Width: 4)
 };
+foreach (var (name, type, width) in new[]
+{
+    ("AllocatePacked", "PackedLeaf", 5), ("AllocateNested", "NestedRecord", 32),
+    ("AllocatePackedAndWrite", "PackedLeaf", 5)
+})
+{
+    var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples." + type);
+    allocations.Add((name, $"aggregate {identity} {width}", width));
+}
+allocations.Add(("AllocateVector",
+    "vector \"System.Runtime.Intrinsics.Vector256`1<System.UInt64>\" 32", 32));
+foreach (var (type, storage, width) in new[]
+{
+    ("Signed8", "signed8", 1), ("Unsigned8", "unsigned8", 1),
+    ("Signed16", "signed16", 2), ("Unsigned16", "unsigned16", 2),
+    ("Signed32", "signed32", 4), ("Unsigned32", "unsigned32", 4),
+    ("Signed64", "signed64", 8), ("Unsigned64", "unsigned64", 8),
+    ("AllocationTag", "unsigned8", 1)
+})
+{
+    var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples." + type);
+    allocations.Add((type == "AllocationTag" ? "AllocateUnnamedZero" : "Allocate" + type,
+        $"enumeration {identity} .{storage}", width));
+}
 ExtractBatch("extract", null, allocations.Select(allocation => new GeneratedExtraction(assembly,
     $"PrimitiveArrays::{allocation.Name}(System.Int32" +
-        (allocation.Name == "AllocateAndWrite" ? ",System.Int32,System.Int32)" : ")"),
+        (allocation.Name.EndsWith("AndWrite", StringComparison.Ordinal) ? ",System.Int32,System.Int32)" : ")"),
     Path.Combine(root, allocation.Name))));
 foreach (var (name, element, width) in allocations)
 {
     var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
     var proof = Path.Combine(root, name + ".lean");
-    var composition = name == "AllocateAndWrite";
+    var composition = name.EndsWith("AndWrite", StringComparison.Ordinal);
+    var composite = name is "AllocatePacked" or "AllocateNested" or "AllocateVector";
+    var alignment = composite ? 8 : width;
     var observation = composition ? "result.2 == [.scalar (.i32 7)]" : $$"""
         (match result.2 with
         | [.array view] => view.length == 2 && view.elementType == .{{element}} &&
             view.reference != .null && (view.validate result.1).toOption == some () &&
+            (result.1.allocations 0).map (fun allocation => allocation.layout.alignment) == some {{alignment}} &&
             (view.read result.1 1).toOption == some (List.replicate {{width}} 0)
         | _ => false)
         """.Replace("\n", "\n        ", StringComparison.Ordinal);
@@ -183,7 +212,7 @@ foreach (var (name, element, width) in allocations)
              | .error _ => false) = true := by decide +kernel
         #print axioms fresh_array_result
         """);
-    if (name == "Allocate")
+    if (name is "Allocate" or "AllocatePacked")
     {
         File.AppendAllText(proof, """
 
@@ -205,6 +234,9 @@ foreach (var (name, element, width) in allocations)
             throw new Exception("Expected negative array length rejection");
         }
         catch (TargetInvocationException fault) when (fault.InnerException is OverflowException) { }
+    }
+    if (name == "Allocate")
+    {
         foreach (var (mutation, replacement) in new[]
             { ("element", ".newArray .unsigned32"), ("operation", ".nop") })
         {
@@ -215,14 +247,109 @@ foreach (var (name, element, width) in allocations)
             rejected.Add(forged, "PASS forged array allocation: " + mutation, "ScalarFlowValid");
         }
     }
+    if (name == "AllocateSigned8")
+    {
+        var target = $".newArray (.{element})";
+        foreach (var (mutation, replacement) in new[]
+        {
+            ("identity", target.Replace("Examples.Signed8", "Examples.Unsigned8", StringComparison.Ordinal)),
+            ("storage", target.Replace(".signed8)", ".unsigned8)", StringComparison.Ordinal)),
+            ("width", target.Replace(".signed8)", ".signed16)", StringComparison.Ordinal)),
+            ("primitive", ".newArray .signed8")
+        })
+        {
+            if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing enum newarr target");
+            var forged = Path.Combine(root, "ForgedEnumAllocation-" + mutation + ".lean");
+            File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
+            rejected.Add(forged, "PASS forged enum allocation: " + mutation, "ScalarFlowValid");
+        }
+    }
+    if (name == "AllocatePacked")
+    {
+        var target = $".newArray (.{element})";
+        var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.PackedLeaf");
+        var otherIdentity = identity.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal);
+        var controls = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (mutation, before, after, obligation, diagnostic) in new[]
+        {
+            ("width", target, target.Replace(" 5)", " 6)", StringComparison.Ordinal),
+                "method0_layouts_validated", "MethodLayoutsValid"),
+            ("identity", target, target.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal),
+                "method0_scalars_validated", "ScalarFlowValid"),
+            ("layout-identity", $".aggregate {identity}", $".aggregate {otherIdentity}",
+                "method0_coverage_validated", "LayoutUsesComplete"),
+            ("byref-like", $"identity := {identity},", $"identity := {identity}, byRefLike := true,",
+                "method0_layouts_validated", "MethodLayoutsValid"),
+            ("zero-width", target, target.Replace(" 5)", " 0)", StringComparison.Ordinal),
+                "method0_scalars_validated", "ScalarFlowValid"),
+            ("oversized", target, target.Replace(" 5)", " 65536)", StringComparison.Ordinal),
+                "method0_scalars_validated", "ScalarFlowValid")
+        })
+        {
+            var narrowed = NarrowEvidence(source, obligation);
+            if (controls.Add(obligation))
+                File.AppendAllText(proof,
+                    "\n" + CheckedEvidenceControl(source, narrowed, [obligation], controls.Count));
+            if (!narrowed.Contains(before, StringComparison.Ordinal))
+                throw new Exception("Missing composite allocation mutation: " + mutation);
+            var forged = Path.Combine(root, "ForgedCompositeAllocation-" + mutation + ".lean");
+            File.WriteAllText(forged, narrowed.Replace(before, after, StringComparison.Ordinal));
+            rejected.Add(forged, "PASS forged composite allocation: " + mutation, diagnostic);
+        }
+    }
     var actual = runtime.GetMethod(name)!.Invoke(null, composition ? [2, 1, 7] : [2]);
     if (composition ? !Equals(actual, 7) : actual is not Array { Length: 2 } values ||
-        Convert.ToInt64(values.GetValue(1)) != 0)
+        !Equals(values.GetValue(1), Activator.CreateInstance(values.GetType().GetElementType()!)))
         throw new Exception("Runtime allocation mismatch: " + name);
     evidence.Add(proof, "PASS runtime, certificate and heap array return: " + name);
 }
 evidence.Check();
 rejected.Check();
+foreach (var mutation in new[]
+    { "byref-like", "supplied-byref-like", "wrong-marker-scope", "vararg-marker", "nested-byref-like", "oversized" })
+{
+    using var module = ModuleDefinition.ReadModule(assembly);
+    var element = module.GetType("Examples.PackedLeaf");
+    var signature = "PrimitiveArrays::AllocatePacked(System.Int32)";
+    if (mutation == "supplied-byref-like")
+    {
+        element = module.GetType("Examples.AggregateArrays/Pair");
+        signature = "AggregateArrays::Read(Examples.AggregateArrays/Pair[],System.Int32)";
+    }
+    if (mutation == "oversized") element.ClassSize = ushort.MaxValue + 1;
+    else
+    {
+        var scope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime");
+        if (mutation == "wrong-marker-scope")
+        {
+            scope = new AssemblyNameReference("Forged.Runtime", scope.Version);
+            module.AssemblyReferences.Add(scope);
+        }
+        var marker = new TypeReference("System.Runtime.CompilerServices", "IsByRefLikeAttribute", module, scope);
+        var constructor = new MethodReference(".ctor", module.TypeSystem.Void, marker) { HasThis = true };
+        if (mutation == "vararg-marker") constructor.CallingConvention = MethodCallingConvention.VarArg;
+        element.CustomAttributes.Add(new CustomAttribute(constructor));
+        if (mutation == "nested-byref-like")
+        {
+            var pair = module.GetType("Examples.AggregateArrays/Pair");
+            pair.Fields.Single(field => field.Name == "First").FieldType = element;
+            signature = "AggregateArrays::Read(Examples.AggregateArrays/Pair[],System.Int32)";
+        }
+    }
+    var changed = Path.Combine(root, mutation + ".dll");
+    module.Write(changed);
+    var result = Execute(Extract("extract", changed, null, signature, Path.Combine(root, mutation)));
+    var expected = mutation switch
+    {
+        "wrong-marker-scope" or "vararg-marker" => "byref-like marker",
+        "nested-byref-like" => "Byref-like field",
+        "oversized" => "Unsupported instruction",
+        _ => "Unsupported array"
+    };
+    if (result.Code == 0 || !result.Output.Contains(expected, StringComparison.Ordinal))
+        throw new Exception("Unexpected composite array rejection: " + mutation + "\n" + result.Output);
+    Console.WriteLine("PASS unsupported composite array metadata: " + mutation);
+}
 foreach (var signature in new[]
 {
     "AllocateSingles(System.Int32)", "ReadObject(System.Object[],System.Int32)",

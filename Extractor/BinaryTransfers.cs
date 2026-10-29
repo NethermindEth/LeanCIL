@@ -23,7 +23,7 @@ internal static class BinaryTransfers
         foreach (var (type, width, signed) in new[]
         {
             ("Int16", 2, true), ("UInt16", 2, false), ("Int32", 4, true), ("UInt32", 4, false),
-            ("Int64", 8, true), ("UInt64", 8, false)
+            ("Int64", 8, true), ("UInt64", 8, false), ("IntPtr", 8, true), ("UIntPtr", 8, false)
         })
         foreach (var bigEndian in new[] { false, true })
         foreach (var read in new[] { false, true })

@@ -7,6 +7,7 @@ internal static class InstructionTranslation
 {
     internal static string? RuntimeModel(MethodReference reference, FeatureProfile? profile = null)
     {
+        if (FeatureProfile.PlatformConstant(reference) is int constant) return $".const32 {constant}";
         if (FeatureProfile.Getter(reference) is Feature feature)
             return ".feature " + FeatureProfile.LeanFeature(feature);
         return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);
@@ -56,8 +57,7 @@ internal static class InstructionTranslation
             tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
             throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
         if (i.OpCode.Code == Code.Add && nativeOperands.Incoming.TryGetValue(i, out var incoming) &&
-            incoming.Length >= 2 && incoming[^2] == NativeOperands.Kind.Reference &&
-            incoming[^1].Kind is NativeOperands.Kind.Word32 or NativeOperands.Kind.Native)
+            incoming.Length >= 2 && NativeOperands.ReferenceAddition(incoming[^2], incoming[^1]))
             return ".memory (.add 1 true)";
         if (i.OpCode.Code == Code.Readonly)
         {

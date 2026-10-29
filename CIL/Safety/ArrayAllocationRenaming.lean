@@ -44,18 +44,18 @@ theorem Memory.Renamed.allocateArray {mapping : AllocationRenaming} {scopes : Na
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at success
   split at success
   · cases success
-  · rename_i primitive
+  · rename_i supported
     split at success
     · cases success
     · rename_i bounded
       cases allocated : CIL.Safety.allocate source
-          ⟨.managedHeap, ⟨length * element.width, element.width, []⟩, true,
+          ⟨.managedHeap, ⟨length * element.width, element.allocationAlignment, []⟩, true,
             [length * element.width]⟩ with
       | error fault => simp [allocated, checkedAt, Except.mapError] at success
       | ok pair =>
         obtain ⟨identity, memory⟩ := pair
         have valid : (Allocation.mk .managedHeap
-            ⟨length * element.width, element.width, []⟩ true
+            ⟨length * element.width, element.allocationAlignment, []⟩ true
             [length * element.width]).valid = true := by
           unfold CIL.Safety.allocate at allocated
           split at allocated <;> first | cases allocated | simp_all
@@ -72,7 +72,7 @@ theorem Memory.Renamed.allocateArray {mapping : AllocationRenaming} {scopes : Na
           rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
         refine ⟨CIL.Safety.arrayMemory targetMade target.nextIdentity
           (length * element.width), ?_, ?_⟩
-        · simp [CIL.Safety.allocateArray, primitive, bounded, targetAllocated, checkedAt,
+        · simp [CIL.Safety.allocateArray, supported, bounded, targetAllocated, checkedAt,
             AllocationRenaming.arrayView, AllocationRenaming.managedReference,
             AllocationRenaming.reference, image, Except.mapError,
             Bind.bind, Except.bind, Pure.pure, Except.pure]

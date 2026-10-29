@@ -5,6 +5,15 @@ namespace Nethermind.LeanCIL;
 // Closed owners retain their definition; only field and receiver signatures are substituted.
 internal static class GenericStructs
 {
+    internal static bool DirectInterfaceConstraint(TypeReference constraint, TypeReference argument,
+        ModuleDefinition module) =>
+        constraint.Scope is ModuleDefinition && !constraint.ContainsGenericParameter &&
+        constraint.Resolve() is { IsInterface: true } declared && declared.Module == module &&
+        argument.Resolve() is { } concrete && concrete.Module == module && concrete.IsValueType &&
+        concrete.Interfaces.Any(implemented => MethodSpecialization.SignatureType(Substitute(
+            implemented.InterfaceType, argument as GenericInstanceType)) ==
+            MethodSpecialization.SignatureType(constraint));
+
     internal static bool Is(TypeReference type) => type is GenericInstanceType generic &&
         generic.ElementType.Scope is ModuleDefinition && generic.IsValueType;
 
@@ -31,13 +40,14 @@ internal static class GenericStructs
         foreach (var argument in owner.GenericArguments)
             if (argument is PointerType or ByReferenceType or ArrayType || !argument.IsValueType)
                 throw new InvalidDataException("Generic struct arguments must be reference-free value types");
-        foreach (var parameter in definition.GenericParameters)
+        foreach (var (parameter, argument) in definition.GenericParameters.Zip(owner.GenericArguments))
         {
             if (((uint)parameter.Attributes & ~56u) != 0)
                 throw new InvalidDataException("Unsupported generic struct constraint flags");
             foreach (var constraint in parameter.Constraints)
             {
                 var type = constraint.ConstraintType;
+                if (DirectInterfaceConstraint(type, argument, definition.Module)) continue;
                 if (type is RequiredModifierType modifier &&
                     modifier.ModifierType.FullName == "System.Runtime.InteropServices.UnmanagedType" &&
                     RuntimeModels.ExactScope(modifier.ModifierType.Scope, "System.Runtime"))

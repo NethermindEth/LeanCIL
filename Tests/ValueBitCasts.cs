@@ -25,17 +25,26 @@ void Prove(string name, int width, string source, string target)
         var cells = "[" + string.Join(", ", bytes.Select((b, i) => $"({b}, {(mask == "full" || mask == "partial" && i % 3 != 0 ? "true" : "false")})")) + "]";
         claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [.scalar (CIL.Safety.snapshotValue {source} {cells})] Examples.empty).map Prod.snd = " +
             $".ok [.scalar (CIL.Safety.snapshotValue {target} {cells})]");
+        if (mask != "full" && name is "To128Byte" or "To256Int32" or "To256Int64")
+            claims.Add($"CIL.Safety.checkedIntrinsic (.vector (.equalsAll {width * 8})) " +
+                $"[CIL.Safety.snapshotValue {target} {cells}, CIL.Safety.snapshotValue {target} {cells}] = " +
+                ".error .invalidState");
     }
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
-        string.Join(" ∧\n", claims) + " := by exact ⟨by rfl, by rfl, by rfl⟩\nend ExampleProof\n");
+        string.Join(" ∧\n", claims) + " := by exact ⟨" +
+        string.Join(", ", claims.Select(_ => "by rfl")) + "⟩\n" +
+        "#print axioms correctness\nend ExampleProof\n");
     pending.Add(new GeneratedVerification(selectors[name], proof, output),
         () => Console.WriteLine("PASS compiled BitCast full/partial/unknown masks: " + name));
 }
-foreach (var width in new[] { 16, 32 })
-foreach (var element in new[] { "UInt32", "UInt64" })
+foreach (var (width, element) in new[]
+{
+    (16, "UInt32"), (16, "UInt64"), (32, "UInt32"), (32, "UInt64"),
+    (16, "Byte"), (32, "Int32"), (32, "Int64")
+})
 foreach (var toVector in new[] { true, false })
 {
     var name = $"{(toVector ? "To" : "From")}{width * 8}{element}";
@@ -56,13 +65,20 @@ foreach (var toVector in new[] { true, false })
     else if (width == 16)
     {
         var value = Vector128.Create(BinaryPrimitives.ReadUInt64LittleEndian(bytes), BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(8)));
-        input = element == "UInt64" ? (object)value : value.AsUInt32();
+        input = element switch
+        {
+            "UInt64" => (object)value, "Byte" => value.AsByte(), _ => value.AsUInt32()
+        };
     }
     else
     {
         var value = Vector256.Create(BinaryPrimitives.ReadUInt64LittleEndian(bytes), BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(8)),
             BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(16)), BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(24)));
-        input = element == "UInt64" ? (object)value : value.AsUInt32();
+        input = element switch
+        {
+            "UInt64" => (object)value, "Int32" => value.AsInt32(), "Int64" => value.AsInt64(),
+            _ => value.AsUInt32()
+        };
     }
     var result = method.Invoke(null, [input])!;
     var actual = new byte[width];
@@ -73,9 +89,17 @@ foreach (var toVector in new[] { true, false })
             BinaryPrimitives.WriteUInt64LittleEndian(actual.AsSpan(i * 8), (ulong)fields[i].GetValue(result)!);
     }
     else if (width == 16)
-        (element == "UInt64" ? ((Vector128<ulong>)result).AsByte() : ((Vector128<uint>)result).AsByte()).CopyTo(actual);
+        (result switch
+        {
+            Vector128<ulong> value => value.AsByte(), Vector128<byte> value => value,
+            _ => ((Vector128<uint>)result).AsByte()
+        }).CopyTo(actual);
     else
-        (element == "UInt64" ? ((Vector256<ulong>)result).AsByte() : ((Vector256<uint>)result).AsByte()).CopyTo(actual);
+        (result switch
+        {
+            Vector256<ulong> value => value.AsByte(), Vector256<int> value => value.AsByte(),
+            Vector256<long> value => value.AsByte(), _ => ((Vector256<uint>)result).AsByte()
+        }).CopyTo(actual);
     if (!bytes.SequenceEqual(actual)) throw new InvalidOperationException("Runtime byte reinterpretation mismatch: " + name);
 
     Prove(name, width, source, target);
@@ -97,14 +121,15 @@ foreach (var name in new[] { "WrongSize", "ReferenceLayout" })
     Console.WriteLine("PASS BitCast layout rejection: " + name);
 }
 
-foreach (var mutation in new[] { "arity", "parameter", "return", "instance", "scope", "version", "token" })
+foreach (var mutation in new[] { "arity", "parameter", "return", "instance", "scope", "version", "token",
+    "vector-scope", "vector-element" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
-        var method = module.GetType("Examples.ValueBitCasts").Methods.Single(m => m.Name == "To256UInt64");
+        var method = module.GetType("Examples.ValueBitCasts").Methods.Single(m => m.Name == "To256Int32");
         var call = (GenericInstanceMethod)method.Body.Instructions.Single(i => i.Operand is MethodReference).Operand;
         switch (mutation)
         {
@@ -115,12 +140,24 @@ foreach (var mutation in new[] { "arity", "parameter", "return", "instance", "sc
             case "scope": call.DeclaringType.Scope = module; break;
             case "version": ((AssemblyNameReference)call.DeclaringType.Scope).Version = new Version(9, 0, 0, 0); break;
             case "token": ((AssemblyNameReference)call.DeclaringType.Scope).PublicKeyToken = new byte[8]; break;
+            case "vector-scope": ((GenericInstanceType)call.GenericArguments[1]).ElementType.Scope = module; break;
+            case "vector-element":
+                ((GenericInstanceType)call.GenericArguments[1]).GenericArguments[0] = module.TypeSystem.Single;
+                break;
         }
         module.Write(dll);
     }
     File.Delete(Path.Combine(output, "Extracted.lean"));
-    var result = Execute(Extract("extract", dll, "Examples", selectors["To256UInt64"], output));
+    var result = Execute(Extract("extract", dll, "Examples", selectors["To256Int32"], output));
     if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")))
         throw new InvalidOperationException("Malformed BitCast accepted: " + mutation);
+    var diagnostic = mutation switch
+    {
+        "vector-scope" => "Unresolved aggregate",
+        "vector-element" => "Unsupported Unsafe.BitCast value layouts",
+        _ => null
+    };
+    if (diagnostic is not null && !result.Output.Contains(diagnostic, StringComparison.Ordinal))
+        throw new InvalidOperationException("BitCast vector rejection failed for the wrong reason: " + mutation);
     Console.WriteLine("PASS BitCast signature rejection: " + mutation);
 }

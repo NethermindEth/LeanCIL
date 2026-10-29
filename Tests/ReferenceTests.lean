@@ -1,7 +1,8 @@
 import CIL.Safety.Execution
+import CIL.Safety.MemorySteps
 import CIL.Extraction.Scalars
 
-/-! # Reference observations without byte access authority -/
+/-! # Reference observations and byte offsets retain allocation and authority checks -/
 
 namespace Tests.ReferenceTests
 open CIL.Safety
@@ -137,5 +138,68 @@ theorem changed_reference_branch_rejected :
     CIL.Extraction.scalarOpMatches ⟨0, 45, .target 4⟩ [.reference] (.brnonzero 3) = false :=
   by decide +kernel
 #print axioms changed_reference_branch_rejected
+
+/-- Both operand orders use the same checked addition, including every failure and memory effect. -/
+theorem add_commutes (memory : Memory) (reference : ManagedReference) (offset : CIL.Value)
+    (stride : Nat) (signed : Bool) (rest : List Value) :
+    memoryInstruction (.add stride signed) (.reference reference :: .scalar offset :: rest) memory =
+      memoryInstruction (.add stride signed) (.scalar offset :: .reference reference :: rest)
+        memory := rfl
+#print axioms add_commutes
+
+/-- Commuting an offset cannot discard a readonly reference's restriction. -/
+theorem readonly_add_rejected (memory : Memory) (reference : ManagedReference)
+    (offset : BitVec 64) :
+    memoryInstruction (.add 1 true) [.readOnlyReference reference, .scalar (.i64 offset)] memory =
+      .error .invalidState ∧
+    memoryInstruction (.add 1 true) [.scalar (.i64 offset), .readOnlyReference reference] memory =
+      .error .invalidState := ⟨rfl, rfl⟩
+#print axioms readonly_add_rejected
+
+/-- Only int32/native offsets certify in either order; pointer sums and reversed subtraction fail. -/
+theorem reference_arithmetic_kinds :
+    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .word32]
+      (.memory (.add 1 true)) = true ∧
+    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .native]
+      (.memory (.add 1 true)) = true ∧
+    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .word64]
+      (.memory (.add 1 true)) = false ∧
+    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .reference]
+      (.memory (.add 1 true)) = false ∧
+    CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.reference, .word32] .sub = false :=
+  by decide +kernel
+#print axioms reference_arithmetic_kinds
+
+section SymbolicAddition
+
+attribute [local irreducible] step
+
+/-- Registered stepping equations handle symbolic commuted int32 offsets without unfolding step. -/
+theorem commuted_i32_step (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.W32)
+    (rest : List Value) :
+    step body (.memory (.add 1 true)) pc args frame
+      (.reference reference :: .scalar (.i32 offset) :: rest) memory = do
+      let address ← referenceAt reference
+      let result ← checkedAt reference 0 (add memory address 1 (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.reference (.address result) :: rest) frame memory := by
+  fail_if_success rfl
+  simp only [cil_step]
+#print axioms commuted_i32_step
+
+/-- Native offsets share the existing signed 64-bit stepping equation on symbolic memory. -/
+theorem commuted_native_step (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.W64)
+    (rest : List Value) :
+    step body (.memory (.add 1 true)) pc args frame
+      (.reference reference :: .scalar (.i64 offset) :: rest) memory = do
+      let address ← referenceAt reference
+      let result ← checkedAt reference 0 (add memory address 1 (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.reference (.address result) :: rest) frame memory := by
+  fail_if_success rfl
+  simp only [cil_step]
+#print axioms commuted_native_step
+
+end SymbolicAddition
 
 end Tests.ReferenceTests

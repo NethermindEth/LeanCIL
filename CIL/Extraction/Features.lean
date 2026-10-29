@@ -3,6 +3,7 @@ import CIL.Extraction.FeatureEffects
 import CIL.Extraction.Folds
 import CIL.Extraction.FlowIndex
 import CIL.Extraction.FeatureLocals
+import CIL.Semantics
 import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
@@ -106,6 +107,55 @@ private theorem stripFeaturePrefix_eq (expected bytes suffix : List UInt8) :
 private def featureSignature (identity : String) : Option (List UInt8) :=
   stripFeaturePrefix featurePrefix.toByteArray.data.toList identity.toByteArray.data.toList
 
+/-- Platform query names whose exact signatures must bind emitted constants. -/
+def platformQuery (site : CallSite) : Bool :=
+  match site.declaringType with
+  | .atom _ owner =>
+    (site.name == "get_Size" && owner ∈ ["System.IntPtr", "System.UIntPtr"]) ||
+      (site.name == "get_Is64BitProcess" && owner == "System.Environment")
+  | _ => false
+
+/-- Exact process-width getters under the supported 64-bit runtime profiles. -/
+def platformConstant (site : CallSite) : Option W32 := do
+  let .atom scope owner := site.declaringType | none
+  if !platformQuery site || scope != runtimeScope || site.parameterCount != 0 ||
+      !site.parameterTypes.isEmpty || site.hasThis || !site.returnsValue ||
+      site.ownerArgumentCount != 0 || !site.typeArguments.isEmpty then none
+  else
+    let result := if site.name == "get_Size" then "System.Int32" else "System.Boolean"
+    if site.returnType != .atom runtimeScope result ||
+        site.target != .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++
+          "::" ++ site.name ++ "()") then none
+    else some (if site.name == "get_Size" then 8 else 1)
+
+/-- Classify reference-free storage against a table whose `LayoutsValid` is checked separately.
+    Aggregate identity lookup does not revalidate fields or confer memory access authority. -/
+def referenceFreeStorage (layouts : Array RawLayout) : TypeExpr → Bool
+  | type@(.atom ..) | type@(.enum _ (.atom ..)) =>
+    match typeStorage [] type with | some (.field _) => true | _ => false
+  | .aggregate identity index => (layouts[index]?).any (·.identity == identity)
+  | type => (integerVectorWidth type).isSome
+
+/-- Reserve the runtime query name even when malformed metadata prevents exact recognition. -/
+def referenceContentQuery (site : CallSite) : Bool :=
+  site.name == "IsReferenceOrContainsReferences" &&
+    (match site.declaringType with
+    | .atom _ owner => owner == "System.Runtime.CompilerServices.RuntimeHelpers"
+    | _ => false)
+
+/-- Bind a false reference-content answer to an exact helper and independently admitted type. -/
+def referenceContentConstant (layouts : Array RawLayout) (site : CallSite) : Option W32 := do
+  let [type] := site.typeArguments | none
+  if !referenceContentQuery site ||
+      site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers" ||
+      site.parameterCount != 0 || !site.parameterTypes.isEmpty || site.hasThis ||
+      !site.returnsValue || site.ownerArgumentCount != 0 ||
+      site.returnType != .atom runtimeScope "System.Boolean" ||
+      site.target != .external (runtimeScope ++
+        "::System.Boolean System.Runtime.CompilerServices.RuntimeHelpers::" ++
+        "IsReferenceOrContainsReferences()") || !referenceFreeStorage layouts type then none
+  else some 0
+
 /-- Identify getters from raw member and assembly identity, never an emitter-supplied flag. -/
 def featureGetter (site : CallSite) : Option Feature := do
   let .external identity := site.target | none
@@ -146,7 +196,8 @@ theorem featureGetter_eq_original (site : CallSite) : featureGetter site = (do
 
 /-- A certificate state fits the method: one fact per local, at most `maxStack` stack
     entries, and only eligible locals known. -/
-private def wellShaped (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+private def wellShaped (raw : RawMethod)
+    (eligible : Nat → Option W32 → Bool)
     (state : FeatureState) : Bool :=
   state.locals.length == raw.locals.length && state.stack.length <= raw.maxStack &&
   (state.locals.zipIdx).all fun (fact, index) => eligible index fact
@@ -188,9 +239,31 @@ private def forget (state : FeatureState) (pops pushes : Nat) : Option FeatureSt
     some { state with stack := List.replicate pushes none ++ state.stack.drop pops }
   else none
 
+/-- Short and long compare branches share the CLI's ten-operation ordering. -/
+def comparisonBranchIndex (opcode : Nat) : Option Nat :=
+  if 46 <= opcode && opcode <= 55 then some (opcode - 46)
+  else if 59 <= opcode && opcode <= 68 then some (opcode - 59) else none
+
+/-- Known int32 comparisons use the value evaluator, including signedness and operand order. -/
+def constantComparison (opcode : Nat) (left right : W32) : Option W32 := do
+  let index ← match opcode with
+    | 65025 => some 0 | 65026 => some 2 | 65027 => some 7
+    | 65028 => some 4 | 65029 => some 9
+    | _ => comparisonBranchIndex opcode
+  let (operation, negate) ← match index with
+    | 0 => some (Op.eq, false) | 5 => some (.eq, true)
+    | 1 => some (.lt, true) | 2 => some (.gt, false)
+    | 3 => some (.gt, true) | 4 => some (.lt, false)
+    | 6 => some (.ltu, true) | 7 => some (.gtu, false)
+    | 8 => some (.gtu, true) | 9 => some (.ltu, false)
+    | _ => none
+  let .i32 value ← binary operation (.i32 left) (.i32 right) | none
+  return if negate then (if value == 0 then 1 else 0) else value
+
 /-- Recompute a transfer from raw CLI encodings and metadata, independently of the
     extractor's worklist and its claimed incoming/outgoing facts. -/
-private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+private def featureTransferWith (layouts : Array RawLayout) (raw : RawMethod)
+    (eligible : Nat → Option W32 → Bool)
     (profile : FeatureProfile)
     (instruction : RawInstruction) (state : FeatureState) : Option FeatureState := do
   if let some word := constant32 instruction then
@@ -206,18 +279,20 @@ private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32
     if index >= state.locals.length then none else
       return { stack, locals :=
         state.locals.set index (if eligible index value then value else none) }
-  -- `dup`, then `and`, `or`, `xor` and `ceq` over known words.
+  -- `dup`, then bitwise operations and comparisons over known words.
   if instruction.opcode == 37 then
     let value :: stack := state.stack | none
     return { state with stack := value :: value :: stack }
-  if instruction.opcode ∈ [95, 96, 97, 65025] then
+  if instruction.opcode ∈ [95, 96, 97] ||
+      (65025 <= instruction.opcode && instruction.opcode <= 65029) then
     let right :: left :: stack := state.stack | none
     let value := do
       let a ← left
       let b ← right
-      return if instruction.opcode == 95 then a &&& b
-        else if instruction.opcode == 96 then a ||| b
-        else if instruction.opcode == 97 then a ^^^ b else if a == b then 1 else 0
+      if instruction.opcode == 95 then some (a &&& b)
+        else if instruction.opcode == 96 then some (a ||| b)
+        else if instruction.opcode == 97 then some (a ^^^ b)
+        else constantComparison instruction.opcode a b
     return { state with stack := value :: stack }
   -- `call` and `newobj`; a feature getter pushes the profile's answer.
   if instruction.opcode == 41 then
@@ -228,6 +303,9 @@ private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32
     let .call site := instruction.operand | none
     let next ← forget state
       (site.parameterCount + if instruction.opcode != 115 && site.hasThis then 1 else 0) 0
+    if let some constant := referenceContentConstant layouts site <|> platformConstant site then
+      if instruction.opcode != 40 then none else
+        return { next with stack := some constant :: next.stack }
     if let some feature := featureGetter site then
       if instruction.opcode != 40 then none else
         return { next with stack := some (if profile.evaluate feature then 1 else 0) :: next.stack }
@@ -240,31 +318,33 @@ private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32
     forget state pops pushes
 
 /-- Recompute the transfer using the raw local-eligibility rule. -/
-def featureTransfer (raw : RawMethod) := featureTransferWith raw (featureLocalEligible raw)
+def featureTransfer (layouts : Array RawLayout) (raw : RawMethod) :=
+  featureTransferWith layouts raw (featureLocalEligible raw)
 
 /-- A decided type test replaces the raw comparison result by its exact word. -/
-private def featureTransferAtWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+private def featureTransferAtWith (layouts : Array RawLayout) (raw : RawMethod)
+    (eligible : Nat → Option W32 → Bool)
     (profile : FeatureProfile) (role : Option FoldRole)
     (instruction : RawInstruction) (state : FeatureState) : Option FeatureState :=
   match role with
   | some .tailCall => match instruction.operand with
     | .indirectCall _ parameters false false 0 =>
       if state.stack.length == parameters.length + 1 then
-        featureTransferWith raw eligible profile instruction state else none
+        featureTransferWith layouts raw eligible profile instruction state else none
     | .call site =>
       if state.stack.length == site.parameterCount + (if site.hasThis then 1 else 0) then
-        featureTransferWith raw eligible profile instruction state else none
+        featureTransferWith layouts raw eligible profile instruction state else none
     | _ => none
   | some (.result value) => match state.stack with
     | _ :: _ :: stack => some { state with stack := some (if value then 1 else 0) :: stack }
     | _ => none
-  | _ => featureTransferWith raw eligible profile instruction state
+  | _ => featureTransferWith layouts raw eligible profile instruction state
 
 /-- The folded transfer stated independently of any local-eligibility index. -/
-def featureTransferAt (raw : RawMethod) := featureTransferAtWith raw (featureLocalEligible raw)
+def featureTransferAt (layouts : Array RawLayout) (raw : RawMethod) :=
+  featureTransferAtWith layouts raw (featureLocalEligible raw)
 
-/-- Every switch destination is retained, even for a constant selector. Only
-    true/false branches may prune an edge, and only for a known word. -/
+/-- Known int32 conditions select an edge; unknowns retain every possible successor. -/
 def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : FeatureState) :
     Option (List Nat) :=
   -- `ret`, `throw`, `rethrow`, `endfinally` and `endfilter` leave the method or handler.
@@ -274,8 +354,12 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
   else if instruction.opcode == 43 || instruction.opcode == 56 then
     match instruction.operand with | .target target => some [target] | _ => none
   else if instruction.opcode == 69 then
-    match instruction.operand with | .targets targets => some ((pc + 1) :: targets) | _ => none
-  -- Conditional branches; only `brfalse` and `brtrue` on a known word prune an edge.
+    match instruction.operand with
+    | .targets targets => match state.stack with
+      | some selector :: _ => some [targets[selector.toNat]?.getD (pc + 1)]
+      | _ => some ((pc + 1) :: targets)
+    | _ => none
+  -- Conditional branches use the incoming facts before their operands are popped.
   else if (44 <= instruction.opcode && instruction.opcode <= 55) ||
       (57 <= instruction.opcode && instruction.opcode <= 68) then do
     let .target target := instruction.operand | none
@@ -285,7 +369,12 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
         return [if (value != 0) == (instruction.opcode == 45 || instruction.opcode == 58) then
           target else pc + 1]
       | _ => return [target, pc + 1]
-    else return [target, pc + 1]
+    else match state.stack with
+      | some right :: some left :: _ =>
+        match constantComparison instruction.opcode left right with
+        | some value => return [if value != 0 then target else pc + 1]
+        | none => return [target, pc + 1]
+      | _ => return [target, pc + 1]
   else some [pc + 1]
 
 /-- The raw stack effect, with calls taken from their signature. -/
@@ -317,7 +406,8 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) 
 /-- Bind every control-flow operation and every operation that propagates a known
     feature fact to the actual emitted instruction. Unknown operations may not
     emit an unsupported hole on a reachable path. -/
-private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
+    (eligible : Nat → Option W32 → Bool)
     (instruction : RawInstruction) (emitted : Op) : Bool :=
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
@@ -332,6 +422,14 @@ private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W3
   if let some word := constant32 instruction then
     return match emitted with | .const32 actual => word == actual | _ => false
   if let .call site := instruction.operand then
+    if referenceContentQuery site then
+      return match referenceContentConstant layouts site, emitted with
+        | some expected, .const32 actual => instruction.opcode == 40 && expected == actual
+        | _, _ => false
+    if platformQuery site then
+      return match platformConstant site, emitted with
+        | some expected, .const32 actual => instruction.opcode == 40 && expected == actual
+        | _, _ => false
     if let some feature := featureGetter site then
       return match emitted with
         | .feature actual => instruction.opcode == 40 && feature == actual
@@ -361,16 +459,18 @@ private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W3
       | _ => false
   if instruction.opcode ∈ [16, 65035] then
     return match emitted with | .setLocal index none => raw.locals.length <= index | _ => false
-  -- A native-width wrapper is looked through only for `and`, `or`, `xor`, `ceq` and
+  -- A native-width wrapper is looked through only for bitwise operations, comparisons and
   -- two-operand branches.
   let emitted := match emitted with
-    | .nativeBinary operation => if instruction.opcode ∈ [95, 96, 97, 65025] ||
+    | .nativeBinary operation => if instruction.opcode ∈ [95, 96, 97] ||
+        (65025 <= instruction.opcode && instruction.opcode <= 65029) ||
         (46 <= instruction.opcode && instruction.opcode <= 55) ||
         (59 <= instruction.opcode && instruction.opcode <= 68) then operation else emitted
     | _ => emitted
   return match instruction.opcode, instruction.operand, emitted with
-    -- `dup`, `and`, `or`, `xor` and `ceq`.
+    -- Stack duplication, bitwise operations and exact comparison signedness.
     | 37, _, .dup | 95, _, .band | 96, _, .bor | 97, _, .bxor | 65025, _, .eq => true
+    | 65026, _, .gt | 65027, _, .gtu | 65028, _, .lt | 65029, _, .ltu => true
     -- Branches, short and long forms, must keep their target.
     | 43, .target x, .branch y | 56, .target x, .branch y
     | 44, .target x, .brzero y | 57, .target x, .brzero y
@@ -390,16 +490,19 @@ private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W3
     -- No other raw instruction may emit control flow, a feature test or a hole.
     | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .branch _ | _, _, .switch _
     | _, _, .brzero _ | _, _, .brnonzero _ => false
-    | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 65025, 42] || (43 <= opcode && opcode <= 69)) &&
+    | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
+        (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
 
 /-- Bind an emitted operation using the raw local-eligibility rule. -/
-def featureOpMatches (raw : RawMethod) := featureOpMatchesWith raw (featureLocalEligible raw)
+def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod) :=
+  featureOpMatchesWith layouts raw (featureLocalEligible raw)
 
 /-- Fold operands emit nothing, a type comparison emits its decided word and a folded
     `throw` raises its constructed type. Outside a decided test, type handles and
     `System.Type` calls have no admitted translation. -/
-private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+private def featureOpMatchesAtWith (layouts : Array RawLayout) (raw : RawMethod)
+    (eligible : Nat → Option W32 → Bool)
     (role : Option FoldRole)
     (instruction : RawInstruction) (emitted : Op) : Bool :=
   match role, emitted with
@@ -410,34 +513,45 @@ private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option 
     index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with
     | .call site => site.returnType == raw.returnType &&
-      featureOpMatchesWith raw eligible instruction (.call target count)
+      featureOpMatchesWith layouts raw eligible instruction (.call target count)
     | _ => false
   | some .tailCall, .managed (.call signature catalog true) =>
     signature.result == callableType raw.returnType &&
-      featureOpMatchesWith raw eligible instruction (.managed (.call signature catalog false))
-  | some .argument, _ => featureOpMatchesWith raw eligible instruction emitted
+      featureOpMatchesWith layouts raw eligible instruction
+        (.managed (.call signature catalog false))
+  | some .argument, _ => featureOpMatchesWith layouts raw eligible instruction emitted
   | some _, _ => false
-  | none, _ => !typeTestInstruction instruction && featureOpMatchesWith raw eligible instruction emitted
+  | none, _ => !typeTestInstruction instruction &&
+      featureOpMatchesWith layouts raw eligible instruction emitted
 
 /-- Fold-aware instruction matching stated independently of any eligibility index. -/
-def featureOpMatchesAt (raw : RawMethod) := featureOpMatchesAtWith raw (featureLocalEligible raw)
+def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod) :=
+  featureOpMatchesAtWith layouts raw (featureLocalEligible raw)
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     be well shaped, match its emitted instruction, and flow into a weaker state at every
     recomputed successor. -/
-private def checkFeatureSiteWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
+private def checkFeatureSiteWith (layouts : Array RawLayout) (raw : RawMethod)
+    (eligible : Nat → Option W32 → Bool)
     (profile : FeatureProfile)
     (certificate : Nat → Option (Option FeatureState))
     (roles : Nat → Option (Option FoldRole)) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Op → Bool
   | _, none, .unsupported _ => true
   | ((instruction, role), pc), some state, emitted =>
-    wellShaped raw eligible state && featureOpMatchesAtWith raw eligible role instruction emitted &&
-      match featureTransferAtWith raw eligible profile role instruction state,
+    wellShaped raw eligible state &&
+      featureOpMatchesAtWith layouts raw eligible role instruction emitted &&
+      match featureTransferAtWith layouts raw eligible profile role instruction state,
           featureSuccessors pc instruction state with
       | some after, some successors =>
-        -- Roles are contiguous, so only a non-fallthrough edge can enter a fold's interior.
-        successors.all (fun target => target == pc + 1 || foldEntry (roles target)) &&
+        -- Even an unselected encoded target must be a valid entry, not a fold's interior.
+        let validTarget := fun target =>
+          let role := roles target
+          role.isSome && foldEntry role
+        (match instruction.operand with
+        | .target target => validTarget target
+        | .targets targets => targets.all validTarget
+        | _ => true) &&
         successors.all fun target =>
           match certificate target with
           | some (some incoming) => after.weakens incoming
@@ -446,37 +560,39 @@ private def checkFeatureSiteWith (raw : RawMethod) (eligible : Nat → Option W3
   | _, none, _ => false
 
 /-- The per-site specification uses the original raw-metadata eligibility rule. -/
-private def checkFeatureSite (raw : RawMethod) :=
-  checkFeatureSiteWith raw (featureLocalEligible raw)
+private def checkFeatureSite (layouts : Array RawLayout) (raw : RawMethod) :=
+  checkFeatureSiteWith layouts raw (featureLocalEligible raw)
 
 /-- No optional sites: entry, every raw PC, the entire parameter-reachability mask,
     every successor, and all unsupported holes are covered. -/
-def FeatureFlowValid (raw : RawMethod) (profile : FeatureProfile)
+def FeatureFlowValid (layouts : Array RawLayout) (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) (reachable : List Bool) (code : List Op) : Prop :=
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := List.replicate raw.locals.length none }) ∧
   (let eligible := (FeatureLocalIndex.ofRaw raw).eligible
-   all3Flow (fun lookup => checkFeatureSiteWith raw eligible profile lookup
+   all3Flow (fun lookup => checkFeatureSiteWith layouts raw eligible profile lookup
       (FlowIndex.ofList (foldRoles raw.locals raw.code)).get?)
     (.ofList certificate) 0
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code) = true
 
-instance (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
+instance (layouts : Array RawLayout) (raw : RawMethod) (profile : FeatureProfile)
+    (certificate : FeatureCertificate)
     (reachable : List Bool) (code : List Op) :
-    Decidable (FeatureFlowValid raw profile certificate reachable code) :=
+    Decidable (FeatureFlowValid layouts raw profile certificate reachable code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Streaming validation has exactly the same entry, mask, shape and successor checks
     as indexing the complete certificate and fold-role lists at every site. -/
-theorem FeatureFlowValid_iff_list (raw : RawMethod) (profile : FeatureProfile)
+theorem FeatureFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
+    (profile : FeatureProfile)
     (certificate : FeatureCertificate) (reachable : List Bool) (code : List Op) :
-    FeatureFlowValid raw profile certificate reachable code ↔
+    FeatureFlowValid layouts raw profile certificate reachable code ↔
       certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
       reachable = certificate.map Option.isSome ∧
       certificate[0]? = some (some
         { stack := [], locals := List.replicate raw.locals.length none }) ∧
-      all3 (checkFeatureSite raw profile (fun target => certificate[target]?)
+      all3 (checkFeatureSite layouts raw profile (fun target => certificate[target]?)
           (fun target => (foldRoles raw.locals raw.code)[target]?))
         (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true := by
   unfold FeatureFlowValid
@@ -534,20 +650,21 @@ theorem factsWeaken_preserves {source target : List (Option W32)} {values : List
 
 /-- Abstract execution edges are computed from raw instructions and incoming
     facts, rather than copied from the extractor's claimed reachable mask. -/
-def FeatureEdge (raw : RawMethod) (profile : FeatureProfile)
+def FeatureEdge (layouts : Array RawLayout) (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) (pc target : Nat) : Prop :=
   ∃ instruction role state after successors,
     (raw.code.zip (foldRoles raw.locals raw.code))[pc]? = some (instruction, role) ∧
     certificate[pc]? = some (some state) ∧
-    featureTransferAt raw profile role instruction state = some after ∧
+    featureTransferAt layouts raw profile role instruction state = some after ∧
     featureSuccessors pc instruction state = some successors ∧ target ∈ successors
 
 /-- Validation establishes closure under every independently recomputed edge,
-    including backedges and every switch destination. -/
-theorem FeatureFlowValid.edge_closed {raw : RawMethod} {profile : FeatureProfile}
+    including backedges and every possible switch destination. -/
+theorem FeatureFlowValid.edge_closed {layouts : Array RawLayout} {raw : RawMethod}
+    {profile : FeatureProfile}
     {certificate : FeatureCertificate} {reachable : List Bool} {code : List Op}
-    (valid : FeatureFlowValid raw profile certificate reachable code)
-    {pc target : Nat} (edge : FeatureEdge raw profile certificate pc target) :
+    (valid : FeatureFlowValid layouts raw profile certificate reachable code)
+    {pc target : Nat} (edge : FeatureEdge layouts raw profile certificate pc target) :
     ∃ incoming, certificate[target]? = some (some incoming) := by
   obtain ⟨instruction, role, state, after, successors, rawAt, stateAt, transferred, successorsAt,
     member⟩ := edge
@@ -576,18 +693,21 @@ theorem FeatureFlowValid.edge_closed {raw : RawMethod} {profile : FeatureProfile
     | some incoming => exact ⟨incoming, rfl⟩
 
 /-- The pcs reachable from entry along recomputed feature edges. -/
-inductive FeaturePath (raw : RawMethod) (profile : FeatureProfile)
+inductive FeaturePath (layouts : Array RawLayout) (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) : Nat → Prop where
-  | entry : FeaturePath raw profile certificate 0
-  | next {pc target} : FeaturePath raw profile certificate pc →
-      FeatureEdge raw profile certificate pc target → FeaturePath raw profile certificate target
+  | entry : FeaturePath layouts raw profile certificate 0
+  | next {pc target} : FeaturePath layouts raw profile certificate pc →
+      FeatureEdge layouts raw profile certificate pc target →
+        FeaturePath layouts raw profile certificate target
 
 /-- Arbitrarily many steps through the validated graph remain in the emitted
     reachable mask; this includes cyclic paths without a bound on iterations. -/
-theorem FeatureFlowValid.path_reachable {raw : RawMethod} {profile : FeatureProfile}
+theorem FeatureFlowValid.path_reachable {layouts : Array RawLayout} {raw : RawMethod}
+    {profile : FeatureProfile}
     {certificate : FeatureCertificate} {reachable : List Bool} {code : List Op}
-    (valid : FeatureFlowValid raw profile certificate reachable code)
-    {pc : Nat} (path : FeaturePath raw profile certificate pc) : reachable[pc]? = some true := by
+    (valid : FeatureFlowValid layouts raw profile certificate reachable code)
+    {pc : Nat} (path : FeaturePath layouts raw profile certificate pc) :
+    reachable[pc]? = some true := by
   have present : ∃ incoming, certificate[pc]? = some (some incoming) := by
     cases path with
     | entry => exact ⟨_, valid.2.2.2.1⟩

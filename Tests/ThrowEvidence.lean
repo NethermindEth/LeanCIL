@@ -74,7 +74,7 @@ theorem accepts_two_strings :
 #print axioms accepts_two_strings
 
 theorem rejects_non_exception_certificate :
-    ¬ FeatureFlowValid (raw [i 115 (ctor runtime "System.Object" 0), i 122]) .scalar
+    ¬ FeatureFlowValid #[] (raw [i 115 (ctor runtime "System.Object" 0), i 122]) .scalar
       [state [], state [none]] [true, true] [.nop, .throw "System.Object"] := by decide
 #print axioms rejects_non_exception_certificate
 
@@ -85,21 +85,48 @@ private def guardStates : FeatureCertificate :=
 private def guardCode : List Op :=
   [.arg 0, .brnonzero 5, .nop, .nop, .throw "System.ArgumentException", .arg 0, .ret none]
 
-example : FeatureFlowValid guardRaw .scalar guardStates (List.replicate 7 true) guardCode := by decide
+example : FeatureFlowValid #[] guardRaw .scalar guardStates (List.replicate 7 true) guardCode := by decide
 -- The raised type is the constructed one, and the fold cannot be emitted as a hole.
-example : ¬ FeatureFlowValid guardRaw .scalar guardStates (List.replicate 7 true)
+example : ¬ FeatureFlowValid #[] guardRaw .scalar guardStates (List.replicate 7 true)
     (guardCode.set 4 (.throw "System.InvalidOperationException")) := by decide
-example : ¬ FeatureFlowValid guardRaw .scalar guardStates (List.replicate 7 true)
+example : ¬ FeatureFlowValid #[] guardRaw .scalar guardStates (List.replicate 7 true)
     (guardCode.set 4 (.unsupported "hidden")) := by decide
 
 -- A branch to the raw `throw` would raise whatever object it carries, so it is rejected.
 private def enteredRaw := raw [i 2, i 37, i 45 (.target 6), i 38, i 114 (.text "zero"), i 115 argument, i 122]
-example : ¬ FeatureFlowValid enteredRaw .scalar
+example : ¬ FeatureFlowValid #[] enteredRaw .scalar
     [state [], state [none], state [none, none], state [none], state [], state [none], state [none]]
     (List.replicate 7 true) [.arg 0, .dup, .brnonzero 6, .pop, .nop, .nop, .throw "System.ArgumentException"] := by decide
 
--- A `throw` outside the exact encoding stays unsupported.
-example : ¬ FeatureFlowValid (raw [i 20, i 122]) .scalar [state [], state [none]] [true, true]
+/-- An adjacent raw null is the only operand admitted by the null-throw fold. -/
+theorem null_throw_encoding :
+    foldRoles [] [i 20, i 122] =
+      [some .head, some (.raise "System.NullReferenceException")] ∧
+    FeatureFlowValid #[] (raw [i 20, i 122]) .scalar
+      [state [], state [none]] [true, true] [.nop, .throw "System.NullReferenceException"] ∧
+    ¬ FeatureFlowValid #[] (raw [i 22, i 122]) .scalar
+      [state [], state [some 0]] [true, true] [.nop, .throw "System.NullReferenceException"] ∧
+    ¬ FeatureFlowValid #[] (raw [i 20 (.text "forged"), i 122]) .scalar
+      [state [], state [none]] [true, true] [.nop, .throw "System.NullReferenceException"] ∧
+    ¬ FeatureFlowValid #[] (raw [i 20, i 0, i 122]) .scalar
+      [state [], state [none], state [none]] [true, true, true]
+      [.nop, .nop, .throw "System.NullReferenceException"] := by decide +kernel
+#print axioms null_throw_encoding
+
+/-- A branch may enter at the null load, but not skip it to reach the folded throw. -/
+theorem null_throw_entry :
+    FeatureFlowValid #[] (raw [i 20, i 43 (.target 2), i 20, i 122]) .scalar
+      [state [], state [none], state [none], state [none, none]]
+      [true, true, true, true]
+      [.memory .nullRef, .branch 2, .nop, .throw "System.NullReferenceException"] ∧
+    ¬ FeatureFlowValid #[] (raw [i 20, i 43 (.target 3), i 20, i 122]) .scalar
+      [state [], state [none], none, state [none]] [true, true, false, true]
+      [.memory .nullRef, .branch 3, .unsupported "dead", .throw "System.NullReferenceException"] :=
+  by decide +kernel
+#print axioms null_throw_entry
+
+-- A null throw cannot claim another exception type.
+example : ¬ FeatureFlowValid #[] (raw [i 20, i 122]) .scalar [state [], state [none]] [true, true]
     [.nop, .throw "System.Object"] := by decide
 
 end Tests.ThrowEvidence

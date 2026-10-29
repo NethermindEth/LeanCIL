@@ -41,12 +41,13 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     match aggregateIndex type with
     | none => return []
     | some index =>
-      if opcode = 0x71 then return [.size pc index .load]
+      if typeStorage layouts type ≠ some (.field (.aggregate index)) then none
+      else if opcode = 0x71 then return [.size pc index .load]
       else if opcode = 0x81 then return [.size pc index .store]
       else if opcode = 0xfe15 then return [.size pc index .initialize]
       else if opcode = 0x70 then return [.size pc index .copy]
       else if opcode = 0xfe1c then return [.size pc index .sizeOf]
-      else if opcode ∈ [0x8f, 0xa3, 0xa4] then return [.size pc index .arrayElement]
+      else if opcode ∈ [0x8d, 0x8f, 0xa3, 0xa4] then return [.size pc index .arrayElement]
       else return []
   -- `newobj` of a struct, then `Unsafe.SizeOf<T>` and `Unsafe.Add<T>`.
   | 0x73, .call site =>

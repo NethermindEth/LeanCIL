@@ -66,38 +66,38 @@ private def foldMask := [true, true, true, true, true, true, true, true, false, 
 private def foldCode : List Op := [.nop, .nop, .nop, .nop, .const32 1, .brzero 8, .const32 1, .ret none,
   .unsupported "pruned", .unsupported "pruned"]
 
-example : FeatureFlowValid foldRaw .scalar foldStates foldMask foldCode := by decide
+example : FeatureFlowValid #[] foldRaw .scalar foldStates foldMask foldCode := by decide
 -- A forged constant fails even with matching facts, and forged facts cannot prune the live branch.
-example : ¬ FeatureFlowValid foldRaw .scalar foldStates foldMask (foldCode.set 4 (.const32 0)) := by decide
-example : ¬ FeatureFlowValid foldRaw .scalar (foldStates.set 5 (state [some 0])) foldMask foldCode := by decide
-example : ¬ FeatureFlowValid foldRaw .scalar foldStates foldMask (foldCode.set 2 (.const32 0)) := by decide
+example : ¬ FeatureFlowValid #[] foldRaw .scalar foldStates foldMask (foldCode.set 4 (.const32 0)) := by decide
+example : ¬ FeatureFlowValid #[] foldRaw .scalar (foldStates.set 5 (state [some 0])) foldMask foldCode := by decide
+example : ¬ FeatureFlowValid #[] foldRaw .scalar foldStates foldMask (foldCode.set 2 (.const32 0)) := by decide
 -- Distinct types decide the opposite edge.
 private def distinctRaw := raw (test marker other ++ [i 44 (.target 8), i 23, i 42, i 22, i 42])
-example : ¬ FeatureFlowValid distinctRaw .scalar foldStates foldMask foldCode := by decide
-example : FeatureFlowValid distinctRaw .scalar
+example : ¬ FeatureFlowValid #[] distinctRaw .scalar foldStates foldMask foldCode := by decide
+example : FeatureFlowValid #[] distinctRaw .scalar
     ((foldStates.set 5 (state [some 0])).set 6 none |>.set 7 none |>.set 8 (state []) |>.set 9 (state [some 0]))
     [true, true, true, true, true, true, false, false, true, true]
     [.nop, .nop, .nop, .nop, .const32 0, .brzero 8, .unsupported "pruned", .unsupported "pruned", .const32 0, .ret none] := by decide
 
 -- A branch into the operands would reach the comparison with a different emitted stack.
 private def enteredRaw := raw ([i 22, i 43 (.target 4)] ++ test marker marker ++ [i 42])
-example : ¬ FeatureFlowValid enteredRaw .scalar
+example : ¬ FeatureFlowValid #[] enteredRaw .scalar
     [state [], state [some 0], none, none, state [some 0], state [none, some 0], state [none, some 0], state [some 1]]
     [true, true, false, false, true, true, true, true]
     [.const32 0, .branch 4, .unsupported "", .unsupported "", .nop, .nop, .const32 1, .ret none] := by decide
 -- The same facts are accepted once the edge enters at the first operand.
-example : FeatureFlowValid (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
+example : FeatureFlowValid #[] (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
     [state [], state [some 0], state [some 0], state [none, some 0], state [none, some 0], state [none, none, some 0], state [none, none, some 0], state [some 1, some 0]]
     [true, true, true, true, true, true, true, true]
     [.const32 0, .branch 2, .nop, .nop, .nop, .nop, .const32 1, .ret none] := by decide
 
 -- Undecided comparisons and stray type handles have no admitted translation.
 private def undecidedRaw := raw (test (.atom "Forwarder" "System.UInt64") word ++ [i 42])
-example : ¬ FeatureFlowValid undecidedRaw .scalar
+example : ¬ FeatureFlowValid #[] undecidedRaw .scalar
     [state [], state [none], state [none], state [none, none], state [none, none], state [none]]
     (List.replicate 6 true) [.nop, .nop, .nop, .nop, .const32 0, .ret none] := by decide
-example : featureOpMatchesAt foldRaw none (i 208 (.type marker)) (.const32 0) = false := by decide
-example : featureOpMatchesAt foldRaw none (i 40 equality) (.eq) = false := by decide
-example : featureOpMatchesAt foldRaw none (i 40 fromHandle) (.convU4) = false := by decide
+example : featureOpMatchesAt #[] foldRaw none (i 208 (.type marker)) (.const32 0) = false := by decide
+example : featureOpMatchesAt #[] foldRaw none (i 40 equality) (.eq) = false := by decide
+example : featureOpMatchesAt #[] foldRaw none (i 40 fromHandle) (.convU4) = false := by decide
 
 end Tests.TypeTestEvidence

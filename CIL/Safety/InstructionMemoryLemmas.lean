@@ -532,6 +532,19 @@ theorem spanFillInstruction_contract (width : Nat) (clear : Bool) (stack values 
     | split at filled
 #print axioms spanFillInstruction_contract
 
+/-- Checked reference addition preserves memory and returns only a valid reference. -/
+theorem referenceAddInstruction_contract (size : Nat) (signed : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (executed : referenceAddInstruction size signed stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold referenceAddInstruction at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms referenceAddInstruction_contract
+
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
 private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
@@ -620,6 +633,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   split at h
   · cases h
   · split at h
+    · exact referenceAddInstruction_contract _ _ _ _ _ _ h
     · exact pointerTransferInstruction_contract _ _ _ _ _ _ _ h
     · exact arrayTransferInstruction_contract _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h

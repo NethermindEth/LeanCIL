@@ -8,6 +8,7 @@
 
 using System.Reflection;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/GenericLayouts");
@@ -115,6 +116,89 @@ foreach (var (name, signature) in new[]
     var proofPath = Path.Combine(root, name + ".lean");
     File.WriteAllText(proofPath, proof);
     evidence.Add(proofPath, "PASS closed generic layout: " + name);
+}
+foreach (var closedInterface in new[] { false, true })
+{
+    var name = closedInterface ? "ClosedInterfaceOwner" : "InterfaceOwner";
+    var dll = Path.Combine(root, name + ".dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        TypeReference constraint = module.GetType("Examples.ICounterValue");
+        TypeReference argument = module.GetType("Examples.CounterValue");
+        if (closedInterface)
+        {
+            var genericConstraint = new GenericInstanceType(module.GetType("Examples.IClosedCounter`1"));
+            genericConstraint.GenericArguments.Add(module.TypeSystem.Int32);
+            constraint = genericConstraint;
+            var genericArgument = new GenericInstanceType(module.GetType("Examples.GenericInterfaceCounter`1"));
+            genericArgument.GenericArguments.Add(module.TypeSystem.Int32);
+            argument = genericArgument;
+        }
+        var template = module.GetType("Examples.GenericPair`1");
+        var owner = new TypeDefinition("Examples", "InterfacePair`1", template.Attributes, template.BaseType);
+        var parameter = new GenericParameter("T", owner) { Attributes = template.GenericParameters[0].Attributes };
+        foreach (var inherited in template.GenericParameters[0].Constraints)
+            parameter.Constraints.Add(new GenericParameterConstraint(inherited.ConstraintType));
+        parameter.Constraints.Add(new GenericParameterConstraint(constraint));
+        owner.GenericParameters.Add(parameter);
+        owner.Fields.Add(new FieldDefinition("First", Mono.Cecil.FieldAttributes.Public, parameter));
+        owner.Fields.Add(new FieldDefinition("Second", Mono.Cecil.FieldAttributes.Public, parameter));
+        module.Types.Add(owner);
+        var method = module.GetType("Examples.GenericLayouts").Methods.Single(method => method.Name == "VectorSize");
+        var call = (GenericInstanceMethod)method.Body.Instructions.Single(instruction =>
+            instruction.OpCode.Code == Code.Call).Operand;
+        var closedOwner = new GenericInstanceType(owner);
+        closedOwner.GenericArguments.Add(argument);
+        call.GenericArguments[0] = closedOwner;
+        module.Write(dll);
+        argument.Resolve().Interfaces.Clear();
+        module.Write(Path.Combine(root, name + "-invalid.dll"));
+    }
+    var failure = Execute(["dotnet", ExtractorPath, "extract", Path.Combine(root, name + "-invalid.dll"),
+        "GenericLayouts::VectorSize()", Path.Combine(root, name + "-invalid")]);
+    if (failure.Code == 0 || !failure.Output.Contains("Unsupported generic struct constraint type"))
+        throw new InvalidOperationException("Unsatisfied generic struct constraint accepted: " + failure.Output);
+    var output = Path.Combine(root, name);
+    Run(["dotnet", ExtractorPath, "extract", dll, "GenericLayouts::VectorSize()", output]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var narrow = NarrowEvidence(source, "layouts_validated");
+    var expected = closedInterface ? 16 : 8;
+    if (!Equals(Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.GenericLayouts")!
+        .GetMethod("VectorSize")!.Invoke(null, []), expected))
+        throw new InvalidOperationException("Interface-constrained layout differs from the CLR");
+    var path = Path.Combine(root, name + ".lean");
+    File.WriteAllText(path, narrow + $$"""
+
+        /-- A closed interface constraint retains the concrete argument's checked storage size. -/
+        theorem interface_owner_size :
+            (CIL.Safety.invoke Extracted.program 8 0 []
+              { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
+        #print axioms interface_owner_size
+        """);
+    evidence.Add(path, "PASS generic owner with direct interface constraint: " + name, "layouts_validated");
+    var invalid = Path.Combine(root, name + "-missing-interface.lean");
+    var marker = closedInterface ? "::Examples.IClosedCounter`1<System.Int32>" : "::Examples.ICounterValue";
+    marker = System.Text.Json.JsonSerializer.Serialize(marker)[1..^1];
+    var start = narrow.IndexOf("interfaces := [", StringComparison.Ordinal);
+    var interfaces = narrow.IndexOf(marker, start, StringComparison.Ordinal);
+    var end = narrow.IndexOf(']', start);
+    if (start < 0 || interfaces < 0 || interfaces > end)
+        throw new InvalidOperationException("Missing interface evidence");
+    // Change only the argument's interface list, retaining the constraint's original identity.
+    var changed = narrow[..start] + "interfaces := []" + narrow[(end + 1)..];
+    File.WriteAllText(invalid, changed);
+    rejected.Add(invalid, "PASS rejected unsatisfied generic owner constraint: " + name, "LayoutsValid");
+    var constraintStart = narrow.LastIndexOf("constraints := [", StringComparison.Ordinal);
+    var constraintIdentity = narrow.IndexOf(marker, constraintStart, StringComparison.Ordinal);
+    if (constraintIdentity < 0) throw new InvalidOperationException("Missing owner constraint identity");
+    var forgedIdentity = closedInterface ? marker.Replace("System.Int32", "System.Int64", StringComparison.Ordinal)
+        : "ForgedScope" + marker;
+    var wrongIdentity = narrow[..constraintIdentity] + forgedIdentity +
+        narrow[(constraintIdentity + marker.Length)..];
+    var wrongPath = Path.Combine(root, name + "-wrong-identity.lean");
+    File.WriteAllText(wrongPath, wrongIdentity);
+    rejected.Add(wrongPath, "PASS rejected wrong owner constraint identity: " + name, "LayoutsValid");
 }
 evidence.Check();
 rejected.Check();

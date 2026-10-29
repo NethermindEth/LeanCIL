@@ -6,6 +6,20 @@ import CIL.Extraction.Scalars
 namespace Tests.PointerOperations
 open CIL.Safety
 
+/-- Pointer storage admits characters and integer enums, without admitting other pointee shapes. -/
+theorem pointer_storage_kinds :
+    let runtime := CIL.Extraction.runtimeScope
+    let storage := CIL.Extraction.typeStorage []
+    storage (.pointer (.atom runtime "System.Char")) = some .reference ∧
+    storage (.pointer (.enum "Example" (.atom runtime "System.Int16"))) = some .reference ∧
+    storage (.pointer (.enum "Example" (.atom runtime "System.UInt64"))) = some .reference ∧
+    storage (.pointer (.enum "Example" (.atom runtime "System.Boolean"))) = none ∧
+    storage (.pointer (.atom "forged" "System.Char")) = none ∧
+    storage (.pointer (.atom runtime "System.Double")) = none ∧
+    storage (.pointer (.byref (.atom runtime "System.Int32"))) = none ∧
+    storage (.pointer (.pointer (.atom runtime "System.Int32"))) = none := by decide +kernel
+#print axioms pointer_storage_kinds
+
 private def memory : Memory := {
   allocations := fun identity => if identity < 2 then
     some ⟨.callerStack, ⟨8, 1, []⟩, true, [8]⟩ else none

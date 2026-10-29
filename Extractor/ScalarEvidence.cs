@@ -22,6 +22,8 @@ internal static class ScalarEvidence
             certificate.Incoming.TryGetValue(instruction, out NativeOperands.StackType[]? stack)
                 ? $"some [{string.Join(", ", stack.Reverse().Select(Kind))}]" : "none");
         lean.AppendLine($"def method{number}ScalarStates : Extraction.ScalarCertificate := [{string.Join(", ", states)}]");
-        lean.AppendLine($"theorem method{number}_scalars_validated : Extraction.ScalarFlowValid method{number}Closed method{number}FeatureStates method{number}ScalarStates method{number}.code := {LeanEmitter.Decide}");
+        lean.AppendLine($"theorem method{number}_scalars_validated : Extraction.ScalarFlowValid rawLayouts.toArray " +
+            $"method{number}Closed method{number}FeatureStates method{number}ScalarStates " +
+            $"method{number}.code := {LeanEmitter.Decide}");
     }
 }

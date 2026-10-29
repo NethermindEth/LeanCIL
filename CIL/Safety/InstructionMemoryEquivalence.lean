@@ -114,6 +114,20 @@ theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalen
     | split
 #print axioms Memory.Equivalent.spanFillInstruction
 
+/-- Checked reference addition observes equivalent allocation states and returns the same address. -/
+theorem Memory.Equivalent.referenceAddInstruction {m n : Memory} (same : m.Equivalent n)
+    (size : Nat) (signed : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (referenceAddInstruction size signed stack m)
+      (referenceAddInstruction size signed stack n) := by
+  unfold CIL.Safety.referenceAddInstruction
+  split <;> try simp only [same.add]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.referenceAddInstruction
+
 /-- Non-fill memory operations preserve equivalent memories and identical values. -/
 private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -237,6 +251,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   split
   · exact .error _
   · split
+    · exact same.referenceAddInstruction _ _ _
     · exact same.pointerTransferInstruction _ _ _ _
     · exact same.arrayTransferInstruction _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _

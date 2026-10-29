@@ -32,7 +32,7 @@ public static class IntegerMath
     public static uint MaxUInt32(uint x, uint y) => System.Math.Max(x, y);
     public static uint ClampUInt32(uint x, uint lower, uint upper) => System.Math.Clamp(x, lower, upper);
 
-    public static long MinInt64(long x, long y) => System.Math.Min(x, y);
+    public static long MinInt64(long x, long y) => long.Min(x, y);
     public static long MaxInt64(long x, long y) => System.Math.Max(x, y);
     public static long ClampInt64(long x, long lower, long upper) => System.Math.Clamp(x, lower, upper);
     public static long AbsInt64(long x) => System.Math.Abs(x);

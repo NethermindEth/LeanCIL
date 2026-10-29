@@ -35,6 +35,14 @@ computes a fresh result, so no analysis is cached across method mutation or prof
 `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
 profiles, feature queries and a loop backedge, and retains source/assembly tampering checks.
 
+`Tests/FeatureEvidence.lean` checks known int32 comparisons at signed/unsigned boundaries,
+short/long branch encodings, unknown operands and loss of facts after native conversions.
+Independent certificates reject changed comparison signedness, unjustified pruning and constants
+that do not survive a loop backedge. Compiled profile guards exercise the same propagation.
+Switch checks cover known, unknown, negative and out-of-range selectors, empty and duplicate
+tables, and backedge weakening. Unselected targets still reject out-of-range positions and
+tail-transfer interiors in both extraction and independent evidence validation.
+
 The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
 extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,
 hashes and whole-assembly signature validation are shared within the batch. Long-form argument
@@ -436,7 +444,7 @@ arguments checks everything and writes `artifacts/test-results.json`.
 | Span constructors (`SpanConstructors`) | Single-reference and pointer constructors cover primitive, aggregate and integer-vector elements, mutable/readonly views and in-place local initialization without readable bytes. Vector-field aggregate layouts are checked on x64 and ARM64; evidence mutations reject changed widths and capabilities. |
 | Supplied aggregate/vector arrays (`AggregateArrays`, `AggregateArrayStorage`) | Typed element addresses, loads/stores, lengths, span conversions and data references cover reference-free structs and integer vectors over existing storage. Kernel fixtures check masks, authority, bounds, lifetime and readonly views; independent evidence mutations reject changed element descriptors and operations. |
 | Closed generic structs (`GenericLayouts`) | Sequential same-assembly reference-free instantiations cover nested layouts, fields, direct instance methods and constructors through checked owner substitution and ordinary aggregate storage. Unsupported reference-bearing, open, non-sequential and interface/reference-constrained generic layouts remain rejected. |
-| Byte-order span transfers (`BinarySpans`) | Compiled wrappers exercise all 48 signed/unsigned 16-, 32- and 64-bit read/write/try endian overloads, short spans, read/write authority and uninitialized reads. Evidence mutations reject altered widths, endian choices, signedness and try behavior. |
+| Byte-order span transfers (`BinarySpans`) | Compiled wrappers exercise all 64 signed/unsigned 16-, 32-, 64-bit and native integer read/write/try endian overloads, short spans, read/write authority and uninitialized reads. Evidence mutations reject altered widths, endian choices, signedness and try behavior. |
 | No-read view observations (`ViewAccessors`) | Span emptiness, pinnable references and array data references cover empty/default/readonly views, empty and null arrays and observations without readable bytes or byte authority. Evidence mutations reject mismatched accessors and capabilities. |
 | Closed generic owners (`GenericOwners`) | Static helpers on closed same-assembly generic owners, nested owners and combined owner/method arguments certify through structural substitution; evidence mutations reject incorrect owner and argument bindings. |
 | Native managed dispatch (`NativeManagedDispatch`, `NativeMethodTables`) | Supplied immutable native tables cover checked byte-offset loads, authenticated native target locals, separate numeric locals and tail dispatch. Fault and certificate controls reject invalid storage, target provenance and signature changes. |
@@ -475,7 +483,7 @@ arguments checks everything and writes `artifacts/test-results.json`.
 | Method discovery includes canonical selectors and unsupported candidates without claiming support | Passed |
 | Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Passed |
 | Subtraction rejected by the unchanged universal addition contract | Passed; no successful report retained |
-| Primitive integer array allocation | Checked zero initialization, empty/non-null identity, negative/native lengths, helper returns and stores; forged element/operation certificates and unsupported element types rejected |
+| Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
 | Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against actual .NET execution and corresponding Lean proofs passed, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs passed for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
 | Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests passed |
@@ -525,8 +533,10 @@ extraction. Ten semantic tests cover initialization, permissions, lifetime, GC-s
 bounds, null references and partial overlap. The generic copy snapshot theorem and the full Lean
 library/semantic/automation build passed.
 
-Portable helper validation: 7,200 comparisons with actual .NET results passed, covering power-of-two
-boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation counts.
+Portable helper validation compares actual .NET results with extracted execution, covering
+power-of-two boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation
+counts. Primitive 32-bit, 64-bit and native rotation aliases use compact boundary samples;
+the full BitOperations matrix covers their shared scalar operation.
 Universal 64-bit rotation round-trip and integer-logarithm proofs passed with only approved Lean
 axioms; incorrect implementations failed the unchanged contracts. Nine malformed/unsupported runtime
 calls were rejected before extraction. Semantic tests reject incorrect arity, widths and operand
@@ -603,4 +613,3 @@ startup and shared-machine activity. These timings are illustrative, not a perfo
 
 The initialized-types end-to-end test and four mandatory-certificate audit cases check that
 verification reports record both the schema-3 extraction audit and initialized-type assumptions.
-

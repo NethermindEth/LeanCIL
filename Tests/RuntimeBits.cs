@@ -11,6 +11,23 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/RuntimeBits");
 Directory.CreateDirectory(root);
+// Raw CIL may pass noncanonical int32 bits to narrow helpers; the helper must normalize them.
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var removed = 0;
+    foreach (var method in module.GetType("Examples.Bits").Methods
+        .Where(method => method.Name.StartsWith("PrimitiveNarrow", StringComparison.Ordinal)))
+    foreach (var instruction in method.Body.Instructions)
+        if (instruction.OpCode.Code is Mono.Cecil.Cil.Code.Conv_U1 or Mono.Cecil.Cil.Code.Conv_U2 or
+            Mono.Cecil.Cil.Code.Conv_I1 or Mono.Cecil.Cil.Code.Conv_I2)
+        {
+            instruction.OpCode = Mono.Cecil.Cil.OpCodes.Nop;
+            removed++;
+        }
+    if (removed != 8) throw new InvalidOperationException("Unexpected narrow helper conversion count: " + removed);
+    assembly = Path.Combine(root, "Examples.dll");
+    module.Write(assembly);
+}
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Bits")!;
 var cases = 0;
 var queue = new GeneratedQueue(verification, assembly);
@@ -59,7 +76,16 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         values = values.Concat(Enumerable.Range(0, 64).SelectMany(i =>
             new[] { (1UL << i) - 1, 1UL << i, unchecked((1UL << i) + 1) })).Distinct().ToArray();
     var counts = rotations ? new[] { int.MinValue, -65, -33, -1, 0, 1, 31, 32, 33, 63, 64, 65, int.MaxValue } : new[] { 0 };
+    // Primitive aliases share models covered by the full BitOperations matrix.
+    if (method.Name.StartsWith("Primitive", StringComparison.Ordinal))
+    {
+        values = rotations ? [0, 0x8000000180000001, ulong.MaxValue] :
+            [0, 1, 2, 1UL << 31, 1UL << 63, ulong.MaxValue];
+        counts = rotations ? [-1, 0, 65] : [0];
+    }
     var claims = new List<string>();
+    var narrow = method.Name.StartsWith("PrimitiveNarrow", StringComparison.Ordinal);
+    if (narrow) values = [0, 1, 2, 127, 128, 255, 256, 32767, 32768, 65535, 65536, uint.MaxValue];
     // Different source bit patterns can become the same narrow runtime argument.
     var arguments = values.Select(bits => Value(parameters[0].ParameterType, bits)).Distinct();
     foreach (var value in arguments)
@@ -67,12 +93,13 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     {
         object[] inputs = rotations ? [value, count] : [value];
         var expected = method.Invoke(null, inputs)!;
-        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = .ok [{LeanValue(expected)}]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program {(narrow ? 48 : 8)} 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = .ok [{LeanValue(expected)}]");
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
+        " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) +
+        "⟩\n#print axioms correctness\nend ExampleProof\n");
     var selector = $"Bits::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     var comparisons = claims.Count;
     queue.Add(new(selector, proof, output), () =>
@@ -115,17 +142,30 @@ if (!failed || File.Exists(Path.Combine(wrongLog, "verified.json")))
     throw new InvalidOperationException("Incorrect integer logarithm accepted");
 
 // Preserve exact runtime identity and signature checks for the new allowlist.
-foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported", "memory-scope", "memory-key" })
+foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported",
+    "memory-scope", "memory-key", "signed-log", "wide-count", "native-count",
+    "narrow-leading", "narrow-signed-log", "narrow-return" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
     string expectedDiagnostic;
+    var fixture = mutation switch
+    {
+        "signed-log" => "PrimitivePopulation32",
+        "wide-count" => "PrimitivePower64",
+        "native-count" => "PrimitivePowerNative",
+        "narrow-leading" or "narrow-return" => "PrimitiveNarrow8",
+        "narrow-signed-log" => "PrimitiveNarrowSigned",
+        "memory-scope" or "memory-key" => "ReverseU64",
+        _ => "PrimitiveLeftU64"
+    };
+    string selector;
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
-        var method = module.GetType("Examples.Bits").Methods.Single(m => m.Name ==
-            (mutation.StartsWith("memory-", StringComparison.Ordinal) ? "ReverseU64" : "Left64"));
-        var call = (MethodReference)method.Body.Instructions.Single(i => i.OpCode.Code == Mono.Cecil.Cil.Code.Call).Operand;
+        var method = module.GetType("Examples.Bits").Methods.Single(m => m.Name == fixture);
+        selector = $"Bits::{fixture}({string.Join(",", method.Parameters.Select(p => p.ParameterType.FullName))})";
+        var call = (MethodReference)method.Body.Instructions.First(i => i.OpCode.Code == Mono.Cecil.Cil.Code.Call).Operand;
         switch (mutation)
         {
             case "scope": call.DeclaringType.Scope = module; break;
@@ -137,6 +177,18 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             case "unsupported": call.Name = "Log2"; break;
             case "memory-scope": call.DeclaringType.Scope = module.TypeSystem.CoreLibrary; break;
             case "memory-key": ((AssemblyNameReference)call.DeclaringType.Scope).PublicKeyToken = []; break;
+            case "signed-log": call.Name = "Log2"; break;
+            case "narrow-leading": call.Name = "LeadingZeroCount"; break;
+            case "narrow-return": call.ReturnType = module.TypeSystem.Int32; break;
+            case "narrow-signed-log":
+                call.Name = "Log2";
+                call.ReturnType = call.Parameters[0].ParameterType;
+                break;
+            case "wide-count":
+            case "native-count":
+                call.Name = "PopCount";
+                call.ReturnType = call.Parameters[0].ParameterType;
+                break;
         }
         expectedDiagnostic = mutation switch
         {
@@ -145,12 +197,13 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             "memory-key" => "Unsupported runtime assembly scope: " + call.FullName,
             "instance" => "Invalid evaluation stack during reachability",
             "generic" => "Contract imports require an exact closed generic instantiation on a non-generic declaring type.",
-            "return" or "argument" or "unsupported" or "memory-scope" => "External managed dependency: " + call.FullName,
+            "return" or "argument" or "unsupported" or "memory-scope" or
+                "signed-log" or "wide-count" or "native-count" or "narrow-leading" or
+                "narrow-signed-log" or "narrow-return" => "External managed dependency: " + call.FullName,
             _ => throw new InvalidOperationException("Unknown runtime rejection fixture: " + mutation)
         };
         module.Write(dll);
     }
-    var selector = mutation.StartsWith("memory-", StringComparison.Ordinal) ? "Bits::ReverseU64(ulong)" : "Bits::Left64(ulong,int)";
     var rejected = Execute(Extract("extract", dll, "Examples", selector, output));
     if (rejected.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")) ||
         !rejected.Output.Contains(expectedDiagnostic, StringComparison.Ordinal))
@@ -158,4 +211,4 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
     Console.WriteLine("PASS rejection: " + mutation);
 }
 
-Console.WriteLine($"Runtime helpers passed: {cases} comparisons; universal rotation and logarithm proofs; two incorrect implementations and nine invalid calls rejected.");
+Console.WriteLine($"Runtime helpers passed: {cases} comparisons; universal rotation and logarithm proofs; two incorrect implementations and fifteen invalid calls rejected.");

@@ -484,7 +484,19 @@ def pointerTransferInstruction (kind : CIL.TransferKind) (alignment : Nat) (stor
     .error (.memory .unwritable reference kind.width)
   | _, _ => .error .invalidState
 
-/-- Executes non-fill memory operations after the shared operand guard. -/
+/-- Adds a scalar offset to a checked reference while preserving its allocation identity. -/
+def referenceAddInstruction (size : Nat) (signed : Bool) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match stack with
+  | .scalar value :: .reference reference :: rest
+  | .reference reference :: .scalar value :: rest =>
+    let some offset := CIL.offsetValue signed value | .error .invalidState
+    let address ← referenceAt reference
+    let result ← checkedAt reference 0 (add memory address size (BitVec.ofInt 64 offset))
+    return (memory, .reference (.address result) :: rest)
+  | _ => .error .invalidState
+
+/-- Executes the remaining memory operations after the shared operand guard. -/
 def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   match operation, stack with
@@ -565,11 +577,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let offset ← referenceDifference memory target origin
     return (memory, .scalar (.i64 offset) :: rest)
   | .asRef, .reference r :: rest => return (memory, (← formValue memory r) :: rest)
-  | .add size signed, .scalar offset :: .reference r :: rest =>
-    let some offset := CIL.offsetValue signed offset | .error .invalidState
-    let address ← referenceAt r
-    let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 offset))
-    return (memory, .reference (.address result) :: rest)
   | .bitcast256, .scalar (.v256 bits) :: rest => return (memory, .scalar (.v256 bits) :: rest)
   | .bitcastValue source target, .scalar value :: rest =>
     return (memory, .scalar (← bitcastValue source target value) :: rest)
@@ -744,6 +751,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     .error (.unsupported "Memory operation observes unspecified vector bits")
   else
   match operation with
+  | .add size signed => referenceAddInstruction size signed stack memory
   | .pointerTransfer kind alignment store =>
     pointerTransferInstruction kind alignment store stack memory
   | .arrayTransfer element store => arrayTransferInstruction element store stack memory

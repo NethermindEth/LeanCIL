@@ -73,7 +73,8 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     var forged = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(forged, NarrowEvidence(source.Replace(".nop", ".localAddr 0"), obligation));
     rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
-        diagnostic => Regex.IsMatch(diagnostic, @"Extraction\.FeatureFlowValid method\d+Closed"), "is false");
+        diagnostic => Regex.IsMatch(diagnostic,
+            @"Extraction\.FeatureFlowValid rawLayouts\.toArray method\d+Closed"), "is false");
 }
 
 // The proved value comes from the assembly's RVA blob through ldtoken.

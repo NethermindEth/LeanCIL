@@ -5,6 +5,29 @@ namespace Nethermind.LeanCIL;
 
 internal static class MetadataValidation
 {
+    sealed record RefLikeMetadata(bool IsByRefLike);
+
+    internal static bool IsByRefLike(TypeReference type) =>
+        EnumTypes.Cached(type, RefLikeMarker).IsByRefLike;
+
+    static RefLikeMetadata RefLikeMarker(TypeReference type)
+    {
+        var markers = type.Resolve().CustomAttributes.Where(attribute =>
+            attribute.AttributeType.FullName == "System.Runtime.CompilerServices.IsByRefLikeAttribute").ToArray();
+        if (markers.Length == 0) return new(false);
+        var marker = markers[0];
+        var constructor = marker.Constructor;
+        if (markers.Length != 1 || marker.AttributeType is TypeSpecification ||
+            !RuntimeModels.ExactScope(marker.AttributeType.Scope, "System.Runtime") ||
+            constructor.Name != ".ctor" || !constructor.HasThis || constructor.ExplicitThis ||
+            constructor.CallingConvention != MethodCallingConvention.Default ||
+            constructor.HasGenericParameters || constructor.Parameters.Count != 0 ||
+            constructor.ReturnType.MetadataType != MetadataType.Void ||
+            marker.HasConstructorArguments || marker.HasFields || marker.HasProperties)
+            throw new InvalidDataException("Unsupported byref-like marker: " + type.FullName);
+        return new(true);
+    }
+
     static string ScopeName(IMetadataScope scope) => scope switch
     {
         AssemblyNameReference assembly => assembly.Name,
@@ -202,14 +225,18 @@ internal static class MetadataValidation
         var offsets = new Dictionary<string, int>();
         var end = 0;
         var alignment = 1;
+        var byRefLike = IsByRefLike(reference);
         foreach (var actual in Fields(reference))
         {
             var field = actual.Definition;
             var fieldType = actual.Type;
+            var aggregate = IsAggregate(fieldType, module);
+            if (!byRefLike && aggregate && IsByRefLike(fieldType))
+                throw new InvalidDataException("Byref-like field in a heap-storable struct: " + field.FullName);
             int? vectorWidth = VectorFieldWidth(fieldType);
-            if (fieldType is TypeSpecification && vectorWidth is null && !IsAggregate(fieldType, module))
+            if (fieldType is TypeSpecification && vectorWidth is null && !aggregate)
                 throw new InvalidDataException($"Unsupported field type: {fieldType.FullName}");
-            var nested = IsAggregate(fieldType, module)
+            var nested = aggregate
                 ? AggregateLayout(fieldType, module, architecture, active, layouts, typeCounts) : null;
             int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(fieldType);
             if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
@@ -262,10 +289,12 @@ internal static class MetadataValidation
         }
         if (type is PointerType pointer)
         {
+            var element = EnumTypes.Storage(pointer.ElementType);
             if (!IsAggregate(pointer.ElementType, module) && IntegerVectorWidth(pointer.ElementType) is null &&
-                (pointer.ElementType is TypeSpecification ||
-                pointer.ElementType.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
-                    MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 or
+                (element is TypeSpecification ||
+                element.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
+                    MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Char or
+                    MetadataType.Int32 or MetadataType.UInt32 or
                     MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr)))
                 throw new InvalidDataException("Unsupported stack-storage pointer element type");
             Type(pointer.ElementType, module, architecture: architecture);

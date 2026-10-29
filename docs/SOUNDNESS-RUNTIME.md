@@ -8,6 +8,23 @@ require their features; portable operations use software semantics. Profile vali
 but the verifier does not discover a deployment's actual CPU, runtime or resource availability.
 See [runtime profiles](RUNTIME-PROFILES.md).
 
+`IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` use the profile's required
+64-bit process assumption. Their exact getters translate to constants `8`, `8` and `true`;
+they do not inspect the verifier host or establish a deployment's actual process width.
+
+`RuntimeHelpers.IsReferenceOrContainsReferences<T>()` returns `false` only for supported primitive
+integers, booleans, characters, integer enums and vectors, or a reference-free aggregate admitted
+by the layout validator. Closed generic and padded aggregates use that same validator. A byref-like
+aggregate is admissible when its validated fields contain neither references nor byrefs; spans,
+arrays, classes, open generic arguments and unsupported storage are rejected. The query establishes
+neither initialized padding nor memory access, lifetime or escape authority.
+
+The exact runtime signature and generic argument bind the constant independently of extraction.
+Feature and scalar certificates receive `rawLayouts.toArray`, including types used only by queries;
+the enclosing translation certificate checks the complete layout table. Aggregate queries compare
+their index and identity without repeating layout computation. Runtime correspondence assumes the
+.NET 10 helper's reference-and-byref classification, rather than inspecting the verifier host.
+
 | Area | Model convention / deployment premise | Excluded claim |
 | --- | --- | --- |
 | Numeric operations | Bit-vector wrapping; checked arithmetic/conversions use mathematical bounds; signed division truncates toward zero | Floating-point conversion and arbitrary CLI/runtime behavior |
@@ -23,7 +40,23 @@ and binary hashes on pinned x64/ARM64 binaries. It is differential evidence, not
 reproducible source-to-binary build. Small integers use i32 stack values; narrow stores truncate and
 loads/returns sign- or zero-extend by the declared type. Boolean bytes need not be canonical.
 
+### Pointer element offsets
+
+`Unsafe.Add<T>(void*, int)` and `Unsafe.Subtract<T>(void*, int)` use the same checked,
+allocation-relative element offsets as their managed-reference counterparts. Runtime correspondence
+assumes .NET 10's native-width multiplication by `sizeof(T)` followed by addition or subtraction.
+They admit existing storage for supported integer,
+enum, vector and reference-free aggregate types; neither fabricates addresses nor grants authority.
+Negative offsets wrap at native width before the resulting reference is checked for lifetime and
+bounds. Null and invalid resulting references fail. Exact signature checks bind the pointer overload;
+primitive/vector stride and signedness are checked directly, and aggregate stride uses layout evidence.
+
 ### Unspecified vector lanes
+
+Portable 128- and 256-bit integer vector bitwise operators, whole-vector equality, `Zero` and
+`AllBitsSet` share their bit-level semantics for byte, signed/unsigned 32-bit and signed/unsigned
+64-bit elements. The intrinsic certificate checks the exact runtime call, element, width, generic
+arguments and emitted operation. Floating-point equality and 512-bit portable forms are excluded.
 
 `v128Low64 low` represents every vector with that low lane. `checkedIntrinsic` admits only consumers
 proved independent of the upper lane: reinterpretation, lane-zero extraction and the count operands
@@ -46,11 +79,23 @@ Reference-element and multidimensional arrays, covariance and addresses of array
 Valid null/index failures raise their named exceptions; invalid descriptors, expired storage and
 missing authority remain model faults and cannot discharge those exceptional contracts.
 
-`newarr` allocates only primitive integer/bool/char/native arrays. Fresh non-null identities survive
-frame return, including for empty arrays. Payloads start zeroed and writable. Negative lengths raise
-`OverflowException`; lengths above `0x7fffffc7`, invalid native extents and allocator inconsistency
-are model faults. The [CoreCLR ceiling](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/gchelpers.cpp)
+`newarr` allocates primitive integer/bool/char/native arrays, same-assembly integer-backed enums,
+validated reference-free aggregates and supported integer vectors. Enum payloads start at zero
+even when the enum declares no zero member. Fresh non-null
+identities survive frame return, including for empty arrays. Payloads start zeroed and writable.
+Negative lengths raise `OverflowException`; lengths above `0x7fffffc7`, invalid native extents and
+allocator inconsistency are model faults. The [CoreCLR ceiling](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/gchelpers.cpp)
 does not establish available memory. GC, object headers and out-of-memory behavior are not modeled.
+
+Array component sizes range from 1 to 65535 bytes, matching CoreCLR's
+[16-bit component-size field](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/methodtable.h).
+Composite payloads have eight-byte base alignment on the admitted 64-bit targets, independent of
+element stride: the [array header](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/object.h)
+preserves the [GC pointer alignment](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/gc/env/gcenv.base.h).
+Vector arrays do not acquire 16-, 32- or 64-byte alignment from their element width. Padding bytes,
+like fields, start initialized to zero. Byref-like structs cannot be array elements or fields of
+heap-storable structs. The raw byref-like marker is decoded from metadata; faithful decoding and
+serialization remain extractor assumptions, while the Lean layout and array checks enforce it.
 
 Spans, slices, array conversions and `MemoryMarshal` views preserve backing identity and capability;
 creating a view neither reads/initializes bytes nor grants byte authority. Readonly views permit
@@ -60,8 +105,11 @@ constructors require a checked extent, not a numeric address. Raw `void*` is adm
 supported helpers/constructors. Arbitrary pointer element types and reference-bearing layouts remain
 unsupported. [OPCODES](OPCODES.md) specifies the exact constructor and receiver forms.
 
-Aggregate/vector loads and stores preserve snapshot initialization masks. Fill captures its value
-before writing, including aliasing cases, and preserves those masks; Clear initializes every byte.
+Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
+`byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
+unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.
+Fill captures its value before writing, including aliasing cases, and preserves those masks;
+Clear initializes every byte.
 Nonempty destinations need write authority, not prior readability. Copy requires initialized source
 bytes. Empty operations grant no authority. Empty spans have null pinnable references; empty arrays
 retain their data reference. Null array data-reference access raises its named exception.
@@ -73,6 +121,7 @@ Zero-byte blocks access no memory, including through null. Prefix operands/follo
 are validated; correspondence to CoreCLR remains assumed.
 
 `BinaryPrimitives` span operations bind width, endian order, signedness and try behavior exactly.
+Native integer overloads use eight-byte transfers under the validated 64-bit deployment profile.
 Short ordinary operations raise `ArgumentOutOfRangeException`; short try-reads initialize the output
 to zero and short try-writes preserve memory. Reads capture source before writing an aliased output.
 These are runtime-helper assumptions backed by validation, not verified runtime implementations.
@@ -163,10 +212,21 @@ All underlying bit patterns are admitted, not just named constants. Narrow exten
 follows the underlying type. Boxing, reflection, enum instance methods and external enum dependencies
 are excluded; equal byte widths do not authorize replacing one enum identity with another.
 
+Checked pointer parameters and locals admit these enum types and `char`, using the existing
+allocation-relative reference representation and integer loads/stores. Enum pointees retain their
+validated declaration identity and underlying storage; character pointees require the exact runtime
+type identity. This does not admit floating-point, nested-pointer or reference-bearing pointees.
+
 ## Portable bit helpers
 
 Rotations use modulo-width counts; counts/reversal and log2 follow the scalar bit-vector model.
 Log2(0) is zero. Round-up returns zero for zero/overflow; signed power-of-two tests exclude the sign
-bit. Native overloads assume 64 bits. Correspondence to the selected .NET BitOperations and
-BinaryPrimitives overloads remains a runtime assumption backed by exact signature checks and
-boundary/runtime comparisons. See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).
+bit. Native overloads assume 64 bits. Primitive signed and unsigned 32-bit, 64-bit and native
+`RotateLeft`/`RotateRight` overloads share the same bit-vector rotation model. Primitive `Int32`
+and `UInt32` population/leading-zero/trailing-zero counts and `UInt32.Log2` share the existing
+32-bit result models; primitive 32-bit, 64-bit and native `IsPow2` share the signedness-aware
+power-of-two model. Signed `Log2` and 64-bit/native count results are not admitted by these aliases.
+Correspondence to these primitive methods and the selected .NET BitOperations and BinaryPrimitives
+overloads remains
+a runtime assumption backed by exact signature checks and boundary/runtime comparisons.
+See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).

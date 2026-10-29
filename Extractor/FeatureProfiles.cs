@@ -113,6 +113,23 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
 
     private static string Bool(bool value) => value ? "true" : "false";
 
+    internal static int? PlatformConstant(MethodReference reference)
+    {
+        var pointerSize = reference.Name == "get_Size" &&
+            reference.DeclaringType.FullName is "System.IntPtr" or "System.UIntPtr";
+        var processWidth = reference.Name == "get_Is64BitProcess" &&
+            reference.DeclaringType.FullName == "System.Environment";
+        if (!pointerSize && !processWidth) return null;
+        var result = pointerSize ? "System.Int32" : "System.Boolean";
+        if (!RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            reference.HasThis || reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default ||
+            reference.HasGenericParameters || reference is GenericInstanceMethod || reference.Parameters.Count != 0 ||
+            reference.FullName != $"{result} {reference.DeclaringType.FullName}::{reference.Name}()")
+            throw new InvalidDataException($"Unsupported platform getter: {reference.FullName}");
+        RuntimeModels.ValidateSignature(reference);
+        return pointerSize ? 8 : 1;
+    }
+
     internal static Feature? Getter(MethodReference reference)
     {
         if (reference.Name is not ("get_IsSupported" or "get_IsHardwareAccelerated") ||

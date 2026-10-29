@@ -1,11 +1,12 @@
 import CIL.Safety.InstructionMemory
 
 /-!
-# Primitive heap arrays
+# Reference-free heap arrays
 
 Array allocation reuses fresh allocation identities and existing typed array views, enforcing
 the .NET 10 element-count ceiling. Success still assumes runtime allocation availability;
 the model does not certify heap capacity or GC behavior. Unsupported extents remain model faults.
+Composite payloads retain the runtime's eight-byte base alignment independently of element stride.
 -/
 
 namespace CIL.Safety
@@ -24,18 +25,20 @@ def arrayMemory (allocated : Memory) (identity size : Nat) : Memory :=
     Initialization uses a constant cell function, independent of the requested length. -/
 def allocateArray (memory : Memory) (element : CIL.ArrayElement) (length : Nat) :
     ExecutionResult (ArrayView × Memory) := do
-  if !element.primitive then .error (.unsupported "Nonprimitive array allocation") else pure ()
+  if !element.allocationSupported then
+    .error (.unsupported "Unsupported array element allocation") else pure ()
   if length > maxArrayLength then
     .error (.unsupported "Array length outside supported extent") else pure ()
   let size := length * element.width
   let (identity, allocated) ← checkedAt .null size
-    (allocate memory ⟨.managedHeap, ⟨size, element.width, []⟩, true, [size]⟩)
+    (allocate memory ⟨.managedHeap, ⟨size, element.allocationAlignment, []⟩, true, [size]⟩)
   return (⟨.address ⟨identity, 0⟩, length, element⟩, arrayMemory allocated identity size)
 
 /-- Decode the CLI signed int32/native length before allocating; negative lengths overflow. -/
 def newArray (memory : Memory) (element : CIL.ArrayElement) (value : CIL.Value) :
     ExecutionResult (ArrayView × Memory) := do
-  if !element.primitive then .error (.unsupported "Nonprimitive array allocation") else pure ()
+  if !element.allocationSupported then
+    .error (.unsupported "Unsupported array element allocation") else pure ()
   let length ← match value with
     | .i32 bits => pure bits.toInt
     | .i64 bits => pure bits.toInt

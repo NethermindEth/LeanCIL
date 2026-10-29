@@ -21,12 +21,17 @@ internal static class UnsafeModels
         bool Parameter(TypeReference type) => type is GenericParameter parameter &&
             parameter.Type == GenericParameterType.Method && parameter.Position == 0 && parameter.Owner == definition;
         bool Reference(TypeReference type) => type is ByReferenceType byRef && Parameter(byRef.ElementType);
+        bool Pointer(TypeReference type) => type is PointerType { ElementType.MetadataType: MetadataType.Void };
 
         var sizeOf = reference.Name == "SizeOf" && reference.Parameters.Count == 0 &&
             reference.ReturnType.FullName == "System.Int32";
-        var elementOffset = reference.Name is "Add" or "Subtract" && reference.Parameters.Count == 2 &&
-            Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
-            reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr";
+        var elementOffset = reference.Parameters.Count == 2 &&
+            ((reference.Name is "Add" or "Subtract" && Reference(reference.ReturnType) &&
+              Reference(reference.Parameters[0].ParameterType) &&
+              reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr") ||
+             (reference.Name is "Add" or "Subtract" && Pointer(reference.ReturnType) &&
+              Pointer(reference.Parameters[0].ParameterType) &&
+              reference.Parameters[1].ParameterType.FullName == "System.Int32"));
         var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Void;
         var nullRef = reference.Name == "NullRef" && reference.Parameters.Count == 0 && Reference(reference.ReturnType);

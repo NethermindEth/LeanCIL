@@ -55,4 +55,70 @@ theorem wrong_call_shape :
       typeArguments := [.atom runtimeScope "System.Int32"] } = none := by decide +kernel
 #print axioms wrong_call_shape
 
+/-- Raw process-width calls retain their exact owner, result and external identity. -/
+def platform (owner member result : String) : CallSite := {
+  declaringType := .atom runtimeScope owner, name := member
+  target := .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++ "::" ++ member ++ "()")
+  parameterCount := 0, hasThis := false, returnsValue := true, typeArguments := []
+  returnType := .atom runtimeScope result, parameterTypes := [] }
+
+/-- Both native-size getters and the process query use the admitted 64-bit platform. -/
+theorem platform_values :
+    platformConstant (platform "System.IntPtr" "get_Size" "System.Int32") = some 8 ∧
+    platformConstant (platform "System.UIntPtr" "get_Size" "System.Int32") = some 8 ∧
+    platformConstant (platform "System.Environment" "get_Is64BitProcess" "System.Boolean") =
+      some 1 := by decide +kernel
+#print axioms platform_values
+
+/-- A platform constant is checked even when its forged instruction has the same stack effect. -/
+theorem platform_encoding (raw : RawMethod) :
+    let site := platform "System.IntPtr" "get_Size" "System.Int32"
+    featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.const32 8) = true ∧
+    featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.const32 4) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with
+      declaringType := .atom "forged" "System.IntPtr" }⟩ (.const32 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with
+      target := .external "forged" }⟩ (.const32 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with
+      returnType := .atom runtimeScope "System.UInt32" }⟩ (.const32 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 111, .call site⟩ (.const32 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with hasThis := true }⟩ (.const32 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with parameterCount := 1 }⟩ (.const32 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with
+      typeArguments := [.atom runtimeScope "System.Int32"] }⟩ (.const32 8) = false := by
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+#print axioms platform_encoding
+
+/-- A reference-content query retains its independently serialized generic argument. -/
+def referenceQuery (type : TypeExpr) : CallSite := {
+  declaringType := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers"
+  name := "IsReferenceOrContainsReferences"
+  target := .external (runtimeScope ++
+    "::System.Boolean System.Runtime.CompilerServices.RuntimeHelpers::" ++
+    "IsReferenceOrContainsReferences()")
+  parameterCount := 0, hasThis := false, returnsValue := true, typeArguments := [type]
+  returnType := .atom runtimeScope "System.Boolean", parameterTypes := [] }
+
+/-- Representable references and views are not reference-free generic value storage. -/
+theorem reference_content_boundary :
+    let integer := TypeExpr.atom runtimeScope "System.Int32"
+    let query := fun type => referenceContentConstant #[] (referenceQuery type)
+    query integer = some 0 ∧
+    query (.atom runtimeScope "System.Boolean") = some 0 ∧
+    query (.atom runtimeScope "System.Char") = some 0 ∧
+    query (.atom runtimeScope "System.UIntPtr") = some 0 ∧
+    query (.enum "enum" integer) = some 0 ∧
+    query (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
+      integer) = some 0 ∧
+    query (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector512`1")
+      integer) = some 0 ∧
+    query (.byref integer) = none ∧ query (.pointer integer) = none ∧
+    query (.array integer) = none ∧ query (.parameter 0) = none ∧
+    query (.atom runtimeScope "System.Object") = none ∧
+    query (.atom runtimeScope "System.Single") = none ∧
+    query (.apply (.constructor runtimeScope "System.Span`1") integer) = none ∧
+    query (.apply (.constructor runtimeScope "System.ReadOnlySpan`1") integer) = none ∧
+    query (.aggregate "missing" 0) = none := by decide +kernel
+#print axioms reference_content_boundary
+
 end Tests.FeatureGetter

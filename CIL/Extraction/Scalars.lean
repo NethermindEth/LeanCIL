@@ -169,7 +169,8 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
   if instruction.opcode == 141 then
     match instruction.operand, stack, emitted with
     | .type token, length :: _, .newArray element =>
-      length ∈ [.word32, .native] && element.primitive && arrayElementType token == some element
+      length ∈ [.word32, .native] && element.allocationSupported &&
+        arrayElementType token == some element.metadata
     | _, _, _ => false
   else
   match arrayStep instruction stack, emitted with
@@ -221,7 +222,7 @@ private def scalarEncodingMatches (opcode : Nat) (emitted : Op) : Bool :=
 
 /-- The emitted branch each compare-branch opcode must produce, keeping its target. -/
 private def branchEncodingMatches (opcode target : Nat) (emitted : Op) : Bool :=
-  match (if opcode <= 55 then opcode - 46 else opcode - 59), emitted with
+  (comparisonBranchIndex opcode).any fun index => match index, emitted with
   | 0, .beq actual | 1, .bge actual | 2, .bgt actual | 3, .ble actual | 4, .blt actual
   | 5, .bne actual | 6, .bgeu actual | 7, .bgtu actual | 8, .bleu actual
   | 9, .bltu actual => actual == target
@@ -261,6 +262,11 @@ private def literal (instruction : RawInstruction) : Option Op :=
     if 22 <= opcode && opcode <= 30 then some (.const32 (BitVec.ofNat 32 (opcode - 22))) else none
   | _, _ => none
 
+/-- Pointer addition admits an int32 or native byte offset on either side of the reference. -/
+private def referenceAddition : ScalarKind → ScalarKind → Bool
+  | .reference, offset | offset, .reference => offset ∈ [.word32, .native]
+  | _, _ => false
+
 /-- A covered opcode emits exactly the encoding its operand kinds imply. -/
 def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Op) :
     Bool :=
@@ -291,9 +297,10 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
         nativeWrapped left right (branchEncodingMatches instruction.opcode target) emitted
     | _, _ => false
   else if instruction.operand != .none then false
-  else if instruction.opcode == 88 && (stack[1]? == some .reference) then
-    match stack[0]?, emitted with
-    | some kind, .memory (.add 1 true) => kind ∈ [.word32, .native]
+  else if instruction.opcode == 88 &&
+      (stack[0]? == some .reference || stack[1]? == some .reference) then
+    match stack, emitted with
+    | right :: left :: _, .memory (.add 1 true) => referenceAddition left right
     | _, _ => false
   else if instruction.opcode == 89 && (stack.drop 1).head? == some .reference then
     match stack.head?, emitted with
@@ -354,11 +361,18 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
-/-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word
-    (bound by the feature check) or a size constant may emit a scalar operation. -/
-def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
+/-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word,
+    a size constant or an exact runtime query may emit a scalar operation. -/
+def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
+    (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
-  if instruction.opcode == 77 && (stack.head?).any
+  if (match instruction.operand with
+    | .call site => referenceContentQuery site | _ => false) then
+    match instruction.operand, emitted with
+    | .call site, .const32 bits => instruction.opcode == 40 &&
+      referenceContentConstant layouts site == some bits
+    | _, _ => false
+  else if instruction.opcode == 77 && (stack.head?).any
       (fun kind => match kind with | .nativeMethodTable _ => true | _ => false) then
     match stack, emitted with
     | .nativeMethodTable signature :: _, .managed (.tableLoad actual) => signature == actual
@@ -390,7 +404,10 @@ def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | some (.result _), .const32 _ => true
-    | _, .const32 bits => sizeConstant instruction bits
+    | _, .const32 bits => sizeConstant instruction bits ||
+        (instruction.opcode == 40 && match instruction.operand with
+          | .call site => platformConstant site == some bits
+          | _ => false)
     | _, _ => false
 
 /-- The result kind of a conversion opcode: `conv.i`/`conv.u` forms give native ints,
@@ -555,7 +572,7 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
 
 /-- The kind a call pushes. -/
 private def callResult (site : CallSite) : ScalarKind :=
-  if spanCallReturnsReference site ||
+  if unsafePointerOffset ⟨0, 40, .call site⟩ || spanCallReturnsReference site ||
       (viewObservation ⟨0, 40, .call site⟩).any
         (fun operation => operation == .spanPinnable || operation == .arrayData) then .reference
   else match site.target with
@@ -608,12 +625,14 @@ private def dispatchScalar (context : NativeDispatchContext) (type : TypeExpr)
   | _ => scalarType type
 
 /-- The kind of argument `index`, counting `this` as argument 0. -/
-private def argumentKind (raw : RawMethod) (context : NativeDispatchContext) (index : Nat) : Option ScalarKind :=
+private def argumentKind (raw : RawMethod)
+    (context : NativeDispatchContext) (index : Nat) : Option ScalarKind :=
   if raw.hasThis && index == 0 then some .reference
   else dispatchScalar context <$> raw.parameters[index - (if raw.hasThis then 1 else 0)]?
 
 /-- The kind an opcode with a fixed one-value push leaves on the stack. -/
-private def pushedKind (raw : RawMethod) (context : NativeDispatchContext)
+private def pushedKind (raw : RawMethod)
+    (context : NativeDispatchContext)
     (instruction : RawInstruction) : Option ScalarKind := do
   match argumentOperation instruction with
   | some (.load index) => argumentKind raw context index
@@ -687,7 +706,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let .type token := instruction.operand | none
     let element ← arrayElementType token
     let length :: tail := stack | none
-    if !element.primitive || length ∉ [.word32, .native] then none else
+    if length ∉ [.word32, .native] then none else
       return .array element :: tail
   if arrayCovered opcode then return (← arrayStep instruction stack).2
   if opcode == 20 then
@@ -709,7 +728,8 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- Arithmetic, shifts, `neg`, `not` and conversions.
   if scalarBinary opcode then
     let right :: left :: tail := stack | none
-    if opcode ∈ [88, 89] && left == .reference && right ∈ [.word32, .native] then
+    if (opcode == 88 && referenceAddition left right) ||
+        (opcode == 89 && left == .reference && right ∈ [.word32, .native]) then
       return .reference :: tail
     if opcode == 89 && left == .reference && right == .reference then
       return .native :: tail
@@ -745,6 +765,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         if let some (type, read, _) := unsafeValueCall instruction then
         (if read then [] else [scalarType type]) ++ [.reference] else
       if unsafeReferenceHelper instruction == some .asRef then [.reference] else
+      if unsafePointerOffset instruction then [.word32, .reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
@@ -812,7 +833,8 @@ private def readOnlySiteMatches (raw : RawMethod) (pc : Nat) (instruction : RawI
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, emit the right encoding, and give every successor,
     which must be reachable, exactly the resulting stack kinds. -/
-private def checkScalarSite (raw : RawMethod) (context : NativeDispatchContext)
+private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
+    (context : NativeDispatchContext)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Op → Bool
@@ -825,7 +847,7 @@ private def checkScalarSite (raw : RawMethod) (context : NativeDispatchContext)
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
       readOnlySiteMatches raw pc instruction emitted &&
-      scalarEmissionMatches role instruction stack emitted &&
+      scalarEmissionMatches layouts role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack role context, featureSuccessors pc instruction feature with
       | some after, some successors =>
@@ -835,26 +857,28 @@ private def checkScalarSite (raw : RawMethod) (context : NativeDispatchContext)
 
 /-- The scalar certificate covers exactly the feature-reachable pcs, starts with an empty
     stack, and passes every site check. -/
-def ScalarFlowValid (raw : RawMethod) (features : FeatureCertificate)
+def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Op) : Prop :=
   let context := nativeDispatchContext raw
   raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3Flow (fun lookup instruction (feature, stack) emitted =>
-      checkScalarSite raw context (fun after target => match lookup target with
+      checkScalarSite layouts raw context (fun after target => match lookup target with
         | some (some _, incoming) => incoming == some after
         | _ => false) instruction feature stack emitted)
     (.ofList (features.zip certificate)) 0
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx (features.zip certificate) code = true
 
-instance (raw : RawMethod) (features : FeatureCertificate) (certificate : ScalarCertificate)
-    (code : List Op) : Decidable (ScalarFlowValid raw features certificate code) :=
+instance (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
+    (certificate : ScalarCertificate)
+    (code : List Op) : Decidable (ScalarFlowValid layouts raw features certificate code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Pairing feature and scalar states preserves both the reachability and exact stack
     check, including targets missing from either certificate. -/
-theorem scalarSuccessor_zip (features : FeatureCertificate) (certificate : ScalarCertificate)
+theorem scalarSuccessor_zip (features : FeatureCertificate)
+    (certificate : ScalarCertificate)
     (target : Nat) (after : List ScalarKind) :
     (match (features.zip certificate)[target]? with
       | some (some _, incoming) => incoming == some after
@@ -873,13 +897,15 @@ theorem scalarSuccessor_zip (features : FeatureCertificate) (certificate : Scala
 #print axioms scalarSuccessor_zip
 
 /-- Streaming scalar validation preserves all list-indexed site checks and lengths. -/
-theorem ScalarFlowValid_iff_list (raw : RawMethod) (features : FeatureCertificate)
+theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
+    (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Op) :
-    ScalarFlowValid raw features certificate code ↔
+    ScalarFlowValid layouts raw features certificate code ↔
       raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
       raw.code.length = code.length ∧ certificate[0]? = some (some []) ∧
       all3 (fun (instruction, feature) stack emitted =>
-          checkScalarSite raw (nativeDispatchContext raw) (fun after target => match features[target]? with
+          checkScalarSite layouts raw (nativeDispatchContext raw)
+            (fun after target => match features[target]? with
             | some (some _) => certificate[target]? == some (some after)
             | _ => false)
             instruction feature stack emitted)
@@ -899,16 +925,17 @@ theorem ScalarFlowValid_iff_list (raw : RawMethod) (features : FeatureCertificat
 #print axioms ScalarFlowValid_iff_list
 
 /-- At every reachable pc the emitted instruction is the scalar encoding the raw one implies. -/
-theorem ScalarFlowValid.instruction_checked {raw : RawMethod} {features : FeatureCertificate}
+theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : RawMethod}
+    {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Op}
-    (valid : ScalarFlowValid raw features certificate code)
+    (valid : ScalarFlowValid layouts raw features certificate code)
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Op}
     (rawAt : raw.code[pc]? = some instruction)
     (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
     (featureAt : features[pc]? = some (some feature))
     (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
-    scalarEmissionMatches role instruction stack emitted = true := by
+    scalarEmissionMatches layouts role instruction stack emitted = true := by
   have pairAt : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
       some ((instruction, role), pc) := by
     simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]

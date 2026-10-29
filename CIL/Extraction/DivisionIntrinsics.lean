@@ -3,12 +3,12 @@ import Std.Data.TreeSet.Lemmas
 import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
-# Division intrinsics and opaque vector locals
+# Exact vector calls and opaque vector locals
 
-A fixed set of `Vector128/256/512<ulong>` hardware intrinsic calls, used by vectorized
-division, is emitted as `.intrinsic` operations. `DivisionIntrinsicsValid` recognizes each
-call from its exact raw metadata and requires the matching emitted intrinsic, available
-under the method's profile, and nothing else.
+`DivisionIntrinsicsValid` checks selected hardware calls used by vectorized division and
+lane-independent portable integer vector calls. Each covered call requires exact raw metadata
+and the matching emitted intrinsic, available under the method's profile. Other intrinsic
+families retain their existing extraction checks.
 
 `Vector128.CreateScalarUnsafe` leaves the upper half of its result unspecified, so a
 method that uses it keeps eligible `Vector128<ulong>` locals as opaque whole values rather
@@ -123,9 +123,58 @@ private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
     some (divisionVector "128", [.atom runtimeScope "System.UInt64"])
   | _ => none
 
-/-- The intrinsic and arity of a static, non-generic `call` that matches an admitted entry
-    exactly: owner, name, arity, identity and declared types. -/
-def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat) := do
+/-- Lane-independent integer operations share vector semantics at either supported width. -/
+private def portableVectorOperation (name : String) (width : Nat) :
+    Option (Intrinsic × Nat) :=
+  match name with
+  | "op_BitwiseAnd" => some (.vector (.band width), 2)
+  | "op_BitwiseOr" => some (.vector (.bor width), 2)
+  | "op_ExclusiveOr" => some (.vector (.bxor width), 2)
+  | "op_OnesComplement" => some (.vector (.bnot width), 1)
+  | "op_Equality" | "EqualsAll" => some (.vector (.equalsAll width), 2)
+  | "get_Zero" => some (.vector (.zero width), 0)
+  | "get_AllBitsSet" => some (.vector (.ones width), 0)
+  | _ => none
+
+/-- Exact portable vector calls retain their integer element, width, types and generic identity. -/
+private def portableVectorIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat) := do
+  if instruction.opcode != 40 then none else pure ()
+  let .call site := instruction.operand | none
+  if site.hasThis || !site.returnsValue || site.ownerArgumentCount != 0 then none else pure ()
+  let isStatic := site.name == "EqualsAll"
+  let vector ← if isStatic then
+      match site.declaringType, site.typeArguments with
+      | .atom scope owner, [element] =>
+        if scope != intrinsicsScope then none
+        else some (TypeExpr.apply (.constructor scope (owner ++ "`1")) element)
+      | _, _ => none
+    else if site.typeArguments.isEmpty then some site.declaringType else none
+  let bytes ← integerVectorWidth vector
+  if bytes != 16 && bytes != 32 then none else pure ()
+  let (intrinsic, arity) ← portableVectorOperation site.name (bytes * 8)
+  let .apply (.constructor _ owner) (.atom _ element) := vector | none
+  let staticOwner := "System.Runtime.Intrinsics.Vector" ++ toString (bytes * 8)
+  let parameterName := owner ++ (if isStatic then "<!!0>" else "<!0>")
+  let equality := site.name == "op_Equality" || isStatic
+  let result := if equality then TypeExpr.atom runtimeScope "System.Boolean" else vector
+  let resultName := if equality then "System.Boolean" else parameterName
+  let declaringName := if isStatic then staticOwner else owner ++ "<" ++ element ++ ">"
+  let signature := resultName ++ " " ++ declaringName ++ "::" ++ site.name ++ "(" ++
+    String.intercalate "," (List.replicate arity parameterName) ++ ")"
+  if site.parameterCount != arity || site.parameterTypes != List.replicate arity vector ||
+      site.returnType != result || site.target != .external (intrinsicsScope ++ "::" ++ signature)
+    then none else some (intrinsic, arity)
+
+/-- Owner names reserve portable vector calls even when their metadata is malformed. -/
+private def portableVectorOwner (owner : String) : Bool :=
+  owner == "System.Runtime.Intrinsics.Vector128" ||
+  owner == "System.Runtime.Intrinsics.Vector256" ||
+  owner.startsWith "System.Runtime.Intrinsics.Vector128`1" ||
+  owner.startsWith "System.Runtime.Intrinsics.Vector256`1"
+
+/-- The intrinsic and arity of an exact admitted call, including its generic types and identity. -/
+def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat) :=
+  portableVectorIntrinsic instruction <|> do
   if instruction.opcode != 40 then none else
   let .call site := instruction.operand | none
   if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
@@ -141,7 +190,7 @@ def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat)
 /-- Checking names and arities first preserves the original admitted-signature lookup and metadata
     checks, without any assumptions on the raw instruction. -/
 theorem divisionIntrinsic_eq_original (instruction : RawInstruction) :
-    divisionIntrinsic instruction = (do
+    divisionIntrinsic instruction = (portableVectorIntrinsic instruction <|> do
       if instruction.opcode != 40 then none else
       let .call site := instruction.operand | none
       if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
@@ -228,10 +277,42 @@ private theorem intrinsicSignature_matches (target : MethodId) (signature : Stri
       rfl
 #print axioms intrinsicSignature_matches
 
+/-- Split one metadata identity separator without decoding byte-backed strings. -/
+private def splitIdentityOwner : List UInt8 → List UInt8 × List UInt8
+  -- ASCII ':' separates the assembly, owner and member identities.
+  | 58 :: 58 :: tail => ([], tail)
+  | head :: tail =>
+    let (owner, member) := splitIdentityOwner tail
+    (head :: owner, member)
+  | [] => ([], [])
+
+/-- Family recognition uses both structured metadata and the independently supplied target. -/
+private def portableVectorFamily (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .call site =>
+    let owner := match site.declaringType with
+      | .atom _ owner | .apply (.constructor _ owner) _ => owner
+      | _ => ""
+    (portableVectorOwner owner && (portableVectorOperation site.name 128).isSome) ||
+      match intrinsicSignature site.target with
+      | some signature =>
+        let (signatureOwner, member) := splitIdentityOwner signature
+        -- ASCII space ends the return type; '<' begins type arguments and '(' begins parameters.
+        let owner := (signatureOwner.reverse.takeWhile (· != 32)).reverse.takeWhile (· != 60)
+        let name := member.takeWhile (· != 40)
+        (["System.Runtime.Intrinsics.Vector128", "System.Runtime.Intrinsics.Vector256",
+          "System.Runtime.Intrinsics.Vector128`1", "System.Runtime.Intrinsics.Vector256`1"].any
+          (fun expected => owner == identityBytes expected)) &&
+        (["op_BitwiseAnd", "op_BitwiseOr", "op_ExclusiveOr", "op_OnesComplement", "op_Equality",
+          "EqualsAll", "get_Zero", "get_AllBitsSet"].any
+          (fun expected => name == identityBytes expected))
+      | none => false
+  | _ => false
+
 /-- A call that resembles an admitted entry by identity, or by owner and name; such a call
     must then match an entry exactly. -/
 private def divisionCallFamily (instruction : RawInstruction) : Bool :=
-  match instruction.operand with
+  portableVectorFamily instruction || match instruction.operand with
   | .call site => match intrinsicSignature site.target with
     | none => divisionSignatures.any fun (owner, name, _, _, _) =>
         site.name == name && match site.declaringType with
@@ -246,7 +327,8 @@ private def divisionCallFamily (instruction : RawInstruction) : Bool :=
 
 /-- Sharing scope removal preserves family recognition by either full identity or owner/name. -/
 private theorem divisionCallFamily_eq_original (instruction : RawInstruction) :
-    divisionCallFamily instruction = (match instruction.operand with
+    divisionCallFamily instruction = (portableVectorFamily instruction ||
+      match instruction.operand with
       | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
           site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
           site.name == name && match site.declaringType with
@@ -267,7 +349,9 @@ def emittedDivisionIntrinsic : Op → Option (Intrinsic × Nat)
     | .avx2 .shl64Count | .avx2 .shr64Count | .avx2 .shl64 | .avx2 .shr64
     | .avx512 .ltu512 | .avx512 .gtu512
     | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256
-    | .vector .createScalarUnsafe64 => some (intrinsic, arity)
+    | .vector .createScalarUnsafe64
+    | .vector (.band _) | .vector (.bor _) | .vector (.bxor _) | .vector (.bnot _)
+    | .vector (.equalsAll _) | .vector (.zero _) | .vector (.ones _) => some (intrinsic, arity)
     | _ => none
   | _ => none
 
@@ -319,7 +403,7 @@ def DivisionIntrinsicsValid (closed : RawMethod) (reachable : List Bool) (method
 theorem DivisionIntrinsicsValid_iff_original (closed : RawMethod) (reachable : List Bool)
     (method : Method) :
     DivisionIntrinsicsValid closed reachable method ↔
-    let classify := fun instruction : RawInstruction => (do
+    let classify := fun instruction : RawInstruction => (portableVectorIntrinsic instruction <|> do
       if instruction.opcode != 40 then none else
       let .call site := instruction.operand | none
       if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
@@ -331,7 +415,8 @@ theorem DivisionIntrinsicsValid_iff_original (closed : RawMethod) (reachable : L
       let (returnType, parameterTypes) ← divisionCallTypes intrinsic
       if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
       return (intrinsic, arity))
-    let family := fun instruction : RawInstruction => match instruction.operand with
+    let family := fun instruction : RawInstruction =>
+      portableVectorFamily instruction || match instruction.operand with
       | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
           site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
           site.name == name && match site.declaringType with

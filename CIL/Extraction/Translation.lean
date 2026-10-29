@@ -158,7 +158,8 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   SpecializationValid rawLayouts item.original item.arguments item.closed item.parameterInput ∧
   ParameterHomesValid layouts item.parameterInput item.reachable method ∧
   MethodLayoutsValid rawLayouts layouts method item.layoutUses ∧
-  FeatureFlowValid item.closed method.profile item.featureStates item.reachable method.code ∧
+  FeatureFlowValid rawLayouts.toArray item.closed method.profile item.featureStates
+    item.reachable method.code ∧
   ManagedCallsValid (specializationTable all) imports
     (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
@@ -167,7 +168,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   DivisionIntrinsicsValid item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   VectorInitializationsValid item.closed item.reachable method ∧
-  ScalarFlowValid item.closed item.featureStates item.scalarStates method.code ∧
+  ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable method
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)

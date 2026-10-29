@@ -50,7 +50,29 @@ internal sealed class FeatureConstants
         return changed;
     }
 
-    internal int? Top => _stack.Count == 0 ? null : _stack[^1];
+    internal bool? BranchCondition(Code code)
+    {
+        if (_stack.Count == 0 || _stack[^1] is not int right) return null;
+        if (code is Code.Brfalse or Code.Brfalse_S) return right == 0;
+        if (code is Code.Brtrue or Code.Brtrue_S) return right != 0;
+        return _stack.Count >= 2 && _stack[^2] is int left ? Compare(code, left, right) : null;
+    }
+
+    // Only known int32 words reach this evaluator; native and reference values stay unknown.
+    static bool? Compare(Code code, int left, int right) => code switch
+    {
+        Code.Ceq or Code.Beq or Code.Beq_S => left == right,
+        Code.Bne_Un or Code.Bne_Un_S => left != right,
+        Code.Clt or Code.Blt or Code.Blt_S => left < right,
+        Code.Cgt or Code.Bgt or Code.Bgt_S => left > right,
+        Code.Bge or Code.Bge_S => left >= right,
+        Code.Ble or Code.Ble_S => left <= right,
+        Code.Clt_Un or Code.Blt_Un or Code.Blt_Un_S => (uint)left < (uint)right,
+        Code.Cgt_Un or Code.Bgt_Un or Code.Bgt_Un_S => (uint)left > (uint)right,
+        Code.Bge_Un or Code.Bge_Un_S => (uint)left >= (uint)right,
+        Code.Ble_Un or Code.Ble_Un_S => (uint)left <= (uint)right,
+        _ => null
+    };
 
     private int? Pop()
     {
@@ -102,13 +124,14 @@ internal sealed class FeatureConstants
                 _stack.Add(top);
                 _stack.Add(top);
                 return;
-            case Code.And: case Code.Or: case Code.Xor: case Code.Ceq:
+            case Code.And: case Code.Or: case Code.Xor:
+            case Code.Ceq: case Code.Clt: case Code.Clt_Un: case Code.Cgt: case Code.Cgt_Un:
                 int? right = Pop();
                 int? left = Pop();
                 _stack.Add(left is int a && right is int b ? code switch
                 {
                     Code.And => a & b, Code.Or => a | b, Code.Xor => a ^ b,
-                    Code.Ceq => a == b ? 1 : 0, _ => null
+                    _ => Compare(code, a, b) is bool comparison ? comparison ? 1 : 0 : null
                 } : null);
                 return;
             case Code.Calli:
@@ -119,7 +142,10 @@ internal sealed class FeatureConstants
             case Code.Call: case Code.Callvirt: case Code.Newobj:
                 MethodReference callee = (MethodReference)instruction.Operand;
                 for (int i = 0; i < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); i++) Pop();
-                if (FeatureProfile.Getter(callee) is Feature feature)
+                if ((ReferenceQueries.Constant(callee, profile.Architecture) ??
+                    FeatureProfile.PlatformConstant(callee)) is int constant)
+                    _stack.Add(constant);
+                else if (FeatureProfile.Getter(callee) is Feature feature)
                     _stack.Add(profile.Get(feature) ? 1 : 0);
                 else if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)
                     _stack.Add(null);

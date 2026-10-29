@@ -3,8 +3,8 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Folds `throw new E(...)` with literal strings and null arguments into a fault naming E. This mirrors
-// CIL.Extraction.throwFold; Lean rechecks every raised type. The constructor is not run.
+// Folds constructed exceptions and `throw null` into named faults. This mirrors
+// CIL.Extraction.foldRoles; Lean rechecks every raised type. The constructor is not run.
 internal static class Throws
 {
     const int ArgumentLimit = 4;
@@ -55,14 +55,26 @@ internal static class Throws
         var analysis = new Analysis([], [], []);
         for (int at = 0; at < code.Count; at++)
         {
-            int count = 0;
-            // One past the maximum arity bounds each prefix scan, including rejected prefixes.
-            while (count < ArgumentLimit && at + count < code.Count &&
-                code[at + count].OpCode.Code is Code.Ldstr or Code.Ldnull) count++;
-            int raise = at + count + 1;
-            if (count == ArgumentLimit || raise >= code.Count || code[raise].OpCode.Code != Code.Throw ||
-                Raised(code[at + count], code, at, count) is not string name)
-                continue;
+            int raise;
+            string name;
+            if (code[at].OpCode.Code == Code.Ldnull && at + 1 < code.Count &&
+                code[at + 1].OpCode.Code == Code.Throw)
+            {
+                raise = at + 1;
+                name = "System.NullReferenceException";
+            }
+            else
+            {
+                int count = 0;
+                // One past the maximum arity bounds each prefix scan, including rejected prefixes.
+                while (count < ArgumentLimit && at + count < code.Count &&
+                    code[at + count].OpCode.Code is Code.Ldstr or Code.Ldnull) count++;
+                raise = at + count + 1;
+                if (count == ArgumentLimit || raise >= code.Count || code[raise].OpCode.Code != Code.Throw ||
+                    Raised(code[at + count], code, at, count) is not string constructed)
+                    continue;
+                name = constructed;
+            }
             for (int k = at; k < raise; k++) analysis.Operands.Add(code[k]);
             for (int k = at + 1; k <= raise; k++) analysis.Interior.Add(code[k]);
             analysis.Raises.Add(code[raise], name);
