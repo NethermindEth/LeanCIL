@@ -59,17 +59,23 @@ string Proof(string name, string bindings, string left, string right, string par
     File.WriteAllText(path, $$"""
     import Extracted
     import CIL.MethodIdentity
+    import CIL.Safety.Execution
 
     open CIL
     namespace ExampleProof
 
     {{bindings}}
 
-    theorem correctness (x y : W64) (memory : Memory) :
-        invoke Extracted.program 4 {{left}} [.i64 x, .i64 y] memory = some (memory, [.i64 (x - y)]) ∧
-        invoke Extracted.program 4 {{right}} [.i64 x, .i64 y] memory = some (memory, [.i64 (x ^^^ y)]) ∧
-        invoke Extracted.program 32 {{parent}} [.i64 x, .i64 y] memory = some (memory, [.i64 ((x ^^^ y) + (x - y))]) := by
+    theorem correctness (x y : W64) (memory : Safety.Memory) :
+        Safety.invoke Extracted.program 4 {{left}} [.scalar (.i64 x), .scalar (.i64 y)] memory =
+          .ok (memory, [.scalar (.i64 (x - y))]) ∧
+        Safety.invoke Extracted.program 4 {{right}} [.scalar (.i64 x), .scalar (.i64 y)] memory =
+          .ok (memory, [.scalar (.i64 (x ^^^ y))]) ∧
+        Safety.invoke Extracted.program 32 {{parent}} [.scalar (.i64 x), .scalar (.i64 y)] memory =
+          .ok (memory, [.scalar (.i64 ((x ^^^ y) + (x - y)))]) := by
       exact ⟨rfl, rfl, rfl⟩
+
+    #print axioms correctness
 
     end ExampleProof
     """);
