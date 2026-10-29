@@ -15,7 +15,7 @@ def LocalSlot.Below (limit : Nat) : LocalSlot → Prop
   | .bytes _ reference => reference.allocation < limit
   | .root reference => ∀ address ∈ reference, address.Below limit
   | .readOnlyRoot address => address.Below limit
-  | .opaque128 _ => True
+  | .opaque128 _ | .methodPointer .. | .methodTable .. => True
   | .span _ _ view => ∀ span ∈ view, span.reference.Below limit
   | .array _ view => ∀ array ∈ view, array.reference.Below limit
 
@@ -29,7 +29,7 @@ theorem LocalSlot.Below.mono {before after : Nat} (growth : before ≤ after) (s
     | address reference => exact Nat.lt_of_lt_of_le bound growth
   cases slot with
   | bytes kind address => exact Nat.lt_of_lt_of_le bound growth
-  | opaque128 _ => trivial
+  | opaque128 _ | methodPointer _ _ | methodTable _ _ => trivial
   | root address => exact fun value member => reference value (bound value member)
   | readOnlyRoot address => exact reference address bound
   | span _ _ view => exact fun value member => reference value.reference (bound value member)
@@ -43,6 +43,8 @@ def localSlot (mapping : AllocationRenaming) : LocalSlot → LocalSlot
   | .bytes kind reference => .bytes kind (mapping.reference reference)
   | .root reference => .root (reference.map mapping.managedReference)
   | .readOnlyRoot address => .readOnlyRoot (mapping.managedReference address)
+  | .methodPointer signature value => .methodPointer signature value
+  | .methodTable signature value => .methodTable signature value
   | .opaque128 contents => .opaque128 contents
   | .span width writable view => .span width writable (view.map mapping.spanView)
   | .array element view => .array element (view.map mapping.arrayView)
@@ -54,7 +56,7 @@ theorem Extends.localSlot {earlier later : AllocationRenaming}
   cases slot with
   | bytes kind reference =>
     exact congrArg (LocalSlot.bytes kind) (extension.reference reference bound)
-  | opaque128 _ => rfl
+  | opaque128 _ | methodPointer _ _ | methodTable _ _ => rfl
   | readOnlyRoot reference =>
     exact congrArg LocalSlot.readOnlyRoot (extension.managedReference reference bound)
   | root reference =>
@@ -83,7 +85,7 @@ theorem localSlot_below (mapping : AllocationRenaming) (slot : LocalSlot)
     (mapping.localSlot slot).Below mapping.targetLimit := by
   cases slot with
   | bytes kind reference => exact mapping.bounded _ bound
-  | opaque128 _ => trivial
+  | opaque128 _ | methodPointer _ _ | methodTable _ _ => trivial
   | readOnlyRoot reference => exact mapping.managedReference_below reference bound
   | root reference =>
     cases reference with

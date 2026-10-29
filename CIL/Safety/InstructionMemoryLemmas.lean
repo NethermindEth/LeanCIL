@@ -49,6 +49,7 @@ theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List
 /-- Reference validity is independent of readable initialization and access
     width. A span's accessible bytes are checked by the memory operation. -/
 def Value.Valid (m : Memory) : Value → Prop
+  | .methodPointer _ | .methodTable _ => True
   | .scalar value => numericValue value = true
   | .bufferSpan view => view.validate m = .ok ()
   | .array view => view.validate m = .ok ()
@@ -137,6 +138,7 @@ theorem formValue_readOnly_valid (m : Memory) (reference : ManagedReference) (va
 theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
   cases value with
+  | methodPointer _ | methodTable _ => cases h; exact ⟨rfl, trivial⟩
   | scalar value =>
     simp only [checkedValue] at h
     split at h
@@ -177,6 +179,7 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
 theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid m) :
     checkedValue m value = .ok value := by
   cases value with
+  | methodPointer _ | methodTable _ => rfl
   | scalar value => simp only [Value.Valid] at valid; simp [checkedValue, valid]
   | bufferSpan view | array view =>
     simp only [Value.Valid] at valid
@@ -199,7 +202,7 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   intro value member
   have hv := valid value member
   cases value with
-  | scalar value => exact hv
+  | scalar value | methodPointer _ | methodTable _ => exact hv
   | bufferSpan view => exact view.validate_preserved hv hm ext
   | array view => exact view.validate_preserved hv hm ext
   | readOnlyReference r =>

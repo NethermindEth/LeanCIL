@@ -18,7 +18,7 @@ def ManagedReference.Below (limit : Nat) : ManagedReference → Prop
 
 /-- Every reference carried by a checked value belongs to the allocated identity prefix. -/
 def Value.Below (limit : Nat) : Value → Prop
-  | .scalar _ => True
+  | .scalar _ | .methodPointer _ | .methodTable _ => True
   | .reference address | .readOnlyReference address | .span address _ =>
     address.Below limit
   | .bufferSpan view => view.reference.Below limit
@@ -41,6 +41,8 @@ def arrayView (mapping : AllocationRenaming) (view : ArrayView) : ArrayView :=
 
 /-- Rename every allocation-backed part of a checked value, leaving scalar bits unchanged. -/
 def value (mapping : AllocationRenaming) : Value → Value
+  | .methodPointer pointer => .methodPointer pointer
+  | .methodTable table => .methodTable table
   | .scalar scalar => .scalar scalar
   | .reference reference => .reference (mapping.managedReference reference)
   | .readOnlyReference reference => .readOnlyReference (mapping.managedReference reference)
@@ -83,7 +85,7 @@ theorem value_below (mapping : AllocationRenaming) (value : Value)
     (bound : value.Below mapping.sourceLimit) :
     (mapping.value value).Below mapping.targetLimit := by
   cases value with
-  | scalar _ => trivial
+  | scalar _ | methodPointer _ | methodTable _ => trivial
   | reference reference | readOnlyReference reference | span reference _ =>
     exact mapping.managedReference_below reference bound
   | bufferSpan view => exact mapping.managedReference_below view.reference bound
