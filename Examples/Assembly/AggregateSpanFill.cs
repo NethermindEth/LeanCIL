@@ -13,4 +13,7 @@ internal static class AggregateSpanFill
     public static void Vector512(Span<Vector512<ulong>> target, Vector512<ulong> value) => target.Fill(value);
 
     public static void Aliased(Span<AggregateSpans.Words> target) => target.Fill(target[0]);
+
+    public static void Generic(Span<GenericPair<ulong>> target, GenericPair<ulong> value) =>
+        target.Fill(value);
 }

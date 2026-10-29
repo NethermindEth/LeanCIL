@@ -14,6 +14,7 @@ internal static class AggregateArrays
     }
 
     public static Pair Read(Pair[] source, int index) => source[index];
+    public static GenericPair<ulong> ReadGeneric(GenericPair<ulong>[] source, int index) => source[index];
     public static void Write(Pair[] target, int index, Pair value) => target[index] = value;
     public static ref Pair Address(Pair[] source, int index) => ref source[index];
     public static ref Pair Data(Pair[] source) => ref MemoryMarshal.GetArrayDataReference(source);

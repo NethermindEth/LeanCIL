@@ -23,9 +23,16 @@ foreach (var method in methods)
 {
     var name = method.Name;
     var vector = name.Contains("Vector", StringComparison.Ordinal);
+    var aggregateIdentity = metadata.Assembly.Name.FullName + "::Examples.AggregateArrays/Pair";
+    if (name == "ReadGeneric")
+    {
+        var owner = (GenericInstanceType)((ArrayType)method.Parameters[0].ParameterType).ElementType;
+        var argument = owner.GenericArguments[0];
+        aggregateIdentity = metadata.Assembly.Name.FullName + "::" + owner.ElementType.FullName + "<" +
+            ((AssemblyNameReference)argument.Scope).FullName + "::" + argument.FullName + ">";
+    }
     var element = vector ? ".vector \"System.Runtime.Intrinsics.Vector128`1<System.UInt64>\" 16"
-        : ".aggregate " + JsonSerializer.Serialize(metadata.Assembly.Name.FullName + "::Examples.AggregateArrays/Pair") +
-            " 16";
+        : ".aggregate " + JsonSerializer.Serialize(aggregateIdentity) + " 16";
     var array = $".array ⟨.address ⟨0, 0⟩, 2, ({element})⟩";
     var store = name.StartsWith("Write", StringComparison.Ordinal);
     var indexed = store || name.StartsWith("Read", StringComparison.Ordinal) && name != "ReadOnlyView" || name == "Address";

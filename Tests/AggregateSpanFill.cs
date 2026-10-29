@@ -17,16 +17,16 @@ var queue = new GeneratedQueue(verification, assembly);
 foreach (var method in metadata.GetType("Examples.AggregateSpanFill").Methods.Where(method => method.IsPublic))
 {
     var name = method.Name;
-    var width = name switch { "Vector128" => 16, "Vector512" => 64, _ => 32 };
+    var width = name switch { "Vector128" or "Generic" => 16, "Vector512" => 64, _ => 32 };
     var shape = name switch
     {
         "Vector128" => ".vector128", "Vector256" => ".vector256", "Vector512" => ".vector512",
-        _ => ".aggregate 32"
+        _ => $".aggregate {width}"
     };
     var value = name switch
     {
         "Vector128" => ".v128 7", "Vector256" => ".v256 7", "Vector512" => ".v512 7",
-        _ => ".aggregate (List.replicate 32 7)"
+        _ => $".aggregate (List.replicate {width} 7)"
     };
     string Args(string element, int length = 2, bool writable = true) =>
         $"[.bufferSpan ⟨.address ⟨0, 16⟩, {length}, {width}, {writable.ToString().ToLowerInvariant()}⟩" +
