@@ -5,6 +5,9 @@ public enum AllocationTag : byte { One = 1 }
 public static class PrimitiveArrays
 {
     public static int Length(int[] values) => values.Length;
+    public static void FillGeneric<T>(T[] values, T value) => System.Array.Fill(values, value);
+    public static void FillIntegers(int[] values, int value) => FillGeneric(values, value);
+    public static void FillEnums(AllocationTag[] values, AllocationTag value) => FillGeneric(values, value);
     public static sbyte ReadSByte(sbyte[] values, int index) => values[index];
     public static byte ReadByte(byte[] values, int index) => values[index];
     public static short ReadInt16(short[] values, int index) => values[index];

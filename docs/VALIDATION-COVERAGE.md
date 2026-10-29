@@ -323,8 +323,10 @@ from inserting a placeholder. The ordinary shared tactic tests run unchanged.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
 types against runtime results and certified checked execution. It also covers length, helper calls,
-aliases, returned arrays, named null/bounds faults and unsupported array forms. Independent changes
-to load width or signedness must fail the Lean scalar certificate. `Tests/PrimitiveArrays.lean`
+aliases, returned arrays, named null/bounds faults and unsupported array forms. Generic integer
+and enum fills cover readback, neighboring bytes, empty arrays, named null exceptions and missing
+write authority. Independent changes to fill element identities, widths, operations, scope and
+arity, or load width and signedness, must fail the Lean scalar certificate. `Tests/PrimitiveArrays.lean`
 covers empty and null arrays, signed and native indices, initialization, authority, invalid extents,
 local storage and neighboring-byte preservation. Both run in the evidence suite.
 

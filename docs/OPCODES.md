@@ -304,6 +304,11 @@ integer constants, and its exact constructor call. The address cannot escape or 
 and control flow cannot enter the sequence after its first instruction. The local may be
 reused or reinitialized; construction faults remain at the call instruction.
 
+Whole-array `Array.Fill<T>(T[], T)` supports primitive integers, Boolean, character and
+integer-backed enums through the same checked span fill. Null arrays throw
+`ArgumentNullException`; empty arrays do not require write authority. Range overloads and
+reference-bearing, aggregate or vector elements are outside this runtime helper's scope.
+
 `Span<T>.Clear` initializes the complete view using one checked range write, including
 aggregate and vector elements. `Fill` repeats a captured primitive, enum, aggregate or integer-vector
 value using one checked range write. Aggregate/vector snapshots retain initialization masks;
