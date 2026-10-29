@@ -238,9 +238,19 @@ internal static class RuntimeModels
         foreach (var (name, operation) in Rotations)
             operations.Add($"{type} {type}::{name}({type},System.Int32)",
                 $".intrinsic (.scalar (.{operation} {width})) 2");
+        foreach (var (type, width, signed) in Pow2Integers.Where(integer => integer.Width == 32))
+        foreach (var (name, operation) in BitCounts)
+        {
+            if (name == "Log2" && signed) continue;
+            operations.Add($"{type} {type}::{name}({type})",
+                $".intrinsic (.scalar (.{operation} {width})) 1");
+        }
         foreach (var (type, width, signed) in Pow2Integers)
-            operations.Add($"System.Boolean System.Numerics.BitOperations::IsPow2({type})",
-                $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
+        {
+            var model = $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1";
+            operations.Add($"System.Boolean System.Numerics.BitOperations::IsPow2({type})", model);
+            operations.Add($"System.Boolean {type}::IsPow2({type})", model);
+        }
         return operations;
     }
 

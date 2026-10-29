@@ -59,11 +59,12 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         values = values.Concat(Enumerable.Range(0, 64).SelectMany(i =>
             new[] { (1UL << i) - 1, 1UL << i, unchecked((1UL << i) + 1) })).Distinct().ToArray();
     var counts = rotations ? new[] { int.MinValue, -65, -33, -1, 0, 1, 31, 32, 33, 63, 64, 65, int.MaxValue } : new[] { 0 };
-    // Primitive aliases share the rotation model covered by the full BitOperations matrix.
+    // Primitive aliases share models covered by the full BitOperations matrix.
     if (method.Name.StartsWith("Primitive", StringComparison.Ordinal))
     {
-        values = [0, 0x8000000180000001, ulong.MaxValue];
-        counts = [-1, 0, 65];
+        values = rotations ? [0, 0x8000000180000001, ulong.MaxValue] :
+            [0, 1, 2, 1UL << 31, 1UL << 63, ulong.MaxValue];
+        counts = rotations ? [-1, 0, 65] : [0];
     }
     var claims = new List<string>();
     // Different source bit patterns can become the same narrow runtime argument.
@@ -122,16 +123,26 @@ if (!failed || File.Exists(Path.Combine(wrongLog, "verified.json")))
     throw new InvalidOperationException("Incorrect integer logarithm accepted");
 
 // Preserve exact runtime identity and signature checks for the new allowlist.
-foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported", "memory-scope", "memory-key" })
+foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported",
+    "memory-scope", "memory-key", "signed-log", "wide-count", "native-count" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
     string expectedDiagnostic;
+    var fixture = mutation switch
+    {
+        "signed-log" => "PrimitivePopulation32",
+        "wide-count" => "PrimitivePower64",
+        "native-count" => "PrimitivePowerNative",
+        "memory-scope" or "memory-key" => "ReverseU64",
+        _ => "PrimitiveLeftU64"
+    };
+    string selector;
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
-        var method = module.GetType("Examples.Bits").Methods.Single(m => m.Name ==
-            (mutation.StartsWith("memory-", StringComparison.Ordinal) ? "ReverseU64" : "PrimitiveLeftU64"));
+        var method = module.GetType("Examples.Bits").Methods.Single(m => m.Name == fixture);
+        selector = $"Bits::{fixture}({string.Join(",", method.Parameters.Select(p => p.ParameterType.FullName))})";
         var call = (MethodReference)method.Body.Instructions.Single(i => i.OpCode.Code == Mono.Cecil.Cil.Code.Call).Operand;
         switch (mutation)
         {
@@ -144,6 +155,12 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             case "unsupported": call.Name = "Log2"; break;
             case "memory-scope": call.DeclaringType.Scope = module.TypeSystem.CoreLibrary; break;
             case "memory-key": ((AssemblyNameReference)call.DeclaringType.Scope).PublicKeyToken = []; break;
+            case "signed-log": call.Name = "Log2"; break;
+            case "wide-count":
+            case "native-count":
+                call.Name = "PopCount";
+                call.ReturnType = call.Parameters[0].ParameterType;
+                break;
         }
         expectedDiagnostic = mutation switch
         {
@@ -152,13 +169,12 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             "memory-key" => "Unsupported runtime assembly scope: " + call.FullName,
             "instance" => "Invalid evaluation stack during reachability",
             "generic" => "Contract imports require an exact closed generic instantiation on a non-generic declaring type.",
-            "return" or "argument" or "unsupported" or "memory-scope" => "External managed dependency: " + call.FullName,
+            "return" or "argument" or "unsupported" or "memory-scope" or
+                "signed-log" or "wide-count" or "native-count" => "External managed dependency: " + call.FullName,
             _ => throw new InvalidOperationException("Unknown runtime rejection fixture: " + mutation)
         };
         module.Write(dll);
     }
-    var selector = mutation.StartsWith("memory-", StringComparison.Ordinal)
-        ? "Bits::ReverseU64(ulong)" : "Bits::PrimitiveLeftU64(ulong,int)";
     var rejected = Execute(Extract("extract", dll, "Examples", selector, output));
     if (rejected.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")) ||
         !rejected.Output.Contains(expectedDiagnostic, StringComparison.Ordinal))
@@ -166,4 +182,4 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
     Console.WriteLine("PASS rejection: " + mutation);
 }
 
-Console.WriteLine($"Runtime helpers passed: {cases} comparisons; universal rotation and logarithm proofs; two incorrect implementations and nine invalid calls rejected.");
+Console.WriteLine($"Runtime helpers passed: {cases} comparisons; universal rotation and logarithm proofs; two incorrect implementations and twelve invalid calls rejected.");

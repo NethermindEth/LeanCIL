@@ -5,6 +5,19 @@ namespace Examples;
 
 public static class Bits
 {
+    public static int PrimitivePopulation32(int value) => int.PopCount(value);
+    public static uint PrimitivePopulationU32(uint value) => uint.PopCount(value);
+    public static int PrimitiveLeading32(int value) => int.LeadingZeroCount(value);
+    public static uint PrimitiveLeadingU32(uint value) => uint.LeadingZeroCount(value);
+    public static int PrimitiveTrailing32(int value) => int.TrailingZeroCount(value);
+    public static uint PrimitiveTrailingU32(uint value) => uint.TrailingZeroCount(value);
+    public static uint PrimitiveLogU32(uint value) => uint.Log2(value);
+    public static bool PrimitivePower32(int value) => int.IsPow2(value);
+    public static bool PrimitivePowerU32(uint value) => uint.IsPow2(value);
+    public static bool PrimitivePower64(long value) => long.IsPow2(value);
+    public static bool PrimitivePowerU64(ulong value) => ulong.IsPow2(value);
+    public static bool PrimitivePowerNative(nint value) => nint.IsPow2(value);
+    public static bool PrimitivePowerUNative(nuint value) => nuint.IsPow2(value);
     public static int PrimitiveLeft32(int value, int count) => int.RotateLeft(value, count);
     public static int PrimitiveRight32(int value, int count) => int.RotateRight(value, count);
     public static uint PrimitiveLeftU32(uint value, int count) => uint.RotateLeft(value, count);
