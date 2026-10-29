@@ -19,6 +19,9 @@ public struct GenericEnvelope<T> where T : unmanaged
 
 public static class GenericLayouts
 {
+    public static int VectorSize() => System.Runtime.CompilerServices.Unsafe.SizeOf<
+        GenericPair<System.Runtime.Intrinsics.Vector128<int>>>();
+
     public static ulong Roundtrip(ulong first, ulong second)
     {
         var pair = new GenericPair<ulong>(first, second);
