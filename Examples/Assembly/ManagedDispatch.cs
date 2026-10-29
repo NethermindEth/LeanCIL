@@ -13,6 +13,14 @@ public static unsafe class ManagedDispatch
 
     public static int Address(int value) => ((delegate* managed<int, int>)&Repeat)(value);
 
+    public static int Read(ref int value) => value;
+
+    public static int LocalEscape(int value)
+    {
+        var local = value;
+        return ((delegate* managed<ref int, int>)&Read)(ref local);
+    }
+
     // These addresses define the bounded handler universe independently of the supplied table.
     public static void Targets(delegate* managed<int, int>[] handlers)
     {

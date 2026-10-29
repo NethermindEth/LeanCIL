@@ -140,6 +140,9 @@ name = "Tests.SpanEvidence"
 name = "Tests.ConstrainedEvidence"
 
 [[lean_lib]]
+name = "Tests.ManagedPointerValues"
+
+[[lean_lib]]
 name = "Tests.StackAllocation"
 
 [[lean_lib]]
