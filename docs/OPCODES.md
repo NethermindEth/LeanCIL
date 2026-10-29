@@ -20,14 +20,14 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
-| `ldlen` | Partial | Length of a supplied primitive integer/enum array or typed handler table, returned as a native integer. Null raises `System.NullReferenceException`. |
-| `ldelema` | Partial | Checked element reference into a supplied primitive or enum array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
+| `ldlen` | Partial | Length of a supplied integer, enum, reference-free aggregate or integer-vector array, or typed handler table, returned as a native integer. Null raises `System.NullReferenceException`. |
+| `ldelema` | Partial | Checked element reference into a supplied integer, enum, reference-free aggregate or integer-vector array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
 | `readonly.` | Partial | Immediately precedes an admitted `ldelema`; branches into the following address instruction are rejected. Produces a restricted reference that remains readonly through byref locals, arguments and returns. Scalar reads are allowed, while stores and adapters that would discard the restriction fail. Other authorized aliases can still update the backing bytes. |
-| `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` requires an admitted primitive or exact enum token matching the array element type. Reads require initialized bytes and read authority. `ldelem.i` and typed `ldelem` also select typed entries from supplied handler tables. |
-| `stelem.i1`, `stelem.i2`, `stelem.i4`, `stelem.i8`, `stelem.i`, `stelem` | Partial | Checked integer array stores; narrow stores truncate. Typed `stelem` requires a matching primitive or exact enum token. Stores require write authority and initialize only the selected element. |
+| `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` also supports validated aggregate and integer-vector tokens, matching the exact array element identity and width. Scalar reads require initialized bytes; aggregate/vector snapshot reads retain initialization masks. All reads require read authority. `ldelem.i` and typed `ldelem` also select typed entries from supplied handler tables. |
+| `stelem.i1`, `stelem.i2`, `stelem.i4`, `stelem.i8`, `stelem.i`, `stelem` | Partial | Checked integer array stores; narrow stores truncate. Typed `stelem` requires a matching integer, enum, aggregate or integer-vector token. Stores require write authority; scalar stores initialize the selected element, while aggregate/vector stores preserve snapshot initialization masks. |
 | `ldc.i4`, `ldc.i4.s`, `ldc.i4.m1`, `ldc.i4.0`–`ldc.i4.8` | Complete within the admitted model | Push the encoded 32-bit integer constant. |
 | `ldc.i8` | Complete within the admitted model | Push the encoded 64-bit integer constant. |
-| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, stack shuffles/discard, or a supplied primitive/enum array or typed handler-table slot/call/return. General object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
+| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, stack shuffles/discard, or a supplied supported array or typed handler-table slot/call/return. General object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
 | `nop` | Complete within the admitted model | Advance without changing the stack or memory. |
 | `dup`, `pop` | Complete within the admitted model | Duplicate or discard a supported stack value; stack underflow fails. |
 | `ldarg`, `ldarg.s`, `ldarg.0`–`ldarg.3` | Partial | Load admitted argument values; struct instance methods have a managed-reference `this` at index zero; narrow integers are truncated and sign- or zero-extended to `i32`. Reference values undergo validity checks; class instance methods remain unsupported. |
@@ -56,7 +56,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality as described below; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering remains unsupported. No floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted instruction boundary, including backward edges and self-loops. |
 | `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. All reachable targets must be valid instruction boundaries; each arm and the fallthrough participate in dependency and stack analysis. |
-| `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char), same-assembly explicit- or sequential-layout reference-free aggregates, or the integer vectors listed below. Native integers use eight bytes under the validated profile. No reference types, floating-point or generic aggregate layouts. |
+| `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char), same-assembly explicit- or sequential-layout reference-free aggregates, or the integer vectors listed below. Native integers use eight bytes under the validated profile. Closed same-assembly generic structs require validated sequential layouts. No reference types, floating-point or unsupported generic layouts. |
 | `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. Also accepts checked references, including readonly references and null. Admitted forward and backward successors. |
 | `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
 | `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64` or two live references within one allocation, branching to admitted forward or backward targets. Cross-allocation reference ordering is unsupported. |
@@ -71,8 +71,8 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `initobj` | Partial | Zero the validated width of an admitted integer type, same-assembly explicit- or sequential-layout aggregate, or admitted Vector128/256/512 integer value. This initializes previously unknown bytes without touching neighboring storage. No managed-object initialization. |
 | `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). Other static fields are rejected. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data with an explicit packed blob layout and no static constructor. A `ReadOnlySpan<byte>` over such data may be returned by value (for example from a C# collection-expression property); see [static span tables](#static-span-tables) for other element types. Not arbitrary static fields or mutable global state. |
-| `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners. No arbitrary external calls, class instance methods or general virtual dispatch. |
-| `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted primitive integer and enum `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage, from `(void*, int)`, an array, or `(array, start, length)`. Class construction, other generic constructors and cyclic dependencies are rejected. |
+| `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners; validated closed sequential structs also admit direct instance methods and constructors. No arbitrary external calls, class instance methods or general virtual dispatch. |
+| `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Class construction and unsupported generic constructors or cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Only `throw new E(...)` with `ldstr`/`ldnull` arguments (see below): it raises a located `thrown "E"` fault. Other throws are rejected. |
 | `constrained.`, `callvirt` | Partial | Adjacent prefix and call resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
@@ -171,7 +171,8 @@ reference orderings are not admitted. Overflow-checking `sub.ovf.un` remains sca
 ## Unsupported opcodes
 
 Supplied arrays admit `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`,
-`nint`, `nuint`, `bool` and `char` elements over existing storage. Their length, element type
+`nint`, `nuint`, `bool`, `char`, admitted enums, validated reference-free aggregates and
+supported integer Vector128/256/512 elements over existing storage. Their length, element type
 and allocation identity remain explicit across locals, calls and returns. Indexing checks
 null before bounds; negative and out-of-range indices raise `System.IndexOutOfRangeException`
 on a valid non-null array. Length does not require readable contents. Invalid storage and
@@ -228,20 +229,22 @@ this support.
 Aggregate span widths come from the validated target-specific layout, including vector-field
 alignment; vectors use their exact storage width. Indexing yields a checked element reference
 for existing typed load/store operations. Parameters, locals, slicing, reference factories,
-reinterpretation, copies and clearing reuse the same checked views. Aggregate array factories
-and aggregate pointer constructors are not admitted.
+reinterpretation, copies, fills and clearing reuse the same checked views. Single-reference
+constructors form one-element views over live storage; pointer constructors take an explicit
+int32 length. Both forms support primitive, enum, aggregate and integer-vector elements and
+retain the element layout, lifetime and readonly capability without reading or initializing bytes.
+Opaque values and numeric addresses cannot fabricate references.
 
 Span `IsEmpty` and `GetPinnableReference` inspect a validated view without reading its bytes.
 An empty span's pinnable reference is null; readonly views return readonly references.
-`MemoryMarshal.GetArrayDataReference<T>` supports primitive and enum arrays: an empty array
+`MemoryMarshal.GetArrayDataReference<T>` supports all admitted array elements: an empty array
 retains its data reference, while a null array raises `NullReferenceException`. These accessors
 grant no byte-access authority.
 
 Array constructors, implicit array conversions and the array overloads of
-`MemoryExtensions.AsSpan` form views over supplied primitive or enum array storage. Enum
-views retain their exact enum identity through locals, slices, calls and returns; equal-width
-enums are not interchangeable. `AsSpan`
-accepts a whole array, a start index, or a start and length. Null arrays produce empty
+`MemoryExtensions.AsSpan` form views over supplied integer, enum, aggregate and integer-vector
+array storage. Enum views retain their exact enum identity through locals, slices, calls and returns; equal-width
+enums are not interchangeable. `AsSpan` accepts a whole array, a start index, or a start and length. Null arrays produce empty
 spans only for a zero range; invalid ranges raise `ArgumentOutOfRangeException`.
 These operations allocate no backing storage, preserve aliases and grant no byte-access
 authority. Array allocation and non-array `AsSpan` overloads remain unsupported.
@@ -252,15 +255,16 @@ and control flow cannot enter the sequence after its first instruction. The loca
 reused or reinitialized; construction faults remain at the call instruction.
 
 `Span<T>.Clear` initializes the complete view using one checked range write, including
-aggregate and vector elements. `Fill` is restricted to primitive integer and enum elements. Both
-require write authority, but not initialized or readable destination bytes. Empty spans require
-no byte access; nonempty fills establish repeated sequence contents and preserve neighbouring
+aggregate and vector elements. `Fill` repeats a captured primitive, enum, aggregate or integer-vector
+value using one checked range write. Aggregate/vector snapshots retain initialization masks;
+unknown bytes never become initialized, and unspecified low-lane-only vector values remain rejected.
+Both require write authority, but not initialized or readable destination bytes. Empty spans require
+no byte access; nonempty fills establish repeated contents and preserve neighbouring
 bytes, including other slices in the same allocation. Readonly views do not admit these members.
 
 `MemoryMarshal.AsBytes` and `Cast<TFrom,TTo>` reinterpret admitted integer, enum, aggregate
 and integer-vector spans without copying or reading their bytes. They retain allocation identity,
-lifetime and
-write capability. The result length is the source byte extent divided by the target element
+lifetime and write capability. The result length is the source byte extent divided by the target element
 width, rounded down; a length exceeding `Int32.MaxValue` raises `OverflowException`.
 Readonly views stay readonly, and reinterpreting uninitialized storage does not initialize it.
 
@@ -299,7 +303,7 @@ Release configuration is required, but it does not guarantee that a compiler emi
 
 Reachable same-assembly generic methods are specialized for supported primitive, enum, reference-free aggregate and vector type arguments. This substitutes types in the original CIL parameters, locals, type operands and nested generic calls; it does not replace method bodies with functional summaries. Repeated uses share a specialization, while different type arguments retain separate bodies. Ordinary calls retain an acyclic order; tail transfers may form cycles. Extraction rejects more than 256 distinct specializations.
 
-Select a non-generic entry method whose compiled calls supply the concrete type arguments. Static calls on closed same-assembly generic declaring types are supported, including nested owners and combined owner/method type arguments. Generic aggregate layouts and instance storage, generic constructors, reference-type constraints, boxing, general runtime dispatch and unsupported storage types remain rejected. A same-assembly interface constraint is admitted when the concrete struct directly declares that interface; constrained calls are checked as described below. Unconstrained parameters and admitted value-type/default-constructor/unmanaged constraints are supported for the reference-free value types above. Every specialized body's instructions undergo the normal validation.
+Select a non-generic entry method whose compiled calls supply the concrete type arguments. Static calls on closed same-assembly generic declaring types are supported, including nested owners and combined owner/method type arguments. Closed same-assembly sequential generic structs admit reference-free storage, field accesses, direct instance methods and constructors after substituting their owner arguments. Explicit/auto generic layouts, reference-containing instantiations and interface/reference-constrained generic structs remain rejected, as do boxing, general runtime dispatch and unsupported storage types. A same-assembly interface constraint is admitted when the concrete struct directly declares that interface; constrained calls are checked as described below. Unconstrained parameters and admitted value-type/default-constructor/unmanaged constraints are supported for the reference-free value types above. Every specialized body's instructions undergo the normal validation.
 
 See the [per-family intrinsic tables](SIMD.md) for the exact Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, operand types and profile requirements.
 

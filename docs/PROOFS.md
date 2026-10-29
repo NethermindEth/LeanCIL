@@ -630,16 +630,31 @@ without a source read or destination write; empty copies require no byte access.
 
 Aggregate and integer-vector spans use the same `SpanView`, indexed references, checked
 loads/stores, byte snapshots and copy rules. Supply the validated element width rather than
-assuming one of the primitive widths. `Clear` initializes the byte extent; scalar `Fill`
-remains restricted to integers and enums. Vector loads and stores preserve initialization
-masks, while span copies require readable, initialized source bytes. View creation and
+assuming one of the primitive widths. `Clear` initializes the byte extent. Aggregate/vector
+`Fill` repeats a captured snapshot with its initialization flags through `SpanView.fillSnapshot`;
+`spanFillSnapshot_effect` exposes its checked snapshot-write effect. Scalar `Fill` retains the
+existing sequence-content lemmas. Vector loads and stores preserve initialization masks, while
+span copies require readable, initialized source bytes. View creation and
 reinterpretation alone establish neither initialization nor read/write authority.
 
 `Tests/AggregateSpans.cs` demonstrates aggregate buffers, vector masks, overlap-safe copying
-and target-dependent layouts. `Tests/BinarySpans.cs` demonstrates integer byte-order transfers
+and target-dependent layouts. `Tests/AggregateSpanFill.cs` checks repeated masked snapshots,
+aliased inputs and neighboring bytes. `Tests/SpanConstructors.cs` checks single-reference and
+pointer constructors, including target-dependent layouts and in-place local initialization.
+`Tests/BinarySpans.cs` demonstrates integer byte-order transfers
 and short-span behavior. `Tests/ViewAccessors.cs` checks observations without byte authority.
+Supplied aggregate/vector arrays reuse the same checked snapshot loads/stores, indexed
+references and span conversions; no backing storage is allocated. `Tests/AggregateArrays.cs`
+and `Tests/AggregateArrayStorage.lean` cover exact types, masks, authority and lifetime.
+`ArrayView.null_valid` requires a valid element width, and `InitializerFits` includes that
+condition for array locals, even when initialized to null.
+
 Closed generic-owner helpers use the ordinary specialized managed-call proof interface;
-`Tests/GenericOwners.cs` covers nested owners and mixed owner/method arguments.
+`Tests/GenericOwners.cs` covers nested owners and mixed owner/method arguments. Closed sequential
+generic structs use the existing checked layout, field and construction rules after substituting
+the owner arguments. Prove calls against the specialized closed body; no separate generic runtime
+or heap representation is introduced. `Tests/GenericLayouts.cs` covers fields, nested layouts,
+instance calls and construction.
 
 For supplied native dispatch tables, provide an immutable allocation binding and exact catalog
 target identities in `MethodTable.backing`. Checked byte offsets and `ldind.i` preserve
