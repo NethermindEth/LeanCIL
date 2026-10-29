@@ -52,53 +52,64 @@ internal static class ConstrainedCalls
         if (instructions.IsTarget(call))
             throw new InvalidDataException("Branch bypasses constrained receiver prefix");
         if (reference is GenericInstanceMethod || reference.Resolve() is not { } slot ||
-            slot.Module != caller.Module || reference.FullName != slot.FullName ||
+            slot.Module != caller.Module || reference.Name != slot.Name ||
+            !SameType(reference.ReturnType, slot.ReturnType) ||
+            !reference.Parameters.Select(parameter => MethodSpecialization.SignatureType(parameter.ParameterType))
+                .SequenceEqual(slot.Parameters.Select(parameter =>
+                    MethodSpecialization.SignatureType(parameter.ParameterType))) ||
             reference.HasThis != slot.HasThis || !slot.HasThis || slot.IsStatic || slot.IsConstructor ||
             slot.HasGenericParameters || reference.ExplicitThis ||
             reference.CallingConvention != MethodCallingConvention.Default)
             throw new InvalidDataException("Unsupported constrained method slot");
 
         var owner = receiver as GenericInstanceType;
+        var slotOwner = reference.DeclaringType as GenericInstanceType;
+        if (reference.DeclaringType.ContainsGenericParameter ||
+            (slotOwner?.GenericArguments.Count ?? 0) != slot.DeclaringType.GenericParameters.Count ||
+            LayoutEvidence.Scope(reference.DeclaringType) != LayoutEvidence.Scope(slot.DeclaringType))
+            throw new InvalidDataException("Unsupported constrained method owner");
         if (slot.DeclaringType == concrete)
         {
-            if (owner is not null)
-                throw new InvalidDataException("Constrained generic receivers require a non-generic interface slot");
-            return Checked(concrete, slot, slot, owner);
+            if (!SameType(reference.DeclaringType, receiver))
+                throw new InvalidDataException("Constrained direct slot must match its receiver owner");
+            return Checked(concrete, reference, slot, owner);
         }
-        if (!slot.DeclaringType.IsInterface || slot.DeclaringType.HasGenericParameters ||
+        if (!slot.DeclaringType.IsInterface ||
             !slot.IsAbstract || !slot.IsVirtual ||
-            !concrete.Interfaces.Any(implementation => implementation.InterfaceType.Resolve() == slot.DeclaringType))
+            !concrete.Interfaces.Any(implementation => SameType(
+                GenericStructs.Substitute(implementation.InterfaceType, owner), reference.DeclaringType)))
             throw new InvalidDataException("Constrained call requires a directly implemented same-assembly interface");
 
         var explicitTargets = concrete.Methods.Where(method =>
-            method.Overrides.Any(overridden => overridden.Resolve() == slot)).ToArray();
+            method.Overrides.Any(overridden => overridden.Resolve() == slot &&
+                SameType(GenericStructs.Substitute(overridden.DeclaringType, owner),
+                    reference.DeclaringType))).ToArray();
         var targets = explicitTargets.Length != 0 ? explicitTargets : concrete.Methods.Where(method =>
             method.IsPublic && !method.HasGenericParameters && method.Name == slot.Name &&
-            SignatureMatches(method, slot, owner)).ToArray();
+            SignatureMatches(method, reference, owner)).ToArray();
         if (targets.Length != 1)
             throw new InvalidDataException("Constrained interface slot has no unique struct implementation");
-        return Checked(concrete, slot, targets[0], owner);
+        return Checked(concrete, reference, targets[0], owner);
     }
 
-    static Resolution Checked(TypeDefinition receiver, MethodDefinition slot, MethodDefinition target,
+    static Resolution Checked(TypeDefinition receiver, MethodReference slot, MethodDefinition target,
         GenericInstanceType? owner)
     {
         if (target.DeclaringType != receiver || !target.HasThis || target.IsStatic || target.IsAbstract ||
             !target.HasBody || target.IsConstructor || target.HasGenericParameters || target.ExplicitThis ||
             target.CallingConvention != MethodCallingConvention.Default || !SignatureMatches(target, slot, owner))
             throw new InvalidDataException("Constrained call would require boxing or unsupported dispatch");
-        return new(receiver, slot, target);
+        return new(receiver, slot.Resolve(), target);
     }
 
     static bool SignatureMatches(MethodReference implementation, MethodReference slot, GenericInstanceType? owner)
     {
-        TypeReference Closed(TypeReference type) => owner is null ? type : GenericStructs.Substitute(type, owner);
-        return SameType(Closed(implementation.ReturnType), slot.ReturnType) &&
+        return SameType(GenericStructs.Substitute(implementation.ReturnType, owner), CallReturnType.Resolve(slot)) &&
             implementation.Parameters.Count == slot.Parameters.Count &&
-            implementation.Parameters.Zip(slot.Parameters).All(pair =>
-                SameType(Closed(pair.First.ParameterType), pair.Second.ParameterType));
+            implementation.Parameters.Zip(CallReturnType.Parameters(slot)).All(pair =>
+                SameType(GenericStructs.Substitute(pair.First.ParameterType, owner), pair.Second));
     }
 
     static bool SameType(TypeReference left, TypeReference right) =>
-        left.FullName == right.FullName && LayoutEvidence.Scope(left) == LayoutEvidence.Scope(right);
+        MethodSpecialization.SignatureType(left) == MethodSpecialization.SignatureType(right);
 }

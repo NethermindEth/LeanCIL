@@ -58,6 +58,10 @@ obligation types, but reuse the original checked theorem instead of reducing its
 Generic controls compile and replay in the original positive batch. Missing or changed control
 declarations must still fail type checking; isolated mutation cases retain their original validator
 proofs and diagnostic checks, without access to the positive-control witnesses.
+Constrained fixtures include direct closed generic struct slots with substituted parameters and
+results, closed interfaces on ordinary and generic structs, and explicit implementations whose
+interface instantiations share a token and signature. A forged closed override owner must fail the
+same checked dispatch obligation. These cases share the existing positive batch and kernel replay.
 The projected declarations use a distinct namespace, so missing names cannot fall back to the
 original `Extracted` namespace. Controls reject explicit access to that namespace while preserving
 quoted metadata strings and disable automatic implicit parameters. Regression cases cover removed

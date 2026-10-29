@@ -25,7 +25,7 @@ structure DispatchMethod where
   implementation : Nat
   returnType : TypeExpr
   parameters : List TypeExpr
-  overrides : List Nat
+  overrides : List (Nat × TypeExpr)
   owner : TypeExpr := .void
   ownerArguments : List TypeExpr := []
   deriving DecidableEq, Repr
@@ -52,8 +52,13 @@ private def signatureMatches (method : DispatchMethod) (site : CallSite) : Bool 
     method.parameters == site.parameterTypes && method.parameters.length == site.parameterCount
 
 /-- Restrict both sides of dispatch to one assembly identity. -/
+private def ownerBase : TypeExpr → TypeExpr
+  | .apply owner _ => ownerBase owner
+  | type => type
+
+/-- Compare the assembly scopes of closed owners, retaining all arguments in dispatch identity. -/
 private def sameScope (left right : TypeExpr) : Bool :=
-  match namedType left, namedType right with
+  match namedType (ownerBase left), namedType (ownerBase right) with
   | some (scope, _), some (other, _) => scope == other
   | _, _ => false
 
@@ -64,24 +69,41 @@ def dispatchOwnerMatches (receiver : TypeExpr) (target : DispatchMethod) : Bool 
   | .aggregate identity _ => genericOwnerIdentity target.owner target.ownerArguments == some identity
   | _ => false
 
+/-- A closed struct slot uses its receiver's layout identity; interface identities stay structural. -/
+private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : TypeExpr :=
+  match receiver with
+  | .aggregate identity _ =>
+    if !site.typeArguments.isEmpty &&
+        genericOwnerIdentity (ownerBase site.declaringType) site.typeArguments == some identity
+      then receiver else site.declaringType
+  | _ => site.declaringType
+
+/-- Only closed owner arguments are admitted; generic method slots remain unsupported. -/
+private def slotArgumentsValid (site : CallSite) : Bool :=
+  match managedOwner site.declaringType with
+  | some (_, arguments) => arguments == site.typeArguments &&
+      arguments.length == site.ownerArgumentCount
+  | none => false
+
 /-- Resolve a concrete value-type method or a directly implemented interface slot.
     Explicit overrides take precedence; missing, ambiguous and boxing cases fail.
     This list-based specification states the equivalence of indexed production resolution. -/
 def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site : CallSite) :
     Option DispatchMethod := do
   let .aggregate .. := receiver | none
-  if !site.hasThis || !site.typeArguments.isEmpty then
+  if !site.hasThis || !slotArgumentsValid site then
     none else pure ()
   let .managed token := site.target | none
   let concrete ← unique (types.filter fun type => type.identity == receiver)
   if !concrete.valueType || concrete.interfaceType then none else pure ()
-  let declaring ← unique (types.filter fun type => type.identity == site.declaringType)
+  let declaring ← unique (types.filter fun type => type.identity == declaringIdentity receiver site)
   let slot ← unique (declaring.methods.filter fun method => method.token == token)
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
   let target ← if receiver == declaring.identity then some slot else do
     if !declaring.interfaceType || !slot.isAbstract || !slot.isVirtual ||
         !concrete.interfaces.contains declaring.identity then none else pure ()
-    let explicit := concrete.methods.filter fun method => method.overrides.contains token
+    let explicit := concrete.methods.filter fun method =>
+      method.overrides.contains (token, site.declaringType)
     unique (if explicit.isEmpty then concrete.methods.filter fun method =>
       method.isPublic && method.name == slot.name && signatureMatches method site else explicit)
   if target.isAbstract || !target.hasBody || target.name ∈ [".ctor", ".cctor"] ||
@@ -183,7 +205,7 @@ structure DispatchTypeIndex where
 /-- Build candidate lists without discarding duplicate tokens, names or implementations. -/
 def DispatchTypeIndex.ofType (type : DispatchType) : DispatchTypeIndex :=
   ⟨type, groupIndex (·.token) type.methods, groupIndex (·.name) type.methods,
-    multiGroup (·.overrides) type.methods⟩
+    multiGroup (fun method => method.overrides.map Prod.fst) type.methods⟩
 
 /-- Dispatch type buckets; exact identity filtering preserves duplicate ambiguity. -/
 def DispatchIndex := Std.TreeMap (List (List UInt8)) (List DispatchTypeIndex)
@@ -227,18 +249,19 @@ theorem DispatchIndex.findType_ofTypes (types : List DispatchType) (identity : T
 def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : CallSite) :
     Option DispatchMethod := do
   let .aggregate .. := receiver | none
-  if !site.hasThis || !site.typeArguments.isEmpty then
+  if !site.hasThis || !slotArgumentsValid site then
     none else pure ()
   let .managed token := site.target | none
   let concrete ← index.findType receiver
   if !concrete.raw.valueType || concrete.raw.interfaceType then none else pure ()
-  let declaring ← index.findType site.declaringType
+  let declaring ← index.findType (declaringIdentity receiver site)
   let slot ← unique (declaring.tokens.getD token [])
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
   let target ← if receiver == declaring.raw.identity then some slot else do
     if !declaring.raw.interfaceType || !slot.isAbstract || !slot.isVirtual ||
         !concrete.raw.interfaces.contains declaring.raw.identity then none else pure ()
-    let explicit := concrete.overrides.getD token []
+    let explicit := (concrete.overrides.getD token []).filter fun method =>
+      method.overrides.contains (token, site.declaringType)
     unique (if explicit.isEmpty then (concrete.names.getD slot.name []).filter fun method =>
       method.isPublic && signatureMatches method site else explicit)
   if target.isAbstract || !target.hasBody || target.name ∈ [".ctor", ".cctor"] ||
@@ -251,10 +274,19 @@ theorem DispatchIndex.resolve_ofTypes (types : List DispatchType) (receiver : Ty
     (site : CallSite) :
     (DispatchIndex.ofTypes types).resolve receiver site =
       resolveConstrained types receiver site := by
+  have overrideFilter (token : Nat) (method : DispatchMethod) :
+      (method.overrides.contains (token, site.declaringType) &&
+        (method.overrides.map Prod.fst).contains token) =
+          method.overrides.contains (token, site.declaringType) := by
+    by_cases present : (token, site.declaringType) ∈ method.overrides
+    · have mapped : token ∈ method.overrides.map Prod.fst := List.mem_map.mpr
+        ⟨(token, site.declaringType), present, rfl⟩
+      simp [present, mapped]
+    · simp [present]
   simp only [DispatchIndex.resolve, resolveConstrained, DispatchIndex.findType_ofTypes,
     Bind.bind, Option.bind_map, Function.comp_def, DispatchTypeIndex.ofType,
     groupIndex_get, multiGroup_get,
-    List.filter_filter]
+    List.filter_filter, overrideFilter]
   simp only [Bool.and_assoc, Bool.and_left_comm, Bool.and_comm]
 
 #print axioms DispatchIndex.resolve_ofTypes

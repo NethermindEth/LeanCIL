@@ -92,7 +92,7 @@ theorem explicit_override_precedes_implicit :
     (resolveConstrained
       [{ concrete with methods := [implementation,
         { implementation with
-          token := 22, name := "IValue.Read", isPublic := false, overrides := [5] }] }, declared]
+          token := 22, name := "IValue.Read", isPublic := false, overrides := [(5, interface)] }] }, declared]
       receiver site).map (·.token) = some 22 := by decide +kernel
 #print axioms explicit_override_precedes_implicit
 
@@ -166,7 +166,7 @@ theorem indexed_type_identity :
 theorem indexed_override_precedence :
     ((DispatchIndex.ofTypes [{ concrete with methods := [implementation,
       { implementation with
-        token := 22, name := "IValue.Read", isPublic := false, overrides := [5, 5] }] },
+        token := 22, name := "IValue.Read", isPublic := false, overrides := [(5, interface), (5, interface)] }] },
       declared]).resolve receiver site).map (·.token) = some 22 := by
   decide +kernel
 #print axioms indexed_override_precedence
@@ -178,8 +178,8 @@ theorem indexed_method_ambiguity :
     (DispatchIndex.ofTypes [{ concrete with methods := [implementation, implementation] },
       declared]).resolve receiver site = none ∧
     (DispatchIndex.ofTypes [{ concrete with methods := [
-      { implementation with overrides := [5] },
-      { implementation with token := 22, overrides := [5] }] }, declared]).resolve
+      { implementation with overrides := [(5, interface)] },
+      { implementation with token := 22, overrides := [(5, interface)] }] }, declared]).resolve
       receiver site = none := by decide +kernel
 #print axioms indexed_method_ambiguity
 private def genericOwner : TypeExpr := .constructor "Fixture" "Counter`1"

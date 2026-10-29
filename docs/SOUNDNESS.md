@@ -65,7 +65,9 @@ of the JIT or of resource availability on every deployment.
 Concrete constrained struct calls retain their original prefix and interface slot in raw
 specialization evidence. A mandatory Lean validator independently resolves the slot from the
 serialized type, interface, method and explicit-override declarations, then checks the emitted
-direct-call target, signature and closed generic owner arguments. Faithful metadata decoding and complete serialization of those
+direct-call target, signature and closed generic owner arguments. Explicit overrides bind both the
+method token and closed interface identity, distinguishing instantiations with identical signatures.
+Faithful metadata decoding and complete serialization of those
 declarations remain trusted. The admitted subset has no runtime vtable lookup or boxing fallback;
 this does not prove general CLR dispatch correct.
 

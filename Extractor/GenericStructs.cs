@@ -8,8 +8,9 @@ internal static class GenericStructs
     internal static bool Is(TypeReference type) => type is GenericInstanceType generic &&
         generic.ElementType.Scope is ModuleDefinition && generic.IsValueType;
 
-    internal static TypeReference Substitute(TypeReference type, GenericInstanceType owner)
+    internal static TypeReference Substitute(TypeReference type, GenericInstanceType? owner)
     {
+        if (owner is null) return type;
         if (type is GenericParameter parameter)
         {
             if (parameter.Type != GenericParameterType.Type || parameter.Owner != owner.ElementType.Resolve() ||

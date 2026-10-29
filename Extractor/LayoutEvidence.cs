@@ -104,7 +104,9 @@ internal sealed class LayoutEvidence
             return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, {genericEvidence}" +
                 $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
                 (metadata.IsAutoLayout ? "auto := true, " : "") +
-                $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(implementation => JsonSerializer.Serialize(Identity(implementation.InterfaceType))))}], " +
+                $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(implementation =>
+                    JsonSerializer.Serialize(Identity(GenericStructs.Substitute(implementation.InterfaceType,
+                        type as GenericInstanceType)))))}], " +
                 $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
         })));
         lean.AppendLine("]");

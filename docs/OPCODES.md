@@ -214,18 +214,19 @@ expressions with effects or faults are not discarded. Prefix recognition inspect
 
 An adjacent `constrained. T; callvirt` pair supports a concrete, reference-free same-assembly
 struct `T` and a method declared on that struct or a directly implemented same-assembly interface.
-Closed sequential generic structs are admitted as receivers of directly implemented non-generic
-interface slots; direct constrained slots on generic declaring types remain unsupported.
+Closed sequential generic structs admit direct slots and directly implemented interface slots,
+including closed generic interfaces. The slot's closed declaring owner must match exactly.
 Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
-overrides take precedence. Closed generic helpers can use a directly implemented interface constraint.
+overrides take precedence and retain the closed interface owner as well as the method token.
+Closed generic helpers can use a directly implemented closed interface constraint.
 The original managed-reference receiver is passed to the resolved implementation, so mutations
 remain visible to the caller without boxing.
 
 The Lean certificate independently resolves serialized type, interface and method metadata and
 checks the selected method token, signature, closed owner arguments and argument count.
 A branch cannot bypass the prefix.
-Reference receivers, boxing fallbacks, inherited or default-interface dispatch, generic interface
-slots and ordinary unconstrained virtual calls remain unsupported.
+Reference receivers, boxing fallbacks, inherited or default-interface dispatch, generic methods
+on interfaces, open interface constraints and ordinary unconstrained virtual calls remain unsupported.
 
 ### Static span tables
 
