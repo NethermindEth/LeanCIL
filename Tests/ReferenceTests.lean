@@ -1,4 +1,5 @@
 import CIL.Safety.Execution
+import CIL.Safety.MemorySteps
 import CIL.Extraction.Scalars
 
 /-! # Reference observations and byte offsets retain allocation and authority checks -/
@@ -168,5 +169,37 @@ theorem reference_arithmetic_kinds :
     CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.reference, .word32] .sub = false :=
   by decide +kernel
 #print axioms reference_arithmetic_kinds
+
+section SymbolicAddition
+
+attribute [local irreducible] step
+
+/-- Registered stepping equations handle symbolic commuted int32 offsets without unfolding step. -/
+theorem commuted_i32_step (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.W32)
+    (rest : List Value) :
+    step body (.memory (.add 1 true)) pc args frame
+      (.reference reference :: .scalar (.i32 offset) :: rest) memory = do
+      let address ← referenceAt reference
+      let result ← checkedAt reference 0 (add memory address 1 (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.reference (.address result) :: rest) frame memory := by
+  fail_if_success rfl
+  simp only [cil_step]
+#print axioms commuted_i32_step
+
+/-- Native offsets share the existing signed 64-bit stepping equation on symbolic memory. -/
+theorem commuted_native_step (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.W64)
+    (rest : List Value) :
+    step body (.memory (.add 1 true)) pc args frame
+      (.reference reference :: .scalar (.i64 offset) :: rest) memory = do
+      let address ← referenceAt reference
+      let result ← checkedAt reference 0 (add memory address 1 (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.reference (.address result) :: rest) frame memory := by
+  fail_if_success rfl
+  simp only [cil_step]
+#print axioms commuted_native_step
+
+end SymbolicAddition
 
 end Tests.ReferenceTests

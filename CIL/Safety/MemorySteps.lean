@@ -152,6 +152,16 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) (value :: rest) frame memory := by
   memory_step_proof
 
+/-- Commuted reference offsets reuse the scalar-first memory step equations. -/
+@[cil_step high] theorem step_memory_add_commuted_eq (size : Nat) (signed : Bool)
+    (reference : ManagedReference) (offset : CIL.Value) (rest : List Value) :
+    step body (.memory (.add size signed)) pc args frame
+      (.reference reference :: .scalar offset :: rest) memory =
+    step body (.memory (.add size signed)) pc args frame
+      (.scalar offset :: .reference reference :: rest) memory := by
+  rfl
+#print axioms step_memory_add_commuted_eq
+
 -- One equation per `offsetValue` shape, so the offset is a term and needs no side condition.
 @[cil_step high] theorem step_memory_add_signed_i32_eq (size : Nat) (offset : CIL.W32)
     (r : ManagedReference) (rest : List Value) :

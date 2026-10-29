@@ -38,7 +38,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `stloc`, `stloc.s`, `stloc.0`–`stloc.3` | Partial | Store values compatible with the declared local storage kind; narrow integer locals truncate an `i32` to their physical width. No general object or reference-bearing aggregate storage. |
 | `ldloca`, `ldloca.s` | Partial | Form a checked reference to byte-backed local storage. Taking the address of a managed-reference local is explicitly unsupported. |
 | `neg` | Partial | Wrapping negation of an `i32` or `i64`; the signed minimum maps to itself. No floating-point or reference operands. |
-| `add` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. Also accepts a checked reference as the first operand and an int32 or native integer byte offset as the second, preserving allocation identity and checking lifetime and bounds when forming the result. Supplied immutable native handler tables also admit checked byte-offset addition. No floating-point operands or arbitrary numeric address fabrication. |
+| `add` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. Also accepts a checked reference and an int32 or native integer byte offset in either operand order, preserving allocation identity and checking lifetime and bounds when forming the result. Supplied immutable native handler tables also admit checked byte-offset addition. No floating-point operands or arbitrary numeric address fabrication. |
 | `sub` | Partial | Wrapping scalar subtraction; also subtract an int32/native byte offset from a checked reference, preserving its readonly restriction, or compute the native byte difference of two live references within one allocation. Null, cross-allocation differences and invalid resulting positions fail. |
 | `mul` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. No floating-point or reference/pointer operands. |
 | `div`, `div.un`, `rem`, `rem.un` | Partial | Same-width `i32`/`i64` quotient or remainder. Signed quotient truncates toward zero; signed remainder follows the dividend sign. Zero divisors fault. Signed minimum with divisor -1 faults for both signed operations under the admitted runtime assumption. No floating-point, mixed-width operands or exception handlers. |
@@ -372,6 +372,11 @@ bytes through null faults with `nullDereference`, the model's
 operations access nothing, as above. Extraction evidence binds each call to its operation in
 both directions, as for `SkipInit`. `NullRef` produces a null byref; the bounded
 `ldnull` support above produces an object null and does not permit mixing it with managed pointers.
+
+Raw reference `add` admits either operand order, matching the
+[.NET 10 importer](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/importer.cpp#L5093-L5106).
+Offsets must be int32 or native integers. Reference sums, ordinary int64 offsets, reversed
+reference subtraction and addition through a restricted readonly reference remain unsupported.
 
 The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references supports the checked byte-offset form described above.
 
