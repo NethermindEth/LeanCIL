@@ -230,3 +230,7 @@ if (check.Code == 0 || !check.Output.Contains("Stale or mismatched"))
     throw new InvalidOperationException("Modified generic provenance accepted");
 
 Console.WriteLine($"PASS {comparisons} generic runtime comparisons, six universal proofs, provenance and negative tests");
+Run(["dotnet", "run", "--file", "Tests/GenericOwners.cs"], streamOutput: true,
+    progress: "Closed generic declaring types");
+Run(["dotnet", "run", "--file", "Tests/GenericLayouts.cs"], streamOutput: true,
+    progress: "Closed generic struct layouts");

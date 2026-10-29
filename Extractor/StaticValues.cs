@@ -6,12 +6,12 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Readonly fields have one unconditional store, from a literal or M(constants).
+// Readonly fields have one unconditional store, from a literal, M(constants) or new T(constants).
 // Lean rechecks stored bytes; recognizing the constructor store remains trusted.
 internal static partial class StaticValues
 {
     internal sealed record Value(FieldDefinition Field, MethodDefinition? Initializer, string[] Arguments,
-        byte[] Bytes, string? Literal = null);
+        byte[] Bytes, string? Literal = null, bool Construct = false);
 
     internal static string Scalar(FieldDefinition field) => MetadataValidation.IsAggregate(field.FieldType, field.Module)
         ? "none" : "some " + (EnumTypes.Storage(field.FieldType).FullName is "System.SByte" or "System.Int16"
@@ -111,11 +111,19 @@ internal static partial class StaticValues
                 throw Unsupported(field, "Its literal initializer has an invalid stack.");
             return new(field, null, [], Bytes(literal, field, architecture), LeanWord(literal));
         }
-        if (store == 0 || code[store - 1] is not { OpCode.Code: Code.Call, Operand: MethodDefinition initializer } ||
-            initializer.Module != module || !initializer.IsStatic || initializer.HasGenericParameters ||
-            initializer.ReturnType.FullName != field.FieldType.FullName ||
-            initializer.Parameters.Any(p => p.ParameterType.FullName is not ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64")))
-            throw Unsupported(field, "Its value is not a same-assembly static call with integer constant arguments, or a copy of such a field.");
+        var construct = store > 0 && code[store - 1].OpCode.Code == Code.Newobj;
+        if (store == 0 || code[store - 1].OpCode.Code is not (Code.Call or Code.Newobj) ||
+            code[store - 1].Operand is not MethodDefinition initializer ||
+            initializer.Module != module || initializer.HasGenericParameters ||
+            (construct ? !initializer.IsConstructor || !initializer.HasThis ||
+                initializer.ReturnType.FullName != "System.Void" ||
+                initializer.DeclaringType.FullName != field.FieldType.FullName ||
+                !MetadataValidation.IsAggregate(field.FieldType, module)
+                : !initializer.IsStatic || initializer.ReturnType.FullName != field.FieldType.FullName) ||
+            initializer.Parameters.Any(p => p.ParameterType.FullName is not
+                ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64")))
+            throw Unsupported(field, "Its value is not a same-assembly static call or struct construction " +
+                "with integer constant arguments, or a copy of such a field.");
         var start = store - 1;
         for (var pushed = 0; pushed < initializer.Parameters.Count; )
         {
@@ -131,8 +139,19 @@ internal static partial class StaticValues
                 throw Unsupported(field, $"Argument {p} of {initializer.FullName} has the wrong width.");
         if (context.InitializerStaticAccess(initializer) is { } staticAccess)
             throw Unsupported(field, $"Its initializer accesses static fields, in {staticAccess.FullName}.");
-        var bytes = Bytes(Run(initializer, arguments, field, module, 0, architecture), field, architecture);
-        return new Value(field, initializer, arguments.Select(a => LeanWord((Word)a)).ToArray(), bytes);
+        var result = construct ? Construct(initializer, arguments, field, module, 0, architecture)
+            : Run(initializer, arguments, field, module, 0, architecture);
+        var bytes = Bytes(result, field, architecture);
+        return new Value(field, initializer, arguments.Select(a => LeanWord((Word)a)).ToArray(), bytes,
+            Construct: construct);
+    }
+
+    static Snapshot Construct(MethodDefinition constructor, Slot[] arguments, FieldDefinition field,
+        ModuleDefinition module, int depth, string architecture)
+    {
+        byte[] data = new byte[MetadataValidation.Layout(constructor.DeclaringType, module, architecture)];
+        Run(constructor, [new Self(data), .. arguments], field, module, depth + 1, architecture);
+        return new Snapshot(data);
     }
 
     // Same-assembly methods reachable by direct calls; unmodelled code beyond them is a documented assumption.
@@ -165,9 +184,8 @@ internal static partial class StaticValues
                 case Code.Newobj when i.Operand is MethodReference reference && reference.Resolve() is { IsConstructor: true, HasThis: true } constructor &&
                     constructor.Module == module && MetadataValidation.IsAggregate(constructor.DeclaringType, module):
                 {
-                    byte[] data = new byte[MetadataValidation.Layout(constructor.DeclaringType, module, architecture)];
-                    Run(constructor, [new Self(data), .. Pop(stack, constructor.Parameters.Count)], field, module, depth + 1, architecture);
-                    stack.Push(new Snapshot(data));
+                    stack.Push(Construct(constructor, Pop(stack, constructor.Parameters.Count), field, module,
+                        depth, architecture));
                     break;
                 }
                 case Code.Call when i.Operand is MethodReference reference && reference is not GenericInstanceMethod &&

@@ -20,6 +20,8 @@ inductive FieldAccess where
 /-- How an instruction uses a struct's size, including scaled reference addition/subtraction. -/
 inductive SizeAccess where
   | load | store | initialize | copy | sizeOf | construct | referenceAdd | referenceSubtract
+  | spanElement | spanSource | spanTarget
+  | arrayElement
   deriving DecidableEq, Repr
 
 /-- The native-width negative stride used to subtract an element offset. -/
@@ -56,12 +58,25 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
 
 /-- The emitted size-dependent operation uses exactly the computed struct size. -/
 private def checkSize (size : Nat) : SizeAccess → Op → Bool
+  | .arrayElement, .memory (.arrayAddress (.aggregate _ width) _)
+  | .arrayElement, .memory (.arrayTransfer (.aggregate _ width) _)
+  | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
+  | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
   | .load, .memory (.marshalRead (.snapshot (.aggregate width)) _)
   | .store, .memory (.marshalWrite (.snapshot (.aggregate width)) _) => width == size
   | .load, .loadAggregate width | .store, .storeAggregate width
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
   | .sizeOf, .const32 bits => bits.toNat == size
   | .construct, .newAggregate _ _ width => width.val == size
+  | .spanElement, .memory (.spanItem width)
+  | .spanElement, .memory (.spanCopy width _)
+  | .spanElement, .memory (.spanFill width _)
+  | .spanElement, .memory (.spanFromReference width _)
+  | .spanElement, .memory (.spanSingleReference width _)
+  | .spanElement, .initializeSpanLocal _ (.reference width _)
+  | .spanElement, .initializeSpanLocal _ (.singleReference width _) => width == size
+  | .spanSource, .memory (.spanReinterpret width _ _) => width == size
+  | .spanTarget, .memory (.spanReinterpret _ width _) => width == size
   | .referenceAdd, .memory (.add width _) => width == size
   | .referenceSubtract, .memory (.add stride _) => stride == subtractionStride size
   | _, _ => false

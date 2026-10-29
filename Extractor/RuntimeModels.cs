@@ -45,7 +45,7 @@ internal static class RuntimeModels
     {
         string name = type.FullName;
         return name is "System.UInt32" or "System.Byte" or "System.UIntPtr" or "System.IntPtr" or
-            "System.RuntimeFieldHandle" || Spans.Width(type) is not null ||
+            "System.RuntimeFieldHandle" || Spans.Is(type) ||
             (type is ByReferenceType byRef && SupportedType(byRef.ElementType)) ||
             IsSupportedVector(name);
     }
@@ -66,6 +66,13 @@ internal static class RuntimeModels
             return;
         }
         if (type is GenericParameter) return;
+        if (GenericStructs.Is(type) && type is GenericInstanceType closedStruct)
+        {
+            foreach (var argument in closedStruct.GenericArguments)
+                ValidateTypeIdentity(argument, module, architecture);
+            MetadataValidation.Layout(type, module, architecture);
+            return;
+        }
         if (type is GenericInstanceType generic)
         {
             if (generic.IsValueType != generic.ElementType.IsValueType)
@@ -120,7 +127,7 @@ internal static class RuntimeModels
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
             (reference.HasThis && reference.Name is not
                 (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill" or
-                 "CopyTo" or "TryCopyTo")) ||
+                 "CopyTo" or "TryCopyTo" or "get_IsEmpty" or "GetPinnableReference")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
         if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" &&
@@ -134,8 +141,9 @@ internal static class RuntimeModels
                 ?? MemoryTransfers.Marshal(reference, profile.Architecture)
                 ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
-                ?? EnumSpan(reference) ?? Runtime(reference.FullName),
-            "System.Memory" => Scalar(reference) ?? EnumSpan(reference) ?? Span(reference.FullName),
+                ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
+            "System.Memory" => Scalar(reference) ?? BinaryTransfers.Translate(reference) ??
+                ElementSpan(reference, profile.Architecture) ?? Span(reference.FullName),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
@@ -244,11 +252,15 @@ internal static class RuntimeModels
 
     private static string? Runtime(string signature) => signature switch
     {
-        $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" => ".memory (.copyBlock 8)",
-        $"System.Void {Unsafe}::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" =>
+        $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" or
+        $"System.Void {Unsafe}::CopyBlock(System.Void*,System.Void*,System.UInt32)" => ".memory (.copyBlock 8)",
+        $"System.Void {Unsafe}::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" or
+        $"System.Void {Unsafe}::CopyBlockUnaligned(System.Void*,System.Void*,System.UInt32)" =>
             ".memory (.copyBlock 1)",
-        $"System.Void {Unsafe}::InitBlock(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 8)",
-        $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
+        $"System.Void {Unsafe}::InitBlock(System.Byte&,System.Byte,System.UInt32)" or
+        $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" => ".memory (.initBlock 8)",
+        $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
+        $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
         $"!!1 {Unsafe}::BitCast<System.Byte,System.Boolean>(!!0)" => ".memory .bitcastByteBool",
         "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" => ".memory .spanCreate",
         _ => Span(signature)
@@ -259,19 +271,31 @@ internal static class RuntimeModels
     // Signatures are immutable: runtime lookup performs no interpolation or per-element scan.
     private static string? Span(string signature) => SpanOperations.GetValueOrDefault(signature);
 
-    private static string? EnumSpan(MethodReference method)
+    private sealed class ElementSpanOperations
+    {
+        internal readonly Dictionary<string, Dictionary<string, string>> Architectures = new(StringComparer.Ordinal);
+    }
+
+    private static string? ElementSpan(MethodReference method, string architecture)
     {
         var element = method.DeclaringType is GenericInstanceType { GenericArguments.Count: 1 } owner
             ? owner.GenericArguments[0]
             : method is GenericInstanceMethod { GenericArguments.Count: 1 } generic
                 ? generic.GenericArguments[0] : null;
-        if (element is null || !EnumTypes.IsEnum(element)) return null;
-        EnumTypes.Storage(element);
-        return EnumTypes.Cached(element, type => BuildSpanOperations(type))
-            .GetValueOrDefault(method.FullName);
+        if (element is null || Arrays.Primitive(element) is not null ||
+            Spans.ElementWidth(element, architecture) is null) return null;
+        if (EnumTypes.IsEnum(element)) EnumTypes.Storage(element);
+        var architectures = EnumTypes.Cached(element, _ => new ElementSpanOperations()).Architectures;
+        if (!architectures.TryGetValue(architecture, out var operations))
+        {
+            operations = BuildSpanOperations(element, architecture);
+            architectures.Add(architecture, operations);
+        }
+        return operations.GetValueOrDefault(method.FullName);
     }
 
-    private static Dictionary<string, string> BuildSpanOperations(TypeReference? enumType = null)
+    private static Dictionary<string, string> BuildSpanOperations(
+        TypeReference? elementType = null, string architecture = "scalar")
     {
         var operations = new Dictionary<string, string>(StringComparer.Ordinal);
         var primitives = new[]
@@ -280,12 +304,15 @@ internal static class RuntimeModels
             ("System.Int32", 4), ("System.UInt32", 4), ("System.Int64", 8), ("System.UInt64", 8),
             ("System.IntPtr", 8), ("System.UIntPtr", 8), ("System.Char", 2), ("System.Boolean", 1)
         };
-        foreach (var (element, width) in enumType is null ? primitives :
-            [(enumType.FullName, Arrays.Storage(enumType)!.Width)])
+        foreach (var (element, width) in elementType is null ? primitives :
+            [(elementType.FullName, Spans.ElementWidth(elementType, architecture)!.Value)])
         {
-            var arrayElement = (enumType is null ? Arrays.Primitive(element) : Arrays.Storage(enumType))!.Expression;
+            var arrayElement = (elementType is null ? Arrays.Primitive(element) :
+                Arrays.Storage(elementType, architecture))?.Expression;
             var span = $"System.ReadOnlySpan`1<{element}>";
-            operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
+            var staticElement = elementType is null || Arrays.Primitive(elementType) is not null ||
+                EnumTypes.IsEnum(elementType);
+            if (staticElement) operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
                 $"CreateSpan<{element}>(System.RuntimeFieldHandle)", $".memory (.createSpan {width})");
             operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",
                 $".memory (.spanItem {width})");
@@ -297,13 +324,20 @@ internal static class RuntimeModels
                 var writable = name == "System.Span`1";
                 var capability = writable ? "true" : "false";
                 var arrayWhole = $".memory (.arraySpan {arrayElement} {capability} .whole)";
-                operations.Add($"System.Void {owner}::.ctor(!0[])", arrayWhole);
-                operations.Add($"{name}<!0> {owner}::op_Implicit(!0[])", arrayWhole);
-                operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
+                if (arrayElement is not null) operations.Add($"System.Void {owner}::.ctor(!0[])", arrayWhole);
+                if (arrayElement is not null) operations.Add($"{name}<!0> {owner}::op_Implicit(!0[])", arrayWhole);
+                if (arrayElement is not null) operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
                     $".memory (.arraySpan {arrayElement} {capability} .counted)");
                 operations.Add($"System.Void {owner}::.ctor(System.Void*,System.Int32)",
                     $".memory (.spanFromReference {width} {capability})");
+                operations.Add($"System.Void {owner}::.ctor(!0&)",
+                    $".memory (.spanSingleReference {width} {capability})");
                 operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
+                operations.Add($"System.Boolean {owner}::get_IsEmpty()", ".memory (.observeView .spanEmpty)");
+                var pinnableResult = writable ? "!0&" :
+                    "!0& modreq(System.Runtime.InteropServices.InAttribute)";
+                operations.Add($"{pinnableResult} {owner}::GetPinnableReference()",
+                    ".memory (.observeView .spanPinnable)");
                 operations.Add($"System.Void {owner}::CopyTo(System.Span`1<!0>)",
                     $".memory (.spanCopy {width} false)");
                 operations.Add($"System.Boolean {owner}::TryCopyTo(System.Span`1<!0>)",
@@ -323,12 +357,14 @@ internal static class RuntimeModels
             }
             operations.Add($"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
                 "op_Implicit(System.Span`1<!0>)", ".memory .spanReadOnly");
+            operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
+                $"GetArrayDataReference<{element}>(!!0[])", ".memory (.observeView .arrayData)");
             foreach (var (parameters, range) in new[]
             {
                 ("!!0[]", "whole"), ("!!0[],System.Int32", "fromStart"),
                 ("!!0[],System.Int32,System.Int32", "counted")
             })
-                operations.Add("System.Span`1<!!0> System.MemoryExtensions::" +
+                if (arrayElement is not null) operations.Add("System.Span`1<!!0> System.MemoryExtensions::" +
                     $"AsSpan<{element}>({parameters})", $".memory (.arraySpan {arrayElement} true .{range})");
         }
         return operations;

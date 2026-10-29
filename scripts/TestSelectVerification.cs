@@ -77,7 +77,15 @@ Test("test entry points", () =>
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]), ["enums", "evidence", "excluded", "scaling", "unsafe"]);
+    Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
+        ["blocks", "enums", "evidence", "excluded", "generics", "scaling", "unsafe"]);
+    Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
+    Equal(VerificationSelection.Select(["Tests/GenericLayouts.cs"]), ["generics"]);
+    Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["evidence"]);
+    Equal(VerificationSelection.Select(["Tests/NativeMethodTables.lean"]), ["evidence"]);
+    foreach (var name in new[]
+        { "AggregateSpans", "ViewAccessors", "BinarySpans", "SpanConstructors", "AggregateSpanFill", "AggregateArrays" })
+        Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["unsafe"]);
     Equal(VerificationSelection.Select(["Tests/VectorStorage.cs"]), ["unsafe"]);
     Equal(VerificationSelection.Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
 });

@@ -17,7 +17,7 @@ structure OrdinaryFrame (body : CIL.Method) : Prop where
   vectorArguments : body.vectorArgs = []
   parameterHomes : body.parameterHomes = []
   layouts : ∀ kind ∈ body.localKinds, localWidth kind < nativeLimit ∧
-    ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]
+    ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)
 
 /-- Ordinary unmodeled declarations whose physical home creation is supported. -/
 structure UnmodeledFrame (body : CIL.Method) : Prop where
@@ -26,7 +26,7 @@ structure UnmodeledFrame (body : CIL.Method) : Prop where
   vectorArguments : body.vectorArgs = []
   parameterHomes : body.parameterHomes = []
   layouts : ∀ kind ∈ body.localKinds, localWidth kind < nativeLimit ∧
-    ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]
+    ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)
 
 /-- Entering a nested call adds its activation pair without changing existing scope witnesses. -/
 def enterScopes (scopes : Nat → Nat → Prop) (source target : Nat) : Nat → Nat → Prop :=

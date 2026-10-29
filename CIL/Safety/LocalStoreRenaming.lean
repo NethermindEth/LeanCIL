@@ -121,9 +121,18 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
   | array element stored =>
     cases value with
     | scalar scalar => cases scalar <;> exact .error _
-    | reference reference => cases reference <;> first
-        | exact .error .invalidState
-        | exact .ok ⟨rfl, related⟩
+    | reference reference =>
+      cases reference with
+      | address _ => exact .error .invalidState
+      | null =>
+        simp only [CIL.Safety.storeLocal, AllocationRenaming.localSlot, AllocationRenaming.value,
+          Value.hasUnspecified, Bool.and, Bool.false_eq_true, ite_false,
+          AllocationRenaming.managedReference, ArrayView.validate, ArrayView.storage, SpanView.validate]
+        by_cases width : 0 < element.width ∧ element.width < 2^64
+        all_goals simp [width, checkedAt, Except.mapError, Bind.bind, Except.bind,
+          Pure.pure, Except.pure]
+        · exact .ok ⟨rfl, related⟩
+        · exact .error _
     | span _ _ | readOnlyReference _ | bufferSpan _
     | methodPointer _ | methodTable _ => exact .error _
     | array view =>

@@ -15,14 +15,23 @@ internal static class InstructionTranslation
         IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
         FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
         IReadOnlyDictionary<int, int>? parameterHomes = null, ImportResolution? imports = null,
-        MetadataValidation.LayoutContext? layouts = null)
+        MetadataValidation.LayoutContext? layouts = null, ConstrainedCalls.TargetIndex? constrainedTargets = null)
     {
         if (imports is not null && imports.TryTranslate(i, methods.Count, out string imported)) return imported;
         profile ??= FeatureProfile.Scalar;
         layouts?.Require(m.Module, profile.Architecture);
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
-        nativeOperands ??= NativeOperands.Certify(m, reachable!);
+        nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
+        if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
+        {
+            if (i.OpCode.Code == Code.Add && dispatchStack.Length >= 2 &&
+                dispatchStack[^2].Kind == NativeOperands.Kind.NativeMethodTable)
+                return ".managed .tableOffset";
+            if (i.OpCode.Code == Code.Ldind_I && dispatchStack.LastOrDefault() is
+                { Kind: NativeOperands.Kind.NativeMethodTable, Metadata: { } signature })
+                return ".managed (.tableLoad " + signature[".nativeMethodTable ".Length..] + ")";
+        }
         if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
             return $".managed (.call {ManagedPointers.SignatureEvidence(indirect)} " +
                 $"{ManagedPointers.Catalog(indirect, methods, methodIndex, i.Previous?.OpCode.Code == Code.Tail)} " +
@@ -56,21 +65,23 @@ internal static class InstructionTranslation
             return ".nop";
         }
         if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
-        if (Arrays.Translate(i) is { } arrayOperation) return arrayOperation;
+        if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
-        var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes, layouts);
+        var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
+            layouts, constrainedTargets);
         return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;
     }
 
     static string TranslateCore(Instruction i, MethodDefinition m, IReadOnlyDictionary<MethodDefinition, int> methods,
         int methodIndex, InstructionIndex instructions,
-        FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext? layouts)
+        FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext? layouts,
+        ConstrainedCalls.TargetIndex? constrainedTargets)
     {
         profile ??= FeatureProfile.Scalar;
         var typeTests = TypeTests.Analyze(m);
         if (i.OpCode.Code == Code.Tail)
         {
-            TailCalls.ValidateReachable(m, i);
+            TailCalls.ValidateReachable(m, i, profile.Architecture);
             return ".nop";
         }
         if (typeTests.Results.TryGetValue(i, out bool same)) return same ? ".const32 1" : ".const32 0";
@@ -85,12 +96,14 @@ internal static class InstructionTranslation
         if (i.OpCode.Code == Code.Callvirt)
         {
             var resolved = ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture).Target;
+            resolved = (constrainedTargets ?? new ConstrainedCalls.TargetIndex(methods.Keys))
+                .Find(resolved, (TypeReference)i.Previous.Operand);
             var index = methods.GetValueOrDefault(resolved, -1);
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
             return $".call {index} {resolved.Parameters.Count + 1}";
         }
         if (throws.Raises.TryGetValue(i, out string? raised)) return $".throw \"{raised}\"";
-        var spans = Spans.Analyze(m);
+        var spans = Spans.Analyze(m, profile);
         if (spans.Constructors.TryGetValue(i, out var constructor)) return constructor;
         if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return ".nop";
         int Target() => instructions.Position((Instruction)i.Operand);
@@ -117,20 +130,13 @@ internal static class InstructionTranslation
             var f = (FieldReference)i.Operand;
             FieldDefinition resolved = f.Resolve() ?? throw new InvalidDataException("Unresolved field");
             Layout(f.DeclaringType);
-            RuntimeModels.ValidateTypeIdentity(f.FieldType, m.Module, profile.Architecture);
-            var tuple = ValueTuples.Is(f.DeclaringType);
-            var tupleFields = tuple ? layouts?.Fields(f.DeclaringType) ??
-                MetadataValidation.Fields(f.DeclaringType) : null;
-            var field = tupleFields?.SingleOrDefault(candidate =>
-                candidate.Definition == resolved && f.FieldType is GenericParameter parameter &&
-                resolved.FieldType is GenericParameter definition && parameter.Position == definition.Position);
-            if (resolved.IsStatic || (tuple ? field is null : resolved.Module != m.Module || resolved.FullName != f.FullName))
-                throw new InvalidDataException($"Unsupported field {f.FullName}");
-            var fieldType = field?.Type ?? resolved.FieldType;
+            var actual = MetadataValidation.InstanceFieldOf(f);
+            var fieldType = actual.Type;
+            RuntimeModels.ValidateTypeIdentity(fieldType, m.Module, profile.Architecture);
             var aggregate = MetadataValidation.IsAggregate(fieldType, m.Module);
             int width = layouts?.FieldSize(fieldType) ??
                 MetadataValidation.FieldSize(fieldType, m.Module, profile.Architecture);
-            var owner = tuple ? f.DeclaringType : resolved.DeclaringType;
+            var owner = f.DeclaringType;
             int offset = layouts?.FieldOffset(owner, resolved) ??
                 MetadataValidation.FieldOffset(owner, resolved, m.Module, profile.Architecture);
             if (aggregate && op != "fieldAddr")
@@ -150,7 +156,7 @@ internal static class InstructionTranslation
             if (index > methodIndex || index >= 0 && TailCalls.IsCall(i))
             {
                 if (i.OpCode.Code == Code.Newobj)
-                    return $".newAggregate {index} {resolved.Parameters.Count} {Layout(resolved.DeclaringType)}";
+                    return $".newAggregate {index} {resolved.Parameters.Count} {Layout(MethodSpecialization.DeclaringType(resolved))}";
                 var operation = TailCalls.IsCall(i) ? "tailCall" : "call";
                 return $".{operation} {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
             }
@@ -167,7 +173,7 @@ internal static class InstructionTranslation
             Code.Initblk => $".memory (.initBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Starg or Code.Starg_S => Parameter("setLocal"),
             Code.Ldarga or Code.Ldarga_S => Parameter(
-                Spans.Width(((ParameterDefinition)i.Operand).ParameterType) is null ? "localAddr" : "local"),
+                !Spans.Is(((ParameterDefinition)i.Operand).ParameterType) ? "localAddr" : "local"),
             Code.Conv_I => ".convI8",
             Code.Ldind_I => ".load64", Code.Stind_I => ".store64",
             Code.Conv_Ovf_I1 => ".checkedConvert 8 true false", Code.Conv_Ovf_I1_Un => ".checkedConvert 8 true true",
@@ -224,7 +230,7 @@ internal static class InstructionTranslation
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
             Code.Ldloc or Code.Ldloc_S => LocalOp("local", Local()),
             Code.Ldloca or Code.Ldloca_S => LocalOp(
-                Spans.Width(((VariableDefinition)i.Operand).VariableType) is null ? "localAddr" : "local", Local()),
+                !Spans.Is(((VariableDefinition)i.Operand).VariableType) ? "localAddr" : "local", Local()),
             Code.Stloc_0 => LocalOp("setLocal", 0), Code.Stloc_1 => LocalOp("setLocal", 1), Code.Stloc_2 => LocalOp("setLocal", 2), Code.Stloc_3 => LocalOp("setLocal", 3),
             Code.Stloc or Code.Stloc_S => LocalOp("setLocal", Local()),
             Code.Ldfld => Field("field"), Code.Ldflda => Field("fieldAddr"), Code.Stfld => Field("setField"),

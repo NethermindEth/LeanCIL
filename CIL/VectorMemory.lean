@@ -133,9 +133,20 @@ def TransferKind.width : TransferKind → Nat
   | .scalar width _ => width
   | .snapshot shape => shape.width
 
+/-- Observations of existing views that neither read bytes nor grant write authority. -/
+inductive ViewObservation where
+  | spanEmpty | spanPinnable | arrayData
+  deriving DecidableEq, Repr
+
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
+  /-- Inspect an existing view without accessing its element contents. -/
+  | observeView (observation : ViewObservation)
+  /-- Fixed-width endian-aware reads; short try-reads initialize the out value to zero. -/
+  | binaryRead (width : Nat) (signed bigEndian trying : Bool)
+  /-- Fixed-width endian-aware writes; short try-writes leave the span unchanged. -/
+  | binaryWrite (width : Nat) (bigEndian trying : Bool)
   /-- Reinterpret existing bytes without changing their storage or authority. -/
   | spanReinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   /-- Snapshot copying permits overlapping spans; try-copy returns false for a short target. -/
@@ -160,19 +171,25 @@ inductive MemoryOp where
   | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
   /-- Primitive spans over supplied storage; these operations never grant memory authority. -/
   | spanFromReference (width : Nat) (writable : Bool)
+  | spanSingleReference (width : Nat) (writable : Bool)
   | spanSlice (explicitLength : Bool) | spanReadOnly
-  /-- A span view over supplied primitive array storage, without allocation or copying. -/
+  /-- A span view over supplied reference-free array storage, without allocation or copying. -/
   | arraySpan (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   /-- Integer operations over supplied array storage; allocation is not modelled. -/
   | arrayLength | arrayLoad (width : Nat) (signed : Bool) | arrayStore (width : Nat)
   /-- A checked element address retains allocation provenance without granting authority. -/
   | arrayAddress (element : ArrayElement) (writable : Bool := true)
+  /-- A typed reference-free element transfer retains byte initialization masks. -/
+  | arrayTransfer (element : ArrayElement) (store : Bool)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
   deriving Repr
 
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
+  | .observeView _ => 1
+  | .binaryRead _ _ _ trying => if trying then 2 else 1
+  | .binaryWrite .. => 2
   | .spanCopy .. => 2
   | .spanFill _ clear => if clear then 1 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1
@@ -180,9 +197,11 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2
+  | .spanSingleReference .. => 1
   | .arraySpan _ _ range => range.argumentCount
   | .spanReinterpret .. | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2
+  | .arrayTransfer _ store => if store then 3 else 2
   | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
   | .staticAddress _ | .staticValue _ | .nullRef => 0

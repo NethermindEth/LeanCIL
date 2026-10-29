@@ -21,7 +21,9 @@ inductive StorageType where
   | field (type : FieldType)
   | reference | vector128 | vector256 | vector512
   | span (width : Nat) (writable : Bool)
+  | aggregateSpan (index : Nat) (writable : Bool)
   | array (element : ArrayElement)
+  | aggregateArray (identity : String) (index : Nat)
   | methodPointer (signature : ManagedSignature)
   | methodTable (signature : ManagedSignature)
   deriving DecidableEq, Repr
@@ -47,10 +49,18 @@ structure RawArguments where
 def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalKind
   | .reference => some .reference
   | .array element => some (.array element)
+  | .aggregateArray identity index => do
+    let layout ← layouts[index]?
+    if 0 < layout.layout.size ∧ layout.layout.size < 2^64 then
+      some (.array (.aggregate identity layout.layout.size)) else none
   | .methodPointer signature => some (.methodPointer signature)
   | .methodTable signature => some (.methodTable signature)
+  | .aggregateSpan index writable => do
+    let layout ← layouts[index]?
+    if 0 < layout.layout.size ∧ layout.layout.size < 2^64 then
+      some (.span layout.layout.size writable) else none
   | .span width writable =>
-    if width ∈ [1, 2, 4, 8] then some (.span width writable) else none
+    if (0 < width ∧ width < 2^64) then some (.span width writable) else none
   | .vector128 => some .vector128
   | .vector256 => some .vector256
   | .vector512 => some .vector512
@@ -187,7 +197,7 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
       match emitted with
       | .localAddr actual => return actual == slot
       | .local actual none => return actual == slot && match type with
-          | .span .. => true | _ => false
+          | .span .. | .aggregateSpan .. => true | _ => false
       | _ => return false).getD false
   | .other => match emitted with
       | .arg .. | .vectorArg .. | .vectorArgAddr .. => false

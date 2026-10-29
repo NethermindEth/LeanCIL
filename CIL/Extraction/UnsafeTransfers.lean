@@ -1,13 +1,45 @@
 import CIL.Extraction.Generics
 
 /-!
-# Managed-reference unaligned transfers
+# Checked Unsafe transfers
 
 Unsafe byte-reference reads and writes lower to existing checked typed operations. Scalar and
 vector widths are bound here; aggregate widths are additionally bound by complete layout uses.
 -/
 
 namespace CIL.Extraction
+
+/-- Exact byte-reference and pointer block helpers share the existing checked block operations. -/
+def unsafeBlockCall (raw : RawInstruction) : Option (Bool × Nat) := do
+  if raw.opcode != 40 then none else pure ()
+  let .call site := raw.operand | none
+  if site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" ||
+      site.hasThis || site.returnsValue || site.returnType != .void ||
+      !site.typeArguments.isEmpty || site.parameterCount != 3 then none else pure ()
+  let (copy, alignment) ← match site.name with
+    | "CopyBlock" => some (true, 8) | "CopyBlockUnaligned" => some (true, 1)
+    | "InitBlock" => some (false, 8) | "InitBlockUnaligned" => some (false, 1)
+    | _ => none
+  let byte := TypeExpr.atom runtimeScope "System.Byte"
+  let pointer := site.parameterTypes.head? == some (.pointer .void)
+  let address := if pointer then .pointer .void else .byref byte
+  if site.parameterTypes != [address, if copy then address else byte,
+      .atom runtimeScope "System.UInt32"] then none else pure ()
+  let addressName := if pointer then "System.Void*" else "System.Byte&"
+  if site.target != .external (runtimeScope ++
+      "::System.Void System.Runtime.CompilerServices.Unsafe::" ++ site.name ++ "(" ++
+      addressName ++ "," ++ (if copy then addressName else "System.Byte") ++
+      ",System.UInt32)") then none else some (copy, alignment)
+
+/-- Block helper calls bind operation, alignment and signature independently of the extractor. -/
+def unsafeBlockMatches (raw : RawInstruction) (emitted : Op) : Bool :=
+  match unsafeBlockCall raw with
+  | some (copy, alignment) => match copy, emitted with
+    | true, .memory (.copyBlock actual) | false, .memory (.initBlock actual) => actual == alignment
+    | _, _ => false
+  | none => match raw.opcode, emitted with
+    | 40, .memory (.copyBlock _) | 40, .memory (.initBlock _) => false
+    | _, _ => true
 
 /-- The exact load or store representation of an admitted reference-free value type. -/
 def typedTransferMatches (layouts : List RawLayout) (type : TypeExpr) (read : Bool)

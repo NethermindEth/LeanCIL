@@ -6,11 +6,10 @@ import CIL.Safety.SpanViewLemmas
 namespace CIL.Safety
 
 /-- A typed null array has no extent and needs no backing allocation. -/
-theorem ArrayView.null_valid (element : CIL.ArrayElement) (memory : Memory) :
+theorem ArrayView.null_valid (element : CIL.ArrayElement) (memory : Memory)
+    (width : 0 < element.width ∧ element.width < 2^64) :
     (ArrayView.mk .null 0 element).validate memory = .ok () := by
-  cases element with
-  | enumeration _ storage => cases storage <;> rfl
-  | _ => rfl
+  simp [ArrayView.validate, ArrayView.storage, SpanView.validate, width, Pure.pure, Except.pure]
 
 #print axioms ArrayView.null_valid
 

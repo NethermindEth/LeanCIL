@@ -14,10 +14,16 @@ internal static class ParameterEvidence
             return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
                 ManagedPointers.SignatureEvidence(signature);
         if (type is ByReferenceType or PointerType) return ".reference";
+        if (type is ArrayType array && MetadataValidation.IsAggregate(array.ElementType, module))
+            return $".aggregateArray {System.Text.Json.JsonSerializer.Serialize(LayoutEvidence.Identity(array.ElementType))} " +
+                layouts.Index(array.ElementType);
         if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
-        if (Spans.Width(type) is { } width)
+        if (type is GenericInstanceType span && Spans.Is(type) &&
+            MetadataValidation.IsAggregate(span.GenericArguments[0], module))
+            return $".aggregateSpan {layouts.Index(span.GenericArguments[0])} {(Spans.Writable(type) ? "true" : "false")}";
+        if (Spans.Width(type, layouts.Metadata.Architecture) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
-        if (type is GenericInstanceType vector && !ValueTuples.Is(type))
+        if (type is GenericInstanceType vector && !MetadataValidation.IsAggregate(type, module))
             return vector.ElementType.FullName switch
             {
                 "System.Runtime.Intrinsics.Vector128`1" => ".vector128",
@@ -38,10 +44,13 @@ internal static class ParameterEvidence
     internal static void Emit(StringBuilder lean, MethodDefinition method, int number,
         HashSet<Instruction> reachable, LayoutEvidence layouts)
     {
+        var dispatch = NativeDispatch.For(method);
         var arguments = new List<string>();
         if (method.HasThis) arguments.Add(".reference");
-        arguments.AddRange(method.Parameters.Select(parameter => Type(parameter.ParameterType, method.Module, layouts)));
-        var locals = method.Body.Variables.Select(local => Type(local.VariableType, method.Module, layouts));
+        arguments.AddRange(method.Parameters.Select(parameter => dispatch.Kind(parameter.ParameterType) ??
+            Type(parameter.ParameterType, method.Module, layouts)));
+        var locals = method.Body.Variables.Select(local => dispatch.Kind(local.VariableType, local.Index) ??
+            Type(local.VariableType, method.Module, layouts));
         var code = method.Body.Instructions.Select(instruction => instruction.OpCode.Code switch
         {
             Code.Ldarg_0 => ".load 0", Code.Ldarg_1 => ".load 1", Code.Ldarg_2 => ".load 2", Code.Ldarg_3 => ".load 3",

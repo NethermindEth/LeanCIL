@@ -1,0 +1,47 @@
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+
+namespace Examples;
+
+internal static class AggregateSpans
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Words
+    {
+        public ulong First;
+        public ulong Second;
+        public ulong Third;
+        public ulong Fourth;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VectorRecord
+    {
+        public byte Prefix;
+        public Vector256<ulong> Value;
+    }
+
+    public static bool IsEmpty(Span<Words> source) => source.IsEmpty;
+    public static bool VectorIsEmpty(ReadOnlySpan<Vector128<ulong>> source) => source.IsEmpty;
+
+    public static Span<byte> LayoutBytes(Span<VectorRecord> source) => MemoryMarshal.AsBytes(source);
+    public static VectorRecord LayoutRead(ReadOnlySpan<VectorRecord> source) => source[0];
+
+    public static Span<Words> Factory(ref Words source, int length) =>
+        MemoryMarshal.CreateSpan(ref source, length);
+    public static ReadOnlySpan<Words> ReadOnlyFactory(ref Words source, int length) =>
+        MemoryMarshal.CreateReadOnlySpan(ref source, length);
+
+    public static Span<byte> Bytes(Span<Words> source) => MemoryMarshal.AsBytes(source);
+    public static ReadOnlySpan<Words> WordsView(ReadOnlySpan<byte> source) =>
+        MemoryMarshal.Cast<byte, Words>(source);
+    public static Span<byte> VectorBytes(Span<Vector128<ulong>> source) => MemoryMarshal.AsBytes(source);
+    public static Vector128<ulong> ReadVector(ReadOnlySpan<Vector128<ulong>> source) => source[0];
+    public static Words Read(ReadOnlySpan<Words> source) => source[0];
+    public static void Write(Span<Words> target, Words value) => target[0] = value;
+    public static void WriteVector(Span<Vector128<ulong>> target, Vector128<ulong> value) => target[0] = value;
+    public static bool Copy(ReadOnlySpan<Words> source, Span<Words> target) => source.TryCopyTo(target);
+    public static Span<Words> Slice(Span<Words> source, int offset, int length) => source.Slice(offset, length);
+    public static void Clear(Span<Words> source) => source.Clear();
+}

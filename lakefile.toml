@@ -251,3 +251,9 @@ name = "Tests.LayoutProjectionIndexes"
 
 [[lean_lib]]
 name = "Tests.FullTransfer"
+
+[[lean_lib]]
+name = "Tests.NativeMethodTables"
+
+[[lean_lib]]
+name = "Tests.AggregateArrayStorage"

@@ -141,3 +141,10 @@ Run(["dotnet", "run", "--file", "Tests/UnalignedMemory.cs"], streamOutput: true,
 Run(["dotnet", "run", "--file", "Tests/MarshaledMemory.cs"], streamOutput: true, progress: "Byte-span transfer checks");
 Run(["dotnet", "run", "--file", "Tests/ReinterpretedSpans.cs"], streamOutput: true, progress: "Span reinterpretation checks");
 Run(["dotnet", "run", "--file", "Tests/SpanCopies.cs"], streamOutput: true, progress: "Span copy checks");
+Run(["dotnet", "run", "--file", "Tests/ViewAccessors.cs"], streamOutput: true, progress: "View accessor checks");
+Run(["dotnet", "run", "--file", "Tests/BinarySpans.cs"], streamOutput: true, progress: "Endian span checks");
+
+Run(["dotnet", "run", "--file", "Tests/AggregateSpans.cs"], streamOutput: true, progress: "Aggregate span checks");
+Run(["dotnet", "run", "--file", "Tests/SpanConstructors.cs"], streamOutput: true, progress: "Span constructor checks");
+Run(["dotnet", "run", "--file", "Tests/AggregateSpanFill.cs"], streamOutput: true, progress: "Aggregate fill checks");
+Run(["dotnet", "run", "--file", "Tests/AggregateArrays.cs"], streamOutput: true, progress: "Aggregate array checks");

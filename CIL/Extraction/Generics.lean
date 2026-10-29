@@ -49,7 +49,12 @@ private def enumField : FieldType → Bool
   | _ => false
 
 /-- Primitive array element identity is derived from the exact runtime metadata scope. -/
-def arrayElementType : TypeExpr → Option ArrayElement
+def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option ArrayElement :=
+  match type with
+  | .aggregate identity _ => some (.aggregate identity aggregateWidth)
+  | type@(.apply (.constructor _ name) (.atom _ element)) => do
+    let width ← integerVectorWidth type
+    return .vector (name ++ "<" ++ element ++ ">") width
   | .enum identity (.atom scope name) => do
     if scope != runtimeScope then none else pure ()
     let storage ← match name with
@@ -69,42 +74,70 @@ def arrayElementType : TypeExpr → Option ArrayElement
       | "System.Boolean" => some .boolean | "System.Char" => some .character
       | _ => none
   | _ => none
-/-- Exact primitive span metadata, including element width and write capability. -/
-def spanStorage : TypeExpr → Option StorageType
+/-- Primitive/vector widths are intrinsic; aggregate widths come from checked layout uses. -/
+def spanElementWidth (type : TypeExpr) (aggregateWidth : Nat := 0) : Option Nat :=
+  if let .aggregate .. := type then some aggregateWidth else
+  ((arrayElementType type).map ArrayElement.width).orElse (fun _ => integerVectorWidth type)
+
+/-- Exact span metadata, including element width and write capability. -/
+def spanStorage (type : TypeExpr) (aggregateWidth : Nat := 0) : Option StorageType :=
+  match type with
   | .apply (.constructor scope name) elementType => do
     if scope != runtimeScope ||
         name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
-    let element ← arrayElementType elementType
-    return .span element.width (name == "System.Span`1")
+    let width ← spanElementWidth elementType aggregateWidth
+    return .span width (name == "System.Span`1")
   | _ => none
 
-/-- Whether a local is a supported primitive span. -/
+/-- Whether a local has a supported span metadata shape; layouts are validated separately. -/
 def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
 
-/-- Function-pointer parameters are primitive integers, enums or their managed references. -/
+/-- Callable identities retain scoped aggregate names, independent of layout-table ordering.
+    Argument storage still validates the original index against the checked layout metadata. -/
+def callableType : TypeExpr → TypeExpr
+  | .aggregate identity _ => .aggregate identity 0
+  | .byref element => .byref (callableType element)
+  | .apply constructor argument => .apply (callableType constructor) (callableType argument)
+  | .functionPointer result parameters convention hasThis explicitThis =>
+    .functionPointer (callableType result) (callableType parameters) convention hasThis explicitThis
+  | .signatureParameter head tail => .signatureParameter (callableType head) (callableType tail)
+  | type => type
+
+/-- Function pointers admit checked aggregates, integer vectors and integer/reference types. -/
 def managedParameter : TypeExpr → Bool
   | .atom scope name => scope == runtimeScope && (primitiveField name).isSome
   | .enum _ (.atom scope name) => scope == runtimeScope &&
       ((primitiveField name).map enumField).getD false
   | .byref element => match element with
-      | .atom .. | .enum .. => managedParameter element
+      | .atom .. | .enum .. | .aggregate .. | .apply .. => managedParameter element
       | _ => false
-  | _ => false
+  | .aggregate .. => true
+  | type => (integerVectorWidth type).isSome
 
 /-- Decode the ordered parameter chain without accepting another metadata constructor. -/
 def managedParameters : TypeExpr → Option (List TypeExpr)
   | .void => some []
   | .signatureParameter head tail => do
     if !managedParameter head then none else pure ()
-    return head :: (← managedParameters tail)
+    return callableType head :: (← managedParameters tail)
   | _ => none
 
 /-- Only the exact static managed convention gives callable provenance. -/
 def managedSignature : TypeExpr → Option ManagedSignature
   | .functionPointer result parameters 0 false false => do
     if result != .void && !managedParameter result then none else pure ()
-    return ⟨result, ← managedParameters parameters⟩
+    return ⟨callableType result, ← managedParameters parameters⟩
   | _ => none
+
+/-- Raw callable types must bind every aggregate index before their identity is canonicalized. -/
+def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool
+  | .aggregate identity index => (layouts[index]?).any (·.identity == identity)
+  | .byref element => callableLayoutsValid layouts element
+  | .functionPointer result parameters _ _ _ =>
+    callableLayoutsValid layouts result && callableLayoutsValid layouts parameters
+  | .signatureParameter head tail =>
+    callableLayoutsValid layouts head && callableLayoutsValid layouts tail
+  | _ => true
 
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
@@ -116,16 +149,30 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
+  | .array (.aggregate identity index) => do
+    let metadata ← layouts[index]?
+    if metadata.identity == identity then some (.aggregateArray identity index) else none
   | .array element => match managedSignature element with
-    | some signature => some (.methodTable signature)
+    | some signature => if callableLayoutsValid layouts element then some (.methodTable signature)
+      else none
     | none => StorageType.array <$> arrayElementType element
-  | type@(.functionPointer ..) => StorageType.methodPointer <$> managedSignature type
+  | type@(.functionPointer ..) => if callableLayoutsValid layouts type then
+      StorageType.methodPointer <$> managedSignature type else none
   | .pointer (.atom scope name) =>
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
         "System.IntPtr", "System.UIntPtr"] then some .reference else none
+  | .pointer (.aggregate identity index) => do
+    let metadata ← layouts[index]?
+    if metadata.identity == identity then some .reference else none
+  | .pointer type => if (integerVectorWidth type).isSome then some .reference else none
   | type@(.apply (.constructor scope name) elementType) => do
-    if let some storage := spanStorage type then return storage
+    if let some storage := spanStorage type then
+      if let .aggregate identity index := elementType then
+        let metadata ← layouts[index]?
+        if metadata.identity != identity then none else
+          return .aggregateSpan index (name == "System.Span`1")
+      else return storage
     let .atom elementScope element := elementType | none
     if scope != intrinsicsScope || elementScope != runtimeScope ||
         element ∉ ["System.UInt64", "System.Int64", "System.UInt32", "System.Int32",
@@ -134,22 +181,6 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256
     else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
   | _ => none
-
-/-- Structural substitution includes nested type constructors, not just signature strings. -/
-def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
-  | .parameter index => arguments[index]?
-  | .byref element => TypeExpr.byref <$> substituteType arguments element
-  | .pointer element => TypeExpr.pointer <$> substituteType arguments element
-  | .array element => TypeExpr.array <$> substituteType arguments element
-  | .functionPointer result parameters convention hasThis explicitThis => do
-    return .functionPointer (← substituteType arguments result)
-      (← substituteType arguments parameters) convention hasThis explicitThis
-  | .signatureParameter head tail => do
-    return .signatureParameter (← substituteType arguments head) (← substituteType arguments tail)
-  | .enum identity underlying => TypeExpr.enum identity <$> substituteType arguments underlying
-  | .apply constructor argument => do
-    return .apply (← substituteType arguments constructor) (← substituteType arguments argument)
-  | type => some type
 
 /-- A call target: a method of this module by metadata token, or another assembly's
     method by its `scope::signature` identity. -/
@@ -169,6 +200,8 @@ structure CallSite where
   returnsValue : Bool
   returnType : TypeExpr := .void
   parameterTypes : List TypeExpr := []
+  /-- The suffix of `typeArguments` belonging to the declaring type, not the method. -/
+  ownerArgumentCount : Nat := 0
   deriving DecidableEq, Repr
 
 /-- A decoded instruction operand. A field operand names its owner type and the field's
@@ -218,23 +251,33 @@ structure RawMethod where
   maxStack : Nat
   genericParameters : List GenericConstraint
   code : List RawInstruction
+  /-- Declaring-type constraints follow method constraints in the substitution environment. -/
+  ownerParameters : List GenericConstraint := []
+  /-- Closed bodies retain the owner arity after their parameter constraints are discharged. -/
+  ownerArgumentCount : Nat := 0
   deriving DecidableEq, Repr
 
+/-- Close metadata storage after substitution without changing callable owner expressions. -/
+def substituteStorageType (layouts : List RawLayout) (arguments : List TypeExpr)
+    (type : TypeExpr) : Option TypeExpr :=
+  closeLayoutType layouts <$> substituteType arguments type
+
 /-- Substitutes type arguments through every type an operand mentions. -/
-def substituteOperand (arguments : List TypeExpr) : RawOperand → Option RawOperand
-  | .type type => RawOperand.type <$> substituteType arguments type
+def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := []) :
+    RawOperand → Option RawOperand
+  | .type type => RawOperand.type <$> substituteStorageType layouts arguments type
   | .field owner index type isStatic => do
-    return .field (← substituteType arguments owner) index (← substituteType arguments type)
+    return .field (← substituteStorageType layouts arguments owner) index (← substituteStorageType layouts arguments type)
       isStatic
   | .call site => do
     return .call { site with
       declaringType := ← substituteType arguments site.declaringType,
-      typeArguments := ← site.typeArguments.mapM (substituteType arguments),
-      returnType := ← substituteType arguments site.returnType,
-      parameterTypes := ← site.parameterTypes.mapM (substituteType arguments) }
+      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments),
+      returnType := ← substituteStorageType layouts arguments site.returnType,
+      parameterTypes := ← site.parameterTypes.mapM (substituteStorageType layouts arguments) }
   | .indirectCall returnType parameters hasThis explicitThis convention => do
-    return .indirectCall (← substituteType arguments returnType)
-      (← parameters.mapM (substituteType arguments)) hasThis explicitThis convention
+    return .indirectCall (← substituteStorageType layouts arguments returnType)
+      (← parameters.mapM (substituteStorageType layouts arguments)) hasThis explicitThis convention
   | operand => some operand
 
 /-- The exact runtime identity of the value-type constraint. -/
@@ -294,25 +337,27 @@ private def allowedConstraint (layouts : List RawLayout) (argument : TypeExpr)
 /-- A closed, non-reference type argument with a known storage. -/
 private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : Bool :=
   substituteType [] type == some type && match typeStorage layouts type with
-    | some .reference | some (.span ..) | some (.array _) | none => false
+    | some .reference | some (.span ..) | some (.aggregateSpan ..) | some (.array _) | none => false
     | some _ => true
 
 /-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/
 def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
     (arguments : List TypeExpr) : Option RawMethod := do
-  if arguments.length != original.genericParameters.length ||
+  if original.ownerArgumentCount != 0 ||
+      arguments.length != original.genericParameters.length + original.ownerParameters.length ||
       !arguments.all (admittedTypeArgument layouts) ||
-      !(original.genericParameters.zip arguments).all
+      !((original.genericParameters ++ original.ownerParameters).zip arguments).all
         (fun (constraint, argument) => allowedConstraint layouts argument constraint) then none
   else
-    let returnType ← substituteType arguments original.returnType
-    let parameters ← original.parameters.mapM (substituteType arguments)
-    let locals ← original.locals.mapM (substituteType arguments)
+    let returnType ← substituteStorageType layouts arguments original.returnType
+    let parameters ← original.parameters.mapM (substituteStorageType layouts arguments)
+    let locals ← original.locals.mapM (substituteStorageType layouts arguments)
     let code ← original.code.mapM fun instruction => do
-      return { instruction with operand := ← substituteOperand arguments instruction.operand }
+      return { instruction with operand := ← substituteOperand arguments layouts instruction.operand }
     -- Masking with 239 clears the generic calling-convention bit (0x10).
     return { original with
-      returnType, parameters, locals, code, genericParameters := [],
+      returnType, parameters, locals, code, genericParameters := [], ownerParameters := [],
+      ownerArgumentCount := original.ownerParameters.length,
       callingConvention := original.callingConvention &&& 239 }
 
 /-- Closed argument metadata is derived from this checked body, including short opcodes. -/
@@ -329,10 +374,54 @@ def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   | opcode, _ =>
     if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
 
+/-- The unique raw managed indirect signature and native locals directly consumed as targets. -/
+structure NativeDispatchContext where
+  signature : Option ManagedSignature := none
+  pointerLocals : List Nat := []
+  deriving DecidableEq, Repr
+
+/-- Native integer metadata eligible for an authenticated table element. -/
+def nativeDispatchInteger : TypeExpr → Bool
+  | .atom scope name => scope == runtimeScope && name ∈ ["System.IntPtr", "System.UIntPtr"]
+  | _ => false
+
+/-- Derive callable homes from raw call sites, never from emitted kinds or numerical values. -/
+def nativeDispatchContext (raw : RawMethod) : NativeDispatchContext := Id.run do
+  let mut signature : Option ManagedSignature := none
+  let mut locals := []
+  let mut previous : Option RawInstruction := none
+  for instruction in raw.code do
+    if instruction.opcode == 41 then
+      let .indirectCall result parameters false false 0 := instruction.operand | return {}
+      let current : ManagedSignature := ⟨callableType result, parameters.map callableType⟩
+      if managedSignature current.typeExpr != some current then return {}
+      if let some expected := signature then
+        if expected != current then return {}
+      signature := some current
+      if let some before := previous then
+        if before.opcode ∈ [6, 7, 8, 9] then locals := (before.opcode - 6) :: locals
+        else if before.opcode ∈ [17, 65036] then
+          if let .local index := before.operand then locals := index :: locals
+    if instruction.opcode != 65044 then previous := some instruction
+  return ⟨signature, locals⟩
+
+/-- A native pointer is an input table view; only raw target-feeding integer locals are callable. -/
+def nativeDispatchStorage (context : NativeDispatchContext) (type : TypeExpr)
+    (localIndex : Option Nat := none) : Option StorageType := do
+  let signature ← context.signature
+  if let .pointer element := type then
+    if nativeDispatchInteger element then return .methodTable signature
+  if nativeDispatchInteger type && localIndex.any context.pointerLocals.contains then
+    return .methodPointer signature
+  none
+
 /-- Closed argument and local storage, including typed span views, and argument accesses. -/
 def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments := do
-  let parameters ← closed.parameters.mapM (typeStorage layouts)
-  let locals ← closed.locals.mapM (typeStorage layouts)
+  let context := nativeDispatchContext closed
+  let parameters ← closed.parameters.mapM fun type =>
+    nativeDispatchStorage context type <|> typeStorage layouts type
+  let locals ← closed.locals.zipIdx.mapM fun (type, index) =>
+    nativeDispatchStorage context type (some index) <|> typeStorage layouts type
   let code ← closed.code.mapM argumentOperation
   return ⟨(if closed.hasThis then [.reference] else []) ++ parameters, locals, code⟩
 
@@ -406,10 +495,29 @@ def managedTargetMatches (methods : Nat → Option SpecializedMethod)
   | none => false
   | some callee =>
     target.identity.owner == callee.closed.owner &&
-    target.identity.token == callee.closed.token && target.identity.arguments == callee.arguments &&
+    target.identity.token == callee.closed.token &&
+    target.identity.arguments == callee.arguments.map callableType &&
     !callee.closed.hasThis && !callee.closed.explicitThis && callee.closed.callingConvention == 0 &&
-    callee.closed.returnType == signature.result && callee.closed.parameters == signature.parameters &&
+    callableType callee.closed.returnType == signature.result &&
+    callee.closed.parameters.map callableType == signature.parameters &&
     managedSignature signature.typeExpr == some signature
+
+/-- Split a scoped declaring type from its ordered generic arguments. -/
+def managedOwner : TypeExpr → Option (String × List TypeExpr)
+  | .atom scope name | .constructor scope name => some (scope ++ "::" ++ name, [])
+  | .aggregate identity _ => some (identity, [])
+  | .apply owner argument => do
+    let (identity, arguments) ← managedOwner owner
+    return (identity, arguments ++ [argument])
+  | _ => none
+
+/-- Owner arguments occupy the suffix after method arguments, with independently checked arity. -/
+def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : Bool :=
+  match managedOwner site.declaringType with
+  | some (identity, arguments) => identity == owner && ownerCount == site.ownerArgumentCount &&
+    arguments.length == ownerCount && ownerCount ≤ site.typeArguments.length &&
+    site.typeArguments.drop (site.typeArguments.length - ownerCount) == arguments
+  | none => false
 
 /-- Exact function address evidence; integer constants cannot acquire callable provenance. -/
 def managedAddressMatches (methods : Nat → Option SpecializedMethod)
@@ -417,12 +525,14 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
   raw.opcode == 65030 && managedTargetMatches methods signature target &&
   match raw.operand with
   | .call site => site.target == .managed target.identity.token &&
-    (match site.declaringType with
-      | .atom scope name => target.identity.owner == scope ++ "::" ++ name
-      | .aggregate identity _ => target.identity.owner == identity
-      | _ => false) &&
-    site.typeArguments == target.identity.arguments && !site.hasThis &&
-    site.returnType == signature.result && site.parameterTypes == signature.parameters &&
+    (match methods target.method with
+      | some callee => managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount &&
+        site.typeArguments == callee.arguments &&
+        site.returnType == callee.closed.returnType && site.parameterTypes == callee.closed.parameters
+      | none => false) &&
+    site.typeArguments.map callableType == target.identity.arguments && !site.hasThis &&
+    callableType site.returnType == signature.result &&
+    site.parameterTypes.map callableType == signature.parameters &&
     site.parameterCount == signature.parameters.length &&
     site.returnsValue == (signature.result != .void)
   | _ => false
@@ -431,11 +541,14 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
 def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
     (raw : RawInstruction) (signature : ManagedSignature) (catalog : List ManagedTarget) : Bool :=
   raw.opcode == 41 && !catalog.isEmpty &&
-    catalog.all (managedTargetMatches methods signature) &&
     (catalog.map (·.identity)).Nodup &&
   match raw.operand with
   | .indirectCall result parameters false false 0 =>
-    result == signature.result && parameters == signature.parameters
+    callableType result == signature.result && parameters.map callableType == signature.parameters &&
+    catalog.all fun target => managedTargetMatches methods signature target &&
+      match methods target.method with
+      | some callee => result == callee.closed.returnType && parameters == callee.closed.parameters
+      | none => false
   | _ => false
 
 /-- Every live managed call must select the independently instantiated definition
@@ -455,6 +568,7 @@ def validateManagedCallWith (methodCount : Nat)
       | some (target, count) => match methods target with
         | none => false
         | some callee =>
+          managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
           callee.closed.token == token && callee.arguments == site.typeArguments &&
           callee.closed.parameters.length == site.parameterCount &&
           callee.closed.hasThis == site.hasThis &&
@@ -553,7 +667,7 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
   cases operand with
   | call site =>
     obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue,
-      returnType, parameterTypes⟩ := site
+      returnType, parameterTypes, ownerArgumentCount⟩ := site
     cases method with
     | managed token =>
       have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside

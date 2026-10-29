@@ -250,9 +250,9 @@ theorem stored_dead_spans_returns (memory : Safety.Memory) (value : W32) :
 
 #print axioms stored_dead_spans_returns
 
-/-- Every supported span width and mutability permits both empty initializers. -/
+/-- Primitive, aggregate and vector span widths permit both empty initializers. -/
 theorem dead_span_kinds_supported :
-    ([1, 2, 4, 8].all fun width => [false, true].all fun writable =>
+    ([1, 2, 3, 4, 8, 16, 24, 32, 48, 64].all fun width => [false, true].all fun writable =>
       [.nullRef, .unmodeled].all (rootLocal (.span width writable))) = true := by decide
 
 #print axioms dead_span_kinds_supported
@@ -265,12 +265,12 @@ a dropped local has a kind or initializer frame entry rejects
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbedsDeadLocals
-    [{ stored with locals := [.nullRef, .nullRef], localKinds := [.reference, .span 3 false] }]
+    [{ stored with locals := [.nullRef, .nullRef], localKinds := [.reference, .span (2^64) false] }]
     0 stored := by cil_embed
 
 /-- The kernel rejects unsupported widths and nonempty scalar initializers independently. -/
 theorem invalid_dead_spans_rejected :
-    rootLocal (.span 3 false) .nullRef = false ∧
+    rootLocal (.span (2^64) false) .nullRef = false ∧
     rootLocal (.span 0 true) .unmodeled = false ∧
     rootLocal (.span 4 true) (.i32 0) = false := by decide
 
@@ -386,7 +386,7 @@ theorem numeric_dead_rejected : ¬ MethodEmbedsDeadLocals
 
 /-- An unsupported span width fails the embedding condition in the kernel itself. -/
 theorem invalid_span_dead_rejected : ¬ MethodEmbedsDeadLocals
-    [{ stored with locals := [.nullRef, .nullRef], localKinds := [.reference, .span 3 false] }]
+    [{ stored with locals := [.nullRef, .nullRef], localKinds := [.reference, .span (2^64) false] }]
     0 stored := by
   rintro ⟨actual, map, found, embeds⟩
   cases found

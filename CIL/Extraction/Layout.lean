@@ -1,5 +1,6 @@
 import CIL.Layout
 import CIL.Features
+import CIL.TypeExpr
 
 /-!
 # Aggregate layouts from raw metadata
@@ -26,6 +27,19 @@ structure RawField where
   offset : Option Nat := none
   deriving DecidableEq, Repr
 
+/-- Original generic owner metadata and its supplied closed arguments. -/
+structure GenericLayout where
+  owner : TypeExpr
+  arity : Nat
+  arguments : List TypeExpr
+  fields : List TypeExpr
+  constraints : List (Nat × List String)
+  deriving DecidableEq, Repr
+
+/-- The closed owner expression preserves argument order and exact scoped type identities. -/
+def GenericLayout.closedType (layout : GenericLayout) : TypeExpr :=
+  layout.arguments.foldl TypeExpr.apply layout.owner
+
 /-- Children precede parents; indices refer to raw metadata, not computed sizes. -/
 structure RawLayout where
   identity : String := ""
@@ -37,6 +51,8 @@ structure RawLayout where
   auto : Bool := false
   /-- Direct interface identities, used when checking closed generic constraints. -/
   interfaces : List String := []
+  /-- Closed sequential generic layouts additionally prove their original field substitutions. -/
+  generic : Option GenericLayout := none
   deriving DecidableEq, Repr
 
 /-- A struct's field offsets and size, with the alignment it imposes when nested. -/
@@ -212,11 +228,83 @@ theorem computeLayout_eq_append (previous : Array ComputedLayout) (raw : RawLayo
 
 #print axioms computeLayout_eq_append
 
+/-- Resolve a closed generic aggregate by its independently serialized owner and arguments. -/
+def genericLayoutIndex (layouts : List RawLayout) (type : TypeExpr) : Option Nat :=
+  layouts.findIdx? fun layout => layout.generic.any (fun generic => generic.closedType == type)
+
+/-- Resolve specialized storage tokens after substituting owner or method parameters. -/
+def closeLayoutType (layouts : List RawLayout) : TypeExpr → TypeExpr
+  | .byref type => .byref (closeLayoutType layouts type)
+  | .pointer type => .pointer (closeLayoutType layouts type)
+  | .array type => .array (closeLayoutType layouts type)
+  | .apply owner argument =>
+    let type := .apply (closeLayoutType layouts owner) (closeLayoutType layouts argument)
+    match genericLayoutIndex layouts type with
+    | some index => .aggregate (layouts[index]?.map RawLayout.identity |>.getD "") index
+    | none => type
+  | type => type
+
+/-- Field storage is derived from substituted metadata, including exact aggregate identities. -/
+private def genericFieldType (layouts : List RawLayout) : TypeExpr → Option FieldType
+  | .enum _ underlying => genericFieldType layouts underlying
+  | type =>
+  match closeLayoutType layouts type with
+  | .aggregate identity index =>
+    if (layouts[index]?).any (·.identity == identity) then some (.aggregate index) else none
+  | .atom scope name => if scope != runtimeScope then none else match name with
+    | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
+    | "System.Boolean" => some .boolean | "System.Char" => some .character
+    | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
+    | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
+    | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
+    | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
+    | _ => none
+  | .apply (.constructor scope name) (.atom elementScope element) =>
+    if scope != "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, " ++
+        "PublicKeyToken=cc7b13ffcd2ddd51" || elementScope != runtimeScope ||
+        element ∉ ["System.Byte", "System.Int32", "System.UInt32",
+          "System.Int64", "System.UInt64"] then none else
+    if name == "System.Runtime.Intrinsics.Vector128`1" then some .vector128
+    else if name == "System.Runtime.Intrinsics.Vector256`1" then some .vector256 else none
+  | _ => none
+
+/-- Closed generic identities retain the scope and ordering of every supported argument. -/
+def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option String := do
+      let .constructor scope name := owner | none
+      let names ← arguments.mapM fun argument => match argument with
+        | .atom scope name => some (scope ++ "::" ++ name)
+        | .enum identity _ | .aggregate identity _ =>
+          some identity
+        | .apply (.constructor scope name) (.atom elementScope element) =>
+          some (scope ++ "::" ++ name ++ "<" ++ elementScope ++ "::" ++ element ++ ">")
+        | _ => none
+      return scope ++ "::" ++ name ++ "<" ++ String.intercalate "," names ++ ">"
+
+/-- Generic layouts cannot replace their argument ordering or original field storage. -/
+def genericLayoutValid (layouts : List RawLayout) (layout : RawLayout) : Bool :=
+  match layout.generic with
+  | none => true
+  | some generic =>
+    genericOwnerIdentity generic.owner generic.arguments == some layout.identity &&
+      !layout.explicit && !layout.auto && generic.arity > 0 &&
+      generic.arguments.length == generic.arity &&
+      generic.constraints.length == generic.arity && generic.constraints.all (fun constraint =>
+        constraint.1 &&& 56 == constraint.1 && constraint.2.all (fun type =>
+          type == runtimeScope ++ "::System.ValueType" ||
+          type == runtimeScope ++ "::System.Runtime.InteropServices.UnmanagedType!" ++
+            runtimeScope ++ "::System.ValueType")) &&
+      generic.arguments.all (fun type => substituteType [] type == some type &&
+        (genericFieldType layouts type).isSome) &&
+      (generic.fields.mapM fun type => do
+        genericFieldType layouts (← substituteType generic.arguments type)) ==
+          some (layout.fields.map RawField.type)
+
 /-- Reject forward references and cycles by computing strictly in metadata-table order. -/
 def computeLayouts (raw : List RawLayout) (architecture : Architecture := .scalar) :
     Option (Array ComputedLayout) :=
-  raw.foldlM (init := #[]) fun previous entry => do
-    return previous.push (← computeLayout previous entry architecture)
+  if !raw.all (genericLayoutValid raw) then none else
+    raw.foldlM (init := #[]) fun previous entry => do
+      return previous.push (← computeLayout previous entry architecture)
 
 /-- The claimed table is checked against a separate raw metadata table. -/
 def LayoutsValid (raw : List RawLayout) (claimed : Array ComputedLayout)

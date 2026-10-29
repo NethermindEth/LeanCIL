@@ -26,6 +26,8 @@ structure DispatchMethod where
   returnType : TypeExpr
   parameters : List TypeExpr
   overrides : List Nat
+  owner : TypeExpr := .void
+  ownerArguments : List TypeExpr := []
   deriving DecidableEq, Repr
 
 /-- Direct interfaces and declared methods of one metadata type; no inherited dispatch table. -/
@@ -55,13 +57,20 @@ private def sameScope (left right : TypeExpr) : Bool :=
   | some (scope, _), some (other, _) => scope == other
   | _, _ => false
 
+/-- Generic dispatch metadata must name precisely the closed receiver specialization. -/
+def dispatchOwnerMatches (receiver : TypeExpr) (target : DispatchMethod) : Bool :=
+  if target.ownerArguments.isEmpty then target.owner == .void else
+  match receiver with
+  | .aggregate identity _ => genericOwnerIdentity target.owner target.ownerArguments == some identity
+  | _ => false
+
 /-- Resolve a concrete value-type method or a directly implemented interface slot.
     Explicit overrides take precedence; missing, ambiguous and boxing cases fail.
     This list-based specification states the equivalence of indexed production resolution. -/
 def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site : CallSite) :
     Option DispatchMethod := do
   let .aggregate .. := receiver | none
-  if !site.hasThis || !site.typeArguments.isEmpty || !sameScope receiver site.declaringType then
+  if !site.hasThis || !site.typeArguments.isEmpty then
     none else pure ()
   let .managed token := site.target | none
   let concrete ← unique (types.filter fun type => type.identity == receiver)
@@ -76,7 +85,9 @@ def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site :
     unique (if explicit.isEmpty then concrete.methods.filter fun method =>
       method.isPublic && method.name == slot.name && signatureMatches method site else explicit)
   if target.isAbstract || !target.hasBody || target.name ∈ [".ctor", ".cctor"] ||
-      !signatureMatches target site then none else some target
+      !signatureMatches target site || !dispatchOwnerMatches receiver target ||
+      !sameScope (if target.ownerArguments.isEmpty then receiver else target.owner)
+        site.declaringType then none else some target
 
 
 /-- Ordered candidate buckets retain every matching metadata entry. -/
@@ -216,7 +227,7 @@ theorem DispatchIndex.findType_ofTypes (types : List DispatchType) (identity : T
 def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : CallSite) :
     Option DispatchMethod := do
   let .aggregate .. := receiver | none
-  if !site.hasThis || !site.typeArguments.isEmpty || !sameScope receiver site.declaringType then
+  if !site.hasThis || !site.typeArguments.isEmpty then
     none else pure ()
   let .managed token := site.target | none
   let concrete ← index.findType receiver
@@ -231,7 +242,9 @@ def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : 
     unique (if explicit.isEmpty then (concrete.names.getD slot.name []).filter fun method =>
       method.isPublic && signatureMatches method site else explicit)
   if target.isAbstract || !target.hasBody || target.name ∈ [".ctor", ".cctor"] ||
-      !signatureMatches target site then none else some target
+      !signatureMatches target site || !dispatchOwnerMatches receiver target ||
+      !sameScope (if target.ownerArguments.isEmpty then receiver else target.owner)
+        site.declaringType then none else some target
 
 /-- Indexed dispatch preserves ambiguity, explicit overrides, signatures and all failures. -/
 theorem DispatchIndex.resolve_ofTypes (types : List DispatchType) (receiver : TypeExpr)

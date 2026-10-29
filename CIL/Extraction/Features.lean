@@ -407,13 +407,13 @@ private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option 
   | some (.result value), .const32 word => word == if value then 1 else 0
   | some (.raise name), .throw exception => name == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
-    index == actual && constructor == operation
+    index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with
     | .call site => site.returnType == raw.returnType &&
       featureOpMatchesWith raw eligible instruction (.call target count)
     | _ => false
   | some .tailCall, .managed (.call signature catalog true) =>
-    signature.result == raw.returnType &&
+    signature.result == callableType raw.returnType &&
       featureOpMatchesWith raw eligible instruction (.managed (.call signature catalog false))
   | some .argument, _ => featureOpMatchesWith raw eligible instruction emitted
   | some _, _ => false

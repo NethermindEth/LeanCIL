@@ -30,7 +30,7 @@ internal static class MetadataValidation
 
     internal static bool IsAggregate(TypeReference type, ModuleDefinition module) =>
         (type is not TypeSpecification && type.Scope == module && type.IsValueType && !EnumTypes.IsEnum(type)) ||
-        ValueTuples.Is(type);
+        ValueTuples.Is(type) || GenericStructs.Is(type);
 
     internal static int PrimitiveWidth(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -71,12 +71,23 @@ internal static class MetadataValidation
 
     internal static InstanceField[] Fields(TypeReference owner) => ValueTuples.Is(owner) ? ValueTuples.Fields(owner) :
         [.. (owner.Resolve() ?? throw new InvalidDataException("Unresolved aggregate")).Fields
-            .Where(field => !field.IsStatic).Select(field => new InstanceField(field.Name, field.FieldType, field))];
+            .Where(field => !field.IsStatic).Select(field => new InstanceField(field.Name, owner is GenericInstanceType generic
+                ? GenericStructs.Substitute(field.FieldType, generic) : field.FieldType, field))];
+
+    internal static InstanceField InstanceFieldOf(FieldReference reference)
+    {
+        var definition = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate field");
+        if (definition.IsStatic || reference.Name != definition.Name ||
+            MethodSpecialization.SignatureType(reference.FieldType) !=
+                MethodSpecialization.SignatureType(definition.FieldType))
+            throw new InvalidDataException("Mismatched aggregate field signature: " + reference.FullName);
+        return Fields(reference.DeclaringType).Single(field => field.Definition == definition);
+    }
 
     // A read-only validation/emission phase owns its context; metadata rewrites require a new one.
     internal sealed class LayoutContext(ModuleDefinition module, string architecture)
     {
-        readonly Dictionary<TypeReference, AggregateInfo> validated = new(ReferenceEqualityComparer.Instance);
+        readonly Dictionary<string, AggregateInfo> validated = new(StringComparer.Ordinal);
         readonly Dictionary<TypeReference, FieldSet> fields = new(ReferenceEqualityComparer.Instance);
         Dictionary<string, int>? typeCounts;
         internal string Architecture => architecture;
@@ -122,12 +133,12 @@ internal static class MetadataValidation
 
         internal AggregateInfo AggregateLayout(TypeReference reference)
         {
-            if (validated.TryGetValue(reference, out var cached)) return cached;
+            if (validated.TryGetValue(LayoutEvidence.Identity(reference), out var cached)) return cached;
             typeCounts ??= module.GetTypes().CountBy(type => type.FullName, StringComparer.Ordinal).ToDictionary();
             // A new root keeps its own recursion-depth check, even if a child was validated earlier.
             var layout = MetadataValidation.AggregateLayout(reference, module, architecture, [],
                 new Dictionary<string, AggregateInfo>(), typeCounts);
-            validated.Add(reference, layout);
+            validated.Add(LayoutEvidence.Identity(reference), layout);
             return layout;
         }
 
@@ -158,17 +169,30 @@ internal static class MetadataValidation
     {
         if (ValueTuples.Is(reference)) return TupleLayout(reference, module, architecture);
         var type = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate");
+        if (reference is GenericInstanceType closed) GenericStructs.Validate(closed);
         if (reference.Scope != module || type.Module != module || !reference.IsValueType ||
             !type.IsValueType || !RuntimeModels.HasRuntimeValueTypeBase(type) ||
-            !(type.IsExplicitLayout || type.IsSequentialLayout) || type.HasGenericParameters ||
+            !(type.IsExplicitLayout || type.IsSequentialLayout) || (type.HasGenericParameters && reference is not GenericInstanceType) ||
             type.ClassSize is < -1 or > 65536 || (type.IsExplicitLayout && type.ClassSize <= 0) ||
             type.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.InlineArrayAttribute") ||
             typeCounts.GetValueOrDefault(type.FullName) != 1)
             throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName}");
 
-        if (layouts.TryGetValue(type.FullName, out var cached)) return cached;
-        if (active.Count >= 128 || !active.Add(type.FullName))
+        if (layouts.TryGetValue(LayoutEvidence.Identity(reference), out var cached)) return cached;
+        if (active.Count >= 128 || !active.Add(LayoutEvidence.Identity(reference)))
             throw new InvalidDataException($"Recursive or excessively nested aggregate layout: {reference.FullName}");
+
+        if (reference is GenericInstanceType instance)
+            foreach (var argument in instance.GenericArguments)
+            {
+                if (IsAggregate(argument, module))
+                    _ = AggregateLayout(argument, module, architecture, active, layouts, typeCounts);
+                else
+                {
+                    RuntimeModels.ValidateTypeIdentity(argument, module, architecture);
+                    _ = VectorFieldWidth(argument) ?? PrimitiveWidth(argument);
+                }
+            }
 
         var packing = type.PackingSize;
         if (packing is not (-1 or 0 or 1 or 2 or 4 or 8 or 16 or 32 or 64 or 128))
@@ -178,17 +202,19 @@ internal static class MetadataValidation
         var offsets = new Dictionary<string, int>();
         var end = 0;
         var alignment = 1;
-        foreach (var field in type.Fields.Where(f => !f.IsStatic))
+        foreach (var actual in Fields(reference))
         {
-            int? vectorWidth = VectorFieldWidth(field.FieldType);
-            if (field.FieldType is TypeSpecification && vectorWidth is null)
-                throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
-            var nested = IsAggregate(field.FieldType, module)
-                ? AggregateLayout(field.FieldType, module, architecture, active, layouts, typeCounts) : null;
-            int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(field.FieldType);
+            var field = actual.Definition;
+            var fieldType = actual.Type;
+            int? vectorWidth = VectorFieldWidth(fieldType);
+            if (fieldType is TypeSpecification && vectorWidth is null && !IsAggregate(fieldType, module))
+                throw new InvalidDataException($"Unsupported field type: {fieldType.FullName}");
+            var nested = IsAggregate(fieldType, module)
+                ? AggregateLayout(fieldType, module, architecture, active, layouts, typeCounts) : null;
+            int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(fieldType);
             if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
                 throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
-            if (nested is null) RuntimeModels.ValidateTypeIdentity(field.FieldType, module, architecture);
+            if (nested is null) RuntimeModels.ValidateTypeIdentity(fieldType, module, architecture);
             int naturalAlignment = vectorWidth == 32 && architecture == "arm64" ? 16 : width;
             int fieldAlignment = Math.Min(pack, nested?.Alignment ?? naturalAlignment);
             alignment = Math.Max(alignment, fieldAlignment);
@@ -206,9 +232,9 @@ internal static class MetadataValidation
         var size = type.ClassSize > 0 ? Math.Max(end, type.ClassSize) : (end + alignment - 1) / alignment * alignment;
         size = Math.Max(1, size);
         if (size > 65536) throw new InvalidDataException($"Unsupported aggregate size: {reference.FullName}");
-        active.Remove(type.FullName);
+        active.Remove(LayoutEvidence.Identity(reference));
         var result = new AggregateInfo(size, alignment, offsets);
-        layouts.Add(type.FullName, result);
+        layouts.Add(LayoutEvidence.Identity(reference), result);
         return result;
     }
 
@@ -236,10 +262,11 @@ internal static class MetadataValidation
         }
         if (type is PointerType pointer)
         {
-            if (pointer.ElementType is TypeSpecification ||
+            if (!IsAggregate(pointer.ElementType, module) && IntegerVectorWidth(pointer.ElementType) is null &&
+                (pointer.ElementType is TypeSpecification ||
                 pointer.ElementType.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
                     MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 or
-                    MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr))
+                    MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr)))
                 throw new InvalidDataException("Unsupported stack-storage pointer element type");
             Type(pointer.ElementType, module, architecture: architecture);
             return;
@@ -257,7 +284,7 @@ internal static class MetadataValidation
                 throw new InvalidDataException("Unsupported address of managed callable root");
             if (byRef.ElementType is ArrayType)
                 throw new InvalidDataException("Unsupported by-reference array root");
-            if (Spans.Width(byRef.ElementType) is not null)
+            if (Spans.Is(byRef.ElementType))
                 throw new InvalidDataException("Unsupported by-reference span");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
@@ -270,7 +297,7 @@ internal static class MetadataValidation
             ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char") &&
             !(type is GenericInstanceType && type.FullName.StartsWith("System.Runtime.Intrinsics.Vector", StringComparison.Ordinal) && RuntimeModels.SupportedType(type)) &&
-            Spans.Width(type) is null)
+            !Spans.Is(type))
             throw new InvalidDataException($"Unsupported type: {type.FullName}");
         RuntimeModels.ValidateTypeIdentity(type, module, architecture);
     }
@@ -359,12 +386,13 @@ internal static class MetadataValidation
             if (!Check(method, null, () =>
             {
                 if (method.Module != module || method.IsStatic == method.HasThis || method.ExplicitThis ||
-                    (!method.IsStatic && !IsAggregate(method.DeclaringType, module)) ||
+                    (!method.IsStatic && !IsAggregate(MethodSpecialization.DeclaringType(method), module)) ||
                     method.CallingConvention != MethodCallingConvention.Default || !method.HasBody ||
                     method.IsPInvokeImpl ||
                     (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
                         MethodImplAttributes.Synchronized | MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0 ||
-                    method.HasGenericParameters || method.DeclaringType.HasGenericParameters ||
+                    method.HasGenericParameters || (method.DeclaringType.HasGenericParameters &&
+                        MethodSpecialization.OwnerArguments(method).Count == 0) ||
                     method.Body.Instructions.Count == 0 || method.Body.ExceptionHandlers.Count != 0 ||
                     (method.IsConstructor && method.IsStatic) ||
                     (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
@@ -373,7 +401,7 @@ internal static class MetadataValidation
             })) return;
             Check(method, null, () =>
             {
-                if (method.HasThis) Layout(method.DeclaringType, module, profile.Architecture);
+                if (method.HasThis) Layout(MethodSpecialization.DeclaringType(method), module, profile.Architecture);
                 if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
                 Type(method.ReturnType, module, returns: true, architecture: profile.Architecture);
@@ -384,7 +412,7 @@ internal static class MetadataValidation
                     if (parameter.ParameterType is ByReferenceType && importedByref?.Invoke(parameter.ParameterType) == true) return;
                     Type(parameter.ParameterType, module, architecture: profile.Architecture);
                 }, named: true);
-            if (Check(method, null, () => Spans.Analyze(method), named: true))
+            if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
                     Check(method, null, () => Type(local.VariableType, module,
                         architecture: profile.Architecture), named: true);
@@ -409,7 +437,7 @@ internal static class MetadataValidation
                 if (instruction.OpCode.Code == Code.Callvirt)
                 {
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
-                    Enter(resolved.Target, reference, instruction);
+                    Enter(ConstrainedCalls.Specialize(resolved, instruction, specializations), reference, instruction);
                     return;
                 }
                 if (ImportResolution.External(reference, module))
@@ -425,16 +453,20 @@ internal static class MetadataValidation
                     }
                     return;
                 }
-                if (reference is GenericInstanceMethod generic)
+                if (reference is GenericInstanceMethod || reference.DeclaringType is GenericInstanceType)
                 {
-                    if (instruction.OpCode.Code is not (Code.Call or Code.Ldftn or Code.Calli))
+                    if (instruction.OpCode.Code is not (Code.Call or Code.Ldftn or Code.Calli or Code.Newobj))
                         throw Call("Unsupported generic constructor call", reference, method, instruction);
                     MethodDefinition specialized;
-                    try { specialized = specializations.Instantiate(generic); }
+                    try { specialized = specializations.Instantiate(reference); }
                     catch (InvalidDataException error) when (Rejections.Of(error) is null)
                     {
                         throw Call("Unsupported generic call", reference, method, instruction, error.Message, error);
                     }
+                    if (instruction.OpCode.Code == Code.Newobj &&
+                        (!specialized.IsConstructor || !specialized.HasThis ||
+                         !IsAggregate(MethodSpecialization.DeclaringType(specialized), module)))
+                        throw Call("Unsupported generic newobj constructor", reference, method, instruction);
                     instruction.Operand = specialized;
                     Enter(specialized, reference, instruction);
                     return;
@@ -493,8 +525,9 @@ internal static class MetadataValidation
                                 .Where(target => target.DeclaringType.Scope == module).ToArray();
                             targets = addressedMethods
                                 .Where(target => ManagedPointers.SameSignature(site, ManagedPointers.ReferenceSignature(target)))
-                                .Select(target => target is GenericInstanceMethod generic
-                                    ? specializations.Instantiate(generic) : target.Resolve())
+                                .Select(target => target is GenericInstanceMethod ||
+                                        target.DeclaringType is GenericInstanceType
+                                    ? specializations.Instantiate(target) : target.Resolve())
                                 .Where(target => target is not null && ManagedPointers.SameSignature(site, target))
                                 .Distinct().ToArray()!;
                             indirectTargets.Add(signature, targets);
@@ -519,8 +552,8 @@ internal static class MetadataValidation
                             throw Call("Unsupported exception constructor", reference, method, instruction,
                                 "Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
                         if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
-                            Spans.Width(reference.DeclaringType) is not null &&
-                            !Spans.Analyze(method).Constructors.ContainsKey(instruction))
+                            Spans.Is(reference.DeclaringType) &&
+                            !Spans.Analyze(method, profile).Constructors.ContainsKey(instruction))
                             throw Call("Unsupported in-place span constructor", reference, method, instruction,
                                 "The receiver must be a local address followed by at most three simple argument pushes.");
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
@@ -534,6 +567,7 @@ internal static class MetadataValidation
         var methods = ordered.ToArray();
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
+        var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var layoutContext = new LayoutContext(module, profile.Architecture);
         for (int i = 0; i < methods.Length; i++)
         {
@@ -546,7 +580,7 @@ internal static class MetadataValidation
             if (!Check(method, null, () =>
                 {
                     reachable = Reachability.Analyze(method, profile);
-                    nativeOperands = NativeOperands.Certify(method, reachable);
+                    nativeOperands = NativeOperands.Certify(method, reachable, profile);
                     parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable));
                 }, named: true))
                 continue;
@@ -554,7 +588,7 @@ internal static class MetadataValidation
                 if (!skipped.Contains(instruction))
                     Check(method, instruction, () =>
                         InstructionTranslation.Translate(instruction, method, methodIndices, index, instructions,
-                            profile, nativeOperands, parameterHomes, imports, layoutContext), named: true);
+                            profile, nativeOperands, parameterHomes, imports, layoutContext, constrainedTargets), named: true);
         }
         return methods;
     }

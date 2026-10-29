@@ -17,7 +17,7 @@ private def frame : Frame := { activation := 0, locals := [], owned := [] }
 /-- A table lookup retains stable identity rather than turning it into a numeric address. -/
 theorem table_provenance :
     managedStep (.tableElement signature) 0 frame
-      [.scalar (.i32 1), .methodTable ⟨signature, some [other, identity]⟩] memory =
+      [.scalar (.i32 1), .methodTable ⟨signature, some #[other, identity], none⟩] memory =
         .ok (.next 1 [.methodPointer ⟨signature, some identity⟩] frame memory) := rfl
 #print axioms table_provenance
 

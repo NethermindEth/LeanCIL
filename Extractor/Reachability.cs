@@ -38,14 +38,14 @@ internal static class Reachability
         // Facts only move from a constant to unknown, so this reaches a fixed point.
         var typeTests = TypeTests.Analyze(method);
         var throws = Throws.Analyze(method);
-        var spans = Spans.Analyze(method);
+        var spans = Spans.Analyze(method, profile);
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];
         pending.Enqueue(instructions[0]);
         while (pending.TryDequeue(out Instruction? i))
         {
             queued.Remove(i);
-            if (i.OpCode.Code == Code.Tail) TailCalls.ValidateReachable(method, i);
+            if (i.OpCode.Code == Code.Tail) TailCalls.ValidateReachable(method, i, profile.Architecture);
             FeatureConstants state = incoming[i];
             int? condition = state.Top;
             state = state.Copy();

@@ -36,7 +36,7 @@ theorem Memory.Equivalent.spanElement {m n : Memory} (same : m.Equivalent n)
 theorem Memory.Equivalent.spanFill {m n : Memory} (same : m.Equivalent n)
     (view : SpanView) (element : List (BitVec 8)) :
     ResultEquivalent Memory.Equivalent (view.fill m element) (view.fill n element) := by
-  unfold SpanView.fill
+  unfold SpanView.fill SpanView.fillWith
   rw [same.spanValidate]
   repeat first
     | exact .error _
@@ -217,7 +217,10 @@ theorem Memory.Equivalent.makeLocal {m n : Memory} (same : m.Equivalent n)
        obtain ⟨otherSlot, otherStored⟩ := right
        obtain ⟨rfl, storedEquivalent⟩ := related
        exact .ok ⟨rfl, rfl, storedEquivalent⟩)
-  | (cases initial <;> first | exact .error _ | exact .ok ⟨rfl, rfl, same⟩)
+  | (cases initial <;> dsimp only <;> repeat first
+      | exact .error _
+      | exact .ok ⟨rfl, rfl, same⟩
+      | split)
 
 theorem Memory.Equivalent.makeLocals {m n : Memory} (same : m.Equivalent n)
     (activation : Nat) (kinds : List CIL.LocalKind) (initializers : List CIL.Value) :

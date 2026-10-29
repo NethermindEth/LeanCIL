@@ -3,12 +3,15 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
+#:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
 
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
+if (args is not ([] or ["--pointers-only"])) throw new ArgumentException("Expected --pointers-only or no arguments");
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Blocks");
@@ -30,13 +33,61 @@ void Prove(string dll, string selector, string name, List<string> claims)
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\nnamespace ExampleProof\n" + memory +
-        "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact ⟨" +
-        string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
+        "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
+        (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") +
+        "\n#print axioms correctness\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
     {
         cases += claims.Count;
         Console.WriteLine($"PASS {name}: {claims.Count} checks");
     });
+}
+
+// Pointer overloads share the block interpreter; its boundary matrix is exercised below.
+foreach (var copy in new[] { false, true })
+foreach (var aligned in new[] { false, true })
+{
+    var name = (copy ? "Copy" : "Fill") + "Pointer" + (aligned ? "Aligned" : "");
+    var second = copy ? ".reference (.address ⟨1, 0⟩)" : ".scalar (.i32 7)";
+    var expected = copy ? "[32, 33, 34, 165]" : "[7, 7, 7, 165]";
+    var parameters = copy ? "byte*,byte*,uint" : "byte*,byte,uint";
+    var claims = new List<string>
+    {
+        $"(CIL.Safety.invoke Extracted.program 16 0 [Examples.reference, {second}, .scalar (.i32 3)] " +
+         "memory).map (fun result => (List.range 4).map (fun offset => " +
+         $"(result.1.cells 0 offset).bits.toNat)) = .ok {expected}"
+    };
+    if (!copy && !aligned)
+        claims.Add($"(CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 0), {second}, " +
+            ".scalar (.i32 3)] memory).isOk = false");
+    Prove(assembly, $"Blocks::{name}({parameters})", name, claims);
+}
+
+void CheckPointerEvidence()
+{
+    var rejected = new RejectedEvidence(Path.Combine(root, "RejectedPointerEvidence"));
+    foreach (var (name, before, after) in new[]
+    {
+        ("CopyPointer", ".copyBlock 1", ".copyBlock 8"),
+        ("FillPointerAligned", ".initBlock 8", ".initBlock 1"),
+        ("CopyPointer", ".copyBlock 1", ".initBlock 1")
+    })
+    {
+        var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
+            "method0_unsafe_validated");
+        if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing block mutation");
+        var path = Path.Combine(root, name + after.Replace(' ', '-') + ".lean");
+        File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
+        rejected.Add(path, "PASS pointer block evidence rejection: " + name + after, "UnsafeCallsValid");
+    }
+    rejected.Check();
+}
+
+if (args.Length != 0)
+{
+    queue.Flush();
+    CheckPointerEvidence();
+    return;
 }
 
 // Model-owned scalar homes retain natural alignment, including addressed parameters.
@@ -229,6 +280,7 @@ foreach (var mutation in new[] { "zero", "three", "eight", "target", "duplicate"
 }
 
 queue.Flush();
+CheckPointerEvidence();
 
 Console.WriteLine($"PASS {cases} block memory checks and universal overrun rejection");
 

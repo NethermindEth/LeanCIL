@@ -89,7 +89,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         var raise = methods.Single(method => method.Name == "Raise").MetadataToken.ToUInt32();
         var owner = module.Assembly.Name.FullName + "::Examples.ManagedDispatch";
         string Identity(uint token) => $"⟨{System.Text.Json.JsonSerializer.Serialize(owner)}, {token}, []⟩";
-        string Table(string targets) => $".methodTable ⟨dispatchSignature, some [{targets}]⟩";
+        string Table(string targets) => $".methodTable ⟨dispatchSignature, some #[{targets}], none⟩";
         var table = Table(Identity(repeat) + ", " + Identity(raise));
         string Args(string view, int index, int value) => $"{view}, .scalar (.i32 {index}), .scalar (.i32 {value})";
         claims.Add($"({RunCase(Args(table, 0, 3))}).map Prod.snd = .ok [.scalar (.i32 17)]");
@@ -97,7 +97,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
             $"(match {RunCase(args, fuel)} with | .error fault => some fault.fault | .ok _ => none)";
         claims.Add($"{Fault(Args(table, 1, 2))} = some (.thrown \"System.ArgumentException\")");
         claims.Add($"{Fault(Args(table, 2, 0))} = some (.thrown \"System.IndexOutOfRangeException\")");
-        claims.Add($"{Fault(Args(".methodTable ⟨dispatchSignature, none⟩", 0, 0))} = " +
+        claims.Add($"{Fault(Args(".methodTable ⟨dispatchSignature, none, none⟩", 0, 0))} = " +
             "some (.thrown \"System.NullReferenceException\")");
         claims.Add($"{Fault(Args(Table(Identity(uint.MaxValue)), 0, 0))} = some .invalidState");
         claims.Add($"({RunCase(Args(table, 0, 3), 1)}).isOk = false");
@@ -157,6 +157,97 @@ foreach (var mutation in new[] { "convention", "prefix-entry" })
     if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.OrdinalIgnoreCase))
         throw new Exception("Incorrect managed metadata rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS managed metadata rejection: " + mutation);
+}
+var valuesDll = Path.Combine(root, "IndirectValuesTail.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    foreach (var method in module.GetType("Examples.IndirectValues").Methods.Where(method => method.IsPublic))
+    {
+        var call = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Calli);
+        method.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Tail));
+    }
+    module.Write(valuesDll);
+}
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var entries = module.GetType("Examples.IndirectValues").Methods.Where(method => method.IsPublic)
+        .SelectMany(method => new[] { false, true }.Select(tail =>
+            (Method: method, Tail: tail, Name: method.Name + (tail ? "Tail" : "")))).ToArray();
+    ExtractBatch("extract", null, entries.Select(entry => new GeneratedExtraction(
+        entry.Tail ? valuesDll : assembly, entry.Method.FullName, Path.Combine(root, entry.Name))));
+    foreach (var entry in entries)
+    {
+        var source = File.ReadAllText(Path.Combine(root, entry.Name, "Extracted.lean"));
+        var vector = entry.Method.Name == "Vector";
+        var reference = entry.Method.Name == "Reference";
+        var shape = vector ? ".vector128" : ".aggregate 16";
+        var full = vector ? ".v128 7" : ".aggregate (List.replicate 16 7)";
+        var partial = $".snapshot ({shape}) ((7, true) :: List.replicate 15 (9, false))";
+        string Invoke(string value) =>
+            $"CIL.Safety.invoke Extracted.program 64 0 [{value}] valueMemory";
+        var argument = reference ? ".reference (.address ⟨0, 0⟩)" : $".scalar ({full})";
+        var expected = reference ? ".aggregate (List.replicate 16 7)" : full;
+        var claims = new List<string>
+        {
+            $"({Invoke(argument)}).toOption.map Prod.snd = some [.scalar ({expected})]"
+        };
+        if (!reference)
+            claims.Add($"({Invoke($".scalar ({partial})")}).toOption.map Prod.snd = some [.scalar ({partial})]");
+        if (vector)
+            claims.Add($"({Invoke(".scalar (.v128Low64 7)")}).isOk = false");
+        var proof = Path.Combine(root, entry.Name + ".lean");
+        File.WriteAllText(proof, source + """
+
+            /-- Supplied aggregate storage has live checked bounds and readable contents. -/
+            private def valueMemory : CIL.Safety.Memory := {
+              allocations := fun identity => if identity == 0 then
+                some ⟨.managedHeap, ⟨16, 16, []⟩, true, [16]⟩ else none
+              cells := fun _ _ => ⟨7, true⟩
+              views := [⟨0, 0, 16, true, true⟩]
+              nextIdentity := 1 }
+            """ + "\n/-- Indirect calls preserve checked value contents and initialization masks. -/\n" +
+            "theorem indirect_value_result :\n" + string.Join(" ∧\n", claims) +
+            " := by decide +kernel" +
+            "\n#print axioms indirect_value_result\n");
+        evidence.Add(proof, "PASS aggregate/vector indirect transfer: " + entry.Name);
+        if (entry.Name != "Generic") continue;
+        var call = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.call ",
+            StringComparison.Ordinal));
+        var aggregate = Regex.Match(call, @"\.aggregate ""[^""]+"" 0").Value;
+        var pair = ".aggregate " + System.Text.Json.JsonSerializer.Serialize(
+            module.Assembly.Name.FullName + "::Examples.IndirectValues/Pair") + " 0";
+        var catalog = call.IndexOf(" } [", StringComparison.Ordinal);
+        if (aggregate.Length == 0 || catalog < 0) throw new Exception("Missing generic callable type");
+        // Box<Pair> and Pair both occupy 16 bytes; their scoped type identities still differ.
+        var forged = call[..catalog].Replace(aggregate, pair, StringComparison.Ordinal) + call[catalog..];
+        if (call == forged) throw new Exception("Missing scoped generic callable signature");
+        var narrowed = NarrowEvidence(source, "method0_calls_validated");
+        var path = Path.Combine(root, "Rejected-aggregate-identity.lean");
+        File.WriteAllText(path, narrowed.Replace(call, forged, StringComparison.Ordinal));
+        rejected.Add(path, "PASS distinct aggregate callable identity rejected", "ManagedCallsValid");
+        foreach (var (label, pattern) in new[]
+        {
+            ("calli-layout", @"(\.indirectCall \(\.aggregate ""[^""]+"" )\d+"),
+            ("address-layout", @"(\.call \{[^\r\n]*?returnType := \.aggregate ""[^""]+"" )\d+"),
+            ("address-type-argument", @"(typeArguments := \[\.aggregate ""[^""]+"" )\d+")
+        })
+        {
+            var match = Regex.Match(narrowed, pattern);
+            if (!match.Success) throw new Exception("Missing raw callable layout: " + label);
+            var changed = narrowed.Replace(match.Value, match.Groups[1].Value + "999999", StringComparison.Ordinal);
+            var invalid = Path.Combine(root, "Rejected-" + label + ".lean");
+            File.WriteAllText(invalid, changed);
+            rejected.Add(invalid, "PASS raw callable layout binding: " + label, "ManagedCallsValid");
+        }
+        var local = NarrowEvidence(source, "method0_specialization_validated")
+            .Replace("by constructor <;> rfl", "by decide +kernel", StringComparison.Ordinal);
+        var signature = Regex.Match(local, @"(\.functionPointer \(\.aggregate ""[^""]+"" )\d+");
+        if (!signature.Success) throw new Exception("Missing callable local type");
+        var invalidLocal = Path.Combine(root, "Rejected-local-layout.lean");
+        File.WriteAllText(invalidLocal,
+            local.Replace(signature.Value, signature.Groups[1].Value + "999999", StringComparison.Ordinal));
+        rejected.Add(invalidLocal, "PASS raw callable local layout binding", "SpecializationValid");
+    }
 }
 evidence.Check();
 rejected.Check();

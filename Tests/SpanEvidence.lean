@@ -212,4 +212,16 @@ theorem exact_reinterpret_call :
       declaringType := .atom owner "System.Runtime.InteropServices.MemoryMarshal" }))
       (.memory (.spanReinterpret 1 4 false)) = false := by decide +kernel
 #print axioms exact_reinterpret_call
+/-- Runtime names omit scopes without discarding nested or adjacent generic arguments. -/
+theorem closed_generic_element_names :
+    spanElementName (.aggregate ("Examples::Pair`1<" ++ runtimeScope ++ "::System.UInt64>") 0) =
+      some "Pair`1<System.UInt64>" ∧
+    spanElementName (.aggregate ("Examples::Outer`2<Examples::Pair`1<" ++
+      runtimeScope ++ "::System.UInt64>," ++ runtimeScope ++ "::System.UInt32>") 1) =
+      some "Outer`2<Pair`1<System.UInt64>,System.UInt32>" ∧
+    spanElementName (.aggregate
+      "System.Runtime::System.ValueTuple`2<System.UInt64,System.UInt64>" 2) =
+      some "System.ValueTuple`2<System.UInt64,System.UInt64>" := by decide +kernel
+#print axioms closed_generic_element_names
+
 end Tests.SpanEvidence

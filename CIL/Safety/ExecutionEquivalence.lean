@@ -1,4 +1,5 @@
 import CIL.Safety.StaticMemoryEquivalence
+import CIL.Safety.NativeMethodTableEquivalence
 import CIL.Safety.Execution
 import CIL.Safety.StackAllocationEquivalence
 
@@ -71,7 +72,7 @@ theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
     ResultEquivalent FrameActionEquivalent (managedStep operation pc frame stack m)
       (managedStep operation pc frame stack n) := by
   unfold CIL.Safety.managedStep
-  split <;> try simp only [same.checkedValues]
+  split <;> try simp only [same.checkedValues, same.addNativeTable, same.loadNativeTable]
   all_goals repeat' first
     | exact .error _
     | exact .ok (.next same _ _ _)

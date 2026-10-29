@@ -10,7 +10,9 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
     internal sealed record Origin(string Definition, string[] TypeArguments);
     static readonly ConditionalWeakTable<MethodDefinition, Origin> origins = new();
     static readonly ConditionalWeakTable<MethodDefinition, TypeReference[]> typeArguments = new();
+    static readonly ConditionalWeakTable<MethodDefinition, TypeReference[]> ownerArguments = new();
     static readonly ConditionalWeakTable<MethodDefinition, MethodDefinition> definitions = new();
+    static readonly ConditionalWeakTable<MethodDefinition, TypeReference> declaringTypes = new();
     readonly Dictionary<string, MethodDefinition> instances = new(StringComparer.Ordinal);
 
     internal static Origin? Source(MethodDefinition method) => origins.TryGetValue(method, out var origin) ? origin : null;
@@ -21,24 +23,57 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
     internal static IReadOnlyList<TypeReference> Arguments(MethodDefinition method) =>
         typeArguments.TryGetValue(method, out var arguments) ? arguments : [];
 
-    internal MethodDefinition Instantiate(GenericInstanceMethod reference)
+    internal static IReadOnlyList<TypeReference> OwnerArguments(MethodDefinition method) =>
+        ownerArguments.TryGetValue(method, out var arguments) ? arguments : [];
+
+    internal static TypeReference DeclaringType(MethodDefinition method) =>
+        declaringTypes.TryGetValue(method, out var owner) ? owner : method.DeclaringType;
+
+    internal static string SignatureType(TypeReference type) => type switch
+    {
+        GenericParameter parameter => $"{parameter.Type}:{parameter.Position}",
+        ByReferenceType reference => SignatureType(reference.ElementType) + "&",
+        PointerType pointer => SignatureType(pointer.ElementType) + "*",
+        ArrayType { IsVector: true } array => SignatureType(array.ElementType) + "[]",
+        GenericInstanceType instance => LayoutEvidence.Identity(instance.ElementType) + "<" +
+            string.Join(",", instance.GenericArguments.Select(SignatureType)) + ">",
+        FunctionPointerType pointer => $"fn:{pointer.CallingConvention}:{pointer.HasThis}:{pointer.ExplicitThis}:" +
+            SignatureType(pointer.ReturnType) + "(" +
+            string.Join(",", pointer.Parameters.Select(parameter => SignatureType(parameter.ParameterType))) + ")",
+        _ => LayoutEvidence.Identity(type)
+    };
+
+    internal MethodDefinition Instantiate(MethodReference reference)
     {
         var definition = reference.Resolve() ?? throw new InvalidDataException($"Unresolved generic method: {reference.FullName}");
-        if (definition.Module != module || definition.DeclaringType.HasGenericParameters ||
-            reference.ElementMethod.FullName != definition.FullName || reference.HasThis != definition.HasThis ||
-            reference.ExplicitThis || reference.GenericArguments.Count != definition.GenericParameters.Count ||
-            !definition.HasGenericParameters || definition.IsConstructor || !definition.HasBody || definition.Body.ExceptionHandlers.Count != 0 ||
+        var methodArguments = reference is GenericInstanceMethod genericMethod
+            ? genericMethod.GenericArguments.ToArray() : [];
+        var declaringArguments = reference.DeclaringType is GenericInstanceType genericOwner
+            ? genericOwner.GenericArguments.ToArray() : [];
+        var member = reference is GenericInstanceMethod instance ? instance.ElementMethod : reference;
+        if (definition.Module != module || reference.HasThis != definition.HasThis ||
+            reference.ExplicitThis || methodArguments.Length != definition.GenericParameters.Count ||
+            declaringArguments.Length != definition.DeclaringType.GenericParameters.Count ||
+            (methodArguments.Length == 0 && declaringArguments.Length == 0) ||
+            member.Name != definition.Name || SignatureType(member.ReturnType) != SignatureType(definition.ReturnType) ||
+            !member.Parameters.Select(parameter => SignatureType(parameter.ParameterType))
+                .SequenceEqual(definition.Parameters.Select(parameter => SignatureType(parameter.ParameterType))) ||
+            (declaringArguments.Length != 0 && !definition.IsStatic && !GenericStructs.Is(reference.DeclaringType)) ||
+            (definition.IsConstructor && (methodArguments.Length != 0 || definition.IsStatic)) ||
+            !definition.HasBody || definition.Body.ExceptionHandlers.Count != 0 ||
             (reference.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default ||
             (definition.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
             throw new InvalidDataException($"Unsupported generic method signature or body: {reference.FullName}");
 
-        foreach (var argument in reference.GenericArguments)
+        var arguments = methodArguments.Concat(declaringArguments).ToArray();
+        foreach (var argument in arguments)
         {
             if (argument is ByReferenceType or PointerType or GenericParameter)
                 throw new InvalidDataException($"Unsupported generic method type argument: {argument.FullName}");
             MetadataValidation.Type(argument, module, architecture: architecture);
         }
-        foreach (var parameter in definition.GenericParameters)
+        foreach (var (parameter, argument) in definition.GenericParameters
+            .Concat(definition.DeclaringType.GenericParameters).Zip(arguments))
         {
             // 0x20 is the .NET allows-ref-struct anti-constraint. Other flags are
             // either reference/variance constraints or unsupported metadata bits.
@@ -55,7 +90,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                     type = modifier.ElementType;
                 if (type.Scope is ModuleDefinition && type is not TypeSpecification &&
                     type.Resolve() is { IsInterface: true, HasGenericParameters: false } declared &&
-                    declared.Module == module && reference.GenericArguments[parameter.Position].Resolve() is { } concrete &&
+                    declared.Module == module && argument.Resolve() is { } concrete &&
                     concrete.Module == module && concrete.IsValueType &&
                     concrete.Interfaces.Any(implemented => implemented.InterfaceType.FullName == type.FullName &&
                         implemented.InterfaceType.Resolve() == declared))
@@ -66,19 +101,25 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
             }
         }
 
-        var key = reference.FullName;
+        var key = definition.MetadataToken.ToInt32() + ":" + SignatureType(reference.DeclaringType) +
+            "<" + string.Join(",", methodArguments.Select(SignatureType)) + ">";
         if (instances.TryGetValue(key, out var existing)) return existing;
         if (instances.Count >= 256)
             throw new InvalidDataException("Generic specialization limit exceeded (possible expanding recursion)");
 
         TypeReference Substitute(TypeReference type)
         {
-            if (type is GenericParameter parameter && parameter.Type == GenericParameterType.Method && parameter.Owner == definition)
-                return parameter.Position >= 0 && parameter.Position < reference.GenericArguments.Count
-                    ? reference.GenericArguments[parameter.Position]
+            if (type is GenericParameter parameter)
+            {
+                var expectedOwner = parameter.Type == GenericParameterType.Method
+                    ? (IGenericParameterProvider)definition : definition.DeclaringType;
+                if (parameter.Owner != expectedOwner)
+                    throw new InvalidDataException("Foreign generic parameter owner in specialized body");
+                var supplied = parameter.Type == GenericParameterType.Method ? methodArguments : declaringArguments;
+                return parameter.Position >= 0 && parameter.Position < supplied.Length
+                    ? supplied[parameter.Position]
                     : throw new InvalidDataException("Malformed generic method type parameter");
-            if (type is ByReferenceType byRef) return new ByReferenceType(Substitute(byRef.ElementType));
-            if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType));
+            }
             if (type is ArrayType { IsVector: true } array) return new ArrayType(Substitute(array.ElementType));
             if (type is FunctionPointerType pointerSignature)
             {
@@ -93,24 +134,33 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                     result.Parameters.Add(new ParameterDefinition(Substitute(argument.ParameterType)));
                 return result;
             }
-            if (type is GenericInstanceType generic)
-            {
-                var result = new GenericInstanceType(generic.ElementType);
-                foreach (var argument in generic.GenericArguments) result.GenericArguments.Add(Substitute(argument));
-                return result;
-            }
-            return type;
+            return TypeSubstitution.Components(type, Substitute);
         }
 
         MethodReference SubstituteMethod(MethodReference method)
         {
+            var member = method is GenericInstanceMethod instance ? instance.ElementMethod : method;
+            if (member.DeclaringType is GenericInstanceType)
+            {
+                var closed = new MethodReference(member.Name, member.ReturnType, Substitute(member.DeclaringType))
+                {
+                    HasThis = member.HasThis,
+                    ExplicitThis = member.ExplicitThis,
+                    CallingConvention = member.CallingConvention
+                };
+                foreach (var parameter in member.Parameters)
+                    closed.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
+                foreach (var parameter in member.GenericParameters)
+                    closed.GenericParameters.Add(new GenericParameter(parameter.Name, closed));
+                member = closed;
+            }
             if (method is GenericInstanceMethod generic)
             {
-                var result = new GenericInstanceMethod(generic.ElementMethod);
+                var result = new GenericInstanceMethod(member);
                 foreach (var argument in generic.GenericArguments) result.GenericArguments.Add(Substitute(argument));
                 return result;
             }
-            return method;
+            return member;
         }
 
         Mono.Cecil.CallSite SubstituteSite(Mono.Cecil.CallSite site)
@@ -126,7 +176,8 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
             return result;
         }
 
-        var clone = new MethodDefinition(definition.Name + "<" + string.Join(",", reference.GenericArguments.Select(t => t.FullName)) + ">",
+        var clone = new MethodDefinition(definition.IsConstructor ? definition.Name :
+            definition.Name + "<" + string.Join(",", arguments.Select(t => t.FullName)) + ">",
             definition.Attributes, Substitute(definition.ReturnType))
         {
             DeclaringType = definition.DeclaringType,
@@ -162,14 +213,17 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                 ParameterDefinition parameter => parameter.Index < 0 ? clone.Body.ThisParameter : clone.Parameters[parameter.Index],
                 VariableDefinition local => clone.Body.Variables[local.Index],
                 TypeReference type => Substitute(type),
+                FieldReference field => new FieldReference(field.Name, field.FieldType, Substitute(field.DeclaringType)),
                 MethodReference method => SubstituteMethod(method),
                 Mono.Cecil.CallSite site => SubstituteSite(site),
                 _ => instruction.Operand
             };
 
         instances.Add(key, clone);
-        origins.Add(clone, new(definition.FullName, reference.GenericArguments.Select(t => t.FullName).ToArray()));
-        typeArguments.Add(clone, reference.GenericArguments.ToArray());
+        origins.Add(clone, new(definition.FullName, arguments.Select(t => t.FullName).ToArray()));
+        typeArguments.Add(clone, arguments);
+        ownerArguments.Add(clone, declaringArguments);
+        declaringTypes.Add(clone, reference.DeclaringType);
         definitions.Add(clone, definition);
         return clone;
     }

@@ -4,6 +4,18 @@ namespace Examples;
 
 public static class Blocks
 {
+    public static unsafe void FillPointer(byte* destination, byte value, uint count) =>
+        Unsafe.InitBlockUnaligned(destination, value, count);
+
+    public static unsafe void CopyPointer(byte* destination, byte* source, uint count) =>
+        Unsafe.CopyBlockUnaligned(destination, source, count);
+
+    public static unsafe void FillPointerAligned(byte* destination, byte value, uint count) =>
+        Unsafe.InitBlock(destination, value, count);
+
+    public static unsafe void CopyPointerAligned(byte* destination, byte* source, uint count) =>
+        Unsafe.CopyBlock(destination, source, count);
+
     public static void Fill(ref byte destination, byte value, uint count) =>
         Unsafe.InitBlockUnaligned(ref destination, value, count);
 

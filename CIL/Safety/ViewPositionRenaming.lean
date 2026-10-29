@@ -17,7 +17,7 @@ theorem Memory.Renamed.spanFill {mapping : AllocationRenaming}
     (bound : view.reference.Below mapping.sourceLimit) (element : List (BitVec 8)) :
     ResultEquivalent (Memory.Renamed mapping scopes)
       (view.fill source element) ((mapping.spanView view).fill target element) := by
-  unfold SpanView.fill
+  unfold SpanView.fill SpanView.fillWith
   rw [related.spanValidate view bound]
   apply ResultEquivalent.bind_same
   intro checked

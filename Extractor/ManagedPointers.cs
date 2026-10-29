@@ -46,7 +46,9 @@ internal static class ManagedPointers
             return;
         }
         var storage = EnumTypes.Storage(type);
-        if (!(result && storage.MetadataType == MetadataType.Void) && storage.MetadataType is not
+        if (!MetadataValidation.IsAggregate(type, module) &&
+            MetadataValidation.IntegerVectorWidth(type) is null &&
+            !(result && storage.MetadataType == MetadataType.Void) && storage.MetadataType is not
             (MetadataType.Boolean or MetadataType.Char or MetadataType.SByte or MetadataType.Byte or
              MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 or
              MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr))
@@ -58,6 +60,13 @@ internal static class ManagedPointers
     {
         if (type is ByReferenceType reference) return $".byref ({TypeEvidence(reference.ElementType)})";
         if (type.MetadataType == MetadataType.Void) return ".void";
+        // Callable identity is independent of the extraction's checked layout-table ordering.
+        if (MetadataValidation.IsAggregate(type, type.Module))
+            return $".aggregate {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} 0";
+        if (type is GenericInstanceType generic && MetadataValidation.IntegerVectorWidth(type) is not null)
+            return $".apply (.constructor {JsonSerializer.Serialize(LayoutEvidence.Scope(generic.ElementType))} " +
+                $"{JsonSerializer.Serialize(generic.ElementType.FullName)}) " +
+                $"({TypeEvidence(generic.GenericArguments[0])})";
         if (EnumTypes.IsEnum(type))
             return $".enum {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} " +
                 $"({TypeEvidence(EnumTypes.Storage(type))})";
@@ -85,23 +94,15 @@ internal static class ManagedPointers
     // Inspect a closed address signature before attempting to admit its body or constraints.
     internal static IMethodSignature ReferenceSignature(MethodReference target)
     {
-        if (target is not GenericInstanceMethod generic) return target;
-        TypeReference Substitute(TypeReference type) => type switch
-        {
-            GenericParameter { Type: GenericParameterType.Method } parameter
-                when parameter.Position < generic.GenericArguments.Count =>
-                    generic.GenericArguments[parameter.Position],
-            ByReferenceType reference => new ByReferenceType(Substitute(reference.ElementType)),
-            _ => type
-        };
-        var signature = new Mono.Cecil.CallSite(Substitute(target.ReturnType))
+        if (target is not GenericInstanceMethod && target.DeclaringType is not GenericInstanceType) return target;
+        var signature = new Mono.Cecil.CallSite(CallReturnType.Resolve(target))
         {
             CallingConvention = target.CallingConvention & ~MethodCallingConvention.Generic,
             HasThis = target.HasThis,
             ExplicitThis = target.ExplicitThis
         };
-        foreach (var parameter in target.Parameters)
-            signature.Parameters.Add(new ParameterDefinition(Substitute(parameter.ParameterType)));
+        foreach (var parameter in CallReturnType.Parameters(target))
+            signature.Parameters.Add(new ParameterDefinition(parameter));
         return signature;
     }
 

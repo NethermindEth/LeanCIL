@@ -23,20 +23,23 @@ foreach (var (name, type, expected) in new[]
     ("Implicit", "CounterValue", 42),
     ("Explicit", "ExplicitCounterValue", 43),
     ("Mutating", "CounterValue", 43),
-    ("MutatingExplicit", "ExplicitCounterValue", 44)
+    ("MutatingExplicit", "ExplicitCounterValue", 44),
+    ("Generic", "GenericCounterValue`1<System.Int32>", 42),
+    ("GenericExplicit", "ExplicitGenericCounterValue`1<System.Int32>", 44)
 })
 {
     var output = Path.Combine(root, name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"ConstrainedCalls::{name}(Examples.{type}&)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var proof = Path.Combine(root, name + ".lean");
+    var extent = type.Contains('`') ? 8 : 4;
     File.WriteAllText(proof, source + $$"""
 
         private def inputMemory : CIL.Safety.Memory := {
           allocations := fun identity => if identity == 0 then
-            some ⟨.callerStack, ⟨4, 1, []⟩, true, []⟩ else none
+            some ⟨.callerStack, ⟨{{extent}}, 1, []⟩, true, []⟩ else none
           cells := fun _ offset => ⟨if offset == 0 then 42 else 0, true⟩
-          views := [⟨0, 0, 4, true, true⟩]
+          views := [⟨0, 0, {{extent}}, true, true⟩]
           nextIdentity := 1 }
         theorem constrained_result :
             (CIL.Safety.invoke Extracted.program 32 0 [.reference (.address ⟨0, 0⟩)]
@@ -64,9 +67,43 @@ foreach (var (name, type, expected) in new[]
         Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value), 0);
     File.AppendAllText(proof, "\n" + control);
     evidence.Add(proof, "PASS compiled constrained call, certificate and obligation eligibility: " + name);
-    File.WriteAllText(forged, narrowed.Replace(call, ".call 0 1", StringComparison.Ordinal));
-    rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
+    if (!type.Contains('`'))
+    {
+        File.WriteAllText(forged, narrowed.Replace(call, ".call 0 1", StringComparison.Ordinal));
+        rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
+    }
+    if (type.Contains('`'))
+    {
+        const string arguments = "ownerArguments := [.atom Extraction.runtimeScope \"System.Int32\"]";
+        if (!narrowed.Contains(arguments, StringComparison.Ordinal))
+            throw new Exception("Missing generic dispatch owner mutation target");
+        var wrongOwner = Path.Combine(root, name + "-wrong-owner.lean");
+        File.WriteAllText(wrongOwner, narrowed.Replace(arguments,
+            "ownerArguments := [.atom Extraction.runtimeScope \"System.Int64\"]", StringComparison.Ordinal));
+        rejected.Add(wrongOwner, "PASS forged constrained owner specialization: " + name, "ConstrainedCallsValid");
+    }
 }
+
+var twoOwners = Path.Combine(root, "TwoGenericOwners");
+Run(["dotnet", ExtractorPath, "extract", assembly,
+    "ConstrainedCalls::TwoGenericOwners(Examples.GenericCounterValue`1<System.Int32>&," +
+    "Examples.GenericCounterValue`1<System.Int64>&)", twoOwners]);
+var twoOwnerProof = Path.Combine(root, "TwoGenericOwners.lean");
+File.WriteAllText(twoOwnerProof, File.ReadAllText(Path.Combine(twoOwners, "Extracted.lean")) + """
+
+    private def twoOwnerMemory : CIL.Safety.Memory := {
+      allocations := fun identity => if identity == 0 then
+        some ⟨.callerStack, ⟨24, 1, []⟩, true, []⟩ else none
+      cells := fun _ offset => ⟨if offset == 0 || offset == 8 then 42 else 0, true⟩
+      views := [⟨0, 0, 24, true, true⟩]
+      nextIdentity := 1 }
+    theorem distinct_owner_results :
+        (CIL.Safety.invoke Extracted.program 64 0
+          [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 8⟩)]
+          twoOwnerMemory).map Prod.snd = .ok [.scalar (.i32 84)] := rfl
+    #print axioms distinct_owner_results
+    """);
+evidence.Add(twoOwnerProof, "PASS distinct constrained owner specializations");
 
 AddTailCallFixtures(assembly, root, evidence, rejected);
 evidence.Check();

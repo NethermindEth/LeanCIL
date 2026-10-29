@@ -81,6 +81,21 @@ theorem Memory.Equivalent.spanCopyInstruction {m n : Memory} (same : m.Equivalen
     | split
 #print axioms Memory.Equivalent.spanCopyInstruction
 
+/-- Repeated snapshot writes preserve byte values and masks on equivalent memories. -/
+theorem Memory.Equivalent.spanFillSnapshot {m n : Memory} (same : m.Equivalent n)
+    (view : SpanView) (element : List (BitVec 8 × Bool)) :
+    ResultEquivalent Memory.Equivalent (view.fillSnapshot m element)
+      (view.fillSnapshot n element) := by
+  unfold SpanView.fillSnapshot SpanView.fillWith
+  rw [same.spanValidate]
+  repeat first
+    | exact .error _
+    | exact .ok same
+    | exact same.writeSnapshot _ _ _
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.spanFillSnapshot
+
 /-- Fill and clear preserve equivalent backing memories and identical retained values. -/
 theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalent n)
     (width : Nat) (clear : Bool) (stack : List Value) :
@@ -88,6 +103,9 @@ theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalen
       (spanFillInstruction width clear stack n) := by
   unfold CIL.Safety.spanFillInstruction
   repeat first
+    | (apply ResultEquivalent.bind ((same.spanFillSnapshot _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
     | exact .error _
     | (apply ResultEquivalent.bind ((same.spanFill _ _).mapError _)
        intro left right related
@@ -128,6 +146,71 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
 
 #print axioms Memory.Equivalent.otherMemoryInstruction
 
+/-- Observations depend only on allocation metadata and preserve equivalent memories. -/
+theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
+    (observation : CIL.ViewObservation) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (viewObservationInstruction observation stack m)
+      (viewObservationInstruction observation stack n) := by
+  unfold CIL.Safety.viewObservationInstruction
+  split <;> try simp only [same.spanValidate, same.arrayValidate, same.formValue]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.viewObservationInstruction
+
+/-- Endian transfers retain their exact results over equivalent backing memories. -/
+theorem Memory.Equivalent.binaryTransferInstruction {m n : Memory} (same : m.Equivalent n)
+    (width : Nat) (signed bigEndian read trying : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent
+      (binaryTransferInstruction width signed bigEndian read trying stack m)
+      (binaryTransferInstruction width signed bigEndian read trying stack n) := by
+  unfold CIL.Safety.binaryTransferInstruction
+  split <;> try simp only [same.spanValidate, same.loadTransfer]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind (same.storeTransfer _ _ _)
+       intro left right related
+       first
+       | exact .ok ⟨related, rfl⟩
+       | split <;> exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.binaryTransferInstruction
+
+/-- A single-reference view depends only on equivalent allocation metadata. -/
+theorem Memory.Equivalent.singleSpanInstruction {m n : Memory} (same : m.Equivalent n)
+    (width : Nat) (writable : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (singleSpanInstruction width writable stack m)
+      (singleSpanInstruction width writable stack n) := by
+  unfold CIL.Safety.singleSpanInstruction
+  split <;> try simp only [same.spanValidate]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.singleSpanInstruction
+
+/-- Typed array transfers observe identical bytes and preserve equivalent checked writes. -/
+theorem Memory.Equivalent.arrayTransferInstruction {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.ArrayElement) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (arrayTransferInstruction element store stack m)
+      (arrayTransferInstruction element store stack n) := by
+  unfold CIL.Safety.arrayTransferInstruction
+  simp only [same.arrayElement, same.loadTransfer]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind (same.storeTransfer _ _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.arrayTransferInstruction
+
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -137,6 +220,11 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   split
   · exact .error _
   · split
+    · exact same.arrayTransferInstruction _ _ _
+    · exact same.binaryTransferInstruction _ _ _ _ _ _
+    · exact same.binaryTransferInstruction _ _ _ _ _ _
+    · exact same.singleSpanInstruction _ _ _
+    · exact same.viewObservationInstruction _ _
     · exact same.spanCopyInstruction _ _ _
     · exact same.spanFillInstruction _ _ _
     · exact same.otherMemoryInstruction _ _

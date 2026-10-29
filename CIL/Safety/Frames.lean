@@ -131,12 +131,13 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     if table.signature != signature then .error .invalidState else
       return (.methodTable signature (some table), m)
   | .methodTable signature _, .reference .null =>
-    return (.methodTable signature (some ⟨signature, none⟩), m)
+    return (.methodTable signature (some ⟨signature, none, none⟩), m)
   | .array element _, .array view =>
     if view.elementType != element then .error .invalidState else pure ()
     let _ ← checkedAt view.reference 0 (view.validate m)
     return (.array element (some view), m)
   | .array element _, .reference .null =>
+    let _ ← checkedAt .null 0 ((ArrayView.mk .null 0 element).validate m)
     return (.array element (some ⟨.null, 0, element⟩), m)
   | .span width writable _, .bufferSpan view =>
     if view.width != width || view.writable != writable then .error .invalidState else pure ()
@@ -250,15 +251,17 @@ def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m
     | .unmodeled => .ok (.methodPointer signature none, [], m)
     | _ => .error .invalidState
   | .methodTable signature => match initial with
-    | .nullRef => .ok (.methodTable signature (some ⟨signature, none⟩), [], m)
+    | .nullRef => .ok (.methodTable signature (some ⟨signature, none, none⟩), [], m)
     | .unmodeled => .ok (.methodTable signature none, [], m)
     | _ => .error .invalidState
   | .array element => match initial with
-    | .nullRef => .ok (.array element (some ⟨.null, 0, element⟩), [], m)
+    | .nullRef =>
+      if ¬(0 < element.width ∧ element.width < 2^64) then .error .invalidState else
+        .ok (.array element (some ⟨.null, 0, element⟩), [], m)
     | .unmodeled => .ok (.array element none, [], m)
     | _ => .error .invalidState
   | .span width writable =>
-    if width ∉ [1, 2, 4, 8] then .error .invalidState else
+    if ¬(0 < width ∧ width < 2^64) then .error .invalidState else
     match initial with
     | .nullRef => .ok (.span width writable (some ⟨.null, 0, width, writable⟩), [], m)
     | .unmodeled => .ok (.span width writable none, [], m)

@@ -39,7 +39,8 @@ foreach (var (mutation, marker) in new[]
     ("switch", "Branch bypasses constrained receiver prefix"),
     ("reference", "concrete same-assembly struct"),
     ("missing", "no unique struct implementation"),
-    ("ordinary", "adjacent concrete constrained receiver")
+    ("ordinary", "adjacent concrete constrained receiver"),
+    ("generic-direct", "require a non-generic interface slot")
 })
 {
     using var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll"));
@@ -59,6 +60,13 @@ foreach (var (mutation, marker) in new[]
         case "reference": prefix.Operand = module.GetType("Examples.ConstrainedCalls"); break;
         case "missing": receiver.Methods.Remove(receiver.Methods.Single(method => method.Name == "Read")); break;
         case "ordinary": prefix.OpCode = OpCodes.Nop; prefix.Operand = null; break;
+        case "generic-direct":
+            var definition = module.GetType("Examples.GenericCounterValue`1");
+            var generic = new GenericInstanceType(definition);
+            generic.GenericArguments.Add(module.TypeSystem.Int32);
+            prefix.Operand = generic;
+            call.Operand = definition.Methods.Single(member => member.Name == "Read" && !member.HasGenericParameters);
+            break;
     }
     try
     {

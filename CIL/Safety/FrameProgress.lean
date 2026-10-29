@@ -17,8 +17,10 @@ namespace CIL.Safety
     physical home, and a managed root may start null. -/
 def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
   match kind with
-  | .array _ | .methodPointer _ | .methodTable _ => initial = .unmodeled ∨ initial = .nullRef
-  | .span width _ => width ∈ [1, 2, 4, 8] ∧ (initial = .unmodeled ∨ initial = .nullRef)
+  | .methodPointer _ | .methodTable _ => initial = .unmodeled ∨ initial = .nullRef
+  | .array element => initial = .unmodeled ∨
+      (0 < element.width ∧ element.width < 2^64) ∧ initial = .nullRef
+  | .span width _ => (0 < width ∧ width < 2^64) ∧ (initial = .unmodeled ∨ initial = .nullRef)
   | _ => initial = .unmodeled ∨ match kind, initial with
   | .aggregate size, .aggregate bytes => bytes.length = size.val
   | .reference, .nullRef => True
@@ -138,7 +140,7 @@ def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .reference _ => kind = .reference
   | .span _ _ => False
   | .readOnlyReference _ => kind = .reference
-  | .bufferSpan view => kind = .span view.width view.writable ∧ view.width ∈ [1, 2, 4, 8]
+  | .bufferSpan view => kind = .span view.width view.writable ∧ (0 < view.width ∧ view.width < 2^64)
   | .array view => kind = .array view.elementType
 
 /-- Every parameter home names an existing argument that fits its kind. -/
@@ -177,11 +179,12 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | array view =>
     change kind = .array view.elementType at fits
     subst kind
-    refine ⟨.array view.elementType none, [], m,
-      .array view.elementType (some view), m, rfl, ?_⟩
     change view.validate m = .ok () at valid
-    simp [storeLocal, Value.hasUnspecified, valid, checkedAt, Except.mapError,
-      Bind.bind, Except.bind, Pure.pure, Except.pure]
+    refine ⟨.array view.elementType none, [], m,
+      .array view.elementType (some view), m, ?_, ?_⟩
+    · rfl
+    · simp [storeLocal, Value.hasUnspecified, valid, checkedAt, Except.mapError,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]
   | bufferSpan view =>
     obtain ⟨rfl, widthValid⟩ := fits
     refine ⟨.span view.width view.writable none, [], m,

@@ -87,8 +87,8 @@ def observerCount : CIL.Op → Nat
   | .ret _ => 1
   | .call _ argc | .tailCall _ argc | .newVector256 _ argc | .newAggregate _ argc _ => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1
-  | .managed (.tableElement _) => 2
-  | .managed .tableLength => 1
+  | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => 2
+  | .managed .tableLength | .managed (.tableLoad _) => 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
@@ -336,6 +336,22 @@ def spanCopyInstruction (width : Nat) (tryCopy : Bool) (stack : List Value) (mem
   let result ← checkedAt destination.reference count (writeIndexed memory target bytes 1)
   return (result, values)
 
+/-- Aggregate and vector fill operands retain their exact byte width and initialization mask. -/
+def fillSnapshot (width : Nat) (value : CIL.Value) : Option (List (BitVec 8 × Bool)) := do
+  let shape ← match value with
+    | .aggregate _ => some (.aggregate width)
+    | .snapshot shape _ => some shape
+    | .v128 _ => some .vector128
+    | .v256 _ => some .vector256
+    | .v512 _ => some .vector512
+    | _ => none
+  if shape.width != width then none else valueSnapshot shape value
+
+/-- Fill repeats a captured value without observing or initializing its unknown bytes. -/
+def SpanView.fillSnapshot (view : SpanView) (memory : Memory)
+    (element : List (BitVec 8 × Bool)) : Checked Memory :=
+  view.fillWith memory element (fun reference bytes => writeSnapshot memory reference bytes 1)
+
 /-- Whole-span fill and clear retain checked write authority and exact operand shapes. -/
 def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -346,13 +362,110 @@ def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memor
       (view.fill memory (List.replicate width 0)), rest)
   | false, .scalar value :: .bufferSpan view :: rest =>
     if view.width != width then .error .invalidState else
-    let number ← match width, value with
-      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
-      | 8, .i64 bits => .ok bits.toNat
-      | _, _ => .error .invalidState
-    return (← checkedAt view.reference (view.length * width)
-      (view.fill memory (numberBytes number width)), rest)
+    let number := match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => some bits.toNat
+      | 8, .i64 bits => some bits.toNat
+      | _, _ => none
+    if let some number := number then
+      return (← checkedAt view.reference (view.length * width)
+        (view.fill memory (numberBytes number width)), rest)
+    else
+      let some bytes := fillSnapshot width value | .error .invalidState
+      return (← checkedAt view.reference (view.length * width)
+        (view.fillSnapshot memory bytes), rest)
   | _, _ => .error .invalidState
+
+/-- A fixed-width integer in the requested byte order, with the required narrow extension. -/
+def endianValue (width : Nat) (signed bigEndian : Bool) (value : CIL.Value) :
+    ExecutionResult CIL.Value := do
+  match width, value with
+  | 2, .i32 bits =>
+    let narrow := bits.setWidth 16
+    let ordered := if bigEndian then CIL.reverseBytes narrow else narrow
+    return .i32 (if signed then ordered.signExtend 32 else ordered.zeroExtend 32)
+  | 4, .i32 bits => return .i32 (if bigEndian then CIL.reverseBytes bits else bits)
+  | 8, .i64 bits => return .i64 (if bigEndian then CIL.reverseBytes bits else bits)
+  | _, _ => .error .invalidState
+
+/-- Fixed-width endian transfers share checked storage and preserve short-buffer behavior. -/
+def binaryTransferInstruction (width : Nat) (signed bigEndian read trying : Bool)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  match read, trying, stack with
+  -- Endian transfers share checked byte access and only reorder the fixed-width integer.
+  | true, false, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.width != 1 then .error .invalidState else
+    if view.length < width then .error (.thrown "System.ArgumentOutOfRangeException") else
+    let value ← loadTransfer memory view.reference (.scalar width false)
+    return (memory, .scalar (← endianValue width signed bigEndian value) :: rest)
+  | true, true, .reference destination :: .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.width != 1 then .error .invalidState else
+    let fits := width ≤ view.length
+    let value ← if fits then loadTransfer memory view.reference (.scalar width false)
+      else .ok (defaultTransfer (.scalar width false))
+    let ordered ← endianValue width signed bigEndian value
+    let result ← storeTransfer memory destination (.scalar width signed) ordered
+    return (result, .scalar (.i32 (if fits then 1 else 0)) :: rest)
+  | false, trying, .scalar value :: .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.width != 1 then .error .invalidState else
+    if !view.writable then .error (.memory .unwritable view.reference width) else
+    if view.length < width then
+      if trying then return (memory, .scalar (.i32 0) :: rest)
+      else .error (.thrown "System.ArgumentOutOfRangeException")
+    else
+      let ordered ← endianValue width false bigEndian value
+      let result ← storeTransfer memory view.reference (.scalar width false) ordered
+      if trying then return (result, .scalar (.i32 1) :: rest) else return (result, rest)
+  | _, _, _ => .error .invalidState
+
+/-- View observations preserve memory and do not inspect stored element bytes. -/
+def viewObservationInstruction (observation : CIL.ViewObservation) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  match observation, stack with
+  | .spanEmpty, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    return (memory, .scalar (.i32 (if view.length == 0 then 1 else 0)) :: rest)
+  | .spanPinnable, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    let reference := if view.length == 0 then .null else view.reference
+    let formed ← formValue memory reference
+    return (memory, (if view.writable then formed
+      else .readOnlyReference reference) :: rest)
+  | .arrayData, .array view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.reference == .null then .error (.thrown "System.NullReferenceException") else
+    return (memory, (← formValue memory view.reference) :: rest)
+  | .arrayData, .reference .null :: _ =>
+    .error (.thrown "System.NullReferenceException")
+  | _, _ => .error .invalidState
+
+/-- Typed array transfers share the checked snapshot reads and writes used by byref transfers. -/
+def arrayTransferInstruction (element : CIL.ArrayElement) (store : Bool)
+  (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  let (value, input) ← if store then match stack with
+    | .scalar value :: tail => pure (some value, tail)
+    | _ => .error .invalidState
+    else pure (none, stack)
+  let .scalar index :: array :: rest := input | .error .invalidState
+  let some index := arrayIndex index | .error .invalidState
+  let view ← match array with
+    | .array view => pure view
+    | .reference .null => .error (.thrown "System.NullReferenceException")
+    | _ => .error .invalidState
+  if view.elementType != element then .error .invalidState else pure ()
+  let shape ← match element with
+    | .aggregate _ size => pure (CIL.SnapshotShape.aggregate size)
+    | .vector _ 16 => pure .vector128
+    | .vector _ 32 => pure .vector256
+    | .vector _ 64 => pure .vector512
+    | _ => .error .invalidState
+  let reference ← arrayElement memory view index element.width
+  match value with
+  | none => return (memory, .scalar (← loadTransfer memory (.address reference)
+      (.snapshot shape)) :: rest)
+  | some value => return (← storeTransfer memory (.address reference) (.snapshot shape) value, rest)
 
 /-- Executes non-fill memory operations after the shared operand guard. -/
 def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
@@ -529,7 +642,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   -- Spans
   | .spanReinterpret sourceWidth targetWidth writable, .bufferSpan view :: rest =>
     if view.width == sourceWidth && view.writable == writable &&
-        targetWidth ∈ [1, 2, 4, 8] then pure () else .error .invalidState
+        (0 < targetWidth ∧ targetWidth < 2^64) then pure () else .error .invalidState
     let _ ← checkedAt view.reference 0 (view.validate memory)
     let length := view.length * sourceWidth / targetWidth
     if length < 2^31 then pure () else .error (.thrown "System.OverflowException")
@@ -584,10 +697,24 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   -- Null references
   | .nullRef, _ => return (memory, .reference .null :: stack)
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
-  | .isNullRef, .reference r :: rest =>
+  | .isNullRef, .reference r :: rest | .isNullRef, .readOnlyReference r :: rest =>
     return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
   | .staticAddress _, _ | .staticValue _, _ | .createSpan _, _ | .spanCreate, _ =>
     .error (.unsupported "Extraction-bound static/span allocation metadata")
+  | _, _ => .error .invalidState
+
+/-- Constructs a one-element view over checked existing storage without reading its bytes. -/
+def singleSpanInstruction (width : Nat) (writable : Bool) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  match writable, stack with
+  | _, .reference reference :: rest =>
+    let view : SpanView := ⟨reference, 1, width, writable⟩
+    let _ ← checkedAt reference width (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
+  | false, .readOnlyReference reference :: rest =>
+    let view : SpanView := ⟨reference, 1, width, false⟩
+    let _ ← checkedAt reference width (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
   | _, _ => .error .invalidState
 
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
@@ -600,6 +727,13 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     .error (.unsupported "Memory operation observes unspecified vector bits")
   else
   match operation with
+  | .arrayTransfer element store => arrayTransferInstruction element store stack memory
+  | .binaryRead width signed bigEndian trying =>
+    binaryTransferInstruction width signed bigEndian true trying stack memory
+  | .binaryWrite width bigEndian trying =>
+    binaryTransferInstruction width false bigEndian false trying stack memory
+  | .spanSingleReference width writable => singleSpanInstruction width writable stack memory
+  | .observeView observation => viewObservationInstruction observation stack memory
   | .spanCopy width tryCopy => spanCopyInstruction width tryCopy stack memory
   | .spanFill width clear => spanFillInstruction width clear stack memory
   | _ => otherMemoryInstruction operation stack memory

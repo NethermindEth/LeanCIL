@@ -8,7 +8,7 @@ open CIL CIL.Extraction
 namespace CallIndexScaling
 /-- A well-formed raw shell with the supplied instruction stream. -/
 def raw (code : List RawInstruction) : RawMethod := {
-  token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+  token := 1, owner := "Tests::Scaling", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
   genericParameters := [], code := code }
@@ -18,7 +18,7 @@ def nops (count : Nat) := raw (List.replicate count ⟨0, 0, .none⟩)
 def emitted (code : List Op) : Method := { locals := [], returnsValue := false, code := code }
 /-- A managed call to the identical scalar-free signature at a chosen table index. -/
 def call : RawInstruction := ⟨0, 40, .call {
-  target := .managed 1, typeArguments := [], parameterCount := 0, hasThis := false,
+  declaringType := .atom "Tests" "Scaling", target := .managed 1, typeArguments := [], parameterCount := 0, hasThis := false,
   returnsValue := false, returnType := .void, parameterTypes := [] }⟩
 /-- Each instruction calls a distinct table position. -/
 def calls (count : Nat) := raw (List.replicate count call)

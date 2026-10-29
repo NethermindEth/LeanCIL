@@ -14,11 +14,12 @@ private def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
 /-- The selected program entry must be precisely the resolved struct implementation. -/
 private def selectedImplementation (methods : Nat → Option SpecializedMethod) (receiver : TypeExpr)
     (resolved : DispatchMethod) (emitted : Op) : Bool :=
-  match emitted, namedType receiver with
+  match emitted, namedType (if resolved.ownerArguments.isEmpty then receiver else resolved.owner) with
   | .call index count, some (scope, name) => match methods index with
     | none => false
     | some method =>
-      method.arguments.isEmpty && method.closed.token == resolved.token &&
+      method.arguments == resolved.ownerArguments && method.closed.token == resolved.token &&
+      method.closed.ownerArgumentCount == resolved.ownerArguments.length &&
       method.closed.owner == String.ofList scope ++ "::" ++ String.ofList name &&
       method.closed.hasThis && !method.closed.explicitThis &&
       method.closed.callingConvention == 0 && method.closed.genericParameters.isEmpty &&
@@ -196,6 +197,14 @@ instance (types : List DispatchType) (methods : List SpecializedMethod) (raw : R
     Decidable (ConstrainedCallsValid types methods raw reachable emitted) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
+/-- A generic implementation retains its owner arguments for ordinary managed-call validation. -/
+def constrainedTargetSite (receiver : TypeExpr) (site : CallSite) (target : DispatchMethod) : CallSite :=
+  { site with
+    target := .managed target.token,
+    declaringType := (if target.ownerArguments.isEmpty then receiver else
+      target.ownerArguments.foldl TypeExpr.apply target.owner),
+    typeArguments := target.ownerArguments, ownerArgumentCount := target.ownerArguments.length }
+
 /-- Lower a constrained prefix or call using the immediately preceding raw instruction. -/
 def lowerConstrainedInstruction (resolve : TypeExpr → CallSite → Option DispatchMethod)
     (previous : Option RawInstruction)
@@ -205,8 +214,7 @@ def lowerConstrainedInstruction (resolve : TypeExpr → CallSite → Option Disp
   | ⟨offset, 111, .call site⟩ =>
     match previous with
     | some ⟨_, 65046, .type receiver⟩ => match resolve receiver site with
-      | some target => ⟨offset, 40, .call { site with
-          target := .managed target.token, declaringType := receiver }⟩
+      | some target => ⟨offset, 40, .call (constrainedTargetSite receiver site target)⟩
       | none => instruction
     | _ => instruction
   | _ => instruction
@@ -255,8 +263,7 @@ theorem lowerConstrainedRaw_eq_original (types : List DispatchType) (raw : RawMe
       | ⟨offset, 111, .call site⟩ =>
         match raw.code[pc - 1]? with
         | some ⟨_, 65046, .type receiver⟩ => match resolveConstrained types receiver site with
-          | some target => ⟨offset, 40, .call { site with
-              target := .managed target.token, declaringType := receiver }⟩
+          | some target => ⟨offset, 40, .call (constrainedTargetSite receiver site target)⟩
           | none => instruction
         | _ => instruction
       | _ => instruction } := by

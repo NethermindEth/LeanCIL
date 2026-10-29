@@ -628,6 +628,50 @@ neighboring-byte preservation for the retained snapshot. The snapshot uses array
 for constant-time byte lookup. Short destinations throw `ArgumentException` or return false
 without a source read or destination write; empty copies require no byte access.
 
+Aggregate and integer-vector spans use the same `SpanView`, indexed references, checked
+loads/stores, byte snapshots and copy rules. Supply the validated element width rather than
+assuming one of the primitive widths. `Clear` initializes the byte extent. Aggregate/vector
+`Fill` repeats a captured snapshot with its initialization flags through `SpanView.fillSnapshot`;
+`spanFillSnapshot_effect` exposes its checked snapshot-write effect. Scalar `Fill` retains the
+existing sequence-content lemmas. Vector loads and stores preserve initialization masks, while
+span copies require readable, initialized source bytes. View creation and
+reinterpretation alone establish neither initialization nor read/write authority.
+
+`Tests/AggregateSpans.cs` demonstrates aggregate buffers, vector masks, overlap-safe copying
+and target-dependent layouts. `Tests/AggregateSpanFill.cs` checks repeated masked snapshots,
+aliased inputs and neighboring bytes. `Tests/SpanConstructors.cs` checks single-reference and
+pointer constructors, including target-dependent layouts and in-place local initialization.
+`Tests/BinarySpans.cs` demonstrates integer byte-order transfers
+and short-span behavior. `Tests/ViewAccessors.cs` checks observations without byte authority.
+Supplied aggregate/vector arrays reuse the same checked snapshot loads/stores, indexed
+references and span conversions; no backing storage is allocated. `Tests/AggregateArrays.cs`
+and `Tests/AggregateArrayStorage.lean` cover exact types, masks, authority and lifetime.
+`ArrayView.null_valid` requires a valid element width, and `InitializerFits` includes that
+condition for array locals, even when initialized to null.
+
+Closed generic-owner helpers use the ordinary specialized managed-call proof interface;
+`Tests/GenericOwners.cs` covers nested owners and mixed owner/method arguments. Closed sequential
+generic structs use the existing checked layout, field and construction rules after substituting
+the owner arguments. Prove calls against the specialized closed body; no separate generic runtime
+or heap representation is introduced. `Tests/GenericLayouts.cs` covers fields, nested layouts,
+instance calls and construction. Constrained interface calls on these closed owners use the same
+direct-call proof interface after the certificate resolves and binds the exact implementation;
+`Tests/ConstrainedCalls.cs` covers implicit and explicit mutating implementations.
+
+For supplied native dispatch tables, provide an immutable allocation binding and exact catalog
+target identities in `MethodTable.backing`. Checked byte offsets and `ldind.i` preserve
+authenticated callable provenance; numeric address bytes alone are insufficient.
+`Tests/NativeManagedDispatch.cs` and `Tests/NativeMethodTables.lean` cover dispatch and rejection
+obligations. These tables require a unique supported managed indirect-call signature in each
+body; handler signatures cannot carry native table pointers. Ordinary call and tail-call
+lifetime and fuel obligations still apply.
+
+Managed indirect calls admit aggregate and integer-vector values and references through the
+ordinary checked argument/return storage. `Tests/ManagedDispatch.cs` covers normal and tail
+transfers, exact closed generic identities, initialization masks and rejected unspecified lanes.
+Pointer overloads of `Unsafe` block helpers use the same block operations and proof rules as
+their managed-reference overloads; `Tests/Blocks.cs` covers exact overload/alignment evidence.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes
@@ -1220,7 +1264,7 @@ An extraction can also declare locals the literal body never uses. Exact-memory 
 covers dead locals that trail the body's own locals and are
 references or spans initialized to their empty value or left unmodeled. These cover
 byref, pointer, `Span<T>` and `ReadOnlySpan<T>` locals; spans require an element width
-of 1, 2, 4 or 8 bytes. For those, `cil_embed` proves
+greater than zero and less than `2^64` bytes. For those, `cil_embed` proves
 `MethodEmbedsDeadLocals` instead, and the same proof covers extractions with and
 without them (from `CIL.Safety.Embedding.DeadLocals`):
 
@@ -1269,7 +1313,7 @@ every source method. The target is the extraction with the additional dead decla
 This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals`, `vectorArgs`
 and `parameterHomes` are empty. Retained initializers stay exact, including initialized
 numeric helpers; their successful setup is derived from the actual source execution.
-Local widths must fit the native range; span element widths must be 1, 2, 4 or 8.
+Local widths must fit the native range; span element widths must be positive and less than `2^64`.
 These are explicit, checked metadata conditions, not assumed target frame-entry success.
 The audited int256 Multiply body across all fourteen profiles has 22 word64 and four
 vector256 unmodeled locals. Its reachable helper method4 has an initialized word64 zero

@@ -39,10 +39,18 @@ structure MethodPointer where
   target : Option ManagedIdentity
   deriving DecidableEq, Repr
 
-/-- Supplied immutable handler entries sharing one closed signature; `none` is a null table. -/
+/-- A native cursor retains the binding identity of its supplied immutable handler storage. -/
+structure MethodTableBacking where
+  identity : Nat
+  byteOffset : Nat
+  deriving DecidableEq, Repr
+
+/-- Supplied immutable handler entries sharing one closed signature; `none` is a null table.
+    Native cursors additionally retain the backing allocation and table origin. -/
 structure MethodTable where
   signature : ManagedSignature
-  targets : Option (List ManagedIdentity)
+  targets : Option (Array ManagedIdentity)
+  backing : Option MethodTableBacking := none
   deriving DecidableEq, Repr
 
 /-- Managed pointer operations preserve metadata provenance instead of encoding addresses. -/
@@ -50,6 +58,9 @@ inductive ManagedOp where
   | address (target : ManagedTarget) (signature : ManagedSignature)
   | tableLength
   | tableElement (signature : ManagedSignature)
+  | tableAddress (signature : ManagedSignature)
+  | tableOffset
+  | tableLoad (signature : ManagedSignature)
   | call (signature : ManagedSignature) (catalog : List ManagedTarget) (tail : Bool)
   deriving DecidableEq, Repr
 

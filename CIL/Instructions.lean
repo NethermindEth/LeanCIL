@@ -74,12 +74,14 @@ inductive LocalKind where
 inductive SpanConstructor where
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   | reference (width : Nat) (writable : Bool)
+  | singleReference (width : Nat) (writable : Bool)
   deriving DecidableEq, Repr
 
 /-- The checked memory operation underlying a span constructor. -/
 def SpanConstructor.operation : SpanConstructor → MemoryOp
   | .array element writable range => .arraySpan element writable range
   | .reference width writable => .spanFromReference width writable
+  | .singleReference width writable => .spanSingleReference width writable
 
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
@@ -161,12 +163,14 @@ inductive Op where
   | unsupported (description : String)
   deriving Repr
 
-/-- The call `method arguments` whose result a static constructor stores in a readonly field. -/
+/-- A literal, call or construction whose value a static constructor stores in a readonly field. -/
 structure StaticInitializer where
   method : Nat
   arguments : List Value
   /-- A direct integer literal store; no method is called when this is present. -/
   literal : Option Value := none
+  /-- Construct a zero-initialized aggregate with this instance constructor. -/
+  construct : Bool := false
   deriving DecidableEq, Repr
 
 /-- A static field the method reads: its bytes as extracted, and where they came from. -/

@@ -21,7 +21,7 @@ theorem Memory.Renamed.makeLocalUnmodeled {mapping : AllocationRenaming}
       binding.2.allocation < mapping.sourceLimit)
     (sourceActivation targetActivation : Nat) (scope : scopes sourceActivation targetActivation)
     (kind : CIL.LocalKind) (bounded : localWidth kind < nativeLimit)
-    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]) :
+    (spanWidth : ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)) :
     ∃ later slot owned sourceAfter targetAfter,
       mapping.Extends later ∧
       makeLocal sourceActivation kind .unmodeled source = .ok (slot, owned, sourceAfter) ∧
@@ -92,7 +92,7 @@ theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
       binding.2.allocation < mapping.sourceLimit)
     (sourceActivation targetActivation : Nat) (scope : scopes sourceActivation targetActivation)
     (kind : CIL.LocalKind) (initial : CIL.Value) (bounded : localWidth kind < nativeLimit)
-    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8])
+    (spanWidth : ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64))
     {slot : LocalSlot} {owned : List AllocationId} {sourceAfter : Memory}
     (made : makeLocal sourceActivation kind initial source = .ok (slot, owned, sourceAfter)) :
     ∃ later targetAfter, mapping.Extends later ∧
@@ -120,13 +120,24 @@ theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
     rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
   let retainedKind := kind
   cases kind with
-  | reference | array _ | methodPointer _ | methodTable _ =>
+  | reference | methodPointer _ | methodTable _ =>
     cases initial <;> simp only [CIL.Safety.makeLocal] at made
     all_goals first | contradiction | cases made
     all_goals refine ⟨mapping, target, .refl mapping, ?_, related, ?_, ?_⟩
     all_goals simp [CIL.Safety.makeLocal, AllocationRenaming.localSlot,
       AllocationRenaming.managedReference,
       AllocationRenaming.arrayView, LocalSlot.Below, ManagedReference.Below]
+  | array element =>
+    cases initial <;> simp only [CIL.Safety.makeLocal] at made
+    all_goals first | contradiction | cases made | skip
+    split at made
+    · cases made
+    rename_i width
+    cases made
+    refine ⟨mapping, target, .refl mapping, ?_, related, ?_, ?_⟩
+    all_goals simp [CIL.Safety.makeLocal, width, AllocationRenaming.localSlot,
+      AllocationRenaming.managedReference, AllocationRenaming.arrayView,
+      LocalSlot.Below, ManagedReference.Below]
   | span width writable =>
     have widthOK := spanWidth width writable rfl
     cases initial <;> simp only [CIL.Safety.makeLocal, widthOK, not_true_eq_false,
@@ -171,7 +182,7 @@ theorem Memory.Renamed.skipLocalUnmodeled {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.Renamed mapping scopes source target) (targetFormed : target.WellFormed)
     (activation : Nat) (kind : CIL.LocalKind) (bounded : localWidth kind < nativeLimit)
-    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]) :
+    (spanWidth : ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)) :
     ∃ later slot owned targetAfter,
       mapping.Extends later ∧ makeLocal activation kind .unmodeled target =
         .ok (slot, owned, targetAfter) ∧
@@ -253,7 +264,7 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
     (related : Memory.Renamed mapping scopes source target) (targetFormed : target.WellFormed)
     (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value)
     (fits : InitializerFits kind initial) (bounded : localWidth kind < nativeLimit)
-    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]) :
+    (spanWidth : ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)) :
     ∃ later slot owned targetAfter,
       mapping.Extends later ∧ makeLocal activation kind initial target =
         .ok (slot, owned, targetAfter) ∧
@@ -277,7 +288,7 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
       .refl mapping, rfl, related, by simp⟩
   | methodTable signature =>
     cases initial <;> simp [InitializerFits] at fits unknown
-    exact ⟨mapping, .methodTable signature (some ⟨signature, none⟩), [], target,
+    exact ⟨mapping, .methodTable signature (some ⟨signature, none, none⟩), [], target,
       .refl mapping, rfl, related, by simp⟩
   | reference =>
     cases initial <;> simp [InitializerFits] at fits unknown
@@ -286,8 +297,8 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
   | array element =>
     cases initial <;> simp [InitializerFits] at fits unknown
     refine ⟨mapping, .array element (some ⟨.null, 0, element⟩), [], target,
-      .refl mapping, rfl, related, ?_⟩
-    intro identity member; cases member
+      .refl mapping, ?_, related, ?_⟩
+    all_goals simp_all [makeLocal]
   | span width writable =>
     cases initial <;> simp [InitializerFits] at fits unknown
     refine ⟨mapping, .span width writable (some ⟨.null, 0, width, writable⟩), [], target,
