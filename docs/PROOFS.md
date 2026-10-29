@@ -654,7 +654,9 @@ Closed generic-owner helpers use the ordinary specialized managed-call proof int
 generic structs use the existing checked layout, field and construction rules after substituting
 the owner arguments. Prove calls against the specialized closed body; no separate generic runtime
 or heap representation is introduced. `Tests/GenericLayouts.cs` covers fields, nested layouts,
-instance calls and construction.
+instance calls and construction. Constrained interface calls on these closed owners use the same
+direct-call proof interface after the certificate resolves and binds the exact implementation;
+`Tests/ConstrainedCalls.cs` covers implicit and explicit mutating implementations.
 
 For supplied native dispatch tables, provide an immutable allocation binding and exact catalog
 target identities in `MethodTable.backing`. Checked byte offsets and `ldind.i` preserve
@@ -663,6 +665,12 @@ authenticated callable provenance; numeric address bytes alone are insufficient.
 obligations. These tables require a unique supported managed indirect-call signature in each
 body; handler signatures cannot carry native table pointers. Ordinary call and tail-call
 lifetime and fuel obligations still apply.
+
+Managed indirect calls admit aggregate and integer-vector values and references through the
+ordinary checked argument/return storage. `Tests/ManagedDispatch.cs` covers normal and tail
+transfers, exact closed generic identities, initialization masks and rejected unspecified lanes.
+Pointer overloads of `Unsafe` block helpers use the same block operations and proof rules as
+their managed-reference overloads; `Tests/Blocks.cs` covers exact overload/alignment evidence.
 
 ## Construct structs through contracts
 

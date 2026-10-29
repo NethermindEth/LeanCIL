@@ -77,7 +77,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `throw` | Partial | Only `throw new E(...)` with `ldstr`/`ldnull` arguments (see below): it raises a located `thrown "E"` fault. Other throws are rejected. |
 | `constrained.`, `callvirt` | Partial | Adjacent prefix and call resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
-| `calli` | Partial | Static default-managed signatures over admitted integer/enum values and managed references. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
+| `calli` | Partial | Static default-managed signatures over admitted integer/enum, reference-free aggregate and integer-vector values, and managed references to these types. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
 | `tail.` | Partial | Adjacent `tail. call ret` or `tail. calli ret` with exactly its arguments and optional function pointer on the stack and the same return type. Retires caller storage before entering the callee and revalidates argument lifetimes. Admitted same-assembly transfers may form cycles; virtual, imported and intrinsic tail calls remain unsupported. |
 | `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. |
 | `initblk`, `cpblk` | Partial | Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
@@ -94,8 +94,9 @@ one exact signature and must name non-null catalog targets. A null table raises
 Catalog discovery uses same-assembly `ldftn` references and already extracted methods with
 matching signatures. Each entry binds the scoped metadata identity, generic arguments and
 program index to an extracted body. Pointer identities stay stable when linking relocates
-program indices. Supported signatures contain primitive integer or enum parameters/results,
-managed references to those types, and void results. Calling conventions are checked exactly.
+program indices. Supported signatures contain primitive integer, enum, reference-free aggregate or
+integer-vector parameters/results, managed references to those types, and void results. Closed
+generic structs retain their exact scoped identity. Calling conventions are checked exactly.
 
 Supplied immutable `nint*` tables admit byte-offset addition, `ldind.i` and native target locals.
 An explicit binding identifies the static allocation and authenticated catalog identities;
@@ -206,15 +207,18 @@ In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof
 
 An adjacent `constrained. T; callvirt` pair supports a concrete, reference-free same-assembly
 struct `T` and a method declared on that struct or a directly implemented same-assembly interface.
+Closed sequential generic structs are admitted as receivers of directly implemented non-generic
+interface slots; direct constrained slots on generic declaring types remain unsupported.
 Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
 overrides take precedence. Closed generic helpers can use a directly implemented interface constraint.
 The original managed-reference receiver is passed to the resolved implementation, so mutations
 remain visible to the caller without boxing.
 
 The Lean certificate independently resolves serialized type, interface and method metadata and
-checks the selected method token, signature and argument count. A branch cannot bypass the prefix.
-Reference receivers, boxing fallbacks, inherited or default-interface dispatch, generic declaring
-types and ordinary unconstrained virtual calls remain unsupported.
+checks the selected method token, signature, closed owner arguments and argument count.
+A branch cannot bypass the prefix.
+Reference receivers, boxing fallbacks, inherited or default-interface dispatch, generic interface
+slots and ordinary unconstrained virtual calls remain unsupported.
 
 ### Static span tables
 
@@ -296,9 +300,13 @@ field of the same type. Loads truncate to the declared storage width and sign-ex
 the load width and signedness to the raw field type. Mutable fields, address-taking during
 initialization, repeated stores and conditional initialization remain rejected.
 
-`public static readonly UInt256 One = 1ul;` compiles to `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable `ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an aggregate and touches no memory. The static constructor must store the field exactly once, unconditionally (no control flow before the store and no branch back to it), as the result of a same-assembly static call whose arguments are integer constants (`ldc.i4*`, `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`), or as a copy (`ldsfld G; stsfld F`) of such a field stored earlier, as in `MinValue = Zero`. The field's declaring type must be named by `--assume-initialized`. The called method and its callees become part of the extracted program and must not access static fields. The static site records the call, and the extraction certificate reruns it in the checked interpreter: the result must be exactly the emitted bytes, or `translation_valid` fails.
+`public static readonly UInt256 One = 1ul;` compiles to `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable `ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an aggregate and touches no memory. The static constructor must store the field exactly once, unconditionally (no control flow before the store and no branch back to it). A helper-call initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`, `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead copy (`ldsfld G; stsfld F`) such a field stored earlier, as in `MinValue = Zero`. The field's declaring type must be named by `--assume-initialized`. The called method and its callees become part of the extracted program and must not access static fields. The static site records the call, and the extraction certificate reruns it in the checked interpreter: the result must be exactly the emitted bytes, or `translation_valid` fails.
 
-Rejected: a declaring type without the assumption; values built by `newobj` in the static constructor or by any other code shape; a second store, a store outside the static constructor, or `ldsflda` of the field during initialization; `stsfld` in an extracted method; and `ldsflda` of the field in an extracted method, so its address, and any write through it, is never formed.
+Direct `new T(integer constants)` initialization is also admitted for non-generic same-assembly
+reference-free structs. The certificate executes the ordinary checked aggregate-construction
+operation, including zero initialization and constructor readback, to establish the stored bytes.
+
+Rejected: a declaring type without the assumption; values built by other code shapes; a second store, a store outside the static constructor, or `ldsflda` of the field during initialization; `stsfld` in an extracted method; and `ldsflda` of the field in an extracted method, so its address, and any write through it, is never formed.
 
 Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable array allocation or exception handling is still rejected.
 

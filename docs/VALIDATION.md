@@ -495,7 +495,8 @@ certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations
 items and non-native 64-bit size operands. These run in the `evidence` suite.
 
 `Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls, including
-mutation through the receiver, and rejects forged generated call targets and malformed prefix,
+closed generic owners and mutation through the receiver, and rejects forged generated call targets,
+owner arguments and malformed prefix,
 branch and interface-constraint metadata. `Tests/ConstrainedResolution.cs` checks the extractor's
 resolution rules; `Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target,
 signature, ambiguity and prefix rejection. These run in the `evidence` suite.
