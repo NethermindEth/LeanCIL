@@ -15,7 +15,7 @@ internal static class InstructionTranslation
         IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
         FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
         IReadOnlyDictionary<int, int>? parameterHomes = null, ImportResolution? imports = null,
-        MetadataValidation.LayoutContext? layouts = null)
+        MetadataValidation.LayoutContext? layouts = null, ConstrainedCalls.TargetIndex? constrainedTargets = null)
     {
         if (imports is not null && imports.TryTranslate(i, methods.Count, out string imported)) return imported;
         profile ??= FeatureProfile.Scalar;
@@ -67,13 +67,15 @@ internal static class InstructionTranslation
         if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
-        var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes, layouts);
+        var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
+            layouts, constrainedTargets);
         return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;
     }
 
     static string TranslateCore(Instruction i, MethodDefinition m, IReadOnlyDictionary<MethodDefinition, int> methods,
         int methodIndex, InstructionIndex instructions,
-        FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext? layouts)
+        FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext? layouts,
+        ConstrainedCalls.TargetIndex? constrainedTargets)
     {
         profile ??= FeatureProfile.Scalar;
         var typeTests = TypeTests.Analyze(m);
@@ -94,6 +96,8 @@ internal static class InstructionTranslation
         if (i.OpCode.Code == Code.Callvirt)
         {
             var resolved = ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture).Target;
+            resolved = (constrainedTargets ?? new ConstrainedCalls.TargetIndex(methods.Keys))
+                .Find(resolved, (TypeReference)i.Previous.Operand);
             var index = methods.GetValueOrDefault(resolved, -1);
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
             return $".call {index} {resolved.Parameters.Count + 1}";

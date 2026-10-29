@@ -268,22 +268,24 @@ private def genericFieldType (layouts : List RawLayout) : TypeExpr → Option Fi
     else if name == "System.Runtime.Intrinsics.Vector256`1" then some .vector256 else none
   | _ => none
 
-/-- Generic layouts cannot replace their argument ordering or original field storage. -/
-def genericLayoutValid (layouts : List RawLayout) (layout : RawLayout) : Bool :=
-  match layout.generic with
-  | none => true
-  | some generic =>
-    let identity := (do
-      let .constructor scope name := generic.owner | none
-      let names ← generic.arguments.mapM fun argument => match argument with
+/-- Closed generic identities retain the scope and ordering of every supported argument. -/
+def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option String := do
+      let .constructor scope name := owner | none
+      let names ← arguments.mapM fun argument => match argument with
         | .atom scope name => some (scope ++ "::" ++ name)
         | .enum identity _ | .aggregate identity _ =>
           some identity
         | .apply (.constructor scope name) (.atom elementScope element) =>
           some (scope ++ "::" ++ name ++ "<" ++ elementScope ++ "::" ++ element ++ ">")
         | _ => none
-      return scope ++ "::" ++ name ++ "<" ++ String.intercalate "," names ++ ">")
-    identity == some layout.identity &&
+      return scope ++ "::" ++ name ++ "<" ++ String.intercalate "," names ++ ">"
+
+/-- Generic layouts cannot replace their argument ordering or original field storage. -/
+def genericLayoutValid (layouts : List RawLayout) (layout : RawLayout) : Bool :=
+  match layout.generic with
+  | none => true
+  | some generic =>
+    genericOwnerIdentity generic.owner generic.arguments == some layout.identity &&
       !layout.explicit && !layout.auto && generic.arity > 0 &&
       generic.arguments.length == generic.arity &&
       generic.constraints.length == generic.arity && generic.constraints.all (fun constraint =>

@@ -437,7 +437,7 @@ internal static class MetadataValidation
                 if (instruction.OpCode.Code == Code.Callvirt)
                 {
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
-                    Enter(resolved.Target, reference, instruction);
+                    Enter(ConstrainedCalls.Specialize(resolved, instruction, specializations), reference, instruction);
                     return;
                 }
                 if (ImportResolution.External(reference, module))
@@ -567,6 +567,7 @@ internal static class MetadataValidation
         var methods = ordered.ToArray();
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
+        var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var layoutContext = new LayoutContext(module, profile.Architecture);
         for (int i = 0; i < methods.Length; i++)
         {
@@ -587,7 +588,7 @@ internal static class MetadataValidation
                 if (!skipped.Contains(instruction))
                     Check(method, instruction, () =>
                         InstructionTranslation.Translate(instruction, method, methodIndices, index, instructions,
-                            profile, nativeOperands, parameterHomes, imports, layoutContext), named: true);
+                            profile, nativeOperands, parameterHomes, imports, layoutContext, constrainedTargets), named: true);
         }
         return methods;
     }

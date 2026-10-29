@@ -119,6 +119,7 @@ internal static class LeanEmitter
     {
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
+        var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var templates = new List<TemplateEmitter.Method>();
         var callDefinitions = new string?[methods.Length];
         StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
@@ -168,7 +169,7 @@ internal static class LeanEmitter
             foreach (Instruction i in m.Body.Instructions)
                 ops.Add(reachable.Contains(i)
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterHomes, importResolution, layoutContext)
+                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
                     : ".unsupported \"Unreachable under selected profile\"");
             var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
             string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables

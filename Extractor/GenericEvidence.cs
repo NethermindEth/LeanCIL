@@ -201,29 +201,44 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
     string DispatchTypes(MethodDefinition method)
     {
         var receivers = method.Body.Instructions.Where(instruction => instruction.OpCode.Code == Code.Constrained)
-            .Select(instruction => ((TypeReference)instruction.Operand).Resolve())
-            .Where(type => type.Module == method.Module).ToArray();
-        var types = receivers.Concat(receivers.SelectMany(type => type.Interfaces)
-                .Select(implementation => implementation.InterfaceType.Resolve())
-                .Where(type => type.Module == method.Module))
-            .DistinctBy(type => type.MetadataToken.ToUInt32()).OrderBy(type => type.MetadataToken.ToUInt32());
+            .Select(instruction => (TypeReference)instruction.Operand)
+            .Where(type => type.Resolve().Module == method.Module).ToArray();
+        var types = receivers.Concat(receivers.SelectMany(type => type.Resolve().Interfaces)
+                .Select(implementation => implementation.InterfaceType)
+                .Where(type => type.Resolve().Module == method.Module))
+            .DistinctBy(LayoutEvidence.Identity).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal);
         return List(types.Select(type =>
         {
-            var original = (TypeDefinition)originalModule.LookupToken(type.MetadataToken);
-            return $"{{ identity := {Type(original)}, valueType := {Bool(original.IsValueType)}, " +
+            var original = (TypeDefinition)originalModule.LookupToken(type.Resolve().MetadataToken);
+            GenericInstanceType? owner = null;
+            if (type is GenericInstanceType closed)
+            {
+                owner = new GenericInstanceType(original);
+                foreach (var argument in closed.GenericArguments) owner.GenericArguments.Add(argument);
+            }
+            return $"{{ identity := {Type(type)}, valueType := {Bool(original.IsValueType)}, " +
                 $"interfaceType := {Bool(original.IsInterface)}, " +
                 $"interfaces := {List(original.Interfaces.Select(implementation => Type(implementation.InterfaceType)))}, " +
-                $"methods := {List(original.Methods.Select(DispatchMethod))} }}";
+                $"methods := {List(original.Methods.Select(member => DispatchMethod(member, owner)))} }}";
         }));
     }
 
-    string DispatchMethod(MethodDefinition method) =>
+    string DispatchMethod(MethodDefinition method, GenericInstanceType? owner)
+    {
+        string Signature(TypeReference type) => Type(owner is null || method.HasGenericParameters
+            ? type : GenericStructs.Substitute(type, owner));
+        var specialization = owner is null ? "" :
+            $", owner := .constructor {Scope(owner.ElementType)} {Quote(owner.ElementType.FullName)}, " +
+            $"ownerArguments := {List(owner.GenericArguments.Select(Type))}";
+        return
         $"{{ token := {method.MetadataToken.ToUInt32()}, name := {Quote(method.Name)}, " +
         $"hasThis := {Bool(method.HasThis)}, isPublic := {Bool(method.IsPublic)}, " +
         $"isAbstract := {Bool(method.IsAbstract)}, isVirtual := {Bool(method.IsVirtual)}, " +
         $"hasBody := {Bool(method.HasBody)}, genericArity := {method.GenericParameters.Count}, " +
         $"explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, " +
         $"attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, " +
-        $"returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Type(parameter.ParameterType)))}, " +
-        $"overrides := {List(method.Overrides.Where(slot => slot.DeclaringType.Scope is ModuleDefinition).Select(slot => slot.Resolve().MetadataToken.ToUInt32().ToString(CultureInfo.InvariantCulture)))} }}";
+        $"returnType := {Signature(method.ReturnType)}, " +
+        $"parameters := {List(method.Parameters.Select(parameter => Signature(parameter.ParameterType)))}, " +
+        $"overrides := {List(method.Overrides.Where(slot => slot.DeclaringType.Scope is ModuleDefinition).Select(slot => slot.Resolve().MetadataToken.ToUInt32().ToString(CultureInfo.InvariantCulture)))}{specialization} }}";
+    }
 }
