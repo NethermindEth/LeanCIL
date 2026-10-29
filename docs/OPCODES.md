@@ -20,7 +20,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
-| `newarr` | Partial | Fresh zero-initialized primitive integer arrays, including native integers, `bool` and `char`. Int32/native lengths must be nonnegative and at most the .NET 10 CoreCLR ceiling `0x7fffffc7`; negative lengths raise `System.OverflowException`. Heap identity survives returns. Success assumes runtime-supported allocation size and available heap capacity; no GC, object-header or out-of-memory model. |
+| `newarr` | Partial | Fresh zero-initialized primitive integer and same-assembly enum arrays, including native integers, `bool` and `char`. Enum zero values need not name a declared member. Int32/native lengths must be nonnegative and at most the .NET 10 CoreCLR ceiling `0x7fffffc7`; negative lengths raise `System.OverflowException`. Heap identity survives returns. Success assumes runtime-supported allocation size and available heap capacity; no GC, object-header or out-of-memory model. |
 | `ldlen` | Partial | Length of a supplied integer, enum, reference-free aggregate or integer-vector array, or typed handler table, returned as a native integer. Null raises `System.NullReferenceException`. |
 | `ldelema` | Partial | Checked element reference into a supplied integer, enum, reference-free aggregate or integer-vector array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
 | `readonly.` | Partial | Immediately precedes an admitted `ldelema`; branches into the following address instruction are rejected. Produces a restricted reference that remains readonly through byref locals, arguments and returns. Scalar reads are allowed, while stores and adapters that would discard the restriction fail. Other authorized aliases can still update the backing bytes. |
@@ -181,7 +181,7 @@ supported integer Vector128/256/512 elements over existing storage. Their length
 and allocation identity remain explicit across locals, calls and returns. Indexing checks
 null before bounds; negative and out-of-range indices raise `System.IndexOutOfRangeException`
 on a valid non-null array. Length does not require readable contents. Invalid storage and
-insufficient authority remain model faults. Primitive integer arrays can also be allocated with
+insufficient authority remain model faults. Primitive integer and same-assembly enum arrays can also be allocated with
 `newarr`. Array-root address-taking, object identity tests and reference/floating-point elements
 remain outside this subset.
 
@@ -192,7 +192,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | Debugger and prefixes | `break`, `volatile.`; `tail.` outside admitted same-assembly calls; `readonly.` outside the checked array-element subset; `constrained.` outside the checked struct-call subset |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*` |
-| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, nonprimitive `newarr`, reference/floating-point `ldelem.*`/`stelem.*`, `ldtoken` of a method or of a type outside a decided type test |
+| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, aggregate, vector, reference and floating-point `newarr`, reference/floating-point `ldelem.*`/`stelem.*`, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` and `ldsflda` of fields outside the admitted readonly subset |
 | Dispatch and exceptions | Unconstrained `callvirt`, `jmp`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |
@@ -333,7 +333,21 @@ Release configuration is required, but it does not guarantee that a compiler emi
 
 Reachable same-assembly generic methods are specialized for supported primitive, enum, reference-free aggregate and vector type arguments. This substitutes types in the original CIL parameters, locals, type operands and nested generic calls; it does not replace method bodies with functional summaries. Repeated uses share a specialization, while different type arguments retain separate bodies. Ordinary calls retain an acyclic order; tail transfers may form cycles. Extraction rejects more than 256 distinct specializations.
 
-Select a non-generic entry method whose compiled calls supply the concrete type arguments. Static calls on closed same-assembly generic declaring types are supported, including nested owners and combined owner/method type arguments. Closed same-assembly sequential generic structs admit reference-free storage, field accesses, direct instance methods and constructors after substituting their owner arguments. Explicit/auto generic layouts, reference-containing instantiations and interface/reference-constrained generic structs remain rejected, as do boxing, general runtime dispatch and unsupported storage types. A same-assembly interface constraint is admitted when the concrete struct directly declares that interface; constrained calls are checked as described below. Unconstrained parameters and admitted value-type/default-constructor/unmanaged constraints are supported for the reference-free value types above. Every specialized body's instructions undergo the normal validation.
+Select a non-generic entry method whose compiled calls supply the concrete type arguments.
+Static calls on closed same-assembly generic declaring types support nested owners and combined
+owner/method type arguments. Closed same-assembly sequential generic structs admit reference-free
+storage, field accesses, direct instance methods and constructors after substituting their
+owner arguments. Every specialized body's instructions undergo the normal validation.
+
+Generic methods and generic struct owners admit a closed same-assembly interface constraint
+when the concrete struct directly declares that exact interface. Dispatch follows the
+[constrained struct-call rules](#constrained-struct-calls). Unconstrained parameters and admitted
+value-type, default-constructor and unmanaged constraints support the reference-free value
+types above.
+
+Explicit/auto generic layouts, reference-containing instantiations, reference constraints,
+open interface constraints and inherited interface matching remain unsupported, as do boxing
+and general runtime dispatch.
 
 See the [per-family intrinsic tables](SIMD.md) for the exact Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, operand types and profile requirements.
 
@@ -406,6 +420,11 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 | `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Reverse bytes within the value; preserve signed return conventions; byte/sbyte are identity operations |
 
 `System.Math.Min`, `Max` and `Clamp` support signed and unsigned 8-, 16-, 32-, 64-bit and native integers. `Abs` and `Sign` support the signed types; `Sign` returns an `int`. `Abs` of the signed minimum produces an arithmetic overflow fault. `Clamp` with a lower bound greater than its upper bound produces an invalid-bounds fault. These failures terminate checked execution; exception handlers are not modelled.
+
+The corresponding static `Min`, `Max` and `Clamp` methods on `sbyte`, `byte`, `short`,
+`ushort`, `int`, `uint`, `long`, `ulong`, `nint` and `nuint` use the same operations.
+Signed types also admit `Abs` and `Sign`, with the same overflow behavior and `int` sign result.
+These exact signatures share the checked integer semantics used for `System.Math`.
 
 `System.Math.BigMul(ulong, ulong, out ulong)` returns the high 64 bits of the unsigned product and writes the low 64 bits through the checked output reference. The destination must be live, in bounds and writable; its previous bytes need not be initialized. `CIL.Safety.bigMul64_succeeds` exposes the exact result, low-word readback, allocation preservation and preservation of cells outside the output's eight bytes.
 
