@@ -8,6 +8,10 @@ public static unsafe class NativeManagedDispatch
         return ((delegate* managed<int, int, long, int>)target)(value, count, marker);
     }
 
-    public static int Repeat(int value, int count, long marker) => count == 0 ? value :
-        ((delegate* managed<int, int, long, int>)&Repeat)(value + 1, count - 1, marker);
+    public static int Repeat(int value, int count, long marker)
+    {
+        if (marker < 0) throw new System.InvalidOperationException();
+        return count == 0 ? value :
+            ((delegate* managed<int, int, long, int>)&Repeat)(value + 1, count - 1, marker);
+    }
 }
