@@ -93,15 +93,15 @@ Lake configuration and Lean elaborators execute code, so use packages you trust.
 
 LeanCIL supports integer arithmetic, selected control flow and managed calls, reference-free
 structs, checked memory access, integer and enum arrays and spans over supplied storage,
-and selected runtime helpers and SIMD intrinsics. Each has restrictions documented in the
-[opcode support table](docs/OPCODES.md) and [intrinsic support tables](docs/SIMD.md).
+typed managed dispatch, and selected runtime helpers and SIMD intrinsics. Each has restrictions
+documented in the [opcode support table](docs/OPCODES.md) and [intrinsic support tables](docs/SIMD.md).
 Unsupported instructions and signatures are rejected explicitly.
 
 The checked memory model tracks allocation identity, lifetime, bounds, permissions,
 initialization and alignment. Use `CIL.Safety.invoke` for memory-safety claims; successful
 execution in the simpler `CIL.invoke` model alone does not establish them.
 
-General class allocation and virtual dispatch, recursive managed calls, exception handlers,
+General class allocation and virtual dispatch, ordinary recursive calls, exception handlers,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.
 Concurrency, GC implementation correctness and equivalence to arbitrary .NET runtimes are
 outside the model's guarantees. See [soundness and limitations](docs/SOUNDNESS.md).

@@ -457,9 +457,17 @@ and rejects branches into the call or return. The checked driver retires the cur
 before revalidating arguments and entering the callee. References or views into that frame's
 locals therefore fail even if the callee would ignore them; references to still-live caller
 storage remain valid. The callee result returns directly, without a caller continuation.
-Indirect `tail.calli`, imported or intrinsic tail calls, and recursive managed graphs remain
-unsupported. Table-loaded native-integer targets need a separate checked function-pointer
-provenance and signature model; direct tail support does not cover an indirect EVM dispatcher.
+Typed `ldftn`/`calli` values retain a scoped method identity and exact closed signature.
+Each possible call target is bound by the certificate to an extracted body. Linking relocates
+catalog indices without changing pointer identities. Supplied immutable handler tables contain
+non-null identities of one signature; a null table and out-of-range indexes raise their named
+exceptions. Integer conversion cannot manufacture callable provenance.
+
+Direct and indirect tail transfers may form cycles, using the same frame-retirement checks.
+Execution remains fuel-bounded and termination needs a proof. Only default-managed static
+signatures over admitted integers, enums and managed references are supported. Imported or
+intrinsic tail calls, mutable handler tables, null entries, unmanaged conventions and raw
+native-integer targets remain unsupported. This does not model an arbitrary raw-pointer EVM table.
 
 ## Integer enums
 
