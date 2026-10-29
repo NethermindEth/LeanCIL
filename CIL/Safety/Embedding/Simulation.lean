@@ -199,6 +199,19 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {ar
       | cases h
       | split at h
       | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  case managed operation =>
+    cases operation <;> try rfl
+    rename_i signature catalog tail
+    cases tail
+    · rfl
+    · simp only [step, managedStep] at h
+      repeat' first
+        | contradiction
+        | exact resumes.elim
+        | cases h
+        | split at h
+        | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+      all_goals simp_all
   all_goals rfl
 
 /-- Each method of `expected` embeds into the same method of `actual` under `maps`. -/

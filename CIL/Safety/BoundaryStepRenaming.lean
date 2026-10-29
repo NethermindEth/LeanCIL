@@ -4,6 +4,13 @@ import CIL.Safety.FixedStepHelpers
 
 namespace CIL.Safety
 
+/-- Allocation renaming preserves exactly the null managed reference. -/
+private theorem managedReference_null_iff (mapping : AllocationRenaming)
+    (reference : ManagedReference) :
+    mapping.managedReference reference = .null ↔ reference = .null := by
+  cases reference <;> simp [AllocationRenaming.managedReference]
+#print axioms managedReference_null_iff
+
 /-- Managed metadata identities are stable while checked argument references are renamed. -/
 theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
@@ -35,13 +42,14 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
         Bind.bind, Except.bind, Pure.pure, Except.pure])
   all_goals try simp_all only [reduceCtorEq, forall_const, forall_eq', false_implies, true_implies]
   all_goals cases stack with
-  | nil => simp_all [AllocationRenaming.value]
+  | nil => simp_all [AllocationRenaming.value, managedReference_null_iff]
   | cons head rest =>
-    cases head <;> simp_all [AllocationRenaming.value]
+    cases head <;> simp_all [AllocationRenaming.value, managedReference_null_iff]
     all_goals cases rest with
-    | nil => simp_all [AllocationRenaming.value]
+    | nil => simp_all [AllocationRenaming.value, managedReference_null_iff]
     | cons head rest =>
-      cases head <;> simp_all [AllocationRenaming.value] <;> (exfalso; solve_by_elim)
+      cases head <;> simp_all [AllocationRenaming.value, managedReference_null_iff] <;>
+        (exfalso; solve_by_elim)
 #print axioms Memory.Renamed.managedStep
 
 /-- Argument loads, calls and returns preserve their checked values and control flow. -/
