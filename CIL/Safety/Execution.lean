@@ -62,6 +62,8 @@ theorem bitcastValue_numeric {source target : CIL.SnapshotShape} {input value : 
 /-- Checks that a value may be pushed: a reference or span base must form in memory and a
     scalar must be numeric. -/
 def checkedValue (m : Memory) : Value → ExecutionResult Value
+  | .methodPointer pointer => .ok (.methodPointer pointer)
+  | .methodTable table => .ok (.methodTable table)
   | .reference r => formValue m r
   | .readOnlyReference r => do
     let _ ← formValue m r
@@ -110,6 +112,34 @@ inductive FrameAction where
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
+/-- Managed dispatch checks stable pointer identity and signature before selecting a body.
+    Tail calls use the same retirement action as direct tail calls. -/
+def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
+  match operation, stack with
+  | .address target signature, _ =>
+    return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
+  | .tableLength, .methodTable table :: rest =>
+    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 targets.length)) :: rest) frame memory
+  | .tableElement signature, .scalar index :: .methodTable table :: rest =>
+    if table.signature != signature then .error .invalidState else pure ()
+    let some index := arrayIndex index | .error .invalidState
+    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    let some target := targets[index]? | .error (.thrown "System.IndexOutOfRangeException")
+    return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
+  | .call signature catalog tail, .methodPointer pointer :: values =>
+    if pointer.signature != signature then .error .invalidState else pure ()
+    let some identity := pointer.target | .error .invalidState
+    let some target := catalog.find? (·.identity == identity) | .error .invalidState
+    let count := signature.parameters.length
+    if (if tail then values.length != count else values.length < count) then
+      .error .invalidState else pure ()
+    let arguments ← (values.take count).reverse.mapM (checkedValue memory)
+    if tail then return .tailCall target.method arguments memory
+    else return .call target.method arguments (values.drop count) memory
+  | _, _ => .error .invalidState
+
 /-- Evaluates an intrinsic. Operands with unspecified bits are allowed only where the
     result does not observe them; arithmetic faults are reported, not swallowed. -/
 def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : ExecutionResult CIL.Value :=
@@ -135,6 +165,7 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   if unspecifiedOperands (observerCount op) stack || unknownArgument then
     .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
+  | .managed operation, _ => managedStep operation pc frame stack m
   | .sub, .scalar offset :: .reference value :: rest =>
     let result ← referenceSubtract m value offset
     return .next (pc + 1) (.reference result :: rest) frame m

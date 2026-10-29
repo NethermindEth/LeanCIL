@@ -3,6 +3,7 @@ import CIL.IntegerArithmetic
 import CIL.Features
 import CIL.SIMD.Availability
 import CIL.VectorMemory
+import CIL.MethodPointers
 
 /-!
 # Instructions and methods
@@ -63,6 +64,9 @@ inductive LocalKind where
   | span (width : Nat) (writable : Bool)
   /-- A typed array root keeps its shape and reference without encoding object headers. -/
   | array (element : ArrayElement)
+  /-- Callable roots retain exact signatures and never expose a numeric byte home. -/
+  | methodPointer (signature : ManagedSignature)
+  | methodTable (signature : ManagedSignature)
   | byte | word32 | word64 | vector128 | vector256 | vector512 | reference
   deriving DecidableEq, Repr
 
@@ -118,6 +122,8 @@ inductive Op where
   | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
   /-- Transfer to a managed method after retiring the current activation. -/
   | tailCall (callee argc : Nat)
+  /-- Authenticated managed pointers, immutable tables and exact-signature indirect calls. -/
+  | managed (operation : ManagedOp)
   -- 64-bit lanes of a 256-bit vector.
   | lane (index : Fin 4)
   | laneAddress (index : Fin 4)

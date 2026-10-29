@@ -29,6 +29,10 @@ inductive Value where
   | array (view : ArrayView)
   /-- A reference obtained through a readonly view; scalar loads preserve this restriction. -/
   | readOnlyReference (reference : ManagedReference)
+  /-- Callable identities cannot be forged by arithmetic or byte reinterpretation. -/
+  | methodPointer (pointer : CIL.MethodPointer)
+  /-- An immutable supplied table retains the provenance of every entry. -/
+  | methodTable (table : CIL.MethodTable)
   deriving DecidableEq, Repr
 
 /-- Why the checked interpreter stopped. -/
@@ -82,6 +86,10 @@ def observerCount : CIL.Op → Nat
   -- Method boundaries
   | .ret _ => 1
   | .call _ argc | .tailCall _ argc | .newVector256 _ argc | .newAggregate _ argc _ => argc
+  | .managed (.call signature _ _) => signature.parameters.length + 1
+  | .managed (.tableElement _) => 2
+  | .managed .tableLength => 1
+  | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
@@ -781,6 +789,8 @@ def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
       | .reference reference => formValue m reference
       | .scalar value => if value.initialized then .ok (.scalar value) else .error .invalidState
       | .span reference length => .ok (.span reference length)
+      | .methodPointer pointer => .ok (.methodPointer pointer)
+      | .methodTable table => .ok (.methodTable table)
       | .array view => do
         let _ ← checkedAt view.reference 0 (view.validate m)
         pure (.array view)

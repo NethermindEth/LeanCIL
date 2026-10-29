@@ -39,6 +39,10 @@ inductive TypeExpr where
   | pointer (element : TypeExpr)
   /-- A zero-based, single-dimensional CLI array signature. -/
   | array (element : TypeExpr)
+  /-- A static function pointer using the default managed calling convention. -/
+  | functionPointer (result parameters : TypeExpr)
+  /-- One parameter in a function-pointer signature; the parameter chain ends in `.void`. -/
+  | signatureParameter (head tail : TypeExpr)
   | constructor (scope name : String)
   | apply (constructor argument : TypeExpr)
   deriving DecidableEq, Repr
