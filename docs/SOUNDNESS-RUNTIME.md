@@ -53,10 +53,10 @@ primitive/vector stride and signedness are checked directly, and aggregate strid
 
 ### Unspecified vector lanes
 
-Portable 128- and 256-bit integer vector bitwise operators, whole-vector equality, `Zero` and
+Portable 128-, 256- and 512-bit integer vector bitwise operators, whole-vector equality, `Zero` and
 `AllBitsSet` share their bit-level semantics for byte, signed/unsigned 32-bit and signed/unsigned
 64-bit elements. The intrinsic certificate checks the exact runtime call, element, width, generic
-arguments and emitted operation. Floating-point equality and 512-bit portable forms are excluded.
+arguments and emitted operation. Floating-point equality and unspecified-lane observations are excluded.
 
 `v128Low64 low` represents every vector with that low lane. `checkedIntrinsic` admits only consumers
 proved independent of the upper lane: reinterpretation, lane-zero extraction and the count operands
@@ -105,11 +105,22 @@ constructors require a checked extent, not a numeric address. Raw `void*` is adm
 supported helpers/constructors. Arbitrary pointer element types and reference-bearing layouts remain
 unsupported. [OPCODES](OPCODES.md) specifies the exact constructor and receiver forms.
 
+Empty span getters and explicit default resets use null, zero-length views. Their element width
+and write capability remain bound to the exact span type; aggregate widths and identities are
+checked against the layout table. Resetting a local replaces its view without modifying backing
+memory, granting authority or extending a lifetime.
+
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
 unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.
 Fill captures its value before writing, including aliasing cases, and preserves those masks;
 Clear initializes every byte.
+
+Whole-array `Array.Fill<T>(T[], T)` requires the exact runtime signature and primitive or
+integer-backed enum element identity. It rejects null before delegating to the array's checked
+span view; an empty non-null array performs no write. The view supplies no additional memory
+authority, and the shared span fill preserves confinement and initialization guarantees.
+Range overloads and other element families are not modeled by this helper.
 Nonempty destinations need write authority, not prior readability. Copy requires initialized source
 bytes. Empty operations grant no authority. Empty spans have null pinnable references; empty arrays
 retain their data reference. Null array data-reference access raises its named exception.

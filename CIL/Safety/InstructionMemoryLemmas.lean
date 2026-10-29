@@ -14,6 +14,16 @@ and allocation extension across instructions follow from these.
 
 namespace CIL.Safety
 
+/-- Empty spans retain their element width and capability without reading or changing memory. -/
+theorem memoryInstruction_emptySpan (memory : Memory) (stack : List Value)
+    (width : Nat) (writable : Bool) (bounded : 0 < width ∧ width < 2^64) :
+    memoryInstruction (.spanEmpty width writable) stack memory =
+      .ok (memory, .bufferSpan ⟨.null, 0, width, writable⟩ :: stack) := by
+  simp [memoryInstruction, otherMemoryInstruction, unspecifiedOperands,
+    CIL.MemoryOp.argumentCount, SpanView.validate, bounded, checkedAt]
+  rfl
+#print axioms memoryInstruction_emptySpan
+
 theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m : Memory) :
     instructions (first ++ second) stack m =
       (instructions first stack m).bind
@@ -532,6 +542,25 @@ theorem spanFillInstruction_contract (width : Nat) (clear : Bool) (stack values 
     | split at filled
 #print axioms spanFillInstruction_contract
 
+/-- Whole-array filling inherits the checked span write and retained-stack contract. -/
+theorem arrayFillInstruction_contract (element : CIL.ArrayElement) (stack values : List Value)
+    (memory result : Memory)
+    (filled : arrayFillInstruction element stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold arrayFillInstruction at filled
+  split at filled
+  · split at filled
+    · cases filled
+    · split at filled
+      · cases filled
+      · have contract := spanFillInstruction_contract _ _ _ _ _ _ filled
+        refine ⟨contract.effect, fun formed valid => contract.values formed ?_⟩
+        simpa only [ValuesValid, List.mem_cons, forall_eq_or_imp, Value.Valid,
+          ArrayView.validate] using valid
+  · cases filled
+  · cases filled
+#print axioms arrayFillInstruction_contract
+
 /-- Checked reference addition preserves memory and returns only a valid reference. -/
 theorem referenceAddInstruction_contract (size : Nat) (signed : Bool)
     (stack values : List Value) (memory result : Memory)
@@ -642,6 +671,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact viewObservationInstruction_contract _ _ _ _ _ h
     · exact spanCopyInstruction_contract _ _ _ _ _ _ h
     · exact spanFillInstruction_contract _ _ _ _ _ _ h
+    · exact arrayFillInstruction_contract _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in

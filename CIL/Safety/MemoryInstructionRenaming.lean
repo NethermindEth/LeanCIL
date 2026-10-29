@@ -138,6 +138,41 @@ private theorem Memory.Renamed.spanFillInstructionResult {mapping : AllocationRe
     | (split <;> try simp only [*, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.spanFillInstructionResult
 
+/-- Array filling transports through the existing span-fill allocation-renaming rule. -/
+private theorem Memory.Renamed.arrayFillInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (element : CIL.ArrayElement)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (arrayFillInstruction element stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (arrayFillInstruction element stack source)
+      (arrayFillInstruction element (stack.map mapping.value) target) := by
+  simp only [CIL.Safety.arrayFillInstruction] at observable ⊢
+  split at observable
+  · rename_i value view rest
+    simp only [List.map_cons, AllocationRenaming.value, AllocationRenaming.arrayView,
+      mapping.isNull]
+    split at observable
+    · simp only [*, ite_true]
+      exact .error _
+    · simp only [*, Bool.false_eq_true, ite_false]
+      split at observable
+      · simp only [*, ite_true]
+        exact .error _
+      · simp only [*, Bool.false_eq_true, ite_false]
+        have renamed := related.spanFillInstructionResult element.width false
+          (.scalar value :: .bufferSpan view.storage :: rest)
+          (by simpa only [List.mem_cons, forall_eq_or_imp, Value.Below, ArrayView.storage]
+                using bounds) observable
+        simpa only [List.map_cons, AllocationRenaming.value, AllocationRenaming.spanView,
+          ArrayView.storage] using renamed
+  · simp only [List.map_cons, AllocationRenaming.value, AllocationRenaming.managedReference]
+    exact .error _
+  · cases observable
+#print axioms Memory.Renamed.arrayFillInstructionResult
+
 /-- Typed array loads and stores transport the exact snapshot mask and checked authority. -/
 private theorem Memory.Renamed.arrayTransferInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -234,7 +269,7 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
     fun left right leftBound rightBound =>
       ⟨mapping.injective left right leftBound rightBound, congrArg mapping.image⟩
   all_goals try solve
-    | apply (related.checkedSpanValidate _ (by assumption)).bindWithSuccess
+    | apply (related.checkedSpanValidate _ (by first | assumption | trivial)).bindWithSuccess
       intro first second sourceStep same
       subst second
       repeat first
@@ -495,6 +530,7 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     · exact related.viewObservationInstructionResult _ _ bounds observable
     · exact related.spanCopyInstructionResult _ _ _ bounds observable
     · exact related.spanFillInstructionResult _ _ _ bounds observable
+    · exact related.arrayFillInstructionResult _ _ bounds observable
     · exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult

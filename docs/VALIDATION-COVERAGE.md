@@ -323,8 +323,10 @@ from inserting a placeholder. The ordinary shared tactic tests run unchanged.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
 types against runtime results and certified checked execution. It also covers length, helper calls,
-aliases, returned arrays, named null/bounds faults and unsupported array forms. Independent changes
-to load width or signedness must fail the Lean scalar certificate. `Tests/PrimitiveArrays.lean`
+aliases, returned arrays, named null/bounds faults and unsupported array forms. Generic integer
+and enum fills cover readback, neighboring bytes, empty arrays, named null exceptions and missing
+write authority. Independent changes to fill element identities, widths, operations, scope and
+arity, or load width and signedness, must fail the Lean scalar certificate. `Tests/PrimitiveArrays.lean`
 covers empty and null arrays, signed and native indices, initialization, authority, invalid extents,
 local storage and neighboring-byte preservation. Both run in the evidence suite.
 
@@ -441,7 +443,7 @@ arguments checks everything and writes `artifacts/test-results.json`.
 | Typed indirect dispatch | Compiled pointer locals and supplied handler tables cover ordinary calls, indirect tail cycles, return/throw outcomes, null tables, bounds, unknown targets and local-reference expiration. Independent Lean certificate mutations reject forged targets, identities, signatures, numeric pointers, conventions and dropped tail semantics. Malformed calling conventions and branches into a tail transfer are rejected during extraction. |
 | Aggregate and vector spans (`AggregateSpans`) | Reference-free aggregate buffers and integer vectors cover views, slicing, typed reads/writes, reinterpretation, overlap-safe copying and clearing. Vector masks and neighboring bytes are checked; vector-field layouts are certified for x64 and ARM64. Evidence mutations reject forged widths and write capabilities. |
 | Aggregate/vector fills (`AggregateSpanFill`) | Five compiled aggregate, Vector128/256/512 and aliased-source wrappers check repeated values, initialization masks, unknown-lane rejection, empty views, write authority and neighboring bytes. Independent evidence mutations reject changed aggregate/vector widths and clear/fill flags. |
-| Span constructors (`SpanConstructors`) | Single-reference and pointer constructors cover primitive, aggregate and integer-vector elements, mutable/readonly views and in-place local initialization without readable bytes. Vector-field aggregate layouts are checked on x64 and ARM64; evidence mutations reject changed widths and capabilities. |
+| Span constructors (`SpanConstructors`) | Single-reference and pointer constructors cover primitive, aggregate and integer-vector elements, mutable/readonly views and in-place local initialization without readable bytes. Empty getters and explicit default resets cover returns, helper calls and empty slices. Vector-field aggregate layouts are checked on x64 and ARM64; evidence mutations reject changed widths, capabilities and aggregate identities. Wrong scoped reset types and branches into reset folds are rejected. |
 | Supplied aggregate/vector arrays (`AggregateArrays`, `AggregateArrayStorage`) | Typed element addresses, loads/stores, lengths, span conversions and data references cover reference-free structs and integer vectors over existing storage. Kernel fixtures check masks, authority, bounds, lifetime and readonly views; independent evidence mutations reject changed element descriptors and operations. |
 | Closed generic structs (`GenericLayouts`) | Sequential same-assembly reference-free instantiations cover nested layouts, fields, direct instance methods and constructors through checked owner substitution and ordinary aggregate storage. Unsupported reference-bearing, open, non-sequential and interface/reference-constrained generic layouts remain rejected. |
 | Byte-order span transfers (`BinarySpans`) | Compiled wrappers exercise all 64 signed/unsigned 16-, 32-, 64-bit and native integer read/write/try endian overloads, short spans, read/write authority and uninitialized reads. Evidence mutations reject altered widths, endian choices, signedness and try behavior. |

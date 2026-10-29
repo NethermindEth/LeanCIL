@@ -72,6 +72,7 @@ inductive LocalKind where
 
 /-- Constructors that initialize a typed span local without exposing its storage address. -/
 inductive SpanConstructor where
+  | empty (width : Nat) (writable : Bool)
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   | reference (width : Nat) (writable : Bool)
   | singleReference (width : Nat) (writable : Bool)
@@ -79,6 +80,7 @@ inductive SpanConstructor where
 
 /-- The checked memory operation underlying a span constructor. -/
 def SpanConstructor.operation : SpanConstructor → MemoryOp
+  | .empty width writable => .spanEmpty width writable
   | .array element writable range => .arraySpan element writable range
   | .reference width writable => .spanFromReference width writable
   | .singleReference width writable => .spanSingleReference width writable

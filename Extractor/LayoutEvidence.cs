@@ -158,7 +158,8 @@ internal sealed class LayoutEvidence
                     Spans.Is(spanOwner) &&
                     spanCall.Parameters.FirstOrDefault()?.ParameterType is not ArrayType &&
                     MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
-                    spanCall.Name is "get_Item" or "CopyTo" or "TryCopyTo" or "Clear" or "Fill" or ".ctor")
+                    spanCall.Name is ("get_Item" or "CopyTo" or "TryCopyTo" or "Clear" or "Fill" or
+                        ".ctor" or "get_Empty"))
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
             }
             if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda)
@@ -170,6 +171,10 @@ internal sealed class LayoutEvidence
                 var access = instruction.OpCode.Code switch { Code.Ldfld => "load", Code.Stfld => "store", _ => "address" };
                 uses.Add($".field {pc} {Index(owner)} {fieldIndex} .{access}");
             }
+            else if (instruction.OpCode.Code == Code.Initobj &&
+                instruction.Operand is GenericInstanceType span && Spans.Is(span) &&
+                MetadataValidation.IsAggregate(span.GenericArguments[0], method.Module))
+                uses.Add($".size {pc} {Index(span.GenericArguments[0])} .spanElement");
             else if (instruction.Operand is TypeReference type && MetadataValidation.IsAggregate(type, method.Module))
             {
                 var access = instruction.OpCode.Code switch

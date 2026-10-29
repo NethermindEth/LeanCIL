@@ -47,11 +47,13 @@ internal static class Reachability
             queued.Remove(i);
             if (i.OpCode.Code == Code.Tail) TailCalls.ValidateReachable(method, i, profile.Architecture);
             FeatureConstants state = incoming[i];
-            var condition = i.OpCode.FlowControl == FlowControl.Cond_Branch
-                ? state.BranchCondition(i.OpCode.Code) : null;
+            var folded = typeTests.Results.TryGetValue(i, out bool same);
+            var conditional = i.OpCode.FlowControl == FlowControl.Cond_Branch;
+            var condition = conditional ? state.BranchCondition(i.OpCode.Code) : null;
+            if (conditional && folded) condition = same;
             var selector = i.OpCode.Code == Code.Switch && state.Stack.Count != 0 ? state.Stack[^1] : null;
             state = state.Copy();
-            state.Step(i, method, profile, addressed, typeTests.Results.TryGetValue(i, out bool same) ? same : null);
+            state.Step(i, method, profile, addressed, folded && !conditional ? same : null);
 
             void Successor(Instruction target)
             {

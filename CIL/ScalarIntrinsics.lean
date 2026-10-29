@@ -53,7 +53,22 @@ inductive ScalarIntrinsic where
   deriving DecidableEq, Repr
 
 /-- The number of set bits. -/
-def population (x : BitVec w) : Nat := ((List.range w).filter x.getLsbD).length
+def population (x : BitVec w) : Nat := x.cpopNatRec w 0
+
+/-- Population counts exactly the set bit positions, including the empty bitvector. -/
+theorem population_eq_length_filter (x : BitVec w) :
+    population x = ((List.range w).filter x.getLsbD).length := by
+  have count (width : Nat) :
+      x.cpopNatRec width 0 = ((List.range width).filter x.getLsbD).length := by
+    induction width with
+    | zero => rfl
+    | succ width previous =>
+      rw [BitVec.cpopNatRec_succ, BitVec.cpopNatRec_eq, previous, List.range_succ,
+        List.filter_append, List.length_append]
+      cases bit : x.getLsbD width <;> simp [bit]
+  exact count w
+
+#print axioms population_eq_length_filter
 
 /-- The number of zero bits above the highest set bit; `w` for zero. -/
 def leadingZeros (x : BitVec w) : Nat :=
@@ -115,6 +130,18 @@ def evalScalarIntrinsic : ScalarIntrinsic → List Value → Option Value
   | .log2 width, [.i32 bits] =>
     if width == 8 || width == 16 then
       some (.i32 (BitVec.ofNat 32 (bits.setWidth width).toNat.log2)) else none
+  | .leadingZeroCount width, [.i32 bits] =>
+    if width == 8 || width == 16 then
+      some (.i32 (BitVec.ofNat 32 (leadingZeros (bits.setWidth width)))) else none
+  | .trailingZeroCount width, [.i32 bits] =>
+    if width == 8 || width == 16 then
+      some (.i32 (BitVec.ofNat 32 (trailingZeros (bits.setWidth width)))) else none
+  | .rotateLeft width, [.i32 bits, .i32 count] =>
+    if width == 8 || width == 16 then
+      some (.i32 (((bits.setWidth width).rotateLeft count.toNat).zeroExtend 32)) else none
+  | .rotateRight width, [.i32 bits, .i32 count] =>
+    if width == 8 || width == 16 then
+      some (.i32 (((bits.setWidth width).rotateRight count.toNat).zeroExtend 32)) else none
   | _, _ => none
 
 end CIL

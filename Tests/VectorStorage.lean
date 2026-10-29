@@ -1,4 +1,5 @@
 import CIL.Extraction.VectorInitialization
+import CIL.Safety.Execution
 
 /-! Exact integer-vector object encodings, independently of generated source or DLL hashes. -/
 
@@ -59,5 +60,14 @@ theorem changed_object_meaning_rejected :
       (.initAggregate 16) = false := by decide +kernel
 
 #print axioms changed_object_meaning_rejected
+
+/-- Whole-vector operations reject incomplete 512-bit snapshots and wrong-width opaque values. -/
+theorem incomplete_vector512_rejected :
+    Safety.checkedIntrinsic (.vector (.equalsAll 512))
+        [.snapshot .vector512 (List.replicate 63 (0, true) ++ [(0, false)]), .v512 0] =
+      .error .invalidState ∧
+    Safety.checkedIntrinsic (.vector (.band 512)) [.v128Low64 0, .v512 0] =
+      .error (.unsupported "Intrinsic observes unspecified vector bits") := ⟨rfl, rfl⟩
+#print axioms incomplete_vector512_rejected
 
 end Tests.VectorStorage

@@ -114,6 +114,18 @@ theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalen
     | split
 #print axioms Memory.Equivalent.spanFillInstruction
 
+/-- Typed array fill uses the same checked span write in equivalent memories. -/
+theorem Memory.Equivalent.arrayFillInstruction {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.ArrayElement) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (arrayFillInstruction element stack m)
+      (arrayFillInstruction element stack n) := by
+  unfold CIL.Safety.arrayFillInstruction
+  repeat first
+    | exact same.spanFillInstruction _ _ _
+    | exact .error _
+    | split
+#print axioms Memory.Equivalent.arrayFillInstruction
+
 /-- Checked reference addition observes equivalent allocation states and returns the same address. -/
 theorem Memory.Equivalent.referenceAddInstruction {m n : Memory} (same : m.Equivalent n)
     (size : Nat) (signed : Bool) (stack : List Value) :
@@ -260,6 +272,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.viewObservationInstruction _ _
     · exact same.spanCopyInstruction _ _ _
     · exact same.spanFillInstruction _ _ _
+    · exact same.arrayFillInstruction _ _
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)

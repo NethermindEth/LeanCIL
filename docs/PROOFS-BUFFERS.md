@@ -55,7 +55,10 @@ establish neither initialization nor read/write authority.
 `Tests/AggregateSpans.cs` demonstrates aggregate buffers, vector masks, overlap-safe copying and
 target-dependent layouts. `Tests/AggregateSpanFill.cs` checks repeated masked snapshots, aliased
 inputs and neighboring bytes. `Tests/SpanConstructors.cs` checks single-reference and pointer
-constructors, including target-dependent layouts and in-place local initialization.
+constructors, including target-dependent layouts, empty getters and in-place local resets.
+`memoryInstruction_emptySpan` proves that every supported element width and capability produces
+a null, zero-length view without changing memory. `SpanConstructor.empty` uses that same operation
+when `initializeSpanLocal` replaces a local's previous view.
 `Tests/BinarySpans.cs` demonstrates integer byte-order transfers and short-span behavior.
 `Tests/ViewAccessors.cs` checks observations without byte authority. Supplied aggregate/vector
 arrays reuse the same checked snapshot loads/stores, indexed references and span conversions; no
@@ -86,4 +89,3 @@ checked argument/return storage. `Tests/ManagedDispatch.cs` covers normal and ta
 closed generic identities, initialization masks and rejected unspecified lanes. Pointer overloads of
 `Unsafe` block helpers use the same block operations and proof rules as their managed-reference
 overloads; `Tests/Blocks.cs` covers exact overload/alignment evidence.
-

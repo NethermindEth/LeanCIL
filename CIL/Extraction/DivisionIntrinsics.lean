@@ -123,7 +123,7 @@ private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
     some (divisionVector "128", [.atom runtimeScope "System.UInt64"])
   | _ => none
 
-/-- Lane-independent integer operations share vector semantics at either supported width. -/
+/-- Lane-independent integer operations share vector semantics at each supported width. -/
 private def portableVectorOperation (name : String) (width : Nat) :
     Option (Intrinsic × Nat) :=
   match name with
@@ -150,7 +150,7 @@ private def portableVectorIntrinsic (instruction : RawInstruction) : Option (Int
       | _, _ => none
     else if site.typeArguments.isEmpty then some site.declaringType else none
   let bytes ← integerVectorWidth vector
-  if bytes != 16 && bytes != 32 then none else pure ()
+  if bytes != 16 && bytes != 32 && bytes != 64 then none else pure ()
   let (intrinsic, arity) ← portableVectorOperation site.name (bytes * 8)
   let .apply (.constructor _ owner) (.atom _ element) := vector | none
   let staticOwner := "System.Runtime.Intrinsics.Vector" ++ toString (bytes * 8)
@@ -169,8 +169,10 @@ private def portableVectorIntrinsic (instruction : RawInstruction) : Option (Int
 private def portableVectorOwner (owner : String) : Bool :=
   owner == "System.Runtime.Intrinsics.Vector128" ||
   owner == "System.Runtime.Intrinsics.Vector256" ||
+  owner == "System.Runtime.Intrinsics.Vector512" ||
   owner.startsWith "System.Runtime.Intrinsics.Vector128`1" ||
-  owner.startsWith "System.Runtime.Intrinsics.Vector256`1"
+  owner.startsWith "System.Runtime.Intrinsics.Vector256`1" ||
+  owner.startsWith "System.Runtime.Intrinsics.Vector512`1"
 
 /-- The intrinsic and arity of an exact admitted call, including its generic types and identity. -/
 def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat) :=
@@ -301,7 +303,8 @@ private def portableVectorFamily (instruction : RawInstruction) : Bool :=
         let owner := (signatureOwner.reverse.takeWhile (· != 32)).reverse.takeWhile (· != 60)
         let name := member.takeWhile (· != 40)
         (["System.Runtime.Intrinsics.Vector128", "System.Runtime.Intrinsics.Vector256",
-          "System.Runtime.Intrinsics.Vector128`1", "System.Runtime.Intrinsics.Vector256`1"].any
+          "System.Runtime.Intrinsics.Vector512", "System.Runtime.Intrinsics.Vector128`1",
+          "System.Runtime.Intrinsics.Vector256`1", "System.Runtime.Intrinsics.Vector512`1"].any
           (fun expected => owner == identityBytes expected)) &&
         (["op_BitwiseAnd", "op_BitwiseOr", "op_ExclusiveOr", "op_OnesComplement", "op_Equality",
           "EqualsAll", "get_Zero", "get_AllBitsSet"].any

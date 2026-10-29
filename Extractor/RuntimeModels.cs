@@ -257,10 +257,14 @@ internal static class RuntimeModels
         {
             operations.Add($"System.Boolean {type}::IsPow2({type})",
                 $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
-            if (signed) continue;
-            foreach (var (name, operation) in new[] { ("PopCount", "popCount"), ("Log2", "log2") })
+            foreach (var (name, operation) in BitCounts.Where(count => count.Name != "Log2"))
                 operations.Add($"{type} {type}::{name}({type})",
                     $".intrinsic (.scalar (.{operation} {width})) 1");
+            if (signed) continue;
+            operations.Add($"{type} {type}::Log2({type})", $".intrinsic (.scalar (.log2 {width})) 1");
+            foreach (var (name, operation) in Rotations)
+                operations.Add($"{type} {type}::{name}({type},System.Int32)",
+                    $".intrinsic (.scalar (.{operation} {width})) 2");
         }
         return operations;
     }
@@ -345,6 +349,9 @@ internal static class RuntimeModels
             var span = $"System.ReadOnlySpan`1<{element}>";
             var staticElement = elementType is null || Arrays.Primitive(elementType) is not null ||
                 EnumTypes.IsEnum(elementType);
+            if (staticElement && arrayElement is not null)
+                operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0)",
+                    $".memory (.arrayFill {arrayElement})");
             if (staticElement) operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
                 $"CreateSpan<{element}>(System.RuntimeFieldHandle)", $".memory (.createSpan {width})");
             operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",
@@ -365,6 +372,7 @@ internal static class RuntimeModels
                     $".memory (.spanFromReference {width} {capability})");
                 operations.Add($"System.Void {owner}::.ctor(!0&)",
                     $".memory (.spanSingleReference {width} {capability})");
+                operations.Add($"{name}<!0> {owner}::get_Empty()", $".memory (.spanEmpty {width} {capability})");
                 operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
                 operations.Add($"System.Boolean {owner}::get_IsEmpty()", ".memory (.observeView .spanEmpty)");
                 var pinnableResult = writable ? "!0&" :
@@ -409,7 +417,7 @@ internal static class RuntimeModels
     private static Dictionary<string, string> BuildPortableVectorOperations()
     {
         var operations = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var width in new[] { 128, 256 })
+        foreach (var width in new[] { 128, 256, 512 })
         {
             var genericVector = Vector(width, "!!0");
             var memberVector = Vector(width, "!0");

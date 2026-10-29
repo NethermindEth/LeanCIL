@@ -65,9 +65,15 @@ private def getTypeFromHandle : CallSite :=
 private def typeFromHandle (instruction : RawInstruction) : Bool :=
   instruction.opcode == 40 && instruction.operand == .call getTypeFromHandle
 
-/-- `some true` for `op_Equality`, `some false` for `op_Inequality`. -/
+/-- Equality polarity of the exact comparison call or reference-equality branch. -/
 private def typeComparison (instruction : RawInstruction) : Option Bool :=
-  if instruction.opcode != 40 then none
+  if instruction.opcode == 65025 then
+    if instruction.operand == .none then some true else none
+  else if instruction.opcode ∈ [46, 51, 59, 64] then
+    match instruction.operand with
+    | .target _ => some (instruction.opcode == 46 || instruction.opcode == 59)
+    | _ => none
+  else if instruction.opcode != 40 then none
   else if instruction.operand == .call (typeMethod "op_Equality"
       "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2) then some true
   else if instruction.operand == .call (typeMethod "op_Inequality"
@@ -232,6 +238,8 @@ inductive FoldRole where
   | interior
   /-- A type comparison: pushes the decided Boolean. -/
   | result (value : Bool)
+  /-- A reference-equality branch over two closed typeof values takes this decided edge. -/
+  | typeBranch (taken : Bool)
   /-- The raw `throw`: raises the type bound by the exact folded operands. -/
   | raise (exception : String)
   /-- An unchanged argument push protected from non-fallthrough entry. -/
@@ -241,6 +249,17 @@ inductive FoldRole where
   /-- A direct managed call whose prefix requests frame retirement before transfer. -/
   | tailCall
   deriving DecidableEq, Repr
+
+/-- Resetting a span local binds its exact type and never exposes its storage address. -/
+private def spanDefaultFold (locals : List TypeExpr) (head : RawInstruction)
+    (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
+  if !(head.opcode ∈ [18, 65037]) then none else pure ()
+  let index ← localIndex head
+  let localType ← locals[index]?
+  let some ⟨_, 65045, .type initialized⟩ := tail.head? | none
+  if initialized != localType then none else pure ()
+  let .span width writable ← spanStorage localType | none
+  return [some .head, some (.spanConstructor index (.empty width writable))]
 
 /-- A constructor fold admits at most three pure single-value argument pushes. -/
 private def spanConstructorFold (locals : List TypeExpr) (head : RawInstruction)
@@ -264,7 +283,7 @@ private def spanConstructorFold (locals : List TypeExpr) (head : RawInstruction)
 private def foldAt (locals receiverLocals : List TypeExpr)
     (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
-  spanConstructorFold locals a tail <|>
+  spanDefaultFold locals a tail <|> spanConstructorFold locals a tail <|>
   (match a, tail with
     | ⟨_, 20, .none⟩, ⟨_, 122, .none⟩ :: _ =>
       some [some .head, some (.raise "System.NullReferenceException")]
@@ -281,7 +300,8 @@ private def foldAt (locals receiverLocals : List TypeExpr)
     | _ => none) <|>
   (match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
-        [some .head, some .interior, some .interior, some .interior, some (.result value)]
+        [some .head, some .interior, some .interior, some .interior,
+          some (if e.opcode == 40 || e.opcode == 65025 then .result value else .typeBranch value)]
     | _ => none) <|>
   (throwFold (a :: tail)).map fun (count, name) =>
     some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
@@ -344,6 +364,7 @@ theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction
 def foldEntry (role : Option (Option FoldRole)) : Bool :=
   match role with
   | some (some .interior) | some (some (.result _)) | some (some (.raise _))
+  | some (some (.typeBranch _))
   | some (some .argument) | some (some (.spanConstructor ..)) => false
   | some (some .tailCall) => false
   | _ => true

@@ -54,14 +54,14 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `conv.i8` | Partial | Sign-extend `i32` to `i64`, or preserve an `i64`. No floating-point or reference conversions. |
 | `conv.i` | Partial | Sign-extend an integer `i32` to the admitted 64-bit native width, or preserve an `i64`. No pointer/reference or floating-point conversion. |
 | `conv.u` | Partial | Model native unsigned integers as 64-bit: zero-extend `i32`, or preserve `i64`. Does not convert a managed reference to an integer address. |
-| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality as described below; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering remains unsupported. No floating-point/unordered comparisons. |
+| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality and exact closed `typeof` reference results as described below; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering remains unsupported. No floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted instruction boundary, including backward edges and self-loops. |
 | `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. Every encoded target must be a valid instruction boundary and fold entry. Known int32 selectors prune untaken arms; otherwise every arm and the fallthrough participate in dependency and stack analysis. |
 | `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char), same-assembly explicit- or sequential-layout reference-free aggregates, or the integer vectors listed below. Native integers use eight bytes under the validated profile. Closed same-assembly generic structs require validated sequential layouts. No reference types, floating-point or unsupported generic layouts. |
 | `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. Also accepts checked references, including readonly references and null. Admitted forward and backward successors. |
 | `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
 | `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64` or two live references within one allocation, branching to admitted forward or backward targets. Cross-allocation reference ordering is unsupported. |
-| `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. Also supports checked reference equality as described below. No floating-point comparison. |
+| `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. Also supports checked reference equality and exact closed `typeof` reference comparisons as described below. No floating-point comparison. |
 | `ldind.i`, `stind.i` | Partial | Native-width integer load/store through checked managed references; eight bytes on the admitted target, with the same allocation, permission and lifetime checks. A native handler-table cursor also supports authenticated pointer loads through `ldind.i`; stores to these immutable tables are unsupported. |
 | `ldind.i8`, `stind.i8` | Partial | Eight-byte integer load/store through a checked reference. Allocation bounds, permissions, initialization and lifetime rules apply; arbitrary numeric addresses are not accepted. |
 | `ldind.i1`, `ldind.u1`, `ldind.i2`, `ldind.u2`, `ldind.i4`, `ldind.u4` | Partial | One-, two- or four-byte integer loads through a checked reference. Signed narrow loads sign-extend and unsigned loads zero-extend to `i32`; both four-byte forms return the same `i32` bits. Aggregate snapshots and numeric addresses are rejected. |
@@ -69,7 +69,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `ldfld`, `ldflda`, `stfld` | Partial | Fields in same-assembly, validated explicit- or sequential-layout, reference-free value types, and `Item1`/`Item2` of an equal-width primitive `ValueTuple<T1, T2>` (see [value tuples](SOUNDNESS-RUNTIME.md#value-tuples)). Supported field storage is `sbyte`, byte/Boolean, `short`, `ushort`/`char`, 32-bit integer, 64-bit integer, native integer, integer-backed enum or nested reference-free aggregate. Nested snapshots and assignments copy all field bytes, including padding. Narrow stores truncate; narrow loads sign- or zero-extend to `i32` according to field metadata. `ldfld` accepts an aggregate byte snapshot or reference; field addresses and stores require a reference. No general managed objects, auto layouts or static fields through these opcodes. |
 | `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1–65,536 bytes or admitted Vector128/256/512 integer values, retaining initialization masks. No general objects, reference-bearing storage or floating-point tokens. Native-integer tokens use eight-byte storage. |
 | `cpobj` | Partial | Copy validated integer, aggregate or admitted Vector128/256/512 integer storage through checked references. Requires initialized readable source and writable destination; self-copy is supported, partial overlap is rejected. No reference-bearing or floating-point tokens. |
-| `initobj` | Partial | Zero the validated width of an admitted integer type, same-assembly explicit- or sequential-layout aggregate, or admitted Vector128/256/512 integer value. This initializes previously unknown bytes without touching neighboring storage. No managed-object initialization. |
+| `initobj` | Partial | Zero the validated width of an admitted integer type, same-assembly explicit- or sequential-layout aggregate, or admitted Vector128/256/512 integer value. A checked `ldloca; initobj` pair resets an admitted span local to its empty view. Byte initialization leaves neighboring storage unchanged. No managed-object initialization. |
 | `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). Other static fields are rejected. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data, or a constructor-initialized readonly value under the initialization assumption. Uses identity-keyed immutable storage with checked write denial. See [static span tables](#static-span-tables) and [static readonly values](#static-readonly-values). Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners; validated closed sequential structs also admit direct instance methods and constructors. No arbitrary external calls, class instance methods or general virtual dispatch. |
@@ -206,7 +206,22 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 
 ### Type tests
 
-In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof(B)` compile to `ldtoken A; call Type::GetTypeFromHandle; ldtoken B; call Type::GetTypeFromHandle; call Type::op_Equality` (or `op_Inequality`), with the `System.Runtime` signatures. When both types are closed and their identity is decided, the four operand instructions emit `nop` and the comparison emits `ldc.i4.0` or `ldc.i4.1`, as the JIT folds them. Profile reachability then prunes the dead branch. Types are equal when their metadata is identical, and different when their full names differ; one full name in two scopes, decorated names and `void` stay undecided. Undecided tests, any other instruction between the five, a branch into the last four, other `System.Type` members and `Type` values in locals remain rejected.
+Closed `typeof(A) == typeof(B)` and `!=` tests use two adjacent
+`ldtoken; call Type::GetTypeFromHandle` pairs followed by `Type::op_Equality` or
+`op_Inequality`, with exact `System.Runtime` signatures. The four operands emit `nop`
+and the comparison emits its decided Boolean. `ReferenceEquals(typeof(A), typeof(B))`
+used as a Boolean value ends in operandless `ceq`, which emits the same decided Boolean.
+Its negation uses the ordinary integer comparison of that result with zero. Reference-equality
+branches use the same operands followed by short or long `beq` or `bne.un`; they emit
+an unconditional branch to the original target or a fallthrough `nop`. No instruction
+slots are inserted. Feature and scalar certificates share the selected successor.
+
+Types are equal when their metadata is identical, and different when their full names
+differ; one full name in two scopes, decorated names and `void` stay undecided. Every
+encoded target must be valid, even when unselected. Undecided tests, instructions
+between the five, entry into the last four, other `System.Type` members and `Type`
+values in locals remain rejected. A direct `Object.ReferenceEquals` call is
+outside this subset.
 
 ### Throws
 
@@ -264,6 +279,12 @@ int32 length. Both forms support primitive, enum, aggregate and integer-vector e
 retain the element layout, lifetime and readonly capability without reading or initializing bytes.
 Opaque values and numeric addresses cannot fabricate references.
 
+`Span<T>.Empty` and `ReadOnlySpan<T>.Empty` return a null, zero-length view with the validated
+element width and readonly capability. Explicit `default` initialization or reassignment of a
+span local accepts the exact `ldloca; initobj` pair, including resetting a previously nonempty
+local. The initialized type must match the local, and branches cannot enter at `initobj`.
+These operations allocate no storage and grant no byte-access authority.
+
 Span `IsEmpty` and `GetPinnableReference` inspect a validated view without reading its bytes.
 An empty span's pinnable reference is null; readonly views return readonly references.
 `MemoryMarshal.GetArrayDataReference<T>` supports all admitted array elements: an empty array
@@ -282,6 +303,11 @@ In-place construction of a span local accepts `ldloca`, up to three simple argum
 integer constants, and its exact constructor call. The address cannot escape or be duplicated,
 and control flow cannot enter the sequence after its first instruction. The local may be
 reused or reinitialized; construction faults remain at the call instruction.
+
+Whole-array `Array.Fill<T>(T[], T)` supports primitive integers, Boolean, character and
+integer-backed enums through the same checked span fill. Null arrays throw
+`ArgumentNullException`; empty arrays do not require write authority. Range overloads and
+reference-bearing, aggregate or vector elements are outside this runtime helper's scope.
 
 `Span<T>.Clear` initializes the complete view using one checked range write, including
 aggregate and vector elements. `Fill` repeats a captured primitive, enum, aggregate or integer-vector
@@ -343,10 +369,10 @@ Release configuration is required, but it does not guarantee that a compiler emi
 
 ## Runtime calls and SIMD
 
-Portable Vector128/256 bitwise operators, whole-vector equality (`==` and `EqualsAll<T>`),
+Portable Vector128/256/512 bitwise operators, whole-vector equality (`==` and `EqualsAll<T>`),
 `Zero` and `AllBitsSet` accept `byte`, `int`, `uint`, `long` and `ulong`. Their exact call
 identities and emitted operations are independently checked; these forms do not admit floating
-equality, Vector512 operations or observation of unspecified lanes.
+equality or observation of unspecified lanes.
 
 Reachable same-assembly generic methods are specialized for supported primitive, enum, reference-free aggregate and vector type arguments. This substitutes types in the original CIL parameters, locals, type operands and nested generic calls; it does not replace method bodies with functional summaries. Repeated uses share a specialization, while different type arguments retain separate bodies. Ordinary calls retain an acyclic order; tail transfers may form cycles. Extraction rejects more than 256 distinct specializations.
 
@@ -456,9 +482,11 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 | --- | --- | --- |
 | `System.Numerics.BitOperations` | `RotateLeft` / `RotateRight` on `uint`, `ulong` or `nuint`, with `int` count | Circular rotation, count modulo 32/64, including negative counts |
 | Primitive integer types | Static `RotateLeft` / `RotateRight` on `int`, `uint`, `long`, `ulong`, `nint` or `nuint`, with `int` count | The same 32/64-bit rotation semantics, including signed inputs and negative counts |
+| `System.Byte`, `System.UInt16` | Static `RotateLeft` / `RotateRight`, with `int` count | Input truncates to 8/16 bits; count is modulo the width, including negative counts; result is zero-extended to `i32`. |
 | `System.Numerics.BitOperations` | `PopCount`, `LeadingZeroCount`, `TrailingZeroCount` on `uint`, `ulong` or `nuint` | `int` result; zero has 32/64 leading/trailing zeros |
 | `System.Int32`, `System.UInt32` | Static `PopCount`, `LeadingZeroCount`, `TrailingZeroCount` | Result retains the input's `int`/`uint` type; zero has 32 leading/trailing zeros |
-| `System.Byte`, `System.UInt16` | Static `PopCount`, `Log2` | Input truncates to the declared width; result retains the input type, represented on the CIL stack as `i32`. Narrow leading/trailing-zero counts and signed `Log2` remain unsupported. |
+| `System.Byte`, `System.SByte`, `System.UInt16`, `System.Int16` | Static `PopCount`, `LeadingZeroCount`, `TrailingZeroCount` | Input truncates to the declared width; count results retain the input type and use `i32` stack values. Zero has 8/16 leading/trailing zeros. |
+| `System.Byte`, `System.UInt16` | Static `Log2` | Input truncates to the declared width; result retains the input type, represented on the CIL stack as `i32`. |
 | `System.Numerics.BitOperations` | `IsPow2` on `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | True for positive powers of two; false for zero and signed negative values |
 | Primitive integer types | Static `IsPow2` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | The same signedness-aware power-of-two test, returning `bool`; narrow arguments truncate before interpreting the sign bit. |
 | `System.Numerics.BitOperations` | `Log2` on `uint`, `ulong` or `nuint` | Floor base-two logarithm as `int`; zero input returns zero |
@@ -466,7 +494,8 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 | `System.Numerics.BitOperations` | `RoundUpToPowerOf2` on `uint`, `ulong` or `nuint` | Least power of two at least the input; zero for zero input or overflow |
 | `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Reverse bytes within the value; preserve signed return conventions; byte/sbyte are identity operations |
 
-Primitive signed `Log2` and primitive 64-bit/native count or logarithm results remain unsupported.
+Signed 8/16-bit rotations, primitive signed `Log2` and primitive 64-bit/native count or
+logarithm results remain unsupported.
 
 `System.Math.Min`, `Max` and `Clamp` support signed and unsigned 8-, 16-, 32-, 64-bit and native integers. `Abs` and `Sign` support the signed types; `Sign` returns an `int`. `Abs` of the signed minimum produces an arithmetic overflow fault. `Clamp` with a lower bound greater than its upper bound produces an invalid-bounds fault. These failures terminate checked execution; exception handlers are not modelled.
 

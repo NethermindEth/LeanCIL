@@ -10,7 +10,7 @@ Values are modelled as bit patterns with lane zero in the least-significant bits
 
 | Family | Extractable operations |
 | --- | --- |
-| [Vector128 / Vector256](#vector128-and-vector256) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction, extraction, reductions, arithmetic shifts and bit reinterpretation |
+| [Portable vectors](#portable-vector-operations) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction, extraction, reductions, arithmetic shifts and bit reinterpretation |
 | [SSE](#sse) | `Sse2.ShiftLeftLogical128BitLane`, `Ssse3.AlignRight`; SSE4.1/4.2 getters only |
 | [AVX](#avx) | Selected `MoveMask`, `Blend`, `TestZ` overloads |
 | [AVX2](#avx2) | `Permute4x64`, `Blend`, `Add`, `CompareEqual`, `CompareGreaterThan`, widening even-lane `Multiply`, bitwise operations, logical shifts |
@@ -21,9 +21,9 @@ Values are modelled as bit patterns with lane zero in the least-significant bits
 
 An enabled CPU feature does not imply support for all of its APIs. Float/double vectors are used only for selected bit operations, not floating-point arithmetic. Vector64 is not supported, and Vector512 only through the rows below that name it. See the [profile table](#feature-getters-profiles-and-execution-restrictions) for the exact flags enabled by each built-in profile.
 
-## Vector128 and Vector256
+## Portable vector operations
 
-Every row applies to both widths, with matching input/output widths. These portable vector operations require no ISA flag in the extractor and can be modelled under the `scalar` profile; that is a semantics choice, not a claim about how a JIT implements them.
+Rows apply to the named widths, with matching input/output widths. The bitwise and equality operators accept Vector128, Vector256 and Vector512. These portable vector operations require no ISA flag in the extractor and can be modelled under the `scalar` profile; that is a semantics choice, not a claim about how a JIT implements them.
 
 | API / operation | Accepted element types / overloads | Model |
 | --- | --- | --- |
@@ -32,10 +32,10 @@ Every row applies to both widths, with matching input/output widths. These porta
 | Operator `==` | `T = byte`, `int`, `uint`, `long`, `ulong` | Boolean equality of all bits; `!=` is not mapped |
 | `Vector128.LessThan<ulong>`, `Vector256.LessThan<ulong>` | Two vectors of `ulong` | Unsigned per-lane comparison; each result lane is all ones or zero |
 | `Vector128.Equals<ulong>`, `Vector256.Equals<ulong>` | Two vectors of `ulong` | Per-lane equality masks |
-| `Vector128.EqualsAll<T>`, `Vector256.EqualsAll<T>` | `T = byte`, `int`, `uint`, `long`, `ulong` | One Boolean result |
+| `Vector128.EqualsAll<T>`, `Vector256.EqualsAll<T>`, `Vector512.EqualsAll<T>` | `T = byte`, `int`, `uint`, `long`, `ulong` | One Boolean result |
 | `Vector128.GetElement<ulong>`, `Vector256.GetElement<ulong>` | Vector and `int` index | Return one `ulong`; valid indices are 0–1 / 0–3; other indices fail |
-| `Vector128<T>.Zero`, `Vector256<T>.Zero` | `T = byte`, `int`, `uint`, `long`, `ulong` | All-zero vector |
-| `Vector128<T>.AllBitsSet`, `Vector256<T>.AllBitsSet` | `T = byte`, `int`, `uint`, `long`, `ulong` | All-one vector |
+| `Vector128<T>.Zero`, `Vector256<T>.Zero`, `Vector512<T>.Zero` | `T = byte`, `int`, `uint`, `long`, `ulong` | All-zero vector |
+| `Vector128<T>.AllBitsSet`, `Vector256<T>.AllBitsSet`, `Vector512<T>.AllBitsSet` | `T = byte`, `int`, `uint`, `long`, `ulong` | All-one vector |
 | `Vector128.Create`, `Vector256.Create` | One `ulong`, or respectively two/four `ulong` arguments | Broadcast one value, or construct the individual lanes |
 | `Vector128.CreateScalar`, `Vector256.CreateScalar` | One `ulong` or one `uint` | Put the value in the low lane and zero the remaining bits |
 | `Vector128.CreateScalarUnsafe` (128-bit only) | One `ulong` | Put the value in the low lane; the upper lane is unspecified, and only `GetElement(0)`, `As*` and the AVX2 shift counts may read the result (see [SOUNDNESS](SOUNDNESS-RUNTIME.md#runtime-assumptions)) |
@@ -45,7 +45,7 @@ Every row applies to both widths, with matching input/output widths. These porta
 | `Vector128.Sum<ulong>`, `Vector256.Sum<ulong>` | Vector of `ulong` | Wrapping sum of the 64-bit lanes |
 | `AsByte`, `AsUInt32`, `AsInt64`, `AsDouble`, `AsUInt64`, `AsInt32`, `AsSingle` on `Vector128` / `Vector256` | Source element type is `ulong`, `byte`, `uint`, `long`, `int` or `float`; target is the named type | Preserve the bit pattern. The extractor does not currently accept `double` as a source for these casts |
 
-No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to the rows naming it and to `ldobj`/`stobj`/`initobj` of `V512<ulong>`, and there is no general vector load/store API coverage. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
+No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and to `ldobj`/`stobj`/`initobj` of `V512<ulong>`, and there is no general vector load/store API coverage. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
 
 ## SSE
 

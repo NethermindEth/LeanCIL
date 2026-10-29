@@ -3,8 +3,8 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Folds `typeof(A) == typeof(B)` over closed metadata types, as the JIT does. This mirrors
-// CIL.Extraction.typeTestRoles and sameRuntimeType; Lean rechecks every folded word.
+// Folds closed typeof comparisons, including reference-equality branches. Lean
+// rechecks each decided result and target using the same scoped type identities.
 internal static class TypeTests
 {
     internal sealed record Analysis(Dictionary<Instruction, bool> Results, HashSet<Instruction> Operands, HashSet<Instruction> Interior);
@@ -59,6 +59,9 @@ internal static class TypeTests
         "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)");
 
     static bool? Comparison(Instruction instruction) =>
+        instruction.OpCode.Code == Code.Ceq && instruction.Operand is null ? true :
+        instruction.Operand is Instruction && instruction.OpCode.Code is Code.Beq or Code.Beq_S ? true :
+        instruction.Operand is Instruction && instruction.OpCode.Code is Code.Bne_Un or Code.Bne_Un_S ? false :
         TypeMethod(instruction, "op_Equality", "System.Boolean System.Type::op_Equality(System.Type,System.Type)") ? true :
         TypeMethod(instruction, "op_Inequality", "System.Boolean System.Type::op_Inequality(System.Type,System.Type)") ? false : null;
 

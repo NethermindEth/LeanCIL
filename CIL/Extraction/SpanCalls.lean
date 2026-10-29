@@ -17,22 +17,26 @@ def spanMemoryScope : String :=
 
 /-- The observable choice made by a supported span call. -/
 inductive SpanCall where
+  | empty (width : Nat) (writable : Bool)
   | reinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   | copy (width : Nat) (tryCopy : Bool)
   | reference (width : Nat) (writable : Bool)
   | singleReference (width : Nat) (writable : Bool)
   | fill (width : Nat) (clear : Bool)
+  | arrayFill (element : ArrayElement)
   | item (width : Nat) | length | slice (counted : Bool) | readOnly
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   deriving DecidableEq, Repr
 
 /-- A span operation's exact semantic parameters, independent of other memory operations. -/
 private def emittedSpanCall : Op → Option SpanCall
+  | .memory (.spanEmpty width writable) => some (.empty width writable)
   | .memory (.spanReinterpret source target writable) => some (.reinterpret source target writable)
   | .memory (.spanCopy width tryCopy) => some (.copy width tryCopy)
   | .memory (.spanFromReference width writable) => some (.reference width writable)
   | .memory (.spanSingleReference width writable) => some (.singleReference width writable)
   | .memory (.spanFill width clear) => some (.fill width clear)
+  | .memory (.arrayFill element) => some (.arrayFill element)
   | .memory (.spanItem width) => some (.item width)
   | .memory .spanLength => some .length
   | .memory (.spanSlice counted) => some (.slice counted)
@@ -129,6 +133,9 @@ private def spanMemberCall (opcode : Nat) (site : CallSite)
         site.target == target "System.ReadOnlySpan`1<!0>" "System.Span`1<!0>" then
       some .readOnly
     else none
+  else if !site.hasThis && site.name == "get_Empty" && site.parameterTypes.isEmpty &&
+      site.returnType == site.declaringType &&
+      site.target == target (owner ++ "<!0>") "" then some (.empty width writable)
   else if !site.hasThis then none
   else if site.name == "get_Length" && site.returnType == intType &&
       site.parameterTypes.isEmpty && site.target == target "System.Int32" "" then
@@ -168,12 +175,27 @@ def spanLocalConstructor (site : CallSite) (aggregateWidth : Nat := 0) : Option 
 /-- Aggregate constructor widths are bound separately by mandatory layout-use evidence.
     Only aggregate metadata yields the zero-width placeholder in a folded descriptor. -/
 def spanConstructorMatches : SpanConstructor → SpanConstructor → Bool
+  | .empty expected writable, .empty actual capability
   | .reference expected writable, .reference actual capability
   | .singleReference expected writable, .singleReference actual capability =>
     (expected == 0 || expected == actual) && writable == capability
   | .array expected writable range, .array actual capability actualRange =>
     expected.metadata == actual.metadata && writable == capability && range == actualRange
   | expected, actual => expected == actual
+
+/-- Whole-array fill binds the exact primitive or enum element and rejects range overloads. -/
+private def arrayFillCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
+  if opcode != 40 || site.hasThis || site.returnsValue || site.returnType != .void ||
+      site.name != "Fill" || site.declaringType != .atom runtimeScope "System.Array" ||
+      site.parameterCount != 2 || site.ownerArgumentCount != 0 then none else pure ()
+  let [elementType] := site.typeArguments | none
+  let element ← arrayElementType elementType
+  match element with
+  | .aggregate .. | .vector .. => none
+  | _ =>
+    if site.parameterTypes != [.array elementType, elementType] then none else pure ()
+    if site.target != .external (runtimeScope ++ "::System.Void System.Array::Fill(!!0[],!!0)")
+      then none else some (.arrayFill element)
 
 /-- The array overloads of AsSpan accept an array and zero, one or two int32 arguments. -/
 private def arrayExtensionCall (opcode : Nat) (site : CallSite)
@@ -247,14 +269,16 @@ def spanCallMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
     let (sourceWidth, targetWidth) := match emittedSpanCall emitted with
       | some (.reinterpret source target _) => (source, target)
       | some (.copy width _) | some (.fill width _) | some (.item width)
-      | some (.reference width _) | some (.singleReference width _) => (width, width)
+      | some (.reference width _) | some (.singleReference width _)
+      | some (.empty width _) => (width, width)
       | some (.array element _ _) => (element.width, element.width)
       | _ => (0, 0)
     let expected := match instruction.operand with
-      | .call site => (spanMemberCall instruction.opcode site sourceWidth).orElse
+      | .call site => (arrayFillCall instruction.opcode site).orElse (fun _ =>
+          (spanMemberCall instruction.opcode site sourceWidth).orElse
           (fun _ => (arrayExtensionCall instruction.opcode site sourceWidth).orElse
             (fun _ => (referenceFactory instruction.opcode site sourceWidth).orElse
-              (fun _ => reinterpretCall instruction.opcode site sourceWidth targetWidth)))
+              (fun _ => reinterpretCall instruction.opcode site sourceWidth targetWidth))))
       | _ => none
     expected == emittedSpanCall emitted
 

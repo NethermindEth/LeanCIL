@@ -344,11 +344,20 @@ private def featureTransferAtWith (layouts : Array RawLayout) (raw : RawMethod)
 def featureTransferAt (layouts : Array RawLayout) (raw : RawMethod) :=
   featureTransferAtWith layouts raw (featureLocalEligible raw)
 
-/-- Known int32 conditions select an edge; unknowns retain every possible successor. -/
-def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : FeatureState) :
+/-- The taken target or the next instruction for a decided conditional branch. -/
+private def selectedSuccessor (pc target : Nat) (taken : Bool) : List Nat :=
+  [if taken then target else pc + 1]
+
+/-- Known integer conditions and closed type tests select an edge; unknowns retain both. -/
+def featureSuccessors (role : Option FoldRole) (pc : Nat)
+    (instruction : RawInstruction) (state : FeatureState) :
     Option (List Nat) :=
+  if let some (.typeBranch taken) := role then
+    match instruction.operand with
+    | .target target => some (selectedSuccessor pc target taken)
+    | _ => none
   -- `ret`, `throw`, `rethrow`, `endfinally` and `endfilter` leave the method or handler.
-  if instruction.opcode == 42 || instruction.opcode == 122 || instruction.opcode == 65050 ||
+  else if instruction.opcode == 42 || instruction.opcode == 122 || instruction.opcode == 65050 ||
       instruction.opcode == 220 || instruction.opcode == 65041 then some []
   -- `br`, then `switch`.
   else if instruction.opcode == 43 || instruction.opcode == 56 then
@@ -366,13 +375,13 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
     if instruction.opcode ∈ [44, 45, 57, 58] then
       match state.stack with
       | some value :: _ =>
-        return [if (value != 0) == (instruction.opcode == 45 || instruction.opcode == 58) then
-          target else pc + 1]
+        return selectedSuccessor pc target
+          ((value != 0) == (instruction.opcode == 45 || instruction.opcode == 58))
       | _ => return [target, pc + 1]
     else match state.stack with
       | some right :: some left :: _ =>
         match constantComparison instruction.opcode left right with
-        | some value => return [if value != 0 then target else pc + 1]
+        | some value => return selectedSuccessor pc target (value != 0)
         | none => return [target, pc + 1]
       | _ => return [target, pc + 1]
   else some [pc + 1]
@@ -498,7 +507,14 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
 def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod) :=
   featureOpMatchesWith layouts raw (featureLocalEligible raw)
 
-/-- Fold operands emit nothing, a type comparison emits its decided word and a folded
+/-- A decided typeof branch preserves its raw target or falls through without a stack effect. -/
+def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : Op) : Bool :=
+  match instruction.operand, emitted with
+  | .target target, .branch actual => taken && actual == target
+  | .target _, .nop => !taken
+  | _, _ => false
+
+/-- Fold operands emit nothing, a type comparison emits its decided word or branch and a folded
     `throw` raises its constructed type. Outside a decided test, type handles and
     `System.Type` calls have no admitted translation. -/
 private def featureOpMatchesAtWith (layouts : Array RawLayout) (raw : RawMethod)
@@ -508,6 +524,7 @@ private def featureOpMatchesAtWith (layouts : Array RawLayout) (raw : RawMethod)
   match role, emitted with
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .const32 word => word == if value then 1 else 0
+  | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
   | some (.raise name), .throw exception => name == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
     index == actual && spanConstructorMatches constructor operation
@@ -542,7 +559,7 @@ private def checkFeatureSiteWith (layouts : Array RawLayout) (raw : RawMethod)
     wellShaped raw eligible state &&
       featureOpMatchesAtWith layouts raw eligible role instruction emitted &&
       match featureTransferAtWith layouts raw eligible profile role instruction state,
-          featureSuccessors pc instruction state with
+          featureSuccessors role pc instruction state with
       | some after, some successors =>
         -- Even an unselected encoded target must be a valid entry, not a fold's interior.
         let validTarget := fun target =>
@@ -656,7 +673,7 @@ def FeatureEdge (layouts : Array RawLayout) (raw : RawMethod) (profile : Feature
     (raw.code.zip (foldRoles raw.locals raw.code))[pc]? = some (instruction, role) ∧
     certificate[pc]? = some (some state) ∧
     featureTransferAt layouts raw profile role instruction state = some after ∧
-    featureSuccessors pc instruction state = some successors ∧ target ∈ successors
+    featureSuccessors role pc instruction state = some successors ∧ target ∈ successors
 
 /-- Validation establishes closure under every independently recomputed edge,
     including backedges and every possible switch destination. -/

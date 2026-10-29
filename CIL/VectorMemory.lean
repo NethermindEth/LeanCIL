@@ -152,6 +152,8 @@ inductive MemoryOp where
   /-- Snapshot copying permits overlapping spans; try-copy returns false for a short target. -/
   | spanCopy (width : Nat) (tryCopy : Bool)
   | spanFill (width : Nat) (clear : Bool)
+  /-- Fill an exact typed array through its checked writable view, rejecting null arrays. -/
+  | arrayFill (element : ArrayElement)
   | bigMul64
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | load512 | store128 | store256 | store512 | init256
@@ -172,6 +174,7 @@ inductive MemoryOp where
   /-- A span of `width`-byte elements over a whole static field; indexing is bounds checked. -/
   | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
   /-- Primitive spans over supplied storage; these operations never grant memory authority. -/
+  | spanEmpty (width : Nat) (writable : Bool)
   | spanFromReference (width : Nat) (writable : Bool)
   | spanSingleReference (width : Nat) (writable : Bool)
   | spanSlice (explicitLength : Bool) | spanReadOnly
@@ -194,6 +197,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .binaryWrite .. => 2
   | .spanCopy .. => 2
   | .spanFill _ clear => if clear then 1 else 2
+  | .arrayFill _ => 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1
   | .marshalWrite .. => 2
   | .pointerTransfer _ _ store => if store then 2 else 1
@@ -207,7 +211,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .arrayTransfer _ store => if store then 3 else 2
   | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
-  | .staticAddress _ | .staticValue _ | .nullRef => 0
+  | .staticAddress _ | .staticValue _ | .nullRef | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
   | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef => 1
 
