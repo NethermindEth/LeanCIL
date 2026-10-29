@@ -23,10 +23,6 @@ A concrete-input theorem is not a universal method contract.
 
 ## What verification establishes
 
-The [runtime-call catalog and compiler corpus](COMPILER-COVERAGE.md) make changes to the
-admitted API surface and compiler-sensitive patterns visible. Their finite probe domain does
-not establish correspondence with the CLR.
-
 The normal verifier regenerates and checks extraction identity, compiles the proof, replays it
 through the kernel, and audits the theorem's dependencies. Unexpected axioms, missing evidence,
 failed builds and exhausted proof resources are failures. Hash equality establishes identity,
@@ -37,12 +33,15 @@ alignment. Its successful executions satisfy the proved preservation properties.
 exceptions are distinct from unsupported instructions, invalid states and fuel exhaustion.
 An expected-exception proof cannot use these model failures as its witness.
 
-
 Extraction reads compiled CIL; it does not prove that the source compiler preserves a source-level
 specification. JIT correctness, hardware correctness, concurrent interference, GC internals and
 arbitrary runtime versions remain outside the guarantee.
 
 ## Detailed evidence
+
+The [runtime-call catalog and compiler corpus](COMPILER-COVERAGE.md) make changes to the
+admitted API surface and compiler-sensitive patterns visible. Their finite probe domain does
+not establish correspondence with the CLR.
 
 - [Execution and preservation](SOUNDNESS-EXECUTION.md): frames, allocation, embeddings and composition.
 - [Runtime and storage](SOUNDNESS-RUNTIME.md): external models, layout and deployment assumptions.

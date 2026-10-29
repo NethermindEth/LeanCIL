@@ -16,7 +16,7 @@ Exact overload references (.NET 10):
    https://learn.microsoft.com/dotnet/api/system.runtime.interopservices.memorymarshal.getreference?view=net-10.0
    https://learn.microsoft.com/dotnet/api/system.readonlyspan-1.-ctor?view=net-10.0
    Unsafe.Add scales by element size. BitCast preserves storage bits.
-   The pure interpreter models static byte spans. Checked array-backed and
+   The shared value evaluator models static byte spans. Checked array-backed and
    reference-backed primitive spans use the memory rules in CIL.Safety.
    Static bytes come from the extracted RVA field.
 -/
