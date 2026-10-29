@@ -59,6 +59,12 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         values = values.Concat(Enumerable.Range(0, 64).SelectMany(i =>
             new[] { (1UL << i) - 1, 1UL << i, unchecked((1UL << i) + 1) })).Distinct().ToArray();
     var counts = rotations ? new[] { int.MinValue, -65, -33, -1, 0, 1, 31, 32, 33, 63, 64, 65, int.MaxValue } : new[] { 0 };
+    // Primitive aliases share the rotation model covered by the full BitOperations matrix.
+    if (method.Name.StartsWith("Primitive", StringComparison.Ordinal))
+    {
+        values = [0, 0x8000000180000001, ulong.MaxValue];
+        counts = [-1, 0, 65];
+    }
     var claims = new List<string>();
     // Different source bit patterns can become the same narrow runtime argument.
     var arguments = values.Select(bits => Value(parameters[0].ParameterType, bits)).Distinct();
@@ -72,7 +78,8 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
+        " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) +
+        "⟩\n#print axioms correctness\nend ExampleProof\n");
     var selector = $"Bits::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     var comparisons = claims.Count;
     queue.Add(new(selector, proof, output), () =>
@@ -124,7 +131,7 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
         var method = module.GetType("Examples.Bits").Methods.Single(m => m.Name ==
-            (mutation.StartsWith("memory-", StringComparison.Ordinal) ? "ReverseU64" : "Left64"));
+            (mutation.StartsWith("memory-", StringComparison.Ordinal) ? "ReverseU64" : "PrimitiveLeftU64"));
         var call = (MethodReference)method.Body.Instructions.Single(i => i.OpCode.Code == Mono.Cecil.Cil.Code.Call).Operand;
         switch (mutation)
         {
@@ -150,7 +157,8 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
         };
         module.Write(dll);
     }
-    var selector = mutation.StartsWith("memory-", StringComparison.Ordinal) ? "Bits::ReverseU64(ulong)" : "Bits::Left64(ulong,int)";
+    var selector = mutation.StartsWith("memory-", StringComparison.Ordinal)
+        ? "Bits::ReverseU64(ulong)" : "Bits::PrimitiveLeftU64(ulong,int)";
     var rejected = Execute(Extract("extract", dll, "Examples", selector, output));
     if (rejected.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) || File.Exists(Path.Combine(output, "verified.json")) ||
         !rejected.Output.Contains(expectedDiagnostic, StringComparison.Ordinal))

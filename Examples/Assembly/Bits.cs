@@ -5,6 +5,18 @@ namespace Examples;
 
 public static class Bits
 {
+    public static int PrimitiveLeft32(int value, int count) => int.RotateLeft(value, count);
+    public static int PrimitiveRight32(int value, int count) => int.RotateRight(value, count);
+    public static uint PrimitiveLeftU32(uint value, int count) => uint.RotateLeft(value, count);
+    public static uint PrimitiveRightU32(uint value, int count) => uint.RotateRight(value, count);
+    public static long PrimitiveLeft64(long value, int count) => long.RotateLeft(value, count);
+    public static long PrimitiveRight64(long value, int count) => long.RotateRight(value, count);
+    public static ulong PrimitiveLeftU64(ulong value, int count) => ulong.RotateLeft(value, count);
+    public static ulong PrimitiveRightU64(ulong value, int count) => ulong.RotateRight(value, count);
+    public static nint PrimitiveLeftNative(nint value, int count) => nint.RotateLeft(value, count);
+    public static nint PrimitiveRightNative(nint value, int count) => nint.RotateRight(value, count);
+    public static nuint PrimitiveLeftUNative(nuint value, int count) => nuint.RotateLeft(value, count);
+    public static nuint PrimitiveRightUNative(nuint value, int count) => nuint.RotateRight(value, count);
     public static nuint LeftNative(nuint value, int count) => BitOperations.RotateLeft(value, count);
     public static nuint RightNative(nuint value, int count) => BitOperations.RotateRight(value, count);
     public static int PopulationNative(nuint value) => BitOperations.PopCount(value);

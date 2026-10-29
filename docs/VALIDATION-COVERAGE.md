@@ -525,8 +525,10 @@ extraction. Ten semantic tests cover initialization, permissions, lifetime, GC-s
 bounds, null references and partial overlap. The generic copy snapshot theorem and the full Lean
 library/semantic/automation build passed.
 
-Portable helper validation: 7,200 comparisons with actual .NET results passed, covering power-of-two
-boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation counts.
+Portable helper validation compares actual .NET results with extracted execution, covering
+power-of-two boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation
+counts. Primitive 32-bit, 64-bit and native rotation aliases use compact boundary samples;
+the full BitOperations matrix covers their shared scalar operation.
 Universal 64-bit rotation round-trip and integer-logarithm proofs passed with only approved Lean
 axioms; incorrect implementations failed the unchanged contracts. Nine malformed/unsupported runtime
 calls were rejected before extraction. Semantic tests reject incorrect arity, widths and operand
@@ -603,4 +605,3 @@ startup and shared-machine activity. These timings are illustrative, not a perfo
 
 The initialized-types end-to-end test and four mandatory-certificate audit cases check that
 verification reports record both the schema-3 extraction audit and initialized-type assumptions.
-

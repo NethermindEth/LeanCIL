@@ -234,6 +234,10 @@ internal static class RuntimeModels
             operations.Add($"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})",
                 $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1");
         }
+        foreach (var (type, width, _) in MathIntegers.Where(integer => integer.Width is 32 or 64))
+        foreach (var (name, operation) in Rotations)
+            operations.Add($"{type} {type}::{name}({type},System.Int32)",
+                $".intrinsic (.scalar (.{operation} {width})) 2");
         foreach (var (type, width, signed) in Pow2Integers)
             operations.Add($"System.Boolean System.Numerics.BitOperations::IsPow2({type})",
                 $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");

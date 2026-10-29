@@ -178,6 +178,8 @@ are excluded; equal byte widths do not authorize replacing one enum identity wit
 
 Rotations use modulo-width counts; counts/reversal and log2 follow the scalar bit-vector model.
 Log2(0) is zero. Round-up returns zero for zero/overflow; signed power-of-two tests exclude the sign
-bit. Native overloads assume 64 bits. Correspondence to the selected .NET BitOperations and
-BinaryPrimitives overloads remains a runtime assumption backed by exact signature checks and
-boundary/runtime comparisons. See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).
+bit. Native overloads assume 64 bits. Primitive signed and unsigned 32-bit, 64-bit and native
+`RotateLeft`/`RotateRight` overloads share the same bit-vector rotation model. Correspondence to
+these primitive methods and the selected .NET BitOperations and BinaryPrimitives overloads remains
+a runtime assumption backed by exact signature checks and boundary/runtime comparisons.
+See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).
