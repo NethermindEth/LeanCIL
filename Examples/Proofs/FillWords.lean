@@ -5,6 +5,7 @@ import CIL.Safety.NumericLocals
 import CIL.Safety.LoopAutomation
 import CIL.Safety.ReturnMemory
 import CIL.Safety.BufferContents
+import CIL.Safety.MemorySteps
 
 open CIL.Safety
 open CIL (W32 W64)
@@ -128,8 +129,7 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
     have addStep (body : CIL.Method) (pc : Nat) (args : List Value) (f : Frame) :
         step body (.memory (.add 8 true)) pc args f [.scalar (.i32 k), .reference (.address base)] m =
           .ok (.next (pc + 1) [.reference (.address (base.element 8 k.toNat))] f m) := by
-      simp only [step, cil_guard, Bool.false_or, Bool.false_eq_true, ite_false,
-        staticInstruction, memoryInstruction, otherMemoryInstruction, CIL.offsetValue, referenceAt, addressed, checkedAt,
+      simp only [step_memory_add_signed_i32_eq, referenceAt, addressed, checkedAt,
         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
     have storeStep (body : CIL.Method) (pc : Nat) (args : List Value) (f : Frame) :
         step body .store64 pc args f [.scalar (.i64 v), .reference (.address (base.element 8 k.toNat))] m =
