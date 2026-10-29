@@ -84,6 +84,7 @@ theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
   all_goals
     repeat' first
       | rfl
+      | exact True.intro
       | solve | cases ‹Opaque128Value› <;> rfl
       | solve | exact loadSnapshot_numeric (by assumption)
       | solve | apply formValue_result_valid; assumption
@@ -100,6 +101,7 @@ theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value
   | opaque128 _ => cases h
   | span _ _ _ => cases h
   | array _ _ => cases h
+  | methodPointer _ _ | methodTable _ _ => cases h
   | bytes kind r => exact formValue_result_valid m (.address r) value h
 
 theorem ValuesValid.drop {m : Memory} {values : List Value}
@@ -212,6 +214,30 @@ theorem StepContract.initializeSpanLocal {body : CIL.Method} {frame : Frame}
 
 #print axioms StepContract.initializeSpanLocal
 
+/-- Managed identities change no memory; dispatched arguments are checked before use. -/
+theorem managedStep_contract (body : CIL.Method) (operation : CIL.ManagedOp) (pc : Nat)
+    (frame : Frame) (stack : List Value) (memory : Memory) (action : FrameAction)
+    (executed : managedStep operation pc frame stack memory = .ok action) :
+    StepContract body frame stack memory action := by
+  unfold managedStep at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve |
+      cases executed
+      refine ⟨.memory (.ordinary (.unchanged _)), ?_⟩
+      intro formed retained
+      repeat' first
+        | exact retained
+        | exact retained.tail
+        | exact retained.tail.tail
+        | exact retained.tail.drop _
+        | exact (checkedValues_valid _ _ _ (by assumption)).2
+        | (apply ValuesValid.cons; first | trivial | exact retained | exact retained.tail.tail)
+        | constructor
+    | cases executed
+    | split at executed
+#print axioms managedStep_contract
+
 /-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
     so it is the place that breaks when an instruction is added without an effect. -/
 theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
@@ -221,6 +247,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
   unfold step at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
+    | solve | apply managedStep_contract; assumption
     | solve |
         apply StepContract.initializeSpanLocal
         all_goals assumption
