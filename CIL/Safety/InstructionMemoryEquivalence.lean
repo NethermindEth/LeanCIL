@@ -180,7 +180,6 @@ theorem Memory.Equivalent.binaryTransferInstruction {m n : Memory} (same : m.Equ
     | split
 #print axioms Memory.Equivalent.binaryTransferInstruction
 
-<<<<<<< HEAD
 /-- A single-reference view depends only on equivalent allocation metadata. -/
 theorem Memory.Equivalent.singleSpanInstruction {m n : Memory} (same : m.Equivalent n)
     (width : Nat) (writable : Bool) (stack : List Value) :
@@ -194,7 +193,7 @@ theorem Memory.Equivalent.singleSpanInstruction {m n : Memory} (same : m.Equival
     | (apply ResultEquivalent.bind_same; intro)
     | split
 #print axioms Memory.Equivalent.singleSpanInstruction
-=======
+
 /-- Typed array transfers observe identical bytes and preserve equivalent checked writes. -/
 theorem Memory.Equivalent.arrayTransferInstruction {m n : Memory} (same : m.Equivalent n)
     (element : CIL.ArrayElement) (store : Bool) (stack : List Value) :
@@ -211,7 +210,6 @@ theorem Memory.Equivalent.arrayTransferInstruction {m n : Memory} (same : m.Equi
        exact .ok ⟨related, rfl⟩)
     | split
 #print axioms Memory.Equivalent.arrayTransferInstruction
->>>>>>> a7aeb1bd (feat(arrays): support supplied aggregate and integer-vector elements)
 
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)

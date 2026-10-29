@@ -572,7 +572,6 @@ theorem binaryTransferInstruction_contract (width : Nat) (signed bigEndian read 
     | split at transferred
 #print axioms binaryTransferInstruction_contract
 
-<<<<<<< HEAD
 /-- Single-reference construction preserves memory and validates the resulting view. -/
 theorem singleSpanInstruction_contract (width : Nat) (writable : Bool)
     (stack values : List Value) (memory result : Memory)
@@ -585,7 +584,7 @@ theorem singleSpanInstruction_contract (width : Nat) (writable : Bool)
     | cases constructed
     | split at constructed
 #print axioms singleSpanInstruction_contract
-=======
+
 /-- Typed array transfers preserve checked effects and the validity of remaining stack values. -/
 theorem arrayTransferInstruction_contract (element : CIL.ArrayElement) (store : Bool)
     (stack values : List Value) (memory result : Memory)
@@ -598,7 +597,6 @@ theorem arrayTransferInstruction_contract (element : CIL.ArrayElement) (store : 
     | cases transferred
     | split at transferred
 #print axioms arrayTransferInstruction_contract
->>>>>>> a7aeb1bd (feat(arrays): support supplied aggregate and integer-vector elements)
 
 /-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)

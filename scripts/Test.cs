@@ -164,7 +164,8 @@ if (suite is "all" or "generics") projects.Add("Tests/GenericOwners.cs");
 if (suite is "all" or "unsafe")
     projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs", "Tests/UnalignedMemory.cs",
         "Tests/MarshaledMemory.cs", "Tests/ReinterpretedSpans.cs", "Tests/SpanCopies.cs", "Tests/ViewAccessors.cs",
-        "Tests/BinarySpans.cs", "Tests/AggregateSpans.cs", "Tests/SpanConstructors.cs", "Tests/AggregateSpanFill.cs"]);
+        "Tests/BinarySpans.cs", "Tests/AggregateSpans.cs", "Tests/SpanConstructors.cs",
+        "Tests/AggregateSpanFill.cs", "Tests/AggregateArrays.cs"]);
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);
