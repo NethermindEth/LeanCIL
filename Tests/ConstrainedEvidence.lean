@@ -182,4 +182,45 @@ theorem indexed_method_ambiguity :
       { implementation with token := 22, overrides := [5] }] }, declared]).resolve
       receiver site = none := by decide +kernel
 #print axioms indexed_method_ambiguity
+private def genericOwner : TypeExpr := .constructor "Fixture" "Counter`1"
+private def genericReceiver : TypeExpr :=
+  .aggregate ("Fixture::Counter`1<" ++ runtimeScope ++ "::System.Int32>") 0
+private def genericImplementation : DispatchMethod := {
+  implementation with owner := genericOwner, ownerArguments := [integer] }
+private def genericTypes : List DispatchType := [
+  { concrete with identity := genericReceiver, methods := [genericImplementation] }, declared]
+private def genericRaw : RawMethod := { raw with
+  parameters := [.byref genericReceiver],
+  code := raw.code.set 1 ⟨1, 65046, .type genericReceiver⟩ }
+private def genericTarget : SpecializedMethod := ⟨[integer], {
+  target.closed with owner := "Fixture::Counter`1", ownerArgumentCount := 1 }⟩
+
+/-- Closed owner specialization composes with the existing exact constrained-call rule. -/
+theorem generic_call_valid :
+    ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩, genericTarget]
+      genericRaw [true, true, true, true] emitted := by decide +kernel
+#print axioms generic_call_valid
+
+/-- A different specialization of the same method token cannot satisfy the receiver. -/
+theorem changed_owner_arguments_rejected :
+    ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩,
+      { genericTarget with arguments := [.atom runtimeScope "System.Int64"] }]
+      genericRaw [true, true, true, true] emitted := by decide +kernel
+#print axioms changed_owner_arguments_rejected
+
+/-- The owner arity cannot be dropped while retaining a selected generic method body. -/
+theorem changed_owner_arity_rejected :
+    ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩,
+      { genericTarget with closed := { genericTarget.closed with ownerArgumentCount := 0 } }]
+      genericRaw [true, true, true, true] emitted := by decide +kernel
+#print axioms changed_owner_arity_rejected
+
+/-- Dispatch metadata cannot substitute a same-named owner from another assembly. -/
+theorem changed_owner_scope_rejected :
+    resolveConstrained [
+      { concrete with identity := genericReceiver, methods := [
+        { genericImplementation with owner := .constructor "Other" "Counter`1" }] }, declared]
+      genericReceiver site = none := by decide +kernel
+#print axioms changed_owner_scope_rejected
+
 end Tests.ConstrainedEvidence
