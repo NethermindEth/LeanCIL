@@ -111,6 +111,11 @@ internal sealed class FeatureConstants
                     Code.Ceq => a == b ? 1 : 0, _ => null
                 } : null);
                 return;
+            case Code.Calli:
+                var indirect = (Mono.Cecil.CallSite)instruction.Operand;
+                for (var index = 0; index < indirect.Parameters.Count + 1; index++) Pop();
+                if (indirect.ReturnType.MetadataType != MetadataType.Void) _stack.Add(null);
+                return;
             case Code.Call: case Code.Callvirt: case Code.Newobj:
                 MethodReference callee = (MethodReference)instruction.Operand;
                 for (int i = 0; i < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); i++) Pop();

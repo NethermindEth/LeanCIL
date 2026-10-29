@@ -20,6 +20,18 @@ namespace CIL.Extraction
 def intrinsicsScope : String :=
   "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
+/-- Byte width of an admitted integer vector, bound to both exact runtime type identities. -/
+def integerVectorWidth : TypeExpr → Option Nat
+  | .apply (.constructor scope name) (.atom elementScope element) =>
+    if scope != intrinsicsScope || elementScope != runtimeScope ||
+        element ∉ ["System.Byte", "System.Int32", "System.UInt32", "System.Int64",
+          "System.UInt64"] then none
+    else if name == "System.Runtime.Intrinsics.Vector128`1" then some 16
+    else if name == "System.Runtime.Intrinsics.Vector256`1" then some 32
+    else if name == "System.Runtime.Intrinsics.Vector512`1" then some 64
+    else none
+  | _ => none
+
 /-- The field type of a primitive runtime type, by full name. -/
 private def primitiveField : String → Option FieldType
   | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
@@ -36,25 +48,17 @@ private def enumField : FieldType → Bool
   | .signed64 | .unsigned64 => true
   | _ => false
 
-/-- Exact primitive span metadata, including element width and write capability. -/
-def spanStorage : TypeExpr → Option StorageType
-  | .apply (.constructor scope name) (.atom elementScope element) => do
-    if scope != runtimeScope || elementScope != runtimeScope ||
-        name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
-    let width ← match element with
-      | "System.Byte" | "System.SByte" => some 1
-      | "System.Int16" | "System.UInt16" => some 2
-      | "System.Int32" | "System.UInt32" => some 4
-      | "System.Int64" | "System.UInt64" => some 8
-      | _ => none
-    return .span width (name == "System.Span`1")
-  | _ => none
-
-/-- Whether a local is a supported primitive span. -/
-def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
-
 /-- Primitive array element identity is derived from the exact runtime metadata scope. -/
 def arrayElementType : TypeExpr → Option ArrayElement
+  | .enum identity (.atom scope name) => do
+    if scope != runtimeScope then none else pure ()
+    let storage ← match name with
+      | "System.SByte" => some EnumStorage.signed8 | "System.Byte" => some .unsigned8
+      | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
+      | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
+      | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
+      | _ => none
+    return .enumeration identity storage
   | .atom scope name =>
     if scope != runtimeScope then none else match name with
       | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
@@ -65,6 +69,43 @@ def arrayElementType : TypeExpr → Option ArrayElement
       | "System.Boolean" => some .boolean | "System.Char" => some .character
       | _ => none
   | _ => none
+/-- Exact primitive span metadata, including element width and write capability. -/
+def spanStorage : TypeExpr → Option StorageType
+  | .apply (.constructor scope name) elementType => do
+    if scope != runtimeScope ||
+        name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
+    let element ← arrayElementType elementType
+    return .span element.width (name == "System.Span`1")
+  | _ => none
+
+/-- Whether a local is a supported primitive span. -/
+def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
+
+/-- Function-pointer parameters are primitive integers, enums or their managed references. -/
+def managedParameter : TypeExpr → Bool
+  | .atom scope name => scope == runtimeScope && (primitiveField name).isSome
+  | .enum _ (.atom scope name) => scope == runtimeScope &&
+      ((primitiveField name).map enumField).getD false
+  | .byref element => match element with
+      | .atom .. | .enum .. => managedParameter element
+      | _ => false
+  | _ => false
+
+/-- Decode the ordered parameter chain without accepting another metadata constructor. -/
+def managedParameters : TypeExpr → Option (List TypeExpr)
+  | .void => some []
+  | .signatureParameter head tail => do
+    if !managedParameter head then none else pure ()
+    return head :: (← managedParameters tail)
+  | _ => none
+
+/-- Only the exact static managed convention gives callable provenance. -/
+def managedSignature : TypeExpr → Option ManagedSignature
+  | .functionPointer result parameters 0 false false => do
+    if result != .void && !managedParameter result then none else pure ()
+    return ⟨result, ← managedParameters parameters⟩
+  | _ => none
+
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
@@ -75,13 +116,17 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
-  | .array element => StorageType.array <$> arrayElementType element
+  | .array element => match managedSignature element with
+    | some signature => some (.methodTable signature)
+    | none => StorageType.array <$> arrayElementType element
+  | type@(.functionPointer ..) => StorageType.methodPointer <$> managedSignature type
   | .pointer (.atom scope name) =>
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
         "System.IntPtr", "System.UIntPtr"] then some .reference else none
-  | type@(.apply (.constructor scope name) (.atom elementScope element)) =>
-    if let some storage := spanStorage type then some storage else
+  | type@(.apply (.constructor scope name) elementType) => do
+    if let some storage := spanStorage type then return storage
+    let .atom elementScope element := elementType | none
     if scope != intrinsicsScope || elementScope != runtimeScope ||
         element ∉ ["System.UInt64", "System.Int64", "System.UInt32", "System.Int32",
           "System.Byte", "System.Double", "System.Single"] then none
@@ -96,6 +141,11 @@ def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
   | .byref element => TypeExpr.byref <$> substituteType arguments element
   | .pointer element => TypeExpr.pointer <$> substituteType arguments element
   | .array element => TypeExpr.array <$> substituteType arguments element
+  | .functionPointer result parameters convention hasThis explicitThis => do
+    return .functionPointer (← substituteType arguments result)
+      (← substituteType arguments parameters) convention hasThis explicitThis
+  | .signatureParameter head tail => do
+    return .signatureParameter (← substituteType arguments head) (← substituteType arguments tail)
   | .enum identity underlying => TypeExpr.enum identity <$> substituteType arguments underlying
   | .apply constructor argument => do
     return .apply (← substituteType arguments constructor) (← substituteType arguments argument)
@@ -134,6 +184,8 @@ inductive RawOperand where
   | type (value : TypeExpr)
   | field (owner : TypeExpr) (index : Nat) (type : TypeExpr) (isStatic : Bool)
   | call (site : CallSite)
+  | indirectCall (returnType : TypeExpr) (parameters : List TypeExpr)
+      (hasThis explicitThis : Bool) (callingConvention : Nat)
   deriving DecidableEq, Repr
 
 /-- One CIL instruction: its byte offset, opcode and operand. Branch operands are
@@ -180,6 +232,9 @@ def substituteOperand (arguments : List TypeExpr) : RawOperand → Option RawOpe
       typeArguments := ← site.typeArguments.mapM (substituteType arguments),
       returnType := ← substituteType arguments site.returnType,
       parameterTypes := ← site.parameterTypes.mapM (substituteType arguments) }
+  | .indirectCall returnType parameters hasThis explicitThis convention => do
+    return .indirectCall (← substituteType arguments returnType)
+      (← parameters.mapM (substituteType arguments)) hasThis explicitThis convention
   | operand => some operand
 
 /-- The exact runtime identity of the value-type constraint. -/
@@ -314,7 +369,8 @@ structure SpecializedMethod where
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
     opcode: `call` (40) for `.call`, `newobj` (115) for a construction. -/
 private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
-  | .call target count => if opcode = 40 then some (target, count) else none
+  | .call target count | .tailCall target count =>
+    if opcode = 40 then some (target, count) else none
   | .newAggregate target count _ | .newVector256 target count =>
     if opcode = 115 then some (target, count) else none
   | _ => none
@@ -343,12 +399,55 @@ def validateImportCallWith (methodCount : Nat) (imports : Nat → Option ImportS
     count == site.parameterCount + (if site.hasThis then 1 else 0) &&
       importSignatureMatches slot site
 
+/-- A callable catalog entry binds stable metadata and its signature to one extracted body. -/
+def managedTargetMatches (methods : Nat → Option SpecializedMethod)
+    (signature : ManagedSignature) (target : ManagedTarget) : Bool :=
+  match methods target.method with
+  | none => false
+  | some callee =>
+    target.identity.owner == callee.closed.owner &&
+    target.identity.token == callee.closed.token && target.identity.arguments == callee.arguments &&
+    !callee.closed.hasThis && !callee.closed.explicitThis && callee.closed.callingConvention == 0 &&
+    callee.closed.returnType == signature.result && callee.closed.parameters == signature.parameters &&
+    managedSignature signature.typeExpr == some signature
+
+/-- Exact function address evidence; integer constants cannot acquire callable provenance. -/
+def managedAddressMatches (methods : Nat → Option SpecializedMethod)
+    (raw : RawInstruction) (target : ManagedTarget) (signature : ManagedSignature) : Bool :=
+  raw.opcode == 65030 && managedTargetMatches methods signature target &&
+  match raw.operand with
+  | .call site => site.target == .managed target.identity.token &&
+    (match site.declaringType with
+      | .atom scope name => target.identity.owner == scope ++ "::" ++ name
+      | .aggregate identity _ => target.identity.owner == identity
+      | _ => false) &&
+    site.typeArguments == target.identity.arguments && !site.hasThis &&
+    site.returnType == signature.result && site.parameterTypes == signature.parameters &&
+    site.parameterCount == signature.parameters.length &&
+    site.returnsValue == (signature.result != .void)
+  | _ => false
+
+/-- Indirect calls bind the exact raw managed signature and every possible selected target. -/
+def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
+    (raw : RawInstruction) (signature : ManagedSignature) (catalog : List ManagedTarget) : Bool :=
+  raw.opcode == 41 && !catalog.isEmpty &&
+    catalog.all (managedTargetMatches methods signature) &&
+    (catalog.map (·.identity)).Nodup &&
+  match raw.operand with
+  | .indirectCall result parameters false false 0 =>
+    result == signature.result && parameters == signature.parameters
+  | _ => false
+
 /-- Every live managed call must select the independently instantiated definition
 with the exact substituted type arguments and signature; an external one, a matching import slot. -/
 def validateManagedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
     (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
   if !live then true else
+  match emitted with
+  | .managed (.address target signature) => managedAddressMatches methods raw target signature
+  | .managed (.call signature catalog _) => managedIndirectMatches methods raw signature catalog
+  | _ =>
   match raw.operand with
   | .call site => match site.target with
     | .managed token => match managedCallTarget raw.opcode emitted with
@@ -366,10 +465,11 @@ def validateManagedCallWith (methodCount : Nat)
     | .external identity => match emitted with
       | .call target count =>
         validateImportCallWith methodCount imports raw.opcode site identity target count
-      | .newAggregate .. | .newVector256 .. => false
+      | .tailCall .. | .newAggregate .. | .newVector256 .. => false
       | _ => true
+  | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .newAggregate .. | .newVector256 .. => false
+    | .call .. | .tailCall .. | .newAggregate .. | .newVector256 .. => false
     | _ => true
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/

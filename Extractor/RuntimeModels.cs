@@ -78,6 +78,10 @@ internal static class RuntimeModels
         }
         if (type is TypeSpecification specification)
         {
+            if (type is RequiredModifierType required)
+                ValidateTypeIdentity(required.ModifierType, module, architecture);
+            if (type is OptionalModifierType optional)
+                ValidateTypeIdentity(optional.ModifierType, module, architecture);
             ValidateTypeIdentity(specification.ElementType, module, architecture);
             return;
         }
@@ -96,7 +100,7 @@ internal static class RuntimeModels
         "System.Runtime.Intrinsics.Vector512`1" or "System.ValueTuple`2";
 
     private static string DefiningAssembly(string name) =>
-        name == "System.Buffers.Binary.BinaryPrimitives" ? "System.Memory" :
+        name is "System.Buffers.Binary.BinaryPrimitives" or "System.MemoryExtensions" ? "System.Memory" :
         name.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal) ? "System.Runtime.Intrinsics" :
         "System.Runtime";
 
@@ -114,7 +118,9 @@ internal static class RuntimeModels
     internal static string? Translate(MethodReference reference, FeatureProfile profile)
     {
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
-            (reference.HasThis && reference.Name is not (".ctor" or "get_Item" or "get_Length" or "Slice")) ||
+            (reference.HasThis && reference.Name is not
+                (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill" or
+                 "CopyTo" or "TryCopyTo")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
         if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" &&
@@ -124,10 +130,12 @@ internal static class RuntimeModels
         string? op = scope switch
         {
             "System.Runtime" => Scalar(reference)
+                ?? SpanReinterpretation.Translate(reference, profile.Architecture)
+                ?? MemoryTransfers.Marshal(reference, profile.Architecture)
                 ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
-                ?? Runtime(reference.FullName),
-            "System.Memory" => Scalar(reference),
+                ?? EnumSpan(reference) ?? Runtime(reference.FullName),
+            "System.Memory" => Scalar(reference) ?? EnumSpan(reference) ?? Span(reference.FullName),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
@@ -246,47 +254,84 @@ internal static class RuntimeModels
         _ => Span(signature)
     };
 
-    // Primitive spans over whole static fields: creation, bounds-checked indexing, length and the first element.
-    private static string? Span(string signature)
+    private static readonly Dictionary<string, string> SpanOperations = BuildSpanOperations();
+
+    // Signatures are immutable: runtime lookup performs no interpolation or per-element scan.
+    private static string? Span(string signature) => SpanOperations.GetValueOrDefault(signature);
+
+    private static string? EnumSpan(MethodReference method)
     {
-        foreach (var (element, width) in new[]
+        var element = method.DeclaringType is GenericInstanceType { GenericArguments.Count: 1 } owner
+            ? owner.GenericArguments[0]
+            : method is GenericInstanceMethod { GenericArguments.Count: 1 } generic
+                ? generic.GenericArguments[0] : null;
+        if (element is null || !EnumTypes.IsEnum(element)) return null;
+        EnumTypes.Storage(element);
+        return EnumTypes.Cached(element, type => BuildSpanOperations(type))
+            .GetValueOrDefault(method.FullName);
+    }
+
+    private static Dictionary<string, string> BuildSpanOperations(TypeReference? enumType = null)
+    {
+        var operations = new Dictionary<string, string>(StringComparer.Ordinal);
+        var primitives = new[]
         {
             ("System.Byte", 1), ("System.SByte", 1), ("System.Int16", 2), ("System.UInt16", 2),
-            ("System.Int32", 4), ("System.UInt32", 4), ("System.Int64", 8), ("System.UInt64", 8)
-        })
+            ("System.Int32", 4), ("System.UInt32", 4), ("System.Int64", 8), ("System.UInt64", 8),
+            ("System.IntPtr", 8), ("System.UIntPtr", 8), ("System.Char", 2), ("System.Boolean", 1)
+        };
+        foreach (var (element, width) in enumType is null ? primitives :
+            [(enumType.FullName, Arrays.Storage(enumType)!.Width)])
         {
+            var arrayElement = (enumType is null ? Arrays.Primitive(element) : Arrays.Storage(enumType))!.Expression;
             var span = $"System.ReadOnlySpan`1<{element}>";
-            if (signature == "System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
-                $"CreateSpan<{element}>(System.RuntimeFieldHandle)")
-                return $".memory (.createSpan {width})";
-            if (signature == $"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)")
-                return $".memory (.spanItem {width})";
-            if (signature == $"System.Int32 {span}::get_Length()") return ".memory .spanLength";
-            if (signature == "!!0& System.Runtime.InteropServices.MemoryMarshal::" +
-                $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)")
-                return ".memory .spanReference";
+            operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
+                $"CreateSpan<{element}>(System.RuntimeFieldHandle)", $".memory (.createSpan {width})");
+            operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",
+                $".memory (.spanItem {width})");
+            operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
+                $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)", ".memory .spanReference");
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";
                 var writable = name == "System.Span`1";
-                if (signature == $"System.Void {owner}::.ctor(System.Void*,System.Int32)")
-                    return $".memory (.spanFromReference {width} {(writable ? "true" : "false")})";
-                if (signature == $"System.Int32 {owner}::get_Length()") return ".memory .spanLength";
-                if (writable && signature == $"!0& {owner}::get_Item(System.Int32)")
-                    return $".memory (.spanItem {width})";
-                if (signature == $"{name}<!0> {owner}::Slice(System.Int32)")
-                    return ".memory (.spanSlice false)";
-                if (signature == $"{name}<!0> {owner}::Slice(System.Int32,System.Int32)")
-                    return ".memory (.spanSlice true)";
+                var capability = writable ? "true" : "false";
+                var arrayWhole = $".memory (.arraySpan {arrayElement} {capability} .whole)";
+                operations.Add($"System.Void {owner}::.ctor(!0[])", arrayWhole);
+                operations.Add($"{name}<!0> {owner}::op_Implicit(!0[])", arrayWhole);
+                operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
+                    $".memory (.arraySpan {arrayElement} {capability} .counted)");
+                operations.Add($"System.Void {owner}::.ctor(System.Void*,System.Int32)",
+                    $".memory (.spanFromReference {width} {capability})");
+                operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
+                operations.Add($"System.Void {owner}::CopyTo(System.Span`1<!0>)",
+                    $".memory (.spanCopy {width} false)");
+                operations.Add($"System.Boolean {owner}::TryCopyTo(System.Span`1<!0>)",
+                    $".memory (.spanCopy {width} true)");
+                if (writable)
+                {
+                    operations.Add($"!0& {owner}::get_Item(System.Int32)", $".memory (.spanItem {width})");
+                    operations.Add($"System.Void {owner}::Clear()", $".memory (.spanFill {width} true)");
+                    operations.Add($"System.Void {owner}::Fill(!0)", $".memory (.spanFill {width} false)");
+                }
+                operations.Add($"{name}<!0> {owner}::Slice(System.Int32)", ".memory (.spanSlice false)");
+                operations.Add($"{name}<!0> {owner}::Slice(System.Int32,System.Int32)", ".memory (.spanSlice true)");
                 var factory = writable ? "CreateSpan" : "CreateReadOnlySpan";
-                if (signature == $"{name}<!!0> System.Runtime.InteropServices.MemoryMarshal::" +
-                    $"{factory}<{element}>(!!0&,System.Int32)")
-                    return $".memory (.spanFromReference {width} {(writable ? "true" : "false")})";
+                operations.Add($"{name}<!!0> System.Runtime.InteropServices.MemoryMarshal::" +
+                    $"{factory}<{element}>(!!0&,System.Int32)",
+                    $".memory (.spanFromReference {width} {capability})");
             }
-            if (signature == $"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
-                "op_Implicit(System.Span`1<!0>)") return ".memory .spanReadOnly";
+            operations.Add($"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
+                "op_Implicit(System.Span`1<!0>)", ".memory .spanReadOnly");
+            foreach (var (parameters, range) in new[]
+            {
+                ("!!0[]", "whole"), ("!!0[],System.Int32", "fromStart"),
+                ("!!0[],System.Int32,System.Int32", "counted")
+            })
+                operations.Add("System.Span`1<!!0> System.MemoryExtensions::" +
+                    $"AsSpan<{element}>({parameters})", $".memory (.arraySpan {arrayElement} true .{range})");
         }
-        return null;
+        return operations;
     }
 
     private static string? Intrinsic(string signature, FeatureProfile profile)

@@ -28,6 +28,193 @@ theorem SuccessOrThrow.bind_left {first : ExecutionResult α}
   | error fault => cases fault <;> exact observable
 #print axioms SuccessOrThrow.bind_left
 
+/-- Validating a byte view preserves both the checked fault and its allocation-relative location. -/
+theorem Memory.Renamed.checkedSpanValidate {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (view : SpanView)
+    (bound : view.reference.Below mapping.sourceLimit) :
+    ResultRenamed mapping Eq (checkedAt view.reference 0 (view.validate source))
+      (checkedAt (mapping.managedReference view.reference) 0
+        ((mapping.spanView view).validate target)) := by
+  rw [related.spanValidate view bound]
+  exact (ResultEquivalent.eq_refl _).checkedAt _ _
+#print axioms Memory.Renamed.checkedSpanValidate
+
+/-- Snapshot copies transport source reads, destination writes and the exact success flag. -/
+private theorem Memory.Renamed.spanCopyInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (width : Nat) (tryCopy : Bool)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (spanCopyInstruction width tryCopy stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (spanCopyInstruction width tryCopy stack source)
+      (spanCopyInstruction width tryCopy (stack.map mapping.value) target) := by
+  unfold CIL.Safety.spanCopyInstruction at observable ⊢
+  split at observable
+  · rename_i destinationView sourceView rest
+    simp only [List.map_cons, AllocationRenaming.value]
+    dsimp only [AllocationRenaming.spanView]
+    simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+    obtain ⟨destinationBound, sourceBound, restBound⟩ := bounds
+    apply (related.checkedSpanValidate sourceView sourceBound).bindWithSuccess
+    intro first second sourceStep same
+    subst second
+    apply (related.checkedSpanValidate destinationView destinationBound).bindWithSuccess
+    intro first second destinationStep same
+    subst second
+    cases sourceAddress : sourceView.reference <;>
+      cases destinationAddress : destinationView.reference
+    all_goals simp only [sourceAddress, destinationAddress, ManagedReference.Below]
+      at sourceBound destinationBound
+    all_goals cases tryCopy <;>
+      simp only [sourceAddress, destinationAddress, AllocationRenaming.managedReference,
+        writeIndexed_eq, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false]
+    all_goals repeat' first
+      | exact .ok ⟨related, rfl⟩
+      | exact .error _
+      | (apply (related.checkedRead _ (by assumption) _ _ _ _).bindWithSuccess
+         intro first second sourceStep same
+         subst second)
+      | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+         intro first second sourceStep memoryRelated
+         exact .ok ⟨memoryRelated, rfl⟩)
+      | (split <;> try simp only [*, Bind.bind, Except.bind])
+  · repeat first | contradiction | cases observable | split at observable
+#print axioms Memory.Renamed.spanCopyInstructionResult
+
+/-- Fill and clear preserve their exact checked write under allocation renaming. -/
+private theorem Memory.Renamed.spanFillInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (width : Nat) (clear : Bool)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (spanFillInstruction width clear stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (spanFillInstruction width clear stack source)
+      (spanFillInstruction width clear (stack.map mapping.value) target) := by
+  cases clear <;> simp only [CIL.Safety.spanFillInstruction] at observable ⊢
+  all_goals split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try dsimp only [AllocationRenaming.spanView]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .error _
+    | (apply ((related.spanFill _ (by assumption) _).checkedAt _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (split <;> try simp only [*, Bind.bind, Except.bind])
+#print axioms Memory.Renamed.spanFillInstructionResult
+/-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
+private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (operation : CIL.MemoryOp)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (otherMemoryInstruction operation stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (otherMemoryInstruction operation stack source)
+      (otherMemoryInstruction operation (stack.map mapping.value) target) := by
+  unfold otherMemoryInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals have imageEquality : ∀ left right, left < mapping.sourceLimit →
+      right < mapping.sourceLimit → (mapping.image left = mapping.image right ↔ left = right) :=
+    fun left right leftBound rightBound =>
+      ⟨mapping.injective left right leftBound rightBound, congrArg mapping.image⟩
+  all_goals try solve
+    | apply (related.checkedSpanValidate _ (by assumption)).bindWithSuccess
+      intro first second sourceStep same
+      subst second
+      repeat first
+        | exact .ok ⟨by assumption, rfl⟩
+        | exact .error _
+        | (apply (related.loadTransfer _ (by assumption) _).bindWithSuccess
+           intro first second sourceStep same
+           subst second)
+        | (apply (related.storeTransfer _ (by assumption) _ _).bindWithSuccess
+           intro first second sourceStep memoryRelated)
+        | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply ((related.spanFill _ (by assumption) _).checkedAt _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.referenceDifference _ _ (by assumption) (by assumption)).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.formValue _ (by assumption)).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.storeValue _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.loadValue _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (mapping.bitcastValue _ _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply ((related.spanSlice _ (by assumption) _ _).checkedAt _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply ((related.spanElement _ (by assumption) _).checkedAt _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (mapping.referenceAt _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound := referenceAt_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.checkedAdd _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.checkedRead _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.checkedAccess _ (by assumption) _ _ _ _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.checkedSpan _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.checkedArray _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.arrayElement _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound : first.allocation < mapping.sourceLimit := by
+         rw [related.sourceLimit]
+         exact (checkedArrayElement_valid _ _ _ _ _ sourceStep).below formed
+       subst second)
+    | dsimp +instances only [AllocationRenaming.reference]
+    | simp only [mapping.isNull, imageEquality]
+    | (split <;> try simp only [*, mapping.isNull, AllocationRenaming.managedReference,
+        Bind.bind, Except.bind])
+
+#print axioms Memory.Renamed.otherMemoryInstructionResult
+
 /-- A memory instruction's successful effect is preserved on the corresponding allocations. -/
 theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -44,76 +231,12 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
   rw [mapping.unspecifiedOperands]
   split at observable
   · cases observable
-  · simp only [Bool.false_eq_true, ite_false, *]
+  · rename_i observed
+    simp only [observed, Bool.false_eq_true, ite_false]
     split at observable
-    all_goals try simp only [List.map_cons, AllocationRenaming.value]
-    all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
-    all_goals try solve | repeat first | contradiction | cases observable | split at observable
-    all_goals clear observable
-    all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
-    all_goals repeat' rcases bounds with ⟨_, bounds⟩
-    all_goals have imageEquality : ∀ left right, left < mapping.sourceLimit →
-        right < mapping.sourceLimit → (mapping.image left = mapping.image right ↔ left = right) :=
-      fun left right leftBound rightBound =>
-        ⟨mapping.injective left right leftBound rightBound, congrArg mapping.image⟩
-    all_goals repeat first
-      | exact .ok ⟨related, rfl⟩
-      | exact .error _
-      | (apply (related.formValue _ (by assumption)).bindWithSuccess
-         intro first second sourceStep same
-         subst second
-         exact .ok ⟨related, rfl⟩)
-      | (apply (related.storeValue _ (by assumption) _).bindWithSuccess
-         intro first second sourceStep memoryRelated
-         exact .ok ⟨memoryRelated, rfl⟩)
-      | (apply (related.loadValue _ (by assumption) _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second
-         exact .ok ⟨related, rfl⟩)
-      | (apply (mapping.bitcastValue _ _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second
-         exact .ok ⟨related, rfl⟩)
-      | (apply ((related.spanSlice _ (by assumption) _ _).checkedAt _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second
-         exact .ok ⟨related, rfl⟩)
-      | (apply ((related.spanElement _ (by assumption) _).checkedAt _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second)
-      | (apply (mapping.referenceAt _).bindWithSuccess
-         intro first second sourceStep same
-         have addressBound := referenceAt_below (by assumption) sourceStep
-         subst second)
-      | (apply (related.checkedAdd _ (by assumption) _ _ _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second
-         exact .ok ⟨related, rfl⟩)
-      | (apply (related.checkedRead _ (by assumption) _ _ _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second)
-      | (apply (related.checkedAccess _ (by assumption) _ _ _ _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second)
-      | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
-         intro first second sourceStep memoryRelated
-         exact .ok ⟨memoryRelated, rfl⟩)
-      | (apply (related.checkedSpan _ (by assumption) _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second)
-      | (apply (related.checkedArray _ (by assumption) _ _).bindWithSuccess
-         intro first second sourceStep same
-         subst second)
-      | (apply (related.arrayElement _ (by assumption) _ _).bindWithSuccess
-         intro first second sourceStep same
-         have addressBound : first.allocation < mapping.sourceLimit := by
-           rw [related.sourceLimit]
-           exact (checkedArrayElement_valid _ _ _ _ _ sourceStep).below formed
-         subst second)
-      | dsimp +instances only [AllocationRenaming.reference]
-      | simp only [mapping.isNull, imageEquality]
-      | (split <;> try simp only [*, mapping.isNull, AllocationRenaming.managedReference,
-          Bind.bind, Except.bind])
+    · exact related.spanCopyInstructionResult _ _ _ bounds observable
+    · exact related.spanFillInstructionResult _ _ _ bounds observable
+    · exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult
 

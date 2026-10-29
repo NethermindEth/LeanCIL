@@ -633,4 +633,37 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat}
 #print axioms Filled.fill
 #print axioms Contents.transform
 
+/-- A successful whole-span fill establishes a repeated sequence, without any readable-input
+    premise. In particular, the destination may initially be entirely uninitialized. -/
+theorem SpanView.fill_contents (view : SpanView) {before after : Memory} (base : Reference)
+    (value : BitVec (8 * view.width)) (formed : before.WellFormed)
+    (address : view.reference = .address base) (positive : 0 < view.width)
+    (filled : view.fill before (numberBytes value.toNat view.width) = .ok after) :
+    Contents after base view.width (List.replicate view.length value) := by
+  by_cases empty : view.length = 0
+  · simp [empty, Contents]
+  · have written := view.fill_written before after base _ address empty filled
+    have encoding : elementBytes view.width (List.replicate view.length value) =
+        (List.replicate view.length (numberBytes value.toNat view.width)).flatten := by
+      simp [elementBytes, List.flatMap, List.map_replicate]
+    have readback := write_readback _ _ _ _ _ written
+    rw [← encoding, elementBytes_length] at readback
+    exact Contents.of_read (write_preserves_wellFormed _ _ _ _ _ formed written) positive readback
+#print axioms SpanView.fill_contents
+
+/-- Filling a nonempty span preserves readable sequences disjoint from its extent, including
+    neighbouring slices of the same allocation. -/
+theorem Contents.after_span_fill {before after : Memory} {base target : Reference}
+    {width : Nat} {values : List (BitVec (8 * width))} (view : SpanView)
+    (element : List (BitVec 8)) (contents : Contents before base width values)
+    (address : view.reference = .address target) (nonempty : view.length ≠ 0)
+    (size : element.length = view.width)
+    (filled : view.fill before element = .ok after)
+    (apart : Apart base (width * values.length) (target, view.length * view.width)) :
+    Contents after base width values := by
+  apply contents.after_write_apart
+    (view.fill_written before after target element address nonempty filled)
+  simpa [List.length_flatten, List.map_replicate, size] using apart
+#print axioms Contents.after_span_fill
+
 end CIL.Safety

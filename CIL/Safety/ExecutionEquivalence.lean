@@ -27,20 +27,6 @@ theorem Memory.Equivalent.referenceEqual {m n : Memory} (same : m.Equivalent n)
 
 #print axioms Memory.Equivalent.referenceEqual
 
-/-- Pointer subtraction and observations depend only on allocation metadata. -/
-theorem Memory.Equivalent.referencePositions {m n : Memory} (same : m.Equivalent n)
-    (left right : ManagedReference) :
-    referencePositions m left right = referencePositions n left right := by
-  simp only [CIL.Safety.referencePositions, checkedAt, same.form]
-#print axioms Memory.Equivalent.referencePositions
-
-/-- Equivalent memories give the same native pointer difference. -/
-theorem Memory.Equivalent.referenceDifference {m n : Memory} (same : m.Equivalent n)
-    (left right : ManagedReference) :
-    referenceDifference m left right = referenceDifference n left right := by
-  simp only [CIL.Safety.referenceDifference, same.referencePositions]
-#print axioms Memory.Equivalent.referenceDifference
-
 /-- Equivalent memories give the same unsigned pointer ordering. -/
 theorem Memory.Equivalent.referenceLess {m n : Memory} (same : m.Equivalent n)
     (left right : ManagedReference) : referenceLess m left right = referenceLess n left right := by
@@ -71,11 +57,29 @@ inductive FrameActionEquivalent : FrameAction → FrameAction → Prop where
       FrameActionEquivalent (.next pc stack frame m) (.next pc stack frame n)
   | call {m n : Memory} (same : m.Equivalent n) (callee args rest) :
       FrameActionEquivalent (.call callee args rest m) (.call callee args rest n)
+  | tailCall {m n : Memory} (same : m.Equivalent n) (callee args) :
+      FrameActionEquivalent (.tailCall callee args m) (.tailCall callee args n)
   | construct {m n : Memory} (same : m.Equivalent n) (callee args rest frame temporary kind) :
       FrameActionEquivalent (.construct callee args rest frame temporary kind m)
         (.construct callee args rest frame temporary kind n)
   | returned {m n : Memory} (same : m.Equivalent n) (values) :
       FrameActionEquivalent (.returned values m) (.returned values n)
+
+/-- Managed dispatch observes only stable identities and equivalent checked arguments. -/
+theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame) (stack : List Value) :
+    ResultEquivalent FrameActionEquivalent (managedStep operation pc frame stack m)
+      (managedStep operation pc frame stack n) := by
+  unfold CIL.Safety.managedStep
+  split <;> try simp only [same.checkedValues]
+  all_goals repeat' first
+    | exact .error _
+    | exact .ok (.next same _ _ _)
+    | exact .ok (.call same _ _ _)
+    | exact .ok (.tailCall same _ _)
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.managedStep
 
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
@@ -88,6 +92,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract]
   all_goals repeat' first
+    | exact same.managedStep _ _ _ _
     | (apply ResultEquivalent.bind (same.allocateStack _ _ _)
        intro left right related
        obtain ⟨reference, owner, allocated⟩ := left
@@ -97,6 +102,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     | exact .error _
     | exact .ok (.next same _ _ _)
     | exact .ok (.call same _ _ _)
+    | exact .ok (.tailCall same _ _)
     | exact .ok (.returned same _)
     | (apply ResultEquivalent.bind_same; intro)
     | (apply ResultEquivalent.bind (same.storeLocal _ _)
@@ -105,6 +111,20 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨otherSlot, otherMemory⟩ := right
        obtain ⟨rfl, equivalent⟩ := related
        exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.memoryInstruction _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       cases values with
+       | nil => exact .error _
+       | cons value rest =>
+         apply ResultEquivalent.bind (equivalent.storeLocal _ _)
+         intro left right related
+         obtain ⟨slot, memory⟩ := left
+         obtain ⟨otherSlot, otherMemory⟩ := right
+         obtain ⟨rfl, stored⟩ := related
+         exact .ok (.next stored _ _ _))
     | (apply ResultEquivalent.bind (same.staticInstruction _ _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left
@@ -172,6 +192,20 @@ theorem Memory.Equivalent.run {m n : Memory} (same : m.Equivalent n)
       obtain ⟨otherMemory, otherResult⟩ := right
       obtain ⟨finished, rfl⟩ := related
       exact ih finished _ _ _ _ _
+    | tailCall equivalent callee arguments =>
+      dsimp only
+      split <;> try exact .error _
+      split <;> try exact .error _
+      have retired := equivalent.leaveFrame frame
+      simp only [retired.checkedValues]
+      apply ResultEquivalent.bind_same
+      intro checked
+      apply ResultEquivalent.bind ((retired.enterFrame _ _).mapError _)
+      intro left right related
+      obtain ⟨childFrame, memory⟩ := left
+      obtain ⟨otherFrame, otherMemory⟩ := right
+      obtain ⟨rfl, entered⟩ := related
+      exact ih entered _ _ _ _ _
     | construct equivalent callee arguments rest nextFrame temporary kind =>
       dsimp only
       split <;> try exact .error _

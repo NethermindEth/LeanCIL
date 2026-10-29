@@ -7,20 +7,14 @@ namespace Nethermind.LeanCIL;
 // as the receiver of the next span call. Reused locals retain their typed span storage.
 internal static class Spans
 {
-    internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior);
+    internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior,
+        Dictionary<Instruction, string> Constructors);
 
     // Primitive span element width; scopes are checked by ValidateTypeIdentity.
     internal static int? Width(TypeReference type) =>
         type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
             span.GenericArguments.Count == 1
-            ? span.GenericArguments[0].FullName switch
-            {
-                "System.Byte" or "System.SByte" => 1,
-                "System.Int16" or "System.UInt16" => 2,
-                "System.Int32" or "System.UInt32" => 4,
-                "System.Int64" or "System.UInt64" => 8,
-                _ => null
-            }
+            ? Arrays.Storage(span.GenericArguments[0])?.Width
             : null;
 
     internal static bool Writable(TypeReference type) =>
@@ -41,15 +35,30 @@ internal static class Spans
 
     static Analysis Compute(MethodDefinition method)
     {
-        var analysis = new Analysis([], []);
+        var analysis = new Analysis([], [], []);
+        var uses = new int[method.Body.Variables.Count];
+        foreach (var instruction in method.Body.Instructions)
+            if (Store(instruction) || Address(instruction) || Load(instruction))
+                uses[FeatureConstants.Local(instruction)]++;
         foreach (var i in method.Body.Instructions)
         {
             if (!(Store(i) || Address(i) || Load(i)) || Width(method.Body.Variables[FeatureConstants.Local(i)].VariableType) is null ||
                 analysis.Operands.Contains(i))
                 continue;
             var local = FeatureConstants.Local(i);
-            if (method.Body.Instructions.Count(other => (Store(other) || Address(other) || Load(other)) &&
-                    FeatureConstants.Local(other) == local) != 2)
+            if (Address(i) && Constructor(i, method.Body.Variables[local].VariableType) is { } constructor)
+            {
+                analysis.Operands.Add(i);
+                for (var interior = i.Next; interior is not null; interior = interior.Next)
+                {
+                    analysis.Interior.Add(interior);
+                    if (interior != constructor.Call) continue;
+                    analysis.Constructors.Add(interior, $".initializeSpanLocal {local} ({constructor.Descriptor})");
+                    break;
+                }
+                continue;
+            }
+            if (uses[local] != 2)
                 continue;
             // The receiver is read once: by get_Length, or by get_Item after one index push.
             if (!Store(i) || i.Next is not { } address || !Address(address) || FeatureConstants.Local(address) != FeatureConstants.Local(i) ||
@@ -60,5 +69,30 @@ internal static class Spans
             analysis.Interior.Add(address);
         }
         return analysis;
+    }
+
+    // The local address cannot escape: only bounded single-value pushes precede its exact constructor.
+    static (Instruction Call, string Descriptor)? Constructor(Instruction address, TypeReference localType)
+    {
+        var call = address.Next;
+        var count = 0;
+        while (count < 3 && (Push(call) || call?.OpCode.Code == Code.Ldnull))
+        {
+            count++;
+            call = call!.Next;
+        }
+        if (call is not { OpCode.Code: Code.Call, Operand: MethodReference reference } ||
+            reference.Name != ".ctor" || reference.DeclaringType.FullName != localType.FullName ||
+            reference.Parameters.Count != count)
+            return null;
+        var operation = InstructionTranslation.RuntimeModel(reference);
+        if (operation == ".memory .spanCreate") return (call, ".reference 1 false");
+        const string array = ".memory (.arraySpan ";
+        const string pointer = ".memory (.spanFromReference ";
+        if (operation?.StartsWith(array, StringComparison.Ordinal) == true)
+            return (call, ".array " + operation[array.Length..^1]);
+        if (operation?.StartsWith(pointer, StringComparison.Ordinal) == true)
+            return (call, ".reference " + operation[pointer.Length..^1]);
+        return null;
     }
 }

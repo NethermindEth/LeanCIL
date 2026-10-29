@@ -5,8 +5,8 @@ import CIL.Safety.Certificate
 
 A successful return yields exactly as many values as the method declares (one or none), and
 neither returned values nor ordinary call arguments contain unspecified SIMD lanes. The two
-return properties share one dispatcher proof, then lift to runs and invocations through the
-return trace.
+return properties share one dispatcher proof. Run traces preserve arity across tail calls;
+terminal-return witnesses carry the absence of unspecified lanes through invocation.
 -/
 
 namespace CIL.Safety
@@ -16,6 +16,16 @@ private theorem bind_success {source : Except ε α} {continuation : α → Exce
     (source.bind continuation = .ok value) ↔
       ∃ input, source = .ok input ∧ continuation input = .ok value := by
   cases source <;> simp [Except.bind]
+
+/-- Managed dispatch produces a next step or child invocation, never a method return. -/
+private theorem managedStep_not_returned (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory final : Memory) (values : List Value) :
+    managedStep operation pc frame stack memory ≠ .ok (.returned values final) := by
+  intro executed
+  unfold managedStep at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first | cases executed | split at executed
+#print axioms managedStep_not_returned
 
 set_option maxHeartbeats 400000 in
 /-- A successful return has its declared arity and exposes no unspecified SIMD lanes. -/
@@ -28,6 +38,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Na
   unfold step at executed
   dsimp only at executed
   repeat' first
+    | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ executed)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
           reduceCtorEq, and_false, exists_false] at executed
@@ -63,14 +74,22 @@ theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body :
     (lookup : program[method]? = some body)
     (executed : run program fuel method pc args frame stack memory = .ok (final, values)) :
     values.length = if body.returnsValue then 1 else 0 := by
-  obtain ⟨lastPc, lastFrame, lastStack, before, returned, raw, _, fetched, _, checked⟩ :=
-    run_success_return_trace program fuel method pc args frame stack memory final values executed
-  obtain ⟨actualBody, operation, found, _, stepped⟩ := fetched
-  rw [lookup] at found
-  cases found
-  rw [(checkedValues_valid _ _ _ checked).1]
-  exact step_return_length body operation lastPc args lastFrame lastStack before returned raw
-    stepped
+  have trace := run_success_trace _ _ _ _ _ _ _ _ _ _ executed
+  clear executed
+  induction trace generalizing body with
+  | returned step checked =>
+    obtain ⟨actualBody, operation, found, _, stepped⟩ := step
+    rw [lookup] at found
+    cases found
+    rw [(checkedValues_valid _ _ _ checked).1]
+    exact step_return_length _ _ _ _ _ _ _ _ _ stepped
+  | next _ _ ih | call _ _ _ _ _ _ _ ih | construct _ _ _ _ _ _ _ _ ih =>
+    exact ih _ lookup
+  | tailCall _ bodyLookup childLookup returns _ _ _ _ ih =>
+    have same := Option.some.inj (lookup.symm.trans bodyLookup)
+    subst same
+    have result := ih _ childLookup
+    simpa only [bne_eq_false_iff_eq.mp returns] using result
 
 #print axioms step_return_length
 #print axioms run_return_length
@@ -91,11 +110,12 @@ theorem invoke_return_known {program : CIL.Program} {fuel method : Nat}
     (executed : invoke program fuel method args memory = .ok (final, values)) :
     values.any Value.hasUnspecified = false := by
   obtain ⟨_, arguments, frame, entered, _, _, _, ran⟩ := invoke_success_setup executed
-  obtain ⟨pc, lastFrame, stack, before, returned, raw, _, fetched, _, checked⟩ :=
+  obtain ⟨lastMethod, lastArgs, pc, lastFrame, stack, before, returned, raw,
+      _, fetched, _, checked⟩ :=
     run_success_return_trace program fuel method 0 arguments frame [] entered final values ran
   obtain ⟨body, operation, _, _, stepped⟩ := fetched
   rw [(checkedValues_valid _ _ _ checked).1]
-  exact step_return_known body operation pc arguments lastFrame stack before returned raw stepped
+  exact step_return_known body operation pc lastArgs lastFrame stack before returned raw stepped
 
 #print axioms invoke_return_known
 

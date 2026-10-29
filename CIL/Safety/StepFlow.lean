@@ -12,7 +12,9 @@ namespace CIL
 
 /-- Every method index an instruction calls or constructs with. -/
 def Op.callees : Op → List Nat
-  | .call method _ | .newVector256 method _ | .newAggregate method _ _ => [method]
+  | .managed (.call _ catalog _) => catalog.map ManagedTarget.method
+  | .call method _ | .tailCall method _ | .newVector256 method _
+  | .newAggregate method _ _ => [method]
   | _ => []
 
 end CIL
@@ -21,28 +23,64 @@ namespace CIL.Safety
 
 /-- The method an action enters, if any. -/
 def FrameAction.callee : FrameAction → Option Nat
-  | .call callee .. | .construct callee .. => some callee
+  | .call callee .. | .tailCall callee .. | .construct callee .. => some callee
   | _ => none
 
+/-- An indirect call can enter only a body named in its authenticated catalog. -/
+theorem managedStep_callee {operation : CIL.ManagedOp} {pc : Nat} {frame : Frame}
+    {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
+    (executed : managedStep operation pc frame stack memory = .ok action)
+    (enters : action.callee = some callee) : callee ∈ (CIL.Op.managed operation).callees := by
+  unfold managedStep at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve |
+      cases executed
+      simp only [FrameAction.callee, Option.some.injEq] at enters
+      subst callee
+      exact List.mem_map.mpr ⟨_, List.mem_of_find?_eq_some (by assumption), rfl⟩
+    | solve | cases executed; cases enters
+    | cases executed
+    | split at executed
+#print axioms managedStep_callee
+
 set_option maxHeartbeats 800000 in
-/-- Only `.call`, `.newVector256` and `.newAggregate` enter a method, and each enters the
-    one it names. -/
+/-- A successful call or construction enters a method listed by its instruction. -/
 theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body op pc args frame stack m = .ok action) : action.callee = op.callees.head? := by
+    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction} {callee : Nat}
+    (h : step body op pc args frame stack m = .ok action)
+    (enters : action.callee = some callee) : callee ∈ op.callees := by
   cases op <;> unfold step at h
   all_goals dsimp only at h
   all_goals split at h
-  all_goals
-    repeat' first
-      | contradiction
-      | (obtain ⟨_, _, h⟩ := except_bind_ok h)
-      | split at h
-  all_goals (try (cases h; first | rfl | (cases op <;>
-    simp_all [Op.callees, FrameAction.callee]); done))
-  all_goals done
-
+  all_goals repeat' first
+    | exact managedStep_callee h enters
+    | solve | cases h; cases enters
+    | solve |
+      cases h
+      simp only [FrameAction.callee, Option.some.injEq] at enters
+      subst callee
+      simp only [Op.callees, List.mem_singleton]
+    | contradiction
+    | (obtain ⟨_, _, h⟩ := except_bind_ok h)
+    | split at h
 #print axioms step_callee
+
+/-- An indirect tail call cannot leave a caller continuation behind. -/
+theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSignature}
+    {catalog : List CIL.ManagedTarget} {pc : Nat} {args : List Value} {frame : Frame}
+    {stack : List Value} {memory : Memory} {action : FrameAction}
+    (executed : step body (.managed (.call signature catalog true)) pc args frame stack memory =
+      .ok action) :
+    ∃ callee arguments result, action = .tailCall callee arguments result := by
+  simp only [step, managedStep, observerCount, Bool.or_false,
+    Bind.bind, Except.bind, Pure.pure, Except.pure, Bool.true_eq, ite_true] at executed
+  repeat' first
+    | solve | cases executed; exact ⟨_, _, _, rfl⟩
+    | cases executed
+    | split at executed
+  all_goals simp_all
+#print axioms step_managed_tail_action
 
 /-- A step that stays in the frame resumes at the fallthrough of a continuing instruction or
     at one of its targets. -/
@@ -74,6 +112,17 @@ theorem step_call_action {body : CIL.Method} {callee argc pc : Nat} {args : List
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
   all_goals (cases h; exact ⟨_, _, _, rfl⟩)
+
+/-- A tail-call instruction requests frame retirement and exactly its named callee. -/
+theorem step_tailCall_action {body : CIL.Method} {callee argc pc : Nat} {args : List Value}
+    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+    (h : step body (.tailCall callee argc) pc args frame stack m = .ok action) :
+    ∃ arguments updated, action = .tailCall callee arguments updated := by
+  unfold step at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  repeat' (first | contradiction | split at h)
+  all_goals (cases h; exact ⟨_, _, rfl⟩)
+#print axioms step_tailCall_action
 
 /-- Vector and aggregate construction enter the constructor they name with a temporary, never
     as a plain call. -/

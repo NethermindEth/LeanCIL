@@ -1,4 +1,4 @@
-import CIL.Safety.Embedding.Step
+import CIL.Safety.Execution
 
 /-!
 # Steps under trailing local slots
@@ -560,6 +560,23 @@ theorem step_appendLocals_setLocal (index : Nat) (narrow : Option NarrowKind) :
 
 #print axioms step_appendLocals_setLocal
 
+/-- Span construction updates only its existing typed local slot. -/
+theorem step_appendLocals_initializeSpanLocal (index : Nat) (constructor : CIL.SpanConstructor) :
+    StepAppendLocals (.initializeSpanLocal index constructor) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  cases found : frame.locals[index]? with
+  | some slot =>
+    simp only [step, found, Frame.appendLocals_getElem? found, Frame.appendLocals_set found]
+    frame_natural
+  | none =>
+    revert kept
+    simp only [step, found]
+    repeat' split
+    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
+
+#print axioms step_appendLocals_initializeSpanLocal
+
 /-- `lane` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_lane (index : Fin 4) :
     StepAppendLocals (.lane index) := by
@@ -1098,6 +1115,17 @@ theorem step_appendLocals_call (method : Nat) (argc : Nat) :
 
 #print axioms step_appendLocals_call
 
+/-- `tailCall` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_tailCall (method : Nat) (argc : Nat) :
+    StepAppendLocals (.tailCall method argc) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_tailCall
+
 /-- `newVector256` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_newVector256 (constructor : Nat) (argc : Nat) :
     StepAppendLocals (.newVector256 constructor argc) := by
@@ -1211,6 +1239,25 @@ theorem step_appendLocals_unsupported (description : String) :
 
 #print axioms step_appendLocals_unsupported
 
+/-- Managed pointers and tables never inspect the unused trailing frame slots. -/
+theorem step_appendLocals_managed (operation : ManagedOp) :
+    StepAppendLocals (.managed operation) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  unfold managedStep
+  split
+  all_goals repeat' first
+    | rfl
+    | contradiction
+    | (simp only [map_bind, map_pure, FrameAction.appendLocals, Frame.appendLocals]; done)
+    | (apply bind_congr; intro)
+    | split
+    | simp only [map_bind]
+#print axioms step_appendLocals_managed
+
 /-- Every instruction preserves successful and throwing steps under trailing local slots. -/
 theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Value)
     (frame : Frame) (extra : List LocalSlot) (stack : List Value) (memory : Memory)
@@ -1220,6 +1267,7 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       FrameAction.appendLocals extra <$> outcome := by
   have padded : StepAppendLocals op := by
     cases op
+    case managed operation => exact step_appendLocals_managed operation
     case nativeBinary operation =>
       exact step_appendLocals_nativeBinary operation
     case divide signed remainder =>
@@ -1278,6 +1326,8 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       exact step_appendLocals_vectorLocalAddr index
     case setVectorLocal index =>
       exact step_appendLocals_setVectorLocal index
+    case initializeSpanLocal index constructor =>
+      exact step_appendLocals_initializeSpanLocal index constructor
     case localAddr index =>
       exact step_appendLocals_localAddr index
     case setLocal index narrow =>
@@ -1370,6 +1420,8 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       exact step_appendLocals_bne target
     case call method argc =>
       exact step_appendLocals_call method argc
+    case tailCall method argc =>
+      exact step_appendLocals_tailCall method argc
     case newVector256 constructor argc =>
       exact step_appendLocals_newVector256 constructor argc
     case newAggregate constructor argc size =>

@@ -2,8 +2,13 @@
 
 `CIL.Safety.step_return_properties` proves declared return arity and the absence of unspecified
 SIMD lanes together. `step_return_length` and `step_return_known` project the two results, so
-the checked dispatcher is analyzed once. The existing step, run and invocation statements,
-interpreter definitions and approved axioms are unchanged; no stepping attributes are added.
+the checked dispatcher is analyzed once. Run traces preserve the declared arity across tail
+calls, whose callees must have the same return arity. A tail call retires the current frame
+before rechecking its arguments and entering the callee; pointers into that frame's local
+storage therefore cannot escape through a tail call, even if the callee ignores them.
+`run_success_return_trace` and `run_success_live_return_trace` expose the terminal method and
+arguments as existential witnesses: after a tail call, the final `ret` belongs to the callee.
+`run_return_length` and invocation result-validity guarantees apply to the original invocation.
 The return proof uses an explicit simplification set: unrestricted `simp_all` repeatedly tries
 to discharge irrelevant dispatcher exclusions. Keep that set narrow when extending the proof.
 The callee proof reduces each fixed opcode before splitting the remaining dispatcher matches,
@@ -611,6 +616,18 @@ of a compiled loop. `Tests/BufferContents.lean` checks unchanged
 neighbouring bytes and sibling slices, and refutes uninitialized, past-end,
 overlapping, unjoined and stale claims.
 
+For `Span<T>.Fill` and `Clear`, `SpanView.fill_contents` derives the repeated sequence from
+the successful checked fill, without a readable-input premise. `Contents.after_span_fill`
+preserves sequences outside a nonempty fill's extent. The operation checks the whole range
+once and performs one write; callers need no element-by-element execution proof.
+
+`Span<T>.CopyTo` and `TryCopyTo`, including readonly sources, capture all source bytes
+before a destination write, so both overlap directions and self-copy preserve the original
+sequence. `writeIndexed_readback` and `writeIndexed_outside` expose exact readback and
+neighboring-byte preservation for the retained snapshot. The snapshot uses array indexing
+for constant-time byte lookup. Short destinations throw `ArgumentException` or return false
+without a source read or destination write; empty copies require no byte access.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes
@@ -797,9 +814,10 @@ checks them all; the call must expose no unspecified vector bits; and a narrowed
 holds for a boolean. Use `Holds.weaken` afterwards to export a different contract.
 
 `MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which
-passes the address of a fresh numeric local (not a reference, span or array, which have
-no byte home) as a last out argument and drops it. `ForwardsOut.notArray` excludes every
-array element kind; `make_fitting_local` requires the same premise after `notSpan`.
+passes the address of a fresh numeric local as a last out argument and drops it.
+References, spans, arrays, method pointers and handler tables have no byte home;
+`ForwardsOut` excludes them with its `notSpan`, `notArray`, `notPointer` and `notTable`
+premises. `make_fitting_local` and `make_unknown_local` require the same exclusions.
 The local may hold any initializer that fits its kind; the extractor emits
 `.unmodeled` without `InitLocals` and the kind's zero with it. The callee runs in
 the memory after frame entry and the result is read after the local expires, so
@@ -868,9 +886,10 @@ described next.
 
 `CIL.Safety.StepFlow` says where a successful `step` can go without unfolding it.
 `step_next_target`: an action that stays in the frame resumes at `pc + 1` of a
-continuing instruction or at one of `op.targets`. `step_callee`: only `.call`,
-`.newVector256` and `.newAggregate` enter a method, the one they name
-(`Op.callees`). `step_call_action` and `step_newVector256_action` /
+continuing instruction or at one of `op.targets`. Given a successful action and its selected
+callee, `step_callee` proves membership in `Op.callees`: a singleton for a direct call or
+construction, or all authenticated targets for an indirect call. Tail transfers enter a
+callee without continuing in the current frame. `step_call_action` and `step_newVector256_action` /
 `step_newAggregate_action` separate a call from a construction. The module
 imports only the step simulation, so a consumer reasoning about reachable pcs
 does not compile the import and linking layers.

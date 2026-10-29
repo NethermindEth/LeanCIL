@@ -29,6 +29,10 @@ theorem make_numeric_local (memory : Memory) (activation : Nat)
     cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have notArray : ∀ element, kind ≠ .array element := by
     cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+  have notPointer : ∀ signature, kind ≠ .methodPointer signature := by
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+  have notTable : ∀ signature, kind ≠ .methodTable signature := by
+    cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
   have bounded : localWidth kind < nativeLimit := by
     cases kind <;> simp only [localWidth, nativeLimit] <;>
       first | exact CIL.NarrowKind.width_lt _ | simp

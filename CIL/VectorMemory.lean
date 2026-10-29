@@ -16,9 +16,9 @@ Exact overload references (.NET 10):
    https://learn.microsoft.com/dotnet/api/system.runtime.interopservices.memorymarshal.getreference?view=net-10.0
    https://learn.microsoft.com/dotnet/api/system.readonlyspan-1.-ctor?view=net-10.0
    Unsafe.Add scales by element size. BitCast preserves storage bits.
-   The supported span constructor is the observed byte pointer/Int32 overload;
-   empty-span GetReference is deliberately unsupported because dereferencing its
-   result has no valid element. Static bytes come from the extracted RVA field.
+   The pure interpreter models static byte spans. Checked array-backed and
+   reference-backed primitive spans use the memory rules in CIL.Safety.
+   Static bytes come from the extracted RVA field.
 -/
 
 namespace CIL
@@ -113,13 +113,44 @@ def unsafeAdd (sizeBytes : Nat) (offset : Int) : Address → Option Address
     unsafeAdd size (offset : Int) (.byte base) = some (.byte (base + size * offset)) := by
   simp [unsafeAdd, ← Int.natCast_mul, ← Int.natCast_add]
 
+/-- The integer arguments of an array-to-span conversion. -/
+inductive ArraySpanRange where
+  | whole | fromStart | counted
+  deriving DecidableEq, Repr
+
+/-- The array plus any start and length arguments. -/
+def ArraySpanRange.argumentCount : ArraySpanRange → Nat
+  | .whole => 1 | .fromStart => 2 | .counted => 3
+
+/-- Reference-free representations transferred by the checked MemoryMarshal helpers. -/
+inductive TransferKind where
+  | scalar (width : Nat) (signed : Bool)
+  | snapshot (shape : SnapshotShape)
+  deriving DecidableEq, Repr
+
+/-- The complete byte extent transferred by a value operation. -/
+def TransferKind.width : TransferKind → Nat
+  | .scalar width _ => width
+  | .snapshot shape => shape.width
+
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
+  /-- Reinterpret existing bytes without changing their storage or authority. -/
+  | spanReinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
+  /-- Snapshot copying permits overlapping spans; try-copy returns false for a short target. -/
+  | spanCopy (width : Nat) (tryCopy : Bool)
+  | spanFill (width : Nat) (clear : Bool)
   | bigMul64
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | load512 | store128 | store256 | store512 | init256
   | asRef | add (sizeBytes : Nat) (signed : Bool)
+  /-- The target-minus-origin byte displacement within one live allocation. -/
+  | byteOffset
+  /-- Read into a value or an out reference; a short try-read stores default(T). -/
+  | marshalRead (kind : TransferKind) (tryRead : Bool)
+  /-- Copy an in-reference value to a byte span; a short try-write has no memory effect. -/
+  | marshalWrite (kind : TransferKind) (tryWrite : Bool)
   | bitcast256 | bitcastByteBool | skipInit
   | bitcastValue (source target : SnapshotShape)
   | staticAddress (bytes : List (BitVec 8)) | spanCreate | spanReference
@@ -130,6 +161,8 @@ inductive MemoryOp where
   /-- Primitive spans over supplied storage; these operations never grant memory authority. -/
   | spanFromReference (width : Nat) (writable : Bool)
   | spanSlice (explicitLength : Bool) | spanReadOnly
+  /-- A span view over supplied primitive array storage, without allocation or copying. -/
+  | arraySpan (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   /-- Integer operations over supplied array storage; allocation is not modelled. -/
   | arrayLength | arrayLoad (width : Nat) (signed : Bool) | arrayStore (width : Nat)
   /-- A checked element address retains allocation provenance without granting authority. -/
@@ -140,10 +173,15 @@ inductive MemoryOp where
 
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
+  | .spanCopy .. => 2
+  | .spanFill _ clear => if clear then 1 else 2
+  | .marshalRead _ tryRead => if tryRead then 2 else 1
+  | .marshalWrite .. => 2
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
-  | .spanFromReference .. => 2
-  | .spanReadOnly | .arrayLength => 1
+  | .spanFromReference .. | .byteOffset => 2
+  | .arraySpan _ _ range => range.argumentCount
+  | .spanReinterpret .. | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2

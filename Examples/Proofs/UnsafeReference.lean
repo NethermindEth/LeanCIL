@@ -11,7 +11,7 @@ theorem reinterpret_preserves (memory : Memory) (reference : Reference) (rest : 
     (formed : form memory reference = .ok reference) :
     memoryInstruction .asRef (.reference (.address reference) :: rest) memory =
       .ok (memory, .reference (.address reference) :: rest) := by
-  simp [memoryInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+  simp [memoryInstruction, otherMemoryInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands,
     CIL.Safety.Value.hasUnspecified, formValue, checkedAt, formed, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
@@ -20,7 +20,7 @@ theorem correctness (memory : Memory) (reference : Reference)
     (formed : form memory reference = .ok reference) :
     invoke Extracted.program 4 0 [.reference (.address reference)] memory =
       .ok (memory, [.reference (.address reference)]) := by
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, formed, instruction, staticInstruction, memoryInstruction,
+  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, formed, instruction, staticInstruction, memoryInstruction, otherMemoryInstruction,
     observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands, CIL.Safety.Value.hasUnspecified,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   all_goals simp [run, Extracted.program, Extracted.method0, step, checkedValue, formValue,

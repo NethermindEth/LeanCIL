@@ -1,9 +1,24 @@
 import CIL.Safety.SpanViews
 import CIL.Safety.AllocationExtension
 
-/-! # Preservation of span extents under allocation extension -/
+/-! # Checked span fills and preservation of extents under allocation extension -/
 
 namespace CIL.Safety
+
+/-- A nonempty fill performs one checked write of exactly the repeated element encoding. -/
+theorem SpanView.fill_written (view : SpanView) (before after : Memory)
+    (base : Reference) (element : List (BitVec 8))
+    (address : view.reference = .address base) (nonempty : view.length ≠ 0)
+    (filled : view.fill before element = .ok after) :
+    Safety.write before base (List.replicate view.length element).flatten 1 = .ok after := by
+  unfold SpanView.fill at filled
+  simp only [address, nonempty, beq_iff_eq, ite_false] at filled
+  repeat' first
+    | exact filled
+    | cases filled
+    | split at filled
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
+#print axioms SpanView.fill_written
 
 /-- Span formation depends on allocation metadata, not cells or permissions. -/
 theorem SpanView.validate_congr (view : SpanView) (before after : Memory)

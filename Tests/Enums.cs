@@ -155,3 +155,5 @@ foreach (var mutation in mutations)
 queue.Flush();
 
 Console.WriteLine($"PASS {cases} enum runtime comparisons and {mutations.Length} malformed metadata rejections");
+Run(["dotnet", "run", "--file", "Tests/EnumBuffers.cs"], streamOutput: true, progress: "Enum buffer checks");
+Run(["dotnet", "run", "--file", "Tests/EnumMetadata.cs"], streamOutput: true, progress: "Enum metadata checks");

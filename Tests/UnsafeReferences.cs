@@ -3,8 +3,12 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
+#:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
 
 using Mono.Cecil;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
@@ -22,7 +26,7 @@ void Prove(string name, string selector, string claim)
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + memory +
-        "\ntheorem correctness : " + claim + " := by rfl\nend ExampleProof\n");
+        "\ntheorem correctness : " + claim + " := by rfl\n#print axioms correctness\nend ExampleProof\n");
     queue.Add(new(selector, proof, output),
         () => Console.WriteLine("PASS checked byref reinterpretation: " + name));
 }
@@ -56,7 +60,179 @@ Prove("Uninitialized", "UnsafeReferences::Read(Examples.FourLimbs&)",
     "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .error ⟨0, 2, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩");
 Prove("PastEnd", "UnsafeReferences::PastEnd(Examples.FourLimbs&)",
     "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .error ⟨0, 4, .memory .outsideAllocation (.address ⟨0, 32⟩) 8⟩");
+
+var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.UnsafeReferences")!;
+var bytes = new byte[32];
+foreach (var name in new[]
+    { "AreSame", "Less", "Greater", "ByteOffset", "AddSigned", "AddUnsigned", "Subtract", "SubtractUnsigned" })
+{
+    var offset = name is "AddSigned" or "AddUnsigned" or "Subtract" or "SubtractUnsigned";
+    var unsigned = name is "AddUnsigned" or "SubtractUnsigned";
+    var selector = $"UnsafeReferences::{name}(System.Byte&," +
+        (offset ? unsigned ? "System.UIntPtr)" : "System.IntPtr)" : "System.Byte&)");
+    var method = runtime.GetMethod(name)!;
+    long expected;
+    if (name == "ByteOffset")
+        expected = method.CreateDelegate<ReferenceDifference>()(ref bytes[5], ref bytes[2]);
+    else if (offset)
+    {
+        ref var result = ref (unsigned
+            ? ref method.CreateDelegate<UnsignedReferenceOffset>()(ref bytes[5], 3)
+            : ref method.CreateDelegate<SignedReferenceOffset>()(ref bytes[5], 3));
+        expected = Unsafe.ByteOffset(ref bytes[0], ref result);
+    }
+    else expected = method.CreateDelegate<ReferenceComparison>()(ref bytes[5], ref bytes[2]) ? 1 : 0;
+    var argument = offset ? ".scalar (.i64 3)" : ".reference (.address ⟨0, 2⟩)";
+    var resultBits = unchecked((ulong)expected);
+    var resultValue = offset ? $".reference (.address ⟨0, {expected}⟩)" :
+        $".scalar (.{(name == "ByteOffset" ? "i64" : "i32")} {resultBits})";
+    Prove(name, selector,
+        $"CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 5⟩), {argument}] memory = " +
+        $".ok (memory, [{resultValue}])");
+}
+void Boundary(string name, string theorem, string arguments, string result, string initial = "memory")
+{
+    File.AppendAllText(Path.Combine(root, name, "Proof.lean"), $$"""
+
+        namespace ExampleProof
+        /-- Reference helpers retain checked allocation boundaries without granting authority. -/
+        theorem {{theorem}} : CIL.Safety.invoke Extracted.program 8 0
+            {{arguments}} ({{initial}}) = {{result}} := by rfl
+        #print axioms {{theorem}}
+        end ExampleProof
+
+        """);
+}
+const string backward = ".ok (memory, [.scalar (.i64 (-3))])";
+Boundary("ByteOffset", "readonly_difference",
+    "[.readOnlyReference (.address ⟨0, 5⟩), .readOnlyReference (.address ⟨0, 2⟩)]", backward);
+Boundary("ByteOffset", "difference_needs_no_authority",
+    "[.reference (.address ⟨0, 5⟩), .reference (.address ⟨0, 2⟩)]",
+    ".ok ({ memory with views := [] }, [.scalar (.i64 (-3))])", "{ memory with views := [] }");
+Boundary("ByteOffset", "end_pointer_difference",
+    "[.reference (.address ⟨0, 32⟩), .reference (.address ⟨0, 0⟩)]",
+    ".ok (memory, [.scalar (.i64 (-32))])");
+Boundary("ByteOffset", "cross_allocation_unsupported",
+    "[.reference (.address ⟨0, 5⟩), .reference (.address ⟨1, 2⟩)]",
+    ".error ⟨0, 2, .unsupported \"Cross-allocation pointer arithmetic\"⟩",
+    "{ memory with nextIdentity := 2, allocations := fun identity => if identity < 2 then " +
+    "some ⟨.callerStack, ⟨32, 1, []⟩, true, [32]⟩ else none }");
+Boundary("ByteOffset", "expired_difference",
+    "[.reference (.address ⟨0, 5⟩), .reference (.address ⟨0, 2⟩)]",
+    ".error ⟨0, 0, .memory .expiredLifetime (.address ⟨0, 5⟩) 0⟩", "CIL.Safety.expire memory 0");
+Boundary("AreSame", "null_equality", "[.reference .null, .reference .null]",
+    ".ok (memory, [.scalar (.i32 1)])");
+Boundary("AddSigned", "negative_byte_offset", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 (-3))]",
+    ".ok (memory, [.reference (.address ⟨0, 2⟩)])");
+Boundary("AddUnsigned", "end_byte_offset", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 27)]",
+    ".ok (memory, [.reference (.address ⟨0, 32⟩)])");
+Boundary("AddUnsigned", "outside_byte_offset", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 28)]",
+    ".error ⟨0, 2, .memory .invalidReference (.address ⟨0, 5⟩) 0⟩");
+Boundary("Subtract", "negative_subtraction", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 (-3))]",
+    ".ok (memory, [.reference (.address ⟨0, 8⟩)])");
+Boundary("SubtractUnsigned", "native_wrapping_subtraction",
+    "[.reference (.address ⟨0, 5⟩), .scalar (.i64 18446744073709551615)]",
+    ".ok (memory, [.reference (.address ⟨0, 6⟩)])");
+Boundary("SubtractUnsigned", "readonly_subtraction",
+    "[.readOnlyReference (.address ⟨0, 5⟩), .scalar (.i64 3)]",
+    ".ok (memory, [.readOnlyReference (.address ⟨0, 2⟩)])");
+var words = new ulong[4];
+foreach (var (name, offsetType, scalar) in new[]
+{
+    ("SubtractElements32", "System.Int32", "i32"),
+    ("SubtractElementsNative", "System.IntPtr", "i64"),
+    ("SubtractElementsUnsigned", "System.UIntPtr", "i64")
+})
+{
+    var method = runtime.GetMethod(name)!;
+    ref var result = ref (scalar == "i32"
+        ? ref method.CreateDelegate<WordOffset32>()(ref words[3], 2)
+        : ref offsetType == "System.IntPtr"
+            ? ref method.CreateDelegate<WordOffsetNative>()(ref words[3], 2)
+            : ref method.CreateDelegate<WordOffsetUnsigned>()(ref words[3], 2));
+    var expected = Unsafe.ByteOffset(ref words[0], ref result);
+    Prove(name, $"UnsafeReferences::{name}(System.UInt64&,{offsetType})",
+        $"CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 24⟩), .scalar (.{scalar} 2)] " +
+        $"memory = .ok (memory, [.reference (.address ⟨0, {expected}⟩)])");
+    Boundary(name, "negative_native_stride", $"[.reference (.address ⟨0, 8⟩), .scalar (.{scalar} (-1))]",
+        ".ok (memory, [.reference (.address ⟨0, 16⟩)])");
+    Boundary(name, "outside_subtraction", $"[.reference (.address ⟨0, 8⟩), .scalar (.{scalar} 2)]",
+        ".error ⟨0, 2, .memory .invalidReference (.address ⟨0, 8⟩) 0⟩");
+}
+Prove("SubtractAggregate", "UnsafeReferences::SubtractAggregate(Examples.FourLimbs&,System.IntPtr)",
+    "CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 32⟩), .scalar (.i64 1)] " +
+    "memory = .ok (memory, [.reference (.address ⟨0, 0⟩)])");
+ref var wrapped = ref runtime.GetMethod("SubtractElementsUnsigned")!.CreateDelegate<WordOffsetUnsigned>()
+    (ref words[1], nuint.MaxValue);
+if (Unsafe.ByteOffset(ref words[1], ref wrapped) != 8)
+    throw new InvalidOperationException("Unsigned element subtraction did not wrap at native width");
+Prove("SubtractVector",
+    "UnsafeReferences::SubtractVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UIntPtr)",
+    "CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 16⟩), .scalar (.i64 1)] " +
+    "memory = .ok (memory, [.reference (.address ⟨0, 0⟩)])");
 queue.Flush();
+
+var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
+foreach (var (name, before, after) in new[]
+{
+    ("AreSame", ".eq", ".ltu"),
+    ("ByteOffset", ".memory .byteOffset", ".sub"),
+    ("AddSigned", ".memory (.add 1 true)", ".memory (.add 8 true)"),
+    ("AddUnsigned", ".memory (.add 1 false)", ".memory (.add 1 true)"),
+    ("Subtract", ".sub", ".add"),
+    ("SubtractUnsigned", ".sub", ".add"),
+    ("SubtractElements32", ".memory (.add 18446744073709551608 true)", ".memory (.add 8 true)"),
+    ("SubtractElementsUnsigned", ".memory (.add 18446744073709551608 false)",
+        ".memory (.add 18446744073709551608 true)"),
+    ("SubtractVector", ".memory (.add 18446744073709551600 false)", ".memory (.add 16 false)")
+})
+{
+    var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    var narrowed = NarrowEvidence(source, "method0_unsafe_validated");
+    if (!narrowed.Contains(before, StringComparison.Ordinal))
+        throw new InvalidOperationException("Missing mutation target: " + name);
+    var path = Path.Combine(root, name, "WrongOperation.lean");
+    File.WriteAllText(path, narrowed.Replace(before, after, StringComparison.Ordinal));
+    rejected.Add(path, "PASS exact Unsafe operation rejection: " + name, "UnsafeCallsValid");
+}
+var aggregateSource = File.ReadAllText(Path.Combine(root, "SubtractAggregate", "Extracted.lean"));
+var aggregateEvidence = NarrowEvidence(aggregateSource, "method0_layouts_validated");
+const string aggregateStride = ".memory (.add 18446744073709551584 true)";
+if (!aggregateEvidence.Contains(aggregateStride, StringComparison.Ordinal))
+    throw new InvalidOperationException("Missing aggregate subtraction stride");
+var aggregateForgery = Path.Combine(root, "SubtractAggregate", "WrongStride.lean");
+File.WriteAllText(aggregateForgery, aggregateEvidence.Replace(aggregateStride,
+    ".memory (.add 32 true)", StringComparison.Ordinal));
+rejected.Add(aggregateForgery, "PASS exact aggregate subtraction layout", "MethodLayoutsValid");
+var byteOffsetSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "ByteOffset", "Extracted.lean")),
+    "method0_unsafe_validated");
+foreach (var (name, before, after) in new[]
+{
+    ("scope", "declaringType := .atom Extraction.runtimeScope", "declaringType := .atom \"forged\""),
+    ("identity", "target := .external externalIdentity0", "target := .external \"forged\""),
+    ("result", "returnType := .atom Extraction.runtimeScope \"System.IntPtr\"",
+        "returnType := .atom Extraction.runtimeScope \"System.UIntPtr\""),
+    ("generic", "typeArguments := [.atom Extraction.runtimeScope \"System.Byte\"]",
+        "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Byte\") ]"),
+    ("array-storage", ".atom Extraction.runtimeScope \"System.Byte\"",
+        ".array (.atom Extraction.runtimeScope \"System.Byte\")")
+})
+{
+    if (!byteOffsetSource.Contains(before, StringComparison.Ordinal))
+        throw new InvalidOperationException("Missing identity mutation target: " + name);
+    var path = Path.Combine(root, "ByteOffset", "Wrong-" + name + ".lean");
+    File.WriteAllText(path, byteOffsetSource.Replace(before, after, StringComparison.Ordinal));
+    rejected.Add(path, "PASS exact Unsafe identity rejection: " + name, "UnsafeCallsValid");
+}
+var renamedSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "AreSame", "Extracted.lean")),
+    "method0_scalars_validated")
+    .Replace("name := \"AreSame\"", "name := \"Other\"", StringComparison.Ordinal)
+    .Replace("declaringType := .atom Extraction.runtimeScope \"System.Runtime.CompilerServices.Unsafe\"",
+        "declaringType := .atom \"Fixture\" \"Lookalike\"", StringComparison.Ordinal);
+var renamedPath = Path.Combine(root, "AreSame", "ForgedNameAndOwner.lean");
+File.WriteAllText(renamedPath, renamedSource);
+rejected.Add(renamedPath, "PASS forged name and owner cannot emit a scalar comparison", "ScalarFlowValid");
+rejected.Check();
 
 foreach (var mutation in new[] { "reference-field", "class", "pointer", "arity", "parameter", "return", "instance", "scope", "version" })
 {
@@ -87,3 +263,37 @@ foreach (var mutation in new[] { "reference-field", "class", "pointer", "arity",
         throw new InvalidOperationException("Unsafe byref mutation accepted: " + mutation);
     Console.WriteLine("PASS unsafe byref rejection: " + mutation);
 }
+
+foreach (var mutation in new[] { "parameter", "return", "generic", "scope" })
+{
+    var output = Path.Combine(root, "Reject-ByteOffset-" + mutation);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var method = module.GetType("Examples.UnsafeReferences").Methods.Single(method => method.Name == "ByteOffset");
+        var call = (GenericInstanceMethod)method.Body.Instructions.Single(i => i.Operand is MethodReference).Operand;
+        switch (mutation)
+        {
+            case "parameter": call.Parameters[1].ParameterType = module.TypeSystem.IntPtr; break;
+            case "return": call.ReturnType = module.TypeSystem.UIntPtr; break;
+            case "generic": call.GenericArguments[0] = module.TypeSystem.String; break;
+            case "scope": call.DeclaringType.Scope = module; break;
+        }
+        module.Write(dll);
+    }
+    File.Delete(Path.Combine(output, "Extracted.lean"));
+    var result = Execute(Extract("extract", dll, "Examples",
+        "UnsafeReferences::ByteOffset(System.Byte&,System.Byte&)", output));
+    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")))
+        throw new InvalidOperationException("Unsafe ByteOffset mutation accepted: " + mutation);
+    Console.WriteLine("PASS unsafe ByteOffset metadata rejection: " + mutation);
+}
+
+delegate bool ReferenceComparison(ref byte origin, ref byte target);
+delegate nint ReferenceDifference(ref byte origin, ref byte target);
+delegate ref byte SignedReferenceOffset(ref byte origin, nint offset);
+delegate ref byte UnsignedReferenceOffset(ref byte origin, nuint offset);
+delegate ref ulong WordOffset32(ref ulong origin, int offset);
+delegate ref ulong WordOffsetNative(ref ulong origin, nint offset);
+delegate ref ulong WordOffsetUnsigned(ref ulong origin, nuint offset);

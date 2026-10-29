@@ -49,6 +49,7 @@ theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List
 /-- Reference validity is independent of readable initialization and access
     width. A span's accessible bytes are checked by the memory operation. -/
 def Value.Valid (m : Memory) : Value → Prop
+  | .methodPointer _ | .methodTable _ => True
   | .scalar value => numericValue value = true
   | .bufferSpan view => view.validate m = .ok ()
   | .array view => view.validate m = .ok ()
@@ -137,6 +138,7 @@ theorem formValue_readOnly_valid (m : Memory) (reference : ManagedReference) (va
 theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
   cases value with
+  | methodPointer _ | methodTable _ => cases h; exact ⟨rfl, trivial⟩
   | scalar value =>
     simp only [checkedValue] at h
     split at h
@@ -177,6 +179,7 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
 theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid m) :
     checkedValue m value = .ok value := by
   cases value with
+  | methodPointer _ | methodTable _ => rfl
   | scalar value => simp only [Value.Valid] at valid; simp [checkedValue, valid]
   | bufferSpan view | array view =>
     simp only [Value.Valid] at valid
@@ -199,7 +202,7 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   intro value member
   have hv := valid value member
   cases value with
-  | scalar value => exact hv
+  | scalar value | methodPointer _ | methodTable _ => exact hv
   | bufferSpan view => exact view.validate_preserved hv hm ext
   | array view => exact view.validate_preserved hv hm ext
   | readOnlyReference r =>
@@ -265,6 +268,19 @@ theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
     | split at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
 
+/-- Typed transfer reads produce numeric or snapshot values, never managed references. -/
+theorem loadTransfer_numeric (memory : Memory) (reference : ManagedReference)
+    (kind : CIL.TransferKind) (value : CIL.Value)
+    (read : loadTransfer memory reference kind = .ok value) : numericValue value = true := by
+  cases kind with
+  | scalar width signed =>
+    simp only [loadTransfer] at read
+    split at read
+    · exact loadValue_scalar_valid _ _ _ _ read
+    · cases read
+  | snapshot shape => exact loadSnapshot_numeric read
+#print axioms loadTransfer_numeric
+
 theorem add_result_valid (m : Memory) (r result : Reference) (size : Nat) (offset : BitVec 64)
     (h : add m r size offset = .ok result) : form m result = .ok result := by
   unfold add at h
@@ -316,11 +332,37 @@ theorem storeValue_effect (m result : Memory) (reference : ManagedReference) (va
     | split at h
     | simp only [Bind.bind, Except.bind] at h
 
+/-- A typed transfer changes memory by one checked write. -/
+theorem storeTransfer_effect (memory result : Memory) (reference : ManagedReference)
+    (kind : CIL.TransferKind) (value : CIL.Value)
+    (stored : storeTransfer memory reference kind value = .ok result) :
+    InstructionEffect memory result := by
+  unfold storeTransfer at stored
+  repeat' first
+    | solve | exact .write (checkedAt_ok (by assumption))
+    | solve | exact .snapshot (checkedAt_ok (by assumption))
+    | cases stored
+    | split at stored
+    | simp only [Bind.bind, Except.bind] at stored
+#print axioms storeTransfer_effect
+
 /-- Memory effects and output validity share the same instruction case analysis.
     Validity remains conditional, so effect clients need no input invariant. -/
 structure InstructionContract (m result : Memory) (stack values : List Value) : Prop where
   effect : InstructionEffect m result
   values : m.WellFormed → ValuesValid m stack → ValuesValid result values
+
+/-- A span fill either leaves an empty view unchanged or performs one checked write. -/
+theorem spanFill_effect (view : SpanView) (memory result : Memory) (element : List (BitVec 8))
+    (filled : view.fill memory element = .ok result) : InstructionEffect memory result := by
+  unfold SpanView.fill at filled
+  repeat' first
+    | exact .write filled
+    | solve | cases filled; exact .unchanged _
+    | cases filled
+    | split at filled
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
+#print axioms spanFill_effect
 
 /-- An instruction whose outputs are valid whenever its inputs are valid afterwards meets its
     contract, since its effect keeps the inputs valid. -/
@@ -399,6 +441,8 @@ macro "instruction_contract_close" : tactic => `(tactic| (
     | exact .write (checkedAt_ok (by assumption))
     | exact .snapshot (checkedAt_ok (by assumption))
     | apply storeValue_effect; assumption
+    | exact spanFill_effect _ _ _ _ (checkedAt_ok (by assumption))
+    | apply storeTransfer_effect; assumption
   · intro retained
     repeat' first
       | exact retained
@@ -413,6 +457,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact True.intro
             | exact bitcastValue_numeric (by assumption)
             | exact loadSnapshot_numeric (by assumption)
+            | exact loadTransfer_numeric _ _ _ _ (by assumption)
             | exact retained.head
             | apply loadValue_scalar_valid; assumption
             | apply formValue_result_valid; assumption
@@ -429,16 +474,58 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact retained.tail.tail
             | exact retained.tail.tail.tail))
 
+/-- Copying only changes checked destination bytes and returns a scalar flag or no value. -/
+theorem spanCopyInstruction_contract (width : Nat) (tryCopy : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (copied : spanCopyInstruction width tryCopy stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  cases tryCopy <;> unfold spanCopyInstruction at copied
+  all_goals simp only [Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+    writeIndexed_eq, Bind.bind, Except.bind, Pure.pure, Except.pure] at copied
+  all_goals repeat' first
+    | solve | cases copied; instruction_contract_close
+    | cases copied
+    | split at copied
+#print axioms spanCopyInstruction_contract
+
+/-- Fill and clear preserve the checked write effect and retain only valid stack values. -/
+theorem spanFillInstruction_contract (width : Nat) (clear : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (filled : spanFillInstruction width clear stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold spanFillInstruction at filled
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
+  repeat' first
+    | solve | cases filled; instruction_contract_close
+    | cases filled
+    | split at filled
+#print axioms spanFillInstruction_contract
+
 set_option maxHeartbeats 800000 in
+/-- The remaining memory operations preserve their checked effects and stack validity. -/
+private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
+    (stack values : List Value) (memory result : Memory)
+    (executed : otherMemoryInstruction operation stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold otherMemoryInstruction at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms otherMemoryInstruction_contract
+
+/-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
     InstructionContract m result stack values := by
   unfold memoryInstruction at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals repeat' first
-    | solve | cases h; instruction_contract_close
-    | cases h
-    | split at h
+  split at h
+  · cases h
+  · split at h
+    · exact spanCopyInstruction_contract _ _ _ _ _ _ h
+    · exact spanFillInstruction_contract _ _ _ _ _ _ h
+    · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in
 theorem instruction_contract (operation : CIL.Op) (stack values : List Value) (m result : Memory)

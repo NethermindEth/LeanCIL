@@ -260,7 +260,7 @@ example : ¬ VectorInitializationsValid
     (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom "forged" "System.UInt64")))
     [true] (body [.initAggregate 16]) := by decide +kernel
 example : ¬ VectorInitializationsValid
-    (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Int64")))
+    (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Int16")))
     [true] (body [.initAggregate 16]) := by decide +kernel
 example : ¬ VectorInitializationsValid
     (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector64`1") (.atom runtimeScope "System.UInt64")))

@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import CIL.Extraction.SpanCalls
 import Std.Data.TreeMap.Lemmas
 
 /-!
@@ -12,101 +13,6 @@ role, which the feature and scalar checks then enforce.
 -/
 
 namespace CIL.Extraction
-
-/-- Characters allowed in a plain metadata name. -/
-private def plainChar (c : Char) : Bool :=
-  c.isAlphanum || c == '_' || c == '.' || c == '/' || c == '`'
-
-/-- Identifier-only names exclude modifiers, arrays and other decorated metadata spellings. -/
-private def plainName (name : List Char) : Bool := !name.isEmpty && name.all plainChar
-
-/-- A nonempty scope with no colon. -/
-private def plainScope (scope : List Char) : Bool := !scope.isEmpty && !scope.contains ':'
-
-/-- Split `scope::name` at its first colon; any other colon makes the identity unusable. -/
-private def splitIdentity : List Char → List Char → Option (List Char × List Char)
-  | scope, ':' :: ':' :: name => some (scope.reverse, name)
-  | scope, c :: rest => if c == ':' then none else splitIdentity (c :: scope) rest
-  | _, [] => none
-
-/-- `(scope, name)` when both are plain. -/
-private def leaf (scope name : List Char) : Option (List Char × List Char) :=
-  if plainScope scope && plainName name then some (scope, name) else none
-
-/-- Decode ASCII without repeated indexed UTF-8 reads during kernel reduction. -/
-private def asciiChars : List UInt8 → Option (List Char)
-  | [] => some []
-  | byte :: bytes =>
-    if byte.toNat < 128 then (Char.ofNat byte.toNat :: ·) <$> asciiChars bytes else none
-
-/-- An ASCII byte is the complete UTF-8 encoding of its character. -/
-private theorem asciiByte (byte : UInt8) (small : byte.toNat < 128) :
-    String.utf8EncodeChar (Char.ofNat byte.toNat) = [byte] := by
-  have valid : byte.toNat.isValidChar := by simp [Nat.isValidChar]; omega
-  have bound : byte.toNat ≤ 127 := by omega
-  simp [String.utf8EncodeChar, Char.ofNat, valid, Char.ofNatAux, bound]
-
-#print axioms asciiByte
-
-/-- Successful ASCII decoding preserves every input byte. -/
-private theorem asciiChars_encode (bytes : List UInt8) (chars : List Char)
-    (decoded : asciiChars bytes = some chars) :
-    chars.utf8Encode.data.toList = bytes := by
-  induction bytes generalizing chars with
-  | nil => simp [asciiChars] at decoded; subst chars; rfl
-  | cons byte bytes ih =>
-    simp only [asciiChars] at decoded
-    split at decoded
-    next small =>
-      cases tail : asciiChars bytes with
-      | none => simp [tail] at decoded
-      | some rest =>
-        simp [tail] at decoded
-        subst chars
-        simpa [List.utf8Encode, List.flatMap_cons, asciiByte byte small] using ih rest tail
-    next large => simp at decoded
-
-#print axioms asciiChars_encode
-
-/-- ASCII metadata uses a byte-list traversal; Unicode retains the full decoder. -/
-private def metadataChars (value : String) : List Char :=
-  match asciiChars value.toByteArray.data.toList with
-  | some chars => chars
-  | none => value.toList
-
-/-- Metadata decoding preserves the original character sequence for every string. -/
-private theorem metadataChars_eq (value : String) : metadataChars value = value.toList := by
-  unfold metadataChars
-  cases decoded : asciiChars value.toByteArray.data.toList with
-  | none => rfl
-  | some chars =>
-    have encoded := asciiChars_encode _ _ decoded
-    have same : String.ofList chars = value := by
-      apply String.toByteArray_inj.mp
-      simpa [String.toByteArray_ofList, ByteArray.ext_iff, Array.ext_iff] using encoded
-    simpa using congrArg String.toList same
-
-#print axioms metadataChars_eq
-
-/-- A named type as its referencing scope and full name. -/
-def namedType : TypeExpr → Option (List Char × List Char)
-  | .atom scope name | .constructor scope name => leaf (metadataChars scope) (metadataChars name)
-  | .aggregate identity _ | .enum identity _ => do
-    let (scope, name) ← splitIdentity [] (metadataChars identity)
-    leaf scope name
-  | _ => none
-
-/-- The fast metadata decoder retains the original named-type rule, including Unicode. -/
-theorem namedType_eq_original (type : TypeExpr) : namedType type =
-    match type with
-    | .atom scope name | .constructor scope name => leaf scope.toList name.toList
-    | .aggregate identity _ | .enum identity _ => do
-      let (scope, name) ← splitIdentity [] identity.toList
-      leaf scope name
-    | _ => none := by
-  cases type <;> simp only [namedType, metadataChars_eq]
-
-#print axioms namedType_eq_original
 
 /-- Pointer, byref and generic instance types, which are never equal to a named type. -/
 private def constructed : TypeExpr → Bool
@@ -310,13 +216,47 @@ inductive FoldRole where
   | result (value : Bool)
   /-- The raw `throw`: raises the constructed type. -/
   | raise (exception : String)
+  /-- An unchanged argument push protected from non-fallthrough entry. -/
+  | argument
+  /-- A checked constructor initializes the local whose address starts the fold. -/
+  | spanConstructor (index : Nat) (constructor : SpanConstructor)
+  /-- A direct managed call whose prefix requests frame retirement before transfer. -/
+  | tailCall
   deriving DecidableEq, Repr
 
+/-- A constructor fold admits at most three pure single-value argument pushes. -/
+private def spanConstructorFold (locals : List TypeExpr) (head : RawInstruction)
+    (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
+  if !(head.opcode ∈ [18, 65037]) then none else pure ()
+  let index ← localIndex head
+  let localType ← locals[index]?
+  let pushes := (tail.take 4).takeWhile fun instruction => instruction.opcode ∈
+    [2, 3, 4, 5, 14, 65033, 6, 7, 8, 9, 17, 65036,
+      20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+  if pushes.length > 3 then none else pure ()
+  let call ← tail[pushes.length]?
+  let .call site := call.operand | none
+  if call.opcode != 40 || site.declaringType != localType then none else pure ()
+  let constructor ← spanLocalConstructor site
+  if pushes.length != site.parameterCount then none else
+    some (some .head :: List.replicate pushes.length (some .argument) ++
+      [some (.spanConstructor index constructor)])
+
 /-- The roles of a fold starting at `a`, if any; type tests take precedence. -/
-private def foldAt (locals : List TypeExpr) (a : RawInstruction) (tail : List RawInstruction) :
+private def foldAt (locals receiverLocals : List TypeExpr)
+    (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
+  spanConstructorFold locals a tail <|>
+  (match a, tail with
+    | ⟨_, 65044, .none⟩, ⟨_, 41, .indirectCall _ _ false false 0⟩ ::
+        ⟨_, 42, .none⟩ :: _ => some [some .head, some .tailCall, some .argument]
+    | ⟨_, 65044, .none⟩, ⟨_, 40, .call site⟩ :: ⟨_, 42, .none⟩ :: _ =>
+      match site.target with
+      | .managed _ => some [some .head, some .tailCall, some .argument]
+      | _ => none
+    | _, _ => none) <|>
   (match tail with
-    | b :: rest => if receiverFold locals a b && spanReceiverUse rest then
+    | b :: rest => if receiverFold receiverLocals a b && spanReceiverUse rest then
         some [some .head, some .interior] else none
     | _ => none) <|>
   (match tail with
@@ -327,13 +267,13 @@ private def foldAt (locals : List TypeExpr) (a : RawInstruction) (tail : List Ra
     some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
 
 /-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural. -/
-def foldRolesFrom (locals : List TypeExpr) :
+def foldRolesFrom (locals receiverLocals : List TypeExpr) :
     List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
   | _, [] => []
-  | role :: pending, _ :: tail => role :: foldRolesFrom locals pending tail
-  | [], a :: tail => match foldAt locals a tail with
-    | some (role :: pending) => role :: foldRolesFrom locals pending tail
-    | _ => none :: foldRolesFrom locals [] tail
+  | role :: pending, _ :: tail => role :: foldRolesFrom locals receiverLocals pending tail
+  | [], a :: tail => match foldAt locals receiverLocals a tail with
+    | some (role :: pending) => role :: foldRolesFrom locals receiverLocals pending tail
+    | _ => none :: foldRolesFrom locals receiverLocals [] tail
 
 /-- Exact counts of decoded local operands, including indexes outside the declared locals. -/
 private def localUseCounts : List RawInstruction → Std.TreeMap Nat Nat
@@ -363,15 +303,15 @@ private theorem localUseCounts_get (code : List RawInstruction) (index : Nat) :
 
 /-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
-  if locals.isEmpty then foldRolesFrom [] [] code else
+  if locals.isEmpty then foldRolesFrom [] [] [] code else
   let counts := localUseCounts code
   let singleUse := locals.zipIdx.map fun (type, index) =>
     if counts.getD index 0 == 2 then type else .void
-  foldRolesFrom singleUse [] code
+  foldRolesFrom locals singleUse [] code
 
 /-- Indexed role discovery agrees with filtering the whole body separately for each local. -/
 theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction) :
-    foldRoles locals code = foldRolesFrom
+    foldRoles locals code = foldRolesFrom locals
       (locals.zipIdx.map fun (type, index) =>
         if (code.filter fun instruction => localIndex instruction == some index).length == 2
           then type else .void) [] code := by
@@ -383,7 +323,9 @@ theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
 def foldEntry (role : Option (Option FoldRole)) : Bool :=
   match role with
-  | some (some .interior) | some (some (.result _)) | some (some (.raise _)) => false
+  | some (some .interior) | some (some (.result _)) | some (some (.raise _))
+  | some (some .argument) | some (some (.spanConstructor ..)) => false
+  | some (some .tailCall) => false
   | _ => true
 
 end CIL.Extraction

@@ -17,7 +17,7 @@ theorem correctness (memory result : Memory) (reference : Reference) (left right
     simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
       referenceAt, checkedAt, stored, Except.mapError,
       Bind.bind, Except.bind]
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, formed, instruction, staticInstruction, memoryInstruction,
+  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, formed, instruction, staticInstruction, memoryInstruction, otherMemoryInstruction,
     observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
     Value.hasUnspecified, CIL.Value.hasUnspecified,
     wrote, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]

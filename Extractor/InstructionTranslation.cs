@@ -23,9 +23,32 @@ internal static class InstructionTranslation
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!);
+        if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
+            return $".managed (.call {ManagedPointers.SignatureEvidence(indirect)} " +
+                $"{ManagedPointers.Catalog(indirect, methods, methodIndex, i.Previous?.OpCode.Code == Code.Tail)} " +
+                $"{(i.Previous?.OpCode.Code == Code.Tail ? "true" : "false")})";
+        if (i.OpCode.Code is Code.Ldlen or Code.Ldelem_I or Code.Ldelem_Any &&
+            nativeOperands.Incoming.TryGetValue(i, out var tableStack) &&
+            tableStack.Length >= (i.OpCode.Code == Code.Ldlen ? 1 : 2) &&
+            tableStack[^(i.OpCode.Code == Code.Ldlen ? 1 : 2)] is
+                { Kind: NativeOperands.Kind.MethodTable, Metadata: { } table })
+            return i.OpCode.Code == Code.Ldlen ? ".managed .tableLength" :
+                ".managed (.tableElement " + table[".methodTable ".Length..] + ")";
+        if (i.OpCode.Code == Code.Ldftn && i.Operand is MethodReference address)
+        {
+            var target = address.Resolve() ?? throw new InvalidDataException("Unresolved managed pointer target");
+            var targetIndex = methods.GetValueOrDefault(target, -1);
+            if (targetIndex < 0) throw new InvalidDataException("Managed pointer target is outside the catalog");
+            return $".managed (.address {ManagedPointers.TargetEvidence(target, targetIndex)} " +
+                $"{ManagedPointers.SignatureEvidence(target)})";
+        }
+        if (TailCalls.IsCall(i) && i.Operand is MethodReference tailTarget &&
+            nativeOperands.Incoming.TryGetValue(i, out var tailStack) &&
+            tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
+            throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
         if (i.OpCode.Code == Code.Add && nativeOperands.Incoming.TryGetValue(i, out var incoming) &&
             incoming.Length >= 2 && incoming[^2] == NativeOperands.Kind.Reference &&
-            incoming[^1] is NativeOperands.Kind.Word32 or NativeOperands.Kind.Native)
+            incoming[^1].Kind is NativeOperands.Kind.Word32 or NativeOperands.Kind.Native)
             return ".memory (.add 1 true)";
         if (i.OpCode.Code == Code.Readonly)
         {
@@ -45,6 +68,11 @@ internal static class InstructionTranslation
     {
         profile ??= FeatureProfile.Scalar;
         var typeTests = TypeTests.Analyze(m);
+        if (i.OpCode.Code == Code.Tail)
+        {
+            TailCalls.ValidateReachable(m, i);
+            return ".nop";
+        }
         if (typeTests.Results.TryGetValue(i, out bool same)) return same ? ".const32 1" : ".const32 0";
         if (typeTests.Operands.Contains(i)) return ".nop";
         var throws = Throws.Analyze(m);
@@ -62,7 +90,9 @@ internal static class InstructionTranslation
             return $".call {index} {resolved.Parameters.Count + 1}";
         }
         if (throws.Raises.TryGetValue(i, out string? raised)) return $".throw \"{raised}\"";
-        if (throws.Operands.Contains(i) || Spans.Analyze(m).Operands.Contains(i)) return ".nop";
+        var spans = Spans.Analyze(m);
+        if (spans.Constructors.TryGetValue(i, out var constructor)) return constructor;
+        if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return ".nop";
         int Target() => instructions.Position((Instruction)i.Operand);
         int Local() => ((VariableDefinition)i.Operand).Index;
         string Narrow(TypeReference type) => LeanEmitter.Narrow(type) is { } kind ? $" (some .{kind})" : "";
@@ -117,11 +147,12 @@ internal static class InstructionTranslation
             if (RuntimeModel(r, profile) is string modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);
-            if (index > methodIndex)
+            if (index > methodIndex || index >= 0 && TailCalls.IsCall(i))
             {
                 if (i.OpCode.Code == Code.Newobj)
                     return $".newAggregate {index} {resolved.Parameters.Count} {Layout(resolved.DeclaringType)}";
-                return $".call {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
+                var operation = TailCalls.IsCall(i) ? "tailCall" : "call";
+                return $".{operation} {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
             }
             throw new InvalidDataException($"Unsupported or unresolved call: {r.FullName} [{r.DeclaringType.Scope.Name}]");
         }
@@ -157,7 +188,7 @@ internal static class InstructionTranslation
             Code.Switch => ".switch [" +
                 string.Join(", ", ((Instruction[])i.Operand).Select(instructions.Position)) + "]",
             Code.Sizeof => $".const32 {TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)}",
-            Code.Cpobj => $".copyObject {CopyWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)}",
+            Code.Cpobj => $".copyObject {TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)}",
             Code.Ldind_I1 => ".loadScalar 1 true", Code.Ldind_U1 => ".loadScalar 1",
             Code.Ldind_I2 => ".loadScalar 2 true", Code.Ldind_U2 => ".loadScalar 2",
             Code.Ldind_I4 or Code.Ldind_U4 => ".loadScalar 4",
@@ -178,15 +209,12 @@ internal static class InstructionTranslation
                 $".initAggregate {Layout((TypeReference)i.Operand)}",
             Code.Stobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) =>
                 $".storeAggregate {Layout((TypeReference)i.Operand)}",
-            Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .load128",
-            Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .load256",
-            Code.Ldobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".memory .load512",
-            Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".memory .store512",
-            Code.Initobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".initAggregate 16",
-            Code.Initobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".initAggregate 32",
-            Code.Initobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => ".initAggregate 64",
-            Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => ".memory .store128",
-            Code.Stobj when ((TypeReference)i.Operand).FullName == "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => ".memory .store256",
+            Code.Ldobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
+                $".memory .load{width * 8}",
+            Code.Stobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
+                $".memory .store{width * 8}",
+            Code.Initobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
+                $".initAggregate {width}",
             Code.Ldobj => $".loadScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}" +
                 (EnumTypes.Storage((TypeReference)i.Operand).FullName is "System.SByte" or "System.Int16" ? " true" : ""),
             Code.Stobj => $".storeScalar {MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)}",
@@ -231,14 +259,5 @@ internal static class InstructionTranslation
     static int TypeWidth(TypeReference type, ModuleDefinition module, string architecture,
         MetadataValidation.LayoutContext? layouts) => MetadataValidation.IsAggregate(type, module)
         ? layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)
-        : MetadataValidation.PrimitiveWidth(type);
-
-    static int CopyWidth(TypeReference type, ModuleDefinition module, string architecture,
-        MetadataValidation.LayoutContext? layouts) => type.FullName switch
-    {
-        "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
-        "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
-        "System.Runtime.Intrinsics.Vector512`1<System.UInt64>" => 64,
-        _ => TypeWidth(type, module, architecture, layouts)
-    };
+        : MetadataValidation.IntegerVectorWidth(type) ?? MetadataValidation.PrimitiveWidth(type);
 }

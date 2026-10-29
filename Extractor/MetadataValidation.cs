@@ -42,12 +42,27 @@ internal static class MetadataValidation
         _ => throw new InvalidDataException($"Unsupported field type: {type.FullName}")
     };
 
-    internal static int? VectorWidth(TypeReference type) => type is GenericInstanceType ? type.FullName switch
+    internal static int? IntegerVectorWidth(TypeReference type)
     {
-        "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" => 16,
-        "System.Runtime.Intrinsics.Vector256`1<System.UInt64>" => 32,
-        _ => null
-    } : null;
+        if (type is not GenericInstanceType { GenericArguments.Count: 1 } vector ||
+            !RuntimeModels.ExactScope(vector.ElementType.Scope, "System.Runtime.Intrinsics") ||
+            !RuntimeModels.ExactScope(vector.GenericArguments[0].Scope, "System.Runtime") ||
+            vector.GenericArguments[0].FullName is not ("System.Byte" or "System.Int32" or "System.UInt32" or
+                "System.Int64" or "System.UInt64")) return null;
+        return vector.ElementType.FullName switch
+        {
+            "System.Runtime.Intrinsics.Vector128`1" => 16,
+            "System.Runtime.Intrinsics.Vector256`1" => 32,
+            "System.Runtime.Intrinsics.Vector512`1" => 64,
+            _ => null
+        };
+    }
+
+    // Vector512 field alignment is not established by the admitted aggregate layout model.
+    internal static int? VectorFieldWidth(TypeReference type) => IntegerVectorWidth(type) switch
+    {
+        16 => 16, 32 => 32, _ => null
+    };
 
     internal sealed record AggregateInfo(int Size, int Alignment, IReadOnlyDictionary<string, int> Offsets);
 
@@ -118,7 +133,7 @@ internal static class MetadataValidation
 
         internal int Size(TypeReference reference) => AggregateLayout(reference).Size;
         internal int FieldSize(TypeReference type) => IsAggregate(type, module)
-            ? Size(type) : VectorWidth(type) ?? PrimitiveWidth(type);
+            ? Size(type) : VectorFieldWidth(type) ?? PrimitiveWidth(type);
         internal int FieldOffset(TypeReference owner, FieldDefinition field) =>
             AggregateLayout(owner).Offsets[field.FullName];
     }
@@ -127,7 +142,7 @@ internal static class MetadataValidation
         AggregateLayout(reference, module, architecture).Size;
 
     internal static int FieldSize(TypeReference type, ModuleDefinition module, string architecture = "scalar") =>
-        IsAggregate(type, module) ? Layout(type, module, architecture) : VectorWidth(type) ?? PrimitiveWidth(type);
+        IsAggregate(type, module) ? Layout(type, module, architecture) : VectorFieldWidth(type) ?? PrimitiveWidth(type);
 
     internal static int FieldOffset(TypeReference owner, FieldDefinition field, ModuleDefinition module, string architecture = "scalar") =>
         AggregateLayout(owner, module, architecture).Offsets[field.FullName];
@@ -165,7 +180,7 @@ internal static class MetadataValidation
         var alignment = 1;
         foreach (var field in type.Fields.Where(f => !f.IsStatic))
         {
-            int? vectorWidth = VectorWidth(field.FieldType);
+            int? vectorWidth = VectorFieldWidth(field.FieldType);
             if (field.FieldType is TypeSpecification && vectorWidth is null)
                 throw new InvalidDataException($"Unsupported field type: {field.FieldType.FullName}");
             var nested = IsAggregate(field.FieldType, module)
@@ -214,6 +229,11 @@ internal static class MetadataValidation
 
     internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, string architecture = "scalar")
     {
+        if (ManagedPointers.Signature(type) is { } managed)
+        {
+            ManagedPointers.Validate(managed, module, architecture);
+            return;
+        }
         if (type is PointerType pointer)
         {
             if (pointer.ElementType is TypeSpecification ||
@@ -233,6 +253,8 @@ internal static class MetadataValidation
         }
         if (type is ByReferenceType byRef)
         {
+            if (ManagedPointers.Signature(byRef.ElementType) is not null)
+                throw new InvalidDataException("Unsupported address of managed callable root");
             if (byRef.ElementType is ArrayType)
                 throw new InvalidDataException("Unsupported by-reference array root");
             if (Spans.Width(byRef.ElementType) is not null)
@@ -280,8 +302,10 @@ internal static class MetadataValidation
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
         Dictionary<MethodDefinition, int> state = [];
         List<MethodDefinition> ordered = [];
-        List<MethodDefinition> path = [];
         Dictionary<MethodDefinition, MethodDefinition[]> chains = [];
+        Dictionary<MethodDefinition, List<(MethodDefinition Method, bool Deferred)>> dependencies = [];
+        MethodReference[]? addressedMethods = null;
+        Dictionary<string, MethodDefinition[]> indirectTargets = new(StringComparer.Ordinal);
         // Call sites already reported, or whose callee was not analysed, have no translation to check.
         HashSet<Instruction> skipped = [];
         bool Check(MethodDefinition method, Instruction? at, Action check, bool named = false)
@@ -301,15 +325,33 @@ internal static class MetadataValidation
         }
         void Visit(MethodDefinition method)
         {
-            if (state.TryGetValue(method, out int visited))
+            var pending = new Stack<(MethodDefinition Method, bool Finish, bool Deferred,
+                MethodDefinition? Caller)>();
+            pending.Push((method, false, false, null));
+            while (pending.TryPop(out var item))
             {
-                if (visited == 1) throw new InvalidDataException($"Recursive managed dependency: {method.FullName}");
-                return;
+                if (item.Finish)
+                {
+                    state[item.Method] = 2;
+                    ordered.Add(item.Method);
+                    continue;
+                }
+                if (state.TryGetValue(item.Method, out var visited))
+                {
+                    if (visited == 1 && !item.Deferred)
+                        throw new InvalidDataException($"Recursive managed dependency: {item.Method.FullName}");
+                    continue;
+                }
+                chains[item.Method] = item.Caller is { } caller
+                    ? [.. chains[caller], item.Method] : [item.Method];
+                dependencies[item.Method] = [];
+                Walk(item.Method);
+                if (state[item.Method] == 3) continue;
+                pending.Push((item.Method, true, false, item.Caller));
+                foreach (var dependency in dependencies[item.Method].AsEnumerable().Reverse())
+                    pending.Push((dependency.Method, false, dependency.Deferred,
+                        item.Method));
             }
-            path.Add(method);
-            chains[method] = [.. path];
-            try { Walk(method); }
-            finally { path.RemoveAt(path.Count - 1); }
         }
         void Walk(MethodDefinition method)
         {
@@ -356,10 +398,11 @@ internal static class MetadataValidation
             state[method] = 1;
             void Enter(MethodDefinition callee, MethodReference reference, Instruction instruction)
             {
-                if (state.GetValueOrDefault(callee) == 1)
+                var deferred = TailCalls.IsCall(instruction) ||
+                    instruction.OpCode.Code is Code.Ldftn or Code.Calli;
+                if (state.GetValueOrDefault(callee) == 1 && !deferred)
                     throw Call("Recursive managed dependency", reference, method, instruction);
-                Visit(callee);
-                if (state[callee] == 3) skipped.Add(instruction);
+                dependencies[method].Add((callee, deferred));
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
@@ -384,7 +427,7 @@ internal static class MetadataValidation
                 }
                 if (reference is GenericInstanceMethod generic)
                 {
-                    if (instruction.OpCode.Code != Code.Call)
+                    if (instruction.OpCode.Code is not (Code.Call or Code.Ldftn or Code.Calli))
                         throw Call("Unsupported generic constructor call", reference, method, instruction);
                     MethodDefinition specialized;
                     try { specialized = specializations.Instantiate(generic); }
@@ -438,6 +481,28 @@ internal static class MetadataValidation
             }
             foreach (Instruction instruction in reachable)
             {
+                if (instruction.OpCode.Code == Code.Calli && instruction.Operand is Mono.Cecil.CallSite site)
+                {
+                    Check(method, instruction, () =>
+                    {
+                        ManagedPointers.Validate(site, module, profile.Architecture);
+                        var signature = ManagedPointers.SignatureEvidence(site);
+                        if (!indirectTargets.TryGetValue(signature, out var targets))
+                        {
+                            addressedMethods ??= ManagedPointers.AddressedMethods(module)
+                                .Where(target => target.DeclaringType.Scope == module).ToArray();
+                            targets = addressedMethods
+                                .Where(target => ManagedPointers.SameSignature(site, ManagedPointers.ReferenceSignature(target)))
+                                .Select(target => target is GenericInstanceMethod generic
+                                    ? specializations.Instantiate(generic) : target.Resolve())
+                                .Where(target => target is not null && ManagedPointers.SameSignature(site, target))
+                                .Distinct().ToArray()!;
+                            indirectTargets.Add(signature, targets);
+                        }
+                        foreach (var target in targets) CallSite(instruction, target);
+                    });
+                    continue;
+                }
                 if (instruction.OpCode.Code == Code.Ldsfld && instruction.Operand is FieldReference loaded)
                 {
                     if (!Check(method, instruction, () => StaticLoad(instruction, loaded), named: true))
@@ -453,12 +518,15 @@ internal static class MetadataValidation
                         if (instruction.OpCode.Code == Code.Newobj && instruction.Next?.OpCode.Code == Code.Throw)
                             throw Call("Unsupported exception constructor", reference, method, instruction,
                                 "Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
+                        if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
+                            Spans.Width(reference.DeclaringType) is not null &&
+                            !Spans.Analyze(method).Constructors.ContainsKey(instruction))
+                            throw Call("Unsupported in-place span constructor", reference, method, instruction,
+                                "The receiver must be a local address followed by at most three simple argument pushes.");
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);
             }
-            state[method] = 2;
-            ordered.Add(method);
         }
         Visit(entry);
         ordered.Reverse();

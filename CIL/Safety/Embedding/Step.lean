@@ -347,12 +347,38 @@ theorem step_relabel_setLocal (index : Nat) (narrow : Option NarrowKind) :
   stack_cases =>
     first | fallback_vacuous | lookup_lockstep
 
+/-- Span construction and its typed local store retain the original instruction boundary. -/
+theorem step_relabel_initializeSpanLocal (index : Nat) (constructor : SpanConstructor) :
+    StepRelabel (.initializeSpanLocal index constructor) := by
+  plain_cases
+  split at h
+  · rename_i found
+    try simp only [found]
+    obtain ⟨⟨memory, values⟩, constructed, h⟩ := except_bind_ok h
+    simp only [constructed, ok_bind_eq]
+    cases values with
+    | nil => cases h
+    | cons value rest => lockstep
+  · cases h
+
+#print axioms step_relabel_initializeSpanLocal
+
 theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) := by
   plain_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
     lockstep
+
+/-- A tail transfer has no continuation pc to relocate. -/
+theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall callee argc) := by
+  plain_cases
+  by_cases short : (stack.length != argc) = true
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
+    lockstep
+
+#print axioms step_relabel_tailCall
 
 theorem step_relabel_newVector256 (callee argc : Nat) :
     StepRelabel (.newVector256 callee argc) := by
@@ -419,7 +445,7 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
         cases rest <;> fallback_vacuous
       | span reference length =>
         cases rest <;> fallback_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ =>
+      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ =>
         cases rest <;> fallback_vacuous
 
 theorem step_relabel_unsupported (description : String) :
@@ -594,6 +620,17 @@ theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
 theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   cases op
+  case managed operation =>
+    cases operation
+    all_goals plain_cases
+    all_goals simp only [managedStep] at h ⊢
+    all_goals repeat' first
+      | contradiction
+      | solve | simp only [FrameAction.relabel, context.next rfl]
+      | solve | lockstep
+      | cases h
+      | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+          Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case stackAlloc initLocals =>
     stack_cases =>
       first
@@ -617,9 +654,12 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case vectorLocal index => exact step_relabel_vectorLocal index
   case vectorLocalAddr index => exact step_relabel_vectorLocalAddr index
   case setVectorLocal index => exact step_relabel_setVectorLocal index
+  case initializeSpanLocal index constructor =>
+    exact step_relabel_initializeSpanLocal index constructor
   case localAddr index => exact step_relabel_localAddr index
   case setLocal index narrow => exact step_relabel_setLocal index narrow
   case call method argc => exact step_relabel_call method argc
+  case tailCall method argc => exact step_relabel_tailCall method argc
   case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
@@ -877,6 +917,13 @@ theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := b
   · simp only [short, ↓reduceIte] at h ⊢
     raise_lockstep
 
+/-- Tail-transfer faults retain their original location under pc relocation. -/
+theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee argc) := by
+  plain_cases
+  exact h
+
+#print axioms step_raise_tailCall
+
 theorem step_raise_newVector256 (callee argc : Nat) : StepRaise (.newVector256 callee argc) := by
   plain_cases
   by_cases short : stack.length < argc
@@ -936,7 +983,7 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
         cases rest <;> fallback_raise_vacuous
       | span reference length =>
         cases rest <;> fallback_raise_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ =>
+      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ =>
         cases rest <;> fallback_raise_vacuous
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
@@ -1088,6 +1135,14 @@ set_option maxHeartbeats 400000 in
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/
 theorem step_raise (op : CIL.Op) : StepRaise op := by
   cases op
+  case managed operation =>
+    plain_cases
+    simp only [managedStep] at h ⊢
+    repeat' first
+      | solve | raise_lockstep
+      | cases h
+      | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+          Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case stackAlloc initLocals =>
     stack_cases =>
       first
@@ -1112,7 +1167,20 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
   case setVectorLocal | setLocal =>
     stack_cases =>
       first | fallback_raise_vacuous | lookup_raise
+  case initializeSpanLocal =>
+    plain_cases
+    split at h
+    · rename_i found
+      try simp only [found]
+      rcases except_bind_error h with constructed | ⟨⟨memory, values⟩, constructed, h⟩
+      · simp only [constructed, error_bind_eq]
+      · simp only [constructed, ok_bind_eq]
+        cases values with
+        | nil => cases h
+        | cons value rest => raise_lockstep
+    · cases h
   case call callee argc => exact step_raise_call callee argc
+  case tailCall callee argc => exact step_raise_tailCall callee argc
   case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
   case intrinsic operation argc => exact step_raise_intrinsic operation argc

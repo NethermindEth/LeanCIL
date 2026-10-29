@@ -24,6 +24,7 @@ def FrameAction.StateValid (program : CIL.Program) (args : List Value) (current 
   | .construct _ childArgs rest frame _ _ memory =>
     LiveState program args frame rest memory ∧ ValuesValid memory childArgs
   | .returned values memory => LiveState program args current values memory
+  | .tailCall _ values memory => LiveState program args current values memory
 
 /-- A successful step from a live state yields a state valid for its action. -/
 theorem step_live_state (program : CIL.Program) (method : Nat) (body : CIL.Method)
@@ -46,6 +47,7 @@ theorem step_live_state (program : CIL.Program) (method : Nat) (body : CIL.Metho
   | next target stack' frame' updated =>
     exact ⟨memory, arguments, values, references, owned, statics⟩
   | returned result updated => exact ⟨memory, arguments, values, references, owned, statics⟩
+  | tailCall callee result updated => exact ⟨memory, arguments, values, references, owned, statics⟩
   | call callee childArgs rest updated =>
     exact ⟨⟨memory, arguments, values.2, references, owned, statics⟩, values.1⟩
   | construct callee childArgs rest frame' temporary kind updated =>

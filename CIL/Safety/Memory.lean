@@ -230,6 +230,27 @@ def write (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Na
       | none => m.cells id offset)
     else m.cells id offset) }
 
+/-- A checked byte write with constant-time lookup in its retained snapshot. -/
+def writeIndexed (memory : Memory) (reference : Reference) (bytes : List (BitVec 8))
+    (alignment : Nat) : Checked Memory := do
+  access memory reference bytes.length alignment true
+  let snapshot := bytes.toArray
+  return { memory with
+    views := writeViews memory reference bytes.length
+    cells := fun id offset =>
+      if id = reference.allocation ∧ reference.offset ≤ offset then
+        match snapshot[offset - reference.offset]? with
+        | some bits => { bits, initialized := true }
+        | none => memory.cells id offset
+      else memory.cells id offset }
+
+/-- Indexed snapshots retain exactly the checked write semantics. -/
+theorem writeIndexed_eq (memory : Memory) (reference : Reference)
+    (bytes : List (BitVec 8)) (alignment : Nat) :
+    writeIndexed memory reference bytes alignment = write memory reference bytes alignment := by
+  simp only [writeIndexed, write, List.getElem?_toArray]
+#print axioms writeIndexed_eq
+
 /-- A snapshot is obtained before any destination change, preserving overlap. -/
 def copy (m : Memory) (source target : Reference) (width : Nat) : Checked Memory := do
   let bytes ← read m source width 1

@@ -71,10 +71,19 @@ foreach (var selector in new[]
     Rejected(selector, "No method matches selector");
 }
 
-foreach (var selector in new[] { "Arithmetic::Add", "Arithmetic::Add(ulong,)", "Arithmetic::Add(List<ulong,ulong)" })
+foreach (var selector in new[]
+{
+    "Arithmetic::Add", "Arithmetic::Add(ulong,)", "Arithmetic::Add(List<ulong,ulong)",
+    "ManagedDispatch::Dispatch(method int *(int][],int,int)",
+    "ManagedDispatch::Dispatch(method int *(int[],int,int)",
+    "ManagedDispatch::Dispatch(method int *int)[],int,int)"
+})
 {
     Rejected(selector, "Malformed method selector");
 }
+
+// Balanced callable syntax still requires an exact metadata signature.
+Rejected("ManagedDispatch::Dispatch(method int *(long)[],int,int)", "No method matches selector");
 
 // Selection does not bypass validation of unsupported runtime types.
 Rejected("string SelectorExamples.One.Collision::Unsupported(string)", "Unsupported type");

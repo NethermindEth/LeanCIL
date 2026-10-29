@@ -80,6 +80,19 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
             if (type is ByReferenceType byRef) return new ByReferenceType(Substitute(byRef.ElementType));
             if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType));
             if (type is ArrayType { IsVector: true } array) return new ArrayType(Substitute(array.ElementType));
+            if (type is FunctionPointerType pointerSignature)
+            {
+                var result = new FunctionPointerType
+                {
+                    ReturnType = Substitute(pointerSignature.ReturnType),
+                    CallingConvention = pointerSignature.CallingConvention,
+                    HasThis = pointerSignature.HasThis,
+                    ExplicitThis = pointerSignature.ExplicitThis
+                };
+                foreach (var argument in pointerSignature.Parameters)
+                    result.Parameters.Add(new ParameterDefinition(Substitute(argument.ParameterType)));
+                return result;
+            }
             if (type is GenericInstanceType generic)
             {
                 var result = new GenericInstanceType(generic.ElementType);
@@ -98,6 +111,19 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                 return result;
             }
             return method;
+        }
+
+        Mono.Cecil.CallSite SubstituteSite(Mono.Cecil.CallSite site)
+        {
+            var result = new Mono.Cecil.CallSite(Substitute(site.ReturnType))
+            {
+                CallingConvention = site.CallingConvention,
+                HasThis = site.HasThis,
+                ExplicitThis = site.ExplicitThis
+            };
+            foreach (var argument in site.Parameters)
+                result.Parameters.Add(new ParameterDefinition(Substitute(argument.ParameterType)));
+            return result;
         }
 
         var clone = new MethodDefinition(definition.Name + "<" + string.Join(",", reference.GenericArguments.Select(t => t.FullName)) + ">",
@@ -137,6 +163,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                 VariableDefinition local => clone.Body.Variables[local.Index],
                 TypeReference type => Substitute(type),
                 MethodReference method => SubstituteMethod(method),
+                Mono.Cecil.CallSite site => SubstituteSite(site),
                 _ => instruction.Operand
             };
 

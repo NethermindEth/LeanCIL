@@ -24,6 +24,26 @@ private def raw (code : List RawInstruction) (parameters : List TypeExpr := [wor
 private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, []⟩
 private def unknown (count : Nat) := state (List.replicate count none)
 
+/-- All native-count shifts retain their value kind and reject ordinary int64 counts. -/
+private theorem nativeShiftKinds :
+    ([98, 99, 100].all fun opcode =>
+      [ScalarKind.word32, .word64, .native].all fun kind =>
+        scalarTransfer (raw []) (i opcode) [.native, kind] == some [kind] &&
+        scalarTransfer (raw []) (i opcode) [.word64, kind] == none) = true := by decide +kernel
+#print axioms nativeShiftKinds
+
+/-- Native-count certificates bind both the exact shift operation and the count's metadata. -/
+private theorem nativeShiftCertificates :
+    ([(98, Op.shl), (99, Op.shr), (100, Op.shrUn)].all fun (opcode, operation) =>
+      let method := raw [i 2, i 3, i opcode, i 42] [word, nativeType]
+      let features := [unknown 0, unknown 1, unknown 2, unknown 1]
+      let states := [some [], some [ScalarKind.word64], some [.native, .word64], some [.word64]]
+      let code := [.arg 0, .arg 1, operation, .ret]
+      decide (ScalarFlowValid method features states code) &&
+      !decide (ScalarFlowValid { method with parameters := [word, word] } features states code) &&
+      !decide (ScalarFlowValid method features states (code.set 2 .add))) = true := by decide +kernel
+#print axioms nativeShiftCertificates
+
 private def arithmetic : List (Nat × Op) := [
   (88, .add), (89, .sub), (90, .mul), (91, .divide true false), (92, .divide false false),
   (93, .divide true true), (94, .divide false true), (95, .band), (96, .bor), (97, .bxor),
@@ -392,6 +412,8 @@ private theorem span_constructor_cases :
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
         parameterTypes := [.pointer word, intType] })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .reference] =
+      some []) ∧
+    (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .other] =
       none) := by
   decide +kernel
 

@@ -17,11 +17,19 @@ inductive FieldAccess where
   | load | store | address
   deriving DecidableEq, Repr
 
-/-- How an instruction uses a struct's size: `referenceAdd` is `Unsafe.Add` scaling by
-    the element size. -/
+/-- How an instruction uses a struct's size, including scaled reference addition/subtraction. -/
 inductive SizeAccess where
-  | load | store | initialize | copy | sizeOf | construct | referenceAdd
+  | load | store | initialize | copy | sizeOf | construct | referenceAdd | referenceSubtract
   deriving DecidableEq, Repr
+
+/-- The native-width negative stride used to subtract an element offset. -/
+def subtractionStride (width : Nat) : Nat := (-(BitVec.ofNat 64 width)).toNat
+
+/-- Scaling by the negative stride is exactly native-width subtraction of the scaled offset. -/
+theorem subtractionStride_mul (width : Nat) (offset : BitVec 64) :
+    BitVec.ofNat 64 (subtractionStride width) * offset = -(BitVec.ofNat 64 width * offset) := by
+  simp only [subtractionStride, BitVec.ofNat_toNat, BitVec.setWidth_eq, BitVec.neg_mul]
+#print axioms subtractionStride_mul
 
 /-- Raw type/field identities at layout-dependent uses; no computed offsets or sizes. -/
 inductive LayoutUse where
@@ -48,11 +56,14 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
 
 /-- The emitted size-dependent operation uses exactly the computed struct size. -/
 private def checkSize (size : Nat) : SizeAccess → Op → Bool
+  | .load, .memory (.marshalRead (.snapshot (.aggregate width)) _)
+  | .store, .memory (.marshalWrite (.snapshot (.aggregate width)) _) => width == size
   | .load, .loadAggregate width | .store, .storeAggregate width
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
   | .sizeOf, .const32 bits => bits.toNat == size
   | .construct, .newAggregate _ _ width => width.val == size
   | .referenceAdd, .memory (.add width _) => width == size
+  | .referenceSubtract, .memory (.add stride _) => stride == subtractionStride size
   | _, _ => false
 
 /-- Bind independently computed layout data to actual instructions and frame slots. -/

@@ -200,6 +200,60 @@ theorem RunTrace.rename (transport : StepTransport)
       rw [← fullExtension.values arguments argumentBounds,
         ← middleExtension.values rest restBounds, ← List.map_append]
       exact continued.prepend fullExtension scopeExtension
+  | @tailCall fuel method pc arguments sourceFrame stack source callee childArguments updated
+      body child checked childFrame childMemory final values actual bodyLookup childFound
+      returns checkedArguments entered childFinished childTrace induction =>
+    obtain ⟨body', operation, found, fetched, stepped⟩ := actual
+    have same : body' = sourceBody := Option.some.inj (found.symm.trans sourceFound)
+    subst body'
+    have same : body = sourceBody := Option.some.inj (bodyLookup.symm.trans sourceFound)
+    subst body
+    obtain ⟨middle, action, extension, targetStepped, actions⟩ := methods.step_success transport
+      memory frames sourceFormed targetFormed statics argumentValues stackValues stepped
+    cases actions with
+    | @tailCall _ targetUpdated _ _ renamed =>
+      have contract := step_contract _ _ _ _ _ _ _ _ stepped
+      have live : ValuesValid updated childArguments := contract.values sourceFormed stackValues
+      have sourceReady := leaveFrame_preserves_wellFormed sourceFrame updated
+        (contract.effect.wellFormed sourceFormed)
+      have targetReady := leaveFrame_preserves_wellFormed targetFrame targetUpdated
+        (step_preserves_wellFormed _ _ _ _ _ _ _ _ targetFormed targetStepped)
+      have departed := renamed.leaveFrame _ _ (frames.owned.extend extension)
+      have updatedStatics := leaveFrame_staticBindingsBounded sourceFrame
+        (contract.effect.staticBindingsBounded statics)
+      have argumentBounds : ∀ value ∈ childArguments, value.Below middle.sourceLimit := by
+        rw [renamed.sourceLimit]
+        exact live.below (contract.effect.wellFormed sourceFormed)
+      have checks := departed.checkedValues _ argumentBounds
+      rw [checkedArguments] at checks
+      obtain ⟨targetChecked, targetCheck, equal⟩ := checks.success
+      subst targetChecked
+      have checkedLive := (checkedValues_valid _ _ _ checkedArguments).2
+      obtain ⟨targetChild, targetChildFound, ⟨childMethods⟩⟩ := programs _ _ childFound
+      obtain ⟨entryMap, sourceChildFrame, targetChildFrame, sourceChildMemory,
+        targetChildMemory, entryExtension, sourceEntry, targetEntry, childMemoryRelated,
+        childFrames⟩ := departed.enterFrameInitialized sourceReady targetReady
+          (by rw [departed.sourceLimit]; exact updatedStatics)
+          childMethods.sourceReady childMethods.targetReady childMethods.indices
+          childMethods.declarations checked (checked.map middle.value) entered
+      have same := Except.ok.inj (sourceEntry.symm.trans entered)
+      cases same
+      have checkedBounds : ∀ value ∈ checked, value.Below middle.sourceLimit := by
+        rw [departed.sourceLimit]
+        exact checkedLive.below sourceReady
+      have continued := induction childFound targetChildFound childMethods childMemoryRelated
+        childFrames (enterFrame_preserves_wellFormed _ _ _ _ _ sourceReady entered)
+        (enterFrame_preserves_wellFormed _ _ _ _ _ targetReady targetEntry)
+        (enterFrame_staticBindingsBounded updatedStatics entered)
+        (checkedLive.preserve sourceReady (enterFrame_fresh _ _ _ _ _ entered).1)
+        (by intro value member; cases member)
+      simp only [List.map_nil] at continued
+      rw [entryExtension.values checked checkedBounds] at continued
+      simp only [run, targetFound, methods.instruction fetched, targetStepped, targetChildFound,
+        childMethods.metadata.returnsValue, methods.metadata.returnsValue, returns,
+        Bool.false_eq_true, ite_false, targetCheck, targetEntry, Except.mapError,
+        Bind.bind, Except.bind]
+      exact continued.prepend (extension.trans entryExtension) (fun _ _ scope => Or.inl scope)
   | @construct fuel method pc arguments sourceFrame stack source callee childArguments rest
       nextFrame temporary kind updated child childFrame childMemory returned value final values
       actual childFound entered childFinished childTrace loaded following
@@ -575,6 +629,79 @@ theorem run_throw_rename (transport : StepTransport)
               rw [← fullExtension.values arguments argumentBounds,
                 ← middleExtension.values rest restBounds, ← List.map_append]
               exact continued
+        | @tailCall updated targetUpdated callee childArguments renamed =>
+          have live : ValuesValid updated childArguments := contract.values sourceFormed stackValues
+          cases childFound : sourceProgram[callee]? with
+          | none =>
+            simp only [childFound] at failed
+            cases failed
+            cases thrown
+          | some child =>
+            obtain ⟨targetChild, targetChildFound, ⟨childMethods⟩⟩ := programs _ _ childFound
+            cases returns : child.returnsValue != sourceBody.returnsValue with
+            | true =>
+              simp only [childFound, returns, ite_true] at failed
+              cases failed
+              cases thrown
+            | false =>
+              simp only [childFound, returns, Bool.false_eq_true, ite_false] at failed
+              simp only [targetChildFound, childMethods.metadata.returnsValue,
+                methods.metadata.returnsValue, returns, Bool.false_eq_true, ite_false]
+              have departed := renamed.leaveFrame _ _ (frames.owned.extend extension)
+              have departedSource := leaveFrame_preserves_wellFormed sourceFrame updated sourceReady
+              have departedTarget := leaveFrame_preserves_wellFormed targetFrame targetUpdated targetReady
+              have departedStatics := leaveFrame_staticBindingsBounded sourceFrame updatedStatics
+              have bounds : ∀ value ∈ childArguments, value.Below middle.sourceLimit := by
+                rw [renamed.sourceLimit]
+                exact live.below sourceReady
+              have checks := departed.checkedValues _ bounds
+              cases checked : childArguments.mapM (checkedValue (leaveFrame sourceFrame updated)) with
+              | error reason =>
+                simp only [checked] at failed
+                cases failed
+                dsimp only at thrown
+                subst reason
+                rw [checked] at checks
+                rw [checks.thrown]
+              | ok values =>
+                rw [checked] at checks
+                obtain ⟨targetChecked, targetCheck, equal⟩ := checks.success
+                subst targetChecked
+                simp only [checked] at failed
+                simp only [targetCheck]
+                have checkedLive := (checkedValues_valid _ _ _ checked).2
+                obtain ⟨initialFrame, initialMemory, entered⟩ :
+                    ∃ childFrame childMemory, enterFrame child values
+                      (leaveFrame sourceFrame updated) = .ok (childFrame, childMemory) := by
+                  cases entry : enterFrame child values (leaveFrame sourceFrame updated) with
+                  | ok result => exact ⟨result.1, result.2, rfl⟩
+                  | error reason =>
+                    simp only [entry] at failed
+                    cases failed
+                    exact False.elim (enterFrame_not_thrown child childMethods.sourceReady
+                      values (leaveFrame sourceFrame updated) exception
+                      (by simpa only [show reason = .thrown exception from thrown] using entry))
+                obtain ⟨entryMap, childFrame, targetChildFrame, childMemory, targetChildMemory,
+                  entryExtension, sourceEntry, targetEntry, childMemoryRelated, childFrames⟩ :=
+                  departed.enterFrameInitialized departedSource departedTarget
+                    (by rw [departed.sourceLimit]; exact departedStatics)
+                    childMethods.sourceReady childMethods.targetReady childMethods.indices
+                    childMethods.declarations values (values.map middle.value) entered
+                simp only [sourceEntry] at failed
+                simp only [targetEntry]
+                have valueBounds : ∀ value ∈ values, value.Below middle.sourceLimit := by
+                  rw [departed.sourceLimit]
+                  exact checkedLive.below departedSource
+                have continued := induction failed childFound targetChildFound childMethods
+                  childMemoryRelated childFrames
+                  (enterFrame_preserves_wellFormed _ _ _ _ _ departedSource sourceEntry)
+                  (enterFrame_preserves_wellFormed _ _ _ _ _ departedTarget targetEntry)
+                  (enterFrame_staticBindingsBounded departedStatics sourceEntry)
+                  (checkedLive.preserve departedSource (enterFrame_fresh _ _ _ _ _ sourceEntry).1)
+                  (by intro value member; cases member)
+                simp only [List.map_nil] at continued
+                rw [entryExtension.values values valueBounds] at continued
+                exact continued
         | @construct updated targetUpdated nextFrame targetNextFrame callee childArguments rest
             temporary kind renamed nextFrames temporaryBound =>
           have live : ValuesValid updated childArguments ∧ ValuesValid updated rest :=

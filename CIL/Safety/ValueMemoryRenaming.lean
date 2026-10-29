@@ -72,4 +72,40 @@ theorem Memory.Renamed.storeValue {mapping : AllocationRenaming}
          exact (related.write reference bound _ _).checkedAt (.address reference) _)
 #print axioms Memory.Renamed.storeValue
 
+/-- Typed transfer reads preserve the value and initialization mask under allocation renaming. -/
+theorem Memory.Renamed.loadTransfer {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : ManagedReference)
+    (bound : reference.Below mapping.sourceLimit) (kind : CIL.TransferKind) :
+    ResultRenamed mapping Eq (loadTransfer source reference kind)
+      (loadTransfer target (mapping.managedReference reference) kind) := by
+  cases kind with
+  | scalar width signed =>
+    simp only [CIL.Safety.loadTransfer]
+    split
+    · exact related.loadValue reference bound width signed
+    · exact .error _
+  | snapshot shape => exact related.loadSnapshot reference bound shape
+#print axioms Memory.Renamed.loadTransfer
+
+/-- Typed transfer writes preserve checked authority and related final memory. -/
+theorem Memory.Renamed.storeTransfer {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : ManagedReference)
+    (bound : reference.Below mapping.sourceLimit) (kind : CIL.TransferKind) (value : CIL.Value) :
+    ResultRenamed mapping (Memory.Renamed mapping scopes)
+      (storeTransfer source reference kind value)
+      (storeTransfer target (mapping.managedReference reference) kind value) := by
+  cases reference with
+  | null => exact .error (.memory .nullDereference .null 0)
+  | address reference =>
+    simp only [CIL.Safety.storeTransfer, referenceAt, AllocationRenaming.managedReference,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+    repeat first
+      | exact .error _
+      | exact (related.write reference bound _ _).checkedAt (.address reference) _
+      | exact (related.writeSnapshot reference bound _ _).checkedAt (.address reference) _
+      | split
+#print axioms Memory.Renamed.storeTransfer
+
 end CIL.Safety

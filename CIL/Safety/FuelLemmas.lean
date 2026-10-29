@@ -53,6 +53,25 @@ theorem run_mono (program : CIL.Program) (fuel extra method pc : Nat)
               ih method target args nextFrame values updated outcome ready h
           | returned values updated =>
             simpa [Nat.succ_add, run, hb, ho, hs] using h
+          | tailCall callee arguments updated =>
+            cases hc : program[callee]? with
+            | none => simpa [Nat.succ_add, run, hb, ho, hs, hc] using h
+            | some child =>
+              cases returns : child.returnsValue != body.returnsValue with
+              | true => simpa [Nat.succ_add, run, hb, ho, hs, hc, returns] using h
+              | false =>
+                cases check : arguments.mapM (checkedValue (leaveFrame frame updated)) with
+                | error fault =>
+                  simpa [Nat.succ_add, run, hb, ho, hs, hc, returns, check] using h
+                | ok checked =>
+                  cases enter : enterFrame child checked (leaveFrame frame updated) with
+                  | error fault =>
+                    simpa [Nat.succ_add, run, hb, ho, hs, hc, returns, check, enter] using h
+                  | ok entered =>
+                    obtain ⟨childFrame, childMemory⟩ := entered
+                    simp [run, hb, ho, hs, hc, returns, check, enter] at h
+                    simpa [Nat.succ_add, run, hb, ho, hs, hc, returns, check, enter] using
+                      ih callee 0 checked childFrame [] childMemory outcome ready h
           | call callee arguments rest updated =>
             cases hc : program[callee]? with
             | none =>

@@ -46,7 +46,7 @@ theorem read_holds : readContract.Holds Extracted.program 1 := by
       memoryInstruction (.spanItem 4) (.scalar (.i32 input.index) :: .bufferSpan input.view :: rest)
         memory = .ok (memory, .readOnlyReference
           (.address (input.base.element 4 input.index.toNat)) :: rest) := by
-    simp only [memoryInstruction]
+    simp only [memoryInstruction, otherMemoryInstruction]
     simp only [ReadInput.view] at element ⊢
     simp [bound, element, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure, unspecifiedOperands, MemoryOp.argumentCount,
@@ -108,7 +108,8 @@ theorem slice_read_composes (program : Program)
         [.scalar (.i32 (input.expected + BitVec.ofNat 32 input.values.length))] := by
     cil_contract_steps [caller, args, frame, checkedValue, numericValue, loadLocal, storeLocal,
       sourceValid, sourceWidth, sourceReadonly, valid, sliced, startBound, lengthBound,
-      ReadInput.view, instruction, staticInstruction, memoryInstruction, MemoryOp.argumentCount,
+      ReadInput.view, instruction, staticInstruction, memoryInstruction,
+        otherMemoryInstruction, MemoryOp.argumentCount,
       observerCount, unspecifiedOperands, Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
     cil_contract_call helper input [caller, args, ReadInput.view, checkedValue, numericValue,
@@ -119,7 +120,8 @@ theorem slice_read_composes (program : Program)
     · intro final values invoked confined returned
       obtain ⟨value, rfl, rfl, rfl⟩ := returned
       cil_contract_steps [caller, args, loadLocal, checkedValue, numericValue, valid,
-        ReadInput.view, instruction, staticInstruction, memoryInstruction, MemoryOp.argumentCount,
+        ReadInput.view, instruction, staticInstruction, memoryInstruction,
+        otherMemoryInstruction, MemoryOp.argumentCount,
         observerCount, unspecifiedOperands, Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
         checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
       exact ⟨rfl, rfl⟩

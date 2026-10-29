@@ -104,6 +104,33 @@ theorem run_extend {base linked : CIL.Program} (links : Links base linked) (fuel
                   simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
                     Except.mapError]
                   exact ih method (pc + 1) args frame (values ++ rest) final outcome resolved h
+          | tailCall callee arguments updated =>
+            cases hc : base[callee]? with
+            | none =>
+              simp only [run, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] at h
+              exact absurd rfl (resolved _ h.symm)
+            | some child =>
+              have hlc := links.found hc
+              cases returns : child.returnsValue != body.returnsValue with
+              | true =>
+                simpa [run, hb, hl, ho, hs, hc, hlc, returns, Bind.bind, Except.bind,
+                  Except.mapError] using h
+              | false =>
+                cases check : arguments.mapM (checkedValue (leaveFrame frame updated)) with
+                | error fault =>
+                  simpa [run, hb, hl, ho, hs, hc, hlc, returns, check, Bind.bind,
+                    Except.bind, Except.mapError] using h
+                | ok checked =>
+                  cases enter : enterFrame child checked (leaveFrame frame updated) with
+                  | error fault =>
+                    simpa [run, hb, hl, ho, hs, hc, hlc, returns, check, enter, Bind.bind,
+                      Except.bind, Except.mapError] using h
+                  | ok entered =>
+                    obtain ⟨childFrame, childMemory⟩ := entered
+                    simp only [run, hb, hl, ho, hs, hc, hlc, returns, check, enter,
+                      Bind.bind, Except.bind, Except.mapError, Bool.false_eq_true,
+                      ite_false] at h ⊢
+                    exact ih callee 0 checked childFrame [] childMemory outcome resolved h
           | construct callee arguments rest parentFrame temporary kind updated =>
             cases hc : base[callee]? with
             | none =>

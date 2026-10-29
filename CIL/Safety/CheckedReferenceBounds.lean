@@ -57,7 +57,7 @@ theorem Memory.WellFormed.span_below {memory : Memory} (formed : memory.WellForm
 theorem Value.Valid.below {memory : Memory} (formed : memory.WellFormed)
     {value : Value} (valid : value.Valid memory) : value.Below memory.nextIdentity := by
   cases value with
-  | scalar value => trivial
+  | scalar value | methodPointer _ | methodTable _ => trivial
   | bufferSpan view => exact formed.span_below view valid
   | array view => exact formed.span_below view.storage valid
   | reference reference | readOnlyReference reference | span reference length =>

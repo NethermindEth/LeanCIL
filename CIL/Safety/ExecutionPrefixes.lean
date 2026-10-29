@@ -43,6 +43,27 @@ inductive RunVisits (program : CIL.Program) : Nat → Nat → Nat → List Value
       (enter : enterFrame child arguments action.memory = .ok (childFrame, childMemory))
       (later : RunVisits program fuel callee 0 arguments childFrame [] childMemory observed) :
       RunVisits program (fuel + 1) method pc args frame stack m observed
+  /-- A tail callee starts only after frame retirement and successful argument rechecking. -/
+  | tailChild {fuel method pc args frame stack m callee arguments updated body child checked
+        childFrame childMemory observed}
+      (step : ProgramStep program method pc args frame stack m
+        (.tailCall callee arguments updated))
+      (bodyLookup : program[method]? = some body)
+      (lookup : program[callee]? = some child)
+      (returns : (child.returnsValue != body.returnsValue) = false)
+      (check : arguments.mapM (checkedValue (leaveFrame frame updated)) = .ok checked)
+      (enter : enterFrame child checked (leaveFrame frame updated) =
+        .ok (childFrame, childMemory))
+      (later : RunVisits program fuel callee 0 checked childFrame [] childMemory observed) :
+      RunVisits program (fuel + 1) method pc args frame stack m observed
+  /-- Frame retirement occurs before a tail callee can observe its arguments. -/
+  | tailExpired {fuel method pc args frame stack m callee arguments updated body child}
+      (step : ProgramStep program method pc args frame stack m
+        (.tailCall callee arguments updated))
+      (bodyLookup : program[method]? = some body)
+      (lookup : program[callee]? = some child)
+      (returns : (child.returnsValue != body.returnsValue) = false) :
+      RunVisits program (fuel + 1) method pc args frame stack m (leaveFrame frame updated)
   | callContinue {fuel method pc args frame stack m callee arguments rest updated child
         childFrame childMemory returned result observed}
       (step : ProgramStep program method pc args frame stack m
@@ -84,6 +105,13 @@ theorem runVisits_wellFormed {program : CIL.Program} {fuel method pc : Nat}
   | child step call lookup enter later ih =>
     exact ih (enterFrame_preserves_wellFormed _ _ _ _ _
       (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step) enter)
+  | tailChild step _ _ _ _ enter _ ih =>
+    exact ih (enterFrame_preserves_wellFormed _ _ _ _ _
+      (leaveFrame_preserves_wellFormed _ _
+        (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)) enter)
+  | tailExpired step _ _ _ =>
+    exact leaveFrame_preserves_wellFormed _ _
+      (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
   | callContinue step lookup enter finish later ih =>
     exact ih (run_preserves_wellFormed _ _ _ _ _ _ _ _ _ _
       (enterFrame_preserves_wellFormed _ _ _ _ _
@@ -109,6 +137,8 @@ theorem run_success_visits (program : CIL.Program) (fuel method pc : Nat)
   induction trace with
   | next step _ ih => exact .next step ih
   | returned step _ => exact .expired step
+  | tailCall step bodyLookup lookup returns check enter _ _ ih =>
+    exact .tailChild step bodyLookup lookup returns check enter ih
   | call step lookup enter finish _ _ _ ih => exact .callContinue step lookup enter finish ih
   | construct step lookup enter finish _ load _ _ ih =>
     exact .constructContinue step lookup enter finish load ih

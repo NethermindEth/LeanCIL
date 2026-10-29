@@ -205,6 +205,26 @@ structure PaddedRefines (unpadded program : CIL.Program) (extra : Nat → List L
       (fun setup => (setup.1.appendLocals (extra index), setup.2)) <$>
         enterFrame body args memory
 
+/-- Preserving all successful return steps also preserves the body's return arity. -/
+theorem returnsValue_of_steps (body target : CIL.Method) (frame : Frame) (memory : Memory)
+    (steps : ∀ op pc args frame stack memory outcome,
+      step body op pc args frame stack memory = outcome → StepKept outcome →
+      step target op pc args frame stack memory = outcome) :
+    target.returnsValue = body.returnsValue := by
+  cases original : body.returnsValue <;> cases actual : target.returnsValue
+  · rfl
+  · have kept := steps (.ret none) 0 [] frame [] memory (.ok (.returned [] memory))
+      (by simp [step, original, observerCount, unspecifiedOperands, Pure.pure, Except.pure]) trivial
+    simp [step, actual, observerCount, unspecifiedOperands] at kept
+  · have kept := steps (.ret none) 0 [] frame [.scalar (.i32 0)] memory
+      (.ok (.returned [.scalar (.i32 0)] memory))
+      (by simp [step, original, observerCount, unspecifiedOperands, Value.hasUnspecified,
+        CIL.Value.hasUnspecified, checkedValue, numericValue, Pure.pure, Except.pure]) trivial
+    simp [step, actual, observerCount, unspecifiedOperands, Value.hasUnspecified,
+      CIL.Value.hasUnspecified] at kept
+  · rfl
+#print axioms returnsValue_of_steps
+
 /-- A result or thrown exception of a run of `unpadded` is the same outcome of the run of
     `program` in the padded frame; pcs and faults are unchanged. -/
 theorem run_padded {unpadded program : CIL.Program} {extra : Nat → List LocalSlot}
@@ -291,6 +311,37 @@ theorem run_padded {unpadded program : CIL.Program} {extra : Nat → List LocalS
                   simp only [Functor.map, Except.map, padded]
                   exact ih method (pc + 1) args frame (returned.2 ++ rest) returned.1 outcome ran
                     transported
+          | tailCall callee arguments memory' =>
+            dsimp only [FrameAction.appendLocals, Functor.map, Except.map]
+            cases child : unpadded[callee]? with
+            | none =>
+              simp only [child] at ran
+              subst ran
+              obtain ⟨_, thrown⟩ := transported
+              cases thrown
+            | some childBody =>
+              simp only [child] at ran
+              obtain ⟨childTarget, childFound, _, childSteps, childEntries⟩ :=
+                refines.method callee childBody child
+              have childReturn := returnsValue_of_steps childBody childTarget frame memory' childSteps
+              have callerReturn := returnsValue_of_steps body target frame memory' steps
+              simp only [childFound, childReturn, callerReturn, childEntries]
+              have retired : leaveFrame (frame.appendLocals (extra method)) memory' =
+                  leaveFrame frame memory' := rfl
+              simp only [retired]
+              split at ran
+              · subst ran; obtain ⟨_, thrown⟩ := transported; cases thrown
+              · rename_i returns
+                simp only [returns, Bool.false_eq_true, ↓reduceIte]
+                cases checked : arguments.mapM (checkedValue (leaveFrame frame memory')) with
+                | error fault => simp only [checked] at ran ⊢; subst ran; rfl
+                | ok values =>
+                  simp only [checked] at ran ⊢
+                  cases entered : enterFrame childBody values (leaveFrame frame memory') with
+                  | error fault => simp only [entered] at ran ⊢; subst ran; rfl
+                  | ok setup =>
+                    simp only [entered] at ran ⊢
+                    exact ih callee 0 values setup.1 [] setup.2 outcome ran transported
           | construct callee arguments rest frame' temporary kind memory' =>
             dsimp only [FrameAction.appendLocals, Functor.map, Except.map]
             cases child : unpadded[callee]? with

@@ -191,6 +191,27 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {ar
   case ret narrow =>
     obtain ⟨_, _, rfl⟩ := step_ret_returns h
     exact resumes.elim
+  case tailCall callee argc =>
+    simp only [step] at h
+    repeat' first
+      | contradiction
+      | exact resumes.elim
+      | cases h
+      | split at h
+      | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  case managed operation =>
+    cases operation <;> try rfl
+    rename_i signature catalog tail
+    cases tail
+    · rfl
+    · simp only [step, managedStep] at h
+      repeat' first
+        | contradiction
+        | exact resumes.elim
+        | cases h
+        | split at h
+        | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+      all_goals simp_all
   all_goals rfl
 
 /-- Each method of `expected` embeds into the same method of `actual` under `maps`. -/
@@ -361,6 +382,35 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
                     outcome h transported
                   rw [next (continues_of_invocation stepped trivial)] at resumed
                   exact resumed
+          | tailCall callee arguments m' =>
+            dsimp only [FrameAction.relabel] at h ⊢
+            cases child : expected[callee]? with
+            | none =>
+              simp only [child] at h
+              subst h
+              obtain ⟨_, thrown⟩ := transported
+              cases thrown
+            | some childBody =>
+              simp only [child] at h ⊢
+              obtain ⟨childTarget, childFound, childRefines⟩ :=
+                refines.method callee childBody child
+              simp only [childFound, childRefines.returnsValue, refined.returnsValue,
+                enterFrame_congr childRefines]
+              split at h
+              · subst h; obtain ⟨_, thrown⟩ := transported; cases thrown
+              · rename_i returns
+                simp only [returns, ↓reduceIte]
+                cases checked : arguments.mapM (checkedValue (leaveFrame frame m')) with
+                | error fault => simp only [checked] at h ⊢; subst h; rfl
+                | ok values =>
+                  simp only [checked] at h ⊢
+                  cases entered : enterFrame childBody values (leaveFrame frame m') with
+                  | error fault => simp only [entered] at h ⊢; subst h; rfl
+                  | ok setup =>
+                    simp only [entered] at h ⊢
+                    have childRun := ih callee 0 values setup.1 [] setup.2 _ h transported
+                    rw [childRefines.entry] at childRun
+                    exact childRun
           | construct callee arguments rest frame' temporary kind m' =>
             dsimp only [FrameAction.relabel] at h ⊢
             cases child : expected[callee]? with

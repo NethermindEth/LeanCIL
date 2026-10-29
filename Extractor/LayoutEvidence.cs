@@ -60,7 +60,7 @@ internal sealed class LayoutEvidence
             if (index < 0) throw new InvalidDataException("Missing raw aggregate metadata: " + type.FullName);
             return $".aggregate {index}";
         }
-        if (MetadataValidation.VectorWidth(type) is int width) return width == 16 ? ".vector128" : ".vector256";
+        if (MetadataValidation.VectorFieldWidth(type) is int width) return width == 16 ? ".vector128" : ".vector256";
         return EnumTypes.Storage(type).FullName switch
         {
             "System.SByte" => ".signed8", "System.Byte" => ".unsigned8", "System.Boolean" => ".boolean",
@@ -127,9 +127,19 @@ internal sealed class LayoutEvidence
                 MetadataValidation.IsAggregate(constructor.DeclaringType, method.Module))
                 uses.Add($".size {pc} {Index(constructor.DeclaringType)} .construct");
             else if (instruction.OpCode.Code == Code.Call && instruction.Operand is GenericInstanceMethod generic &&
-                generic.DeclaringType.FullName == "System.Runtime.CompilerServices.Unsafe" && generic.GenericArguments.Count == 1 &&
-                MetadataValidation.IsAggregate(generic.GenericArguments[0], method.Module) && generic.Name is "SizeOf" or "Add")
-                uses.Add($".size {pc} {Index(generic.GenericArguments[0])} .{(generic.Name == "SizeOf" ? "sizeOf" : "referenceAdd")}");
+                generic.DeclaringType.FullName is "System.Runtime.CompilerServices.Unsafe" or
+                    "System.Runtime.InteropServices.MemoryMarshal" && generic.GenericArguments.Count == 1 &&
+                MetadataValidation.IsAggregate(generic.GenericArguments[0], method.Module))
+            {
+                var access = generic.Name switch
+                {
+                    "SizeOf" => "sizeOf", "Add" => "referenceAdd", "Subtract" => "referenceSubtract",
+                    "ReadUnaligned" or "Read" or "TryRead" => "load",
+                    "WriteUnaligned" or "Write" or "TryWrite" => "store", _ => null
+                };
+                if (access is not null)
+                    uses.Add($".size {pc} {Index(generic.GenericArguments[0])} .{access}");
+            }
         }
         foreach (var local in method.Body.Variables)
             if (MetadataValidation.IsAggregate(local.VariableType, method.Module))

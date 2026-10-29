@@ -119,6 +119,7 @@ theorem allocateHome_preserves_caller_memory {alignment : Nat} (m result : Memor
 
 /-- Roots and spans retain checked references and extents; byte slots name live storage. -/
 def LocalSlot.ReferencesValid (m : Memory) : LocalSlot → Prop
+  | .methodPointer .. | .methodTable .. => True
   | .root none | .root (some .null) | .readOnlyRoot .null | .opaque128 _ => True
   | .root (some (.address r)) | .readOnlyRoot (.address r) | .bytes _ r => form m r = .ok r
   | .span _ _ none => True
@@ -135,7 +136,7 @@ theorem LocalSlot.ReferencesValid.preserve {m result : Memory} {slot : LocalSlot
     slot.ReferencesValid result := by
   cases slot with
   | bytes kind r => exact ext.preserves_reference hm r r valid
-  | opaque128 _ => trivial
+  | opaque128 _ | methodPointer _ _ | methodTable _ _ => trivial
   | readOnlyRoot reference =>
     cases reference with
     | null => trivial
@@ -175,7 +176,8 @@ theorem allocateHome_reference_valid {alignment : Nat} (m result : Memory)
 
 /-- Byte homes are allocated after the entry watermark; roots do not own bytes. -/
 def LocalSlot.Above (watermark : Nat) : LocalSlot → Prop
-  | .root _ | .readOnlyRoot _ | .opaque128 _ | .span .. | .array .. => True
+  | .root _ | .readOnlyRoot _ | .opaque128 _ | .span .. | .array ..
+  | .methodPointer .. | .methodTable .. => True
   | .bytes _ r => watermark ≤ r.allocation
 
 theorem write_staticBindings {m result : Memory} {r : Reference} {bytes : List (BitVec 8)}
@@ -310,7 +312,7 @@ theorem FrameSetup.append {activation : Nat} {first middle last : Memory}
       cases slot with
       | root _ => trivial
       | readOnlyRoot _ => trivial
-      | opaque128 _ => trivial
+      | opaque128 _ | methodPointer _ _ | methodTable _ _ => trivial
       | span _ _ _ => trivial
       | array _ _ => trivial
       | bytes _ _ => exact Nat.le_trans a.fresh.1.next bound
@@ -374,6 +376,16 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
     FrameSetup activation m result [slot] owned := by
   unfold makeLocal at h
   split at h
+  · split at h <;> first
+      | (solve | cases h)
+      | (cases h; exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+          by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
+          by simp [LocalSlot.Above]⟩)
+  · split at h <;> first
+      | (solve | cases h)
+      | (cases h; exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+          by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
+          by simp [LocalSlot.Above]⟩)
   · rename_i element
     split at h
     · cases h

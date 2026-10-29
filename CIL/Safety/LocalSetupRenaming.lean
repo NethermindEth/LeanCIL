@@ -46,6 +46,12 @@ theorem Memory.Renamed.makeLocalUnmodeled {mapping : AllocationRenaming}
     rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
   let slotKind := kind
   cases kind with
+  | methodPointer signature =>
+    exact ⟨mapping, .methodPointer signature none, [], source, target,
+      .refl mapping, rfl, rfl, related, trivial, by simp⟩
+  | methodTable signature =>
+    exact ⟨mapping, .methodTable signature none, [], source, target,
+      .refl mapping, rfl, rfl, related, trivial, by simp⟩
   | reference =>
     refine ⟨mapping, .root none, [], source, target, .refl mapping, rfl, rfl, related, ?_, ?_⟩
     · intro address member; cases member
@@ -114,7 +120,7 @@ theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
     rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
   let retainedKind := kind
   cases kind with
-  | reference | array _ =>
+  | reference | array _ | methodPointer _ | methodTable _ =>
     cases initial <;> simp only [CIL.Safety.makeLocal] at made
     all_goals first | contradiction | cases made
     all_goals refine ⟨mapping, target, .refl mapping, ?_, related, ?_, ?_⟩
@@ -181,6 +187,12 @@ theorem Memory.Renamed.skipLocalUnmodeled {mapping : AllocationRenaming}
     related.skipHome targetFormed activation _ _ bounded (localAlignment_pos kind)
   let slotKind := kind
   cases kind with
+  | methodPointer signature =>
+    exact ⟨mapping, .methodPointer signature none, [], target, .refl mapping, rfl, related,
+      by simp⟩
+  | methodTable signature =>
+    exact ⟨mapping, .methodTable signature none, [], target, .refl mapping, rfl, related,
+      by simp⟩
   | reference =>
     refine ⟨mapping, .root none, [], target, .refl mapping, rfl, related, ?_⟩
     intro identity member; cases member
@@ -259,6 +271,14 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
     exact Nat.ne_of_lt (mapping.bounded identity bound)
   let retainedKind := kind
   cases kind with
+  | methodPointer signature =>
+    cases initial <;> simp [InitializerFits] at fits unknown
+    exact ⟨mapping, .methodPointer signature (some ⟨signature, none⟩), [], target,
+      .refl mapping, rfl, related, by simp⟩
+  | methodTable signature =>
+    cases initial <;> simp [InitializerFits] at fits unknown
+    exact ⟨mapping, .methodTable signature (some ⟨signature, none⟩), [], target,
+      .refl mapping, rfl, related, by simp⟩
   | reference =>
     cases initial <;> simp [InitializerFits] at fits unknown
     refine ⟨mapping, .root (some .null), [], target, .refl mapping, rfl, related, ?_⟩
@@ -277,7 +297,7 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
     obtain ⟨home, allocated, homes⟩ := related.skipHome targetFormed activation
       (localWidth retainedKind) (localAlignment retainedKind) bounded (localAlignment_pos _)
     obtain ⟨number, encoded⟩ := initializer_numeric_number fits (by simp)
-      (by intros; simp) (by intros; simp) unknown
+      (by intros; simp) (by intros; simp) (by intros; simp) (by intros; simp) unknown
     obtain ⟨slot, after, stored⟩ := fresh_home_storeLocal_succeeds _ _ _ _ _ _ _ allocated encoded
     have remains := homes.storePrivateLocal _ privateHome _ _ _ encoded stored
     refine ⟨mapping.skipTarget, slot, [target.nextIdentity], after,

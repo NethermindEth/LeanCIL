@@ -151,6 +151,12 @@ private def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
   | .byref element, rest => keyBytes "byref" :: typeKeyInto element rest
   | .pointer element, rest => keyBytes "pointer" :: typeKeyInto element rest
   | .array element, rest => keyBytes "array" :: typeKeyInto element rest
+  | .functionPointer result parameters convention hasThis explicitThis, rest =>
+    keyBytes "functionPointer" :: keyBytes (toString convention) ::
+      keyBytes (toString hasThis) :: keyBytes (toString explicitThis) ::
+      typeKeyInto result (typeKeyInto parameters rest)
+  | .signatureParameter head tail, rest =>
+    keyBytes "signatureParameter" :: typeKeyInto head (typeKeyInto tail rest)
   | .constructor scope name, rest =>
     keyBytes "constructor" :: keyBytes scope :: keyBytes name :: rest
   | .apply constructor argument, rest =>

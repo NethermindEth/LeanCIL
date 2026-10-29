@@ -17,7 +17,7 @@ namespace CIL.Safety
     physical home, and a managed root may start null. -/
 def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
   match kind with
-  | .array _ => initial = .unmodeled ∨ initial = .nullRef
+  | .array _ | .methodPointer _ | .methodTable _ => initial = .unmodeled ∨ initial = .nullRef
   | .span width _ => width ∈ [1, 2, 4, 8] ∧ (initial = .unmodeled ∨ initial = .nullRef)
   | _ => initial = .unmodeled ∨ match kind, initial with
   | .aggregate size, .aggregate bytes => bytes.length = size.val
@@ -32,6 +32,8 @@ theorem initializer_numeric_number {kind : CIL.LocalKind} {initial : CIL.Value}
     (fits : InitializerFits kind initial) (numeric : kind ≠ .reference)
     (notSpan : ∀ width writable, kind ≠ .span width writable)
     (notArray : ∀ element, kind ≠ .array element)
+    (notPointer : ∀ signature, kind ≠ .methodPointer signature)
+    (notTable : ∀ signature, kind ≠ .methodTable signature)
     (known : initial ≠ .unmodeled) : ∃ number, localNumber kind initial = .ok number := by
   cases kind <;> cases initial <;>
     simp_all [InitializerFits, localNumber, CIL.Value.hasUnspecified]
@@ -43,6 +45,14 @@ theorem localWidth_bounded (kind : CIL.LocalKind) : localWidth kind < nativeLimi
 theorem makeLocal_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind)
     (initial : CIL.Value) (wellFormed : m.WellFormed) (fits : InitializerFits kind initial) :
     ∃ slot owned result, makeLocal activation kind initial m = .ok (slot, owned, result) := by
+  by_cases pointer : ∃ signature, kind = .methodPointer signature
+  · obtain ⟨signature, rfl⟩ := pointer
+    cases initial <;> simp_all [InitializerFits, makeLocal]
+  have notPointer : ∀ signature, kind ≠ .methodPointer signature := by simpa using pointer
+  by_cases table : ∃ signature, kind = .methodTable signature
+  · obtain ⟨signature, rfl⟩ := table
+    cases initial <;> simp_all [InitializerFits, makeLocal]
+  have notTable : ∀ signature, kind ≠ .methodTable signature := by simpa using table
   by_cases array : ∃ element, kind = .array element
   · obtain ⟨element, rfl⟩ := array
     cases initial <;> simp_all [InitializerFits, makeLocal]
@@ -60,7 +70,8 @@ theorem makeLocal_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind
     by_cases unknown : initial = .unmodeled
     · refine ⟨.bytes kind reference, [reference.allocation], memory, ?_⟩
       cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
-    · obtain ⟨number, value⟩ := initializer_numeric_number fits root notSpan notArray unknown
+    · obtain ⟨number, value⟩ :=
+        initializer_numeric_number fits root notSpan notArray notPointer notTable unknown
       obtain ⟨slot, result, stored⟩ := fresh_home_storeLocal_succeeds _ _ _ _ _ _ _ home value
       refine ⟨slot, [reference.allocation], result, ?_⟩
       cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -121,6 +132,8 @@ theorem makeArgumentHomes_succeeds (m : Memory) (activation : Nat) (indices : Li
 
 /-- An argument matches its numeric home, reference root, or typed span view. -/
 def ParameterFits (kind : CIL.LocalKind) : Value → Prop
+  | .methodPointer pointer => kind = .methodPointer pointer.signature
+  | .methodTable table => kind = .methodTable table.signature
   | .scalar value => kind ≠ .reference ∧ ∃ number, localNumber kind value = .ok number
   | .reference _ => kind = .reference
   | .span _ _ => False
@@ -140,6 +153,18 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
       makeLocal activation kind .unmodeled m = .ok (slot, owned, home) ∧
       storeLocal home slot value = .ok (final, result) := by
   cases value with
+  | methodPointer pointer =>
+    change kind = .methodPointer pointer.signature at fits
+    subst kind
+    exact ⟨.methodPointer pointer.signature none, [], m,
+      .methodPointer pointer.signature (some pointer), m, rfl, by
+        simp [storeLocal, Value.hasUnspecified, Pure.pure, Except.pure]⟩
+  | methodTable table =>
+    change kind = .methodTable table.signature at fits
+    subst kind
+    exact ⟨.methodTable table.signature none, [], m,
+      .methodTable table.signature (some table), m, rfl, by
+        simp [storeLocal, Value.hasUnspecified, Pure.pure, Except.pure]⟩
   | span r length => cases fits
   | readOnlyReference reference =>
     change kind = .reference at fits
@@ -178,6 +203,10 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
     have notSpan : ∀ width writable, kind ≠ .span width writable := by
       cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
     have notArray : ∀ element, kind ≠ .array element := by
+      cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+    have notPointer : ∀ signature, kind ≠ .methodPointer signature := by
+      cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+    have notTable : ∀ signature, kind ≠ .methodTable signature := by
       cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
     obtain ⟨r, home, allocated⟩ := allocateHome_succeeds m activation (localWidth kind) hm
       (localWidth_bounded kind) (localAlignment_pos kind)

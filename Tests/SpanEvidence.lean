@@ -1,4 +1,5 @@
 import CIL.Extraction.Features
+import CIL.Extraction.SpanCalls
 
 set_option maxRecDepth 4096
 
@@ -32,6 +33,45 @@ private def state (stack : List (Option W32)) : Option FeatureState := some ⟨s
 example : spanLocal words ∧ spanLocal (span runtime "System.Byte") := by decide
 example : ¬ spanLocal (span owner "System.UInt32") ∧ ¬ spanLocal (span runtime "System.Double") ∧
     ¬ spanLocal intType := by decide
+
+/-- Native integers and the two small primitive types retain their physical element widths. -/
+theorem primitive_span_widths :
+    spanStorage (span runtime "System.IntPtr") = some (.span 8 false) ∧
+    spanStorage (span runtime "System.UIntPtr") = some (.span 8 false) ∧
+    spanStorage (span runtime "System.Char") = some (.span 2 false) ∧
+    spanStorage (span runtime "System.Boolean") = some (.span 1 false) := by decide
+#print axioms primitive_span_widths
+
+/-- A closed int32 array extension call with its exact defining assembly. -/
+private def arraySpanCall : CallSite := {
+  declaringType := .atom spanMemoryScope "System.MemoryExtensions"
+  name := "AsSpan"
+  target := .external (spanMemoryScope ++
+    "::System.Span`1<!!0> System.MemoryExtensions::AsSpan(!!0[],System.Int32)")
+  typeArguments := [intType], parameterCount := 2, hasThis := false, returnsValue := true
+  returnType := .apply (.constructor runtime "System.Span`1") intType
+  parameterTypes := [.array intType, intType] }
+
+/-- Array conversion certificates bind element identity, range arity and all call metadata. -/
+theorem exact_array_span_call :
+    spanCallMatches (i 40 (.call arraySpanCall))
+      (.memory (.arraySpan .signed32 true .fromStart)) = true ∧
+    spanCallMatches (i 40 (.call arraySpanCall))
+      (.memory (.arraySpan .unsigned32 true .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call arraySpanCall))
+      (.memory (.arraySpan .signed32 false .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call arraySpanCall))
+      (.memory (.arraySpan .signed32 true .whole)) = false ∧
+    spanCallMatches (i 115 (.call arraySpanCall))
+      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call { arraySpanCall with hasThis := true }))
+      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call { arraySpanCall with
+      declaringType := .atom runtime "System.MemoryExtensions" }))
+      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
+    spanCallMatches (i 40 (.call { arraySpanCall with parameterTypes := [intType, intType] }))
+      (.memory (.arraySpan .signed32 true .fromStart)) = false := by decide
+#print axioms exact_array_span_call
 
 -- 0: ldarg.0; 1: stloc.0; 2: ldloca.s 0; 3: ldarg.1; 4: get_Item; 5: ldind.u4; 6: ret
 private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 getItem, i 74, i 42]
@@ -76,4 +116,100 @@ example : FeatureFlowValid (raw [words] loadCode) .scalar loadStates (List.repli
 example : ¬ typeTestInstruction (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType true)) ∧
     typeTestInstruction (i 208 (.type intType)) := by decide
 
+/-- The exact writable int32 span member used by whole-region initialization. -/
+private def fillCall : CallSite := {
+  declaringType := .apply (.constructor runtime "System.Span`1") intType
+  name := "Fill"
+  target := .external (runtime ++ "::System.Void System.Span`1<System.Int32>::Fill(!0)")
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false
+  returnType := .void, parameterTypes := [intType] }
+
+/-- Whole-span stores bind the operation, element width, mutability and complete signature. -/
+theorem exact_span_fill_call :
+    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 4 false)) = true ∧
+    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 8 false)) = false ∧
+    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 4 true)) = false ∧
+    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanSlice false)) = false ∧
+    spanCallMatches (i 40 (.call { fillCall with
+      declaringType := .apply (.constructor runtime "System.ReadOnlySpan`1") intType }))
+      (.memory (.spanFill 4 false)) = false ∧
+    spanCallMatches (i 40 (.call { fillCall with
+      parameterTypes := [.atom runtime "System.UInt32"] }))
+      (.memory (.spanFill 4 false)) = false ∧
+    spanCallMatches (i 40 (.call { fillCall with hasThis := false }))
+      (.memory (.spanFill 4 false)) = false ∧
+    spanCallMatches (i 40 (.call { fillCall with returnType := intType, returnsValue := true }))
+      (.memory (.spanFill 4 false)) = false := by decide +kernel
+#print axioms exact_span_fill_call
+
+/-- Exact array constructor used by an in-place local initialization. -/
+private def localConstructor : CallSite := {
+  declaringType := words, name := ".ctor"
+  target := .external (runtime ++
+    "::System.Void System.ReadOnlySpan`1<System.UInt32>::.ctor(!0[])")
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false
+  returnType := .void, parameterTypes := [.array (.atom runtime "System.UInt32")] }
+
+private def constructorCode :=
+  [i 18 (.local 0), i 2, i 40 (.call localConstructor), i 18 (.local 0)]
+
+/-- Reused local addresses do not disable exact constructor folding. -/
+theorem constructor_fold : foldRoles [words] constructorCode =
+    [some .head, some .argument, some (.spanConstructor 0 (.array .unsigned32 false .whole)),
+      none] := by decide +kernel
+#print axioms constructor_fold
+
+/-- Constructor arguments and the constructor itself cannot be external branch targets. -/
+theorem constructor_no_interior_entry :
+    foldEntry (foldRoles [words] constructorCode)[0]? = true ∧
+    foldEntry (foldRoles [words] constructorCode)[1]? = false ∧
+    foldEntry (foldRoles [words] constructorCode)[2]? = false := by decide +kernel
+#print axioms constructor_no_interior_entry
+
+/-- Duplicating the local address or changing its declared span type prevents the fold. -/
+theorem constructor_alias_rejected :
+    foldRoles [words] [i 18 (.local 0), i 37, i 2, i 40 (.call localConstructor)] =
+      List.replicate 4 none ∧
+    foldRoles [span runtime "System.Int32"] constructorCode = List.replicate 4 none := by
+  decide +kernel
+#print axioms constructor_alias_rejected
+
+/-- The emitted local and constructor capability are both bound by the raw sequence. -/
+theorem constructor_forgery_rejected :
+    featureOpMatchesAt (raw [words] constructorCode)
+      (some (.spanConstructor 0 (.array .unsigned32 false .whole)))
+      (i 40 (.call localConstructor))
+      (.initializeSpanLocal 1 (.array .unsigned32 false .whole)) = false ∧
+    featureOpMatchesAt (raw [words] constructorCode)
+      (some (.spanConstructor 0 (.array .unsigned32 false .whole)))
+      (i 40 (.call localConstructor))
+      (.initializeSpanLocal 0 (.array .unsigned32 true .whole)) = false := by decide +kernel
+#print axioms constructor_forgery_rejected
+/-- A readonly cast binds both element types and the exact runtime overload. -/
+private def reinterpretCall : CallSite := {
+  declaringType := .atom runtime "System.Runtime.InteropServices.MemoryMarshal"
+  name := "Cast"
+  target := .external (runtime ++ "::System.ReadOnlySpan`1<!!1> " ++
+    "System.Runtime.InteropServices.MemoryMarshal::Cast(System.ReadOnlySpan`1<!!0>)")
+  typeArguments := [.atom runtime "System.Byte", intType]
+  parameterCount := 1, hasThis := false, returnsValue := true
+  returnType := span runtime "System.Int32"
+  parameterTypes := [span runtime "System.Byte"] }
+
+/-- Width, readonly status, result identity and the declaring assembly cannot be forged. -/
+theorem exact_reinterpret_call :
+    spanCallMatches (i 40 (.call reinterpretCall))
+      (.memory (.spanReinterpret 1 4 false)) = true ∧
+    spanCallMatches (i 40 (.call reinterpretCall))
+      (.memory (.spanReinterpret 1 8 false)) = false ∧
+    spanCallMatches (i 40 (.call reinterpretCall))
+      (.memory (.spanReinterpret 1 4 true)) = false ∧
+    spanCallMatches (i 40 (.call reinterpretCall)) (.memory .spanReadOnly) = false ∧
+    spanCallMatches (i 40 (.call { reinterpretCall with
+      returnType := span runtime "System.UInt32" }))
+      (.memory (.spanReinterpret 1 4 false)) = false ∧
+    spanCallMatches (i 40 (.call { reinterpretCall with
+      declaringType := .atom owner "System.Runtime.InteropServices.MemoryMarshal" }))
+      (.memory (.spanReinterpret 1 4 false)) = false := by decide +kernel
+#print axioms exact_reinterpret_call
 end Tests.SpanEvidence

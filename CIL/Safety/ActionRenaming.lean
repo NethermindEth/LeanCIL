@@ -22,6 +22,10 @@ inductive FrameAction.Renamed (indices : LocalIndexMap) (mapping : AllocationRen
       (memory : Memory.Renamed mapping scopes sourceMemory targetMemory) :
       Renamed indices mapping scopes (.call callee arguments rest sourceMemory)
         (.call callee (arguments.map mapping.value) (rest.map mapping.value) targetMemory)
+  | tailCall {sourceMemory targetMemory callee arguments}
+      (memory : Memory.Renamed mapping scopes sourceMemory targetMemory) :
+      Renamed indices mapping scopes (.tailCall callee arguments sourceMemory)
+        (.tailCall callee (arguments.map mapping.value) targetMemory)
   | construct {sourceMemory targetMemory sourceFrame targetFrame callee arguments rest
       temporary kind}
       (memory : Memory.Renamed mapping scopes sourceMemory targetMemory)

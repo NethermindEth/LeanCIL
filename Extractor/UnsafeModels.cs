@@ -7,6 +7,7 @@ internal static class UnsafeModels
 {
     internal static string? Translate(MethodReference reference, string architecture = "scalar")
     {
+        if (MemoryTransfers.Unaligned(reference, architecture) is { } transfer) return transfer;
         if (ReinterpretReference(reference, architecture) is { } cast) return cast;
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
@@ -23,7 +24,7 @@ internal static class UnsafeModels
 
         var sizeOf = reference.Name == "SizeOf" && reference.Parameters.Count == 0 &&
             reference.ReturnType.FullName == "System.Int32";
-        var add = reference.Name == "Add" && reference.Parameters.Count == 2 &&
+        var elementOffset = reference.Name is "Add" or "Subtract" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr";
         var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
@@ -31,7 +32,20 @@ internal static class UnsafeModels
         var nullRef = reference.Name == "NullRef" && reference.Parameters.Count == 0 && Reference(reference.ReturnType);
         var isNullRef = reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Boolean;
-        if (!sizeOf && !add && !skipInit && !nullRef && !isNullRef) return null;
+        var referencePair = reference.Parameters.Count == 2 &&
+            Reference(reference.Parameters[0].ParameterType) && Reference(reference.Parameters[1].ParameterType);
+        var comparison = referencePair && reference.ReturnType.MetadataType == MetadataType.Boolean &&
+            reference.Name is "AreSame" or "IsAddressLessThan" or "IsAddressGreaterThan";
+        var byteOffset = referencePair && reference.Name == "ByteOffset" &&
+            reference.ReturnType.FullName == "System.IntPtr";
+        var addBytes = reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
+            Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
+            reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
+        var subtractBytes = reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
+            Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
+            reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
+        if (!sizeOf && !elementOffset && !skipInit && !nullRef && !isNullRef && !comparison && !byteOffset &&
+            !addBytes && !subtractBytes) return null;
 
         if (element is ByReferenceType || element is PointerType || element is GenericParameter)
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
@@ -50,9 +64,19 @@ internal static class UnsafeModels
             }
             : MetadataValidation.FieldSize(element, reference.Module, architecture);
 
+        if (comparison) return reference.Name switch
+        {
+            "AreSame" => ".eq",
+            "IsAddressLessThan" => ".ltu",
+            _ => ".gtu"
+        };
+        if (byteOffset) return ".memory .byteOffset";
+        if (subtractBytes) return ".sub";
         if (sizeOf) return $".const32 {width}";
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
-        return $".memory (.add {width} {signed.ToString().ToLowerInvariant()})";
+        // Native-width negative strides reuse the checked wrapping offset operation.
+        var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);
+        return $".memory (.add {stride} {signed.ToString().ToLowerInvariant()})";
     }
 
     // A byref reinterpretation changes only its static type, never the allocation,

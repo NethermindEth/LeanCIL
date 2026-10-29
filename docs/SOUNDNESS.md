@@ -90,9 +90,11 @@ Specialization can make `typeof(A) == typeof(B)` (or `!=`) a constant. `CIL.Extr
 
 `foldRoles` also recognizes `throw new E(...)`: `ldstr`/`ldnull` loads, an exact allowlisted `System.Runtime` exception constructor, then `throw`. `exceptionConstructor` lists the supported exception types with parameterless or one-string constructors, and the two-string overloads of `ArgumentException`, `ArgumentNullException` and `ArgumentOutOfRangeException`. Both extraction and the feature certificate reject other types and constructor signatures; null arguments are admitted only as strings, not as arbitrary constructor parameter types. The feature certificate accepts only `nop` for the loads and `newobj`, and `.throw "E"` for the `throw`, and rejects any non-fallthrough edge past the first instruction, so the raised object is always the one constructed. The checked interpreter fails with `ExecutionFault.thrown "E"` at the `throw`. The model does not run the constructor: resource exhaustion, such as an out-of-memory condition, is not distinguished. Methods with exception handlers are rejected, so nothing observes the exception before execution ends.
 
-`foldRoles` folds `stloc s; ldloca s` for a single-use primitive `ReadOnlySpan<T>` receiver: both emit `nop`, leaving the span value on the stack. The feature certificate checks that the local has exactly those two accesses and that the receiver is followed by `get_Length` or a single load or constant before `get_Item`; branches cannot enter the folded sequence. Other supported span uses retain typed local or parameter storage. Memory-backed views retain allocation identity, element width, bounds and lifetime, and never grant authority or initialize bytes. Readonly views prohibit stores through their element references but do not prevent writable aliases from updating the same allocation. `CreateSpan<T>` over static data requires the start of an immutable allocation whose size is a multiple of the element width; checked indexing stays within that field.
+`foldRoles` folds `stloc s; ldloca s` for a single-use primitive `ReadOnlySpan<T>` receiver: both emit `nop`, leaving the span value on the stack. The feature certificate checks that the local has exactly those two accesses and that the receiver is followed by `get_Length` or a single load or constant before `get_Item`; branches cannot enter the folded sequence. Other supported span uses retain typed local or parameter storage. Memory-backed views retain allocation identity, element width, bounds and lifetime, and never grant authority or initialize bytes. Readonly views prohibit stores through their element references but do not prevent writable aliases from updating the same allocation. Primitive spans also admit `nint`, `nuint`, `char` and `bool`, using their existing 8-, 2- and 1-byte storage rules. Boolean bytes are not assumed canonical. Array `newobj` constructors and implicit conversions, plus the array `MemoryExtensions.AsSpan` overloads with zero, one or two int32 range arguments, form checked views without copying. Null arrays yield empty default views only for zero start/count; invalid ranges raise `ArgumentOutOfRangeException`. The certificate binds exact runtime assemblies, signatures, element identity, arity and mutability. In-place span constructors admit an exact `ldloca` receiver followed by up to three argument loads/constants and `call .ctor`. The receiver address cannot escape, and branches cannot enter the arguments or constructor. Arguments execute at their original instructions; the checked constructor initializes the typed local at the original call instruction, including on reinitialization. More complex argument expressions and aliased receiver addresses are rejected. `Index`/`Range`, string and `ArraySegment` overloads are unsupported. `CreateSpan<T>` over static data requires the start of an immutable allocation whose size is a multiple of the element width; checked indexing stays within that field.
 
 Generated Lean and the identity manifest retain the original generic definition and concrete type arguments; each specialized method retains its original metadata token. Assembly hashing and regeneration-based artifact checks bind this information and the generated instructions to the compiled input. These checks establish artifact consistency, not a formal proof of the extractor's implementation.
+
+`MemoryMarshal.AsBytes<T>` and `Cast<TFrom,TTo>` form checked views over supported primitive integer or enum storage. They retain the allocation-relative reference and readonly status, read no bytes, and grant no authority. Cast lengths truncate incomplete destination elements; a result longer than `Int32.MaxValue` raises `OverflowException`. The evidence binds the exact generic types, source and destination widths, and runtime overload. Misaligned views follow the modeled CoreCLR x64/ARM64 normal-memory convention described below; this does not assert portable support on arbitrary architectures.
 
 Block initialization and copying use allocation-aware byte reads and writes. Nonempty accesses check bounds, lifetime, permissions, alignment and GC-reference exclusion; copying additionally requires initialized source bytes and rejects every overlapping region. The unprefixed block alignment is eight bytes on the admitted target, reduced to 1, 2 or 4 by a validated `unaligned.` prefix. Zero-byte operations access no memory, including when passed null references. This zero-length convention is checked against the admitted runtime; it does not model exception handling or arbitrary pointer addresses.
 
@@ -216,6 +218,20 @@ Ordinary reference-free accesses use alignment 1, for the modeled CoreCLR x64/AR
 
 Primitive indirect loads/stores and integer `ldobj`/`stobj` use those same access checks and one-, two-, four- or eight-byte storage. They accept managed references, not numeric addresses or aggregate snapshots. Narrow stores truncate; loads extend according to the opcode or validated type token. Integer `initobj` zeroes and initializes exactly that storage width. `sizeof` emits a constant from validated integer widths or validated aggregate layout metadata, under the same layout correspondence assumption as aggregate memory operations; it is not a model of arbitrary runtime type layout.
 
+Integer `Vector128<T>`, `Vector256<T>` and `Vector512<T>` storage accepts the already
+admitted `byte`, `int`, `uint`, `long` and `ulong` elements. `sizeof`, `initobj`, `ldobj`,
+`stobj` and `cpobj` use the exact 16-, 32- or 64-byte type width, independently of ISA
+availability. The extraction certificate checks the raw object opcode and exact runtime
+type identities against the emitted vector operation and width. Loads and stores retain
+byte initialization masks through the existing checked snapshot operations. Typed copies
+require initialized source bytes and reject partial overlap; they do not turn unreadable
+bytes into concrete values. The guards against observing unspecified SIMD lanes remain in
+force. Fields admit the same
+integer elements at 128 and 256 bits using the existing architecture-dependent layout
+rules. Vector512 fields remain unsupported because their aggregate alignment is not
+established by this layout model. These storage forms do not admit floating-point vector
+operations or additional vector element types.
+
 `switch` uses unsigned `i32` indexing, with out-of-range indices falling through. Reachability includes every target and the fallthrough, conservatively even for a constant index. Reachable backedges are validated by the same fixed-point feature and stack analyses as other branches; switch-only dependencies and unsupported arms receive the normal validation. These rules follow the [CLI switch operation](https://learn.microsoft.com/en-us/dotnet/api/system.reflection.emit.opcodes.switch); they do not establish loop termination or admit exception-region transfers.
 
 A null managed reference is a distinct value, not address zero. `Unsafe.NullRef<T>` produces it and `Unsafe.IsNullRef<T>` compares against it without any access check, as .NET compares the pointer. Every checked memory instruction faults with `nullDereference` on it, before forming a field or lane offset; this models the `NullReferenceException` that the runtime raises for an access through a null byref, under the same runtime correspondence assumption as other faults. The fault is not `thrown`, so an `OutcomeContract` cannot name it as raised; methods with handlers remain rejected, so nothing observes it.
@@ -234,6 +250,14 @@ model faults and cannot prove either expected exception. Array allocation, refer
 multidimensional arrays and taking the address of an array root are outside this subset.
 The scalar certificate checks array opcode families, integer widths, load signedness, native
 integer distinctions and typed element tokens against the emitted operations.
+
+Same-assembly integer-backed enum arrays retain the full assembly/type identity separately
+from their underlying integer width and narrow-load signedness. Typed element tokens and
+array-to-span factories must match that identity; equal widths do not permit substitution.
+Enum span metadata keeps its identity and write capability in scalar-flow states across
+locals, calls, returns, joins and backedges. Span storage remains a physical checked view;
+it does not encode a CLR type tag or grant additional memory authority. Enum elements reuse
+the existing initialization, lifetime, bounds and readonly checks without heap allocation.
 
 For `readonly.; ldelema`, the certificate additionally binds the readonly flag to the
 immediately preceding raw prefix and disallows branch entry between the two instructions.
@@ -289,6 +313,13 @@ The C# compiler/JIT is not assumed to prove a source-level contract. Extraction 
 No `sorry`, `admit`, new axioms, native proof evaluation, or unchecked correctness summaries are used in the delivered proofs. `rfl` and `decide` generate kernel-checkable proofs; generated evidence uses `decide +kernel`, which reduces the decision procedure in the kernel instead of the elaborator, adds no axioms, and keeps certificates for long method bodies within the default heartbeat budget. A failed build, unexpected diagnostic, resource exhaustion or missing audit is a verification failure, not a successful negative semantic test.
 
 ## Independently checked extraction evidence
+
+Shift certificates distinguish native-integer counts from ordinary `int64` counts, although
+both use 64-bit values during execution. Only `int32` and native counts are admitted. Native
+counts normalize to their low 32 bits before the existing modulo-32 or modulo-64 operation;
+`CIL.binary_native_shift_count` proves this normalization for all three shifts. Count masking,
+including negative and oversized counts, is an admitted .NET runtime behavior rather than
+a guarantee for every CLI implementation.
 
 `CIL.Extraction.TranslationValid` binds one evidence record to every emitted method in program order. Its component validators recompute sequential and explicit layouts from raw fields, packing and declared size; require the complete set of layout-dependent instruction/local/parameter sites; derive parameter homes from reachable raw argument operations; check generic substitution through signatures, locals, operands and nested calls; and bind managed calls to the specialized target table. Method initialization and return shape are checked too.
 
@@ -386,7 +417,7 @@ The wrong-addition fixture has a finite execution witness plus a uniqueness theo
 
 The scalar certificate permits interchange between `word64` and `native` only at a metadata-bound 64-bit local home, argument home or return boundary. Both have the checked interpreter representation `i64` on the validated 64-bit target. This representation rule does not permit a mixed native/int64 arithmetic operation, int32 widening, or recovery of numeric width from `other`.
 
-Primitive integer pointer parameters, locals and results carry checked allocation-relative references. Raw `void*` remains opaque except at the supported `System.Runtime` 10 primitive `Span<T>(void*, int32)` and `ReadOnlySpan<T>(void*, int32)` constructors. Their scalar evidence checks the exact declaring type, external signature, parameter/result metadata, element width and mutability against the emitted `spanFromReference` operation. The existing `ReadOnlySpan<byte>` constructor retains its exact `spanCreate` check. Each constructor requires a checked reference and an int32 length; an opaque value or native integer cannot fabricate a reference through this rule. Other pointer element types remain unsupported by extraction.
+Primitive integer pointer parameters, locals and results carry checked allocation-relative references. Raw `void*` remains opaque except at the supported `System.Runtime` 10 primitive integer and enum `Span<T>(void*, int32)` and `ReadOnlySpan<T>(void*, int32)` constructors. Their scalar evidence checks the exact declaring type, external signature, parameter/result metadata, element width and mutability against the emitted `spanFromReference` operation. The existing `ReadOnlySpan<byte>` constructor retains its exact `spanCreate` check. Each constructor requires a checked reference and an int32 length; an opaque value or native integer cannot fabricate a reference through this rule. Other pointer element types remain unsupported by extraction.
 
 A raw `stloc` into a validated int32 or narrow integer home with a known `word64` or `native` input is an explicit terminal `invalidState` case. The checked home store rejects every such `i64` input. The certificate therefore requires no successful successor from that store; it does not convert the value or treat later instructions as a successful execution. The rule requires the exact emitted local index. Unknown values, references and missing or different homes cannot use this exception. All covered arithmetic and conversion encodings still require their exact checks, including after the terminal store.
 
@@ -417,7 +448,26 @@ References carry allocation identity and offset, not nominal CLR type tags. Rela
 
 The extractor admits direct calls to methods on validated reference-free structs. The implicit `this` argument is a managed reference, not an aggregate snapshot; field accesses use existing allocation, permission, initialization and lifetime checks. By-value struct parameters still copy values into their own frame storage. Parameter assignment/addressing accounts for the shifted argument indices.
 
-Direct calls to a void instance constructor are allowed on existing struct storage. Such calls do not allocate an object or bypass initialization checks. `newobj` for admitted structs allocates zero-initialized caller-owned temporary storage, passes a managed-reference `this` to the constructor, requires a void return and reads back a checked aggregate snapshot. Constructor calls propagate arithmetic and memory faults. The temporary remains owned by the caller until frame cleanup; resource exhaustion is not modelled. Zero-initialized fields follow the CIL construction contract; correspondence of padding bytes and physical runtime layout remains a runtime assumption. Class instance methods, indirect/virtual dispatch and generic declaring types remain unsupported.
+Direct calls to a void instance constructor are allowed on existing struct storage. Such calls do not allocate an object or bypass initialization checks. `newobj` for admitted structs allocates zero-initialized caller-owned temporary storage, passes a managed-reference `this` to the constructor, requires a void return and reads back a checked aggregate snapshot. Constructor calls propagate arithmetic and memory faults. The temporary remains owned by the caller until frame cleanup; resource exhaustion is not modelled. Zero-initialized fields follow the CIL construction contract; correspondence of padding bytes and physical runtime layout remains a runtime assumption. Class instance methods, indirect instance dispatch and generic declaring types remain unsupported.
+
+Direct `tail.; call; ret` transfers are admitted for the existing same-assembly managed-call
+subset. The certificate binds the prefix to its call and immediate return, requires exactly
+the call arguments on the stack, checks the complete callee signature and equal return types,
+and rejects branches into the call or return. The checked driver retires the current frame
+before revalidating arguments and entering the callee. References or views into that frame's
+locals therefore fail even if the callee would ignore them; references to still-live caller
+storage remain valid. The callee result returns directly, without a caller continuation.
+Typed `ldftn`/`calli` values retain a scoped method identity and exact closed signature.
+Each possible call target is bound by the certificate to an extracted body. Linking relocates
+catalog indices without changing pointer identities. Supplied immutable handler tables contain
+non-null identities of one signature; a null table and out-of-range indexes raise their named
+exceptions. Integer conversion cannot manufacture callable provenance.
+
+Direct and indirect tail transfers may form cycles, using the same frame-retirement checks.
+Execution remains fuel-bounded and termination needs a proof. Only default-managed static
+signatures over admitted integers, enums and managed references are supported. Imported or
+intrinsic tail calls, mutable handler tables, null entries, unmanaged conventions and raw
+native-integer targets remain unsupported. This does not model an arbitrary raw-pointer EVM table.
 
 ## Integer enums
 

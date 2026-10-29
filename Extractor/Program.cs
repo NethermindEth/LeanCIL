@@ -259,6 +259,7 @@ internal static partial class Program
                         importHashes.GetValueOrDefault(reference.Name) ?? "", interfaceHashes.GetValueOrDefault(reference.Name) ?? "", Discovered: true));
             }
             using ImportResolution imports = new(importSources);
+            using var enumMetadata = EnumTypes.BeginScope();
             stage = "metadata and CIL validation";
             MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports,
                 typeArguments: entryTypeArguments.ToArray(), importedByref: type => imports.ValidateByref(type, profile));

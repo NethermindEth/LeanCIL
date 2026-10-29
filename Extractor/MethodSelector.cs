@@ -34,15 +34,13 @@ internal static class MethodSelector
         for (var i = 0; i < text.Length; i++)
         {
             var character = text[i];
-            if (character is '<' or '[') delimiters.Push(character);
-            else if (character is '>' or ']')
+            if (character is '<' or '[' or '(') delimiters.Push(character);
+            else if (character is '>' or ']' or ')')
             {
                 if (!delimiters.TryPop(out var opening) ||
-                    (character == '>' ? opening != '<' : opening != '['))
+                    opening != (character == '>' ? '<' : character == ']' ? '[' : '('))
                     throw Rejections.Tag(Rejection.Selector, new ArgumentException("Malformed method selector: unbalanced parameter type"));
             }
-            else if (character is '(' or ')')
-                throw Rejections.Tag(Rejection.Selector, new ArgumentException("Malformed method selector: unexpected parenthesis"));
             else if (character == ',' && delimiters.Count == 0)
             {
                 parts.Add(text[start..i]);

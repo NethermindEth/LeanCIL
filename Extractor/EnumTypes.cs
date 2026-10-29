@@ -5,12 +5,55 @@ namespace Nethermind.LeanCIL;
 // Enums retain their metadata identity, but use their underlying integer storage.
 internal static class EnumTypes
 {
+    [ThreadStatic]
+    static MetadataScope? activeScope;
+
+    // A request may specialize method bodies, but enum declarations remain immutable.
+    sealed class MetadataScope : IDisposable
+    {
+        readonly MetadataScope? previous = activeScope;
+        internal readonly Dictionary<(TypeReference Reference, Type Descriptor), object> Descriptors = [];
+        readonly Dictionary<ModuleDefinition, Dictionary<string, int>> typeCounts = [];
+
+        internal MetadataScope() => activeScope = this;
+
+        internal int Count(TypeDefinition type)
+        {
+            if (!typeCounts.TryGetValue(type.Module, out var counts))
+            {
+                counts = type.Module.GetTypes().CountBy(candidate => candidate.FullName, StringComparer.Ordinal)
+                    .ToDictionary(StringComparer.Ordinal);
+                typeCounts.Add(type.Module, counts);
+            }
+            return counts.GetValueOrDefault(type.FullName);
+        }
+
+        public void Dispose() => activeScope = previous;
+    }
+
+    internal static IDisposable BeginScope() => new MetadataScope();
+
+    internal static T Cached<T>(TypeReference reference, Func<TypeReference, T> create) where T : class
+    {
+        if (activeScope is not { } scope) return create(reference);
+        var key = (reference, typeof(T));
+        if (scope.Descriptors.TryGetValue(key, out var existing)) return (T)existing;
+        var result = create(reference);
+        scope.Descriptors.Add(key, result);
+        return result;
+    }
+
     internal static bool IsEnum(TypeReference type) => type is not TypeSpecification &&
         type.Scope == type.Module && type.Resolve() is { IsEnum: true };
 
     internal static TypeReference Storage(TypeReference reference)
     {
         if (!IsEnum(reference)) return reference;
+        return Cached(reference, ValidateStorage);
+    }
+
+    static TypeReference ValidateStorage(TypeReference reference)
+    {
         var type = reference.Resolve();
         var fields = type.Fields.Where(f => !f.IsStatic).ToArray();
         if (!reference.IsValueType || type.HasGenericParameters || !type.IsSealed || type.HasInterfaces ||
@@ -20,7 +63,7 @@ internal static class EnumTypes
             type.Module != reference.Module || type.Methods.Count != 0 ||
             fields.Length != 1 || fields[0].Name != "value__" ||
             !fields[0].IsSpecialName || !fields[0].IsRuntimeSpecialName ||
-            type.Module.GetTypes().Count(t => t.FullName == type.FullName) != 1)
+            (activeScope?.Count(type) ?? type.Module.GetTypes().Count(t => t.FullName == type.FullName)) != 1)
             throw new InvalidDataException($"Unsupported enum metadata: {reference.FullName}");
         var storage = fields[0].FieldType;
         if (storage is TypeSpecification || !RuntimeModels.ExactScope(storage.Scope, "System.Runtime") ||

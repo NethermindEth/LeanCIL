@@ -72,6 +72,17 @@ theorem run_preserves_caller_allocations (program : CIL.Program) (fuel method pc
     have first := (programStep_extends_allocations step).below watermark bound
     exact first.trans ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
       fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩
+  | tailCall step _ _ _ _ enter _ _ ih =>
+    have first := (programStep_extends_allocations step).below watermark bound
+    have retired := first.trans
+      (show AllocationsBelow _ _ watermark from
+        ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
+          fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩)
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have retiredBound := Nat.le_trans bound retired.next
+    exact (retired.trans (fresh.1.below watermark retiredBound)).trans
+      (ih (Nat.le_trans retiredBound fresh.1.next)
+        (fun id member => Nat.le_trans retiredBound (fresh.2 id member).1))
   | call step _ enter _ _ _ childIH ih =>
     have first := programStep_extends_allocations step
     have fresh := enterFrame_fresh _ _ _ _ _ enter
@@ -124,6 +135,21 @@ theorem runVisits_preserves_caller_allocations {program : CIL.Program} {fuel met
     AllocationsBelow m observed watermark := by
   induction visit with
   | initial => exact (AllocationExtension.refl _).below watermark bound
+  | tailExpired step _ _ _ =>
+    have first := (programStep_extends_allocations step).below watermark bound
+    exact first.trans ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
+      fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩
+  | tailChild step _ _ _ _ enter _ ih =>
+    have first := (programStep_extends_allocations step).below watermark bound
+    have retired := first.trans
+      (show AllocationsBelow _ _ watermark from
+        ⟨by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _,
+          fun id old => leaveFrame_preserves_older_allocations _ _ _ owned id old⟩)
+    have fresh := enterFrame_fresh _ _ _ _ _ enter
+    have retiredBound := Nat.le_trans bound retired.next
+    exact (retired.trans (fresh.1.below watermark retiredBound)).trans
+      (ih (Nat.le_trans retiredBound fresh.1.next)
+        (fun id member => Nat.le_trans retiredBound (fresh.2 id member).1))
   | stepped step => exact (programStep_extends_allocations step).below watermark bound
   | next step later ih =>
     have first := programStep_extends_allocations step

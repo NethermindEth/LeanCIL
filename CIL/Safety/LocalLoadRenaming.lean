@@ -55,7 +55,8 @@ theorem Memory.Renamed.localAddress {mapping : AllocationRenaming}
       (localAddress source slot) (localAddress target (mapping.localSlot slot)) := by
   cases slot with
   | bytes kind reference => exact related.formValue (.address reference) bound
-  | root _ | readOnlyRoot _ | opaque128 _ | span _ _ _ | array _ _ => exact .error _
+  | root _ | readOnlyRoot _ | opaque128 _ | span _ _ _ | array _ _
+  | methodPointer _ _ | methodTable _ _ => exact .error _
 #print axioms Memory.Renamed.localAddress
 
 /-- Reading a retained local preserves its value, including restricted references and snapshots. -/
@@ -66,6 +67,12 @@ theorem Memory.Renamed.loadLocal {mapping : AllocationRenaming}
     ResultRenamed mapping (fun source target => target = mapping.value source)
       (loadLocal source slot) (loadLocal target (mapping.localSlot slot)) := by
   cases slot with
+  | methodPointer _ value | methodTable _ value =>
+    cases value <;> simp only [CIL.Safety.loadLocal, AllocationRenaming.localSlot]
+    all_goals repeat' first
+      | exact .error _
+      | exact .ok rfl
+      | split
   | root reference =>
     cases reference with
     | none => exact .error .invalidState

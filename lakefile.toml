@@ -140,6 +140,9 @@ name = "Tests.SpanEvidence"
 name = "Tests.ConstrainedEvidence"
 
 [[lean_lib]]
+name = "Tests.ManagedPointerValues"
+
+[[lean_lib]]
 name = "Tests.StackAllocation"
 
 [[lean_lib]]
@@ -174,6 +177,12 @@ name = "Tests.ScalarEvidence"
 
 [[lean_lib]]
 name = "Tests.VectorFields"
+
+[[lean_lib]]
+name = "Tests.VectorStorage"
+
+[[lean_lib]]
+name = "Tests.EnumBufferEvidence"
 
 [[lean_lib]]
 name = "Tests.ProfileContract"

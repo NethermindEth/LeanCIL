@@ -13,10 +13,15 @@ namespace CIL.Extraction
 
 /-- `(pops, pushes)` of each memory operation. -/
 private def memoryFeatureEffect : MemoryOp → Nat × Nat
+  | .spanCopy _ tryCopy => (2, if tryCopy then 1 else 0)
+  | .spanFill _ clear => (if clear then 1 else 2, 0)
+  | .marshalRead _ trying => (if trying then 2 else 1, 1)
+  | .marshalWrite _ trying => (2, if trying then 1 else 0)
   | .bigMul64 => (3, 1)
   | .spanSlice explicitLength => (if explicitLength then 3 else 2, 1)
-  | .spanFromReference .. => (2, 1)
-  | .spanReadOnly | .arrayLength => (1, 1)
+  | .spanFromReference .. | .byteOffset => (2, 1)
+  | .arraySpan _ _ range => (range.argumentCount, 1)
+  | .spanReinterpret .. | .spanReadOnly | .arrayLength => (1, 1)
   | .arrayLoad .. | .arrayAddress .. => (2, 1)
   | .arrayStore _ => (3, 0)
   | .copyBlock _ | .initBlock _ => (3, 0)
@@ -32,6 +37,11 @@ change a local root. Control flow, returns, stores and addresses require exact
 raw-instruction matching instead. No unrecognized instruction is admitted. -/
 def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :=
   match op with
+  | .managed (.address ..) => some (0, 1)
+  | .managed .tableLength => some (1, 1)
+  | .managed (.tableElement _) => some (2, 1)
+  | .managed (.call signature _ _) =>
+    some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
   | .stackAlloc _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
@@ -53,12 +63,13 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .initAggregate _ | .skipInit | .pop => some (1, 0)
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.
-  | .call _ count => some (count, if returnsValue then 1 else 0)
+  | .call _ count | .tailCall _ count => some (count, if returnsValue then 1 else 0)
   | .newAggregate _ count _ | .newVector256 _ count => some (count, 1)
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
   | .localAddr _ | .vectorLocalAddr _ | .vectorArgAddr _ | .setLocal .. | .setVectorLocal _
+  | .initializeSpanLocal ..
   | .feature _ | .ret _ | .throw _ | .unsupported _ | .branch _ | .switch _ | .brzero _
   | .brnonzero _ | .bgt _ | .ble _ | .bleu _ | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _
   | .beq _ | .bne _ => none
