@@ -160,8 +160,11 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
       StorageType.methodPointer <$> managedSignature type else none
   | .pointer (.atom scope name) =>
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
-        "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
-        "System.IntPtr", "System.UIntPtr"] then some .reference else none
+        "System.UInt16", "System.Char", "System.Int32", "System.UInt32", "System.Int64",
+        "System.UInt64", "System.IntPtr", "System.UIntPtr"] then some .reference else none
+  | .pointer (.enum identity underlying) => do
+    let .field _ ← typeStorage layouts (.enum identity underlying) | none
+    return .reference
   | .pointer (.aggregate identity index) => do
     let metadata ← layouts[index]?
     if metadata.identity == identity then some .reference else none

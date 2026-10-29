@@ -179,6 +179,11 @@ All underlying bit patterns are admitted, not just named constants. Narrow exten
 follows the underlying type. Boxing, reflection, enum instance methods and external enum dependencies
 are excluded; equal byte widths do not authorize replacing one enum identity with another.
 
+Checked pointer parameters and locals admit these enum types and `char`, using the existing
+allocation-relative reference representation and integer loads/stores. Enum pointees retain their
+validated declaration identity and underlying storage; character pointees require the exact runtime
+type identity. This does not admit floating-point, nested-pointer or reference-bearing pointees.
+
 ## Portable bit helpers
 
 Rotations use modulo-width counts; counts/reversal and log2 follow the scalar bit-vector model.

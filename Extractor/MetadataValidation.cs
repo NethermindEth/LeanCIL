@@ -262,10 +262,12 @@ internal static class MetadataValidation
         }
         if (type is PointerType pointer)
         {
+            var element = EnumTypes.Storage(pointer.ElementType);
             if (!IsAggregate(pointer.ElementType, module) && IntegerVectorWidth(pointer.ElementType) is null &&
-                (pointer.ElementType is TypeSpecification ||
-                pointer.ElementType.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
-                    MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 or
+                (element is TypeSpecification ||
+                element.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
+                    MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Char or
+                    MetadataType.Int32 or MetadataType.UInt32 or
                     MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr)))
                 throw new InvalidDataException("Unsupported stack-storage pointer element type");
             Type(pointer.ElementType, module, architecture: architecture);
