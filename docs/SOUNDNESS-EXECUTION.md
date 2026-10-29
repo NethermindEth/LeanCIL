@@ -268,8 +268,7 @@ correspondence remains part of the extractor trust boundary.
 
 Fixed 256-bit snapshot-home operations use **vector** names to distinguish them from general
 aggregates. Lane operations are explicitly vector-lane operations. They do not stand for arbitrary
-struct layouts. The pure interpreter intentionally returns failure for the new general aggregate
-operations; use the checked interpreter for those operations. Validated reference-free nested
+struct layouts. Validated reference-free nested
 layouts and same-assembly value constructors are exposed by extraction; reference-bearing field
 layouts remain unsupported.
 

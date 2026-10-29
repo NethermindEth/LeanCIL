@@ -97,14 +97,14 @@ The new aggregate instructions are supported by the allocation-aware interpreter
 
 ## Primitive memory and switch additions
 
-- `Op.loadScalar width signed` and `Op.storeScalar width` add checked integer-reference access for widths 1, 2, 4 and 8. The earlier `.load64` / `.store64` constructors remain unchanged. The pure interpreter rejects the new memory operations; use `CIL.Safety.invoke` for their execution proofs.
+- `Op.loadScalar width signed` and `Op.storeScalar width` add checked integer-reference access for widths 1, 2, 4 and 8. The earlier `.load64` / `.store64` constructors remain unchanged. Use `CIL.Safety.invoke` for their execution proofs.
 - Primitive integer `ldobj` / `stobj` now emit these scalar operations. Primitive `initobj` reuses the checked zero-fill operation `initAggregate` with the validated integer width; its semantics do not require an aggregate operand.
 - `Op.switch targets` adds unsigned `i32` jump-table dispatch to both execution models. Consumers matching exhaustively on `Op` must handle the new constructors.
 - `sizeof` emits `const32` using validated type metadata. No runtime type inference or new layout oracle is introduced. Regenerate artifacts and recheck consuming proofs after upgrading.
 
 ## Integer division and remainder
 
-- `Op.divide signed remainder` represents four CIL encodings. `CIL.IntegerArithmetic` provides the checked bit-vector and scalar operations; the original pure interpreter exposes their successes through `Option`.
+- `Op.divide signed remainder` represents four CIL encodings. `CIL.IntegerArithmetic` provides the checked bit-vector and scalar operations; `CIL.Safety.invoke` propagates checked results and arithmetic faults.
 - `ExecutionFault.arithmetic` carries `ArithmeticFault.divideByZero`, `.overflow` or `.invalidOperands`. Consumers matching faults or instructions exhaustively must handle the new constructors. Successful scalar results still pass the existing value checks and safety invariants.
 - Regenerate artifacts: reachable division is now supported, with arithmetic failures distinguished from unsupported instructions. The generic unsupported-instruction fixture now uses array allocation.
 
