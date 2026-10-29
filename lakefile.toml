@@ -179,6 +179,9 @@ name = "Tests.VectorFields"
 name = "Tests.VectorStorage"
 
 [[lean_lib]]
+name = "Tests.EnumBufferEvidence"
+
+[[lean_lib]]
 name = "Tests.ProfileContract"
 
 [[lean_lib]]
