@@ -39,6 +39,9 @@ profiles, feature queries and a loop backedge, and retains source/assembly tampe
 short/long branch encodings, unknown operands and loss of facts after native conversions.
 Independent certificates reject changed comparison signedness, unjustified pruning and constants
 that do not survive a loop backedge. Compiled profile guards exercise the same propagation.
+Switch checks cover known, unknown, negative and out-of-range selectors, empty and duplicate
+tables, and backedge weakening. Unselected targets still reject out-of-range positions and
+tail-transfer interiors in both extraction and independent evidence validation.
 
 The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
 extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,

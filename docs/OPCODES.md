@@ -56,7 +56,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `conv.u` | Partial | Model native unsigned integers as 64-bit: zero-extend `i32`, or preserve `i64`. Does not convert a managed reference to an integer address. |
 | `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality as described below; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering remains unsupported. No floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted instruction boundary, including backward edges and self-loops. |
-| `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. All reachable targets must be valid instruction boundaries; each arm and the fallthrough participate in dependency and stack analysis. |
+| `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. Every encoded target must be a valid instruction boundary and fold entry. Known int32 selectors prune untaken arms; otherwise every arm and the fallthrough participate in dependency and stack analysis. |
 | `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char), same-assembly explicit- or sequential-layout reference-free aggregates, or the integer vectors listed below. Native integers use eight bytes under the validated profile. Closed same-assembly generic structs require validated sequential layouts. No reference types, floating-point or unsupported generic layouts. |
 | `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. Also accepts checked references, including readonly references and null. Admitted forward and backward successors. |
 | `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
@@ -411,7 +411,10 @@ analysis; the certificate binds the raw call signature and emitted value. Known 
 propagate through bitwise operations and `ceq`, `cgt`, `cgt.un`, `clt` and `clt.un`.
 Single-condition branches and all short/long signed or unsigned comparison branches select an
 edge when their operands are known. Unknown operands, including native and int64 values, keep
-both edges; joins and backedges discard conflicting constants. Switches retain every successor.
+both edges; joins and backedges discard conflicting constants. A known int32 switch selector
+chooses its indexed arm, or falls through when its unsigned value is out of range. Unknown
+selectors retain every successor. Every encoded branch or switch target remains bounds-checked
+and must enter a folded sequence or tail transfer at its start, even when unselected.
 
 ## Lean-only operations and source of truth
 
