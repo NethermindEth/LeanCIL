@@ -53,6 +53,11 @@ foreach (var method in methods)
     var proof = Path.Combine(root, name + ".lean");
     File.WriteAllText(proof, source + $$"""
 
+        /-- A successful observation identifies the exact checked execution result. -/
+        private theorem result_of_toOption {error value : Type} {result : Except error value}
+            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
+          cases result <;> simp_all [Except.toOption]
+        #print axioms result_of_toOption
         /-- Supplied live array storage; typed views do not create authority. -/
         private def memory : CIL.Safety.Memory := {
           allocations := fun identity => if identity == 0 then
@@ -62,7 +67,7 @@ foreach (var method in methods)
           nextIdentity := 1 }
         /-- Compiled array operations preserve typed contents and storage identity. -/
         theorem result : (CIL.Safety.invoke Extracted.program 64 0 [{{arguments}}] memory).map
-            Prod.snd = .ok [{{expected}}] := by decide +kernel
+            Prod.snd = .ok [{{expected}}] := by apply result_of_toOption; decide +kernel
         #print axioms result
         """);
     evidence.Add(proof, "PASS aggregate array: " + name);
