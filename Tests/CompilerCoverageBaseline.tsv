@@ -148,6 +148,8 @@ Examples:System.Byte& Examples.UnsafeReferences::Subtract(System.Byte&,System.In
 Examples:System.Byte& Examples.UnsafeReferences::SubtractUnsigned(System.Byte&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Byte* Examples.PointerOperations::Subtract(System.Byte*,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Byte* Examples.PointerOperations::SubtractNative(System.Byte*,System.IntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Byte* Examples.UnsafeReferences::AddPointer(System.Byte*,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Byte* Examples.UnsafeReferences::AddPointerAggregate(System.Byte*,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Byte[] Examples.PrimitiveArrays::AllocateBytes(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Char Examples.MemorySpans::CharacterWrite(System.Span`1<System.Char>,System.Int32,System.Char)	A	A	A	A	A	A	A	A
 Examples:System.Char Examples.NarrowIntegers::Character(System.Int32)	A	A	A	A	A	A	A	A
@@ -184,11 +186,14 @@ Examples:System.Int32 Examples.Bits::LogNative(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::Population32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::Population64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::PopulationNative(System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Bits::PrimitiveLeft32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Bits::PrimitiveRight32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::ReverseI32(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::Trailing32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::Trailing64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::TrailingNative(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::WrongLog64(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Capabilities::Platform()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ClosedInterfaceCounter::Examples.IClosedCounter<System.Int32>.Read()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ClosedInterfaceCounter::Examples.IClosedCounter<System.Int64>.Read()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ConstrainedCalls::ClosedBoth(Examples.ClosedInterfaceCounter&)	A	A	A	A	A	A	A	A
@@ -337,6 +342,8 @@ Examples:System.Int32* Examples.StackAllocation::EscapingStorage()	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::Allocate(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::Identity(System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::ReadJagged(System.Int32[][],System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Int64 Examples.Bits::PrimitiveLeft64(System.Int64,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int64 Examples.Bits::PrimitiveRight64(System.Int64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.Bits::ReverseI64(System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.ExceptionDocumentation::CheckedAdd(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.ExceptionDocumentation::Divide(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
@@ -411,6 +418,8 @@ Examples:System.Int64& Examples.UnsafeLayouts::Add8nint(System.Int64&,System.Int
 Examples:System.Int64& Examples.UnsafeLayouts::Add8nuint(System.Int64&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int64[] Examples.PrimitiveArrays::AllocateLongs(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr Examples.Arguments::Native(System.IntPtr)	A	A	A	A	A	A	A	A
+Examples:System.IntPtr Examples.Bits::PrimitiveLeftNative(System.IntPtr,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.IntPtr Examples.Bits::PrimitiveRightNative(System.IntPtr,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr Examples.Bits::ReverseNative(System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr Examples.GenericMethods::NativeIdentity(System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr Examples.IntegerMath::AbsNative(System.IntPtr)	A	A	A	A	A	A	A	A
@@ -532,6 +541,8 @@ Examples:System.UInt32 Examples.Arguments::CallerIsolation(System.UInt32)	A	A	A	
 Examples:System.UInt32 Examples.Arguments::Overwrite(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Arguments::ReassignReference(System.UInt32&,System.UInt32&)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::Left32(System.UInt32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Bits::PrimitiveLeftU32(System.UInt32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Bits::PrimitiveRightU32(System.UInt32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::ReverseU32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::Right32(System.UInt32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::RoundUp32(System.UInt32)	A	A	A	A	A	A	A	A
@@ -594,6 +605,8 @@ Examples:System.UInt64 Examples.BinarySpans::ReadLittle(System.ReadOnlySpan`1<Sy
 Examples:System.UInt64 Examples.BinarySpans::TryReadBig(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.BinarySpans::TryReadLittle(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::Left64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Bits::PrimitiveLeftU64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Bits::PrimitiveRightU64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::ReverseU64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::Right64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::RoundTrip(System.UInt64)	A	A	A	A	A	A	A	A
@@ -700,6 +713,8 @@ Examples:System.UInt64& Examples.UnsafeReferences::SubtractElementsNative(System
 Examples:System.UInt64& Examples.UnsafeReferences::SubtractElementsUnsigned(System.UInt64&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt64& Examples.UnsafeReferences::Word(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr Examples.Bits::LeftNative(System.UIntPtr,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UIntPtr Examples.Bits::PrimitiveLeftUNative(System.UIntPtr,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UIntPtr Examples.Bits::PrimitiveRightUNative(System.UIntPtr,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr Examples.Bits::ReverseUNative(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr Examples.Bits::RightNative(System.UIntPtr,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr Examples.Bits::RoundUpNative(System.UIntPtr)	A	A	A	A	A	A	A	A
