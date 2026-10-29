@@ -727,6 +727,9 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let .call site := instruction.operand | none
     let expected := if let some (copy, _) := unsafeBlockCall instruction then
         [.word32, if copy then .reference else .word32, .reference] else
+      if let some (type, read) := unalignedCall instruction then
+        (if read then [] else [scalarType type]) ++ [.reference] else
+      if unsafeReferenceHelper instruction == some .asRef then [.reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else

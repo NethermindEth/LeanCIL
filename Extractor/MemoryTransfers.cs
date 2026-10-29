@@ -59,12 +59,13 @@ internal static class MemoryTransfers
         bool Parameter(TypeReference type) => type is GenericParameter parameter &&
             parameter.Type == GenericParameterType.Method && parameter.Position == 0 &&
             parameter.Owner == generic.ElementMethod;
-        bool ByteReference(TypeReference type) => type is ByReferenceType byRef &&
-            byRef.ElementType.FullName == "System.Byte";
+        bool Address(TypeReference type) => type is ByReferenceType byRef &&
+            byRef.ElementType.FullName == "System.Byte" ||
+            type is PointerType { ElementType.MetadataType: MetadataType.Void };
         var read = reference.Name == "ReadUnaligned" && reference.Parameters.Count == 1 &&
-            ByteReference(reference.Parameters[0].ParameterType) && Parameter(reference.ReturnType);
+            Address(reference.Parameters[0].ParameterType) && Parameter(reference.ReturnType);
         var write = reference.Name == "WriteUnaligned" && reference.Parameters.Count == 2 &&
-            ByteReference(reference.Parameters[0].ParameterType) && Parameter(reference.Parameters[1].ParameterType) &&
+            Address(reference.Parameters[0].ParameterType) && Parameter(reference.Parameters[1].ParameterType) &&
             reference.ReturnType.MetadataType == MetadataType.Void;
         if (!read && !write) return null;
         RuntimeModels.ValidateSignature(reference, architecture);

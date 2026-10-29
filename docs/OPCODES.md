@@ -341,11 +341,13 @@ both directions, as for `SkipInit`. `NullRef` produces a null byref; the bounded
 
 The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references supports the checked byte-offset form described above.
 
-Managed byte-reference `Unsafe.ReadUnaligned<T>` and `WriteUnaligned<T>` support admitted
+Managed byte-reference and pointer `Unsafe.ReadUnaligned<T>` and `WriteUnaligned<T>` support admitted
 integer, aggregate and integer-vector storage. They use the existing typed loads and stores
 with byte alignment, retaining bounds, lifetime, access authority and snapshot initialization
 masks. Readonly source references are accepted; writes require writable references and byte
-authority. Pointer overloads and reference-bearing value types remain unsupported.
+authority. Pointer overloads require allocation-relative references, not numeric addresses.
+`Unsafe.AsRef<T>(void*)` preserves that provenance and forms a live reference without reading or
+initializing bytes or granting access authority. Reference-bearing value types remain unsupported.
 
 The checked model supports `Unsafe.BitCast<TFrom,TTo>` between equal-size validated unmanaged aggregates and `Vector128`/`Vector256` values with `uint` or `ulong` elements, in both directions and under the scalar profile. Byte snapshots retain initialization flags through the cast, local and parameter homes, and value loads/stores. Partially initialized results remain snapshots; numeric reads and vector arithmetic cannot consume their unknown bytes. The pure model does not implement this value-cast operation.
 

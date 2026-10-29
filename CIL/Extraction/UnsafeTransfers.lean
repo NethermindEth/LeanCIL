@@ -64,23 +64,26 @@ def typedTransferMatches (layouts : List RawLayout) (type : TypeExpr) (read : Bo
     | _ => false
 
 /-- Exact static generic Unsafe identity, including both closed parameter and result types. -/
-private def unalignedCall (raw : RawInstruction) : Option (TypeExpr × Bool) := do
+def unalignedCall (raw : RawInstruction) : Option (TypeExpr × Bool) := do
   if raw.opcode != 40 then none else pure ()
   let .call site := raw.operand | none
   let [type] := site.typeArguments | none
   if site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" ||
       site.hasThis then none else pure ()
   let byte := TypeExpr.atom runtimeScope "System.Byte"
+  let pointer := site.parameterTypes.head? == some (.pointer .void)
+  let address := if pointer then .pointer .void else .byref byte
+  let addressName := if pointer then "System.Void*" else "System.Byte&"
   if site.name == "ReadUnaligned" && site.parameterCount == 1 && site.returnsValue &&
-      site.parameterTypes == [.byref byte] && site.returnType == type &&
+      site.parameterTypes == [address] && site.returnType == type &&
       site.target == .external (runtimeScope ++
-        "::!!0 System.Runtime.CompilerServices.Unsafe::ReadUnaligned(System.Byte&)") then
+        "::!!0 System.Runtime.CompilerServices.Unsafe::ReadUnaligned(" ++ addressName ++ ")") then
     some (type, true)
   else if site.name == "WriteUnaligned" && site.parameterCount == 2 && !site.returnsValue &&
-      site.parameterTypes == [.byref byte, type] && site.returnType == .void &&
+      site.parameterTypes == [address, type] && site.returnType == .void &&
       site.target == .external (runtimeScope ++
         "::System.Void System.Runtime.CompilerServices.Unsafe::" ++
-        "WriteUnaligned(System.Byte&,!!0)") then
+        "WriteUnaligned(" ++ addressName ++ ",!!0)") then
     some (type, false)
   else none
 

@@ -95,7 +95,10 @@ internal static class UnsafeModels
         bool Reference(TypeReference type, int position) => type is ByReferenceType byRef &&
             byRef.ElementType is GenericParameter parameter && parameter.Type == GenericParameterType.Method &&
             parameter.Position == position && parameter.Owner == definition;
-        if (!Reference(definition.Parameters[0].ParameterType, 0) || !Reference(definition.ReturnType, arity - 1))
+        var pointer = reference.Name == "AsRef" &&
+            definition.Parameters[0].ParameterType is PointerType { ElementType.MetadataType: MetadataType.Void };
+        if ((!pointer && !Reference(definition.Parameters[0].ParameterType, 0)) ||
+            !Reference(definition.ReturnType, arity - 1))
             return null;
         foreach (var type in generic.GenericArguments)
         {

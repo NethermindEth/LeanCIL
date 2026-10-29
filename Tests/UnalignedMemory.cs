@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:property AllowUnsafeBlocks=true
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
@@ -24,7 +25,8 @@ var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
 foreach (var (suffix, width, shape) in new[]
 {
     ("Signed", 1, ""), ("Half", 2, ""), ("Word", 8, ""),
-    ("Aggregate", 32, "aggregate"), ("128", 16, "v128"), ("512", 64, "v512")
+    ("Aggregate", 32, "aggregate"), ("128", 16, "v128"), ("512", 64, "v512"),
+    ("PointerWord", 8, ""), ("PointerAggregate", 32, "aggregate")
 })
 {
     var runtimeRead = runtime.GetMethod("Read" + suffix)!;
@@ -59,6 +61,12 @@ foreach (var (suffix, width, shape) in new[]
         var invocation = $"CIL.Safety.invoke Extracted.program 32 0 {arguments} memory";
         var boundaries = name switch
         {
+            "ReadPointerWord" => """
+                /-- Numeric addresses cannot acquire pointer provenance at the call boundary. -/
+                theorem numericPointer : (CIL.Safety.invoke Extracted.program 32 0
+                    [.scalar (.i64 1)] memory).toOption = none := by rfl
+                #print axioms numericPointer
+                """,
             "ReadWord" => """
                 /-- Scalar loads require initialized bytes. -/
                 theorem unreadable : CIL.Safety.invoke Extracted.program 32 0
@@ -128,7 +136,9 @@ foreach (var (name, theorem, before, after) in new[]
     ("Write512", "method0_unsafe_validated", ".memory .store512", ".memory .store256"),
     ("ReadAggregate", "method0_layouts_validated", ".loadAggregate 32", ".loadAggregate 16"),
     ("WriteAggregate", "method0_coverage_validated", ".size 2 0 .store", ".size 2 0 .load"),
-    ("ReadWord", "method0_unsafe_validated", "target := .external externalIdentity0", "target := .external \"forged\"")
+    ("ReadWord", "method0_unsafe_validated", "target := .external externalIdentity0", "target := .external \"forged\""),
+    ("ReadPointerWord", "method0_unsafe_validated", "target := .external externalIdentity0", "target := .external \"forged\""),
+    ("ReadPointerAggregate", "method0_layouts_validated", ".loadAggregate 32", ".loadAggregate 16")
 })
 {
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
@@ -146,22 +156,33 @@ partial class Program
 {
     delegate T Reader<T>(in byte source);
     delegate void Writer<T>(ref byte destination, T value);
+    unsafe delegate T PointerReader<T>(byte* source);
+    unsafe delegate void PointerWriter<T>(byte* destination, T value);
 
-    static object RuntimeRead<T>(MethodInfo method, int width) where T : struct
+    static unsafe object RuntimeRead<T>(MethodInfo method, int width) where T : struct
     {
         var bytes = Enumerable.Repeat((byte)255, width + 2).ToArray();
-        var value = method.CreateDelegate<Reader<T>>()(in bytes[1]);
+        T value;
+        fixed (byte* source = &bytes[1])
+            value = method.GetParameters()[0].ParameterType.IsPointer
+                ? method.CreateDelegate<PointerReader<T>>()(source)
+                : method.CreateDelegate<Reader<T>>()(in bytes[1]);
         var actual = MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, 1));
         if (!actual.SequenceEqual(bytes.AsSpan(1, width))) throw new Exception("Runtime read differs");
         return value;
     }
 
-    static void RuntimeWrite<T>(MethodInfo method, int width) where T : struct
+    static unsafe void RuntimeWrite<T>(MethodInfo method, int width) where T : struct
     {
         var bytes = Enumerable.Repeat((byte)255, width + 2).ToArray();
         var valueBytes = Enumerable.Repeat((byte)9, width).ToArray();
         var value = Unsafe.ReadUnaligned<T>(ref valueBytes[0]);
-        method.CreateDelegate<Writer<T>>()(ref bytes[1], value);
+        fixed (byte* destination = &bytes[1])
+        {
+            if (method.GetParameters()[0].ParameterType.IsPointer)
+                method.CreateDelegate<PointerWriter<T>>()(destination, value);
+            else method.CreateDelegate<Writer<T>>()(ref bytes[1], value);
+        }
         if (bytes[0] != 255 || bytes[^1] != 255 || !bytes.AsSpan(1, width).SequenceEqual(valueBytes))
             throw new Exception("Runtime write footprint differs");
     }
