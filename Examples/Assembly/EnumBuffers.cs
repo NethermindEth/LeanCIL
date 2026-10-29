@@ -35,6 +35,15 @@ public static class EnumBuffers
 
     public static Span<Small> Slice(Span<Small> values, int start) => values.Slice(start);
 
+    public static Small FillClear(Small[] values)
+    {
+        var span = values.AsSpan();
+        span.Fill(Small.Seven);
+        var first = span[0];
+        span.Clear();
+        return first;
+    }
+
     public static Small Loop(Small[] values, int count)
     {
         var span = values.AsSpan();

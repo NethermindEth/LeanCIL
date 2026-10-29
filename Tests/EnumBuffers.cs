@@ -50,6 +50,9 @@ foreach (var name in new[] { "Roundtrip", "Address", "SpanRoundtrip" })
         throw new InvalidOperationException("Enum runtime roundtrip mismatch: " + name);
 if (!Equals(runtime.GetMethod("Loop")!.Invoke(null, [values, 2]), seven))
     throw new InvalidOperationException("Enum runtime loop mismatch");
+if (!Equals(runtime.GetMethod("FillClear")!.Invoke(null, [values]), seven) ||
+    values.Cast<object>().Any(value => Convert.ToInt32(value) != 0))
+    throw new InvalidOperationException("Enum runtime Fill/Clear mismatch");
 
 string Element(string name, int width, bool signed) =>
     $".enumeration {JsonSerializer.Serialize(metadata.Assembly.Name.FullName + "::Examples.EnumBuffers/" + name)} " +
@@ -65,6 +68,7 @@ foreach (var (name, arguments, result, width) in new[]
     ("Address", $"[{array}, .scalar (.i32 1), .scalar (.i32 7)]", 7UL, 1),
     ("SpanRoundtrip", $"[{array}, .scalar (.i32 1), .scalar (.i32 7)]", 7UL, 1),
     ("Loop", $"[{array}, .scalar (.i32 2)]", 7UL, 1),
+    ("FillClear", $"[{array}]", 7UL, 1),
     ("Read", "[.bufferSpan ⟨.address ⟨0, 0⟩, 3, 1, false⟩]", 7UL, 1),
     ("Wide", $"[.array ⟨.address ⟨0, 0⟩, 3, ({wide})⟩, .scalar (.i32 1)]", 9223372036854775809UL, 8)
 })
@@ -84,6 +88,7 @@ foreach (var (name, arguments, result, width) in new[]
         theorem correctness :
             (match CIL.Safety.invoke Extracted.program 256 0 {{arguments}} memory with
              | .ok result => result.2 == [.scalar (.i{{(width == 8 ? 64 : 32)}} {{result}})]
+                 {{(name == "FillClear" ? "&& (result.1.cells 0 0).bits == 0 && (result.1.cells 0 2).bits == 0" : "")}}
              | .error _ => false) = true := by decide +kernel
         #print axioms correctness
         end ExampleProof
