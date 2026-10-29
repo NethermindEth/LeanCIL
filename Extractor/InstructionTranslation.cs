@@ -81,7 +81,7 @@ internal static class InstructionTranslation
         var typeTests = TypeTests.Analyze(m);
         if (i.OpCode.Code == Code.Tail)
         {
-            TailCalls.ValidateReachable(m, i);
+            TailCalls.ValidateReachable(m, i, profile.Architecture);
             return ".nop";
         }
         if (typeTests.Results.TryGetValue(i, out bool same)) return same ? ".const32 1" : ".const32 0";

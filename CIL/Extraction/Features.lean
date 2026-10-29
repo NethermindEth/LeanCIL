@@ -413,7 +413,7 @@ private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option 
       featureOpMatchesWith raw eligible instruction (.call target count)
     | _ => false
   | some .tailCall, .managed (.call signature catalog true) =>
-    signature.result == raw.returnType &&
+    signature.result == callableType raw.returnType &&
       featureOpMatchesWith raw eligible instruction (.managed (.call signature catalog false))
   | some .argument, _ => featureOpMatchesWith raw eligible instruction emitted
   | some _, _ => false

@@ -45,7 +45,7 @@ internal static class Reachability
         while (pending.TryDequeue(out Instruction? i))
         {
             queued.Remove(i);
-            if (i.OpCode.Code == Code.Tail) TailCalls.ValidateReachable(method, i);
+            if (i.OpCode.Code == Code.Tail) TailCalls.ValidateReachable(method, i, profile.Architecture);
             FeatureConstants state = incoming[i];
             int? condition = state.Top;
             state = state.Copy();

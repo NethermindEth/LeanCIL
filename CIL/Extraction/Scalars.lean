@@ -371,7 +371,8 @@ def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction
     | .tableElement signature, index :: .methodTable actual :: _ =>
       index ∈ [.word32, .native] && signature == actual &&
         (instruction.opcode == 151 || (instruction.opcode == 163 &&
-          instruction.operand == .type signature.typeExpr))
+          (match instruction.operand with
+           | .type type => managedSignature type == some signature | _ => false)))
     | _, _ => false
   else if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
   else if arrayEmission emitted then arrayMatches instruction stack emitted
@@ -647,12 +648,13 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   let opcode := instruction.opcode
   if opcode == 65030 then
     let .call site := instruction.operand | none
-    let signature : ManagedSignature := ⟨site.returnType, site.parameterTypes⟩
+    let signature : ManagedSignature :=
+      ⟨callableType site.returnType, site.parameterTypes.map callableType⟩
     if site.hasThis || managedSignature signature.typeExpr != some signature then none else
       return .methodPointer signature :: stack
   if opcode == 41 then
     let .indirectCall result parameters false false 0 := instruction.operand | none
-    let signature : ManagedSignature := ⟨result, parameters⟩
+    let signature : ManagedSignature := ⟨callableType result, parameters.map callableType⟩
     let .methodPointer actual :: values := stack | none
     if actual != signature || managedSignature signature.typeExpr != some signature then none else
     let expected := parameters.reverse.map scalarType
@@ -669,7 +671,8 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   if opcode == 151 || opcode == 163 then
     if let index :: .methodTable signature :: rest := stack then
       if index ∉ [.word32, .native] || (opcode == 163 &&
-          instruction.operand != .type signature.typeExpr) then none else
+          (match instruction.operand with
+           | .type type => managedSignature type != some signature | _ => true)) then none else
         return .methodPointer signature :: rest
   if arrayCovered opcode then return (← arrayStep instruction stack).2
   if opcode == 20 then

@@ -92,29 +92,41 @@ def spanStorage (type : TypeExpr) (aggregateWidth : Nat := 0) : Option StorageTy
 /-- Whether a local has a supported span metadata shape; layouts are validated separately. -/
 def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
 
-/-- Function-pointer parameters are primitive integers, enums or their managed references. -/
+/-- Callable identities retain scoped aggregate names, independent of layout-table ordering.
+    Argument storage still validates the original index against the checked layout metadata. -/
+def callableType : TypeExpr → TypeExpr
+  | .aggregate identity _ => .aggregate identity 0
+  | .byref element => .byref (callableType element)
+  | .apply constructor argument => .apply (callableType constructor) (callableType argument)
+  | .functionPointer result parameters convention hasThis explicitThis =>
+    .functionPointer (callableType result) (callableType parameters) convention hasThis explicitThis
+  | .signatureParameter head tail => .signatureParameter (callableType head) (callableType tail)
+  | type => type
+
+/-- Function pointers admit checked aggregates, integer vectors and integer/reference types. -/
 def managedParameter : TypeExpr → Bool
   | .atom scope name => scope == runtimeScope && (primitiveField name).isSome
   | .enum _ (.atom scope name) => scope == runtimeScope &&
       ((primitiveField name).map enumField).getD false
   | .byref element => match element with
-      | .atom .. | .enum .. => managedParameter element
+      | .atom .. | .enum .. | .aggregate .. | .apply .. => managedParameter element
       | _ => false
-  | _ => false
+  | .aggregate .. => true
+  | type => (integerVectorWidth type).isSome
 
 /-- Decode the ordered parameter chain without accepting another metadata constructor. -/
 def managedParameters : TypeExpr → Option (List TypeExpr)
   | .void => some []
   | .signatureParameter head tail => do
     if !managedParameter head then none else pure ()
-    return head :: (← managedParameters tail)
+    return callableType head :: (← managedParameters tail)
   | _ => none
 
 /-- Only the exact static managed convention gives callable provenance. -/
 def managedSignature : TypeExpr → Option ManagedSignature
   | .functionPointer result parameters 0 false false => do
     if result != .void && !managedParameter result then none else pure ()
-    return ⟨result, ← managedParameters parameters⟩
+    return ⟨callableType result, ← managedParameters parameters⟩
   | _ => none
 
 /-- Decode storage independently from the exact metadata type identity. -/
@@ -369,7 +381,7 @@ def nativeDispatchContext (raw : RawMethod) : NativeDispatchContext := Id.run do
   for instruction in raw.code do
     if instruction.opcode == 41 then
       let .indirectCall result parameters false false 0 := instruction.operand | return {}
-      let current : ManagedSignature := ⟨result, parameters⟩
+      let current : ManagedSignature := ⟨callableType result, parameters.map callableType⟩
       if managedSignature current.typeExpr != some current then return {}
       if let some expected := signature then
         if expected != current then return {}
@@ -471,9 +483,11 @@ def managedTargetMatches (methods : Nat → Option SpecializedMethod)
   | none => false
   | some callee =>
     target.identity.owner == callee.closed.owner &&
-    target.identity.token == callee.closed.token && target.identity.arguments == callee.arguments &&
+    target.identity.token == callee.closed.token &&
+    target.identity.arguments == callee.arguments.map callableType &&
     !callee.closed.hasThis && !callee.closed.explicitThis && callee.closed.callingConvention == 0 &&
-    callee.closed.returnType == signature.result && callee.closed.parameters == signature.parameters &&
+    callableType callee.closed.returnType == signature.result &&
+    callee.closed.parameters.map callableType == signature.parameters &&
     managedSignature signature.typeExpr == some signature
 
 /-- Split a scoped declaring type from its ordered generic arguments. -/
@@ -502,8 +516,9 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
     (match methods target.method with
       | some callee => managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount
       | none => false) &&
-    site.typeArguments == target.identity.arguments && !site.hasThis &&
-    site.returnType == signature.result && site.parameterTypes == signature.parameters &&
+    site.typeArguments.map callableType == target.identity.arguments && !site.hasThis &&
+    callableType site.returnType == signature.result &&
+    site.parameterTypes.map callableType == signature.parameters &&
     site.parameterCount == signature.parameters.length &&
     site.returnsValue == (signature.result != .void)
   | _ => false
@@ -516,7 +531,7 @@ def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
     (catalog.map (·.identity)).Nodup &&
   match raw.operand with
   | .indirectCall result parameters false false 0 =>
-    result == signature.result && parameters == signature.parameters
+    callableType result == signature.result && parameters.map callableType == signature.parameters
   | _ => false
 
 /-- Every live managed call must select the independently instantiated definition
