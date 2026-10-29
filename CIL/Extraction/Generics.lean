@@ -280,60 +280,6 @@ def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := [
       (← parameters.mapM (substituteStorageType layouts arguments)) hasThis explicitThis convention
   | operand => some operand
 
-/-- The exact runtime identity of the value-type constraint. -/
-def valueTypeConstraint : String :=
-  { toByteArray := ⟨#[
-      83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44, 32,
-      86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46, 48,
-      44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97,
-      108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101,
-      110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48, 97,
-      51, 97, 58, 58, 83, 121, 115, 116, 101, 109, 46, 86, 97, 108, 117, 101,
-      84, 121, 112, 101]⟩,
-    isValidUTF8 := by decide +kernel }
-
-/-- The byte-backed constraint retains the exact metadata identity. -/
-theorem valueTypeConstraint_eq :
-    valueTypeConstraint = runtimeScope ++ "::System.ValueType" := by decide +kernel
-#print axioms valueTypeConstraint_eq
-
-/-- The exact runtime identity of the unmanaged value-type constraint. -/
-def unmanagedTypeConstraint : String :=
-  { toByteArray := ⟨#[
-      83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44, 32,
-      86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46, 48,
-      44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97,
-      108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101,
-      110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48, 97,
-      51, 97, 58, 58, 83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105,
-      109, 101, 46, 73, 110, 116, 101, 114, 111, 112, 83, 101, 114, 118, 105, 99,
-      101, 115, 46, 85, 110, 109, 97, 110, 97, 103, 101, 100, 84, 121, 112, 101,
-      33, 83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44,
-      32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46,
-      48, 44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114,
-      97, 108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107,
-      101, 110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48,
-      97, 51, 97, 58, 58, 83, 121, 115, 116, 101, 109, 46, 86, 97, 108, 117,
-      101, 84, 121, 112, 101]⟩,
-    isValidUTF8 := by decide +kernel }
-
-/-- The byte-backed constraint retains the exact metadata identity. -/
-theorem unmanagedTypeConstraint_eq :
-    unmanagedTypeConstraint = runtimeScope ++ "::System.Runtime.InteropServices.UnmanagedType!" ++
-      runtimeScope ++ "::System.ValueType" := by decide +kernel
-#print axioms unmanagedTypeConstraint_eq
-
-/-- Admit value-type constraints and interfaces declared directly by the concrete aggregate.
-    Only the `struct`, `new()` and `allows ref struct` flags are supported. -/
-private def allowedConstraint (layouts : List RawLayout) (argument : TypeExpr)
-    (constraint : GenericConstraint) : Bool :=
-  constraint.flags &&& 56 == constraint.flags && constraint.types.all fun type =>
-    type == valueTypeConstraint || type == unmanagedTypeConstraint || match argument with
-    | .aggregate identity index => match layouts[index]? with
-      | some layout => layout.identity == identity && layout.interfaces.contains type
-      | none => false
-    | _ => false
-
 /-- A closed, non-reference type argument with a known storage. -/
 private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : Bool :=
   substituteType [] type == some type && match typeStorage layouts type with
@@ -347,7 +293,8 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
       arguments.length != original.genericParameters.length + original.ownerParameters.length ||
       !arguments.all (admittedTypeArgument layouts) ||
       !((original.genericParameters ++ original.ownerParameters).zip arguments).all
-        (fun (constraint, argument) => allowedConstraint layouts argument constraint) then none
+        (fun (constraint, argument) =>
+          genericConstraintValid layouts argument constraint.flags constraint.types) then none
   else
     let returnType ← substituteStorageType layouts arguments original.returnType
     let parameters ← original.parameters.mapM (substituteStorageType layouts arguments)

@@ -280,6 +280,59 @@ def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option
         | _ => none
       return scope ++ "::" ++ name ++ "<" ++ String.intercalate "," names ++ ">"
 
+/-- The exact runtime identity of the value-type constraint. -/
+def valueTypeConstraint : String :=
+  { toByteArray := ⟨#[
+      83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44, 32,
+      86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46, 48,
+      44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97,
+      108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101,
+      110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48, 97,
+      51, 97, 58, 58, 83, 121, 115, 116, 101, 109, 46, 86, 97, 108, 117, 101,
+      84, 121, 112, 101]⟩,
+    isValidUTF8 := by decide +kernel }
+
+/-- The byte-backed constraint retains the exact metadata identity. -/
+theorem valueTypeConstraint_eq :
+    valueTypeConstraint = runtimeScope ++ "::System.ValueType" := by decide +kernel
+#print axioms valueTypeConstraint_eq
+
+/-- The exact runtime identity of the unmanaged value-type constraint. -/
+def unmanagedTypeConstraint : String :=
+  { toByteArray := ⟨#[
+      83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44, 32,
+      86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46, 48,
+      44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97,
+      108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101,
+      110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48, 97,
+      51, 97, 58, 58, 83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105,
+      109, 101, 46, 73, 110, 116, 101, 114, 111, 112, 83, 101, 114, 118, 105, 99,
+      101, 115, 46, 85, 110, 109, 97, 110, 97, 103, 101, 100, 84, 121, 112, 101,
+      33, 83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44,
+      32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46,
+      48, 44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114,
+      97, 108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107,
+      101, 110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48,
+      97, 51, 97, 58, 58, 83, 121, 115, 116, 101, 109, 46, 86, 97, 108, 117,
+      101, 84, 121, 112, 101]⟩,
+    isValidUTF8 := by decide +kernel }
+
+/-- The byte-backed constraint retains the exact metadata identity. -/
+theorem unmanagedTypeConstraint_eq :
+    unmanagedTypeConstraint = runtimeScope ++ "::System.Runtime.InteropServices.UnmanagedType!" ++
+      runtimeScope ++ "::System.ValueType" := by decide +kernel
+#print axioms unmanagedTypeConstraint_eq
+
+/-- Value-type flags and exact direct interface identities constrain a closed type argument. -/
+def genericConstraintValid (layouts : List RawLayout) (argument : TypeExpr)
+    (flags : Nat) (types : List String) : Bool :=
+  flags &&& 56 == flags && types.all fun type =>
+    type == valueTypeConstraint || type == unmanagedTypeConstraint || match argument with
+    | .aggregate identity index => match layouts[index]? with
+      | some layout => layout.identity == identity && layout.interfaces.contains type
+      | none => false
+    | _ => false
+
 /-- Generic layouts cannot replace their argument ordering or original field storage. -/
 def genericLayoutValid (layouts : List RawLayout) (layout : RawLayout) : Bool :=
   match layout.generic with
@@ -288,11 +341,9 @@ def genericLayoutValid (layouts : List RawLayout) (layout : RawLayout) : Bool :=
     genericOwnerIdentity generic.owner generic.arguments == some layout.identity &&
       !layout.explicit && !layout.auto && generic.arity > 0 &&
       generic.arguments.length == generic.arity &&
-      generic.constraints.length == generic.arity && generic.constraints.all (fun constraint =>
-        constraint.1 &&& 56 == constraint.1 && constraint.2.all (fun type =>
-          type == runtimeScope ++ "::System.ValueType" ||
-          type == runtimeScope ++ "::System.Runtime.InteropServices.UnmanagedType!" ++
-            runtimeScope ++ "::System.ValueType")) &&
+      generic.constraints.length == generic.arity &&
+      (generic.constraints.zip generic.arguments).all (fun (constraint, argument) =>
+        genericConstraintValid layouts argument constraint.1 constraint.2) &&
       generic.arguments.all (fun type => substituteType [] type == some type &&
         (genericFieldType layouts type).isSome) &&
       (generic.fields.mapM fun type => do

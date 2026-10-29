@@ -88,12 +88,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                     modifier.ModifierType.FullName == "System.Runtime.InteropServices.UnmanagedType" &&
                     RuntimeModels.ExactScope(modifier.ModifierType.Scope, "System.Runtime"))
                     type = modifier.ElementType;
-                if (type.Scope is ModuleDefinition && !type.ContainsGenericParameter &&
-                    type.Resolve() is { IsInterface: true } declared &&
-                    declared.Module == module && argument.Resolve() is { } concrete &&
-                    concrete.Module == module && concrete.IsValueType &&
-                    concrete.Interfaces.Any(implemented => SignatureType(GenericStructs.Substitute(
-                        implemented.InterfaceType, argument as GenericInstanceType)) == SignatureType(type)))
+                if (GenericStructs.DirectInterfaceConstraint(type, argument, module))
                     continue;
                 if (type.FullName != "System.ValueType" || !RuntimeModels.ExactScope(type.Scope, "System.Runtime"))
                     throw new InvalidDataException($"Unsupported generic method constraints: {definition.FullName}");
