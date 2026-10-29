@@ -611,6 +611,11 @@ of a compiled loop. `Tests/BufferContents.lean` checks unchanged
 neighbouring bytes and sibling slices, and refutes uninitialized, past-end,
 overlapping, unjoined and stale claims.
 
+For `Span<T>.Fill` and `Clear`, `SpanView.fill_contents` derives the repeated sequence from
+the successful checked fill, without a readable-input premise. `Contents.after_span_fill`
+preserves sequences outside a nonempty fill's extent. The operation checks the whole range
+once and performs one write; callers need no element-by-element execution proof.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes

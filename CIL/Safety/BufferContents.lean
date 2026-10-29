@@ -661,7 +661,8 @@ theorem Contents.after_span_fill {before after : Memory} {base target : Referenc
     (filled : view.fill before element = .ok after)
     (apart : Apart base (width * values.length) (target, view.length * view.width)) :
     Contents after base width values := by
-  apply contents.after_write_apart (view.fill_written before after target element address nonempty filled)
+  apply contents.after_write_apart
+    (view.fill_written before after target element address nonempty filled)
   simpa [List.length_flatten, List.map_replicate, size] using apart
 #print axioms Contents.after_span_fill
 

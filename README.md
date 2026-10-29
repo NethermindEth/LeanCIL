@@ -92,7 +92,7 @@ Lake configuration and Lean elaborators execute code, so use packages you trust.
 ## Supported subset and limits
 
 LeanCIL supports integer arithmetic, selected control flow and managed calls, reference-free
-structs, checked memory access, primitive integer arrays and spans over supplied storage,
+structs, checked memory access, integer and enum arrays and spans over supplied storage,
 and selected runtime helpers and SIMD intrinsics. Each has restrictions documented in the
 [opcode support table](docs/OPCODES.md) and [intrinsic support tables](docs/SIMD.md).
 Unsupported instructions and signatures are rejected explicitly.
