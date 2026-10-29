@@ -88,6 +88,15 @@ theorem run_preserves_static_world (program : CIL.Program) (fuel method pc : Nat
     exact leaveFrame_preserves_static_world _ _ _
       (programStep_preserves_frame_allocations step hm owns)
       (programStep_preserves_static_world step hm world)
+  | @tailCall fuel method pc args frame stack m callee arguments updated body child checked childFrame childMemory final values step _ _ _ _ enter _ _ ih =>
+    have hw := leaveFrame_preserves_wellFormed frame _
+      (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
+    have updated := leaveFrame_preserves_static_world _ _ _
+      (programStep_preserves_frame_allocations step hm owns)
+      (programStep_preserves_static_world step hm world)
+    exact ih (enterFrame_preserves_wellFormed _ _ _ _ _ hw enter)
+      (enterFrame_owned _ _ _ _ _ enter)
+      (enterFrame_preserves_static_world _ _ _ _ _ _ hw updated enter)
   | call step _ enter finish _ _ childIH ih
   | construct step _ enter finish _ _ _ childIH ih =>
     have hw := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step
@@ -120,6 +129,19 @@ theorem runVisits_preserves_static_world {program : CIL.Program} {fuel method pc
     StaticWorldValid (programStaticDescriptors program) observed := by
   induction visit with
   | initial => exact world
+  | tailExpired step =>
+    exact leaveFrame_preserves_static_world _ _ _
+      (programStep_preserves_frame_allocations step hm owns)
+      (programStep_preserves_static_world step hm world)
+  | @tailChild fuel method pc args frame stack m callee arguments updated body child checked childFrame childMemory observed step _ _ _ _ enter _ ih =>
+    have hw := leaveFrame_preserves_wellFormed frame _
+      (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
+    have updated := leaveFrame_preserves_static_world _ _ _
+      (programStep_preserves_frame_allocations step hm owns)
+      (programStep_preserves_static_world step hm world)
+    exact ih (enterFrame_preserves_wellFormed _ _ _ _ _ hw enter)
+      (enterFrame_owned _ _ _ _ _ enter)
+      (enterFrame_preserves_static_world _ _ _ _ _ _ hw updated enter)
   | stepped step => exact programStep_preserves_static_world step hm world
   | next step later ih =>
     exact ih (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)

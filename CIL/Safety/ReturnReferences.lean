@@ -30,7 +30,8 @@ theorem run_result_valid (program : CIL.Program) (fuel method pc : Nat)
   clear h
   induction trace with
   | returned _ checked => exact (checkedValues_valid _ _ _ checked).2
-  | next _ _ ih | call _ _ _ _ _ _ _ ih | construct _ _ _ _ _ _ _ _ ih => exact ih
+  | next _ _ ih | call _ _ _ _ _ _ _ ih | construct _ _ _ _ _ _ _ _ ih
+  | tailCall _ _ _ _ _ _ _ _ ih => exact ih
 
 theorem invoke_result_valid (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory)

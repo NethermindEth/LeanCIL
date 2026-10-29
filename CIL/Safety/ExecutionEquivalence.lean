@@ -57,6 +57,8 @@ inductive FrameActionEquivalent : FrameAction → FrameAction → Prop where
       FrameActionEquivalent (.next pc stack frame m) (.next pc stack frame n)
   | call {m n : Memory} (same : m.Equivalent n) (callee args rest) :
       FrameActionEquivalent (.call callee args rest m) (.call callee args rest n)
+  | tailCall {m n : Memory} (same : m.Equivalent n) (callee args) :
+      FrameActionEquivalent (.tailCall callee args m) (.tailCall callee args n)
   | construct {m n : Memory} (same : m.Equivalent n) (callee args rest frame temporary kind) :
       FrameActionEquivalent (.construct callee args rest frame temporary kind m)
         (.construct callee args rest frame temporary kind n)
@@ -83,6 +85,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     | exact .error _
     | exact .ok (.next same _ _ _)
     | exact .ok (.call same _ _ _)
+    | exact .ok (.tailCall same _ _)
     | exact .ok (.returned same _)
     | (apply ResultEquivalent.bind_same; intro)
     | (apply ResultEquivalent.bind (same.storeLocal _ _)
@@ -172,6 +175,20 @@ theorem Memory.Equivalent.run {m n : Memory} (same : m.Equivalent n)
       obtain ⟨otherMemory, otherResult⟩ := right
       obtain ⟨finished, rfl⟩ := related
       exact ih finished _ _ _ _ _
+    | tailCall equivalent callee arguments =>
+      dsimp only
+      split <;> try exact .error _
+      split <;> try exact .error _
+      have retired := equivalent.leaveFrame frame
+      simp only [retired.checkedValues]
+      apply ResultEquivalent.bind_same
+      intro checked
+      apply ResultEquivalent.bind ((retired.enterFrame _ _).mapError _)
+      intro left right related
+      obtain ⟨childFrame, memory⟩ := left
+      obtain ⟨otherFrame, otherMemory⟩ := right
+      obtain ⟨rfl, entered⟩ := related
+      exact ih entered _ _ _ _ _
     | construct equivalent callee arguments rest nextFrame temporary kind =>
       dsimp only
       split <;> try exact .error _

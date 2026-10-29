@@ -78,6 +78,7 @@ theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Meth
         | next target values frame memory =>
           simpa only [Except.mapError, Bind.bind, Except.bind] using ih target frame values memory
         | returned values memory => rfl
+        | tailCall callee arguments memory => rfl
         | call callee arguments rest memory =>
           simp only [Except.mapError, Bind.bind, Except.bind, ih]
         | construct callee arguments rest frame temporary kind memory =>

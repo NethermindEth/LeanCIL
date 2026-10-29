@@ -64,12 +64,18 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
        | exact .error _
        | exact .ok (.returned related)
        | exact .ok (.call related)
+       | exact .ok (.tailCall related)
        | (apply (related.checkedValues _ (by assumption)).bind
           intro first second same
           subst second)
        | (apply (related.checkedValues _ (by
             intro value member
             exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))).bind
+          intro first second same
+          subst second)
+       | (apply (related.checkedValues _ (by
+            intro value member
+            exact bounds value (List.mem_reverse.mp member))).bind
           intro first second same
           subst second)
        | (apply (related.scalarChecks _).bind

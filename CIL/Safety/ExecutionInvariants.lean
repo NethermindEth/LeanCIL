@@ -18,14 +18,15 @@ namespace CIL.Safety
 
 /-- The memory a step leaves behind, whatever it asks the driver to do next. -/
 def FrameAction.memory : FrameAction → Memory
-  | .next _ _ _ m | .call _ _ _ m | .construct _ _ _ _ _ _ m | .returned _ m => m
+  | .next _ _ _ m | .call _ _ _ m | .tailCall _ _ m
+  | .construct _ _ _ _ _ _ m | .returned _ m => m
 
 /-- Calls and returns keep the current frame until the run dispatcher acts;
     ordinary steps and constructor allocation supply their updated frame. -/
 def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
   match action with
   | .next _ _ frame _ | .construct _ _ _ frame _ _ _ => frame
-  | .call _ _ _ _ | .returned _ _ => current
+  | .call _ _ _ _ | .tailCall _ _ _ | .returned _ _ => current
 
 /-- A step's memory and frame changes, with successful primitive operations as
     evidence. Value-stack validity is independent of this effect classification. -/
@@ -130,7 +131,8 @@ theorem allocated_storeLocal_reference_valid (m home result : Memory) (activatio
     values, or a child's arguments together with the caller stack left behind. -/
 def FrameAction.LiveValues (action : FrameAction) : Prop :=
   match action with
-  | .next _ values _ memory | .returned values memory => ValuesValid memory values
+  | .next _ values _ memory | .tailCall _ values memory | .returned values memory =>
+    ValuesValid memory values
   | .call _ args rest memory | .construct _ args rest _ _ _ memory =>
     ValuesValid memory args ∧ ValuesValid memory rest
 
@@ -312,6 +314,10 @@ theorem run_preserves_wellFormed (program : CIL.Program) (fuel method pc : Nat)
   | returned step _ =>
     exact leaveFrame_preserves_wellFormed _ _
       (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)
+  | tailCall step _ _ _ _ enter _ _ ih =>
+    exact ih (enterFrame_preserves_wellFormed _ _ _ _ _
+      (leaveFrame_preserves_wellFormed _ _
+        (programStep_preserves_wellFormed _ _ _ _ _ _ _ _ hm step)) enter)
   | call step _ enter _ _ _ childIH ih
   | construct step _ enter _ _ _ _ childIH ih =>
     exact ih (childIH (enterFrame_preserves_wellFormed _ _ _ _ _

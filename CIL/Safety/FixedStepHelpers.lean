@@ -100,7 +100,8 @@ def fixedStepFamily : CIL.Op → FixedStepFamily
   | .brzero _ | .brnonzero _ | .beq _ | .bne _ => .reference
   | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
   | .divide .. => .numeric
-  | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .throw _ | .ret _ => .boundary
+  | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .tailCall ..
+  | .throw _ | .ret _ => .boundary
   | _ => .other
 
 /-- The dispatcher rejects a narrow argument whose source value contains unspecified bits. -/
@@ -211,7 +212,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    case h_71 =>
+    case h_72 =>
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noArg : ∀ position, operation = .arg position none → False := by assumption
@@ -221,6 +222,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          have noVectorAddress : ∀ position, operation = .vectorArgAddr position → False :=
            by assumption
          have noCall : ∀ callee argc, operation = .call callee argc → False := by assumption
+         have noTailCall : ∀ callee argc, operation = .tailCall callee argc → False := by assumption
          have noThrow : ∀ exception, operation = .throw exception → False := by assumption
          have noReturn : operation = .ret none → False := by assumption
          have noArgument : ∀ position narrow, operation = .arg position narrow → False := by
@@ -233,6 +235,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          all_goals try exact False.elim (noVectorArg _ rfl)
          all_goals try exact False.elim (noVectorAddress _ rfl)
          all_goals try exact False.elim (noCall _ _ rfl)
+         all_goals try exact False.elim (noTailCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)
          all_goals simp only [pureArity, CIL.Safety.instruction] at observable
          all_goals repeat first | cases observable | split at observable)

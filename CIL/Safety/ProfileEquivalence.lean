@@ -59,6 +59,12 @@ theorem run_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
             simpa only [Except.mapError, Bind.bind, Except.bind] using
               ih method target args frame values memory
           | returned values memory => rfl
+          | tailCall callee arguments memory =>
+            cases child : program[callee]? with
+            | none => simp [Except.mapError, Bind.bind, Except.bind, child]
+            | some childBody =>
+              simp only [Except.mapError, Bind.bind, Except.bind, child, Option.map_some,
+                enterFrame_profile, ih]
           | call callee arguments rest memory =>
             cases child : program[callee]? with
             | none => simp [Except.mapError, Bind.bind, Except.bind, child]

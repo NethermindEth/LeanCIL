@@ -179,6 +179,11 @@ theorem run_staticBindingsBounded {program : CIL.Program} {fuel method pc : Nat}
     obtain ⟨body, operation, _, _, stepped⟩ := step
     exact leaveFrame_staticBindingsBounded _
       ((step_effect _ _ _ _ _ _ _ _ stepped).staticBindingsBounded bounded)
+  | tailCall step _ _ _ _ entered _ _ induction =>
+    obtain ⟨body, operation, _, _, stepped⟩ := step
+    exact induction (enterFrame_staticBindingsBounded
+      (leaveFrame_staticBindingsBounded _
+        ((step_effect _ _ _ _ _ _ _ _ stepped).staticBindingsBounded bounded)) entered)
   | call step _ entered _ _ _ childInduction induction
   | construct step _ entered _ _ _ _ childInduction induction =>
     obtain ⟨body, operation, _, _, stepped⟩ := step

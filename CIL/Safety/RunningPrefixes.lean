@@ -88,6 +88,21 @@ inductive RunningVisits (program : CIL.Program) : Nat → Nat → Nat → List V
         observedArgs observedFrame observedStack observed) :
       RunningVisits program (fuel + 1) method pc args frame stack m
         observedArgs observedFrame observedStack observed
+  /-- A visit in a tail callee after retiring the current frame and rechecking arguments. -/
+  | tailChild {fuel method pc args frame stack m callee arguments updated body child checked
+        childFrame childMemory observedArgs observedFrame observedStack observed}
+      (step : ProgramStep program method pc args frame stack m
+        (.tailCall callee arguments updated))
+      (bodyLookup : program[method]? = some body)
+      (lookup : program[callee]? = some child)
+      (returns : (child.returnsValue != body.returnsValue) = false)
+      (check : arguments.mapM (checkedValue (leaveFrame frame updated)) = .ok checked)
+      (enter : enterFrame child checked (leaveFrame frame updated) =
+        .ok (childFrame, childMemory))
+      (later : RunningVisits program fuel callee 0 checked childFrame [] childMemory
+        observedArgs observedFrame observedStack observed) :
+      RunningVisits program (fuel + 1) method pc args frame stack m
+        observedArgs observedFrame observedStack observed
   /-- A visit in the caller after a call returned and its results were pushed. -/
   | callContinue {fuel method pc args frame stack m callee arguments rest updated child
         childFrame childMemory returned result observedArgs observedFrame observedStack observed}
@@ -133,6 +148,12 @@ theorem runningVisits_live_state {program : CIL.Program} {fuel method pc : Nat}
   | suspendedConstruct step => exact (programStep_live_state step state).1
   | child step call lookup enter later ih =>
     exact ih (enter_child_live_state step state call enter)
+  | tailChild step _ _ _ check enter _ ih =>
+    have valid := programStep_live_state step state
+    exact ih (enterFrame_live_state _ _ _ _ _ _
+      (leaveFrame_preserves_wellFormed _ _ valid.memory)
+      (checkedValues_valid _ _ _ check).2
+      (leaveFrame_preserves_static_world _ _ _ valid.owned valid.statics) enter)
   | callContinue step lookup enter finish later ih =>
     exact ih (child_resume_live_state _ _ _ _ _ _ _ _ _ _ _ _ _
       (programStep_live_state step state).1 enter finish)
@@ -154,6 +175,8 @@ theorem runningVisits_memory_observation {program : CIL.Program} {fuel method pc
   | suspendedCall step => exact .stepped step
   | suspendedConstruct step => exact .stepped step
   | child step call lookup enter later ih => exact .child step call lookup enter ih
+  | tailChild step bodyLookup lookup returns check enter _ ih =>
+    exact .tailChild step bodyLookup lookup returns check enter ih
   | callContinue step lookup enter finish later ih =>
     exact .callContinue step lookup enter finish ih
   | constructContinue step lookup enter finish load later ih =>
