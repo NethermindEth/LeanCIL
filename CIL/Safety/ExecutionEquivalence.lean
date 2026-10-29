@@ -65,6 +65,22 @@ inductive FrameActionEquivalent : FrameAction → FrameAction → Prop where
   | returned {m n : Memory} (same : m.Equivalent n) (values) :
       FrameActionEquivalent (.returned values m) (.returned values n)
 
+/-- Managed dispatch observes only stable identities and equivalent checked arguments. -/
+theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame) (stack : List Value) :
+    ResultEquivalent FrameActionEquivalent (managedStep operation pc frame stack m)
+      (managedStep operation pc frame stack n) := by
+  unfold CIL.Safety.managedStep
+  split <;> try simp only [same.checkedValues]
+  all_goals repeat' first
+    | exact .error _
+    | exact .ok (.next same _ _ _)
+    | exact .ok (.call same _ _ _)
+    | exact .ok (.tailCall same _ _)
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.managedStep
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -76,6 +92,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract]
   all_goals repeat' first
+    | exact same.managedStep _ _ _ _
     | (apply ResultEquivalent.bind (same.allocateStack _ _ _)
        intro left right related
        obtain ⟨reference, owner, allocated⟩ := left
