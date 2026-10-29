@@ -31,13 +31,15 @@ foreach (var method in methods)
     var indexed = store || name.StartsWith("Read", StringComparison.Ordinal) && name != "ReadOnlyView" || name == "Address";
     var value = vector ? ".v128 0" : ".aggregate (List.replicate 16 0)";
     var arguments = array + (indexed ? ", .scalar (.i32 1)" : "") +
-        (store ? $", .scalar ({value})" : "") + (name == "Slice" ? ", .scalar (.i32 1), .scalar (.i32 1)" : "");
+        (store ? $", .scalar ({value})" : "") +
+        (name is "Slice" or "ConstructedLength" ? ", .scalar (.i32 1), .scalar (.i32 1)" : "");
     var expected = name switch
     {
         "Address" => ".reference (.address ⟨0, 16⟩)", "Data" => ".reference (.address ⟨0, 0⟩)",
         "View" or "VectorView" => ".bufferSpan ⟨.address ⟨0, 0⟩, 2, 16, true⟩",
         "ReadOnlyView" => ".bufferSpan ⟨.address ⟨0, 0⟩, 2, 16, false⟩",
         "Slice" => ".bufferSpan ⟨.address ⟨0, 16⟩, 1, 16, true⟩",
+        "ConstructedLength" => ".scalar (.i32 1)",
         _ => store ? "" : $".scalar ({value})"
     };
     var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));

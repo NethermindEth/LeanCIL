@@ -20,6 +20,11 @@ internal static class AggregateArrays
     public static Span<Pair> View(Pair[] source) => source;
     public static ReadOnlySpan<Pair> ReadOnlyView(Pair[] source) => source;
     public static Span<Pair> Slice(Pair[] source, int start, int length) => source.AsSpan(start, length);
+    public static int ConstructedLength(Pair[] source, int start, int length)
+    {
+        var span = new Span<Pair>(source, start, length);
+        return span.Length;
+    }
     public static Vector128<ulong> ReadVector(Vector128<ulong>[] source, int index) => source[index];
     public static void WriteVector(Vector128<ulong>[] target, int index, Vector128<ulong> value) =>
         target[index] = value;
