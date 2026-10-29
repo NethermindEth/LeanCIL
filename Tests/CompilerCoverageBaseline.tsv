@@ -203,6 +203,9 @@ Examples:System.Int32 Examples.Bits::Population64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::PopulationNative(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::PrimitiveLeading32(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::PrimitiveLeft32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Bits::PrimitiveNarrow16(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Bits::PrimitiveNarrow8(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Bits::PrimitiveNarrowSigned(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::PrimitivePopulation32(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::PrimitiveRight32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::PrimitiveTrailing32(System.Int32)	A	A	A	A	A	A	A	A
@@ -607,6 +610,7 @@ Examples:System.UInt32 Examples.StaticScalars::ReadInt()	B	B	B	B	B	B	B	B
 Examples:System.UInt32 Examples.Throws::ActualValue(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::ArgumentInner(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Inner(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Throws::Null(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Percent(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Quotient(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 SelectorExamples.One.Collision::Add(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
@@ -855,6 +859,7 @@ Examples:System.Void Examples.StructMethods::ChangeCopy(Examples.Counter)	A	A	A	
 Examples:System.Void Examples.TailCalls::ForwardVoid(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TailCalls::Store(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowDivideByZero()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Throws::ThrowNull()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Packet(Examples.Packet&,Examples.Packet&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Record(Examples.Record&,Examples.Record&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Vector128(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.Runtime.Intrinsics.Vector128`1<System.UInt64>&)	A	A	A	A	A	A	A	A
