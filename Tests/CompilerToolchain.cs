@@ -7,17 +7,19 @@ partial class Program
 
     sealed record CompilerToolchain(string Packages, string References);
 
-    static CompilerToolchain RestoreCompilerToolchain()
+    static CompilerToolchain RestoreCompilerToolchain(string[]? versions = null)
     {
         var directory = At("artifacts/CompilerToolchain");
         Directory.CreateDirectory(directory);
         var project = Path.Combine(directory, "Inputs.csproj");
+        var packageVersions = string.Join(';',
+            (versions ?? CorpusCompilerVersions).Select(version => "[" + version + "]"));
         File.WriteAllText(project, $$"""
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
               <ItemGroup>
                 <PackageDownload Include="Microsoft.Net.Compilers.Toolset"
-                  Version="{{string.Join(';', CorpusCompilerVersions.Select(version => "[" + version + "]"))}}" />
+                  Version="{{packageVersions}}" />
                 <PackageDownload Include="Microsoft.NETCore.App.Ref" Version="[{{CorpusReferenceVersion}}]" />
               </ItemGroup>
             </Project>
