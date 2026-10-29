@@ -38,6 +38,10 @@ against its original strings with `decide +kernel`, avoiding expensive whole-tab
 equality while retaining an axiom-free equality theorem.
 
 Certificate validation streams fallthrough states and uses balanced indexes for branch destinations.
+`FeatureFlowValid`, `ScalarFlowValid`, their transfer/emission checks and feature-edge predicates
+take an explicit array of raw layouts. Generated certificates pass `rawLayouts.toArray`; standalone
+fixtures without aggregate queries pass `#[]`. The enclosing translation certificate validates that
+same layout table, binding reference-content queries to their aggregate identities.
 `FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original list-indexed rules
 without changing their entry, reachability, opcode or bounds requirements. `foldEntry` takes the
 optional lookup result, so a list-based caller writes `foldEntry roles[target]?`. Missing entries
@@ -329,4 +333,3 @@ includes imported environments. Keep kernel replay and the axiom audit enabled.
 
 The [validation guide](VALIDATION-PROOFS.md#proof-automation) describes the regression coverage and
 commands for checking the proof tactics.
-

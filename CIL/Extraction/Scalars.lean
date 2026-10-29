@@ -362,10 +362,17 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
   | _, _ => false
 
 /-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word,
-    a size constant or an exact platform getter may emit a scalar operation. -/
-def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
+    a size constant or an exact runtime query may emit a scalar operation. -/
+def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
+    (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
-  if instruction.opcode == 77 && (stack.head?).any
+  if (match instruction.operand with
+    | .call site => referenceContentQuery site | _ => false) then
+    match instruction.operand, emitted with
+    | .call site, .const32 bits => instruction.opcode == 40 &&
+      referenceContentConstant layouts site == some bits
+    | _, _ => false
+  else if instruction.opcode == 77 && (stack.head?).any
       (fun kind => match kind with | .nativeMethodTable _ => true | _ => false) then
     match stack, emitted with
     | .nativeMethodTable signature :: _, .managed (.tableLoad actual) => signature == actual
@@ -618,12 +625,14 @@ private def dispatchScalar (context : NativeDispatchContext) (type : TypeExpr)
   | _ => scalarType type
 
 /-- The kind of argument `index`, counting `this` as argument 0. -/
-private def argumentKind (raw : RawMethod) (context : NativeDispatchContext) (index : Nat) : Option ScalarKind :=
+private def argumentKind (raw : RawMethod)
+    (context : NativeDispatchContext) (index : Nat) : Option ScalarKind :=
   if raw.hasThis && index == 0 then some .reference
   else dispatchScalar context <$> raw.parameters[index - (if raw.hasThis then 1 else 0)]?
 
 /-- The kind an opcode with a fixed one-value push leaves on the stack. -/
-private def pushedKind (raw : RawMethod) (context : NativeDispatchContext)
+private def pushedKind (raw : RawMethod)
+    (context : NativeDispatchContext)
     (instruction : RawInstruction) : Option ScalarKind := do
   match argumentOperation instruction with
   | some (.load index) => argumentKind raw context index
@@ -824,7 +833,8 @@ private def readOnlySiteMatches (raw : RawMethod) (pc : Nat) (instruction : RawI
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, emit the right encoding, and give every successor,
     which must be reachable, exactly the resulting stack kinds. -/
-private def checkScalarSite (raw : RawMethod) (context : NativeDispatchContext)
+private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
+    (context : NativeDispatchContext)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Op → Bool
@@ -837,7 +847,7 @@ private def checkScalarSite (raw : RawMethod) (context : NativeDispatchContext)
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
       readOnlySiteMatches raw pc instruction emitted &&
-      scalarEmissionMatches role instruction stack emitted &&
+      scalarEmissionMatches layouts role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack role context, featureSuccessors pc instruction feature with
       | some after, some successors =>
@@ -847,26 +857,28 @@ private def checkScalarSite (raw : RawMethod) (context : NativeDispatchContext)
 
 /-- The scalar certificate covers exactly the feature-reachable pcs, starts with an empty
     stack, and passes every site check. -/
-def ScalarFlowValid (raw : RawMethod) (features : FeatureCertificate)
+def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Op) : Prop :=
   let context := nativeDispatchContext raw
   raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3Flow (fun lookup instruction (feature, stack) emitted =>
-      checkScalarSite raw context (fun after target => match lookup target with
+      checkScalarSite layouts raw context (fun after target => match lookup target with
         | some (some _, incoming) => incoming == some after
         | _ => false) instruction feature stack emitted)
     (.ofList (features.zip certificate)) 0
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx (features.zip certificate) code = true
 
-instance (raw : RawMethod) (features : FeatureCertificate) (certificate : ScalarCertificate)
-    (code : List Op) : Decidable (ScalarFlowValid raw features certificate code) :=
+instance (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
+    (certificate : ScalarCertificate)
+    (code : List Op) : Decidable (ScalarFlowValid layouts raw features certificate code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Pairing feature and scalar states preserves both the reachability and exact stack
     check, including targets missing from either certificate. -/
-theorem scalarSuccessor_zip (features : FeatureCertificate) (certificate : ScalarCertificate)
+theorem scalarSuccessor_zip (features : FeatureCertificate)
+    (certificate : ScalarCertificate)
     (target : Nat) (after : List ScalarKind) :
     (match (features.zip certificate)[target]? with
       | some (some _, incoming) => incoming == some after
@@ -885,13 +897,15 @@ theorem scalarSuccessor_zip (features : FeatureCertificate) (certificate : Scala
 #print axioms scalarSuccessor_zip
 
 /-- Streaming scalar validation preserves all list-indexed site checks and lengths. -/
-theorem ScalarFlowValid_iff_list (raw : RawMethod) (features : FeatureCertificate)
+theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
+    (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Op) :
-    ScalarFlowValid raw features certificate code ↔
+    ScalarFlowValid layouts raw features certificate code ↔
       raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
       raw.code.length = code.length ∧ certificate[0]? = some (some []) ∧
       all3 (fun (instruction, feature) stack emitted =>
-          checkScalarSite raw (nativeDispatchContext raw) (fun after target => match features[target]? with
+          checkScalarSite layouts raw (nativeDispatchContext raw)
+            (fun after target => match features[target]? with
             | some (some _) => certificate[target]? == some (some after)
             | _ => false)
             instruction feature stack emitted)
@@ -911,16 +925,17 @@ theorem ScalarFlowValid_iff_list (raw : RawMethod) (features : FeatureCertificat
 #print axioms ScalarFlowValid_iff_list
 
 /-- At every reachable pc the emitted instruction is the scalar encoding the raw one implies. -/
-theorem ScalarFlowValid.instruction_checked {raw : RawMethod} {features : FeatureCertificate}
+theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : RawMethod}
+    {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Op}
-    (valid : ScalarFlowValid raw features certificate code)
+    (valid : ScalarFlowValid layouts raw features certificate code)
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Op}
     (rawAt : raw.code[pc]? = some instruction)
     (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
     (featureAt : features[pc]? = some (some feature))
     (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
-    scalarEmissionMatches role instruction stack emitted = true := by
+    scalarEmissionMatches layouts role instruction stack emitted = true := by
   have pairAt : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
       some ((instruction, role), pc) := by
     simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]

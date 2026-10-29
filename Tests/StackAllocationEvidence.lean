@@ -13,18 +13,18 @@ private def raw : RawMethod := {
 
 /-- Raw uninitialized storage cannot be emitted as initialized storage. -/
 theorem forged_initialization_rejected :
-    featureOpMatches raw ⟨0, 65039, .none⟩ (.stackAlloc true) = false := by decide +kernel
+    featureOpMatches #[] raw ⟨0, 65039, .none⟩ (.stackAlloc true) = false := by decide +kernel
 #print axioms forged_initialization_rejected
 
 /-- An initialized raw method admits its matching flag. -/
 theorem initialization_matches_metadata :
-    featureOpMatches { raw with initLocals := true } ⟨0, 65039, .none⟩ (.stackAlloc true) =
+    featureOpMatches #[] { raw with initLocals := true } ⟨0, 65039, .none⟩ (.stackAlloc true) =
       true := by decide +kernel
 #print axioms initialization_matches_metadata
 
 /-- Another opcode cannot inject a dynamic allocation into the emitted program. -/
 theorem injected_allocation_rejected :
-    featureOpMatches raw ⟨0, 0, .none⟩ (.stackAlloc false) = false := by decide +kernel
+    featureOpMatches #[] raw ⟨0, 0, .none⟩ (.stackAlloc false) = false := by decide +kernel
 #print axioms injected_allocation_rejected
 
 /-- localloc requires the size to be the only stack item. -/

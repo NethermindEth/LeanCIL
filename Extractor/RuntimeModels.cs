@@ -124,6 +124,8 @@ internal static class RuntimeModels
 
     internal static string? Translate(MethodReference reference, FeatureProfile profile)
     {
+        if (ReferenceQueries.Constant(reference, profile.Architecture) is int constant)
+            return $".const32 {constant}";
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
             (reference.HasThis && reference.Name is not
                 (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill" or

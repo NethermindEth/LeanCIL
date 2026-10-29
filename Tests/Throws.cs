@@ -60,7 +60,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, forged);
     rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
-        $"Extraction.FeatureFlowValid method{method}Closed", "is false");
+        $"Extraction.FeatureFlowValid rawLayouts.toArray method{method}Closed", "is false");
     if (name is "Inner" or "ArgumentInner" or "ActualValue")
     {
         var nonNull = Path.Combine(root, name + "-non-null.lean");
@@ -70,7 +70,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         File.WriteAllText(nonNull, source.Replace(nullLoad,
             "opcode := 114, operand := .text \"not null\"", StringComparison.Ordinal));
         rejected.Add(nonNull, $"PASS {name}: non-null constructor operand rejected",
-            $"Extraction.FeatureFlowValid method{method}Closed", "is false");
+            $"Extraction.FeatureFlowValid rawLayouts.toArray method{method}Closed", "is false");
     }
 }
 

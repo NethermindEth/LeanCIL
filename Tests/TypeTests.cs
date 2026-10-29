@@ -73,7 +73,7 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
     controls.Add(control, "PASS unchanged type-test feature obligation: " + name, obligation);
     File.WriteAllText(mutated, NarrowEvidence(string.Join('\n', lines), obligation));
     rejected.Add(mutated, $"PASS {name}: forged type-test word rejected by the feature certificate",
-        "Extraction.FeatureFlowValid method1Closed", "is false");
+        "Extraction.FeatureFlowValid rawLayouts.toArray method1Closed", "is false");
 }
 
 queue.Flush();

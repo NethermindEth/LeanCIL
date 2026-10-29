@@ -12,6 +12,19 @@ See [runtime profiles](RUNTIME-PROFILES.md).
 64-bit process assumption. Their exact getters translate to constants `8`, `8` and `true`;
 they do not inspect the verifier host or establish a deployment's actual process width.
 
+`RuntimeHelpers.IsReferenceOrContainsReferences<T>()` returns `false` only for supported primitive
+integers, booleans, characters, integer enums and vectors, or a reference-free aggregate admitted
+by the layout validator. Closed generic and padded aggregates use that same validator. A byref-like
+aggregate is admissible when its validated fields contain neither references nor byrefs; spans,
+arrays, classes, open generic arguments and unsupported storage are rejected. The query establishes
+neither initialized padding nor memory access, lifetime or escape authority.
+
+The exact runtime signature and generic argument bind the constant independently of extraction.
+Feature and scalar certificates receive `rawLayouts.toArray`, including types used only by queries;
+the enclosing translation certificate checks the complete layout table. Aggregate queries compare
+their index and identity without repeating layout computation. Runtime correspondence assumes the
+.NET 10 helper's reference-and-byref classification, rather than inspecting the verifier host.
+
 | Area | Model convention / deployment premise | Excluded claim |
 | --- | --- | --- |
 | Numeric operations | Bit-vector wrapping; checked arithmetic/conversions use mathematical bounds; signed division truncates toward zero | Floating-point conversion and arbitrary CLI/runtime behavior |

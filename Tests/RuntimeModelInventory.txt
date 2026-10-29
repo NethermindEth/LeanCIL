@@ -162,6 +162,7 @@ System.Runtime::System.Boolean System.Numerics.BitOperations::IsPow2(System.UInt
 System.Runtime::System.Boolean System.Numerics.BitOperations::IsPow2(System.UIntPtr)
 System.Runtime::System.Boolean System.ReadOnlySpan`1::TryCopyTo(System.Span`1<T>)
 System.Runtime::System.Boolean System.ReadOnlySpan`1::get_IsEmpty()
+System.Runtime::System.Boolean System.Runtime.CompilerServices.RuntimeHelpers::IsReferenceOrContainsReferences()
 System.Runtime::System.Boolean System.Runtime.CompilerServices.Unsafe::AreSame(T&,T&)
 System.Runtime::System.Boolean System.Runtime.CompilerServices.Unsafe::IsAddressGreaterThan(T&,T&)
 System.Runtime::System.Boolean System.Runtime.CompilerServices.Unsafe::IsAddressLessThan(T&,T&)

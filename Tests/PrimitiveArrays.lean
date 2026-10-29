@@ -30,7 +30,7 @@ theorem native_store_mismatch :
 
 /-- Unsupported floating-point loads cannot certify an integer load via equal stack effects. -/
 theorem float_load_forgery :
-    CIL.Extraction.scalarEmissionMatches none (rawArray 152) [.word32, .array .signed32]
+    CIL.Extraction.scalarEmissionMatches #[] none (rawArray 152) [.word32, .array .signed32]
       (.memory (.arrayLoad 4 false)) = false := by decide +kernel
 #print axioms float_load_forgery
 

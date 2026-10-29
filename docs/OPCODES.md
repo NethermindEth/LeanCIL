@@ -416,6 +416,15 @@ chooses its indexed arm, or falls through when its unsigned value is out of rang
 selectors retain every successor. Every encoded branch or switch target remains bounds-checked
 and must enter a folded sequence or tail transfer at its start, even when unselected.
 
+`RuntimeHelpers.IsReferenceOrContainsReferences<T>()` produces `false` for supported primitive
+integer, Boolean, character, integer-enum and integer-vector types, and reference-free aggregate
+layouts, including padded and closed generic layouts. Types used only in the query still require
+their validated layout identity. The constant participates in the same branch analysis; both
+feature and scalar evidence bind its exact runtime signature, type argument and value. Classes,
+arrays, spans, byref/pointer arguments and unsupported storage are rejected. A validated byref-like
+aggregate without reference/byref fields is admissible; its query does not grant memory or escape
+authority.
+
 ## Lean-only operations and source of truth
 
 The Lean `CIL.Op` type and memory/SIMD modules contain operations beyond the extractor's current mapping, including vector argument homes, fixed vector-lane helpers, `newVector256` and additional memory helpers. Their existence is not evidence that the corresponding arbitrary CIL or .NET API is extractable. Generic aggregate operations are implemented by the checked memory interpreter.

@@ -35,16 +35,16 @@ private def forwardScalars : ScalarCertificate := [some [], none, none, some []]
 
 /-- Forward lookup accepts the final in-bounds entry in both certificates. -/
 theorem forward_valid :
-    FeatureFlowValid forward .scalar forwardFeatures [true, false, false, true] forwardCode ∧
-    ScalarFlowValid forward forwardFeatures forwardScalars forwardCode := by decide
+    FeatureFlowValid #[] forward .scalar forwardFeatures [true, false, false, true] forwardCode ∧
+    ScalarFlowValid #[] forward forwardFeatures forwardScalars forwardCode := by decide
 #print axioms forward_valid
 
 /-- A target absent from either certificate cannot be accepted as an empty stack. -/
 theorem missing_target_rejected :
-    ¬ FeatureFlowValid forward .scalar [emptyState, none, none, none]
+    ¬ FeatureFlowValid #[] forward .scalar [emptyState, none, none, none]
       [true, false, false, false] forwardCode ∧
-    ¬ ScalarFlowValid forward forwardFeatures [some [], none, none, none] forwardCode ∧
-    ¬ ScalarFlowValid forward [emptyState, none, none, none] forwardScalars forwardCode := by
+    ¬ ScalarFlowValid #[] forward forwardFeatures [some [], none, none, none] forwardCode ∧
+    ¬ ScalarFlowValid #[] forward [emptyState, none, none, none] forwardScalars forwardCode := by
   decide
 #print axioms missing_target_rejected
 
@@ -53,8 +53,8 @@ theorem bounds_rejected :
     ([4, 1000000] : List Nat).all (fun target =>
       let body := { forward with code := forward.code.set 0 ⟨0, 43, .target target⟩ }
       let emitted := forwardCode.set 0 (.branch target)
-      !decide (FeatureFlowValid body .scalar forwardFeatures [true, false, false, true] emitted) &&
-      !decide (ScalarFlowValid body forwardFeatures forwardScalars emitted)) = true := by decide
+      !decide (FeatureFlowValid #[] body .scalar forwardFeatures [true, false, false, true] emitted) &&
+      !decide (ScalarFlowValid #[] body forwardFeatures forwardScalars emitted)) = true := by decide
 #print axioms bounds_rejected
 
 /-- A backward branch can target entry after streaming through several fallthroughs. -/
@@ -62,27 +62,27 @@ theorem backedge_valid :
     let body := raw [⟨0, 0, .none⟩, ⟨1, 0, .none⟩, ⟨2, 43, .target 0⟩]
     let features := List.replicate 3 emptyState
     let emitted := [.nop, .nop, .branch 0]
-    FeatureFlowValid body .scalar features [true, true, true] emitted ∧
-    ScalarFlowValid body features (List.replicate 3 (some [])) emitted := by decide
+    FeatureFlowValid #[] body .scalar features [true, true, true] emitted ∧
+    ScalarFlowValid #[] body features (List.replicate 3 (some [])) emitted := by decide
 #print axioms backedge_valid
 
 /-- The end of a certificate is not an implicit successor for a final nop. -/
 theorem missing_fallthrough_rejected :
-    ¬ FeatureFlowValid (raw [⟨0, 0, .none⟩]) .scalar [emptyState] [true] [.nop] ∧
-    ¬ ScalarFlowValid (raw [⟨0, 0, .none⟩]) [emptyState] [some []] [.nop] := by decide
+    ¬ FeatureFlowValid #[] (raw [⟨0, 0, .none⟩]) .scalar [emptyState] [true] [.nop] ∧
+    ¬ ScalarFlowValid #[] (raw [⟨0, 0, .none⟩]) [emptyState] [some []] [.nop] := by decide
 #print axioms missing_fallthrough_rejected
 
 /-- Empty certificates still fail the mandatory entry check. -/
 theorem empty_rejected :
-    ¬ FeatureFlowValid (raw []) .scalar [] [] [] ∧
-    ¬ ScalarFlowValid (raw []) [] [] [] := by decide
+    ¬ FeatureFlowValid #[] (raw []) .scalar [] [] [] ∧
+    ¬ ScalarFlowValid #[] (raw []) [] [] [] := by decide
 #print axioms empty_rejected
 
 /-- Pairing certificates cannot hide a missing or extra entry. -/
 theorem lengths_rejected :
-    ¬ ScalarFlowValid forward (forwardFeatures ++ [none]) forwardScalars forwardCode ∧
-    ¬ ScalarFlowValid forward forwardFeatures (forwardScalars ++ [none]) forwardCode ∧
-    ¬ FeatureFlowValid forward .scalar (forwardFeatures ++ [none])
+    ¬ ScalarFlowValid #[] forward (forwardFeatures ++ [none]) forwardScalars forwardCode ∧
+    ¬ ScalarFlowValid #[] forward forwardFeatures (forwardScalars ++ [none]) forwardCode ∧
+    ¬ FeatureFlowValid #[] forward .scalar (forwardFeatures ++ [none])
       [true, false, false, true, false] forwardCode := by decide
 #print axioms lengths_rejected
 
