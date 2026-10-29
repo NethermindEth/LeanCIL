@@ -21,6 +21,12 @@ internal static class SpanConstructors
         return span.Length;
     }
 
+    public static int AggregateLocal(in AggregateSpans.Words value)
+    {
+        var span = new ReadOnlySpan<AggregateSpans.Words>(in value);
+        return span.Length;
+    }
+
     public static unsafe int LayoutLocal(AggregateSpans.VectorRecord* value, int length)
     {
         var span = new Span<AggregateSpans.VectorRecord>(value, length);

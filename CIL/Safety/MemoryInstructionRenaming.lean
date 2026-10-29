@@ -356,7 +356,7 @@ private theorem Memory.Renamed.singleSpanInstructionResult {mapping : Allocation
     | (apply (related.checkedSpanValidate _ (by assumption) width).bindWithSuccess
        intro first second sourceStep same
        subst second)
-    | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
+    | (split <;> try simp only [*, Bind.bind, Except.bind])
   all_goals repeat first | contradiction | cases observable | split at observable
 #print axioms Memory.Renamed.singleSpanInstructionResult
 

@@ -20,13 +20,13 @@ foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse2", "arm6
     var name = method.Name;
     var width = name switch
     {
-        "Aggregate" or "Pointer" => 32,
+        "Aggregate" or "AggregateLocal" or "Pointer" => 32,
         "Vector" or "VectorPointer" => 16,
         "LayoutLocal" => profile == "x64-sse2" ? 64 : 48,
         _ => 4
     };
     var counted = name.Contains("Pointer", StringComparison.Ordinal) || name == "LayoutLocal";
-    var writable = name is not ("ReadOnlySingle" or "Vector" or "VectorPointer");
+    var writable = name is not ("ReadOnlySingle" or "AggregateLocal" or "Vector" or "VectorPointer");
     var length = counted ? 2 : 1;
     var output = Path.Combine(root, name + (profile == "scalar" ? "" : "-" + profile));
     Directory.CreateDirectory(output);
@@ -87,12 +87,16 @@ foreach (var (name, before, after, theorem, marker) in new[]
     ("Pointer", ".spanFromReference 32 true", ".spanFromReference 16 true",
         "method0_layouts_validated", "MethodLayoutsValid"),
     ("LayoutLocal-x64-sse2", ".reference 64 true", ".reference 48 true",
-        "method0_layouts_validated", "MethodLayoutsValid")
+        "method0_layouts_validated", "MethodLayoutsValid"),
+    ("AggregateLocal", ".singleReference 32 false", ".singleReference 16 false",
+        "method0_layouts_validated", "MethodLayoutsValid"),
+    ("AggregateLocal", ".singleReference 32 false", ".singleReference 32 true",
+        "method0_scalars_validated", "ScalarFlowValid")
 })
 {
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
     if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing constructor mutation: " + name);
-    var path = Path.Combine(root, name + "Rejected.lean");
+    var path = Path.Combine(root, name + theorem + "Rejected.lean");
     File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
     rejected.Add(path, "PASS constructor evidence rejection: " + name, marker);
 }
