@@ -20,6 +20,7 @@ inductive FieldAccess where
 /-- How an instruction uses a struct's size, including scaled reference addition/subtraction. -/
 inductive SizeAccess where
   | load | store | initialize | copy | sizeOf | construct | referenceAdd | referenceSubtract
+  | spanElement | spanSource | spanTarget
   deriving DecidableEq, Repr
 
 /-- The native-width negative stride used to subtract an element offset. -/
@@ -62,6 +63,12 @@ private def checkSize (size : Nat) : SizeAccess → Op → Bool
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
   | .sizeOf, .const32 bits => bits.toNat == size
   | .construct, .newAggregate _ _ width => width.val == size
+  | .spanElement, .memory (.spanItem width)
+  | .spanElement, .memory (.spanCopy width _)
+  | .spanElement, .memory (.spanFill width _)
+  | .spanElement, .memory (.spanFromReference width _) => width == size
+  | .spanSource, .memory (.spanReinterpret width _ _) => width == size
+  | .spanTarget, .memory (.spanReinterpret _ width _) => width == size
   | .referenceAdd, .memory (.add width _) => width == size
   | .referenceSubtract, .memory (.add stride _) => stride == subtractionStride size
   | _, _ => false

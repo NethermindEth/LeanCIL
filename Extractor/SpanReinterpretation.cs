@@ -28,11 +28,11 @@ internal static class SpanReinterpretation
             !(asBytes ? output.GenericArguments[0].FullName == "System.Byte" :
                 Parameter(output.GenericArguments[0], 1))) return null;
         RuntimeModels.ValidateSignature(reference, architecture);
-        var source = Arrays.Storage(generic.GenericArguments[0]);
-        var target = asBytes ? 1 : Arrays.Storage(generic.GenericArguments[1])?.Width;
+        var source = Spans.ElementWidth(generic.GenericArguments[0]);
+        var target = asBytes ? 1 : Spans.ElementWidth(generic.GenericArguments[1]);
         if (source is null || target is null) return null;
         var writable = input.ElementType.FullName == "System.Span`1";
-        return $".memory (.spanReinterpret {source.Width} {target} {writable.ToString().ToLowerInvariant()})";
+        return $".memory (.spanReinterpret {source} {target} {writable.ToString().ToLowerInvariant()})";
     }
 }
 

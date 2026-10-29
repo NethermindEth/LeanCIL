@@ -10,12 +10,20 @@ internal static class Spans
     internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior,
         Dictionary<Instruction, string> Constructors);
 
-    // Primitive span element width; scopes are checked by ValidateTypeIdentity.
+    // Span element widths reuse the checked scalar and integer-vector storage rules.
     internal static int? Width(TypeReference type) =>
         type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
             span.GenericArguments.Count == 1
-            ? Arrays.Storage(span.GenericArguments[0])?.Width
+            ? ElementWidth(span.GenericArguments[0])
             : null;
+
+    private sealed record Element(int Width);
+
+    internal static int? ElementWidth(TypeReference type) =>
+        Arrays.Storage(type)?.Width ?? MetadataValidation.IntegerVectorWidth(type) ??
+        (MetadataValidation.IsAggregate(type, type.Module)
+            ? EnumTypes.Cached(type, element => new Element(MetadataValidation.Layout(element, element.Module))).Width
+            : null);
 
     internal static bool Writable(TypeReference type) =>
         type is GenericInstanceType { ElementType.FullName: "System.Span`1" };

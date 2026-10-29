@@ -15,6 +15,9 @@ internal static class ParameterEvidence
                 ManagedPointers.SignatureEvidence(signature);
         if (type is ByReferenceType or PointerType) return ".reference";
         if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
+        if (type is GenericInstanceType span && Spans.Width(type) is not null &&
+            MetadataValidation.IsAggregate(span.GenericArguments[0], module))
+            return $".aggregateSpan {layouts.Index(span.GenericArguments[0])} {(Spans.Writable(type) ? "true" : "false")}";
         if (Spans.Width(type) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (type is GenericInstanceType vector && !ValueTuples.Is(type))

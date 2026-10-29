@@ -51,10 +51,22 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
   | 0x73, .call site =>
     return (aggregateIndex site.declaringType).toList.map fun index => .size pc index .construct
   | 0x28, .call site =>
+    if site.name ∈ ["AsBytes", "Cast"] &&
+        site.declaringType == .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" then
+      return ((site.typeArguments[0]?).bind aggregateIndex).toList.map
+        (fun index => .size pc index .spanSource) ++
+        ((site.typeArguments[1]?).bind aggregateIndex).toList.map
+        (fun index => .size pc index .spanTarget)
     match site.declaringType, site.typeArguments with
+    | .apply (.constructor scope owner) (.aggregate _ index), [] =>
+      if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
+          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear"] then
+        return [.size pc index .spanElement] else return []
     | .atom _ "System.Runtime.InteropServices.MemoryMarshal", [.aggregate _ index] =>
       if site.name = "Read" || site.name = "TryRead" then return [.size pc index .load]
       else if site.name = "Write" || site.name = "TryWrite" then return [.size pc index .store]
+      else if site.name ∈ ["CreateSpan", "CreateReadOnlySpan"] then
+        return [.size pc index .spanElement]
       else return []
     | .atom _ "System.Runtime.CompilerServices.Unsafe", [.aggregate _ index] =>
       if site.name = "SizeOf" then return [.size pc index .sizeOf]

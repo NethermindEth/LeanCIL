@@ -105,6 +105,23 @@ internal sealed class LayoutEvidence
         {
             var instruction = method.Body.Instructions[pc];
             if (!reachable.Contains(instruction)) continue;
+            if (instruction.OpCode.Code == Code.Call && instruction.Operand is MethodReference spanCall)
+            {
+                if (spanCall is GenericInstanceMethod reinterpret &&
+                    spanCall.DeclaringType.FullName == "System.Runtime.InteropServices.MemoryMarshal" &&
+                    spanCall.Name is "AsBytes" or "Cast")
+                {
+                    for (var argument = 0; argument < reinterpret.GenericArguments.Count; argument++)
+                        if (MetadataValidation.IsAggregate(reinterpret.GenericArguments[argument], method.Module))
+                            uses.Add($".size {pc} {Index(reinterpret.GenericArguments[argument])} " +
+                                (argument == 0 ? ".spanSource" : ".spanTarget"));
+                }
+                else if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
+                    Spans.Width(spanOwner) is not null &&
+                    MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
+                    spanCall.Name is "get_Item" or "CopyTo" or "TryCopyTo" or "Clear")
+                    uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
+            }
             if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda)
             {
                 var reference = (FieldReference)instruction.Operand;
@@ -135,7 +152,8 @@ internal sealed class LayoutEvidence
                 {
                     "SizeOf" => "sizeOf", "Add" => "referenceAdd", "Subtract" => "referenceSubtract",
                     "ReadUnaligned" or "Read" or "TryRead" => "load",
-                    "WriteUnaligned" or "Write" or "TryWrite" => "store", _ => null
+                    "WriteUnaligned" or "Write" or "TryWrite" => "store",
+                    "CreateSpan" or "CreateReadOnlySpan" => "spanElement", _ => null
                 };
                 if (access is not null)
                     uses.Add($".size {pc} {Index(generic.GenericArguments[0])} .{access}");

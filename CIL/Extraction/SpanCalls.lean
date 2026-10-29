@@ -1,10 +1,11 @@
 import CIL.Extraction.MetadataNames
 
 /-!
-# Exact primitive span calls
+# Exact reference-free span calls
 
 Runtime span members and array-view factories retain their element identity, argument arity,
-width and write capability in translation evidence. Array factories require the exact
+width and write capability in translation evidence. Aggregate widths use checked layouts.
+Array factories require the exact
 System.Memory identity; the span types and primitive elements require System.Runtime.
 -/
 
@@ -35,16 +36,20 @@ private def emittedSpanCall : Op → Option SpanCall
   | .memory (.arraySpan element writable range) => some (.array element writable range)
   | _ => none
 
+/-- Closed span element names retain nested integer-vector arguments in runtime signatures. -/
+def spanElementName (type : TypeExpr) : Option String := do
+  if let some (_, name) := namedType type then return String.ofList name
+  let .apply (.constructor _ name) (.atom _ element) := type | none
+  if (integerVectorWidth type).isSome then some (name ++ "<" ++ element ++ ">") else none
+
 /-- A span member or array constructor with a fully specified owner and signature. -/
-private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
+private def spanMemberCall (opcode : Nat) (site : CallSite)
+    (aggregateWidth : Nat := 0) : Option SpanCall := do
   let .apply (.constructor _ owner) elementType := site.declaringType
     | none
-  let elementName ← match elementType with
-    | .atom _ name => some name
-    | .enum .. => (String.ofList ∘ Prod.snd) <$> namedType elementType
-    | _ => none
-  let .span width writable ← spanStorage site.declaringType | none
-  let element ← arrayElementType elementType
+  let elementName ← spanElementName elementType
+  let .span width writable ← spanStorage site.declaringType aggregateWidth | none
+  let arrayElement := arrayElementType elementType
   if !site.typeArguments.isEmpty || site.parameterCount != site.parameterTypes.length then none
     else pure ()
   let intType := TypeExpr.atom runtimeScope "System.Int32"
@@ -54,9 +59,10 @@ private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall :=
       "(" ++ parameters ++ ")")
   if opcode == 115 && site.name == ".ctor" && site.hasThis &&
       !site.returnsValue && site.returnType == .void then
+    let element ← arrayElement
     if site.parameterTypes == [.array elementType] &&
         site.target == target "System.Void" "!0[]" then
-      some (.array element writable .whole)
+      some (.array (← arrayElement) writable .whole)
     else if site.parameterTypes == [.array elementType, intType, intType] &&
         site.target == target "System.Void" "!0[],System.Int32,System.Int32" then
       some (.array element writable .counted)
@@ -66,7 +72,7 @@ private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall :=
       site.target == target "System.Void" "" then some (.fill width true)
   else if opcode == 40 && site.hasThis && writable && !site.returnsValue &&
       site.returnType == .void && site.name == "Fill" && site.parameterTypes == [elementType] &&
-      site.target == target "System.Void" "!0" then some (.fill width false)
+      site.target == target "System.Void" "!0" && arrayElement.isSome then some (.fill width false)
   else if opcode == 40 && site.hasThis &&
       site.parameterTypes == [.apply (.constructor runtimeScope "System.Span`1") elementType] &&
       site.name == "CopyTo" && !site.returnsValue && site.returnType == .void &&
@@ -80,7 +86,7 @@ private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall :=
   else if !site.hasThis && site.name == "op_Implicit" then
     if site.returnType == site.declaringType && site.parameterTypes == [.array elementType] &&
         site.target == target (owner ++ "<!0>") "!0[]" then
-      some (.array element writable .whole)
+      some (.array (← arrayElement) writable .whole)
     else if writable && site.returnType ==
         .apply (.constructor runtimeScope "System.ReadOnlySpan`1") elementType &&
         site.parameterTypes == [site.declaringType] &&
@@ -108,7 +114,7 @@ private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall :=
   else none
 
 /-- An exact span constructor, independent of whether CIL allocates or initializes its receiver. -/
-def spanLocalConstructor (site : CallSite) : Option SpanConstructor := do
+def spanLocalConstructor (site : CallSite) (aggregateWidth : Nat := 0) : Option SpanConstructor := do
   if let some (.array element writable range) := spanMemberCall 115 site then
     return .array element writable range
   if site.name != ".ctor" || !site.hasThis || site.returnsValue ||
@@ -116,11 +122,9 @@ def spanLocalConstructor (site : CallSite) : Option SpanConstructor := do
       site.parameterTypes != [.pointer .void, .atom runtimeScope "System.Int32"] then none
     else pure ()
   let .apply (.constructor _ owner) elementType := site.declaringType | none
-  let element ← match elementType with
-    | .atom _ name => some name
-    | .enum .. => (String.ofList ∘ Prod.snd) <$> namedType elementType
-    | _ => none
-  let .span width writable ← spanStorage site.declaringType | none
+  if let .aggregate .. := elementType then none else pure ()
+  let element ← spanElementName elementType
+  let .span width writable ← spanStorage site.declaringType aggregateWidth | none
   if site.target != .external (runtimeScope ++ "::System.Void " ++ owner ++ "<" ++ element ++
       ">::.ctor(System.Void*,System.Int32)") then none else some (.reference width writable)
 
@@ -130,7 +134,7 @@ private def arrayExtensionCall (opcode : Nat) (site : CallSite) : Option SpanCal
       site.declaringType != .atom spanMemoryScope "System.MemoryExtensions" ||
       site.parameterCount != site.parameterTypes.length then none else pure ()
   let [elementType] := site.typeArguments | none
-  let element ← arrayElementType elementType
+  let arrayElement := arrayElementType elementType
   if site.returnType != .apply (.constructor runtimeScope "System.Span`1") elementType then none
     else pure ()
   let intType := TypeExpr.atom runtimeScope "System.Int32"
@@ -142,10 +146,11 @@ private def arrayExtensionCall (opcode : Nat) (site : CallSite) : Option SpanCal
       some (.counted, "!!0[],System.Int32,System.Int32") else none
   if site.target != .external (spanMemoryScope ++
       "::System.Span`1<!!0> System.MemoryExtensions::AsSpan(" ++
-      parameters ++ ")") then none else some (.array element true range)
+      parameters ++ ")") then none else some (.array (← arrayElement) true range)
 
 /-- Reinterpretation retains readonly status and both primitive or enum element types. -/
-private def reinterpretCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
+private def reinterpretCall (opcode : Nat) (site : CallSite)
+    (sourceAggregateWidth targetAggregateWidth : Nat) : Option SpanCall := do
   if opcode != 40 || site.hasThis || !site.returnsValue || site.parameterCount != 1 ||
       site.declaringType != .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" then
     none else pure ()
@@ -153,8 +158,8 @@ private def reinterpretCall (opcode : Nat) (site : CallSite) : Option SpanCall :
     | "AsBytes", [source] => some (source, .atom runtimeScope "System.Byte", "System.Byte")
     | "Cast", [source, target] => some (source, target, "!!1")
     | _, _ => none
-  let sourceElement ← arrayElementType source
-  let targetElement ← arrayElementType target
+  let sourceWidth ← spanElementWidth source sourceAggregateWidth
+  let targetWidth ← spanElementWidth target targetAggregateWidth
   let [input] := site.parameterTypes | none
   let .span _ writable ← spanStorage input | none
   let owner := if writable then "System.Span`1" else "System.ReadOnlySpan`1"
@@ -163,15 +168,30 @@ private def reinterpretCall (opcode : Nat) (site : CallSite) : Option SpanCall :
       site.target != .external (runtimeScope ++ "::" ++ owner ++ "<" ++ resultName ++
         "> System.Runtime.InteropServices.MemoryMarshal::" ++ site.name ++ "(" ++ owner ++
         "<!!0>)") then none
-  else some (.reinterpret sourceElement.width targetElement.width writable)
+  else some (.reinterpret sourceWidth targetWidth writable)
 
-/-- Covered calls cannot be replaced with another operation of the same stack effect. -/
+/-- Exact span signatures and primitive/vector widths. Aggregate widths are separately bound
+    by mandatory LayoutUsesComplete and MethodLayoutsValid evidence. -/
 def spanCallMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
-  let expected := match instruction.operand with
-    | .call site => (spanMemberCall instruction.opcode site).orElse
-        (fun _ => (arrayExtensionCall instruction.opcode site).orElse
-          (fun _ => reinterpretCall instruction.opcode site))
-    | _ => none
-  expected == emittedSpanCall emitted
+  let aggregateConstructor := match instruction.operand with
+    | .call site => match site.declaringType with
+      | .apply (.constructor scope owner) (.aggregate ..) =>
+        site.name == ".ctor" && scope == runtimeScope &&
+          owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"]
+      | _ => false
+    | _ => false
+  !aggregateConstructor && matchSpanCall instruction emitted
+where
+  matchSpanCall (instruction : RawInstruction) (emitted : Op) : Bool :=
+    let (sourceWidth, targetWidth) := match emittedSpanCall emitted with
+      | some (.reinterpret source target _) => (source, target)
+      | some (.copy width _) | some (.fill width _) | some (.item width) => (width, width)
+      | _ => (0, 0)
+    let expected := match instruction.operand with
+      | .call site => (spanMemberCall instruction.opcode site sourceWidth).orElse
+          (fun _ => (arrayExtensionCall instruction.opcode site).orElse
+            (fun _ => reinterpretCall instruction.opcode site sourceWidth targetWidth))
+      | _ => none
+    expected == emittedSpanCall emitted
 
 end CIL.Extraction

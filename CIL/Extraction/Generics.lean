@@ -69,16 +69,22 @@ def arrayElementType : TypeExpr → Option ArrayElement
       | "System.Boolean" => some .boolean | "System.Char" => some .character
       | _ => none
   | _ => none
-/-- Exact primitive span metadata, including element width and write capability. -/
-def spanStorage : TypeExpr → Option StorageType
+/-- Primitive/vector widths are intrinsic; aggregate widths come from checked layout uses. -/
+def spanElementWidth (type : TypeExpr) (aggregateWidth : Nat := 0) : Option Nat :=
+  if let .aggregate .. := type then some aggregateWidth else
+  ((arrayElementType type).map ArrayElement.width).orElse (fun _ => integerVectorWidth type)
+
+/-- Exact span metadata, including element width and write capability. -/
+def spanStorage (type : TypeExpr) (aggregateWidth : Nat := 0) : Option StorageType :=
+  match type with
   | .apply (.constructor scope name) elementType => do
     if scope != runtimeScope ||
         name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
-    let element ← arrayElementType elementType
-    return .span element.width (name == "System.Span`1")
+    let width ← spanElementWidth elementType aggregateWidth
+    return .span width (name == "System.Span`1")
   | _ => none
 
-/-- Whether a local is a supported primitive span. -/
+/-- Whether a local has a supported span metadata shape; layouts are validated separately. -/
 def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
 
 /-- Function-pointer parameters are primitive integers, enums or their managed references. -/
@@ -125,7 +131,12 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
         "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
         "System.IntPtr", "System.UIntPtr"] then some .reference else none
   | type@(.apply (.constructor scope name) elementType) => do
-    if let some storage := spanStorage type then return storage
+    if let some storage := spanStorage type then
+      if let .aggregate identity index := elementType then
+        let metadata ← layouts[index]?
+        if metadata.identity != identity then none else
+          return .aggregateSpan index (name == "System.Span`1")
+      else return storage
     let .atom elementScope element := elementType | none
     if scope != intrinsicsScope || elementScope != runtimeScope ||
         element ∉ ["System.UInt64", "System.Int64", "System.UInt32", "System.Int32",
@@ -300,7 +311,7 @@ private def allowedConstraint (layouts : List RawLayout) (argument : TypeExpr)
 /-- A closed, non-reference type argument with a known storage. -/
 private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : Bool :=
   substituteType [] type == some type && match typeStorage layouts type with
-    | some .reference | some (.span ..) | some (.array _) | none => false
+    | some .reference | some (.span ..) | some (.aggregateSpan ..) | some (.array _) | none => false
     | some _ => true
 
 /-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/

@@ -532,10 +532,7 @@ private def spanConstructor (opcode : Nat) (site : CallSite) : Option (Nat × Bo
       site.parameterTypes != [.pointer .void, .atom runtimeScope "System.Int32"] then none
     else pure ()
   let .apply (.constructor _ owner) elementType := site.declaringType | none
-  let element ← match elementType with
-    | .atom _ name => some name
-    | .enum .. => (String.ofList ∘ Prod.snd) <$> namedType elementType
-    | _ => none
+  let element ← spanElementName elementType
   let .span width writable ← spanStorage site.declaringType | none
   if site.target != .external (runtimeScope ++ "::System.Void " ++ owner ++ "<" ++ element ++
       ">::.ctor(System.Void*,System.Int32)") then none else some (width, writable)
