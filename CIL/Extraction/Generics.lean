@@ -417,6 +417,10 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
   raw.opcode == 65030 && managedTargetMatches methods signature target &&
   match raw.operand with
   | .call site => site.target == .managed target.identity.token &&
+    (match site.declaringType with
+      | .atom scope name => target.identity.owner == scope ++ "::" ++ name
+      | .aggregate identity _ => target.identity.owner == identity
+      | _ => false) &&
     site.typeArguments == target.identity.arguments && !site.hasThis &&
     site.returnType == signature.result && site.parameterTypes == signature.parameters &&
     site.parameterCount == signature.parameters.length &&

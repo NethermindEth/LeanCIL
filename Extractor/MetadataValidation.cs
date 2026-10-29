@@ -305,6 +305,7 @@ internal static class MetadataValidation
         Dictionary<MethodDefinition, MethodDefinition[]> chains = [];
         Dictionary<MethodDefinition, List<(MethodDefinition Method, bool Deferred)>> dependencies = [];
         MethodReference[]? addressedMethods = null;
+        Dictionary<string, MethodDefinition[]> indirectTargets = new(StringComparer.Ordinal);
         // Call sites already reported, or whose callee was not analysed, have no translation to check.
         HashSet<Instruction> skipped = [];
         bool Check(MethodDefinition method, Instruction? at, Action check, bool named = false)
@@ -484,14 +485,18 @@ internal static class MetadataValidation
                     Check(method, instruction, () =>
                     {
                         ManagedPointers.Validate(site, module, profile.Architecture);
-                        addressedMethods ??= ManagedPointers.AddressedMethods(module).ToArray();
-                        foreach (var target in addressedMethods)
+                        var signature = ManagedPointers.SignatureEvidence(site);
+                        if (!indirectTargets.TryGetValue(signature, out var targets))
                         {
-                            var closed = target is GenericInstanceMethod generic
-                                ? specializations.Instantiate(generic) : target.Resolve();
-                            if (closed is not null && ManagedPointers.SameSignature(site, closed))
-                                CallSite(instruction, closed);
+                            addressedMethods ??= ManagedPointers.AddressedMethods(module)
+                                .Where(target => target.DeclaringType.Scope == module).ToArray();
+                            targets = addressedMethods.Select(target => target is GenericInstanceMethod generic
+                                    ? specializations.Instantiate(generic) : target.Resolve())
+                                .Where(target => target is not null && ManagedPointers.SameSignature(site, target))
+                                .Distinct().ToArray()!;
+                            indirectTargets.Add(signature, targets);
                         }
+                        foreach (var target in targets) CallSite(instruction, target);
                     });
                     continue;
                 }
