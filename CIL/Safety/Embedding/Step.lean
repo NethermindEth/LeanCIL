@@ -370,6 +370,16 @@ theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) 
   · simp only [short, ↓reduceIte] at h ⊢
     lockstep
 
+/-- A tail transfer has no continuation pc to relocate. -/
+theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall callee argc) := by
+  plain_cases
+  by_cases short : (stack.length != argc) = true
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
+    lockstep
+
+#print axioms step_relabel_tailCall
+
 theorem step_relabel_newVector256 (callee argc : Nat) :
     StepRelabel (.newVector256 callee argc) := by
   plain_cases
@@ -638,6 +648,7 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case localAddr index => exact step_relabel_localAddr index
   case setLocal index narrow => exact step_relabel_setLocal index narrow
   case call method argc => exact step_relabel_call method argc
+  case tailCall method argc => exact step_relabel_tailCall method argc
   case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
@@ -895,6 +906,13 @@ theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := b
   · simp only [short, ↓reduceIte] at h ⊢
     raise_lockstep
 
+/-- Tail-transfer faults retain their original location under pc relocation. -/
+theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee argc) := by
+  plain_cases
+  exact h
+
+#print axioms step_raise_tailCall
+
 theorem step_raise_newVector256 (callee argc : Nat) : StepRaise (.newVector256 callee argc) := by
   plain_cases
   by_cases short : stack.length < argc
@@ -1143,6 +1161,7 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
         | cons value rest => raise_lockstep
     · cases h
   case call callee argc => exact step_raise_call callee argc
+  case tailCall callee argc => exact step_raise_tailCall callee argc
   case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
   case intrinsic operation argc => exact step_raise_intrinsic operation argc

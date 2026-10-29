@@ -1115,6 +1115,17 @@ theorem step_appendLocals_call (method : Nat) (argc : Nat) :
 
 #print axioms step_appendLocals_call
 
+/-- `tailCall` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_tailCall (method : Nat) (argc : Nat) :
+    StepAppendLocals (.tailCall method argc) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_tailCall
+
 /-- `newVector256` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_newVector256 (constructor : Nat) (argc : Nat) :
     StepAppendLocals (.newVector256 constructor argc) := by
@@ -1389,6 +1400,8 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       exact step_appendLocals_bne target
     case call method argc =>
       exact step_appendLocals_call method argc
+    case tailCall method argc =>
+      exact step_appendLocals_tailCall method argc
     case newVector256 constructor argc =>
       exact step_appendLocals_newVector256 constructor argc
     case newAggregate constructor argc size =>
