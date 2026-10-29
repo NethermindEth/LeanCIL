@@ -393,4 +393,3 @@ theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Mem
 #print axioms enterFrame_of_no_opaque
 
 end CIL.Safety
-

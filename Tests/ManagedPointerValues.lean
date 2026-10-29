@@ -50,4 +50,3 @@ theorem literal_null_table_rejected :
 #print axioms literal_null_table_rejected
 
 end Tests.ManagedPointerValues
-

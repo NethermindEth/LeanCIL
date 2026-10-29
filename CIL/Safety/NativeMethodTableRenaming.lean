@@ -195,5 +195,3 @@ theorem Memory.Renamed.addNativeTable_success {mapping : AllocationRenaming}
 #print axioms Memory.Renamed.addNativeTable_success
 
 end CIL.Safety
-
-

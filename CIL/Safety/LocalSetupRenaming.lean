@@ -315,4 +315,3 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
 #print axioms Memory.Renamed.skipLocalInitialized
 
 end CIL.Safety
-

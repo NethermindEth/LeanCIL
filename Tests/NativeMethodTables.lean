@@ -114,4 +114,3 @@ theorem numeric_load_rejected :
 #print axioms numeric_load_rejected
 
 end Tests.NativeMethodTables
-
