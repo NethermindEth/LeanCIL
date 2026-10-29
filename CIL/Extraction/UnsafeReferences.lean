@@ -71,14 +71,15 @@ def UnsafeReferenceHelper.matches : UnsafeReferenceHelper → Op → Bool
   | .addBytes expected, .memory (.add width signed) => width == 1 && signed == expected
   | _, _ => false
 
-/-- The pointer overload uses an int32 element offset and retains checked reference provenance. -/
+/-- Pointer offsets use int32 element displacements and retain checked reference provenance. -/
 def unsafePointerOffset (instruction : RawInstruction) : Bool := Id.run do
   if instruction.opcode != 0x28 then return false
   let .call site := instruction.operand | return false
-  if site.typeArguments.length != 1 || site.name != "Add" then return false
+  if site.typeArguments.length != 1 || site.name ∉ ["Add", "Subtract"] then return false
   return referenceSignature site (.pointer .void)
     [.pointer .void, .atom runtimeScope "System.Int32"]
-    "System.Void* System.Runtime.CompilerServices.Unsafe::Add(System.Void*,System.Int32)"
+    ("System.Void* System.Runtime.CompilerServices.Unsafe::" ++ site.name ++
+      "(System.Void*,System.Int32)")
 
 /-- Element offsets require exact helper metadata and separately checked layout evidence. -/
 def unsafeElementOffset (instruction : RawInstruction) : Bool := Id.run do

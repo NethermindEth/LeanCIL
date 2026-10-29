@@ -29,7 +29,7 @@ internal static class UnsafeModels
             ((reference.Name is "Add" or "Subtract" && Reference(reference.ReturnType) &&
               Reference(reference.Parameters[0].ParameterType) &&
               reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr") ||
-             (reference.Name == "Add" && Pointer(reference.ReturnType) &&
+             (reference.Name is "Add" or "Subtract" && Pointer(reference.ReturnType) &&
               Pointer(reference.Parameters[0].ParameterType) &&
               reference.Parameters[1].ParameterType.FullName == "System.Int32"));
         var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&

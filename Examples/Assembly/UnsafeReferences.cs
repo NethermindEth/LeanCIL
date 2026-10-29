@@ -9,6 +9,10 @@ internal static class UnsafeReferences
     public static unsafe byte* AddPointer(byte* source, int offset) => (byte*)Unsafe.Add<ulong>(source, offset);
     public static unsafe byte* AddPointerAggregate(byte* source, int offset) =>
         (byte*)Unsafe.Add<FourLimbs>(source, offset);
+    public static unsafe byte* SubtractPointer(byte* source, int offset) =>
+        (byte*)Unsafe.Subtract<ulong>(source, offset);
+    public static unsafe byte* SubtractPointerAggregate(byte* source, int offset) =>
+        (byte*)Unsafe.Subtract<FourLimbs>(source, offset);
     public static ref ulong Word(ref FourLimbs value) => ref Unsafe.As<FourLimbs, ulong>(ref value);
     public static ref Vector128<ulong> Half(ref FourLimbs value) => ref Unsafe.As<FourLimbs, Vector128<ulong>>(ref value);
     public static Vector128<ulong> ReadHalf(ref FourLimbs value) => Unsafe.As<FourLimbs, Vector128<ulong>>(ref value);
