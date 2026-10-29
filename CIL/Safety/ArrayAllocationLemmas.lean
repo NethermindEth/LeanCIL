@@ -1,14 +1,14 @@
 import CIL.Safety.ArrayAllocation
 import CIL.Safety.FrameSetupLemmas
 
-/-! # Freshness and initialized storage evidence for primitive heap allocation -/
+/-! # Freshness and initialized storage evidence for integer and enum heap allocation -/
 
 namespace CIL.Safety
 
 /-- Array creation adds one heap allocation without changing frame ownership. -/
 inductive ArrayAllocationEffect (memory : Memory) : ArrayView → Memory → Prop where
   | fresh {element length identity allocated}
-      (primitive : element.primitive = true) (bounded : length < 2^31)
+      (supported : element.allocationSupported = true) (bounded : length < 2^31)
       (allocation : allocate memory
         ⟨.managedHeap, ⟨length * element.width, element.width, []⟩, true,
           [length * element.width]⟩ = .ok (identity, allocated)) :
@@ -24,7 +24,7 @@ theorem allocateArray_effect {memory result : Memory} {element : CIL.ArrayElemen
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at success
   repeat' first
     | solve |
-        exact .fresh (by cases value : element.primitive <;> simp_all)
+        exact .fresh (by cases value : element.allocationSupported <;> simp_all)
           (by simp only [maxArrayLength] at *; omega) (checkedAt_ok (by assumption))
     | cases success
     | split at success
@@ -75,11 +75,13 @@ theorem ArrayAllocationEffect.wellFormed {memory result : Memory} {view : ArrayV
 theorem ArrayAllocationEffect.view_valid {memory result : Memory} {view : ArrayView}
     (effect : ArrayAllocationEffect memory view result) : view.validate result = .ok () := by
   cases effect with
-  | fresh primitive bounded allocation =>
+  | fresh supported bounded allocation =>
     have found := allocation_lookup _ _ _ _ allocation
     rename_i element length identity allocated
     have width : 0 < element.width ∧ element.width ≤ 8 := by
-      cases element <;> simp_all [CIL.ArrayElement.primitive, CIL.ArrayElement.width]
+      cases element <;> simp_all [CIL.ArrayElement.allocationSupported, CIL.ArrayElement.width]
+      rename_i storage
+      cases storage <;> decide
     have extent : length * element.width < nativeLimit := by
       have := Nat.mul_le_mul_left length width.2
       simp only [nativeLimit]

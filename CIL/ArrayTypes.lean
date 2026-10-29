@@ -31,9 +31,9 @@ inductive ArrayElement where
   | vector (identity : String) (size : Nat)
   deriving DecidableEq, Repr
 
-/-- Primitive integer elements whose zero-initialized arrays the allocator admits. -/
-def ArrayElement.primitive : ArrayElement → Bool
-  | .enumeration .. | .aggregate .. | .vector .. => false
+/-- Integer and enum elements whose zero-initialized arrays the allocator admits. -/
+def ArrayElement.allocationSupported : ArrayElement → Bool
+  | .aggregate .. | .vector .. => false
   | _ => true
 
 /-- Storage width on the admitted 64-bit runtime profiles. -/

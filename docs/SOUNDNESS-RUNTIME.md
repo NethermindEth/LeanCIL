@@ -46,10 +46,11 @@ Reference-element and multidimensional arrays, covariance and addresses of array
 Valid null/index failures raise their named exceptions; invalid descriptors, expired storage and
 missing authority remain model faults and cannot discharge those exceptional contracts.
 
-`newarr` allocates only primitive integer/bool/char/native arrays. Fresh non-null identities survive
-frame return, including for empty arrays. Payloads start zeroed and writable. Negative lengths raise
-`OverflowException`; lengths above `0x7fffffc7`, invalid native extents and allocator inconsistency
-are model faults. The [CoreCLR ceiling](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/gchelpers.cpp)
+`newarr` allocates primitive integer/bool/char/native arrays and same-assembly integer-backed enum
+arrays. Enum payloads start at zero even when the enum declares no zero member. Fresh non-null
+identities survive frame return, including for empty arrays. Payloads start zeroed and writable.
+Negative lengths raise `OverflowException`; lengths above `0x7fffffc7`, invalid native extents and
+allocator inconsistency are model faults. The [CoreCLR ceiling](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/gchelpers.cpp)
 does not establish available memory. GC, object headers and out-of-memory behavior are not modeled.
 
 Spans, slices, array conversions and `MemoryMarshal` views preserve backing identity and capability;

@@ -65,7 +65,8 @@ internal static class Arrays
 
     internal static string? Translate(Instruction instruction, string architecture) => instruction.OpCode.Code switch
     {
-        Code.Newarr when Primitive((TypeReference)instruction.Operand) is { } element =>
+        Code.Newarr when Storage((TypeReference)instruction.Operand) is
+            { Kind: not NativeOperands.Kind.ArrayComposite } element =>
             $".newArray {element.Expression}",
         Code.Ldlen => ".memory .arrayLength",
         Code.Ldelema => $".memory (.arrayAddress {(Storage((TypeReference)instruction.Operand, architecture) ??

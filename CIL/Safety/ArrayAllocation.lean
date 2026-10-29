@@ -1,7 +1,7 @@
 import CIL.Safety.InstructionMemory
 
 /-!
-# Primitive heap arrays
+# Integer and enum heap arrays
 
 Array allocation reuses fresh allocation identities and existing typed array views, enforcing
 the .NET 10 element-count ceiling. Success still assumes runtime allocation availability;
@@ -24,7 +24,8 @@ def arrayMemory (allocated : Memory) (identity size : Nat) : Memory :=
     Initialization uses a constant cell function, independent of the requested length. -/
 def allocateArray (memory : Memory) (element : CIL.ArrayElement) (length : Nat) :
     ExecutionResult (ArrayView × Memory) := do
-  if !element.primitive then .error (.unsupported "Nonprimitive array allocation") else pure ()
+  if !element.allocationSupported then
+    .error (.unsupported "Unsupported array element allocation") else pure ()
   if length > maxArrayLength then
     .error (.unsupported "Array length outside supported extent") else pure ()
   let size := length * element.width
@@ -35,7 +36,8 @@ def allocateArray (memory : Memory) (element : CIL.ArrayElement) (length : Nat) 
 /-- Decode the CLI signed int32/native length before allocating; negative lengths overflow. -/
 def newArray (memory : Memory) (element : CIL.ArrayElement) (value : CIL.Value) :
     ExecutionResult (ArrayView × Memory) := do
-  if !element.primitive then .error (.unsupported "Nonprimitive array allocation") else pure ()
+  if !element.allocationSupported then
+    .error (.unsupported "Unsupported array element allocation") else pure ()
   let length ← match value with
     | .i32 bits => pure bits.toInt
     | .i64 bits => pure bits.toInt

@@ -169,7 +169,8 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
   if instruction.opcode == 141 then
     match instruction.operand, stack, emitted with
     | .type token, length :: _, .newArray element =>
-      length ∈ [.word32, .native] && element.primitive && arrayElementType token == some element
+      length ∈ [.word32, .native] && element.allocationSupported &&
+        arrayElementType token == some element
     | _, _, _ => false
   else
   match arrayStep instruction stack, emitted with
@@ -687,7 +688,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let .type token := instruction.operand | none
     let element ← arrayElementType token
     let length :: tail := stack | none
-    if !element.primitive || length ∉ [.word32, .native] then none else
+    if !element.allocationSupported || length ∉ [.word32, .native] then none else
       return .array element :: tail
   if arrayCovered opcode then return (← arrayStep instruction stack).2
   if opcode == 20 then

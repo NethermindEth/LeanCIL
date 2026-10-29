@@ -215,7 +215,7 @@ theorem native_negative_array_length :
 /-- Unsupported element kinds cannot claim an expected exception through their length. -/
 theorem unsupported_allocation_is_not_exception :
     (match newArray memory (.aggregate "Record" 4) (.i32 (-1)) with
-     | .error fault => fault == .unsupported "Nonprimitive array allocation"
+     | .error fault => fault == .unsupported "Unsupported array element allocation"
      | .ok _ => false) = true := by decide +kernel
 #print axioms unsupported_allocation_is_not_exception
 

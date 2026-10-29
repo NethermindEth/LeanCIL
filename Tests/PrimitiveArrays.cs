@@ -144,7 +144,7 @@ foreach (var (name, _, arguments, expected) in compositions)
         """);
     evidence.Add(proof, "PASS certified array composition: " + name);
 }
-var allocations = new[]
+var allocations = new List<(string Name, string Element, int Width)>
 {
     (Name: "Allocate", Element: "signed32", Width: 4),
     (Name: "AllocateBytes", Element: "unsigned8", Width: 1),
@@ -152,6 +152,19 @@ var allocations = new[]
     (Name: "AllocateLongs", Element: "signed64", Width: 8),
     (Name: "AllocateAndWrite", Element: "signed32", Width: 4)
 };
+foreach (var (type, storage, width) in new[]
+{
+    ("Signed8", "signed8", 1), ("Unsigned8", "unsigned8", 1),
+    ("Signed16", "signed16", 2), ("Unsigned16", "unsigned16", 2),
+    ("Signed32", "signed32", 4), ("Unsigned32", "unsigned32", 4),
+    ("Signed64", "signed64", 8), ("Unsigned64", "unsigned64", 8),
+    ("AllocationTag", "unsigned8", 1)
+})
+{
+    var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples." + type);
+    allocations.Add((type == "AllocationTag" ? "AllocateUnnamedZero" : "Allocate" + type,
+        $"enumeration {identity} .{storage}", width));
+}
 ExtractBatch("extract", null, allocations.Select(allocation => new GeneratedExtraction(assembly,
     $"PrimitiveArrays::{allocation.Name}(System.Int32" +
         (allocation.Name == "AllocateAndWrite" ? ",System.Int32,System.Int32)" : ")"),
@@ -213,6 +226,23 @@ foreach (var (name, element, width) in allocations)
             var forged = Path.Combine(root, "ForgedAllocation-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
             rejected.Add(forged, "PASS forged array allocation: " + mutation, "ScalarFlowValid");
+        }
+    }
+    if (name == "AllocateSigned8")
+    {
+        var target = $".newArray (.{element})";
+        foreach (var (mutation, replacement) in new[]
+        {
+            ("identity", target.Replace("Examples.Signed8", "Examples.Unsigned8", StringComparison.Ordinal)),
+            ("storage", target.Replace(".signed8)", ".unsigned8)", StringComparison.Ordinal)),
+            ("width", target.Replace(".signed8)", ".signed16)", StringComparison.Ordinal)),
+            ("primitive", ".newArray .signed8")
+        })
+        {
+            if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing enum newarr target");
+            var forged = Path.Combine(root, "ForgedEnumAllocation-" + mutation + ".lean");
+            File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
+            rejected.Add(forged, "PASS forged enum allocation: " + mutation, "ScalarFlowValid");
         }
     }
     var actual = runtime.GetMethod(name)!.Invoke(null, composition ? [2, 1, 7] : [2]);

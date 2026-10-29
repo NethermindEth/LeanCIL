@@ -1,5 +1,7 @@
 namespace Examples;
 
+public enum AllocationTag : byte { One = 1 }
+
 public static class PrimitiveArrays
 {
     public static int Length(int[] values) => values.Length;
@@ -56,6 +58,16 @@ public static class PrimitiveArrays
         WriteInt32(values, index, value);
         return ReadInt32(values, index);
     }
+
+    public static Signed8[] AllocateSigned8(int length) => new Signed8[length];
+    public static Unsigned8[] AllocateUnsigned8(int length) => new Unsigned8[length];
+    public static Signed16[] AllocateSigned16(int length) => new Signed16[length];
+    public static Unsigned16[] AllocateUnsigned16(int length) => new Unsigned16[length];
+    public static Signed32[] AllocateSigned32(int length) => new Signed32[length];
+    public static Unsigned32[] AllocateUnsigned32(int length) => new Unsigned32[length];
+    public static Signed64[] AllocateSigned64(int length) => new Signed64[length];
+    public static Unsigned64[] AllocateUnsigned64(int length) => new Unsigned64[length];
+    public static AllocationTag[] AllocateUnnamedZero(int length) => new AllocationTag[length];
 
     public static float[] AllocateSingles(int length) => new float[length];
     public static object ReadObject(object[] values, int index) => values[index];

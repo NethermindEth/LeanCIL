@@ -169,8 +169,8 @@ theorem Memory.Renamed.stepNewArray {indices : LocalIndexMap} {mapping : Allocat
         fun value member => bounds value (List.mem_cons_of_mem _ member)
       cases length <;> simp only [newArray, Bind.bind, Except.bind, Pure.pure, Except.pure]
         at observable ⊢
-      all_goals cases primitive : element.primitive
-      all_goals simp only [primitive, Bool.not_true, Bool.not_false, Bool.true_eq,
+      all_goals cases supported : element.allocationSupported
+      all_goals simp only [supported, Bool.not_true, Bool.not_false, Bool.true_eq,
         Bool.false_eq_true, ite_true, ite_false] at observable ⊢
       all_goals try cases observable
       all_goals rename_i bits
