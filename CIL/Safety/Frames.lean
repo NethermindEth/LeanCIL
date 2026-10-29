@@ -258,7 +258,7 @@ def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m
     | .unmodeled => .ok (.array element none, [], m)
     | _ => .error .invalidState
   | .span width writable =>
-    if width ∉ [1, 2, 4, 8] then .error .invalidState else
+    if ¬(0 < width ∧ width < 2^64) then .error .invalidState else
     match initial with
     | .nullRef => .ok (.span width writable (some ⟨.null, 0, width, writable⟩), [], m)
     | .unmodeled => .ok (.span width writable none, [], m)

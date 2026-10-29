@@ -51,7 +51,7 @@ theorem Memory.Renamed.makeLocalsUnmodeled {mapping : AllocationRenaming}
     {indices : LocalIndexMap} {sourceKinds targetKinds : List CIL.LocalKind}
     (selected : indices.Selects Eq sourceKinds targetKinds)
     (ready : ∀ kind ∈ targetKinds, localWidth kind < nativeLimit ∧
-      ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]) :
+      ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)) :
     ∃ later sourceSlots targetSlots sourceOwned targetOwned sourceAfter targetAfter,
       mapping.Extends later ∧
       makeLocals sourceActivation sourceKinds (sourceKinds.map fun _ => .unmodeled) source =
@@ -126,7 +126,7 @@ theorem Memory.Renamed.makeLocalsInitialized {mapping : AllocationRenaming}
     {sourceValues targetValues : List CIL.Value}
     (selected : LocalDeclarations indices sourceKinds sourceValues targetKinds targetValues)
     (ready : ∀ kind ∈ targetKinds, localWidth kind < nativeLimit ∧
-      ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8])
+      ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64))
     {sourceSlots : List LocalSlot} {sourceOwned : List AllocationId} {sourceAfter : Memory}
     (made : makeLocals sourceActivation sourceKinds sourceValues source =
       .ok (sourceSlots, sourceOwned, sourceAfter)) :

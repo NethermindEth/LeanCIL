@@ -595,7 +595,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   -- Spans
   | .spanReinterpret sourceWidth targetWidth writable, .bufferSpan view :: rest =>
     if view.width == sourceWidth && view.writable == writable &&
-        targetWidth ∈ [1, 2, 4, 8] then pure () else .error .invalidState
+        (0 < targetWidth ∧ targetWidth < 2^64) then pure () else .error .invalidState
     let _ ← checkedAt view.reference 0 (view.validate memory)
     let length := view.length * sourceWidth / targetWidth
     if length < 2^31 then pure () else .error (.thrown "System.OverflowException")

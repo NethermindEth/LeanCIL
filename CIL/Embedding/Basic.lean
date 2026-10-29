@@ -139,7 +139,7 @@ def Method.withLocalsOf (actual expected : Method) : Method :=
     supported span initialized to its empty value or left unmodeled. -/
 def rootLocal : LocalKind → Value → Bool
   | .reference, .nullRef | .reference, .unmodeled => true
-  | .span width _, .nullRef | .span width _, .unmodeled => [1, 2, 4, 8].contains width
+  | .span width _, .nullRef | .span width _, .unmodeled => decide (0 < width ∧ width < 2^64)
   | _, _ => false
 
 /-- True when `kinds` and `initials` describe the same number of locals, each a root local. -/

@@ -21,7 +21,7 @@ theorem Memory.Renamed.makeLocalUnmodeled {mapping : AllocationRenaming}
       binding.2.allocation < mapping.sourceLimit)
     (sourceActivation targetActivation : Nat) (scope : scopes sourceActivation targetActivation)
     (kind : CIL.LocalKind) (bounded : localWidth kind < nativeLimit)
-    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]) :
+    (spanWidth : ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)) :
     ∃ later slot owned sourceAfter targetAfter,
       mapping.Extends later ∧
       makeLocal sourceActivation kind .unmodeled source = .ok (slot, owned, sourceAfter) ∧
@@ -92,7 +92,7 @@ theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
       binding.2.allocation < mapping.sourceLimit)
     (sourceActivation targetActivation : Nat) (scope : scopes sourceActivation targetActivation)
     (kind : CIL.LocalKind) (initial : CIL.Value) (bounded : localWidth kind < nativeLimit)
-    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8])
+    (spanWidth : ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64))
     {slot : LocalSlot} {owned : List AllocationId} {sourceAfter : Memory}
     (made : makeLocal sourceActivation kind initial source = .ok (slot, owned, sourceAfter)) :
     ∃ later targetAfter, mapping.Extends later ∧
@@ -171,7 +171,7 @@ theorem Memory.Renamed.skipLocalUnmodeled {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.Renamed mapping scopes source target) (targetFormed : target.WellFormed)
     (activation : Nat) (kind : CIL.LocalKind) (bounded : localWidth kind < nativeLimit)
-    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]) :
+    (spanWidth : ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)) :
     ∃ later slot owned targetAfter,
       mapping.Extends later ∧ makeLocal activation kind .unmodeled target =
         .ok (slot, owned, targetAfter) ∧
@@ -253,7 +253,7 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
     (related : Memory.Renamed mapping scopes source target) (targetFormed : target.WellFormed)
     (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value)
     (fits : InitializerFits kind initial) (bounded : localWidth kind < nativeLimit)
-    (spanWidth : ∀ width writable, kind = .span width writable → width ∈ [1, 2, 4, 8]) :
+    (spanWidth : ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)) :
     ∃ later slot owned targetAfter,
       mapping.Extends later ∧ makeLocal activation kind initial target =
         .ok (slot, owned, targetAfter) ∧

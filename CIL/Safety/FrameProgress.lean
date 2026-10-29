@@ -18,7 +18,7 @@ namespace CIL.Safety
 def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
   match kind with
   | .array _ | .methodPointer _ | .methodTable _ => initial = .unmodeled ∨ initial = .nullRef
-  | .span width _ => width ∈ [1, 2, 4, 8] ∧ (initial = .unmodeled ∨ initial = .nullRef)
+  | .span width _ => (0 < width ∧ width < 2^64) ∧ (initial = .unmodeled ∨ initial = .nullRef)
   | _ => initial = .unmodeled ∨ match kind, initial with
   | .aggregate size, .aggregate bytes => bytes.length = size.val
   | .reference, .nullRef => True
@@ -138,7 +138,7 @@ def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .reference _ => kind = .reference
   | .span _ _ => False
   | .readOnlyReference _ => kind = .reference
-  | .bufferSpan view => kind = .span view.width view.writable ∧ view.width ∈ [1, 2, 4, 8]
+  | .bufferSpan view => kind = .span view.width view.writable ∧ (0 < view.width ∧ view.width < 2^64)
   | .array view => kind = .array view.elementType
 
 /-- Every parameter home names an existing argument that fits its kind. -/

@@ -3,14 +3,14 @@ import CIL.Safety.Memory
 /-!
 # Contiguous span views
 
-Primitive spans retain allocation identity, element width, length and whether the view may
+Spans of reference-free elements retain allocation identity, element width, length and whether the view may
 be used for writing. Forming or slicing a view does not grant memory authority or assert
 initialization. Reads and writes use the existing checked memory operations.
 -/
 
 namespace CIL.Safety
 
-/-- A primitive span over existing storage. Readonly views can still observe aliased writes. -/
+/-- A reference-free span over existing storage. Readonly views can still observe aliased writes. -/
 structure SpanView where
   reference : ManagedReference
   length : Nat
@@ -21,7 +21,7 @@ structure SpanView where
 /-- Validate the complete extent without requiring it to be initialized or readable.
     An empty view may end exactly at the allocation boundary. -/
 def SpanView.validate (view : SpanView) (memory : Memory) : Checked Unit := do
-  if view.width ∈ [1, 2, 4, 8] then pure () else .error .unsupportedLayout
+  if (0 < view.width ∧ view.width < 2^64) then pure () else .error .unsupportedLayout
   if view.length < 2^31 then pure () else .error .outsideAllocation
   match view.reference with
   | .null => if view.length == 0 then return () else .error .nullDereference
