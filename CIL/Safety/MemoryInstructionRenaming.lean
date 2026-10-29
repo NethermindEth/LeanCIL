@@ -84,6 +84,30 @@ private theorem Memory.Renamed.spanCopyInstructionResult {mapping : AllocationRe
   · repeat first | contradiction | cases observable | split at observable
 #print axioms Memory.Renamed.spanCopyInstructionResult
 
+/-- Repeating snapshot bytes preserves allocation renaming and initialization masks. -/
+theorem Memory.Renamed.spanFillSnapshot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (view : SpanView)
+    (bound : view.reference.Below mapping.sourceLimit) (element : List (BitVec 8 × Bool)) :
+    ResultEquivalent (Memory.Renamed mapping scopes)
+      (view.fillSnapshot source element) ((mapping.spanView view).fillSnapshot target element) := by
+  unfold SpanView.fillSnapshot
+  rw [related.spanValidate view bound]
+  apply ResultEquivalent.bind_same
+  intro checked
+  dsimp only [AllocationRenaming.spanView]
+  repeat' first
+    | exact .error _
+    | exact .ok related
+    | (apply ResultEquivalent.bind_same; intro)
+    | (split <;> simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure,
+        Bool.false_eq_true, ite_true, ite_false])
+    | (cases reference : view.reference <;>
+        simp only [AllocationRenaming.managedReference])
+    | exact related.writeSnapshot _
+        (by simpa only [*, ManagedReference.Below] using bound) _ _
+#print axioms Memory.Renamed.spanFillSnapshot
+
 /-- Fill and clear preserve their exact checked write under allocation renaming. -/
 private theorem Memory.Renamed.spanFillInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -104,6 +128,9 @@ private theorem Memory.Renamed.spanFillInstructionResult {mapping : AllocationRe
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
   all_goals repeat' rcases bounds with ⟨_, bounds⟩
   all_goals repeat first
+    | (apply ((related.spanFillSnapshot _ (by assumption) _).checkedAt _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
     | exact .error _
     | (apply ((related.spanFill _ (by assumption) _).checkedAt _ _).bindWithSuccess
        intro first second sourceStep memoryRelated

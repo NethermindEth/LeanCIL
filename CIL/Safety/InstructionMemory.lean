@@ -336,6 +336,27 @@ def spanCopyInstruction (width : Nat) (tryCopy : Bool) (stack : List Value) (mem
   let result ← checkedAt destination.reference count (writeIndexed memory target bytes 1)
   return (result, values)
 
+/-- Aggregate and vector fill operands retain their exact byte width and initialization mask. -/
+def fillSnapshot (width : Nat) (value : CIL.Value) : Option (List (BitVec 8 × Bool)) := do
+  let shape ← match value with
+    | .aggregate _ => some (.aggregate width)
+    | .snapshot shape _ => some shape
+    | .v128 _ => some .vector128
+    | .v256 _ => some .vector256
+    | .v512 _ => some .vector512
+    | _ => none
+  if shape.width != width then none else valueSnapshot shape value
+
+/-- Fill repeats a captured value without observing or initializing its unknown bytes. -/
+def SpanView.fillSnapshot (view : SpanView) (memory : Memory)
+    (element : List (BitVec 8 × Bool)) : Checked Memory := do
+  view.validate memory
+  if view.writable then pure () else .error .unwritable
+  if element.length == view.width then pure () else .error .unsupportedLayout
+  if view.length == 0 then return memory else
+  let .address reference := view.reference | .error .nullDereference
+  writeSnapshot memory reference (List.replicate view.length element).flatten 1
+
 /-- Whole-span fill and clear retain checked write authority and exact operand shapes. -/
 def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -346,12 +367,17 @@ def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memor
       (view.fill memory (List.replicate width 0)), rest)
   | false, .scalar value :: .bufferSpan view :: rest =>
     if view.width != width then .error .invalidState else
-    let number ← match width, value with
-      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
-      | 8, .i64 bits => .ok bits.toNat
-      | _, _ => .error .invalidState
-    return (← checkedAt view.reference (view.length * width)
-      (view.fill memory (numberBytes number width)), rest)
+    let number := match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => some bits.toNat
+      | 8, .i64 bits => some bits.toNat
+      | _, _ => none
+    if let some number := number then
+      return (← checkedAt view.reference (view.length * width)
+        (view.fill memory (numberBytes number width)), rest)
+    else
+      let some bytes := fillSnapshot width value | .error .invalidState
+      return (← checkedAt view.reference (view.length * width)
+        (view.fillSnapshot memory bytes), rest)
   | _, _ => .error .invalidState
 
 /-- A fixed-width integer in the requested byte order, with the required narrow extension. -/

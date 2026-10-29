@@ -364,6 +364,19 @@ theorem spanFill_effect (view : SpanView) (memory result : Memory) (element : Li
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
 #print axioms spanFill_effect
 
+/-- Snapshot filling is one checked snapshot write, or leaves an empty view unchanged. -/
+theorem spanFillSnapshot_effect (view : SpanView) (memory result : Memory)
+    (element : List (BitVec 8 × Bool))
+    (filled : view.fillSnapshot memory element = .ok result) : InstructionEffect memory result := by
+  unfold SpanView.fillSnapshot at filled
+  repeat' first
+    | exact .snapshot filled
+    | solve | cases filled; exact .unchanged _
+    | cases filled
+    | split at filled
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
+#print axioms spanFillSnapshot_effect
+
 /-- An instruction whose outputs are valid whenever its inputs are valid afterwards meets its
     contract, since its effect keeps the inputs valid. -/
 theorem InstructionContract.of_effect {m result : Memory} {stack values : List Value}
@@ -454,6 +467,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
     | exact .snapshot (checkedAt_ok (by assumption))
     | apply storeValue_effect; assumption
     | exact spanFill_effect _ _ _ _ (checkedAt_ok (by assumption))
+    | exact spanFillSnapshot_effect _ _ _ _ (checkedAt_ok (by assumption))
     | apply storeTransfer_effect; assumption
   · intro retained
     repeat' first

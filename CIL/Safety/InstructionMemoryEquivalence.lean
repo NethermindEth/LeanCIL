@@ -81,6 +81,21 @@ theorem Memory.Equivalent.spanCopyInstruction {m n : Memory} (same : m.Equivalen
     | split
 #print axioms Memory.Equivalent.spanCopyInstruction
 
+/-- Repeated snapshot writes preserve byte values and masks on equivalent memories. -/
+theorem Memory.Equivalent.spanFillSnapshot {m n : Memory} (same : m.Equivalent n)
+    (view : SpanView) (element : List (BitVec 8 × Bool)) :
+    ResultEquivalent Memory.Equivalent (view.fillSnapshot m element)
+      (view.fillSnapshot n element) := by
+  unfold SpanView.fillSnapshot
+  rw [same.spanValidate]
+  repeat first
+    | exact .error _
+    | exact .ok same
+    | exact same.writeSnapshot _ _ _
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.spanFillSnapshot
+
 /-- Fill and clear preserve equivalent backing memories and identical retained values. -/
 theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalent n)
     (width : Nat) (clear : Bool) (stack : List Value) :
@@ -88,6 +103,9 @@ theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalen
       (spanFillInstruction width clear stack n) := by
   unfold CIL.Safety.spanFillInstruction
   repeat first
+    | (apply ResultEquivalent.bind ((same.spanFillSnapshot _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
     | exact .error _
     | (apply ResultEquivalent.bind ((same.spanFill _ _).mapError _)
        intro left right related
