@@ -69,7 +69,7 @@ internal static class NativeOperands
         _ => Kind.Other
     };
 
-    static TypeReference FieldType(FieldReference field) => field.Resolve().IsStatic
+    static TypeReference FieldType(FieldReference field) => field.Resolve() is { IsStatic: true }
         ? field.FieldType : MetadataValidation.InstanceFieldOf(field).Type;
 
     static bool Binary(Code code) => code is Code.Add or Code.Sub or Code.Mul or Code.Div or Code.Div_Un or

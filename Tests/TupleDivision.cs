@@ -145,7 +145,7 @@ foreach (var (mutation, method, marker) in new[]
     ("return", "Quotient", "Rejected external call"),
     ("mixed", "Local", "auto layout reorders fields of different widths"),
     ("tuple-version", "Local", "Unsupported type"),
-    ("field", "Quotient", "Unresolved tuple field")
+    ("field", "Quotient", "Unresolved aggregate field")
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
