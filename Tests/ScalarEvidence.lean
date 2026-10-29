@@ -645,4 +645,18 @@ example (valid : ScalarFlowValid addRaw addFeatures addStates addCode) :
 
 #print axioms external_call_validated
 
+/-- External signatures normalize closed generic storage without accepting a scalar argument. -/
+theorem closed_generic_fill_signature :
+    let element := TypeExpr.aggregate ("Scope::Pair`1<" ++ runtime ++ "::System.UInt64>") 0
+    let site : CallSite := {
+      declaringType := .apply (.constructor runtime "System.Span`1") element,
+      name := "Fill", target := .external (runtime ++
+        "::System.Void System.Span`1<Pair`1<System.UInt64>>::Fill(!0)"),
+      typeArguments := [], parameterCount := 1, hasThis := true,
+      returnsValue := false, returnType := .void, parameterTypes := [element] }
+    scalarTransfer (raw []) (i 40 (.call site)) [.other, .reference] = some [] ∧
+      scalarTransfer (raw []) (i 40 (.call { site with parameterTypes := [word] }))
+        [.word64, .reference] = none := by decide +kernel
+#print axioms closed_generic_fill_signature
+
 end Tests.ScalarEvidence

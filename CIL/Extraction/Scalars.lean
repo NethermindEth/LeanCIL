@@ -426,8 +426,9 @@ private def joinBytes (separator : List UInt8) : List (List UInt8) → List UInt
 private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   | .void => some (signatureBytes "System.Void")
   | .atom _ name | .constructor _ name => some (signatureBytes name)
-  -- The name after `::`.
-  | .aggregate identity _ | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
+  | type@(.aggregate ..) => signatureBytes <$> spanElementName type
+  -- Enum names cannot contain generic owner arguments.
+  | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
   | .parameter index => some (signatureBytes ("!!" ++ toString index))
   | .functionPointer .. | .signatureParameter .. => none
   -- `&` and `*`.
