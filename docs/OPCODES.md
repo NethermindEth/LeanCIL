@@ -309,8 +309,10 @@ initialization, repeated stores and conditional initialization remain rejected.
 
 `public static readonly UInt256 One = 1ul;` compiles to `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable `ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an aggregate and touches no memory. The static constructor must store the field exactly once, unconditionally (no control flow before the store and no branch back to it). A helper-call initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`, `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead copy (`ldsfld G; stsfld F`) such a field stored earlier, as in `MinValue = Zero`. The field's declaring type must be named by `--assume-initialized`. The called method and its callees become part of the extracted program and must not access static fields. The static site records the call, and the extraction certificate reruns it in the checked interpreter: the result must be exactly the emitted bytes, or `translation_valid` fails.
 
-Direct `new T(integer constants)` initialization is also admitted for non-generic same-assembly
-reference-free structs. The certificate executes the ordinary checked aggregate-construction
+Direct `new T(integer constants)` initialization is also admitted for same-assembly
+reference-free structs, including closed generic structs stored on nongeneric declaring types.
+Closed constructors use the ordinary checked generic specialization. The certificate executes
+the existing aggregate-construction
 operation, including zero initialization and constructor readback, to establish the stored bytes.
 
 Rejected: a declaring type without the assumption; values built by other code shapes; a second store, a store outside the static constructor, or `ldsflda` of the field during initialization; `stsfld` in an extracted method; and `ldsflda` of the field in an extracted method, so its address, and any write through it, is never formed.

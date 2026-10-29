@@ -29,7 +29,7 @@ ulong[] Limbs(string field)
 // The theorem names each limb, so a wrong byte order or value cannot satisfy it.
 string Claim(string method, ulong[] limbs) =>
     $"∃ bytes, (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.aggregate bytes)] ∧\n" +
-    $"  (List.range 4).map (fun i => CIL.Safety.byteNumber ((bytes.drop (8 * i)).take 8)) = [{string.Join(", ", limbs)}]";
+    $"  (List.range {limbs.Length}).map (fun i => CIL.Safety.byteNumber ((bytes.drop (8 * i)).take 8)) = [{string.Join(", ", limbs)}]";
 void Prove(string dll, string selector, string folder, string claim, Action<JsonElement> passed)
 {
     var output = Path.Combine(root, folder);
@@ -65,6 +65,10 @@ foreach (var (method, field) in new[] { ("One", "One"), ("Zero", "Zero"), ("Min"
         Console.WriteLine($"PASS {field}: limbs {string.Join(", ", Limbs(field))} from the static constructor");
     });
 }
+
+foreach (var (method, limbs) in new[] { ("Pair32", new ulong[] { 7, 9 }), ("Pair64", new ulong[] { 11, 13 }) })
+    Prove(assembly, $"StaticValues::{method}()", method, Claim(method, limbs), _ =>
+        Console.WriteLine($"PASS closed generic static constructor {method}, including zero-filled padding"));
 
 // ExpMod's shape: a loaded value stored through an out parameter.
 var select = Path.Combine(root, "Select");
