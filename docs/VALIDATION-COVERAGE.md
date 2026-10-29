@@ -35,6 +35,11 @@ computes a fresh result, so no analysis is cached across method mutation or prof
 `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
 profiles, feature queries and a loop backedge, and retains source/assembly tampering checks.
 
+`Tests/FeatureEvidence.lean` checks known int32 comparisons at signed/unsigned boundaries,
+short/long branch encodings, unknown operands and loss of facts after native conversions.
+Independent certificates reject changed comparison signedness, unjustified pruning and constants
+that do not survive a loop backedge. Compiled profile guards exercise the same propagation.
+
 The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
 extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,
 hashes and whole-assembly signature validation are shared within the batch. Long-form argument

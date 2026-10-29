@@ -401,9 +401,11 @@ Reachability is evaluated under the chosen, validated feature profile. Instructi
 
 Exact `IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` getters produce `8`, `8`
 and `true` under every supported 64-bit profile. Their constants feed the existing feature-flow
-analysis; the certificate binds the raw call signature and emitted value. Constant propagation
-supports the existing comparison/Boolean operations and single-condition branches. Direct
-two-operand comparison branches are not pruned from these constants.
+analysis; the certificate binds the raw call signature and emitted value. Known int32 words
+propagate through bitwise operations and `ceq`, `cgt`, `cgt.un`, `clt` and `clt.un`.
+Single-condition branches and all short/long signed or unsigned comparison branches select an
+edge when their operands are known. Unknown operands, including native and int64 values, keep
+both edges; joins and backedges discard conflicting constants. Switches retain every successor.
 
 ## Lean-only operations and source of truth
 
