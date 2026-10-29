@@ -296,7 +296,7 @@ foreach (var mutation in new[] { "bad-target", "unsupported-arm", "scope-load", 
             if (mutation == "unsupported-arm")
             {
                 code.Add(Instruction.Create(OpCodes.Ldc_I4_1));
-                code.Add(Instruction.Create(OpCodes.Newarr, module.TypeSystem.Int32));
+                code.Add(Instruction.Create(OpCodes.Newarr, module.TypeSystem.Single));
             }
         }
         code.Add(Instruction.Create(OpCodes.Ret));

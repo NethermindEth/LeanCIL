@@ -21,7 +21,7 @@ public static class Fixture
     public static ulong Admitted(ulong x, ulong y) => x + y;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    static int Helper(int x) => System.GC.GetGeneration(new int[x]);
+    static int Helper(int x) => System.GC.GetGeneration(new float[x]);
 
     public static int First(int x) => Helper(x);
 
@@ -31,7 +31,7 @@ public static class Fixture
 
     public static ulong Excluded(ulong x, ulong y)
     {
-        if (Avx2.IsSupported) return (ulong)System.GC.GetGeneration(new long[(int)x]);
+        if (Avx2.IsSupported) return (ulong)System.GC.GetGeneration(new double[(int)x]);
         return x + y;
     }
 }
@@ -88,10 +88,10 @@ Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(Strin
     .SequenceEqual([
         "External managed dependency: System.Int32 System.Environment::get_ProcessorCount()",
         "External managed dependency: System.Int32 System.GC::GetGeneration(System.Object)",
-        "Unsupported instruction: newarr System.Int32",
-        "Unsupported instruction: newarr System.Int64"]),
+        "Unsupported instruction: newarr System.Double",
+        "Unsupported instruction: newarr System.Single"]),
     "Expected one blocker per unsupported construct");
-var allocation = Blocker("Unsupported instruction: newarr System.Int32");
+var allocation = Blocker("Unsupported instruction: newarr System.Single");
 var generation = Blocker("External managed dependency: System.Int32 System.GC::GetGeneration(System.Object)");
 Require(Reached(allocation).SequenceEqual([
     $"scalar System.Int32 Fixture::First(System.Int32) -> {helper}",
@@ -112,14 +112,15 @@ Require(Ids(1).Order(StringComparer.Ordinal)
 var site = allocation.GetProperty("sites").EnumerateArray().Single();
 var instruction = site.GetProperty("instruction").GetString()!;
 Require(site.GetProperty("method").GetString() == helper &&
-    instruction == $"IL_{site.GetProperty("ilOffset").GetInt32():x4}: newarr System.Int32" &&
+    instruction == $"IL_{site.GetProperty("ilOffset").GetInt32():x4}: newarr System.Single" &&
     site.GetProperty("message").GetString() == "Unsupported instruction: " + instruction, "Wrong blocking instruction: " + instruction);
-Require(site.GetProperty("source").GetString()!.StartsWith($"Fixture.cs:{LineOf("new int[x]")}:", StringComparison.Ordinal),
+Require(site.GetProperty("source").GetString()!.StartsWith(
+    $"Fixture.cs:{LineOf("new float[x]")}:", StringComparison.Ordinal),
     "Wrong source location: " + site.GetProperty("source"));
 
 // The AVX2 branch is folded away under scalar and reported only where the profile makes it live.
 Require(Ids(3).Length == 0, "Excluded branch reported under the scalar profile");
-var live = Blocker("Unsupported instruction: newarr System.Int64");
+var live = Blocker("Unsupported instruction: newarr System.Double");
 var liveSite = live.GetProperty("sites").EnumerateArray().Single();
 Require(Ids(4).Order(StringComparer.Ordinal)
     .SequenceEqual(new[] { Id(live), Id(generation) }.Order(StringComparer.Ordinal)) &&

@@ -144,11 +144,88 @@ foreach (var (name, _, arguments, expected) in compositions)
         """);
     evidence.Add(proof, "PASS certified array composition: " + name);
 }
+var allocations = new[]
+{
+    (Name: "Allocate", Element: "signed32", Width: 4),
+    (Name: "AllocateBytes", Element: "unsigned8", Width: 1),
+    (Name: "AllocateShorts", Element: "signed16", Width: 2),
+    (Name: "AllocateLongs", Element: "signed64", Width: 8),
+    (Name: "AllocateAndWrite", Element: "signed32", Width: 4)
+};
+ExtractBatch("extract", null, allocations.Select(allocation => new GeneratedExtraction(assembly,
+    $"PrimitiveArrays::{allocation.Name}(System.Int32" +
+        (allocation.Name == "AllocateAndWrite" ? ",System.Int32,System.Int32)" : ")"),
+    Path.Combine(root, allocation.Name))));
+foreach (var (name, element, width) in allocations)
+{
+    var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    var proof = Path.Combine(root, name + ".lean");
+    var composition = name == "AllocateAndWrite";
+    var observation = composition ? "result.2 == [.scalar (.i32 7)]" : $$"""
+        (match result.2 with
+        | [.array view] => view.length == 2 && view.elementType == .{{element}} &&
+            view.reference != .null && (view.validate result.1).toOption == some () &&
+            (view.read result.1 1).toOption == some (List.replicate {{width}} 0)
+        | _ => false)
+        """.Replace("\n", "\n        ", StringComparison.Ordinal);
+    File.WriteAllText(proof, source + $$"""
+
+        private def inputMemory : CIL.Safety.Memory := {
+          allocations := fun _ => none
+          cells := fun _ _ => ⟨0, false⟩
+          views := []
+          nextIdentity := 0 }
+        theorem fresh_array_result :
+            (match CIL.Safety.invoke Extracted.program 128 0
+              [.scalar (.i32 2){{(composition ? ", .scalar (.i32 1), .scalar (.i32 7)" : "")}}]
+              inputMemory with
+             | .ok result => {{observation}}
+             | .error _ => false) = true := by decide +kernel
+        #print axioms fresh_array_result
+        """);
+    if (name == "Allocate")
+    {
+        File.AppendAllText(proof, """
+
+            theorem empty_array_is_live :
+                (match CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 0)] inputMemory with
+                 | .ok (memory, [.array view]) => view.reference != .null &&
+                     view.length == 0 && (view.validate memory).toOption == some ()
+                 | _ => false) = true := by decide +kernel
+            #print axioms empty_array_is_live
+            theorem negative_array_overflows :
+                (match CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 (-1))] inputMemory with
+                 | .error fault => fault.fault == .thrown "System.OverflowException"
+                 | .ok _ => false) = true := by decide +kernel
+            #print axioms negative_array_overflows
+            """);
+        try
+        {
+            runtime.GetMethod(name)!.Invoke(null, [-1]);
+            throw new Exception("Expected negative array length rejection");
+        }
+        catch (TargetInvocationException fault) when (fault.InnerException is OverflowException) { }
+        foreach (var (mutation, replacement) in new[]
+            { ("element", ".newArray .unsigned32"), ("operation", ".nop") })
+        {
+            const string target = ".newArray .signed32";
+            if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing newarr mutation");
+            var forged = Path.Combine(root, "ForgedAllocation-" + mutation + ".lean");
+            File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
+            rejected.Add(forged, "PASS forged array allocation: " + mutation, "ScalarFlowValid");
+        }
+    }
+    var actual = runtime.GetMethod(name)!.Invoke(null, composition ? [2, 1, 7] : [2]);
+    if (composition ? !Equals(actual, 7) : actual is not Array { Length: 2 } values ||
+        Convert.ToInt64(values.GetValue(1)) != 0)
+        throw new Exception("Runtime allocation mismatch: " + name);
+    evidence.Add(proof, "PASS runtime, certificate and heap array return: " + name);
+}
 evidence.Check();
 rejected.Check();
 foreach (var signature in new[]
 {
-    "Allocate(System.Int32)", "ReadObject(System.Object[],System.Int32)",
+    "AllocateSingles(System.Int32)", "ReadObject(System.Object[],System.Int32)",
     "ReadSingle(System.Single[],System.Int32)", "ReadJagged(System.Int32[][],System.Int32)",
     "ReadRectangular(System.Int32[0...,0...],System.Int32,System.Int32)"
 })

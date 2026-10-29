@@ -441,7 +441,7 @@ The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integ
 | Method discovery includes canonical selectors and unsupported candidates without claiming support | Passed |
 | Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Passed |
 | Subtraction rejected by the unchanged universal addition contract | Passed; no successful report retained |
-| Unsupported array allocation | Explicit extraction rejection |
+| Primitive integer array allocation | Checked zero initialization, empty/non-null identity, negative/native lengths, helper returns and stores; forged element/operation certificates and unsupported element types rejected |
 | Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against actual .NET execution and corresponding Lean proofs passed, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs passed for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
 | Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests passed |

@@ -575,7 +575,7 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
             if (local) code.Add(Instruction.Create(OpCodes.Stloc_0));
             code.Add(Instruction.Create(OpCodes.Br, header));
             code.Add(unsupported);
-            code.Add(Instruction.Create(OpCodes.Newarr, module.TypeSystem.Int32));
+            code.Add(Instruction.Create(OpCodes.Newarr, module.TypeSystem.Single));
             code.Add(Instruction.Create(OpCodes.Pop));
             if (!local) code.Add(Instruction.Create(OpCodes.Pop));
             code.Add(Instruction.Create(OpCodes.Ldc_I4_0));

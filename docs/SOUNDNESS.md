@@ -275,8 +275,23 @@ initialization and authority checks. A readonly permission set grants no write a
 aliases over the same allocation observe the same bytes. A valid null array raises the named
 `System.NullReferenceException`; an out-of-range index on a valid non-null array raises
 `System.IndexOutOfRangeException`. Invalid extents, expired storage and missing authority remain
-model faults and cannot prove either expected exception. Array allocation, reference elements,
+model faults and cannot prove either expected exception. Reference elements,
 multidimensional arrays and taking the address of an array root are outside this subset.
+
+`newarr` allocates primitive integer arrays, including native integers, `bool` and `char`,
+using the existing fresh-allocation primitive. The payload is zero-initialized and has read/write
+authority; its heap identity survives the allocating frame's return. Empty arrays are non-null
+and have distinct fresh identities. Negative int32/native lengths raise `System.OverflowException`.
+The model admits nonnegative lengths up to `0x7fffffc7`, the .NET 10 CoreCLR element-count
+ceiling, with checked native byte extents; larger lengths
+and allocator consistency failures remain model faults, not named CLR exceptions. A successful
+model execution assumes that the runtime supports and can allocate each requested array.
+The ceiling follows [the .NET 10 allocator](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/gchelpers.cpp);
+it does not establish available heap capacity.
+Object headers, GC behavior, out-of-memory outcomes and allocation of enum, struct, vector or
+reference elements are not modeled. Zero initialization uses a constant cell function rather
+than constructing a byte list proportional to the array length.
+
 The scalar certificate checks array opcode families, integer widths, load signedness, native
 integer distinctions and typed element tokens against the emitted operations. Aggregate arrays
 bind the exact element identity and computed layout width, and integer-vector arrays bind their

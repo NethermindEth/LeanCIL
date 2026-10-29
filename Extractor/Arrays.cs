@@ -65,6 +65,8 @@ internal static class Arrays
 
     internal static string? Translate(Instruction instruction, string architecture) => instruction.OpCode.Code switch
     {
+        Code.Newarr when Primitive((TypeReference)instruction.Operand) is { } element =>
+            $".newArray {element.Expression}",
         Code.Ldlen => ".memory .arrayLength",
         Code.Ldelema => $".memory (.arrayAddress {(Storage((TypeReference)instruction.Operand, architecture) ??
             throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Expression}" +
