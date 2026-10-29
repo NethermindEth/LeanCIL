@@ -152,11 +152,14 @@ internal static class LeanEmitter
             var scalarCertificate = NativeOperands.Certify(m, reachable);
             var parameterIndices = ParameterStorage.Analyze(m, reachable);
             var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
-            string LocalKind(TypeReference type) => Kind(type, m.Module, profile.Architecture, layoutContext);
+            var dispatch = NativeDispatch.For(m);
+            string LocalKind(TypeReference type, int? local = null) => dispatch.Kind(type, local) ??
+                Kind(type, m.Module, profile.Architecture, layoutContext);
             string parameters = string.Join(", ", parameterIndices.Select(index =>
                 $"({index}, {LocalKind(MethodArguments.Type(m, index))})"));
             string locals = string.Join(", ", m.Body.Variables.Select(variable => m.Body.InitLocals
-                ? Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext) : ".unmodeled"));
+                ? dispatch.Kind(variable.VariableType, variable.Index) is not null ? ".nullRef" :
+                    Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext) : ".unmodeled"));
             HashSet<int> addressedLocals = m.Body.Instructions
                 .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
@@ -170,7 +173,7 @@ internal static class LeanEmitter
             string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
                     !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index)) : "";
-            string kinds = string.Join(", ", m.Body.Variables.Select(variable => LocalKind(variable.VariableType)));
+            string kinds = string.Join(", ", m.Body.Variables.Select(variable => LocalKind(variable.VariableType, variable.Index)));
             string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
                 {

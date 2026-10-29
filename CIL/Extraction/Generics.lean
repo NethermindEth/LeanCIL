@@ -348,10 +348,54 @@ def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   | opcode, _ =>
     if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
 
+/-- The unique raw managed indirect signature and native locals directly consumed as targets. -/
+structure NativeDispatchContext where
+  signature : Option ManagedSignature := none
+  pointerLocals : List Nat := []
+  deriving DecidableEq, Repr
+
+/-- Native integer metadata eligible for an authenticated table element. -/
+def nativeDispatchInteger : TypeExpr → Bool
+  | .atom scope name => scope == runtimeScope && name ∈ ["System.IntPtr", "System.UIntPtr"]
+  | _ => false
+
+/-- Derive callable homes from raw call sites, never from emitted kinds or numerical values. -/
+def nativeDispatchContext (raw : RawMethod) : NativeDispatchContext := Id.run do
+  let mut signature : Option ManagedSignature := none
+  let mut locals := []
+  let mut previous : Option RawInstruction := none
+  for instruction in raw.code do
+    if instruction.opcode == 41 then
+      let .indirectCall result parameters false false 0 := instruction.operand | return {}
+      let current : ManagedSignature := ⟨result, parameters⟩
+      if managedSignature current.typeExpr != some current then return {}
+      if let some expected := signature then
+        if expected != current then return {}
+      signature := some current
+      if let some before := previous then
+        if before.opcode ∈ [6, 7, 8, 9] then locals := (before.opcode - 6) :: locals
+        else if before.opcode ∈ [17, 65036] then
+          if let .local index := before.operand then locals := index :: locals
+    if instruction.opcode != 65044 then previous := some instruction
+  return ⟨signature, locals⟩
+
+/-- A native pointer is an input table view; only raw target-feeding integer locals are callable. -/
+def nativeDispatchStorage (context : NativeDispatchContext) (type : TypeExpr)
+    (localIndex : Option Nat := none) : Option StorageType := do
+  let signature ← context.signature
+  if let .pointer element := type then
+    if nativeDispatchInteger element then return .methodTable signature
+  if nativeDispatchInteger type && localIndex.any context.pointerLocals.contains then
+    return .methodPointer signature
+  none
+
 /-- Closed argument and local storage, including typed span views, and argument accesses. -/
 def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments := do
-  let parameters ← closed.parameters.mapM (typeStorage layouts)
-  let locals ← closed.locals.mapM (typeStorage layouts)
+  let context := nativeDispatchContext closed
+  let parameters ← closed.parameters.mapM fun type =>
+    nativeDispatchStorage context type <|> typeStorage layouts type
+  let locals ← closed.locals.zipIdx.mapM fun (type, index) =>
+    nativeDispatchStorage context type (some index) <|> typeStorage layouts type
   let code ← closed.code.mapM argumentOperation
   return ⟨(if closed.hasThis then [.reference] else []) ++ parameters, locals, code⟩
 

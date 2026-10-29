@@ -23,6 +23,15 @@ internal static class InstructionTranslation
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!);
+        if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
+        {
+            if (i.OpCode.Code == Code.Add && dispatchStack.Length >= 2 &&
+                dispatchStack[^2].Kind == NativeOperands.Kind.MethodTable)
+                return ".managed .tableOffset";
+            if (i.OpCode.Code == Code.Ldind_I && dispatchStack.LastOrDefault() is
+                { Kind: NativeOperands.Kind.MethodTable, Metadata: { } signature })
+                return ".managed (.tableLoad " + signature[".methodTable ".Length..] + ")";
+        }
         if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
             return $".managed (.call {ManagedPointers.SignatureEvidence(indirect)} " +
                 $"{ManagedPointers.Catalog(indirect, methods, methodIndex, i.Previous?.OpCode.Code == Code.Tail)} " +

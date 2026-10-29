@@ -41,10 +41,13 @@ internal static class ParameterEvidence
     internal static void Emit(StringBuilder lean, MethodDefinition method, int number,
         HashSet<Instruction> reachable, LayoutEvidence layouts)
     {
+        var dispatch = NativeDispatch.For(method);
         var arguments = new List<string>();
         if (method.HasThis) arguments.Add(".reference");
-        arguments.AddRange(method.Parameters.Select(parameter => Type(parameter.ParameterType, method.Module, layouts)));
-        var locals = method.Body.Variables.Select(local => Type(local.VariableType, method.Module, layouts));
+        arguments.AddRange(method.Parameters.Select(parameter => dispatch.Kind(parameter.ParameterType) ??
+            Type(parameter.ParameterType, method.Module, layouts)));
+        var locals = method.Body.Variables.Select(local => dispatch.Kind(local.VariableType, local.Index) ??
+            Type(local.VariableType, method.Module, layouts));
         var code = method.Body.Instructions.Select(instruction => instruction.OpCode.Code switch
         {
             Code.Ldarg_0 => ".load 0", Code.Ldarg_1 => ".load 1", Code.Ldarg_2 => ".load 2", Code.Ldarg_3 => ".load 3",

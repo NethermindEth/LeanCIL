@@ -73,6 +73,10 @@ internal static class NativeOperands
 
     internal static Certificate Certify(MethodDefinition method, IReadOnlySet<Instruction> reachable)
     {
+        var dispatch = NativeDispatch.For(method);
+        StackType Slot(TypeReference type, int? local = null) => dispatch.Kind(type, local) is { } kind
+            ? new(kind.StartsWith(".methodTable ", StringComparison.Ordinal) ? Kind.MethodTable : Kind.MethodPointer, kind)
+            : Type(type);
         var incoming = new Dictionary<Instruction, StackType[]> { [method.Body.Instructions[0]] = [] };
         var mixed = new HashSet<Instruction>();
         var pending = new Queue<Instruction>();
@@ -90,7 +94,24 @@ internal static class NativeOperands
             }
 
             var code = instruction.OpCode.Code;
-            if (code == Code.Localloc)
+            if (code is Code.Stloc or Code.Stloc_S or Code.Stloc_0 or Code.Stloc_1 or Code.Stloc_2 or
+                Code.Stloc_3 && dispatch.Kind(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType,
+                    FeatureConstants.Local(instruction)) is not null)
+            {
+                var local = method.Body.Variables[FeatureConstants.Local(instruction)];
+                if (Pop() != Slot(local.VariableType, local.Index))
+                    throw new InvalidDataException("Native callable local requires authenticated pointer provenance");
+            }
+            else if (code == Code.Add && stack.Count >= 2 && stack[^2].Kind == Kind.MethodTable &&
+                stack[^1].Kind is Kind.Word32 or Kind.Native)
+                Pop();
+            else if (code == Code.Ldind_I && stack.Count > 0 && stack[^1].Kind == Kind.MethodTable)
+            {
+                var table = Pop();
+                stack.Add(new(Kind.MethodPointer, table.Metadata!.Replace(".methodTable ", ".methodPointer ",
+                    StringComparison.Ordinal)));
+            }
+            else if (code == Code.Localloc)
             {
                 if (stack.Count != 1 || Pop().Kind is not (Kind.Word32 or Kind.Native))
                     throw new InvalidDataException("localloc requires only an int32 or native byte count");
@@ -208,14 +229,15 @@ internal static class NativeOperands
                         throw new InvalidDataException($"Unsupported native stack effect: {instruction}");
                     StackType result = code switch
                     {
-                        Code.Ldarg_0 => Type(MethodArguments.Type(method, 0)),
-                        Code.Ldarg_1 => Type(MethodArguments.Type(method, 1)),
-                        Code.Ldarg_2 => Type(MethodArguments.Type(method, 2)),
-                        Code.Ldarg_3 => Type(MethodArguments.Type(method, 3)),
-                        Code.Ldarg or Code.Ldarg_S => Type(MethodArguments.Type(method,
+                        Code.Ldarg_0 => Slot(MethodArguments.Type(method, 0)),
+                        Code.Ldarg_1 => Slot(MethodArguments.Type(method, 1)),
+                        Code.Ldarg_2 => Slot(MethodArguments.Type(method, 2)),
+                        Code.Ldarg_3 => Slot(MethodArguments.Type(method, 3)),
+                        Code.Ldarg or Code.Ldarg_S => Slot(MethodArguments.Type(method,
                             MethodArguments.Index(method, (ParameterDefinition)instruction.Operand))),
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
-                            Type(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType),
+                            Slot(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType,
+                                FeatureConstants.Local(instruction)),
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj or Code.Ldelem_Any => Type((TypeReference)instruction.Operand),
                         Code.Ldloca or Code.Ldloca_S =>
