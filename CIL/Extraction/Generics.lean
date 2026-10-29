@@ -129,6 +129,16 @@ def managedSignature : TypeExpr → Option ManagedSignature
     return ⟨callableType result, ← managedParameters parameters⟩
   | _ => none
 
+/-- Raw callable types must bind every aggregate index before their identity is canonicalized. -/
+def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool
+  | .aggregate identity index => (layouts[index]?).any (·.identity == identity)
+  | .byref element => callableLayoutsValid layouts element
+  | .functionPointer result parameters _ _ _ =>
+    callableLayoutsValid layouts result && callableLayoutsValid layouts parameters
+  | .signatureParameter head tail =>
+    callableLayoutsValid layouts head && callableLayoutsValid layouts tail
+  | _ => true
+
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
@@ -143,9 +153,11 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let metadata ← layouts[index]?
     if metadata.identity == identity then some (.aggregateArray identity index) else none
   | .array element => match managedSignature element with
-    | some signature => some (.methodTable signature)
+    | some signature => if callableLayoutsValid layouts element then some (.methodTable signature)
+      else none
     | none => StorageType.array <$> arrayElementType element
-  | type@(.functionPointer ..) => StorageType.methodPointer <$> managedSignature type
+  | type@(.functionPointer ..) => if callableLayoutsValid layouts type then
+      StorageType.methodPointer <$> managedSignature type else none
   | .pointer (.atom scope name) =>
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
@@ -514,7 +526,9 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
   match raw.operand with
   | .call site => site.target == .managed target.identity.token &&
     (match methods target.method with
-      | some callee => managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount
+      | some callee => managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount &&
+        site.typeArguments == callee.arguments &&
+        site.returnType == callee.closed.returnType && site.parameterTypes == callee.closed.parameters
       | none => false) &&
     site.typeArguments.map callableType == target.identity.arguments && !site.hasThis &&
     callableType site.returnType == signature.result &&
@@ -527,11 +541,14 @@ def managedAddressMatches (methods : Nat → Option SpecializedMethod)
 def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
     (raw : RawInstruction) (signature : ManagedSignature) (catalog : List ManagedTarget) : Bool :=
   raw.opcode == 41 && !catalog.isEmpty &&
-    catalog.all (managedTargetMatches methods signature) &&
     (catalog.map (·.identity)).Nodup &&
   match raw.operand with
   | .indirectCall result parameters false false 0 =>
-    callableType result == signature.result && parameters.map callableType == signature.parameters
+    callableType result == signature.result && parameters.map callableType == signature.parameters &&
+    catalog.all fun target => managedTargetMatches methods signature target &&
+      match methods target.method with
+      | some callee => result == callee.closed.returnType && parameters == callee.closed.parameters
+      | none => false
   | _ => false
 
 /-- Every live managed call must select the independently instantiated definition

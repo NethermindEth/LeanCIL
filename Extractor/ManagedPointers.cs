@@ -65,7 +65,8 @@ internal static class ManagedPointers
             return $".aggregate {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} 0";
         if (type is GenericInstanceType generic && MetadataValidation.IntegerVectorWidth(type) is not null)
             return $".apply (.constructor {JsonSerializer.Serialize(LayoutEvidence.Scope(generic.ElementType))} " +
-                $"{JsonSerializer.Serialize(generic.ElementType.FullName)}) ({TypeEvidence(generic.GenericArguments[0])})";
+                $"{JsonSerializer.Serialize(generic.ElementType.FullName)}) " +
+                $"({TypeEvidence(generic.GenericArguments[0])})";
         if (EnumTypes.IsEnum(type))
             return $".enum {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} " +
                 $"({TypeEvidence(EnumTypes.Storage(type))})";
