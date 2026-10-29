@@ -61,14 +61,12 @@ private def unscopedArguments : Nat → List Char → List Char
 
 /-- Closed span element names retain nested type arguments in runtime signatures. -/
 def spanElementName (type : TypeExpr) : Option String := do
-  if let some (_, name) := namedType type then
-    return String.ofList name
   if let .aggregate identity _ := type then
     let name ← afterArgumentScope identity.toList
     let name := unscopedArguments name.length name
-    if name.isEmpty || !name.all (fun char => char.isAlphanum ||
-        char ∈ ['_', '.', '/', '`', '<', '>', ',']) then none
-    else return String.ofList name
+    if name.isEmpty then none else return String.ofList name
+  if let some (_, name) := namedType type then
+    return String.ofList name
   let .apply (.constructor _ name) (.atom _ element) := type | none
   if (integerVectorWidth type).isSome then some (name ++ "<" ++ element ++ ">") else none
 
