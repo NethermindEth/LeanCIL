@@ -45,6 +45,7 @@ Examples:Examples.Packet& Examples.UnsafeLayouts::Add16nint(Examples.Packet&,Sys
 Examples:Examples.Packet& Examples.UnsafeLayouts::Add16nuint(Examples.Packet&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:Examples.Signed16 Examples.Enums::IdentityS16(Examples.Signed16)	A	A	A	A	A	A	A	A
 Examples:Examples.Signed16 Examples.Enums::ThroughCall(Examples.Signed16)	A	A	A	A	A	A	A	A
+Examples:Examples.Signed16 Examples.PointerOperations::ReadEnum(Examples.Signed16*,System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.Signed16[] Examples.PrimitiveArrays::AllocateSigned16(System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.Signed32 Examples.Enums::IdentityS32(Examples.Signed32)	A	A	A	A	A	A	A	A
 Examples:Examples.Signed32[] Examples.PrimitiveArrays::AllocateSigned32(System.Int32)	A	A	A	A	A	A	A	A
@@ -150,9 +151,12 @@ Examples:System.Byte* Examples.PointerOperations::Subtract(System.Byte*,System.I
 Examples:System.Byte* Examples.PointerOperations::SubtractNative(System.Byte*,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Byte* Examples.UnsafeReferences::AddPointer(System.Byte*,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Byte* Examples.UnsafeReferences::AddPointerAggregate(System.Byte*,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Byte* Examples.UnsafeReferences::SubtractPointer(System.Byte*,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Byte* Examples.UnsafeReferences::SubtractPointerAggregate(System.Byte*,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Byte[] Examples.PrimitiveArrays::AllocateBytes(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Char Examples.MemorySpans::CharacterWrite(System.Span`1<System.Char>,System.Int32,System.Char)	A	A	A	A	A	A	A	A
 Examples:System.Char Examples.NarrowIntegers::Character(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Char Examples.PointerOperations::ReadCharacter(System.Char*,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Char Examples.PrimitiveArrays::ReadChar(System.Char[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Char Examples.StaticScalars::ReadCharacter()	B	B	B	B	B	B	B	B
 Examples:System.Char& Examples.UnsafeLayouts::Add1int(System.Char&,System.Int32)	A	A	A	A	A	A	A	A
@@ -675,6 +679,7 @@ Examples:System.UInt64 Examples.NullReferences::Read()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.NullReferences::ReadField()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.NullReferences::Unchecked(Examples.FourLimbs&,System.Boolean)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PackedConstructor::Sum()	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64*,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Sequential::Packed(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SkipInitialization::Read(System.UInt64&)	A	A	A	A	A	A	A	A
