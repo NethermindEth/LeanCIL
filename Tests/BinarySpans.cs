@@ -16,7 +16,25 @@ Directory.CreateDirectory(root);
 using var metadata = ModuleDefinition.ReadModule(assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.BinarySpans")!;
 var queue = new GeneratedQueue(verification, assembly);
-foreach (var method in metadata.GetType("Examples.BinarySpans").Methods.Where(method => method.IsPublic))
+var mutations = new (string Name, string Before, string After)[]
+{
+    ("ReadBig", ".binaryRead 2 true true false", ".binaryRead 2 false true false"),
+    ("ReadBig", "returnType := .atom Extraction.runtimeScope \"System.IntPtr\", parameterTypes :=",
+        "returnType := .atom Extraction.runtimeScope \"System.UIntPtr\", parameterTypes :="),
+    ("ReadLittle", "ReadIntPtrLittleEndian", "ReadInt32LittleEndian"),
+    ("TryReadBig", "TryReadUIntPtrBigEndian", "TryReadIntPtrBigEndian"),
+    ("ReadBig", ".binaryRead 2 true true false", ".binaryRead 2 true false false"),
+    ("ReadLittle", ".binaryRead 8 false false false", ".binaryRead 4 false false false"),
+    ("TryReadBig", ".binaryRead 2 true true true", ".binaryRead 2 true true false"),
+    ("WriteBig", ".binaryWrite 2 true false", ".binaryWrite 2 false false"),
+    ("TryWriteLittle", ".binaryWrite 2 false true", ".binaryWrite 2 false false")
+};
+var controlled = mutations.Select(mutation => mutation.Name).ToHashSet(StringComparer.Ordinal);
+var methods = metadata.GetType("Examples.BinarySpans").Methods.Where(method => method.IsPublic).ToArray();
+// Controls reuse the full certificate in each positive proof; mutations keep independent reductions.
+ExtractBatch("extract", "Examples", methods.Select(method =>
+    new GeneratedExtraction(assembly, method.FullName, Path.Combine(root, method.Name))));
+foreach (var method in methods)
 {
     var name = method.Name;
     var read = name.Contains("Read", StringComparison.Ordinal);
@@ -80,41 +98,27 @@ foreach (var method in metadata.GetType("Examples.BinarySpans").Methods.Where(me
         /-- All admitted integer overloads agree with runtime results, including short try operations. -/
         """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
         " := by\n  repeat constructor\n  all_goals first | (apply result_of_toOption; decide +kernel) | decide +kernel\n#print axioms correctness\nend ExampleProof\n");
+    if (controlled.Contains(name))
+    {
+        var original = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+        const string obligation = "method0_unsafe_validated";
+        File.AppendAllText(proof, CheckedEvidenceControl(original, NarrowEvidence(original, obligation),
+            [obligation], 0));
+    }
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS endian transfers: " + name));
 }
 queue.Flush();
 var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-var controls = new GeneratedEvidence(Path.Combine(root, "EvidenceControls"));
-var controlled = new HashSet<string>(StringComparer.Ordinal);
 var index = 0;
-foreach (var (name, before, after) in new[]
-{
-    ("ReadBig", ".binaryRead 2 true true false", ".binaryRead 2 false true false"),
-    ("ReadBig", "returnType := .atom Extraction.runtimeScope \"System.IntPtr\", parameterTypes :=",
-        "returnType := .atom Extraction.runtimeScope \"System.UIntPtr\", parameterTypes :="),
-    ("ReadLittle", "ReadIntPtrLittleEndian", "ReadInt32LittleEndian"),
-    ("TryReadBig", "TryReadUIntPtrBigEndian", "TryReadIntPtrBigEndian"),
-    ("ReadBig", ".binaryRead 2 true true false", ".binaryRead 2 true false false"),
-    ("ReadLittle", ".binaryRead 8 false false false", ".binaryRead 4 false false false"),
-    ("TryReadBig", ".binaryRead 2 true true true", ".binaryRead 2 true true false"),
-    ("WriteBig", ".binaryWrite 2 true false", ".binaryWrite 2 false false"),
-    ("TryWriteLittle", ".binaryWrite 2 false true", ".binaryWrite 2 false false")
-})
+foreach (var (name, before, after) in mutations)
 {
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
         "method0_unsafe_validated");
-    if (controlled.Add(source))
-    {
-        var controlPath = Path.Combine(root, name, "EvidenceControl.lean");
-        File.WriteAllText(controlPath, source);
-        controls.Add(controlPath, "PASS exact endian evidence control: " + name, "method0_unsafe_validated");
-    }
     if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing endian mutation: " + before);
     var path = Path.Combine(root, $"Rejected{index++}.lean");
     File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
     rejected.Add(path, "PASS exact endian evidence rejection: " + name, "UnsafeCallsValid");
 }
-controls.Check(replay: false);
 rejected.Check();
 
 partial class Program
