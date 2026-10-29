@@ -204,10 +204,22 @@ spans only for a zero range; invalid ranges raise `ArgumentOutOfRangeException`.
 These operations allocate no backing storage, preserve aliases and grant no byte-access
 authority. Array allocation and non-array `AsSpan` overloads remain unsupported.
 
+In-place construction of a span local accepts `ldloca`, up to three simple argument loads or
+integer constants, and its exact constructor call. The address cannot escape or be duplicated,
+and control flow cannot enter the sequence after its first instruction. The local may be
+reused or reinitialized; construction faults remain at the call instruction.
+
 `Span<T>.Clear` and `Fill` initialize the complete view using one checked range write. They
 require write authority, but not initialized or readable destination bytes. Empty spans require
 no byte access; nonempty fills establish repeated sequence contents and preserve neighbouring
 bytes, including other slices in the same allocation. Readonly views do not admit these members.
+
+`MemoryMarshal.Read<T>`, `Write<T>`, `TryRead<T>` and `TryWrite<T>` transfer admitted integer,
+aggregate or integer-vector values through byte spans. Short `Read`/`Write` calls raise
+`ArgumentOutOfRangeException`. A short `TryRead` writes initialized `default(T)` to its out
+reference and returns false; a short `TryWrite` returns false without reading the input value
+or modifying memory. Successful transfers preserve snapshot initialization masks and retain
+the checked model's bounds, lifetime and authority requirements.
 
 A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda` rules, packing 1, 2, 4 or 8). The span covers the whole field and has `size / sizeof(T)` elements, for any primitive integer `T`. A caller reads it as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with `System.IndexOutOfRangeException` at the call when the index is out of range, compared unsigned as in .NET. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a single-use receiver with a single-load or constant index; other supported uses retain typed span storage. Branches into a folded receiver and byref spans remain rejected.
 
