@@ -232,7 +232,7 @@ inductive FoldRole where
   | interior
   /-- A type comparison: pushes the decided Boolean. -/
   | result (value : Bool)
-  /-- The raw `throw`: raises the constructed type. -/
+  /-- The raw `throw`: raises the type bound by the exact folded operands. -/
   | raise (exception : String)
   /-- An unchanged argument push protected from non-fallthrough entry. -/
   | argument
@@ -266,6 +266,8 @@ private def foldAt (locals receiverLocals : List TypeExpr)
     Option (List (Option FoldRole)) :=
   spanConstructorFold locals a tail <|>
   (match a, tail with
+    | ⟨_, 20, .none⟩, ⟨_, 122, .none⟩ :: _ =>
+      some [some .head, some (.raise "System.NullReferenceException")]
     | ⟨_, 65044, .none⟩, ⟨_, 41, .indirectCall _ _ false false 0⟩ ::
         ⟨_, 42, .none⟩ :: _ => some [some .head, some .tailCall, some .argument]
     | ⟨_, 65044, .none⟩, ⟨_, 40, .call site⟩ :: ⟨_, 42, .none⟩ :: _ =>

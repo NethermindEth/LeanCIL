@@ -5,6 +5,15 @@ namespace Examples;
 
 public static class Throws
 {
+    public static uint Null(uint value)
+    {
+        if (value == 0) ThrowNull();
+        return value;
+    }
+
+    [DoesNotReturn]
+    static void ThrowNull() => throw null!;
+
     // A zero divisor raises from the helper, before `div` could fault.
     public static uint Quotient(uint value, uint divisor)
     {

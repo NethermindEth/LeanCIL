@@ -75,7 +75,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners; validated closed sequential structs also admit direct instance methods and constructors. No arbitrary external calls, class instance methods or general virtual dispatch. |
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Class construction and unsupported generic constructors or cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
-| `throw` | Partial | Only `throw new E(...)` with `ldstr`/`ldnull` arguments (see below): it raises a located `thrown "E"` fault. Other throws are rejected. |
+| `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `thrown "E"` fault. Adjacent `ldnull; throw` raises `System.NullReferenceException`. Other throws are rejected. |
 | `constrained.`, `callvirt` | Partial | Adjacent prefix and call resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
 | `calli` | Partial | Static default-managed signatures over admitted integer/enum, reference-free aggregate and integer-vector values, and managed references to these types. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
@@ -211,6 +211,11 @@ In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof
 ### Throws
 
 `throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of `E`'s constructor and `throw`. For an exact allowlisted `System.Runtime` constructor, the loads and `newobj` emit `nop` and `throw` emits `.throw "E"`, which ends execution with a fault located at the `throw`. A `[DoesNotReturn]` helper containing only this pattern is an ordinary call. Other arguments, any instruction between the parts, a branch past the first part, rethrowing a stored exception and exception handlers remain rejected.
+
+The adjacent `ldnull; throw` form emits `nop` followed by the same named-fault operation for
+`System.NullReferenceException`, located at the raw `throw`. A branch may target the null load,
+but cannot enter at the throw. Nulls passed through locals, arguments or intervening instructions
+do not satisfy this exact fold.
 
 In addition to the admitted string constructors, `Exception`, `InvalidOperationException`,
 `ArgumentException` and `ArgumentOutOfRangeException` admit a message with a null inner exception.
