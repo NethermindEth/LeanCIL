@@ -39,10 +39,7 @@ foreach (var method in metadata.GetType("Examples.AggregateSpanFill").Methods.Wh
         $"({Run(arguments)}).map Prod.snd = .ok []",
         $"({Run(arguments)}).map (fun result => [(result.1.cells 0 15).bits, " +
         $"(result.1.cells 0 16).bits, (result.1.cells 0 {16 + width}).bits, " +
-        $"(result.1.cells 0 {16 + 2 * width}).bits]) = .ok [11, 7, 7, 11]",
-        $"(match {Run(Args(value, writable: false))} with | .error _ => true | .ok _ => false) = true",
-        $"(match {Run(arguments, "{ memory with views := [⟨0, 0, 256, true, false⟩] }")} " +
-        "with | .error _ => true | .ok _ => false) = true"
+        $"(result.1.cells 0 {16 + 2 * width}).bits]) = .ok [11, 7, 7, 11]"
     };
     if (name != "Aliased")
     {
@@ -51,6 +48,14 @@ foreach (var method in metadata.GetType("Examples.AggregateSpanFill").Methods.Wh
             $"[(result.1.cells 0 16).initialized, (result.1.cells 0 17).initialized, " +
             $"(result.1.cells 0 {16 + width}).initialized, (result.1.cells 0 {17 + width}).initialized, " +
             $"(result.1.cells 0 {16 + 2 * width}).initialized]) = .ok [true, false, true, false, true]");
+    }
+    // All element shapes use the same fill validation and checked snapshot writer.
+    if (name == "Words")
+    {
+        claims.Add($"(match {Run(Args(value, writable: false))} " +
+            "with | .error _ => true | .ok _ => false) = true");
+        claims.Add($"(match {Run(arguments, "{ memory with views := [⟨0, 0, 256, true, false⟩] }")} " +
+            "with | .error _ => true | .ok _ => false) = true");
         claims.Add($"({Run(Args(value, length: 0), "{ memory with views := [] }")}).map Prod.snd = .ok []");
         claims.Add($"({Run(arguments, "{ memory with cells := fun _ _ => ⟨0, false⟩ }")}).map " +
             $"(fun result => [(result.1.cells 0 16).initialized, (result.1.cells 0 {15 + 2 * width}).initialized, " +
