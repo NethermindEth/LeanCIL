@@ -185,4 +185,31 @@ theorem constructor_forgery_rejected :
       (i 40 (.call localConstructor))
       (.initializeSpanLocal 0 (.array .unsigned32 true .whole)) = false := by decide +kernel
 #print axioms constructor_forgery_rejected
+/-- A readonly cast binds both element types and the exact runtime overload. -/
+private def reinterpretCall : CallSite := {
+  declaringType := .atom runtime "System.Runtime.InteropServices.MemoryMarshal"
+  name := "Cast"
+  target := .external (runtime ++ "::System.ReadOnlySpan`1<!!1> " ++
+    "System.Runtime.InteropServices.MemoryMarshal::Cast(System.ReadOnlySpan`1<!!0>)")
+  typeArguments := [.atom runtime "System.Byte", intType]
+  parameterCount := 1, hasThis := false, returnsValue := true
+  returnType := span runtime "System.Int32"
+  parameterTypes := [span runtime "System.Byte"] }
+
+/-- Width, readonly status, result identity and the declaring assembly cannot be forged. -/
+theorem exact_reinterpret_call :
+    spanCallMatches (i 40 (.call reinterpretCall))
+      (.memory (.spanReinterpret 1 4 false)) = true ∧
+    spanCallMatches (i 40 (.call reinterpretCall))
+      (.memory (.spanReinterpret 1 8 false)) = false ∧
+    spanCallMatches (i 40 (.call reinterpretCall))
+      (.memory (.spanReinterpret 1 4 true)) = false ∧
+    spanCallMatches (i 40 (.call reinterpretCall)) (.memory .spanReadOnly) = false ∧
+    spanCallMatches (i 40 (.call { reinterpretCall with
+      returnType := span runtime "System.UInt32" }))
+      (.memory (.spanReinterpret 1 4 false)) = false ∧
+    spanCallMatches (i 40 (.call { reinterpretCall with
+      declaringType := .atom owner "System.Runtime.InteropServices.MemoryMarshal" }))
+      (.memory (.spanReinterpret 1 4 false)) = false := by decide +kernel
+#print axioms exact_reinterpret_call
 end Tests.SpanEvidence
