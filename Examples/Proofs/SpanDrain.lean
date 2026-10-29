@@ -112,4 +112,3 @@ theorem correctness : Ensures Extracted.program 0
 #print axioms correctness
 
 end ExampleProof
-

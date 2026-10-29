@@ -101,4 +101,3 @@ theorem SpanView.slice_succeeds (view : SpanView) (memory : Memory) (start count
 #print axioms SpanView.slice_succeeds
 
 end CIL.Safety
-
