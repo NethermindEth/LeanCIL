@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include ../scripts/BatchVerification.cs
@@ -11,6 +12,8 @@ using System.Text.RegularExpressions;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 using var verification = new Program();
 var output = At("artifacts/FeatureEvidence");
@@ -121,6 +124,38 @@ foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-a
         () => Console.WriteLine($"PASS platform constants and pruned unsupported branch under {profile}"));
 }
 capabilitiesQueue.Flush();
+foreach (var mutation in new[] { "missing-switch-target", "switch-tail-interior", "branch-tail-interior" })
+{
+    using var module = ModuleDefinition.ReadModule(assembly);
+    var method = module.Types.Single(type => type.FullName == "Examples.Capabilities")
+        .Methods.Single(method => method.Name == "Platform");
+    var instructions = method.Body.Instructions;
+    var table = (Instruction[])instructions.Single(instruction => instruction.OpCode.Code == Code.Switch).Operand;
+    var tailCall = Instruction.Create(OpCodes.Call, method);
+    instructions.Add(Instruction.Create(OpCodes.Tail));
+    instructions.Add(tailCall);
+    instructions.Add(Instruction.Create(OpCodes.Ret));
+    if (mutation == "branch-tail-interior")
+    {
+        var branch = instructions.First(instruction => instruction.OpCode.Code is Code.Bne_Un or Code.Bne_Un_S);
+        branch.OpCode = OpCodes.Bne_Un;
+        branch.Operand = tailCall;
+    }
+    else
+    {
+        var missing = Instruction.Create(OpCodes.Nop);
+        missing.Offset = int.MaxValue;
+        table[1] = mutation == "missing-switch-target" ? missing : tailCall;
+    }
+    var mutatedAssembly = Path.Combine(output, mutation + ".dll");
+    module.Write(mutatedAssembly);
+    var result = Execute(Extract("extract", mutatedAssembly, "Examples", "Capabilities::Platform()",
+        Path.Combine(output, mutation)));
+    var diagnostic = mutation == "missing-switch-target" ? "Malformed switch targets" : "middle of a tail transfer";
+    if (result.Code == 0 || !result.Output.Contains(diagnostic, StringComparison.Ordinal))
+        throw new InvalidOperationException("Invalid unselected target accepted: " + mutation + "\n" + result.Output);
+    Console.WriteLine("PASS invalid unselected control-flow target rejected: " + mutation);
+}
 var platformSource = File.ReadAllText(Path.Combine(output, "Capabilities-scalar", "Platform", "Extracted.lean"));
 var platformControls = new GeneratedEvidence(Path.Combine(output, "PlatformControls"));
 foreach (var (obligation, diagnostic) in new[]

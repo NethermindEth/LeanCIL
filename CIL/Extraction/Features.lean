@@ -311,7 +311,7 @@ private def featureTransferAtWith (raw : RawMethod) (eligible : Nat → Option W
 /-- The folded transfer stated independently of any local-eligibility index. -/
 def featureTransferAt (raw : RawMethod) := featureTransferAtWith raw (featureLocalEligible raw)
 
-/-- Known int32 conditions select a branch edge; unknowns retain both edges and switches all. -/
+/-- Known int32 conditions select an edge; unknowns retain every possible successor. -/
 def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : FeatureState) :
     Option (List Nat) :=
   -- `ret`, `throw`, `rethrow`, `endfinally` and `endfilter` leave the method or handler.
@@ -321,7 +321,11 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
   else if instruction.opcode == 43 || instruction.opcode == 56 then
     match instruction.operand with | .target target => some [target] | _ => none
   else if instruction.opcode == 69 then
-    match instruction.operand with | .targets targets => some ((pc + 1) :: targets) | _ => none
+    match instruction.operand with
+    | .targets targets => match state.stack with
+      | some selector :: _ => some [targets[selector.toNat]?.getD (pc + 1)]
+      | _ => some ((pc + 1) :: targets)
+    | _ => none
   -- Conditional branches use the incoming facts before their operands are popped.
   else if (44 <= instruction.opcode && instruction.opcode <= 55) ||
       (57 <= instruction.opcode && instruction.opcode <= 68) then do
@@ -495,8 +499,14 @@ private def checkFeatureSiteWith (raw : RawMethod) (eligible : Nat → Option W3
       match featureTransferAtWith raw eligible profile role instruction state,
           featureSuccessors pc instruction state with
       | some after, some successors =>
-        -- Roles are contiguous, so only a non-fallthrough edge can enter a fold's interior.
-        successors.all (fun target => target == pc + 1 || foldEntry (roles target)) &&
+        -- Even an unselected encoded target must be a valid entry, not a fold's interior.
+        let validTarget := fun target =>
+          let role := roles target
+          role.isSome && foldEntry role
+        (match instruction.operand with
+        | .target target => validTarget target
+        | .targets targets => targets.all validTarget
+        | _ => true) &&
         successors.all fun target =>
           match certificate target with
           | some (some incoming) => after.weakens incoming
@@ -602,7 +612,7 @@ def FeatureEdge (raw : RawMethod) (profile : FeatureProfile)
     featureSuccessors pc instruction state = some successors ∧ target ∈ successors
 
 /-- Validation establishes closure under every independently recomputed edge,
-    including backedges and every switch destination. -/
+    including backedges and every possible switch destination. -/
 theorem FeatureFlowValid.edge_closed {raw : RawMethod} {profile : FeatureProfile}
     {certificate : FeatureCertificate} {reachable : List Bool} {code : List Op}
     (valid : FeatureFlowValid raw profile certificate reachable code)

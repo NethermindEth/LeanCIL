@@ -49,6 +49,7 @@ internal static class Reachability
             FeatureConstants state = incoming[i];
             var condition = i.OpCode.FlowControl == FlowControl.Cond_Branch
                 ? state.BranchCondition(i.OpCode.Code) : null;
+            var selector = i.OpCode.Code == Code.Switch && state.Stack.Count != 0 ? state.Stack[^1] : null;
             state = state.Copy();
             state.Step(i, method, profile, addressed, typeTests.Results.TryGetValue(i, out bool same) ? same : null);
 
@@ -65,7 +66,7 @@ internal static class Reachability
             }
 
             // Folded operands push nothing, so a fold must be entered at its start.
-            void Jump(Instruction target)
+            void ValidateJump(Instruction target)
             {
                 if (TailCalls.IsInterior(target))
                     throw new InvalidDataException($"Branch enters the middle of a tail transfer: {i}");
@@ -75,18 +76,35 @@ internal static class Reachability
                     throw new InvalidDataException($"Branch into a folded throw: {i}");
                 if (spans.Interior.Contains(target))
                     throw new InvalidDataException($"Branch into a folded span receiver: {i}");
-                Successor(target);
             }
 
-            if (condition is bool taken)
+            if (i.Operand is Instruction target)
             {
-                if (taken) Jump((Instruction)i.Operand);
-                else Successor(i.Next ?? throw new InvalidDataException("Missing selected feature successor"));
-                continue;
+                ValidateJump(target);
+                if (condition is bool taken)
+                {
+                    if (taken) Successor(target);
+                    else Successor(i.Next ?? throw new InvalidDataException("Missing selected feature successor"));
+                    continue;
+                }
+                Successor(target);
             }
-            if (i.Operand is Instruction target) Jump(target);
             if (i.OpCode.Code == Code.Switch)
-                foreach (var destination in (Instruction[])i.Operand) Jump(destination);
+            {
+                var targets = (Instruction[])i.Operand;
+                if (selector is int index)
+                {
+                    foreach (var destination in targets) ValidateJump(destination);
+                    Successor((uint)index < (uint)targets.Length ? targets[index] :
+                        i.Next ?? throw new InvalidDataException("Missing selected switch successor"));
+                    continue;
+                }
+                foreach (var destination in targets)
+                {
+                    ValidateJump(destination);
+                    Successor(destination);
+                }
+            }
             if (i.OpCode.FlowControl is not (FlowControl.Return or FlowControl.Branch or FlowControl.Throw))
                 Successor(i.Next ?? throw new InvalidDataException("Control falls off method"));
         }

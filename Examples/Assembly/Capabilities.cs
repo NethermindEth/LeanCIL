@@ -17,6 +17,13 @@ public static class Capabilities
             return (int)Math.Sqrt(2);
         if (!((IntPtr.Size > 4) & ((uint)UIntPtr.Size < uint.MaxValue)))
             return (int)Math.Sqrt(2);
+        switch (IntPtr.Size & 3)
+        {
+            case 0: break;
+            case 1: return 1;
+            case 2: return 2;
+            default: return (int)Math.Sqrt(2);
+        }
         return IntPtr.Size + UIntPtr.Size + (Environment.Is64BitProcess ? 1 : 0);
     }
 }

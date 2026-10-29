@@ -211,4 +211,71 @@ theorem widened_comparison_unknown :
   by decide +kernel
 #print axioms widened_comparison_unknown
 
+/-- Switch indices are unsigned int32 values; unknowns preserve every encoded successor. -/
+theorem constant_switch_successors :
+    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[some 0], []⟩ = some [4] ∧
+    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[some 1], []⟩ = some [6] ∧
+    featureSuccessors 1 (i 69 (.targets [4, 4])) ⟨[some 1], []⟩ = some [4] ∧
+    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[some 2], []⟩ = some [2] ∧
+    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[some (-1)], []⟩ = some [2] ∧
+    featureSuccessors 1 (i 69 (.targets [])) ⟨[some 0], []⟩ = some [2] ∧
+    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[none], []⟩ = some [2, 4, 6] :=
+  by decide +kernel
+#print axioms constant_switch_successors
+
+/-- Unselected switch targets still belong to the method and must match the emitted table. -/
+theorem switch_certificate_targets :
+    let body := raw [i 22, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 42, i 25, i 42]
+    let facts := [state [], state [some 0], none, none, state [], state [some 2], none, none]
+    let code := [.const32 0, .switch [4, 6], .unsupported "pruned", .unsupported "pruned",
+      .const32 2, .ret, .unsupported "pruned", .unsupported "pruned"]
+    let mask := [true, true, false, false, true, true, false, false]
+    FeatureFlowValid body .scalar facts mask code ∧
+    ¬ FeatureFlowValid body .scalar facts mask (code.set 1 (.switch [4, 5])) ∧
+    ¬ FeatureFlowValid { body with code := body.code.set 1 (i 69 (.targets [4, 100])) }
+      .scalar facts mask (code.set 1 (.switch [4, 100])) ∧
+    ¬ FeatureFlowValid body .scalar (facts.set 4 none) (mask.set 4 false)
+      (code.set 4 (.unsupported "false pruning")) := by decide +kernel
+#print axioms switch_certificate_targets
+
+/-- An unselected table arm or untaken comparison cannot enter a tail transfer after its prefix. -/
+theorem pruned_tail_entry_rejected :
+    let tail := [i 65044, i 40 (.call { getter with target := .managed 0 }), i 42]
+    let switchBody := raw ([i 22, i 69 (.targets [2, 5]), i 23, i 42] ++ tail)
+    let switchFacts := [state [], state [some 0], state [], state [some 1], none, none, none]
+    let switchCode := [.const32 0, .switch [2, 5], .const32 1, .ret,
+      .unsupported "pruned", .unsupported "pruned", .unsupported "pruned"]
+    let branchBody := raw ([i 22, i 22, i 51 (.target 6), i 23, i 42] ++ tail)
+    let branchFacts := [state [], state [some 0], state [some 0, some 0], state [], state [some 1],
+      none, none, none]
+    let branchCode := [.const32 0, .const32 0, .bne 6, .const32 1, .ret,
+      .unsupported "pruned", .unsupported "pruned", .unsupported "pruned"]
+    FeatureFlowValid { switchBody with code := switchBody.code.set 1 (i 69 (.targets [2, 4])) }
+      .scalar switchFacts [true, true, true, true, false, false, false]
+      (switchCode.set 1 (.switch [2, 4])) ∧
+    ¬ FeatureFlowValid switchBody .scalar switchFacts
+      [true, true, true, true, false, false, false] switchCode ∧
+    FeatureFlowValid { branchBody with code := branchBody.code.set 2 (i 51 (.target 5)) }
+      .scalar branchFacts [true, true, true, true, true, false, false, false]
+      (branchCode.set 2 (.bne 5)) ∧
+    ¬ FeatureFlowValid branchBody .scalar branchFacts
+      [true, true, true, true, true, false, false, false] branchCode := by decide +kernel
+#print axioms pruned_tail_entry_rejected
+
+/-- A switch selector weakened by a backedge cannot retain the first iteration's chosen arm. -/
+theorem switch_backedge_weakening :
+    let body := raw [i 22, i 10, i 6, i 69 (.targets [4, 7]), i 23, i 10,
+      i 43 (.target 2), i 42] [intType] .void
+    let facts := [state [] [none], state [some 0] [none], state [] [none], state [none] [none],
+      state [] [none], state [some 1] [none], state [] [some 1], state [] [none]]
+    let code := [.const32 0, .setLocal 0, .local 0, .switch [4, 7], .const32 1, .setLocal 0,
+      .branch 2, .ret]
+    FeatureFlowValid body .scalar facts (List.replicate 8 true) code ∧
+    ¬ FeatureFlowValid body .scalar (facts.set 2 (state [] [some 0]))
+      (List.replicate 8 true) code ∧
+    ¬ FeatureFlowValid body .scalar (facts.set 7 none)
+      [true, true, true, true, true, true, true, false]
+      (code.set 7 (.unsupported "pruned backedge exit")) := by decide +kernel
+#print axioms switch_backedge_weakening
+
 end Tests.FeatureEvidence
