@@ -201,7 +201,14 @@ In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof
 
 ### Throws
 
-`throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of `E`'s constructor and `throw`. When `E` is a `System.Runtime` type, the loads and `newobj` emit `nop` and `throw` emits `.throw "E"`, which ends execution with a fault located at the `throw`. A `[DoesNotReturn]` helper containing only this pattern is an ordinary call. Other arguments, any instruction between the parts, a branch past the first part, rethrowing a stored exception and exception handlers remain rejected.
+`throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of `E`'s constructor and `throw`. For an exact allowlisted `System.Runtime` constructor, the loads and `newobj` emit `nop` and `throw` emits `.throw "E"`, which ends execution with a fault located at the `throw`. A `[DoesNotReturn]` helper containing only this pattern is an ordinary call. Other arguments, any instruction between the parts, a branch past the first part, rethrowing a stored exception and exception handlers remain rejected.
+
+In addition to the admitted string constructors, `Exception`, `InvalidOperationException`,
+`ArgumentException` and `ArgumentOutOfRangeException` admit a message with a null inner exception.
+`ArgumentException` also admits message, parameter name and null inner exception;
+`ArgumentOutOfRangeException` admits parameter name, null actual value and message.
+Only the thrown type is observed. Constructor signatures and null operands are checked independently;
+expressions with effects or faults are not discarded. Prefix recognition inspects at most four loads.
 
 ### Constrained struct calls
 
