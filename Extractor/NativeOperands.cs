@@ -30,7 +30,7 @@ internal static class NativeOperands
                 ? new StackType(array.Kind, $".array {array.Expression}") : array.Kind;
         var reference = type is ByReferenceType;
         var value = reference ? ((ByReferenceType)type).ElementType : type;
-        if (Spans.Width(value) is not null && value is GenericInstanceType span &&
+        if (Spans.Is(value) && value is GenericInstanceType span &&
             EnumTypes.IsEnum(span.GenericArguments[0]))
         {
             var element = Arrays.Storage(span.GenericArguments[0])!;

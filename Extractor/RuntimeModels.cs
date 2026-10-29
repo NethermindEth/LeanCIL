@@ -45,7 +45,7 @@ internal static class RuntimeModels
     {
         string name = type.FullName;
         return name is "System.UInt32" or "System.Byte" or "System.UIntPtr" or "System.IntPtr" or
-            "System.RuntimeFieldHandle" || Spans.Width(type) is not null ||
+            "System.RuntimeFieldHandle" || Spans.Is(type) ||
             (type is ByReferenceType byRef && SupportedType(byRef.ElementType)) ||
             IsSupportedVector(name);
     }
@@ -134,9 +134,9 @@ internal static class RuntimeModels
                 ?? MemoryTransfers.Marshal(reference, profile.Architecture)
                 ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
-                ?? ElementSpan(reference) ?? Runtime(reference.FullName),
+                ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
             "System.Memory" => Scalar(reference) ?? BinaryTransfers.Translate(reference) ??
-                ElementSpan(reference) ?? Span(reference.FullName),
+                ElementSpan(reference, profile.Architecture) ?? Span(reference.FullName),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
@@ -260,19 +260,31 @@ internal static class RuntimeModels
     // Signatures are immutable: runtime lookup performs no interpolation or per-element scan.
     private static string? Span(string signature) => SpanOperations.GetValueOrDefault(signature);
 
-    private static string? ElementSpan(MethodReference method)
+    private sealed class ElementSpanOperations
+    {
+        internal readonly Dictionary<string, Dictionary<string, string>> Architectures = new(StringComparer.Ordinal);
+    }
+
+    private static string? ElementSpan(MethodReference method, string architecture)
     {
         var element = method.DeclaringType is GenericInstanceType { GenericArguments.Count: 1 } owner
             ? owner.GenericArguments[0]
             : method is GenericInstanceMethod { GenericArguments.Count: 1 } generic
                 ? generic.GenericArguments[0] : null;
-        if (element is null || Arrays.Primitive(element) is not null || Spans.ElementWidth(element) is null) return null;
+        if (element is null || Arrays.Primitive(element) is not null ||
+            Spans.ElementWidth(element, architecture) is null) return null;
         if (EnumTypes.IsEnum(element)) EnumTypes.Storage(element);
-        return EnumTypes.Cached(element, type => BuildSpanOperations(type))
-            .GetValueOrDefault(method.FullName);
+        var architectures = EnumTypes.Cached(element, _ => new ElementSpanOperations()).Architectures;
+        if (!architectures.TryGetValue(architecture, out var operations))
+        {
+            operations = BuildSpanOperations(element, architecture);
+            architectures.Add(architecture, operations);
+        }
+        return operations.GetValueOrDefault(method.FullName);
     }
 
-    private static Dictionary<string, string> BuildSpanOperations(TypeReference? elementType = null)
+    private static Dictionary<string, string> BuildSpanOperations(
+        TypeReference? elementType = null, string architecture = "scalar")
     {
         var operations = new Dictionary<string, string>(StringComparer.Ordinal);
         var primitives = new[]
@@ -282,7 +294,7 @@ internal static class RuntimeModels
             ("System.IntPtr", 8), ("System.UIntPtr", 8), ("System.Char", 2), ("System.Boolean", 1)
         };
         foreach (var (element, width) in elementType is null ? primitives :
-            [(elementType.FullName, Spans.ElementWidth(elementType)!.Value)])
+            [(elementType.FullName, Spans.ElementWidth(elementType, architecture)!.Value)])
         {
             var arrayElement = (elementType is null ? Arrays.Primitive(element) : Arrays.Storage(elementType))?.Expression;
             var span = $"System.ReadOnlySpan`1<{element}>";

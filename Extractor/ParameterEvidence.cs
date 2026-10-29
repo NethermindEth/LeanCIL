@@ -15,10 +15,10 @@ internal static class ParameterEvidence
                 ManagedPointers.SignatureEvidence(signature);
         if (type is ByReferenceType or PointerType) return ".reference";
         if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
-        if (type is GenericInstanceType span && Spans.Width(type) is not null &&
+        if (type is GenericInstanceType span && Spans.Is(type) &&
             MetadataValidation.IsAggregate(span.GenericArguments[0], module))
             return $".aggregateSpan {layouts.Index(span.GenericArguments[0])} {(Spans.Writable(type) ? "true" : "false")}";
-        if (Spans.Width(type) is { } width)
+        if (Spans.Width(type, layouts.Metadata.Architecture) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (type is GenericInstanceType vector && !ValueTuples.Is(type))
             return vector.ElementType.FullName switch

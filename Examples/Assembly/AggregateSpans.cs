@@ -15,6 +15,16 @@ internal static class AggregateSpans
         public ulong Fourth;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VectorRecord
+    {
+        public byte Prefix;
+        public Vector256<ulong> Value;
+    }
+
+    public static Span<byte> LayoutBytes(Span<VectorRecord> source) => MemoryMarshal.AsBytes(source);
+    public static VectorRecord LayoutRead(ReadOnlySpan<VectorRecord> source) => source[0];
+
     public static Span<byte> Bytes(Span<Words> source) => MemoryMarshal.AsBytes(source);
     public static ReadOnlySpan<Words> WordsView(ReadOnlySpan<byte> source) =>
         MemoryMarshal.Cast<byte, Words>(source);

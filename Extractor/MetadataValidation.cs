@@ -257,7 +257,7 @@ internal static class MetadataValidation
                 throw new InvalidDataException("Unsupported address of managed callable root");
             if (byRef.ElementType is ArrayType)
                 throw new InvalidDataException("Unsupported by-reference array root");
-            if (Spans.Width(byRef.ElementType) is not null)
+            if (Spans.Is(byRef.ElementType))
                 throw new InvalidDataException("Unsupported by-reference span");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
@@ -270,7 +270,7 @@ internal static class MetadataValidation
             ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Byte" or "System.Boolean" or
             "System.SByte" or "System.Int16" or "System.UInt16" or "System.Char") &&
             !(type is GenericInstanceType && type.FullName.StartsWith("System.Runtime.Intrinsics.Vector", StringComparison.Ordinal) && RuntimeModels.SupportedType(type)) &&
-            Spans.Width(type) is null)
+            !Spans.Is(type))
             throw new InvalidDataException($"Unsupported type: {type.FullName}");
         RuntimeModels.ValidateTypeIdentity(type, module, architecture);
     }
@@ -521,7 +521,7 @@ internal static class MetadataValidation
                             throw Call("Unsupported exception constructor", reference, method, instruction,
                                 "Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
                         if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
-                            Spans.Width(reference.DeclaringType) is not null &&
+                            Spans.Is(reference.DeclaringType) &&
                             !Spans.Analyze(method).Constructors.ContainsKey(instruction))
                             throw Call("Unsupported in-place span constructor", reference, method, instruction,
                                 "The receiver must be a local address followed by at most three simple argument pushes.");

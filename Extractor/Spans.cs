@@ -3,28 +3,41 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Folds `stloc s; ldloca s` over a primitive ReadOnlySpan<T> local so the span stays on the stack
+// Folds `stloc s; ldloca s` over a ReadOnlySpan<T> local so the span stays on the stack
 // as the receiver of the next span call. Reused locals retain their typed span storage.
 internal static class Spans
 {
     internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior,
         Dictionary<Instruction, string> Constructors);
 
-    // Span element widths reuse the checked scalar and integer-vector storage rules.
-    internal static int? Width(TypeReference type) =>
+    // Shape checks do not select an architecture or recompute aggregate layouts.
+    internal static bool Is(TypeReference type) =>
         type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
-            span.GenericArguments.Count == 1
-            ? ElementWidth(span.GenericArguments[0])
-            : null;
+        span.GenericArguments.Count == 1 &&
+        (Arrays.Storage(span.GenericArguments[0]) is not null ||
+            MetadataValidation.IntegerVectorWidth(span.GenericArguments[0]) is not null ||
+            MetadataValidation.IsAggregate(span.GenericArguments[0], type.Module));
 
-    private sealed record Element(int Width);
+    internal static int? Width(TypeReference type, string architecture) => Is(type)
+        ? ElementWidth(((GenericInstanceType)type).GenericArguments[0], architecture) : null;
 
-    internal static int? ElementWidth(TypeReference type) =>
-        Arrays.Storage(type)?.Width ?? MetadataValidation.IntegerVectorWidth(type) ??
-        (MetadataValidation.IsAggregate(type, type.Module)
-            ? EnumTypes.Cached(type, element => new Element(MetadataValidation.Layout(element, element.Module))).Width
-            : null);
+    // A struct may have different sizes on x64 and ARM64.
+    private sealed class ElementLayouts
+    {
+        internal readonly Dictionary<string, int> Widths = new(StringComparer.Ordinal);
+    }
 
+    internal static int? ElementWidth(TypeReference type, string architecture)
+    {
+        if (Arrays.Storage(type)?.Width is { } primitive) return primitive;
+        if (MetadataValidation.IntegerVectorWidth(type) is { } vector) return vector;
+        if (!MetadataValidation.IsAggregate(type, type.Module)) return null;
+        var widths = EnumTypes.Cached(type, _ => new ElementLayouts()).Widths;
+        if (widths.TryGetValue(architecture, out var width)) return width;
+        width = MetadataValidation.Layout(type, type.Module, architecture);
+        widths.Add(architecture, width);
+        return width;
+    }
     internal static bool Writable(TypeReference type) =>
         type is GenericInstanceType { ElementType.FullName: "System.Span`1" };
 
@@ -39,7 +52,7 @@ internal static class Spans
         Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or Code.Ldarg_3 or Code.Ldc_I4 or Code.Ldc_I4_S or Code.Ldc_I4_M1 ||
         i.OpCode.Code is >= Code.Ldc_I4_0 and <= Code.Ldc_I4_8);
     static bool Member(Instruction? i, string name) => i is { OpCode.Code: Code.Call, Operand: MethodReference callee } &&
-        callee.HasThis && callee.Name == name && Width(callee.DeclaringType) is not null;
+        callee.HasThis && callee.Name == name && Is(callee.DeclaringType);
 
     static Analysis Compute(MethodDefinition method)
     {
@@ -50,7 +63,8 @@ internal static class Spans
                 uses[FeatureConstants.Local(instruction)]++;
         foreach (var i in method.Body.Instructions)
         {
-            if (!(Store(i) || Address(i) || Load(i)) || Width(method.Body.Variables[FeatureConstants.Local(i)].VariableType) is null ||
+            if (!(Store(i) || Address(i) || Load(i)) ||
+                !Is(method.Body.Variables[FeatureConstants.Local(i)].VariableType) ||
                 analysis.Operands.Contains(i))
                 continue;
             var local = FeatureConstants.Local(i);

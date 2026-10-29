@@ -17,12 +17,16 @@ var queue = new GeneratedQueue(verification, assembly);
 string Span(int width, bool writable = true, int offset = 0, int length = 2) =>
     $".bufferSpan ⟨.address ⟨0, {offset}⟩, {length}, {width}, {writable.ToString().ToLowerInvariant()}⟩";
 foreach (var method in metadata.GetType("Examples.AggregateSpans").Methods.Where(method => method.IsPublic))
+foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordinal)
+    ? new[] { "x64-sse2", "arm64-advsimd" } : ["scalar"])
 {
     var name = method.Name;
-    var output = Path.Combine(root, name);
+    var layoutWidth = profile == "x64-sse2" ? 64 : 48;
+    var output = Path.Combine(root, profile == "scalar" ? name : name + "-" + profile);
     Directory.CreateDirectory(output);
     var arguments = name switch
     {
+        "LayoutBytes" => Span(layoutWidth), "LayoutRead" => Span(layoutWidth, false),
         "WordsView" => Span(1, false, length: 64),
         "VectorBytes" => Span(16), "ReadVector" => Span(16, false),
         "Read" => Span(32, false),
@@ -34,6 +38,8 @@ foreach (var method in metadata.GetType("Examples.AggregateSpans").Methods.Where
     };
     var expected = name switch
     {
+        "LayoutBytes" => Span(1, length: 2 * layoutWidth),
+        "LayoutRead" => $".scalar (.aggregate (List.replicate {layoutWidth} 0))",
         "Bytes" => Span(1, length: 64), "WordsView" => Span(32, false),
         "VectorBytes" => Span(1, length: 32), "ReadVector" => ".scalar (.v128 0)",
         "Read" => ".scalar (.aggregate (List.replicate 32 0))",
@@ -69,7 +75,8 @@ foreach (var method in metadata.GetType("Examples.AggregateSpans").Methods.Where
         (extra is null ? "" : "/-- Stores and overlapping copies preserve neighbouring bytes. -/\n" +
             "theorem contents : " + extra + " := by rfl\n#print axioms contents\n") +
         "end ExampleProof\n");
-    queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS aggregate span: " + name));
+    queue.Add(new(method.FullName, proof, output, Profile: profile),
+        () => Console.WriteLine("PASS aggregate span: " + name + " (" + profile + ")"));
 }
 queue.Flush();
 var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));

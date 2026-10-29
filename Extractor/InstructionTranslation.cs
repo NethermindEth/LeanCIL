@@ -167,7 +167,7 @@ internal static class InstructionTranslation
             Code.Initblk => $".memory (.initBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Starg or Code.Starg_S => Parameter("setLocal"),
             Code.Ldarga or Code.Ldarga_S => Parameter(
-                Spans.Width(((ParameterDefinition)i.Operand).ParameterType) is null ? "localAddr" : "local"),
+                !Spans.Is(((ParameterDefinition)i.Operand).ParameterType) ? "localAddr" : "local"),
             Code.Conv_I => ".convI8",
             Code.Ldind_I => ".load64", Code.Stind_I => ".store64",
             Code.Conv_Ovf_I1 => ".checkedConvert 8 true false", Code.Conv_Ovf_I1_Un => ".checkedConvert 8 true true",
@@ -224,7 +224,7 @@ internal static class InstructionTranslation
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
             Code.Ldloc or Code.Ldloc_S => LocalOp("local", Local()),
             Code.Ldloca or Code.Ldloca_S => LocalOp(
-                Spans.Width(((VariableDefinition)i.Operand).VariableType) is null ? "localAddr" : "local", Local()),
+                !Spans.Is(((VariableDefinition)i.Operand).VariableType) ? "localAddr" : "local", Local()),
             Code.Stloc_0 => LocalOp("setLocal", 0), Code.Stloc_1 => LocalOp("setLocal", 1), Code.Stloc_2 => LocalOp("setLocal", 2), Code.Stloc_3 => LocalOp("setLocal", 3),
             Code.Stloc or Code.Stloc_S => LocalOp("setLocal", Local()),
             Code.Ldfld => Field("field"), Code.Ldflda => Field("fieldAddr"), Code.Stfld => Field("setField"),

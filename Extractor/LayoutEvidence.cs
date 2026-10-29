@@ -117,7 +117,7 @@ internal sealed class LayoutEvidence
                                 (argument == 0 ? ".spanSource" : ".spanTarget"));
                 }
                 else if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
-                    Spans.Width(spanOwner) is not null &&
+                    Spans.Is(spanOwner) &&
                     MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
                     spanCall.Name is "get_Item" or "CopyTo" or "TryCopyTo" or "Clear")
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
