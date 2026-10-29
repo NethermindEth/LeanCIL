@@ -20,4 +20,15 @@ public static class TypeTests
     public static int Marker(int value) => Classify<TypeMarker>(value);
     public static int Other(int value) => Classify<OtherMarker>(value);
     public static int Word(int value) => Classify<ulong>(value);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static int ReferenceClassify<T>(int value) where T : struct
+    {
+        if (ReferenceEquals(typeof(T), typeof(TypeMarker))) return value + 1;
+        if (!ReferenceEquals(typeof(T), typeof(ulong))) return value + 2;
+        return value + 3;
+    }
+
+    public static int ReferenceCases(int value) => ReferenceClassify<TypeMarker>(value) +
+        ReferenceClassify<OtherMarker>(value) + ReferenceClassify<ulong>(value);
 }

@@ -366,7 +366,8 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
-  if (match instruction.operand with
+  if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
+  else if (match instruction.operand with
     | .call site => referenceContentQuery site | _ => false) then
     match instruction.operand, emitted with
     | .call site, .const32 bits => instruction.opcode == 40 &&
@@ -674,6 +675,9 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     (stack : List ScalarKind) (role : Option FoldRole := none)
     (context : NativeDispatchContext := nativeDispatchContext raw) : Option (List ScalarKind) := do
   let opcode := instruction.opcode
+  if role matches some (.typeBranch _) then
+    let _ :: _ :: tail := stack | none
+    return tail
   if opcode == 65030 then
     let .call site := instruction.operand | none
     let signature : ManagedSignature :=
@@ -849,7 +853,8 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
       readOnlySiteMatches raw pc instruction emitted &&
       scalarEmissionMatches layouts role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||
-      match scalarTransfer raw instruction stack role context, featureSuccessors pc instruction feature with
+      match scalarTransfer raw instruction stack role context,
+          featureSuccessors role pc instruction feature with
       | some after, some successors =>
         successors.all (successor after)
       | _, _ => false)

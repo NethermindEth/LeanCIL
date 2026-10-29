@@ -65,9 +65,13 @@ private def getTypeFromHandle : CallSite :=
 private def typeFromHandle (instruction : RawInstruction) : Bool :=
   instruction.opcode == 40 && instruction.operand == .call getTypeFromHandle
 
-/-- `some true` for `op_Equality`, `some false` for `op_Inequality`. -/
+/-- Equality polarity of the exact comparison call or reference-equality branch. -/
 private def typeComparison (instruction : RawInstruction) : Option Bool :=
-  if instruction.opcode != 40 then none
+  if instruction.opcode ∈ [46, 51, 59, 64] then
+    match instruction.operand with
+    | .target _ => some (instruction.opcode == 46 || instruction.opcode == 59)
+    | _ => none
+  else if instruction.opcode != 40 then none
   else if instruction.operand == .call (typeMethod "op_Equality"
       "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2) then some true
   else if instruction.operand == .call (typeMethod "op_Inequality"
@@ -232,6 +236,8 @@ inductive FoldRole where
   | interior
   /-- A type comparison: pushes the decided Boolean. -/
   | result (value : Bool)
+  /-- A reference-equality branch over two closed typeof values takes this decided edge. -/
+  | typeBranch (taken : Bool)
   /-- The raw `throw`: raises the type bound by the exact folded operands. -/
   | raise (exception : String)
   /-- An unchanged argument push protected from non-fallthrough entry. -/
@@ -281,7 +287,8 @@ private def foldAt (locals receiverLocals : List TypeExpr)
     | _ => none) <|>
   (match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
-        [some .head, some .interior, some .interior, some .interior, some (.result value)]
+        [some .head, some .interior, some .interior, some .interior,
+          some (if e.opcode == 40 then .result value else .typeBranch value)]
     | _ => none) <|>
   (throwFold (a :: tail)).map fun (count, name) =>
     some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
@@ -344,6 +351,7 @@ theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction
 def foldEntry (role : Option (Option FoldRole)) : Bool :=
   match role with
   | some (some .interior) | some (some (.result _)) | some (some (.raise _))
+  | some (some (.typeBranch _))
   | some (some .argument) | some (some (.spanConstructor ..)) => false
   | some (some .tailCall) => false
   | _ => true

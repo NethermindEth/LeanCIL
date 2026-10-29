@@ -200,7 +200,15 @@ void RejectedCall(string input, string selector, string caller, string callee, s
     checks++;
 }
 
-RejectedCall(assembly, "Arithmetic::TypeCheck(ulong)", "System.UInt64 Examples.Arithmetic::TypeCheck(System.UInt64)",
+var unfoldedTypeTest = At("artifacts/Selectors/unfolded-type-test.dll");
+using (var module = Mono.Cecil.ModuleDefinition.ReadModule(assembly))
+{
+    var body = module.GetType("Examples.Arithmetic").Methods.Single(method => method.Name == "TypeCheck").Body;
+    body.GetILProcessor().InsertBefore(body.Instructions[2],
+        Mono.Cecil.Cil.Instruction.Create(Mono.Cecil.Cil.OpCodes.Nop));
+    module.Write(unfoldedTypeTest);
+}
+RejectedCall(unfoldedTypeTest, "Arithmetic::TypeCheck(ulong)", "System.UInt64 Examples.Arithmetic::TypeCheck(System.UInt64)",
     "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)",
     ["Rejected external call: ", "External managed dependency: ", "Callee scope: System.Runtime"]);
 var instanceCall = At("artifacts/Selectors/instance-call.dll");

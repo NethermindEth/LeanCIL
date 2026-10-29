@@ -186,15 +186,12 @@ a package. Without descriptors, development builds retain the normal local build
 
 ## Diagnostics
 
-Method and call validation failures name the rejected item and the method containing it. A rejected call reports the callee, the calling method and the IL offset of the call. For example, `typeof(ulong) == typeof(uint)` compiles to calls into the runtime library that LeanCIL does not model:
-
-```text
-Error: External managed dependency: System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)
-  Caller: System.UInt64 Examples.Arithmetic::TypeCheck(System.UInt64) at IL_0005
-  Callee assembly: System.Private.CoreLib (referenced as System.Runtime)
-  Stage: metadata and CIL validation
-  Next: Reachable calls must target methods in the extracted assembly or runtime calls modelled by LeanCIL. Remove the call from the extracted path, or see Supported subset and limits in the README for the modelled calls.
-```
+Method and call validation failures name the rejected item and the method containing it.
+A rejected call reports its callee, caller, IL offset and declaring assembly scope. For
+example, a reachable `Environment.ProcessorCount` call is outside the admitted runtime
+models. Exact closed `typeof` comparisons are supported; a `GetTypeFromHandle` call
+outside those patterns remains unsupported. The diagnostic identifies metadata/CIL
+validation as the failing stage and links to the supported subset.
 
 When proof checking fails, the report leads with `Lean errors (N):`: each
 `error:` diagnostic with its `file:line:col`, the module Lake was building and

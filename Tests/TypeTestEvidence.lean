@@ -1,4 +1,4 @@
-import CIL.Extraction.Features
+import CIL.Extraction.Scalars
 
 set_option maxRecDepth 4096
 
@@ -99,5 +99,61 @@ example : ¬ FeatureFlowValid #[] undecidedRaw .scalar
 example : featureOpMatchesAt #[] foldRaw none (i 208 (.type marker)) (.const32 0) = false := by decide
 example : featureOpMatchesAt #[] foldRaw none (i 40 equality) (.eq) = false := by decide
 example : featureOpMatchesAt #[] foldRaw none (i 40 fromHandle) (.convU4) = false := by decide
+
+/-- The exact reference-equality branch form, with two distinct return paths. -/
+private def branchRaw (same : Bool) (opcode : Nat) (target := 7) :=
+  raw ((test word (if same then word else intType)).take 4 ++
+    [i opcode (.target target), i 23, i 42, i 22, i 42])
+
+/-- Raw typeof values occupy two slots before the decided branch consumes them. -/
+private def branchStates (taken : Bool) : FeatureCertificate :=
+  [state [], state [none], state [none], state [none, none], state [none, none],
+    if taken then none else state [], if taken then none else state [some 1],
+    if taken then state [] else none, if taken then state [some 0] else none]
+
+/-- The raw scalar certificate tracks Type objects without exposing them to the interpreter. -/
+private def branchKinds (taken : Bool) : ScalarCertificate :=
+  [some [], some [.other], some [.other], some [.other, .other], some [.other, .other],
+    if taken then none else some [], if taken then none else some [.word32],
+    if taken then some [] else none, if taken then some [.word32] else none]
+
+/-- Four erased operands and one exact transfer preserve instruction numbering. -/
+private def branchCode (taken : Bool) : List Op :=
+  [.nop, .nop, .nop, .nop, if taken then .branch 7 else .nop,
+    if taken then .unsupported "pruned" else .const32 1,
+    if taken then .unsupported "pruned" else .ret none,
+    if taken then .const32 0 else .unsupported "pruned",
+    if taken then .ret none else .unsupported "pruned"]
+
+/-- Short and long equality/inequality branches certify both type-identity outcomes. -/
+theorem reference_type_branches :
+    ([46, 51, 59, 64].all fun opcode => [true, false].all fun same =>
+      let taken := same == (opcode == 46 || opcode == 59)
+      let body := branchRaw same opcode
+      let states := branchStates taken
+      decide (FeatureFlowValid #[] body .scalar states (states.map Option.isSome)
+        (branchCode taken)) &&
+      decide (ScalarFlowValid #[] body states (branchKinds taken) (branchCode taken))) = true := by
+  decide +kernel
+#print axioms reference_type_branches
+
+/-- Neither a changed operation nor a forged edge may bypass the exact fold and entry checks. -/
+theorem reference_type_branch_rejections :
+    let states := branchStates true
+    let mask := states.map Option.isSome
+    let code := branchCode true
+    let forwarded := raw ((branchRaw true 46).code.set 2
+      (i 208 (.type (.atom "Forwarder" "System.UInt64"))))
+    (¬ FeatureFlowValid #[] (branchRaw true 46) .scalar states mask (code.set 4 (.branch 5))) ∧
+    (¬ FeatureFlowValid #[] (branchRaw true 47) .scalar states mask code) ∧
+    (¬ FeatureFlowValid #[] (branchRaw true 46) .scalar
+      (branchStates false) ((branchStates false).map Option.isSome) (branchCode false)) ∧
+    ([1, 4, 9].all fun target =>
+      let untouched := branchStates false
+      !decide (FeatureFlowValid #[] (branchRaw false 46 target) .scalar untouched
+        (untouched.map Option.isSome) (branchCode false))) = true ∧
+    (¬ FeatureFlowValid #[] forwarded .scalar states mask code) := by
+  decide +kernel
+#print axioms reference_type_branch_rejections
 
 end Tests.TypeTestEvidence

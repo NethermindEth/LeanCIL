@@ -84,7 +84,11 @@ internal static class InstructionTranslation
             TailCalls.ValidateReachable(m, i, profile.Architecture);
             return ".nop";
         }
-        if (typeTests.Results.TryGetValue(i, out bool same)) return same ? ".const32 1" : ".const32 0";
+        if (typeTests.Results.TryGetValue(i, out bool same))
+        {
+            if (i.Operand is Instruction) return same ? $".branch {Target()}" : ".nop";
+            return same ? ".const32 1" : ".const32 0";
+        }
         if (typeTests.Operands.Contains(i)) return ".nop";
         var throws = Throws.Analyze(m);
         if (i.OpCode.Code == Code.Constrained)

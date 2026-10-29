@@ -61,7 +61,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `brfalse`, `brfalse.s`, `brtrue`, `brtrue.s` | Partial | Zero/nonzero tests of `i32` or `i64`. Also accepts checked references, including readonly references and null. Admitted forward and backward successors. |
 | `blt`, `blt.s`, `bge`, `bge.s`, `bgt`, `bgt.s`, `ble`, `ble.s` | Partial | Signed comparison of same-width `i32`/`i64`, branching to admitted forward or backward targets. |
 | `blt.un`, `blt.un.s`, `bge.un`, `bge.un.s`, `bgt.un`, `bgt.un.s`, `ble.un`, `ble.un.s` | Partial | Unsigned comparison of same-width `i32`/`i64` or two live references within one allocation, branching to admitted forward or backward targets. Cross-allocation reference ordering is unsupported. |
-| `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. Also supports checked reference equality as described below. No floating-point comparison. |
+| `beq`, `beq.s`, `bne.un`, `bne.un.s` | Partial | Equality/inequality of same-width `i32`/`i64`, branching to admitted forward or backward targets. Also supports checked reference equality and exact closed `typeof` reference comparisons as described below. No floating-point comparison. |
 | `ldind.i`, `stind.i` | Partial | Native-width integer load/store through checked managed references; eight bytes on the admitted target, with the same allocation, permission and lifetime checks. A native handler-table cursor also supports authenticated pointer loads through `ldind.i`; stores to these immutable tables are unsupported. |
 | `ldind.i8`, `stind.i8` | Partial | Eight-byte integer load/store through a checked reference. Allocation bounds, permissions, initialization and lifetime rules apply; arbitrary numeric addresses are not accepted. |
 | `ldind.i1`, `ldind.u1`, `ldind.i2`, `ldind.u2`, `ldind.i4`, `ldind.u4` | Partial | One-, two- or four-byte integer loads through a checked reference. Signed narrow loads sign-extend and unsigned loads zero-extend to `i32`; both four-byte forms return the same `i32` bits. Aggregate snapshots and numeric addresses are rejected. |
@@ -206,7 +206,20 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 
 ### Type tests
 
-In a specialized generic body, `typeof(A) == typeof(B)` and `typeof(A) != typeof(B)` compile to `ldtoken A; call Type::GetTypeFromHandle; ldtoken B; call Type::GetTypeFromHandle; call Type::op_Equality` (or `op_Inequality`), with the `System.Runtime` signatures. When both types are closed and their identity is decided, the four operand instructions emit `nop` and the comparison emits `ldc.i4.0` or `ldc.i4.1`, as the JIT folds them. Profile reachability then prunes the dead branch. Types are equal when their metadata is identical, and different when their full names differ; one full name in two scopes, decorated names and `void` stay undecided. Undecided tests, any other instruction between the five, a branch into the last four, other `System.Type` members and `Type` values in locals remain rejected.
+Closed `typeof(A) == typeof(B)` and `!=` tests use two adjacent
+`ldtoken; call Type::GetTypeFromHandle` pairs followed by `Type::op_Equality` or
+`op_Inequality`, with exact `System.Runtime` signatures. The four operands emit `nop`
+and the comparison emits its decided Boolean. `ReferenceEquals(typeof(A), typeof(B))`
+branches use the same operands followed by short or long `beq` or `bne.un`; they emit
+an unconditional branch to the original target or a fallthrough `nop`. No instruction
+slots are inserted. Feature and scalar certificates share the selected successor.
+
+Types are equal when their metadata is identical, and different when their full names
+differ; one full name in two scopes, decorated names and `void` stay undecided. Every
+encoded target must be valid, even when unselected. Undecided tests, instructions
+between the five, entry into the last four, other `System.Type` members and `Type`
+values in locals remain rejected. A direct `Object.ReferenceEquals` call is
+outside this subset.
 
 ### Throws
 

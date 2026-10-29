@@ -166,7 +166,7 @@ theorem constant_branch_boundaries :
       (-1, -1, [true, true, false, true, false, false, true, false, true, false])] :
         List (Int × Int × List Bool)).all (fun (left, right, expected) =>
           [46, 59].all fun first => (List.range 10).all fun index =>
-            featureSuccessors 2 (i (first + index) (.target 5))
+            featureSuccessors none 2 (i (first + index) (.target 5))
               ⟨[some (BitVec.ofInt 32 right), some (BitVec.ofInt 32 left)], []⟩ ==
                 some [if expected[index]?.getD false then 5 else 3]) = true := by decide +kernel
 #print axioms constant_branch_boundaries
@@ -175,7 +175,7 @@ theorem constant_branch_boundaries :
 theorem unknown_comparison_edges :
     [46, 59].all (fun first => (List.range 10).all fun index =>
       [([none, some 0] : List (Option W32)), [some 0, none], [none, none]].all fun stack =>
-        featureSuccessors 2 (i (first + index) (.target 5)) ⟨stack, []⟩ == some [5, 3]) =
+        featureSuccessors none 2 (i (first + index) (.target 5)) ⟨stack, []⟩ == some [5, 3]) =
           true := by decide +kernel
 #print axioms unknown_comparison_edges
 
@@ -207,19 +207,19 @@ theorem comparison_results :
 theorem widened_comparison_unknown :
     featureTransfer #[] (raw []) .scalar (i 211) ⟨[some (-1)], []⟩ = some ⟨[none], []⟩ ∧
     featureTransfer #[] (raw []) .scalar (i 224) ⟨[some (-1)], []⟩ = some ⟨[none], []⟩ ∧
-    featureSuccessors 2 (i 51 (.target 5)) ⟨[none, some (-1)], []⟩ = some [5, 3] :=
+    featureSuccessors none 2 (i 51 (.target 5)) ⟨[none, some (-1)], []⟩ = some [5, 3] :=
   by decide +kernel
 #print axioms widened_comparison_unknown
 
 /-- Switch indices are unsigned int32 values; unknowns preserve every encoded successor. -/
 theorem constant_switch_successors :
-    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[some 0], []⟩ = some [4] ∧
-    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[some 1], []⟩ = some [6] ∧
-    featureSuccessors 1 (i 69 (.targets [4, 4])) ⟨[some 1], []⟩ = some [4] ∧
-    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[some 2], []⟩ = some [2] ∧
-    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[some (-1)], []⟩ = some [2] ∧
-    featureSuccessors 1 (i 69 (.targets [])) ⟨[some 0], []⟩ = some [2] ∧
-    featureSuccessors 1 (i 69 (.targets [4, 6])) ⟨[none], []⟩ = some [2, 4, 6] :=
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 0], []⟩ = some [4] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 1], []⟩ = some [6] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 4])) ⟨[some 1], []⟩ = some [4] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 2], []⟩ = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some (-1)], []⟩ = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [])) ⟨[some 0], []⟩ = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[none], []⟩ = some [2, 4, 6] :=
   by decide +kernel
 #print axioms constant_switch_successors
 

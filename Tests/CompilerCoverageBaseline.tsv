@@ -335,6 +335,8 @@ Examples:System.Int32 Examples.TailCalls::Read(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TypeTests::Classify(System.Int32)	N	N	N	N	N	N	N	N
 Examples:System.Int32 Examples.TypeTests::Marker(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TypeTests::Other(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.TypeTests::ReferenceCases(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.TypeTests::ReferenceClassify(System.Int32)	N	N	N	N	N	N	N	N
 Examples:System.Int32 Examples.TypeTests::Word(System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.UnsafeLayouts::Size0()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.UnsafeLayouts::Size1()	A	A	A	A	A	A	A	A
@@ -630,7 +632,7 @@ Examples:System.UInt64 Examples.Arithmetic::ReadLarge(Examples.LargePacket&)	A	A
 Examples:System.UInt64 Examples.Arithmetic::ReadValue(Examples.Packet)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Struct(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::StructCopy(System.UInt64)	A	A	A	A	A	A	A	A
-Examples:System.UInt64 Examples.Arithmetic::TypeCheck(System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.Arithmetic::TypeCheck(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::WrongAdd(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.BinarySpans::ReadBig(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.BinarySpans::ReadLittle(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
