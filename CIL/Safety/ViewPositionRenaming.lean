@@ -1,13 +1,37 @@
 import CIL.Safety.ViewRenaming
 import CIL.Safety.ResultRenaming
+import CIL.Safety.MemoryRenamingOperations
 
 /-!
 # Span and array positions under allocation renaming
 
-Slicing and indexing preserve bounds checks and offsets while mapping backing allocations.
+Slicing, indexing and filling preserve checks and effects while mapping backing allocations.
 -/
 
 namespace CIL.Safety
+
+/-- Filling initializes corresponding regions while preserving allocation renaming. -/
+theorem Memory.Renamed.spanFill {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (view : SpanView)
+    (bound : view.reference.Below mapping.sourceLimit) (element : List (BitVec 8)) :
+    ResultEquivalent (Memory.Renamed mapping scopes)
+      (view.fill source element) ((mapping.spanView view).fill target element) := by
+  unfold SpanView.fill
+  rw [related.spanValidate view bound]
+  apply ResultEquivalent.bind_same
+  intro checked
+  dsimp only [AllocationRenaming.spanView]
+  repeat' first
+    | exact .error _
+    | exact .ok related
+    | (apply ResultEquivalent.bind_same; intro)
+    | (split <;> simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure,
+        Bool.false_eq_true, ite_true, ite_false])
+    | (cases reference : view.reference <;>
+        simp only [AllocationRenaming.managedReference])
+    | exact related.write _ (by simpa only [*, ManagedReference.Below] using bound) _ _
+#print axioms Memory.Renamed.spanFill
 
 /-- Span indexing preserves the exact fault or returns the corresponding element address. -/
 theorem Memory.Renamed.spanElement {mapping : AllocationRenaming}

@@ -54,6 +54,9 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind ((same.spanFill _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
     | (apply ResultEquivalent.bind_same; intro)
     | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
        intro left right related

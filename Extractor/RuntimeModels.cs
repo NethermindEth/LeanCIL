@@ -118,7 +118,8 @@ internal static class RuntimeModels
     internal static string? Translate(MethodReference reference, FeatureProfile profile)
     {
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
-            (reference.HasThis && reference.Name is not (".ctor" or "get_Item" or "get_Length" or "Slice")) ||
+            (reference.HasThis && reference.Name is not
+                (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
         if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" &&
@@ -287,7 +288,11 @@ internal static class RuntimeModels
                     $".memory (.spanFromReference {width} {capability})");
                 operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
                 if (writable)
+                {
                     operations.Add($"!0& {owner}::get_Item(System.Int32)", $".memory (.spanItem {width})");
+                    operations.Add($"System.Void {owner}::Clear()", $".memory (.spanFill {width} true)");
+                    operations.Add($"System.Void {owner}::Fill(!0)", $".memory (.spanFill {width} false)");
+                }
                 operations.Add($"{name}<!0> {owner}::Slice(System.Int32)", ".memory (.spanSlice false)");
                 operations.Add($"{name}<!0> {owner}::Slice(System.Int32,System.Int32)", ".memory (.spanSlice true)");
                 var factory = writable ? "CreateSpan" : "CreateReadOnlySpan";

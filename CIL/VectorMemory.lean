@@ -125,6 +125,7 @@ def ArraySpanRange.argumentCount : ArraySpanRange → Nat
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
+  | spanFill (width : Nat) (clear : Bool)
   | bigMul64
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | load512 | store128 | store256 | store512 | init256
@@ -153,6 +154,7 @@ inductive MemoryOp where
 
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
+  | .spanFill _ clear => if clear then 1 else 2
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2

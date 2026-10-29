@@ -86,6 +86,56 @@ foreach (var (name, signature, arguments, expected) in new[]
     spanProofs.Add(name, proof);
 }
 
+foreach (var (name, signature, width, arguments, bytes) in new[]
+{
+    ("ClearBytes", "System.Span`1<System.Byte>", 1, "", "[0, 0]"),
+    ("FillCharacters", "System.Span`1<System.Char>,System.Char", 2,
+        ", .scalar (.i32 4660)", "[52, 18, 52, 18]"),
+    ("FillIntegers", "System.Span`1<System.Int32>,System.Int32", 4,
+        ", .scalar (.i32 4294967295)", "List.replicate 8 255"),
+    ("FillLongSlice", "System.Span`1<System.Int64>,System.Int32,System.Int32,System.Int64", 8,
+        ", .scalar (.i32 1), .scalar (.i32 2), .scalar (.i64 9223372036854775808)",
+        "[0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 128]")
+})
+{
+    var output = Path.Combine(root, name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"MemorySpans::{name}({signature})", output]);
+    var proof = Path.Combine(root, name + ".lean");
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    if (name == "FillIntegers")
+    {
+        var forged = Path.Combine(root, "Forged-fill-width.lean");
+        if (!source.Contains(".spanFill 4 false", StringComparison.Ordinal))
+            throw new Exception("Missing fill-width mutation");
+        File.WriteAllText(forged, source.Replace(".spanFill 4 false", ".spanFill 8 false",
+            StringComparison.Ordinal));
+        rejected.Add(forged, "PASS independent span fill width rejection",
+            "Extraction.ScalarFlowValid method0Closed method0FeatureStates method0ScalarStates method0.code");
+    }
+    var start = name == "FillLongSlice" ? width : 0;
+    var count = name == "FillLongSlice" ? 4 : 2;
+    File.WriteAllText(proof, source + $$"""
+
+        private def fillMemory : CIL.Safety.Memory := {
+          allocations := fun identity => if identity == 0 then
+            some ⟨.callerStack, ⟨{{(count + 2) * width}}, 1, []⟩, true, []⟩ else none
+          cells := fun _ _ => ⟨99, false⟩
+          views := [⟨0, 0, {{(count + 2) * width}}, false, true⟩]
+          nextIdentity := 1 }
+
+        theorem compiled_fill_contents :
+            (do let (memory, result) ← CIL.Safety.invoke Extracted.program 64 0
+                  [.bufferSpan ⟨.address ⟨0, {{width}}⟩, {{count}}, {{width}}, true⟩{{arguments}}]
+                  fillMemory
+                let contents := CIL.Safety.read memory ⟨0, {{width + start}}⟩ {{2 * width}} 1
+                pure (contents, memory.cells 0 {{width + start - 1}},
+                  memory.cells 0 {{width + start + 2 * width}}, result)) =
+              .ok (.ok ({{bytes}}), ⟨99, false⟩, ⟨99, false⟩, []) := rfl
+        #print axioms compiled_fill_contents
+        """);
+    spanProofs.Add(name, proof);
+}
+
 var original = File.ReadAllText(Path.Combine(root, "SliceRead", "Extracted.lean"));
 foreach (var (name, signature, width, arguments, expected) in new[]
 {
@@ -306,4 +356,3 @@ foreach (var (signature, marker) in new[]
 foreach (var (name, proof) in spanProofs)
     evidence.Add(proof, "PASS compiled span certificate and execution: " + name);
 evidence.Check();
-

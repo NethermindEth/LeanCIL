@@ -32,6 +32,20 @@ theorem Memory.Equivalent.spanElement {m n : Memory} (same : m.Equivalent n)
 #print axioms Memory.Equivalent.spanSlice
 #print axioms Memory.Equivalent.spanElement
 
+/-- Filling a span preserves observational equivalence, including newly readable bytes. -/
+theorem Memory.Equivalent.spanFill {m n : Memory} (same : m.Equivalent n)
+    (view : SpanView) (element : List (BitVec 8)) :
+    ResultEquivalent Memory.Equivalent (view.fill m element) (view.fill n element) := by
+  unfold SpanView.fill
+  rw [same.spanValidate]
+  repeat first
+    | exact .error _
+    | exact .ok same
+    | exact same.write _ _ _
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.spanFill
+
 /-- Array formation respects observational memory equivalence. -/
 theorem Memory.Equivalent.arrayValidate {m n : Memory} (same : m.Equivalent n)
     (view : ArrayView) : view.validate m = view.validate n := by

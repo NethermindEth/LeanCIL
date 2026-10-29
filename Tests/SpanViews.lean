@@ -45,4 +45,33 @@ theorem expired_span_rejected :
     view.validate (expire memory 0) = .error .expiredLifetime := rfl
 #print axioms expired_span_rejected
 
+/-- Whole-view fills initialize unreadable bytes and leave adjacent storage unchanged. -/
+theorem fill_initializes_slice :
+    (do let slice ← view.slice memory 1 2
+        let filled ← slice.fill { memory with
+          cells := fun _ _ => ⟨99, false⟩
+          views := [⟨0, 0, 16, false, true⟩] } [1, 2, 3, 4]
+        let first ← slice.read filled 0
+        let last ← slice.read filled 1
+        pure (first, last, filled.cells 0 3, filled.cells 0 12)) =
+      .ok ([1, 2, 3, 4], [1, 2, 3, 4], ⟨99, false⟩, ⟨99, false⟩) := rfl
+#print axioms fill_initializes_slice
+
+/-- Empty null and end-position views do not demand byte access authority. -/
+theorem fill_empty_views :
+    (SpanView.mk .null 0 4 true).fill { memory with views := [] } [0, 0, 0, 0] =
+      .ok { memory with views := [] } ∧
+    (SpanView.mk (.address ⟨0, 16⟩) 0 4 true).fill { memory with views := [] } [0, 0, 0, 0] =
+      .ok { memory with views := [] } := ⟨rfl, rfl⟩
+#print axioms fill_empty_views
+
+/-- Filling never bypasses view mutability, byte authority, lifetime or extent validation. -/
+theorem fill_rejects_invalid_access :
+    view.asReadOnly.fill memory [0, 0, 0, 0] = .error .unwritable ∧
+    view.fill { memory with views := [] } [0, 0, 0, 0] = .error .unwritable ∧
+    view.fill (expire memory 0) [0, 0, 0, 0] = .error .expiredLifetime ∧
+    { view with length := 5 }.fill memory [0, 0, 0, 0] = .error .outsideAllocation ∧
+    view.fill memory [0] = .error .unsupportedLayout := ⟨rfl, rfl, rfl, rfl, rfl⟩
+#print axioms fill_rejects_invalid_access
+
 end Tests.SpanViews

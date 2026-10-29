@@ -5,6 +5,18 @@ namespace Examples;
 
 public static class MemorySpans
 {
+    public static void ClearBytes(Span<byte> values) => values.Clear();
+
+    public static void FillCharacters(Span<char> values, char value) => values.Fill(value);
+
+    public static void FillIntegers(Span<int> values, int value) => values.Fill(value);
+
+    public static void FillLongSlice(Span<long> values, int start, int length, long value)
+    {
+        var slice = values.Slice(start, length);
+        slice.Fill(value);
+    }
+
     public static Span<int> ArrayWritable(int[] values) => values;
 
     public static ReadOnlySpan<int> ArrayReadOnly(int[] values) => values;

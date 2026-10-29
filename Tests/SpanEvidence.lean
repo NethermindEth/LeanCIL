@@ -116,4 +116,30 @@ example : FeatureFlowValid (raw [words] loadCode) .scalar loadStates (List.repli
 example : ¬ typeTestInstruction (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType true)) ∧
     typeTestInstruction (i 208 (.type intType)) := by decide
 
+/-- The exact writable int32 span member used by whole-region initialization. -/
+private def fillCall : CallSite := {
+  declaringType := .apply (.constructor runtime "System.Span`1") intType
+  name := "Fill"
+  target := .external (runtime ++ "::System.Void System.Span`1<System.Int32>::Fill(!0)")
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false
+  returnType := .void, parameterTypes := [intType] }
+
+/-- Whole-span stores bind the operation, element width, mutability and complete signature. -/
+theorem exact_span_fill_call :
+    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 4 false)) = true ∧
+    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 8 false)) = false ∧
+    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 4 true)) = false ∧
+    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanSlice false)) = false ∧
+    spanCallMatches (i 40 (.call { fillCall with
+      declaringType := .apply (.constructor runtime "System.ReadOnlySpan`1") intType }))
+      (.memory (.spanFill 4 false)) = false ∧
+    spanCallMatches (i 40 (.call { fillCall with
+      parameterTypes := [.atom runtime "System.UInt32"] }))
+      (.memory (.spanFill 4 false)) = false ∧
+    spanCallMatches (i 40 (.call { fillCall with hasThis := false }))
+      (.memory (.spanFill 4 false)) = false ∧
+    spanCallMatches (i 40 (.call { fillCall with returnType := intType, returnsValue := true }))
+      (.memory (.spanFill 4 false)) = false := by decide +kernel
+#print axioms exact_span_fill_call
+
 end Tests.SpanEvidence

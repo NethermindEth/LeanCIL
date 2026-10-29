@@ -285,6 +285,19 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   if unspecifiedOperands operation.argumentCount stack then
     .error (.unsupported "Memory operation observes unspecified vector bits") else
   match operation, stack with
+  -- Whole-span initialization retains byte authority and creates no element loop in CIL.
+  | .spanFill width true, .bufferSpan view :: rest =>
+    if view.width != width then .error .invalidState else
+    return (← checkedAt view.reference (view.length * width)
+      (view.fill memory (List.replicate width 0)), rest)
+  | .spanFill width false, .scalar value :: .bufferSpan view :: rest =>
+    if view.width != width then .error .invalidState else
+    let number ← match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
+      | 8, .i64 bits => .ok bits.toNat
+      | _, _ => .error .invalidState
+    return (← checkedAt view.reference (view.length * width)
+      (view.fill memory (numberBytes number width)), rest)
   -- Wide multiply, block copy and block initialization
   | .bigMul64, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
     return (← storeValue memory low (.i64 (left * right)),

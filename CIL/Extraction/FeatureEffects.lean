@@ -13,6 +13,7 @@ namespace CIL.Extraction
 
 /-- `(pops, pushes)` of each memory operation. -/
 private def memoryFeatureEffect : MemoryOp → Nat × Nat
+  | .spanFill _ clear => (if clear then 1 else 2, 0)
   | .bigMul64 => (3, 1)
   | .spanSlice explicitLength => (if explicitLength then 3 else 2, 1)
   | .spanFromReference .. | .byteOffset => (2, 1)

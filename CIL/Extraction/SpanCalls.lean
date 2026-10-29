@@ -16,12 +16,14 @@ def spanMemoryScope : String :=
 
 /-- The observable choice made by a supported span call. -/
 inductive SpanCall where
+  | fill (width : Nat) (clear : Bool)
   | item (width : Nat) | length | slice (counted : Bool) | readOnly
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   deriving DecidableEq, Repr
 
 /-- A span operation's exact semantic parameters, independent of other memory operations. -/
 private def emittedSpanCall : Op → Option SpanCall
+  | .memory (.spanFill width clear) => some (.fill width clear)
   | .memory (.spanItem width) => some (.item width)
   | .memory .spanLength => some .length
   | .memory (.spanSlice counted) => some (.slice counted)
@@ -51,6 +53,12 @@ private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall :=
         site.target == target "System.Void" "!0[],System.Int32,System.Int32" then
       some (.array element writable .counted)
     else none
+  else if opcode == 40 && site.hasThis && writable && !site.returnsValue &&
+      site.returnType == .void && site.name == "Clear" && site.parameterTypes.isEmpty &&
+      site.target == target "System.Void" "" then some (.fill width true)
+  else if opcode == 40 && site.hasThis && writable && !site.returnsValue &&
+      site.returnType == .void && site.name == "Fill" && site.parameterTypes == [elementType] &&
+      site.target == target "System.Void" "!0" then some (.fill width false)
   else if opcode != 40 || !site.returnsValue then none
   else if !site.hasThis && site.name == "op_Implicit" then
     if site.returnType == site.declaringType && site.parameterTypes == [.array elementType] &&
