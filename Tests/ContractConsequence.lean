@@ -433,7 +433,8 @@ theorem discard_forwards : discardContract.Holds Extracted.program discard :=
     (kind := .word64) (initial := .unmodeled)
     (fun input home => ⟨input.a, input.b, home, home, input.x, input.y⟩)
     discard.found addFlag.found
-    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, .inl rfl, rfl, rfl, rfl, rfl⟩
+    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
+      fun _ => nofun, .inl rfl, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readA, readB⟩ => ⟨formed, fun value member => by
       simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
@@ -510,7 +511,8 @@ theorem copy_forwards : copyContract.Holds Extracted.program copyTo :=
     (kind := .word64) (initial := .i64 0)
     (fun input home => ⟨home, input.b, input.res, input.region, 0, input.y⟩)
     copyTo.found addFrom.found
-    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, .inr trivial, rfl, rfl, rfl, rfl⟩
+    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
+      fun _ => nofun, .inr trivial, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readB, writable, _⟩ => ⟨formed, fun value member => by
       simp only [copyContract, List.mem_cons, List.not_mem_nil, or_false] at member
