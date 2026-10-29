@@ -93,4 +93,31 @@ theorem NativeMethodTable.load_provenance (table : NativeMethodTable) (memory : 
 
 #print axioms NativeMethodTable.load_provenance
 
+/-- Resolve an authenticated table's stable storage binding to the current allocation.
+    Bindings are transported by the existing memory renaming relation. -/
+def nativeTableView (table : CIL.MethodTable) (memory : Memory) :
+    Checked NativeMethodTable := do
+  let some targets := table.targets | .error .nullDereference
+  let some backing := table.backing | .error .invalidReference
+  let some (_, origin) := memory.staticBindings.find? (·.1 == backing.identity) |
+    .error .missingAllocation
+  let view : NativeMethodTable := ⟨table.signature, targets, origin,
+    { origin with offset := origin.offset + backing.byteOffset }⟩
+  view.check memory
+  return view
+
+/-- Move an opaque native table cursor without changing its identities or storage binding. -/
+def addNativeTable (table : CIL.MethodTable) (memory : Memory) (offset : BitVec 64) :
+    Checked CIL.MethodTable := do
+  let view ← nativeTableView table memory
+  let moved ← view.addBytes memory offset
+  let some backing := table.backing | .error .invalidReference
+  return { table with backing := some { backing with
+    byteOffset := moved.cursor.offset - moved.origin.offset } }
+
+/-- Load an authenticated native entry through the current storage binding. -/
+def loadNativeTable (table : CIL.MethodTable) (memory : Memory) : Checked CIL.MethodPointer := do
+  let view ← nativeTableView table memory
+  view.load memory
+
 end CIL.Safety

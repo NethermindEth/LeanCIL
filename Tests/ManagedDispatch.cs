@@ -89,7 +89,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         var raise = methods.Single(method => method.Name == "Raise").MetadataToken.ToUInt32();
         var owner = module.Assembly.Name.FullName + "::Examples.ManagedDispatch";
         string Identity(uint token) => $"⟨{System.Text.Json.JsonSerializer.Serialize(owner)}, {token}, []⟩";
-        string Table(string targets) => $".methodTable ⟨dispatchSignature, some [{targets}]⟩";
+        string Table(string targets) => $".methodTable ⟨dispatchSignature, some #[{targets}], none⟩";
         var table = Table(Identity(repeat) + ", " + Identity(raise));
         string Args(string view, int index, int value) => $"{view}, .scalar (.i32 {index}), .scalar (.i32 {value})";
         claims.Add($"({RunCase(Args(table, 0, 3))}).map Prod.snd = .ok [.scalar (.i32 17)]");
@@ -97,7 +97,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
             $"(match {RunCase(args, fuel)} with | .error fault => some fault.fault | .ok _ => none)";
         claims.Add($"{Fault(Args(table, 1, 2))} = some (.thrown \"System.ArgumentException\")");
         claims.Add($"{Fault(Args(table, 2, 0))} = some (.thrown \"System.IndexOutOfRangeException\")");
-        claims.Add($"{Fault(Args(".methodTable ⟨dispatchSignature, none⟩", 0, 0))} = " +
+        claims.Add($"{Fault(Args(".methodTable ⟨dispatchSignature, none, none⟩", 0, 0))} = " +
             "some (.thrown \"System.NullReferenceException\")");
         claims.Add($"{Fault(Args(Table(Identity(uint.MaxValue)), 0, 0))} = some .invalidState");
         claims.Add($"({RunCase(Args(table, 0, 3), 1)}).isOk = false");
@@ -160,3 +160,4 @@ foreach (var mutation in new[] { "convention", "prefix-entry" })
 }
 evidence.Check();
 rejected.Check();
+

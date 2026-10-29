@@ -87,8 +87,8 @@ def observerCount : CIL.Op → Nat
   | .ret _ => 1
   | .call _ argc | .tailCall _ argc | .newVector256 _ argc | .newAggregate _ argc _ => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1
-  | .managed (.tableElement _) => 2
-  | .managed .tableLength => 1
+  | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => 2
+  | .managed .tableLength | .managed (.tableLoad _) => 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount

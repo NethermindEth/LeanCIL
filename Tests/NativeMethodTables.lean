@@ -1,4 +1,4 @@
-import CIL.Safety.NativeMethodTables
+import CIL.Safety.Execution
 
 /-! Native handler tables preserve opaque identities across checked backing-memory accesses. -/
 
@@ -12,12 +12,13 @@ private def signature : ManagedSignature :=
 private def first : ManagedIdentity := ⟨"Handlers", 1, []⟩
 private def second : ManagedIdentity := ⟨"Handlers", 2, []⟩
 
-private def memory : Memory :=
+private def memory : CIL.Safety.Memory :=
   { allocations := fun index => if index == 0 then
       some { kind := .immutableStatic, layout := ⟨16, 8, []⟩ } else none
     cells := fun _ _ => ⟨0, true⟩
     views := [⟨0, 0, 16, true, false⟩]
-    nextIdentity := 1 }
+    nextIdentity := 1
+    staticBindings := [(42, ⟨0, 0⟩)] }
 
 private def table : NativeMethodTable := ⟨signature, #[first, second], ⟨0, 0⟩, ⟨0, 0⟩⟩
 
@@ -78,6 +79,39 @@ theorem mutable_backing :
 theorem unrelated_cursor :
     { table with cursor := ⟨1, 0⟩ }.load memory = .error .invalidReference := by rfl
 #print axioms unrelated_cursor
+
+private def opaqueTable : MethodTable :=
+  ⟨signature, some #[first, second], some ⟨42, 0⟩⟩
+
+private def frame : Frame := { activation := 0, locals := [], owned := [] }
+
+/-- The native `add` followed by `ldind.i` preserves a checked, callable identity. -/
+theorem native_dispatch_load :
+    managedStep .tableOffset 0 frame [.scalar (.i64 8), .methodTable opaqueTable] memory =
+      .ok (.next 1 [.methodTable { opaqueTable with backing := some ⟨42, 8⟩ }] frame memory) ∧
+    managedStep (.tableLoad signature) 1 frame
+      [.methodTable { opaqueTable with backing := some ⟨42, 8⟩ }] memory =
+        .ok (.next 2 [.methodPointer ⟨signature, some second⟩] frame memory) := ⟨rfl, rfl⟩
+#print axioms native_dispatch_load
+
+/-- A native array element load validates the same backing storage as pointer loading. -/
+theorem native_array_load :
+    managedStep (.tableElement signature) 0 frame
+      [.scalar (.i32 1), .methodTable opaqueTable] memory =
+        .ok (.next 1 [.methodPointer ⟨signature, some second⟩] frame memory) := rfl
+#print axioms native_array_load
+
+/-- An opaque table cannot manufacture a native cursor without a valid storage binding. -/
+theorem missing_binding :
+    loadNativeTable opaqueTable { memory with staticBindings := [] } =
+      .error .missingAllocation := rfl
+#print axioms missing_binding
+
+/-- A scalar address remains uncallable after the new native load operation is introduced. -/
+theorem numeric_load_rejected :
+    managedStep (.tableLoad signature) 0 frame [.scalar (.i64 0)] memory =
+      .error .invalidState := rfl
+#print axioms numeric_load_rejected
 
 end Tests.NativeMethodTables
 

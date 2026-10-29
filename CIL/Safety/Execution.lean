@@ -2,6 +2,7 @@ import CIL.Safety.Frames
 import CIL.Safety.StackAllocation
 import CIL.Safety.StaticMemory
 import CIL.Safety.ReferenceObservations
+import CIL.Safety.NativeMethodTables
 import CIL.NativeEvaluation
 
 /-!
@@ -124,15 +125,42 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
   | .tableLength, .methodTable table :: rest =>
     let some targets := table.targets | .error (.thrown "System.NullReferenceException")
-    if targets.length >= 2^31 then .error .invalidState else pure ()
-    return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 targets.length)) :: rest) frame memory
+    if targets.size >= 2^31 then .error .invalidState else pure ()
+    return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 targets.size)) :: rest) frame memory
   | .tableElement signature, .scalar index :: .methodTable table :: rest =>
     if table.signature != signature then .error .invalidState else pure ()
     let some index := arrayIndex index | .error .invalidState
     let some targets := table.targets | .error (.thrown "System.NullReferenceException")
-    if targets.length >= 2^31 then .error .invalidState else pure ()
+    if targets.size >= 2^31 then .error .invalidState else pure ()
     let some target := targets[index]? | .error (.thrown "System.IndexOutOfRangeException")
+    if let some backing := table.backing then
+      let base := { table with backing := some { backing with byteOffset := 0 } }
+      let selected ← checkedAt .null nativeMethodWidth
+        (addNativeTable base memory (BitVec.ofNat 64 (nativeMethodWidth * index)))
+      let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
+      return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
     return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
+  | .tableAddress signature, .scalar index :: .methodTable table :: rest =>
+    if table.signature != signature then .error .invalidState else pure ()
+    let some index := arrayIndex index | .error .invalidState
+    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    if index >= targets.size then .error (.thrown "System.IndexOutOfRangeException") else pure ()
+    let some backing := table.backing | .error .invalidState
+    let base := { table with backing := some { backing with byteOffset := 0 } }
+    let selected ← checkedAt .null nativeMethodWidth
+      (addNativeTable base memory (BitVec.ofNat 64 (nativeMethodWidth * index)))
+    return .next (pc + 1) (.methodTable selected :: rest) frame memory
+  | .tableOffset, .scalar offset :: .methodTable table :: rest =>
+    let offset ← match offset with
+      | .i32 bits => .ok (bits.signExtend 64)
+      | .i64 bits => .ok bits
+      | _ => .error .invalidState
+    let selected ← checkedAt .null nativeMethodWidth (addNativeTable table memory offset)
+    return .next (pc + 1) (.methodTable selected :: rest) frame memory
+  | .tableLoad signature, .methodTable table :: rest =>
+    if table.signature != signature then .error .invalidState else pure ()
+    let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table memory)
+    return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
   | .call signature catalog tail, .methodPointer pointer :: values =>
     if pointer.signature != signature then .error .invalidState else pure ()
     let some identity := pointer.target | .error .invalidState
