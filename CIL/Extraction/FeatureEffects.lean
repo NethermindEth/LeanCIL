@@ -47,7 +47,7 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
-  | .stackAlloc _ => some (1, 1)
+  | .stackAlloc _ | .newArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
   | .const32 _ | .const64 _ | .arg .. | .vectorArg _ | .local .. | .vectorLocal _ => some (0, 1)

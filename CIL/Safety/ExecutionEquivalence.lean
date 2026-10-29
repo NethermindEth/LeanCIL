@@ -82,6 +82,47 @@ theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
     | split
 #print axioms Memory.Equivalent.managedStep
 
+/-- Fresh array bytes and authority do not depend on the old view-list representation. -/
+theorem Memory.Equivalent.allocateArray {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.ArrayElement) (length : Nat) :
+    ResultEquivalent MemoryLastEquivalent (allocateArray m element length)
+      (allocateArray n element length) := by
+  unfold CIL.Safety.allocateArray
+  repeat first
+    | exact .error _
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.allocate _).mapError _)
+       intro left right related
+       obtain ⟨identity, source⟩ := left
+       obtain ⟨otherIdentity, target⟩ := right
+       obtain ⟨rfl, equivalent⟩ := related
+       change source.Equivalent target at equivalent
+       apply ResultEquivalent.ok
+       refine ⟨rfl, ?_⟩
+       have initialized : Memory.Equivalent
+           { source with cells := fun other offset =>
+               if other == identity then ⟨0, true⟩ else source.cells other offset }
+           { target with cells := fun other offset =>
+               if other == identity then ⟨0, true⟩ else target.cells other offset } :=
+         ⟨equivalent.allocations, by simp only [equivalent.cells], equivalent.permissions,
+           equivalent.nextIdentity, equivalent.staticBindings, equivalent.stackLimit⟩
+       exact initialized.prependView _)
+    | unfold checkedAt
+    | split
+#print axioms Memory.Equivalent.allocateArray
+
+/-- Array length decoding and allocation preserve exact outcomes over equivalent memories. -/
+theorem Memory.Equivalent.newArray {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.ArrayElement) (length : CIL.Value) :
+    ResultEquivalent MemoryLastEquivalent (newArray m element length)
+      (newArray n element length) := by
+  cases length <;> simp only [CIL.Safety.newArray, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  all_goals repeat first
+    | exact .error _
+    | exact same.allocateArray _ _
+    | split
+#print axioms Memory.Equivalent.newArray
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -94,6 +135,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     same.referenceLess, same.referenceSubtract]
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
+    | (apply ResultEquivalent.bind (same.newArray _ _)
+       intro left right related
+       obtain ⟨view, memory⟩ := left
+       obtain ⟨otherView, otherMemory⟩ := right
+       obtain ⟨rfl, equivalent⟩ := related
+       exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.allocateStack _ _ _)
        intro left right related
        obtain ⟨reference, owner, allocated⟩ := left

@@ -182,4 +182,51 @@ theorem null_local_round_trip :
       loadLocal updated slot) = .ok (.array ⟨.null, 0, .signed32⟩) := rfl
 #print axioms null_local_round_trip
 
+/-- The maximum modeled payload initializes without enumerating its elements. -/
+theorem allocation_maximum_constant_initialization :
+    (match allocateArray memory .unsigned8 maxArrayLength with
+     | .ok (view, result) => view.length == maxArrayLength &&
+         (result.cells memory.nextIdentity (maxArrayLength - 1)).initialized &&
+         (result.cells memory.nextIdentity (maxArrayLength - 1)).bits == 0
+     | .error _ => false) = true := by decide +kernel
+#print axioms allocation_maximum_constant_initialization
+
+/-- Lengths outside the runtime element-count ceiling remain model failures, not CLR throws. -/
+theorem allocation_extent_is_not_exception :
+    (match newArray memory .signed32 (.i64 (maxArrayLength + 1)) with
+     | .error fault => fault == .unsupported "Array length outside supported extent"
+     | .ok _ => false) = true := by decide +kernel
+#print axioms allocation_extent_is_not_exception
+
+/-- A forged allocator watermark is rejected instead of establishing an allocation exception. -/
+theorem allocation_identity_reuse_is_not_exception :
+    (match newArray { memory with nextIdentity := 0 } .signed32 (.i32 2) with
+     | .error fault => fault == .memory .identityReuse .null 8
+     | .ok _ => false) = true := by decide +kernel
+#print axioms allocation_identity_reuse_is_not_exception
+
+/-- Native negative lengths retain the CLI overflow exception. -/
+theorem native_negative_array_length :
+    (match newArray memory .signed32 (.i64 (2^63)) with
+     | .error fault => fault == .thrown "System.OverflowException"
+     | .ok _ => false) = true := by decide +kernel
+#print axioms native_negative_array_length
+
+/-- Unsupported element kinds cannot claim an expected exception through their length. -/
+theorem unsupported_allocation_is_not_exception :
+    (match newArray memory (.aggregate "Record" 4) (.i32 (-1)) with
+     | .error fault => fault == .unsupported "Nonprimitive array allocation"
+     | .ok _ => false) = true := by decide +kernel
+#print axioms unsupported_allocation_is_not_exception
+
+/-- Native length operands certify, while raw int64 stack kinds do not. -/
+theorem allocation_native_kind :
+    CIL.Extraction.scalarOpMatches
+      (rawArray 141 (.type (.atom CIL.Extraction.runtimeScope "System.Int32")))
+      [.native] (.newArray .signed32) = true ∧
+    CIL.Extraction.scalarOpMatches
+      (rawArray 141 (.type (.atom CIL.Extraction.runtimeScope "System.Int32")))
+      [.word64] (.newArray .signed32) = false := by decide +kernel
+#print axioms allocation_native_kind
+
 end Tests.PrimitiveArrays

@@ -631,7 +631,7 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
-  case stackAlloc initLocals =>
+  case stackAlloc | newArray =>
     stack_cases =>
       first
       | fallback_vacuous
@@ -1143,7 +1143,7 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
-  case stackAlloc initLocals =>
+  case stackAlloc | newArray =>
     stack_cases =>
       first
         | fallback_raise_vacuous

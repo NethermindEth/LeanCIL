@@ -94,6 +94,8 @@ inductive Op where
   | checkedConvert (width : Nat) (signed unsignedInput : Bool)
   /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
   | stackAlloc (initLocals : Bool)
+  /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
+  | newArray (element : ArrayElement)
   | nop | neg | gt
   -- Signed and unsigned compare-and-branch; more follow `switch` below.
   | bgt (target : Nat)

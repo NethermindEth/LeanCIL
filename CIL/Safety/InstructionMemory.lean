@@ -73,7 +73,7 @@ def observerCount : CIL.Op → Nat
   -- Arithmetic and comparisons
   | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
   | .checkedConvert .. | .neg | .bnot | .convI1 | .convI2 | .convU2
-  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .stackAlloc _ => 1
+  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .stackAlloc _ | .newArray _ => 1
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
   | .lt | .ltu | .gt | .gtu | .eq | .bgt _ | .ble _ | .bleu _
   | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => 2

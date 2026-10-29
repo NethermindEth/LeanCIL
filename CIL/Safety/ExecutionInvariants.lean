@@ -2,6 +2,7 @@ import CIL.Safety.ExecutionTrace
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.StaticMemoryLemmas
 import CIL.Safety.StackAllocationLemmas
+import CIL.Safety.ArrayAllocationLemmas
 import CIL.Safety.SpanConstructionLemmas
 
 /-!
@@ -32,6 +33,8 @@ def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
     evidence. Value-stack validity is independent of this effect classification. -/
 inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) :
     Frame → Memory → Prop where
+  | arrayAllocation {view result} (effect : ArrayAllocationEffect m view result) :
+      StepEffect body frame m frame result
   | stackAllocation {reference final result}
       (effect : StackAllocationEffect m frame reference final result) :
       StepEffect body frame m final result
@@ -53,6 +56,7 @@ inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) :
 theorem StepEffect.wellFormed {body : CIL.Method} {frame final : Frame} {m result : Memory}
     (effect : StepEffect body frame m final result) (hm : m.WellFormed) : result.WellFormed := by
   cases effect with
+  | arrayAllocation effect => exact effect.wellFormed hm
   | stackAllocation effect => exact effect.wellFormed hm
   | memory effect => exact effect.wellFormed hm
   | store _ stored => exact storeLocal_preserves_wellFormed _ _ _ _ _ hm stored
@@ -66,6 +70,7 @@ theorem StepEffect.wellFormed {body : CIL.Method} {frame final : Frame} {m resul
 theorem StepEffect.allocations {body : CIL.Method} {frame final : Frame} {m result : Memory}
     (effect : StepEffect body frame m final result) : AllocationExtension m result := by
   cases effect with
+  | arrayAllocation effect => exact effect.allocations
   | stackAllocation effect => exact effect.allocations
   | memory effect => exact effect.allocations
   | store _ stored => exact storeLocal_extends_allocations _ _ _ _ _ stored
@@ -177,6 +182,20 @@ theorem StepContract.stackAllocation {body : CIL.Method} {frame final : Frame}
 
 #print axioms StepContract.stackAllocation
 
+/-- Heap arrays stay live independently of frame-owned storage. -/
+theorem StepContract.arrayAllocation {body : CIL.Method} {frame : Frame}
+    {stack : List Value} {memory result : Memory} {view : ArrayView}
+    {element : CIL.ArrayElement} {length : CIL.Value} {pc : Nat}
+    (success : newArray memory element length = .ok (view, result)) :
+    StepContract body frame (.scalar length :: stack) memory
+      (.next pc (.array view :: stack) frame result) := by
+  have effect := newArray_effect success
+  apply StepContract.of_effect (.arrayAllocation effect)
+  intro _ _ retained
+  exact ValuesValid.cons effect.view_valid retained.tail
+
+#print axioms StepContract.arrayAllocation
+
 /-- A successful pointer subtraction forms a valid result without changing its capability. -/
 theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedReference)
     (offset : CIL.Value) (success : referenceSubtract memory reference offset = .ok result) :
@@ -252,6 +271,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
         apply StepContract.initializeSpanLocal
         all_goals assumption
     | solve | exact .stackAllocation (by assumption)
+    | solve | exact .arrayAllocation (by assumption)
     | solve |
         apply StepContract.staticInstruction
         apply staticInstruction_contract

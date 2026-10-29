@@ -47,7 +47,7 @@ theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op
       rcases List.mem_cons.mp member with rfl | member
       · exact new _ (by simp)
       · exact retained id member
-  | memory | store => exact retained
+  | arrayAllocation | memory | store => exact retained
   | valueHome allocated stored | localHome allocated stored =>
     have fresh := allocateHome_fresh _ _ _ _ _ allocated
     have new := (allocateHome_owned _ _ _ _ _ allocated).preserve (by

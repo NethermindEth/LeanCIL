@@ -45,6 +45,9 @@ theorem stepTransport : StepTransport := by
       metadata operation family pc arguments stack bounds observable⟩
   | excluded =>
     cases operation <;> try cases family
+    case newArray.refl element =>
+      exact memories.stepNewArray frames sourceFormed targetFormed staticBounds
+        sourceBody targetBody element pc arguments stack bounds observable
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
     | exact ⟨mapping, .refl mapping,
