@@ -72,6 +72,8 @@ private def checkSize (size alignment : Nat) : SizeAccess → Op → Bool
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
   | .sizeOf, .const32 bits => bits.toNat == size
   | .construct, .newAggregate _ _ width => width.val == size
+  | .spanElement, .memory (.spanEmpty width _)
+  | .spanElement, .initializeSpanLocal _ (.empty width _)
   | .spanElement, .memory (.spanItem width)
   | .spanElement, .memory (.spanCopy width _)
   | .spanElement, .memory (.spanFill width _)

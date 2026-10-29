@@ -14,6 +14,16 @@ and allocation extension across instructions follow from these.
 
 namespace CIL.Safety
 
+/-- Empty spans retain their element width and capability without reading or changing memory. -/
+theorem memoryInstruction_emptySpan (memory : Memory) (stack : List Value)
+    (width : Nat) (writable : Bool) (bounded : 0 < width ∧ width < 2^64) :
+    memoryInstruction (.spanEmpty width writable) stack memory =
+      .ok (memory, .bufferSpan ⟨.null, 0, width, writable⟩ :: stack) := by
+  simp [memoryInstruction, otherMemoryInstruction, unspecifiedOperands,
+    CIL.MemoryOp.argumentCount, SpanView.validate, bounded, checkedAt]
+  rfl
+#print axioms memoryInstruction_emptySpan
+
 theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m : Memory) :
     instructions (first ++ second) stack m =
       (instructions first stack m).bind

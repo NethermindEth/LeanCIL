@@ -234,7 +234,7 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
     fun left right leftBound rightBound =>
       ⟨mapping.injective left right leftBound rightBound, congrArg mapping.image⟩
   all_goals try solve
-    | apply (related.checkedSpanValidate _ (by assumption)).bindWithSuccess
+    | apply (related.checkedSpanValidate _ (by first | assumption | trivial)).bindWithSuccess
       intro first second sourceStep same
       subst second
       repeat first

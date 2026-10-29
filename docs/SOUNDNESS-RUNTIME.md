@@ -105,6 +105,11 @@ constructors require a checked extent, not a numeric address. Raw `void*` is adm
 supported helpers/constructors. Arbitrary pointer element types and reference-bearing layouts remain
 unsupported. [OPCODES](OPCODES.md) specifies the exact constructor and receiver forms.
 
+Empty span getters and explicit default resets use null, zero-length views. Their element width
+and write capability remain bound to the exact span type; aggregate widths and identities are
+checked against the layout table. Resetting a local replaces its view without modifying backing
+memory, granting authority or extending a lifetime.
+
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
 unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.

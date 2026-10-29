@@ -664,6 +664,10 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let some _ := arrayIndex index | .error .invalidState
     .error (.thrown "System.NullReferenceException")
   -- Spans
+  | .spanEmpty width writable, rest =>
+    let view : SpanView := ⟨.null, 0, width, writable⟩
+    let _ ← checkedAt .null 0 (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
   | .spanReinterpret sourceWidth targetWidth writable, .bufferSpan view :: rest =>
     if view.width == sourceWidth && view.writable == writable &&
         (0 < targetWidth ∧ targetWidth < 2^64) then pure () else .error .invalidState

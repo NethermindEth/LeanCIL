@@ -110,6 +110,13 @@ internal static class Spans
     static (Instruction Call, string Descriptor)? Constructor(Instruction address, TypeReference localType,
         FeatureProfile profile)
     {
+        if (address.Next is { OpCode.Code: Code.Initobj, Operand: TypeReference initialized } reset)
+        {
+            if (MethodSpecialization.SignatureType(initialized) != MethodSpecialization.SignatureType(localType))
+                throw new InvalidDataException("Span default type does not match its local");
+            return Width(localType, profile.Architecture) is int width
+                ? (reset, $".empty {width} {Writable(localType).ToString().ToLowerInvariant()}") : null;
+        }
         var call = address.Next;
         var count = 0;
         while (count < 3 && (Push(call) || call?.OpCode.Code == Code.Ldnull))

@@ -250,6 +250,17 @@ inductive FoldRole where
   | tailCall
   deriving DecidableEq, Repr
 
+/-- Resetting a span local binds its exact type and never exposes its storage address. -/
+private def spanDefaultFold (locals : List TypeExpr) (head : RawInstruction)
+    (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
+  if !(head.opcode ∈ [18, 65037]) then none else pure ()
+  let index ← localIndex head
+  let localType ← locals[index]?
+  let some ⟨_, 65045, .type initialized⟩ := tail.head? | none
+  if initialized != localType then none else pure ()
+  let .span width writable ← spanStorage localType | none
+  return [some .head, some (.spanConstructor index (.empty width writable))]
+
 /-- A constructor fold admits at most three pure single-value argument pushes. -/
 private def spanConstructorFold (locals : List TypeExpr) (head : RawInstruction)
     (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
@@ -272,7 +283,7 @@ private def spanConstructorFold (locals : List TypeExpr) (head : RawInstruction)
 private def foldAt (locals receiverLocals : List TypeExpr)
     (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
-  spanConstructorFold locals a tail <|>
+  spanDefaultFold locals a tail <|> spanConstructorFold locals a tail <|>
   (match a, tail with
     | ⟨_, 20, .none⟩, ⟨_, 122, .none⟩ :: _ =>
       some [some .head, some (.raise "System.NullReferenceException")]

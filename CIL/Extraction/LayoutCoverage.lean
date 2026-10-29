@@ -37,6 +37,11 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
       return [.field pc parent index (if instruction.opcode = 0x7b then .load
         else if instruction.opcode = 0x7c then .address else .store)]
   -- `ldobj`, `stobj`, `initobj`, `cpobj` and `sizeof` of a struct.
+  | 0xfe15, .type (.apply (.constructor scope owner) (.aggregate identity index)) =>
+    if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] then
+      if typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
+        none else return [.size pc index .spanElement]
+    else return []
   | opcode, .type type =>
     match aggregateIndex type with
     | none => return []
@@ -67,14 +72,17 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
         ((site.typeArguments[1]?).bind aggregateIndex).toList.map
         (fun index => .size pc index .spanTarget)
     match site.declaringType, site.typeArguments with
-    | .apply (.constructor scope owner) (.aggregate _ index), [] =>
+    | .apply (.constructor scope owner) (.aggregate identity index), [] =>
+      if site.name == "get_Empty" &&
+          typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
+        none else
       if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
           site.name ∈ [".ctor", "op_Implicit"] &&
           (site.parameterTypes.head?.map fun type => match type with
             | .array _ => true | _ => false).getD false then
         return [.size pc index .arrayElement]
       else if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor"] then
+          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor", "get_Empty"] then
         return [.size pc index .spanElement] else return []
     | .atom _ "System.MemoryExtensions", [.aggregate _ index] =>
       if site.name == "AsSpan" then return [.size pc index .arrayElement] else return []

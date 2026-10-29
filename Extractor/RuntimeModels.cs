@@ -369,6 +369,7 @@ internal static class RuntimeModels
                     $".memory (.spanFromReference {width} {capability})");
                 operations.Add($"System.Void {owner}::.ctor(!0&)",
                     $".memory (.spanSingleReference {width} {capability})");
+                operations.Add($"{name}<!0> {owner}::get_Empty()", $".memory (.spanEmpty {width} {capability})");
                 operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
                 operations.Add($"System.Boolean {owner}::get_IsEmpty()", ".memory (.observeView .spanEmpty)");
                 var pinnableResult = writable ? "!0&" :
