@@ -63,18 +63,20 @@ Prove("PastEnd", "UnsafeReferences::PastEnd(Examples.FourLimbs&)",
 
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.UnsafeReferences")!;
 var bytes = new byte[32];
-foreach (var name in new[] { "AreSame", "Less", "Greater", "ByteOffset", "AddSigned", "AddUnsigned", "Subtract" })
+foreach (var name in new[]
+    { "AreSame", "Less", "Greater", "ByteOffset", "AddSigned", "AddUnsigned", "Subtract", "SubtractUnsigned" })
 {
-    var offset = name is "AddSigned" or "AddUnsigned" or "Subtract";
+    var offset = name is "AddSigned" or "AddUnsigned" or "Subtract" or "SubtractUnsigned";
+    var unsigned = name is "AddUnsigned" or "SubtractUnsigned";
     var selector = $"UnsafeReferences::{name}(System.Byte&," +
-        (offset ? name == "AddUnsigned" ? "System.UIntPtr)" : "System.IntPtr)" : "System.Byte&)");
+        (offset ? unsigned ? "System.UIntPtr)" : "System.IntPtr)" : "System.Byte&)");
     var method = runtime.GetMethod(name)!;
     long expected;
     if (name == "ByteOffset")
         expected = method.CreateDelegate<ReferenceDifference>()(ref bytes[5], ref bytes[2]);
     else if (offset)
     {
-        ref var result = ref (name == "AddUnsigned"
+        ref var result = ref (unsigned
             ? ref method.CreateDelegate<UnsignedReferenceOffset>()(ref bytes[5], 3)
             : ref method.CreateDelegate<SignedReferenceOffset>()(ref bytes[5], 3));
         expected = Unsafe.ByteOffset(ref bytes[0], ref result);
@@ -128,6 +130,46 @@ Boundary("AddUnsigned", "outside_byte_offset", "[.reference (.address ⟨0, 5⟩
     ".error ⟨0, 2, .memory .invalidReference (.address ⟨0, 5⟩) 0⟩");
 Boundary("Subtract", "negative_subtraction", "[.reference (.address ⟨0, 5⟩), .scalar (.i64 (-3))]",
     ".ok (memory, [.reference (.address ⟨0, 8⟩)])");
+Boundary("SubtractUnsigned", "native_wrapping_subtraction",
+    "[.reference (.address ⟨0, 5⟩), .scalar (.i64 18446744073709551615)]",
+    ".ok (memory, [.reference (.address ⟨0, 6⟩)])");
+Boundary("SubtractUnsigned", "readonly_subtraction",
+    "[.readOnlyReference (.address ⟨0, 5⟩), .scalar (.i64 3)]",
+    ".ok (memory, [.readOnlyReference (.address ⟨0, 2⟩)])");
+var words = new ulong[4];
+foreach (var (name, offsetType, scalar) in new[]
+{
+    ("SubtractElements32", "System.Int32", "i32"),
+    ("SubtractElementsNative", "System.IntPtr", "i64"),
+    ("SubtractElementsUnsigned", "System.UIntPtr", "i64")
+})
+{
+    var method = runtime.GetMethod(name)!;
+    ref var result = ref (scalar == "i32"
+        ? ref method.CreateDelegate<WordOffset32>()(ref words[3], 2)
+        : ref offsetType == "System.IntPtr"
+            ? ref method.CreateDelegate<WordOffsetNative>()(ref words[3], 2)
+            : ref method.CreateDelegate<WordOffsetUnsigned>()(ref words[3], 2));
+    var expected = Unsafe.ByteOffset(ref words[0], ref result);
+    Prove(name, $"UnsafeReferences::{name}(System.UInt64&,{offsetType})",
+        $"CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 24⟩), .scalar (.{scalar} 2)] " +
+        $"memory = .ok (memory, [.reference (.address ⟨0, {expected}⟩)])");
+    Boundary(name, "negative_native_stride", $"[.reference (.address ⟨0, 8⟩), .scalar (.{scalar} (-1))]",
+        ".ok (memory, [.reference (.address ⟨0, 16⟩)])");
+    Boundary(name, "outside_subtraction", $"[.reference (.address ⟨0, 8⟩), .scalar (.{scalar} 2)]",
+        ".error ⟨0, 2, .memory .invalidReference (.address ⟨0, 8⟩) 0⟩");
+}
+Prove("SubtractAggregate", "UnsafeReferences::SubtractAggregate(Examples.FourLimbs&,System.IntPtr)",
+    "CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 32⟩), .scalar (.i64 1)] " +
+    "memory = .ok (memory, [.reference (.address ⟨0, 0⟩)])");
+ref var wrapped = ref runtime.GetMethod("SubtractElementsUnsigned")!.CreateDelegate<WordOffsetUnsigned>()
+    (ref words[1], nuint.MaxValue);
+if (Unsafe.ByteOffset(ref words[1], ref wrapped) != 8)
+    throw new InvalidOperationException("Unsigned element subtraction did not wrap at native width");
+Prove("SubtractVector",
+    "UnsafeReferences::SubtractVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UIntPtr)",
+    "CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 16⟩), .scalar (.i64 1)] " +
+    "memory = .ok (memory, [.reference (.address ⟨0, 0⟩)])");
 queue.Flush();
 
 var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
@@ -137,7 +179,12 @@ foreach (var (name, before, after) in new[]
     ("ByteOffset", ".memory .byteOffset", ".sub"),
     ("AddSigned", ".memory (.add 1 true)", ".memory (.add 8 true)"),
     ("AddUnsigned", ".memory (.add 1 false)", ".memory (.add 1 true)"),
-    ("Subtract", ".sub", ".add")
+    ("Subtract", ".sub", ".add"),
+    ("SubtractUnsigned", ".sub", ".add"),
+    ("SubtractElements32", ".memory (.add 18446744073709551608 true)", ".memory (.add 8 true)"),
+    ("SubtractElementsUnsigned", ".memory (.add 18446744073709551608 false)",
+        ".memory (.add 18446744073709551608 true)"),
+    ("SubtractVector", ".memory (.add 18446744073709551600 false)", ".memory (.add 16 false)")
 })
 {
     var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
@@ -148,6 +195,15 @@ foreach (var (name, before, after) in new[]
     File.WriteAllText(path, narrowed.Replace(before, after, StringComparison.Ordinal));
     rejected.Add(path, "PASS exact Unsafe operation rejection: " + name, "UnsafeCallsValid");
 }
+var aggregateSource = File.ReadAllText(Path.Combine(root, "SubtractAggregate", "Extracted.lean"));
+var aggregateEvidence = NarrowEvidence(aggregateSource, "method0_layouts_validated");
+const string aggregateStride = ".memory (.add 18446744073709551584 true)";
+if (!aggregateEvidence.Contains(aggregateStride, StringComparison.Ordinal))
+    throw new InvalidOperationException("Missing aggregate subtraction stride");
+var aggregateForgery = Path.Combine(root, "SubtractAggregate", "WrongStride.lean");
+File.WriteAllText(aggregateForgery, aggregateEvidence.Replace(aggregateStride,
+    ".memory (.add 32 true)", StringComparison.Ordinal));
+rejected.Add(aggregateForgery, "PASS exact aggregate subtraction layout", "MethodLayoutsValid");
 var byteOffsetSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "ByteOffset", "Extracted.lean")),
     "method0_unsafe_validated");
 foreach (var (name, before, after) in new[]
@@ -238,3 +294,6 @@ delegate bool ReferenceComparison(ref byte origin, ref byte target);
 delegate nint ReferenceDifference(ref byte origin, ref byte target);
 delegate ref byte SignedReferenceOffset(ref byte origin, nint offset);
 delegate ref byte UnsignedReferenceOffset(ref byte origin, nuint offset);
+delegate ref ulong WordOffset32(ref ulong origin, int offset);
+delegate ref ulong WordOffsetNative(ref ulong origin, nint offset);
+delegate ref ulong WordOffsetUnsigned(ref ulong origin, nuint offset);

@@ -53,6 +53,10 @@ def unsafeReferenceHelper (instruction : RawInstruction) : Option UnsafeReferenc
     else if site.name == "SubtractByteOffset" && referenceSignature site reference [reference, native]
         "!!0& System.Runtime.CompilerServices.Unsafe::SubtractByteOffset(!!0&,System.IntPtr)" then
       some .subtractBytes
+    else if site.name == "SubtractByteOffset" &&
+        referenceSignature site reference [reference, unsigned]
+          "!!0& System.Runtime.CompilerServices.Unsafe::SubtractByteOffset(!!0&,System.UIntPtr)" then
+      some .subtractBytes
     else none
 
 /-- The exact existing operation implementing each reference helper. -/
@@ -62,15 +66,15 @@ def UnsafeReferenceHelper.matches : UnsafeReferenceHelper → Op → Bool
   | .addBytes expected, .memory (.add width signed) => width == 1 && signed == expected
   | _, _ => false
 
-/-- Existing element additions remain separately governed by their layout evidence. -/
-def unsafeElementAdd (instruction : RawInstruction) : Bool := Id.run do
+/-- Element offsets require exact helper metadata and separately checked layout evidence. -/
+def unsafeElementOffset (instruction : RawInstruction) : Bool := Id.run do
   if instruction.opcode != 0x28 then return false
   let .call site := instruction.operand | return false
   let [type] := site.typeArguments | return false
-  if site.name != "Add" then return false
+  if site.name != "Add" && site.name != "Subtract" then return false
   return ["System.Int32", "System.IntPtr", "System.UIntPtr"].any fun offset =>
     referenceSignature site (.byref type) [.byref type, .atom runtimeScope offset]
-      ("!!0& System.Runtime.CompilerServices.Unsafe::Add(!!0&," ++ offset ++ ")")
+      ("!!0& System.Runtime.CompilerServices.Unsafe::" ++ site.name ++ "(!!0&," ++ offset ++ ")")
 
 /-- New helper names and byte-add calls cannot escape exact matching through stack effects. -/
 def unsafeReferenceRequired (instruction : RawInstruction) (emitted : Op) : Bool :=
@@ -83,7 +87,7 @@ def unsafeReferenceRequired (instruction : RawInstruction) (emitted : Op) : Bool
         | .atom _ "System.Runtime.CompilerServices.Unsafe" => true
         | _ => false) && site.name ∈ ["AreSame", "IsAddressLessThan", "IsAddressGreaterThan", "ByteOffset",
         "AddByteOffset", "SubtractByteOffset"] ||
-        match emitted with | .memory (.add ..) => !unsafeElementAdd instruction | _ => false
+        match emitted with | .memory (.add ..) => !unsafeElementOffset instruction | _ => false
     | _, _ => false
 
 end CIL.Extraction

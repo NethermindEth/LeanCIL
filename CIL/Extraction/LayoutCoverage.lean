@@ -5,7 +5,7 @@ import CIL.Extraction.Generics
 
 `MethodLayoutsValid` checks only the layout uses it is given. `LayoutUsesComplete` closes
 that gap: it derives every layout-dependent site from the raw body (field accesses, struct
-loads, stores, copies, initializations, sizes, constructions and `Unsafe.Add`), plus every
+loads, stores, copies, initializations, sizes, constructions and Unsafe element offsets), plus every
 struct-typed local and homed parameter, and requires the extractor's list to be exactly
 that list.
 -/
@@ -59,6 +59,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     | .atom _ "System.Runtime.CompilerServices.Unsafe", [.aggregate _ index] =>
       if site.name = "SizeOf" then return [.size pc index .sizeOf]
       else if site.name = "Add" then return [.size pc index .referenceAdd]
+      else if site.name = "Subtract" then return [.size pc index .referenceSubtract]
       else if site.name = "ReadUnaligned" then return [.size pc index .load]
       else if site.name = "WriteUnaligned" then return [.size pc index .store]
       else return []

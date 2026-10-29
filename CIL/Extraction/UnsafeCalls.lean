@@ -36,6 +36,28 @@ private def admittedReferenceArgument (layouts : List RawLayout) : List TypeExpr
     | _ => false
   | _ => false
 
+/-- Element subtraction binds signedness and native stride; aggregate sizes use layout evidence. -/
+def unsafeSubtractMatches (layouts : List RawLayout) (raw : RawInstruction) (emitted : Op) : Bool :=
+  match raw.opcode, raw.operand with
+  | 40, .call site =>
+    if site.name != "Subtract" ||
+        site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" then true
+    else if !unsafeElementOffset raw || !admittedReferenceArgument layouts site.typeArguments then
+      false
+    else match site.typeArguments, emitted with
+      | [type], .memory (.add stride signed) =>
+        signed == (site.parameterTypes[1]? != some (.atom runtimeScope "System.UIntPtr")) &&
+          match typeStorage layouts type with
+          | some (.field (.aggregate _)) => true
+          | some (.field kind) => (primitiveFieldWidth kind).any fun width =>
+            stride == subtractionStride width
+          | some .vector128 => stride == subtractionStride 16
+          | some .vector256 => stride == subtractionStride 32
+          | some .vector512 => stride == subtractionStride 64
+          | _ => false
+      | _, _ => false
+  | _, _ => true
+
 /-- `helper` when the call has its exact target and an admitted type argument. -/
 private def bound (layouts : List RawLayout) (site : CallSite) (signature : String)
     (helper : UnsafeHelper) : Option UnsafeHelper :=
@@ -74,6 +96,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
   all3 (fun instruction live emitted => !live ||
       unsafeTransferMatches layouts instruction emitted &&
       marshalTransferMatches layouts instruction emitted &&
+      unsafeSubtractMatches layouts instruction emitted &&
       if unsafeReferenceRequired instruction emitted then
         match unsafeReferenceHelper instruction, instruction.operand with
         | some helper, .call site =>

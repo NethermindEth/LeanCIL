@@ -24,7 +24,7 @@ internal static class UnsafeModels
 
         var sizeOf = reference.Name == "SizeOf" && reference.Parameters.Count == 0 &&
             reference.ReturnType.FullName == "System.Int32";
-        var add = reference.Name == "Add" && reference.Parameters.Count == 2 &&
+        var elementOffset = reference.Name is "Add" or "Subtract" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr";
         var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
@@ -43,8 +43,8 @@ internal static class UnsafeModels
             reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
         var subtractBytes = reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
-            reference.Parameters[1].ParameterType.FullName == "System.IntPtr";
-        if (!sizeOf && !add && !skipInit && !nullRef && !isNullRef && !comparison && !byteOffset &&
+            reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
+        if (!sizeOf && !elementOffset && !skipInit && !nullRef && !isNullRef && !comparison && !byteOffset &&
             !addBytes && !subtractBytes) return null;
 
         if (element is ByReferenceType || element is PointerType || element is GenericParameter)
@@ -74,7 +74,9 @@ internal static class UnsafeModels
         if (subtractBytes) return ".sub";
         if (sizeOf) return $".const32 {width}";
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
-        return $".memory (.add {(addBytes ? 1 : width)} {signed.ToString().ToLowerInvariant()})";
+        // Native-width negative strides reuse the checked wrapping offset operation.
+        var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);
+        return $".memory (.add {stride} {signed.ToString().ToLowerInvariant()})";
     }
 
     // A byref reinterpretation changes only its static type, never the allocation,

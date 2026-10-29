@@ -30,4 +30,15 @@ internal static class UnsafeReferences
     public static ref byte AddSigned(ref byte origin, nint offset) => ref Unsafe.AddByteOffset(ref origin, offset);
     public static ref byte AddUnsigned(ref byte origin, nuint offset) => ref Unsafe.AddByteOffset(ref origin, offset);
     public static ref byte Subtract(ref byte origin, nint offset) => ref Unsafe.SubtractByteOffset(ref origin, offset);
+    public static ref byte SubtractUnsigned(ref byte origin, nuint offset) =>
+        ref Unsafe.SubtractByteOffset(ref origin, offset);
+    public static ref ulong SubtractElements32(ref ulong origin, int offset) => ref Unsafe.Subtract(ref origin, offset);
+    public static ref ulong SubtractElementsNative(ref ulong origin, nint offset) =>
+        ref Unsafe.Subtract(ref origin, offset);
+    public static ref ulong SubtractElementsUnsigned(ref ulong origin, nuint offset) =>
+        ref Unsafe.Subtract(ref origin, offset);
+    public static ref FourLimbs SubtractAggregate(ref FourLimbs origin, nint offset) =>
+        ref Unsafe.Subtract(ref origin, offset);
+    public static ref Vector128<ulong> SubtractVector(ref Vector128<ulong> origin, nuint offset) =>
+        ref Unsafe.Subtract(ref origin, offset);
 }
