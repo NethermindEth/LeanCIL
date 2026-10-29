@@ -10,6 +10,9 @@ You can prove results for every input satisfying a contract, show that a loop te
 check memory access conditions, or establish a counterexample to an incorrect implementation.
 Proofs can compose previously proved method contracts without unfolding helper bodies.
 
+The [buffer-fill example](Examples/Proofs/FillWords.lean) proves an arbitrary-length fill,
+including termination, the resulting contents and preservation outside the writable region.
+
 ```mermaid
 flowchart TD
     source["C#, F# or other .NET source"] -- ".NET compiler" --> assembly["Compiled assembly<br/>(the actual CIL)"]

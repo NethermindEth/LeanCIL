@@ -2,20 +2,20 @@ import Extracted
 import Examples.Support
 import CIL.Verification
 import CIL.Safety.NumericLocals
-import CIL.Safety.LoopAutomation
+import CIL.Safety.LoopScaffold
 
 open CIL.Safety
 open CIL (W32)
 namespace ExampleProof
 
-private def frame : Frame := ⟨0, [.bytes .word32 ⟨0, 0⟩], [0], [], 0⟩
-private def guard : Nat := instructionLocation Extracted.method0 fun op =>
-  match op with | .brnonzero _ => true | _ => false
+bind_entry entry := Extracted.method0 with [] from Examples.empty
+bind_cutpoint cutpoint := Extracted.method0 matching
+  (fun op => match op with | .brnonzero _ => true | _ => false) with entry.frame
 private def header (state : W32 × Memory) : LoopState :=
-  ⟨guard, frame, [.scalar (.i32 state.1)], state.2⟩
+  cutpoint [.scalar (.i32 state.1)] state.2
 private def invariant (state : W32 × Memory) : Prop :=
-  loadLocal state.2 (.bytes .word32 ⟨0, 0⟩) = .ok (.scalar (.i32 state.1)) ∧
-  access state.2 ⟨0, 0⟩ 4 1 true = .ok ()
+  loadLocal state.2 (.bytes .word32 entry.home0) = .ok (.scalar (.i32 state.1)) ∧
+  access state.2 entry.home0 4 1 true = .ok ()
 
 private theorem terminates (args : List CIL.Safety.Value) (state : W32 × Memory)
     (valid : invariant state) :
@@ -29,7 +29,7 @@ private theorem terminates (args : List CIL.Safety.Value) (state : W32 × Memory
   by_cases zero : x = 0
   · left
     subst x
-    cil_loop_finish [frame, header, loaded]
+    cil_loop_finish [entry.frame, header, cutpoint, loaded]
   · right
     have nonzero : x ≠ 0#32 := zero
     obtain ⟨updated, written, stored, bytes⟩ := store_numeric_local .word32 (.i32 (x - 1))
@@ -38,7 +38,7 @@ private theorem terminates (args : List CIL.Safety.Value) (state : W32 × Memory
     simp only [BitVec.ofNat_eq_ofNat] at stored readback
     obtain ⟨allocation, ready⟩ := access_requirements writable
     have path : LoopReaches Extracted.program 0 args (header (x, m)) (header (x - 1, updated)) := by
-      cil_loop_steps [frame, header, loaded, stored, readback, nonzero]
+      cil_loop_steps [entry.frame, header, cutpoint, loaded, stored, readback, nonzero]
     obtain ⟨cost, segment⟩ := path
     refine ⟨(x - 1, updated), cost, ⟨readback, (ready.after_write written).access⟩, ?_, segment⟩
     have positive : 0 < x.toNat := by
@@ -57,20 +57,19 @@ theorem correctness : CIL.Safety.Ensures Extracted.program 0
   apply ensures_of_loop
   intro args initial permitted
   obtain ⟨x, rfl, rfl⟩ := permitted
-  let entered := ((enterFrame Extracted.method0 [] Examples.empty).toOption.getD
-    (frame, Examples.empty)).2
-  have setup : enterFrame Extracted.method0 [.scalar (.i32 x)] Examples.empty = .ok (frame, entered) := by
+  let entered := entry.memory
+  have setup : enterFrame Extracted.method0 [.scalar (.i32 x)] Examples.empty = .ok (entry.frame, entered) := by
     rfl
-  have writable : access entered ⟨0, 0⟩ 4 1 true = .ok () := by rfl
+  have writable : access entered entry.home0 4 1 true = .ok () := by rfl
   obtain ⟨updated, written, stored, bytes⟩ := store_numeric_local .word32 (.i32 x) x.toNat rfl writable
   have readback := load_numeric_local .word32 (.i32 x) x.toNat rfl bytes
   obtain ⟨allocation, ready⟩ := access_requirements writable
   have entryPath : LoopReaches Extracted.program 0 [.scalar (.i32 x)]
-      ⟨0, frame, [], entered⟩ (header (x, updated)) := by
-    cil_loop_steps [frame, header, stored, readback]
+      ⟨0, entry.frame, [], entered⟩ (header (x, updated)) := by
+    cil_loop_steps [entry.frame, header, cutpoint, stored, readback]
   obtain ⟨fuel, final, values, executed, satisfied⟩ := loop_reaches_terminates entryPath
     (terminates [.scalar (.i32 x)] (x, updated) ⟨readback, (ready.after_write written).access⟩)
-  exact ⟨Extracted.method0, frame, entered, Extracted.lookup0, rfl, setup,
+  exact ⟨Extracted.method0, entry.frame, entered, Extracted.lookup0, rfl, setup,
     fuel, final, values, executed, satisfied⟩
 
 #print axioms correctness

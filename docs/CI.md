@@ -52,11 +52,6 @@ its own cache and transcript; a failure does not skip later members, and any mem
 fails the group. Selection still includes exactly the requested suites. This removes repeated
 toolchain/library downloads without reducing coverage or increasing concurrent runners.
 
-The duration table uses the slower verification step from runs `40746599661` and `40734844413`.
-It produces 48 jobs for the current 66 suites. Applying those groups to the latest run's setup
-times, retaining the slowest setup in each group, estimates 996 fewer runner-seconds. Network
-variation and the job dependency graph mean this is not a wall-clock guarantee.
-
 Checked stepping rewrites feature and return instructions before using the general dispatcher.
 Child invocation matching skips duplicate facts and incompatible literal fuel budgets for
 abstract programs. The library and tactic regressions kernel-check the resulting proofs.

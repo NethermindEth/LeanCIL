@@ -1,5 +1,35 @@
 # Binding and transporting compiled proofs
 
+## Generate loop entry and cutpoint scaffolding
+
+Import `CIL.Safety.LoopScaffold` to derive a concrete checked entry and a uniquely identified
+instruction from an extracted method:
+
+```lean
+bind_entry entry := Extracted.method0 with [] from Examples.empty
+bind_cutpoint cutpoint := Extracted.method0 matching
+  (fun op => match op with | .brnonzero _ => true | _ => false) with entry.frame
+```
+
+`entry.frame`, `entry.memory` and `entry.home0` (and subsequent numeric homes) come from
+`enterFrame`. `entry.checked` proves the allocator returned exactly that frame and memory. Inputs
+must reduce to successful allocation; an invalid entry is rejected. This command does not construct
+symbolic allocation premises for arbitrary initial memory.
+
+`cutpoint stack memory` constructs the loop state. `cutpoint.checked` proves the selected
+instruction satisfies the predicate and is its unique match. Missing or ambiguous matches are
+errors. The predicate locates an instruction; it does not prove that it is a loop header or that
+execution reaches it. The loop proof establishes those properties.
+
+[Countdown](../Examples/Proofs/Countdown.lean) uses these commands without literal frame layouts,
+allocation identifiers or instruction offsets. The author still supplies the invariant, measure,
+specification and preservation proof using the existing checked loop tactics. Only requesting proofs
+elaborate the scaffold; ordinary extraction certificates do not grow.
+
+[FillWords](../Examples/Proofs/FillWords.lean) is a larger result: its contract describes an
+arbitrary-length buffer fill, termination and preservation outside the writable region. See [buffer
+contracts](PROOFS-BUFFERS.md) for its memory preconditions.
+
 ## Move a run that starts inside a region
 
 Embedding relates whole bodies. When only a suffix is shared, `CIL.Safety.RegionRun` cuts the rest
