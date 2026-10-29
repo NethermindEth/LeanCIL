@@ -20,14 +20,14 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
-| `ldlen` | Partial | Length of a supplied primitive integer or enum array, returned as a native integer. Null raises `System.NullReferenceException`. |
+| `ldlen` | Partial | Length of a supplied primitive integer/enum array or typed handler table, returned as a native integer. Null raises `System.NullReferenceException`. |
 | `ldelema` | Partial | Checked element reference into a supplied primitive or enum array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
 | `readonly.` | Partial | Immediately precedes an admitted `ldelema`; branches into the following address instruction are rejected. Produces a restricted reference that remains readonly through byref locals, arguments and returns. Scalar reads are allowed, while stores and adapters that would discard the restriction fail. Other authorized aliases can still update the backing bytes. |
-| `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` requires an admitted primitive or exact enum token matching the array element type. Reads require initialized bytes and read authority. |
+| `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` requires an admitted primitive or exact enum token matching the array element type. Reads require initialized bytes and read authority. `ldelem.i` and typed `ldelem` also select typed entries from supplied handler tables. |
 | `stelem.i1`, `stelem.i2`, `stelem.i4`, `stelem.i8`, `stelem.i`, `stelem` | Partial | Checked integer array stores; narrow stores truncate. Typed `stelem` requires a matching primitive or exact enum token. Stores require write authority and initialize only the selected element. |
 | `ldc.i4`, `ldc.i4.s`, `ldc.i4.m1`, `ldc.i4.0`–`ldc.i4.8` | Complete within the admitted model | Push the encoded 32-bit integer constant. |
 | `ldc.i8` | Complete within the admitted model | Push the encoded 64-bit integer constant. |
-| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, stack shuffles/discard, or a supplied primitive or enum array slot/call/return. General object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
+| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, stack shuffles/discard, or a supplied primitive/enum array or typed handler-table slot/call/return. General object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
 | `nop` | Complete within the admitted model | Advance without changing the stack or memory. |
 | `dup`, `pop` | Complete within the admitted model | Duplicate or discard a supported stack value; stack underflow fails. |
 | `ldarg`, `ldarg.s`, `ldarg.0`–`ldarg.3` | Partial | Load admitted argument values; struct instance methods have a managed-reference `this` at index zero; narrow integers are truncated and sign- or zero-extended to `i32`. Reference values undergo validity checks; class instance methods remain unsupported. |
@@ -98,7 +98,7 @@ program indices. Supported signatures contain primitive integer or enum paramete
 managed references to those types, and void results. Calling conventions are checked exactly.
 
 Table allocation, updates, null entries, pointer fields and numeric-address conversions are
-not supported. Raw `nint` EVM tables therefore need further work. Tail cycles consume ordinary
+not supported. Raw `nint` EVM tables therefore need further work. All-tail cycles are supported; mixed ordinary/tail recursive graphs may be rejected. Tail cycles consume ordinary
 execution fuel; admitting a cycle neither proves termination nor makes exhaustion successful.
 
 ## Dynamic stack allocation
