@@ -628,6 +628,27 @@ neighboring-byte preservation for the retained snapshot. The snapshot uses array
 for constant-time byte lookup. Short destinations throw `ArgumentException` or return false
 without a source read or destination write; empty copies require no byte access.
 
+Aggregate and integer-vector spans use the same `SpanView`, indexed references, checked
+loads/stores, byte snapshots and copy rules. Supply the validated element width rather than
+assuming one of the primitive widths. `Clear` initializes the byte extent; scalar `Fill`
+remains restricted to integers and enums. Vector loads and stores preserve initialization
+masks, while span copies require readable, initialized source bytes. View creation and
+reinterpretation alone establish neither initialization nor read/write authority.
+
+`Tests/AggregateSpans.cs` demonstrates aggregate buffers, vector masks, overlap-safe copying
+and target-dependent layouts. `Tests/BinarySpans.cs` demonstrates integer byte-order transfers
+and short-span behavior. `Tests/ViewAccessors.cs` checks observations without byte authority.
+Closed generic-owner helpers use the ordinary specialized managed-call proof interface;
+`Tests/GenericOwners.cs` covers nested owners and mixed owner/method arguments.
+
+For supplied native dispatch tables, provide an immutable allocation binding and exact catalog
+target identities in `MethodTable.backing`. Checked byte offsets and `ldind.i` preserve
+authenticated callable provenance; numeric address bytes alone are insufficient.
+`Tests/NativeManagedDispatch.cs` and `Tests/NativeMethodTables.lean` cover dispatch and rejection
+obligations. These tables require a unique scalar-only managed indirect-call signature in each
+body; handler signatures cannot carry native table pointers. Ordinary call and tail-call
+lifetime and fuel obligations still apply.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes
@@ -1220,7 +1241,7 @@ An extraction can also declare locals the literal body never uses. Exact-memory 
 covers dead locals that trail the body's own locals and are
 references or spans initialized to their empty value or left unmodeled. These cover
 byref, pointer, `Span<T>` and `ReadOnlySpan<T>` locals; spans require an element width
-of 1, 2, 4 or 8 bytes. For those, `cil_embed` proves
+greater than zero and less than `2^64` bytes. For those, `cil_embed` proves
 `MethodEmbedsDeadLocals` instead, and the same proof covers extractions with and
 without them (from `CIL.Safety.Embedding.DeadLocals`):
 
@@ -1269,7 +1290,7 @@ every source method. The target is the extraction with the additional dead decla
 This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals`, `vectorArgs`
 and `parameterHomes` are empty. Retained initializers stay exact, including initialized
 numeric helpers; their successful setup is derived from the actual source execution.
-Local widths must fit the native range; span element widths must be 1, 2, 4 or 8.
+Local widths must fit the native range; span element widths must be positive and less than `2^64`.
 These are explicit, checked metadata conditions, not assumed target frame-entry success.
 The audited int256 Multiply body across all fourteen profiles has 22 word64 and four
 vector256 unmodeled locals. Its reachable helper method4 has an initialized word64 zero
