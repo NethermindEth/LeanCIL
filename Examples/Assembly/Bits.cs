@@ -72,11 +72,20 @@ public static class Bits
     public static ulong ReverseU64(ulong value) => BinaryPrimitives.ReverseEndianness(value);
 
     public static int PrimitiveNarrow8(uint value) => byte.PopCount((byte)value) |
-        (byte.Log2((byte)value) << 8) | ((byte.IsPow2((byte)value) ? 1 : 0) << 16);
+        (byte.Log2((byte)value) << 8) | ((byte.IsPow2((byte)value) ? 1 : 0) << 16) |
+        (byte.LeadingZeroCount((byte)value) << 18) | (byte.TrailingZeroCount((byte)value) << 22);
     public static int PrimitiveNarrow16(uint value) => ushort.PopCount((ushort)value) |
-        (ushort.Log2((ushort)value) << 8) | ((ushort.IsPow2((ushort)value) ? 1 : 0) << 16);
+        (ushort.Log2((ushort)value) << 8) | ((ushort.IsPow2((ushort)value) ? 1 : 0) << 16) |
+        (ushort.LeadingZeroCount((ushort)value) << 18) | (ushort.TrailingZeroCount((ushort)value) << 23);
     public static int PrimitiveNarrowSigned(uint value) => (sbyte.IsPow2((sbyte)value) ? 1 : 0) |
-        ((short.IsPow2((short)value) ? 1 : 0) << 1);
+        ((short.IsPow2((short)value) ? 1 : 0) << 1) | (sbyte.PopCount((sbyte)value) << 2) |
+        (short.PopCount((short)value) << 6) | (sbyte.LeadingZeroCount((sbyte)value) << 11) |
+        (sbyte.TrailingZeroCount((sbyte)value) << 15) | (short.LeadingZeroCount((short)value) << 19) |
+        (short.TrailingZeroCount((short)value) << 24);
+    public static int PrimitiveNarrowRotate8(uint value, int count) => byte.RotateLeft((byte)value, count) |
+        (byte.RotateRight((byte)value, count) << 8);
+    public static int PrimitiveNarrowRotate16(uint value, int count) => ushort.RotateLeft((ushort)value, count) |
+        (ushort.RotateRight((ushort)value, count) << 16);
 
     public static ulong RoundTrip(ulong value) => BitOperations.RotateRight(BitOperations.RotateLeft(value, 13), 13);
     public static ulong WrongRoundTrip(ulong value) => BitOperations.RotateRight(BitOperations.RotateLeft(value, 13), 12);

@@ -115,6 +115,18 @@ def evalScalarIntrinsic : ScalarIntrinsic → List Value → Option Value
   | .log2 width, [.i32 bits] =>
     if width == 8 || width == 16 then
       some (.i32 (BitVec.ofNat 32 (bits.setWidth width).toNat.log2)) else none
+  | .leadingZeroCount width, [.i32 bits] =>
+    if width == 8 || width == 16 then
+      some (.i32 (BitVec.ofNat 32 (leadingZeros (bits.setWidth width)))) else none
+  | .trailingZeroCount width, [.i32 bits] =>
+    if width == 8 || width == 16 then
+      some (.i32 (BitVec.ofNat 32 (trailingZeros (bits.setWidth width)))) else none
+  | .rotateLeft width, [.i32 bits, .i32 count] =>
+    if width == 8 || width == 16 then
+      some (.i32 (((bits.setWidth width).rotateLeft count.toNat).zeroExtend 32)) else none
+  | .rotateRight width, [.i32 bits, .i32 count] =>
+    if width == 8 || width == 16 then
+      some (.i32 (((bits.setWidth width).rotateRight count.toNat).zeroExtend 32)) else none
   | _, _ => none
 
 end CIL

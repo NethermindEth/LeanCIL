@@ -24,7 +24,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
             instruction.OpCode = Mono.Cecil.Cil.OpCodes.Nop;
             removed++;
         }
-    if (removed != 8) throw new InvalidOperationException("Unexpected narrow helper conversion count: " + removed);
+    if (removed != 22) throw new InvalidOperationException("Unexpected narrow helper conversion count: " + removed);
     assembly = Path.Combine(root, "Examples.dll");
     module.Write(assembly);
 }
@@ -86,6 +86,11 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var claims = new List<string>();
     var narrow = method.Name.StartsWith("PrimitiveNarrow", StringComparison.Ordinal);
     if (narrow) values = [0, 1, 2, 127, 128, 255, 256, 32767, 32768, 65535, 65536, uint.MaxValue];
+    if (narrow && rotations)
+    {
+        values = [0, 1, 128, 255, 256, 32768, 65535, 65536];
+        counts = [-17, -1, 0, 17];
+    }
     // Different source bit patterns can become the same narrow runtime argument.
     var arguments = values.Select(bits => Value(parameters[0].ParameterType, bits)).Distinct();
     foreach (var value in arguments)
@@ -93,7 +98,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     {
         object[] inputs = rotations ? [value, count] : [value];
         var expected = method.Invoke(null, inputs)!;
-        claims.Add($"(CIL.Safety.invoke Extracted.program {(narrow ? 48 : 8)} 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = .ok [{LeanValue(expected)}]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program {(narrow ? 96 : 8)} 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = .ok [{LeanValue(expected)}]");
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
@@ -144,7 +149,7 @@ if (!failed || File.Exists(Path.Combine(wrongLog, "verified.json")))
 // Preserve exact runtime identity and signature checks for the new allowlist.
 foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported",
     "memory-scope", "memory-key", "signed-log", "wide-count", "native-count",
-    "narrow-leading", "narrow-signed-log", "narrow-return" })
+    "narrow-rotate-signed", "narrow-signed-log", "narrow-return" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
@@ -155,7 +160,8 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
         "signed-log" => "PrimitivePopulation32",
         "wide-count" => "PrimitivePower64",
         "native-count" => "PrimitivePowerNative",
-        "narrow-leading" or "narrow-return" => "PrimitiveNarrow8",
+        "narrow-return" => "PrimitiveNarrow8",
+        "narrow-rotate-signed" => "PrimitiveNarrowRotate8",
         "narrow-signed-log" => "PrimitiveNarrowSigned",
         "memory-scope" or "memory-key" => "ReverseU64",
         _ => "PrimitiveLeftU64"
@@ -178,7 +184,11 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             case "memory-scope": call.DeclaringType.Scope = module.TypeSystem.CoreLibrary; break;
             case "memory-key": ((AssemblyNameReference)call.DeclaringType.Scope).PublicKeyToken = []; break;
             case "signed-log": call.Name = "Log2"; break;
-            case "narrow-leading": call.Name = "LeadingZeroCount"; break;
+            case "narrow-rotate-signed":
+                call.DeclaringType = module.TypeSystem.SByte;
+                call.ReturnType = module.TypeSystem.SByte;
+                call.Parameters[0].ParameterType = module.TypeSystem.SByte;
+                break;
             case "narrow-return": call.ReturnType = module.TypeSystem.Int32; break;
             case "narrow-signed-log":
                 call.Name = "Log2";
@@ -198,7 +208,7 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             "instance" => "Invalid evaluation stack during reachability",
             "generic" => "Contract imports require an exact closed generic instantiation on a non-generic declaring type.",
             "return" or "argument" or "unsupported" or "memory-scope" or
-                "signed-log" or "wide-count" or "native-count" or "narrow-leading" or
+                "signed-log" or "wide-count" or "native-count" or "narrow-rotate-signed" or
                 "narrow-signed-log" or "narrow-return" => "External managed dependency: " + call.FullName,
             _ => throw new InvalidOperationException("Unknown runtime rejection fixture: " + mutation)
         };

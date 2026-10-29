@@ -257,10 +257,14 @@ internal static class RuntimeModels
         {
             operations.Add($"System.Boolean {type}::IsPow2({type})",
                 $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
-            if (signed) continue;
-            foreach (var (name, operation) in new[] { ("PopCount", "popCount"), ("Log2", "log2") })
+            foreach (var (name, operation) in BitCounts.Where(count => count.Name != "Log2"))
                 operations.Add($"{type} {type}::{name}({type})",
                     $".intrinsic (.scalar (.{operation} {width})) 1");
+            if (signed) continue;
+            operations.Add($"{type} {type}::Log2({type})", $".intrinsic (.scalar (.log2 {width})) 1");
+            foreach (var (name, operation) in Rotations)
+                operations.Add($"{type} {type}::{name}({type},System.Int32)",
+                    $".intrinsic (.scalar (.{operation} {width})) 2");
         }
         return operations;
     }

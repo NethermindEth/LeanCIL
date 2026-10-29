@@ -39,8 +39,8 @@ Neither scan establishes coverage over arbitrary programs or future compiler rel
 
 Run `dotnet run --file Tests/RuntimeModelInventory.cs` to check the production runtime-call
 translator against the pinned reference metadata. The checked-in
-[catalog](../Tests/RuntimeModelInventory.txt) contains 399 admitted method definitions in
-38 API-owner groups. The fixed primitive domain produces 1,786 admitted closed instances;
+[catalog](../Tests/RuntimeModelInventory.txt) contains 413 admitted method definitions in
+38 API-owner groups. The fixed primitive domain produces 1,800 admitted closed instances;
 these are reported separately to avoid counting each generic instantiation as a new definition.
 The artifact `artifacts/RuntimeModelInventory/inventory.json` records the complete inventory
 and counts by API owner. Additions and removals fail with a diff; after reviewing the model
