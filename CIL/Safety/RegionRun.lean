@@ -30,10 +30,13 @@ def AgreesOn (program other : CIL.Program) (region : Nat → Nat → Prop) : Pro
 
 /-- A non-tail instruction that calls a method falls through to the next pc. -/
 theorem Op.continues_of_callee {op : CIL.Op} {callee : Nat}
-    (h : op.callees.head? = some callee)
-    (notTail : ∀ argc, op ≠ .tailCall callee argc) :
+    (h : callee ∈ op.callees)
+    (notTail : ∀ argc, op ≠ .tailCall callee argc)
+    (notManagedTail : ∀ signature catalog, op ≠ .managed (.call signature catalog true)) :
     op.continues = true := by
   cases op <;> simp_all [CIL.Op.callees, CIL.Op.continues]
+
+#print axioms Op.continues_of_callee
 
 private theorem AgreesOn.found {program other : CIL.Program} {region : Nat → Nat → Prop}
     (agrees : AgreesOn program other region) {method pc : Nat} (inside : region method pc) :
@@ -82,12 +85,16 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
           · exact ih method _ args frame' stack' m' (targets target member)
         | returned result m' => rfl
         | call callee arguments rest m' =>
-          have entered := step_callee hs
-          have child := callees callee (List.mem_of_head? entered.symm)
-          have resume := continues (Op.continues_of_callee entered.symm (by
+          have entered := step_callee hs rfl
+          have child := callees callee entered
+          have resume := continues (Op.continues_of_callee entered (by
             intro argc equal
             subst op
             obtain ⟨_, _, impossible⟩ := step_tailCall_action hs
+            cases impossible) (by
+            intro signature catalog equal
+            subst op
+            obtain ⟨_, _, _, impossible⟩ := step_managed_tail_action hs
             cases impossible))
           rcases agrees.found child with ⟨cb, cb'⟩ | ⟨cbody, cbody', cb, cb', csame, _⟩
           · simp only [cb, cb']
@@ -102,8 +109,8 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
             | error fault => rfl
             | ok result => exact ih method (pc + 1) args frame _ _ resume
         | tailCall callee arguments updated =>
-          have entered := step_callee hs
-          have child := callees callee (List.mem_of_head? entered.symm)
+          have entered := step_callee hs rfl
+          have child := callees callee entered
           rcases agrees.found child with ⟨cb, cb'⟩ | ⟨cbody, cbody', cb, cb', csame, _⟩
           · simp only [cb, cb']
           rw [csame] at cb'
@@ -121,12 +128,16 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
             | error fault => rfl
             | ok result => exact ih callee 0 values result.1 [] result.2 child
         | construct callee arguments rest frame' temporary kind m' =>
-          have entered := step_callee hs
-          have child := callees callee (List.mem_of_head? entered.symm)
-          have resume := continues (Op.continues_of_callee entered.symm (by
+          have entered := step_callee hs rfl
+          have child := callees callee entered
+          have resume := continues (Op.continues_of_callee entered (by
             intro argc equal
             subst op
             obtain ⟨_, _, impossible⟩ := step_tailCall_action hs
+            cases impossible) (by
+            intro signature catalog equal
+            subst op
+            obtain ⟨_, _, _, impossible⟩ := step_managed_tail_action hs
             cases impossible))
           rcases agrees.found child with ⟨cb, cb'⟩ | ⟨cbody, cbody', cb, cb', csame, _⟩
           · simp only [cb, cb']
