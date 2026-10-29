@@ -1,4 +1,4 @@
-import CIL.Extraction.Folds
+import CIL.Extraction.MetadataNames
 
 /-!
 # Exact primitive span calls
@@ -102,7 +102,11 @@ def spanLocalConstructor (site : CallSite) : Option SpanConstructor := do
       !site.typeArguments.isEmpty || site.parameterCount != 2 || site.returnType != .void ||
       site.parameterTypes != [.pointer .void, .atom runtimeScope "System.Int32"] then none
     else pure ()
-  let .apply (.constructor _ owner) (.atom _ element) := site.declaringType | none
+  let .apply (.constructor _ owner) elementType := site.declaringType | none
+  let element ← match elementType with
+    | .atom _ name => some name
+    | .enum .. => (String.ofList ∘ Prod.snd) <$> namedType elementType
+    | _ => none
   let .span width writable ← spanStorage site.declaringType | none
   if site.target != .external (runtimeScope ++ "::System.Void " ++ owner ++ "<" ++ element ++
       ">::.ctor(System.Void*,System.Int32)") then none else some (.reference width writable)

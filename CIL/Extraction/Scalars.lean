@@ -631,7 +631,8 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   if opcode == 40 || opcode == 111 || opcode == 115 then
     let .call site := instruction.operand | none
     let expected := if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
-      then [.word32, .reference] ++ (if opcode == 40 then [.reference] else []) else
+      then [.word32, .reference] ++
+        (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
       site.parameterTypes.reverse.map scalarType ++
         (if opcode != 115 && site.hasThis then [scalarType (.byref site.declaringType)] else [])
     let inputs := if opcode == 115 && role == some .interior then

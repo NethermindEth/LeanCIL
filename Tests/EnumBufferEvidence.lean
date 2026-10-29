@@ -58,4 +58,20 @@ theorem array_identity_checked :
     scalarTransfer method ⟨0, 143, .type (element "Second")⟩ stack = none := by decide +kernel
 #print axioms array_identity_checked
 
+/-- Pointer-based in-place construction keeps the enum receiver's exact metadata identity. -/
+theorem enum_local_constructor :
+    let constructor : CallSite := {
+      declaringType := span "First", name := ".ctor"
+      target := .external (runtimeScope ++
+        "::System.Void System.Span`1<First>::.ctor(System.Void*,System.Int32)")
+      typeArguments := [], parameterCount := 2, hasThis := true, returnsValue := false
+      returnType := .void
+      parameterTypes := [.pointer .void, .atom runtimeScope "System.Int32"] }
+    spanLocalConstructor constructor = some (.reference 1 true) ∧
+    scalarTransfer method ⟨0, 40, .call constructor⟩
+      [.word32, .reference, scalarType (.byref (span "First"))] = some [] ∧
+    scalarTransfer method ⟨0, 40, .call constructor⟩
+      [.word32, .reference, scalarType (.byref (span "Second"))] = none := by decide +kernel
+#print axioms enum_local_constructor
+
 end Tests.EnumBufferEvidence

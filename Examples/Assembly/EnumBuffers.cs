@@ -37,7 +37,7 @@ public static class EnumBuffers
 
     public static Small FillClear(Small[] values)
     {
-        var span = values.AsSpan();
+        var span = new Span<Small>(values);
         span.Fill(Small.Seven);
         var first = span[0];
         span.Clear();
