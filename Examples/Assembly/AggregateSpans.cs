@@ -25,6 +25,11 @@ internal static class AggregateSpans
     public static Span<byte> LayoutBytes(Span<VectorRecord> source) => MemoryMarshal.AsBytes(source);
     public static VectorRecord LayoutRead(ReadOnlySpan<VectorRecord> source) => source[0];
 
+    public static Span<Words> Factory(ref Words source, int length) =>
+        MemoryMarshal.CreateSpan(ref source, length);
+    public static ReadOnlySpan<Words> ReadOnlyFactory(ref Words source, int length) =>
+        MemoryMarshal.CreateReadOnlySpan(ref source, length);
+
     public static Span<byte> Bytes(Span<Words> source) => MemoryMarshal.AsBytes(source);
     public static ReadOnlySpan<Words> WordsView(ReadOnlySpan<byte> source) =>
         MemoryMarshal.Cast<byte, Words>(source);

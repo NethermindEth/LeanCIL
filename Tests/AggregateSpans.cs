@@ -26,6 +26,7 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
     Directory.CreateDirectory(output);
     var arguments = name switch
     {
+        "Factory" or "ReadOnlyFactory" => ".reference (.address ⟨0, 0⟩), .scalar (.i32 2)",
         "LayoutBytes" => Span(layoutWidth), "LayoutRead" => Span(layoutWidth, false),
         "WordsView" => Span(1, false, length: 64),
         "VectorBytes" => Span(16), "ReadVector" => Span(16, false),
@@ -38,6 +39,7 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
     };
     var expected = name switch
     {
+        "Factory" => Span(32), "ReadOnlyFactory" => Span(32, false),
         "LayoutBytes" => Span(1, length: 2 * layoutWidth),
         "LayoutRead" => $".scalar (.aggregate (List.replicate {layoutWidth} 0))",
         "Bytes" => Span(1, length: 64), "WordsView" => Span(32, false),
@@ -82,6 +84,8 @@ queue.Flush();
 var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
 foreach (var (name, before, after, theorem) in new[]
 {
+    ("ReadOnlyFactory", ".spanFromReference 32 false", ".spanFromReference 32 true", "method0_scalars_validated"),
+    ("Factory", ".spanFromReference 32 true", ".spanFromReference 16 true", "method0_layouts_validated"),
     ("Bytes", ".spanReinterpret 32 1 true", ".spanReinterpret 16 1 true", "method0_layouts_validated"),
     ("WordsView", ".spanReinterpret 1 32 false", ".spanReinterpret 1 16 false", "method0_layouts_validated"),
     ("Copy", ".spanCopy 32 true", ".spanCopy 16 true", "method0_layouts_validated"),

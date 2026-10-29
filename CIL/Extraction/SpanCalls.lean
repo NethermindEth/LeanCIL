@@ -19,6 +19,7 @@ def spanMemoryScope : String :=
 inductive SpanCall where
   | reinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   | copy (width : Nat) (tryCopy : Bool)
+  | reference (width : Nat) (writable : Bool)
   | fill (width : Nat) (clear : Bool)
   | item (width : Nat) | length | slice (counted : Bool) | readOnly
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
@@ -28,6 +29,7 @@ inductive SpanCall where
 private def emittedSpanCall : Op → Option SpanCall
   | .memory (.spanReinterpret source target writable) => some (.reinterpret source target writable)
   | .memory (.spanCopy width tryCopy) => some (.copy width tryCopy)
+  | .memory (.spanFromReference width writable) => some (.reference width writable)
   | .memory (.spanFill width clear) => some (.fill width clear)
   | .memory (.spanItem width) => some (.item width)
   | .memory .spanLength => some .length
@@ -59,14 +61,19 @@ private def spanMemberCall (opcode : Nat) (site : CallSite)
       "(" ++ parameters ++ ")")
   if opcode == 115 && site.name == ".ctor" && site.hasThis &&
       !site.returnsValue && site.returnType == .void then
-    let element ← arrayElement
-    if site.parameterTypes == [.array elementType] &&
-        site.target == target "System.Void" "!0[]" then
-      some (.array (← arrayElement) writable .whole)
-    else if site.parameterTypes == [.array elementType, intType, intType] &&
-        site.target == target "System.Void" "!0[],System.Int32,System.Int32" then
-      some (.array element writable .counted)
-    else none
+    if site.parameterTypes == [.pointer .void, intType] &&
+        site.target == target "System.Void" "System.Void*,System.Int32" then
+      if !writable && elementType == .atom runtimeScope "System.Byte" then none
+      else some (.reference width writable)
+    else do
+      let element ← arrayElement
+      if site.parameterTypes == [.array elementType] &&
+          site.target == target "System.Void" "!0[]" then
+        some (.array (← arrayElement) writable .whole)
+      else if site.parameterTypes == [.array elementType, intType, intType] &&
+          site.target == target "System.Void" "!0[],System.Int32,System.Int32" then
+        some (.array element writable .counted)
+      else none
   else if opcode == 40 && site.hasThis && writable && !site.returnsValue &&
       site.returnType == .void && site.name == "Clear" && site.parameterTypes.isEmpty &&
       site.target == target "System.Void" "" then some (.fill width true)
@@ -170,6 +177,22 @@ private def reinterpretCall (opcode : Nat) (site : CallSite)
         "<!!0>)") then none
   else some (.reinterpret sourceWidth targetWidth writable)
 
+/-- Reference factories bind the exact element, output capability and generic signature. -/
+private def referenceFactory (opcode : Nat) (site : CallSite)
+    (aggregateWidth : Nat) : Option SpanCall := do
+  if opcode != 40 || site.hasThis || !site.returnsValue || site.parameterCount != 2 ||
+      site.declaringType != .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" then
+    none else pure ()
+  let [element] := site.typeArguments | none
+  let writable ← if site.name == "CreateSpan" then some true
+    else if site.name == "CreateReadOnlySpan" then some false else none
+  let owner := if writable then "System.Span`1" else "System.ReadOnlySpan`1"
+  if site.parameterTypes != [.byref element, .atom runtimeScope "System.Int32"] ||
+      site.returnType != .apply (.constructor runtimeScope owner) element ||
+      site.target != .external (runtimeScope ++ "::" ++ owner ++
+        "<!!0> System.Runtime.InteropServices.MemoryMarshal::" ++ site.name ++
+        "(!!0&,System.Int32)") then none
+  else some (.reference (← spanElementWidth element aggregateWidth) writable)
 /-- Exact span signatures and primitive/vector widths. Aggregate widths are separately bound
     by mandatory LayoutUsesComplete and MethodLayoutsValid evidence. -/
 def spanCallMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
@@ -185,12 +208,14 @@ where
   matchSpanCall (instruction : RawInstruction) (emitted : Op) : Bool :=
     let (sourceWidth, targetWidth) := match emittedSpanCall emitted with
       | some (.reinterpret source target _) => (source, target)
-      | some (.copy width _) | some (.fill width _) | some (.item width) => (width, width)
+      | some (.copy width _) | some (.fill width _) | some (.item width)
+      | some (.reference width _) => (width, width)
       | _ => (0, 0)
     let expected := match instruction.operand with
       | .call site => (spanMemberCall instruction.opcode site sourceWidth).orElse
           (fun _ => (arrayExtensionCall instruction.opcode site).orElse
-            (fun _ => reinterpretCall instruction.opcode site sourceWidth targetWidth))
+            (fun _ => (referenceFactory instruction.opcode site sourceWidth).orElse
+              (fun _ => reinterpretCall instruction.opcode site sourceWidth targetWidth)))
       | _ => none
     expected == emittedSpanCall emitted
 
