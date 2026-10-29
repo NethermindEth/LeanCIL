@@ -601,7 +601,8 @@ theorem arrayTransferInstruction_contract (element : CIL.ArrayElement) (store : 
 /-- Aligned transfers preserve the existing typed write effect and return only valid scalars. -/
 theorem pointerTransferInstruction_contract (kind : CIL.TransferKind) (alignment : Nat)
     (store : Bool) (stack values : List Value) (memory result : Memory)
-    (transferred : pointerTransferInstruction kind alignment store stack memory = .ok (result, values)) :
+    (transferred : pointerTransferInstruction kind alignment store stack memory =
+      .ok (result, values)) :
     InstructionContract memory result stack values := by
   unfold pointerTransferInstruction at transferred
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at transferred

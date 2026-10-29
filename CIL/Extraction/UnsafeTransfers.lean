@@ -90,7 +90,8 @@ def unsafeValueCall (raw : RawInstruction) : Option (TypeExpr × Bool × Bool) :
       site.parameterCount == 1 && site.returnsValue &&
       site.parameterTypes == [address] && site.returnType == type &&
       site.target == .external (runtimeScope ++
-        "::!!0 System.Runtime.CompilerServices.Unsafe::" ++ site.name ++ "(" ++ addressName ++ ")") then
+        "::!!0 System.Runtime.CompilerServices.Unsafe::" ++
+        site.name ++ "(" ++ addressName ++ ")") then
     some (type, true, aligned)
   else if (site.name == "WriteUnaligned" || site.name == "Write") &&
       site.parameterCount == 2 && !site.returnsValue &&
