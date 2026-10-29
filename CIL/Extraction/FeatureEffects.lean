@@ -20,7 +20,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .spanSlice explicitLength => (if explicitLength then 3 else 2, 1)
   | .spanFromReference .. | .byteOffset => (2, 1)
   | .arraySpan _ _ range => (range.argumentCount, 1)
-  | .spanReadOnly | .arrayLength => (1, 1)
+  | .spanReinterpret .. | .spanReadOnly | .arrayLength => (1, 1)
   | .arrayLoad .. | .arrayAddress .. => (2, 1)
   | .arrayStore _ => (3, 0)
   | .copyBlock _ | .initBlock _ => (3, 0)

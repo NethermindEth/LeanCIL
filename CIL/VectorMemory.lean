@@ -136,6 +136,8 @@ def TransferKind.width : TransferKind → Nat
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
+  /-- Reinterpret existing bytes without changing their storage or authority. -/
+  | spanReinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   | spanFill (width : Nat) (clear : Bool)
   | bigMul64
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
@@ -176,7 +178,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2
   | .arraySpan _ _ range => range.argumentCount
-  | .spanReadOnly | .arrayLength => 1
+  | .spanReinterpret .. | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2

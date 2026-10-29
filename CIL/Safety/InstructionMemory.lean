@@ -497,6 +497,15 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let some _ := arrayIndex index | .error .invalidState
     .error (.thrown "System.NullReferenceException")
   -- Spans
+  | .spanReinterpret sourceWidth targetWidth writable, .bufferSpan view :: rest =>
+    if view.width == sourceWidth && view.writable == writable &&
+        targetWidth ∈ [1, 2, 4, 8] then pure () else .error .invalidState
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    let length := view.length * sourceWidth / targetWidth
+    if length < 2^31 then pure () else .error (.thrown "System.OverflowException")
+    let result : SpanView := { view with width := targetWidth, length }
+    let _ ← checkedAt result.reference 0 (result.validate memory)
+    return (memory, .bufferSpan result :: rest)
   | .spanFromReference width writable, .scalar (.i32 length) :: .reference reference :: rest =>
     if length.toInt < 0 then .error (.thrown "System.ArgumentOutOfRangeException") else pure ()
     let view : SpanView := ⟨reference, length.toNat, width, writable⟩

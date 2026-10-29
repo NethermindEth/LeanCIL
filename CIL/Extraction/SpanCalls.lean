@@ -16,6 +16,7 @@ def spanMemoryScope : String :=
 
 /-- The observable choice made by a supported span call. -/
 inductive SpanCall where
+  | reinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   | fill (width : Nat) (clear : Bool)
   | item (width : Nat) | length | slice (counted : Bool) | readOnly
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
@@ -23,6 +24,7 @@ inductive SpanCall where
 
 /-- A span operation's exact semantic parameters, independent of other memory operations. -/
 private def emittedSpanCall : Op → Option SpanCall
+  | .memory (.spanReinterpret source target writable) => some (.reinterpret source target writable)
   | .memory (.spanFill width clear) => some (.fill width clear)
   | .memory (.spanItem width) => some (.item width)
   | .memory .spanLength => some .length
@@ -131,11 +133,33 @@ private def arrayExtensionCall (opcode : Nat) (site : CallSite) : Option SpanCal
       "::System.Span`1<!!0> System.MemoryExtensions::AsSpan(" ++
       parameters ++ ")") then none else some (.array element true range)
 
+/-- Reinterpretation retains readonly status and both primitive or enum element types. -/
+private def reinterpretCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
+  if opcode != 40 || site.hasThis || !site.returnsValue || site.parameterCount != 1 ||
+      site.declaringType != .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" then
+    none else pure ()
+  let (source, target, resultName) ← match site.name, site.typeArguments with
+    | "AsBytes", [source] => some (source, .atom runtimeScope "System.Byte", "System.Byte")
+    | "Cast", [source, target] => some (source, target, "!!1")
+    | _, _ => none
+  let sourceElement ← arrayElementType source
+  let targetElement ← arrayElementType target
+  let [input] := site.parameterTypes | none
+  let .span _ writable ← spanStorage input | none
+  let owner := if writable then "System.Span`1" else "System.ReadOnlySpan`1"
+  if input != .apply (.constructor runtimeScope owner) source ||
+      site.returnType != .apply (.constructor runtimeScope owner) target ||
+      site.target != .external (runtimeScope ++ "::" ++ owner ++ "<" ++ resultName ++
+        "> System.Runtime.InteropServices.MemoryMarshal::" ++ site.name ++ "(" ++ owner ++
+        "<!!0>)") then none
+  else some (.reinterpret sourceElement.width targetElement.width writable)
+
 /-- Covered calls cannot be replaced with another operation of the same stack effect. -/
 def spanCallMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
   let expected := match instruction.operand with
     | .call site => (spanMemberCall instruction.opcode site).orElse
-        (fun _ => arrayExtensionCall instruction.opcode site)
+        (fun _ => (arrayExtensionCall instruction.opcode site).orElse
+          (fun _ => reinterpretCall instruction.opcode site))
     | _ => none
   expected == emittedSpanCall emitted
 
