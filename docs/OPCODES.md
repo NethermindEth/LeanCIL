@@ -394,6 +394,12 @@ The checked model supports `Unsafe.BitCast<TFrom,TTo>` between equal-size valida
 
 Reachability is evaluated under the chosen, validated feature profile. Instructions excluded by that analysis are emitted as explicit unsupported placeholders, not silently assigned successful semantics. If execution reaches such a placeholder it fails. Changing the profile invalidates extraction artifacts.
 
+Exact `IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` getters produce `8`, `8`
+and `true` under every supported 64-bit profile. Their constants feed the existing feature-flow
+analysis; the certificate binds the raw call signature and emitted value. Constant propagation
+supports the existing comparison/Boolean operations and single-condition branches. Direct
+two-operand comparison branches are not pruned from these constants.
+
 ## Lean-only operations and source of truth
 
 The Lean `CIL.Op` type and memory/SIMD modules contain operations beyond the extractor's current mapping, including vector argument homes, fixed vector-lane helpers, `newVector256` and additional memory helpers. Their existence is not evidence that the corresponding arbitrary CIL or .NET API is extractable. Generic aggregate operations are implemented by the checked memory interpreter.

@@ -50,6 +50,8 @@ The probe covers public methods in System.Runtime, System.Memory and System.Runt
 up to one owner type parameter and two method type parameters, instantiated over the fixed
 primitive domain in the script. It checks scalar, x64-v4 and arm64-advsimd profiles. It does
 not enumerate arbitrary aggregate specializations or separately folded instruction patterns.
+Feature and process-width getters handled by `FeatureProfiles` are outside this dispatcher
+catalog; their exact signatures and constants are checked by the feature-evidence tests.
 The count measures admitted API definitions, not independent semantic assumptions or verified
 CLR implementations. Changing the meaning of an existing mapping still requires semantic review
 and its targeted proof tests, even when the catalog is unchanged.

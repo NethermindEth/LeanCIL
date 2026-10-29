@@ -8,6 +8,10 @@ require their features; portable operations use software semantics. Profile vali
 but the verifier does not discover a deployment's actual CPU, runtime or resource availability.
 See [runtime profiles](RUNTIME-PROFILES.md).
 
+`IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` use the profile's required
+64-bit process assumption. Their exact getters translate to constants `8`, `8` and `true`;
+they do not inspect the verifier host or establish a deployment's actual process width.
+
 | Area | Model convention / deployment premise | Excluded claim |
 | --- | --- | --- |
 | Numeric operations | Bit-vector wrapping; checked arithmetic/conversions use mathematical bounds; signed division truncates toward zero | Floating-point conversion and arbitrary CLI/runtime behavior |
