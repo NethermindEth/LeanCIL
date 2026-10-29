@@ -137,3 +137,4 @@ Run(["dotnet", "run", "--file", "Tests/StaticSpans.cs"], streamOutput: true, pro
 
 Run(["dotnet", "run", "--file", "Tests/VectorFields.cs"], streamOutput: true, progress: "Vector field checks");
 Run(["dotnet", "run", "--file", "Tests/VectorStorage.cs"], streamOutput: true, progress: "Vector storage checks");
+Run(["dotnet", "run", "--file", "Tests/UnalignedMemory.cs"], streamOutput: true, progress: "Unaligned transfer checks");

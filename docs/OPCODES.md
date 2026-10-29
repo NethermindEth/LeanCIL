@@ -20,14 +20,14 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
-| `ldlen` | Partial | Length of a supplied primitive integer array, returned as a native integer. Null raises `System.NullReferenceException`. |
-| `ldelema` | Partial | Checked element reference into a supplied primitive array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
+| `ldlen` | Partial | Length of a supplied primitive integer or enum array, returned as a native integer. Null raises `System.NullReferenceException`. |
+| `ldelema` | Partial | Checked element reference into a supplied primitive or enum array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
 | `readonly.` | Partial | Immediately precedes an admitted `ldelema`; branches into the following address instruction are rejected. Produces a restricted reference that remains readonly through byref locals, arguments and returns. Scalar reads are allowed, while stores and adapters that would discard the restriction fail. Other authorized aliases can still update the backing bytes. |
-| `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` requires an admitted primitive token matching the array element type. Reads require initialized bytes and read authority. |
-| `stelem.i1`, `stelem.i2`, `stelem.i4`, `stelem.i8`, `stelem.i`, `stelem` | Partial | Checked integer array stores; narrow stores truncate. Typed `stelem` requires a matching primitive token. Stores require write authority and initialize only the selected element. |
+| `ldelem.i1`, `ldelem.u1`, `ldelem.i2`, `ldelem.u2`, `ldelem.i4`, `ldelem.u4`, `ldelem.i8`, `ldelem.i`, `ldelem` | Partial | Checked integer array reads; narrow loads extend according to the opcode. Typed `ldelem` requires an admitted primitive or exact enum token matching the array element type. Reads require initialized bytes and read authority. |
+| `stelem.i1`, `stelem.i2`, `stelem.i4`, `stelem.i8`, `stelem.i`, `stelem` | Partial | Checked integer array stores; narrow stores truncate. Typed `stelem` requires a matching primitive or exact enum token. Stores require write authority and initialize only the selected element. |
 | `ldc.i4`, `ldc.i4.s`, `ldc.i4.m1`, `ldc.i4.0`–`ldc.i4.8` | Complete within the admitted model | Push the encoded 32-bit integer constant. |
 | `ldc.i8` | Complete within the admitted model | Push the encoded 64-bit integer constant. |
-| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, stack shuffles/discard, or a supplied primitive-array slot/call/return. General object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
+| `ldnull` | Partial | Push an object null for truth tests, equality with another object null, stack shuffles/discard, or a supplied primitive or enum array slot/call/return. General object parameters, locals, returns and object-null/managed-pointer mixtures remain unsupported. |
 | `nop` | Complete within the admitted model | Advance without changing the stack or memory. |
 | `dup`, `pop` | Complete within the admitted model | Duplicate or discard a supported stack value; stack underflow fails. |
 | `ldarg`, `ldarg.s`, `ldarg.0`–`ldarg.3` | Partial | Load admitted argument values; struct instance methods have a managed-reference `this` at index zero; narrow integers are truncated and sign- or zero-extended to `i32`. Reference values undergo validity checks; class instance methods remain unsupported. |
@@ -186,7 +186,7 @@ types and ordinary unconstrained virtual calls remain unsupported.
 ### Static span tables
 
 `Span<T>` and `ReadOnlySpan<T>` over the eight fixed-width integer types, `nint`, `nuint`,
-`char` and `bool` have typed, allocation-relative storage
+`char`, `bool` and admitted same-assembly enums have typed, allocation-relative storage
 for by-value parameters and reusable locals. Their length, indexing, slicing and readonly
 conversion retain element width and allocation lifetime. `MemoryMarshal.CreateSpan` and
 `CreateReadOnlySpan` form views over existing storage; they do not grant access authority or
@@ -196,11 +196,18 @@ empty view at the allocation end. Byref span parameters and general ref structs 
 this support.
 
 Array constructors, implicit array conversions and the array overloads of
-`MemoryExtensions.AsSpan` form views over supplied primitive array storage. `AsSpan`
+`MemoryExtensions.AsSpan` form views over supplied primitive or enum array storage. Enum
+views retain their exact enum identity through locals, slices, calls and returns; equal-width
+enums are not interchangeable. `AsSpan`
 accepts a whole array, a start index, or a start and length. Null arrays produce empty
 spans only for a zero range; invalid ranges raise `ArgumentOutOfRangeException`.
 These operations allocate no backing storage, preserve aliases and grant no byte-access
 authority. Array allocation and non-array `AsSpan` overloads remain unsupported.
+
+`Span<T>.Clear` and `Fill` initialize the complete view using one checked range write. They
+require write authority, but not initialized or readable destination bytes. Empty spans require
+no byte access; nonempty fills establish repeated sequence contents and preserve neighbouring
+bytes, including other slices in the same allocation. Readonly views do not admit these members.
 
 A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda` rules, packing 1, 2, 4 or 8). The span covers the whole field and has `size / sizeof(T)` elements, for any primitive integer `T`. A caller reads it as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with `System.IndexOutOfRangeException` at the call when the index is out of range, compared unsigned as in .NET. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a single-use receiver with a single-load or constant index; other supported uses retain typed span storage. Branches into a folded receiver and byref spans remain rejected.
 
@@ -250,6 +257,12 @@ both directions, as for `SkipInit`. `NullRef` produces a null byref; the bounded
 `ldnull` support above produces an object null and does not permit mixing it with managed pointers.
 
 The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references supports the checked byte-offset form described above.
+
+Managed byte-reference `Unsafe.ReadUnaligned<T>` and `WriteUnaligned<T>` support admitted
+integer, aggregate and integer-vector storage. They use the existing typed loads and stores
+with byte alignment, retaining bounds, lifetime, access authority and snapshot initialization
+masks. Readonly source references are accepted; writes require writable references and byte
+authority. Pointer overloads and reference-bearing value types remain unsupported.
 
 The checked model supports `Unsafe.BitCast<TFrom,TTo>` between equal-size validated unmanaged aggregates and `Vector128`/`Vector256` values with `uint` or `ulong` elements, in both directions and under the scalar profile. Byte snapshots retain initialization flags through the cast, local and parameter homes, and value loads/stores. Partially initialized results remain snapshots; numeric reads and vector arithmetic cannot consume their unknown bytes. The pure model does not implement this value-cast operation.
 

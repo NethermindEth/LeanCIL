@@ -159,7 +159,8 @@ if (suite is "all" or "evidence")
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
         "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
-if (suite is "all" or "unsafe") projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
+if (suite is "all" or "unsafe")
+    projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs", "Tests/UnalignedMemory.cs"]);
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);
