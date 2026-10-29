@@ -17,7 +17,7 @@ private def intType : TypeExpr := .atom runtime "System.Int32"
 private def nativeType : TypeExpr := .atom runtime "System.IntPtr"
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
 private def raw (code : List RawInstruction) (parameters : List TypeExpr := [word, word]) : RawMethod := {
-  token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
+  token := 1, owner := "Scope::Fixture", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := word, parameters, locals := [], initLocals := true, maxStack := 2,
   genericParameters := [], code }
@@ -239,6 +239,7 @@ example : ¬ ScalarFlowValid addRaw addFeatures addStates (addCode.set 2 (.nativ
 example : ¬ ScalarFlowValid { mixedRaw with parameters := [nativeType, word] } addFeatures mixedStates mixedCode := by decide
 
 private def site : CallSite := {
+  declaringType := .atom "Scope" "Fixture",
   target := .managed 1, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := word, parameterTypes := [word, word] }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call { site with returnType := intType })) true (.call 0 2) = false := by decide
@@ -461,7 +462,7 @@ private def spanRaw := { raw [i 2, i 3, i 40 (.call spanSite), i 113 (.type intT
 /-- Span and external signatures reject malformed metadata and distinguish Unicode names. -/
 private theorem span_signature_cases :
     (ScalarFlowValid spanRaw [unknown 0, unknown 1, unknown 2, unknown 1, unknown 1] [some [],
-      some [.reference], some [.word32, .reference], some [.other], some [.word32]] [.arg 0,
+      some [.reference], some [.word32, .reference], some [.reference], some [.word32]] [.arg 0,
       .arg 1, .memory (.spanItem 4), .loadScalar 4, .ret]) ∧
     (scalarTransfer spanRaw (i 40 (.call { spanSite with
         parameterTypes := [word] })) [.word64, .reference] = none) ∧
